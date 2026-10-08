@@ -196,8 +196,9 @@ something here steer the one device this port does pick.
     are the reader's: placed, moved, widened, handed to a side and taken off
     again. What is on it can be drawn over with the same tools and inks the
     replay viewport draws with, ships can be placed with the range circles their
-    own params state, and the whole board saves and reopens through the preset
-    format the egui board reads and writes
+    own params state, and a visible Blank mode clears the selected layout without
+    requiring a second click on the active mode. The whole board saves and
+    reopens through the preset format the egui board reads and writes
     (`wows_toolkit_viewmodel::tactics::preset`). "Populate caps from replays"
     reads the replay directory for the layouts of the modes they were played in,
     reporting as it goes, and writes them to the cache both apps share

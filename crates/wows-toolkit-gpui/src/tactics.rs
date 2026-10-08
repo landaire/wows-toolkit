@@ -2114,16 +2114,24 @@ impl TacticsBoard {
     /// layout's own caps come back by picking it again.
     pub fn set_mode(&mut self, key: CapLayoutKey, cx: &mut Context<Self>) {
         if self.mode.as_ref() == Some(&key) {
-            self.mode = None;
-            self.set_caps(Vec::new());
-            self.selected = None;
-            self.redraw(cx);
+            self.set_blank_mode(cx);
             return;
         }
         let caps = caps_of(&self.layouts, &key);
         self.set_caps(caps);
         self.selected = None;
         self.mode = Some(key);
+        self.redraw(cx);
+    }
+
+    /// Clears the selected layout and its capture points.
+    pub fn set_blank_mode(&mut self, cx: &mut Context<Self>) {
+        if self.mode.is_none() && self.caps.is_empty() {
+            return;
+        }
+        self.mode = None;
+        self.set_caps(Vec::new());
+        self.selected = None;
         self.redraw(cx);
     }
 
@@ -2464,7 +2472,7 @@ impl TacticsBoard {
                         ),
                     ),
             )
-            .when(!self.modes.is_empty(), |this| {
+            .when(self.map.is_some(), |this| {
                 this.child(
                     h_flex()
                         .gap_2()
@@ -2479,26 +2487,43 @@ impl TacticsBoard {
                                 .text_color(crate::theme::text_dim())
                                 .child(t!("ui.tactics.mode").to_string()),
                         )
-                        .child(h_flex().flex_wrap().gap_1().children(self.modes.iter().cloned().enumerate().map(
-                            |(index, mode)| {
-                                let chosen = chosen_mode.as_ref() == Some(&mode.key);
-                                crate::ui::selectable(
-                                    ("tactics-mode", index),
-                                    chosen,
-                                    Button::new(("tactics-mode-button", index))
-                                        .label(mode.label.clone())
+                        .child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap_1()
+                                .child(crate::ui::selectable(
+                                    "tactics-mode-blank",
+                                    self.mode.is_none(),
+                                    Button::new("tactics-mode-blank-button")
+                                        .label(t!("ui.tactics.blank_mode").into_owned())
                                         .compact()
-                                        .selected(chosen)
+                                        .selected(self.mode.is_none())
                                         .on_click({
                                             let board = board.clone();
                                             move |_event, _window, cx: &mut App| {
-                                                let key = mode.key.clone();
-                                                board.update(cx, |board, cx| board.set_mode(key, cx));
+                                                board.update(cx, |board, cx| board.set_blank_mode(cx));
                                             }
                                         }),
-                                )
-                            },
-                        ))),
+                                ))
+                                .children(self.modes.iter().cloned().enumerate().map(|(index, mode)| {
+                                    let chosen = chosen_mode.as_ref() == Some(&mode.key);
+                                    crate::ui::selectable(
+                                        ("tactics-mode", index),
+                                        chosen,
+                                        Button::new(("tactics-mode-button", index))
+                                            .label(mode.label.clone())
+                                            .compact()
+                                            .selected(chosen)
+                                            .on_click({
+                                                let board = board.clone();
+                                                move |_event, _window, cx: &mut App| {
+                                                    let key = mode.key.clone();
+                                                    board.update(cx, |board, cx| board.set_mode(key, cx));
+                                                }
+                                            }),
+                                    )
+                                })),
+                        ),
                 )
             })
             .child(
