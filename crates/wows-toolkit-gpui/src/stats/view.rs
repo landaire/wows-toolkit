@@ -319,7 +319,7 @@ impl StatsView {
         }
 
         let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> =
-            chart_ids.iter().copied().map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, cx)))).collect();
+            chart_ids.iter().copied().map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, window, cx)))).collect();
         let chart_registry: Arc<Mutex<HashMap<ChartId, WeakEntity<StatsChartPanel>>>> =
             Arc::new(Mutex::new(chart_entities.iter().map(|(id, chart)| (*id, chart.downgrade())).collect()));
 
@@ -334,14 +334,14 @@ impl StatsView {
             panel_handle(panel)
         });
         let chart_registry_for_build = chart_registry.clone();
-        gpui_kit::component::dock::register_panel(cx, "StatsChartPanel", move |context, _window, cx| {
+        gpui_kit::component::dock::register_panel(cx, "StatsChartPanel", move |context, window, cx| {
             let id = chart_id_from_state(context.state()).unwrap_or(0);
             let panel = chart_registry_for_build
                 .lock()
                 .expect("Stats chart restore registry lock is not poisoned")
                 .get(&id)
                 .and_then(WeakEntity::upgrade)
-                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, cx)));
+                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, window, cx)));
             panel_handle(panel)
         });
 
@@ -515,7 +515,7 @@ impl StatsView {
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
-        let first_chart = cx.new(|cx| StatsChartPanel::new(0, cx));
+        let first_chart = cx.new(|cx| StatsChartPanel::new(0, window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
             // Overview and Ships share the main tab group; Charts opens beside them.
@@ -759,7 +759,7 @@ impl StatsView {
         let id = settings.id.unwrap_or(self.next_chart_id);
         self.next_chart_id = self.next_chart_id.max(id.saturating_add(1));
 
-        let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
+        let chart = cx.new(|cx| StatsChartPanel::new(id, window, cx));
         self._chart_subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
         let games = self.games.clone();
