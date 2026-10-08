@@ -1,4 +1,5 @@
 use std::sync::LazyLock;
+use std::collections::HashMap;
 
 #[cfg(feature = "parsing")]
 use std::borrow::Cow;
@@ -20,6 +21,8 @@ pub struct GameConstants {
     weapons: WeaponsConstants,
     common: CommonConstants,
     channel: ChannelConstants,
+    player_num_member_map: HashMap<String, i64>,
+    bot_num_member_map: HashMap<String, i64>,
 }
 
 impl GameConstants {
@@ -37,6 +40,8 @@ impl GameConstants {
             weapons: load_weapons_constants(vfs),
             common: load_common_constants(vfs),
             channel: load_channel_constants(vfs),
+            player_num_member_map: HashMap::new(),
+            bot_num_member_map: HashMap::new(),
         }
     }
 
@@ -72,6 +77,8 @@ impl GameConstants {
             weapons: WeaponsConstants::defaults(),
             common: CommonConstants::defaults(),
             channel: ChannelConstants::defaults(),
+            player_num_member_map: HashMap::new(),
+            bot_num_member_map: HashMap::new(),
         }
     }
 
@@ -93,6 +100,14 @@ impl GameConstants {
 
     pub fn channel(&self) -> &ChannelConstants {
         &self.channel
+    }
+
+    pub fn player_num_member_map(&self) -> &HashMap<String, i64> {
+        &self.player_num_member_map
+    }
+
+    pub fn bot_num_member_map(&self) -> &HashMap<String, i64> {
+        &self.bot_num_member_map
     }
 
     pub fn game_mode_name(&self, id: i32) -> Option<&str> {
@@ -129,10 +144,12 @@ impl GameConstants {
 
     /// Merge replay constants JSON (from wows-constants repo) into this instance.
     ///
-    /// Overrides `CONSUMABLE_IDS` and `BATTLE_STAGES` mappings from the JSON data.
+    /// Overrides replay field maps, consumable IDs, and battle stages from JSON data.
     /// The `version` is forwarded to version-aware battle stage parsing.
     #[cfg(feature = "parsing")]
     pub fn merge_replay_constants(&mut self, replay_constants: &serde_json::Value, version: wowsunpack::data::Version) {
+        merge_num_member_map(&mut self.player_num_member_map, replay_constants, "PLAYER_NUM_MEMBER_MAP");
+        merge_num_member_map(&mut self.bot_num_member_map, replay_constants, "BOT_NUM_MEMBER_MAP");
         if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
             let types = self.common.consumable_types_mut();
             for (key, value) in consumable_ids {
@@ -151,5 +168,15 @@ impl GameConstants {
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "parsing")]
+fn merge_num_member_map(target: &mut HashMap<String, i64>, constants: &serde_json::Value, name: &str) {
+    let Some(fields) = constants.get(name).and_then(serde_json::Value::as_object) else { return };
+    for (index, field) in fields {
+        let Some(index) = index.parse::<i64>().ok() else { continue };
+        let Some(field) = field.as_str() else { continue };
+        target.insert(field.to_string(), index);
     }
 }
