@@ -250,9 +250,7 @@ impl IconCache {
         &mut self,
         achievements: &[wows_toolkit_viewmodel::stats::SerializableAchievement],
         vfs: &VfsPath,
-        svg_renderer: &SvgRenderer,
     ) {
-        let _ = svg_renderer;
         let mut keys_seen: HashSet<String> = HashSet::new();
         for earned in achievements {
             let key = format!("achievement:{}", earned.icon_key);
