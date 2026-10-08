@@ -2456,7 +2456,14 @@ impl TacticsBoard {
     /// Ctrl/Cmd+Z takes a change back and Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z puts it back;
     /// Ctrl/Cmd+1..7 and Ctrl/Cmd+M select drawing tools, Escape puts the tool down,
     /// and Delete erases the object picked out.
-    fn on_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.ship_search.focus_handle(cx).contains_focused(window, cx)
+            || self.preset_name.focus_handle(cx).contains_focused(window, cx)
+            || self.map_select.focus_handle(cx).contains_focused(window, cx)
+            || self.mode_select.focus_handle(cx).contains_focused(window, cx)
+        {
+            return;
+        }
         let modifiers = event.keystroke.modifiers;
         if modifiers.secondary() {
             match event.keystroke.key.as_str() {
