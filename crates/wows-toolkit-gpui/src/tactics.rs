@@ -2476,6 +2476,8 @@ impl TacticsBoard {
         }
         match event.keystroke.key.as_str() {
             "escape" => self.set_tool(wt_collab_client::drawing::Tool::None, cx),
+            "[" if self.has_tool() => self.step_nib(-1.0, cx),
+            "]" if self.has_tool() => self.step_nib(1.0, cx),
             // What is picked out is what a delete is about: a drawn shape if
             // one is picked, and the capture point otherwise.
             "delete" | "backspace" if !self.picked.picked().is_empty() => self.erase_picked(cx),
@@ -2733,6 +2735,7 @@ impl TacticsBoard {
                         board.update(cx, |board, cx| board.step_nib(1.0, cx));
                     })
             })
+            .child(self.render_shortcuts())
             .when(has_drawing, |this| {
                 this.child({
                     let board = board.clone();
@@ -2743,6 +2746,62 @@ impl TacticsBoard {
                             board.update(cx, |board, cx| board.clear_annotations(cx));
                         })
                 })
+            })
+    }
+
+    /// Lists the drawing chords in one place for readers who do not hover
+    /// each tool button.
+    fn render_shortcuts(&self) -> impl IntoElement {
+        let modifier = shortcut_modifier_name();
+        let row = |chord: String, label: String| {
+            h_flex()
+                .gap_3()
+                .justify_between()
+                .child(div().text_xs().child(chord))
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child(label))
+        };
+
+        Popover::new("tactics-shortcuts")
+            .trigger(
+                Button::new("tactics-shortcuts-trigger")
+                    .child(crate::icons::icon(crate::icons::INFO))
+                    .compact()
+                    .tooltip(t!("ui.renderer.annotations.shortcuts_title").into_owned())
+                    .accessibility_label(t!("ui.renderer.annotations.shortcuts_title").into_owned()),
+            )
+            .content(move |_state, _window, _cx| {
+                v_flex()
+                    .min_w(px(220.))
+                    .gap_1()
+                    .p_2()
+                    .child(div().text_xs().child(t!("ui.renderer.annotations.shortcuts_title").into_owned()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.renderer.annotations.shortcuts_tools").into_owned()),
+                    )
+                    .children(tools().into_iter().map(|(_tool, key, _glyph, shortcut)| {
+                        row(format!("{modifier}+{shortcut}"), t!(key).into_owned())
+                    }))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.renderer.annotations.shortcuts_actions").into_owned()),
+                    )
+                    .child(row(format!("{modifier}+Z"), t!("ui.renderer.annotations.action_undo").into_owned()))
+                    .child(row(
+                        format!("{modifier}+Y / {modifier}+Shift+Z"),
+                        t!("ui.renderer.annotations.redo").into_owned(),
+                    ))
+                    .child(row(
+                        format!("{modifier}+Click"),
+                        t!("ui.renderer.annotations.action_multi_select").into_owned(),
+                    ))
+                    .child(row("[ / ]".to_string(), t!("ui.renderer.annotations.action_stroke_width").into_owned()))
+                    .child(row("Del".to_string(), t!("ui.renderer.annotations.action_delete").into_owned()))
+                    .child(row("Esc".to_string(), t!("ui.renderer.annotations.action_cancel").into_owned()))
             })
     }
 
