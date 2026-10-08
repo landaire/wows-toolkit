@@ -730,11 +730,12 @@ impl BasePanel for ReplayPanel {
 
 impl Panel for ReplayPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        match &self.state {
-            LoadState::Loading => SharedString::from(t!("ui.replay.loading").into_owned()),
-            LoadState::Loaded(loaded) => loaded.title.clone(),
-            LoadState::Failed(_) => SharedString::from(t!("ui.messages.replay_load_failed").into_owned()),
-        }
+        let title = match &self.state {
+            LoadState::Loading => t!("ui.replay.loading").into_owned(),
+            LoadState::Loaded(loaded) => loaded.title.to_string(),
+            LoadState::Failed(_) => t!("ui.messages.replay_load_failed").into_owned(),
+        };
+        div().w(px(220.)).truncate().child(title)
     }
 }
 
