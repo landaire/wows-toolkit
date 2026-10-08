@@ -350,11 +350,17 @@ impl StatsChartPanel {
     /// which is also what lets a Japanese or Russian label render.
     fn copy_as_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(bounds) = self.plot_bounds else { return };
+        if !plot::has_drawable_area(bounds) {
+            return;
+        }
         let width = bounds.size.width.as_f32().round() as u32;
         let height = bounds.size.height.as_f32().round() as u32;
 
         let series = self.series();
         let bars = self.bars();
+        if series.is_empty() && bars.is_empty() {
+            return;
+        }
         let x_label = if self.mode == ChartMode::Bar {
             t!("ui.stats.column_ship").into_owned()
         } else {
@@ -800,13 +806,15 @@ impl Render for StatsChartPanel {
             .border_color(border)
             .child(self.settings_menu(cx))
             .child(div().flex_1())
-            .child(
-                Button::new(("chart-copy-image", id))
-                    .label(t!("ui.stats.copy_image").to_string())
-                    .compact()
-                    .xsmall()
-                    .on_click(cx.listener(|this, _event, window, cx| this.copy_as_image(window, cx))),
-            )
+            .when(!empty && self.plot_bounds.is_some_and(plot::has_drawable_area), |this| {
+                this.child(
+                    Button::new(("chart-copy-image", id))
+                        .label(t!("ui.stats.copy_image").to_string())
+                        .compact()
+                        .xsmall()
+                        .on_click(cx.listener(|this, _event, window, cx| this.copy_as_image(window, cx))),
+                )
+            })
             .when(!self.view.is_default(), |this| {
                 this.child(
                     Button::new(("chart-reset-view", id))
@@ -831,7 +839,12 @@ impl Render for StatsChartPanel {
         let measured = cx.entity();
         let surface = canvas(
             move |bounds, _window, cx| {
-                measured.update(cx, |this: &mut Self, _cx| this.plot_bounds = Some(bounds));
+                measured.update(cx, |this: &mut Self, cx| {
+                    if this.plot_bounds != Some(bounds) {
+                        this.plot_bounds = Some(bounds);
+                        cx.notify();
+                    }
+                });
             },
             move |bounds, _prepaint, window, cx| {
                 plot::paint(

@@ -668,6 +668,8 @@ kept so the next audit does not re-report them.
     Nothing is bundled: a chart in Japanese, Russian or Thai is drawn with
     the faces the desktop already has, where a bundled Latin font would have
     left those labels as blank boxes.
+- [done] Copy as Image is hidden when filters leave no chart data or the dock
+  pane is too small to draw the plot, avoiding a blank copied image.
 
 ## Player Tracker
 
