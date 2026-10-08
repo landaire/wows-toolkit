@@ -258,7 +258,7 @@ impl Render for StatsShipsPanel {
             let panel = entity.clone();
 
             let header = h_flex()
-                .id(SharedString::from(format!("ship-header-{ship}")))
+                .id(SharedString::from(format!("ship-header-{ship_id}")))
                 .w_full()
                 .gap_2()
                 .items_center()
