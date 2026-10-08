@@ -1,6 +1,6 @@
 [package]
 name = "wt-collab-client"
-version = "1.0.2-beta2"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

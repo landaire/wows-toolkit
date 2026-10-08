@@ -19,7 +19,7 @@ workspace_library(
     name = "wt_collab_client",
     crate = "wt_collab_client",
     package = "wt-collab-client",
-    version = "1.0.2-beta2",
+    version = "1.0.2",
     deps = WTCC_DEPS,
 )
 
@@ -28,6 +28,6 @@ workspace_test(
     crate = "wt_collab_client",
     crate_root = "src/lib.rs",
     package = "wt-collab-client",
-    version = "1.0.2-beta2",
+    version = "1.0.2",
     deps = WTCC_DEPS,
 )
