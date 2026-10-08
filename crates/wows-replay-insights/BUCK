@@ -4,7 +4,7 @@ workspace_library(
     name = "wows_replay_insights",
     crate = "wows_replay_insights",
     package = "wows-replay-insights",
-    version = "0.13.0",
+    version = "0.14.0",
     features = ["arc", "battle-report", "build", "fire-sections", "serde", "wowssb"],
     deps = [
         "//crates/wows-battle-world:wows_battle_world",
@@ -31,7 +31,7 @@ workspace_test(
     crate = "wows_replay_insights",
     crate_root = "src/lib.rs",
     package = "wows-replay-insights",
-    version = "0.13.0",
+    version = "0.14.0",
     features = ["arc", "battle-report", "build", "fire-sections", "serde", "wowssb"],
     deps = [
         "//crates/wows-battle-world:wows_battle_world",

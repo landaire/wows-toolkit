@@ -4,7 +4,7 @@ workspace_library(
     name = "wows_core",
     crate = "wows_core",
     package = "wows-core",
-    version = "0.13.0",
+    version = "0.14.0",
     features = [
         "arc",
         "default",
@@ -24,7 +24,7 @@ workspace_test(
     name = "wows_core_test",
     crate = "wows_core",
     package = "wows-core",
-    version = "0.13.0",
+    version = "0.14.0",
     crate_root = "src/lib.rs",
     features = [
         "arc",
