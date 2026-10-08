@@ -641,6 +641,8 @@ kept so the next audit does not re-report them.
   English literals.
 - [done] Overview damage figures use the selected locale's grouping rules, and
   cached ship-table values are rebuilt when the language changes.
+- [done] The Overview ship table keeps its columns readable when its dock pane
+  is narrow: the header and virtualized rows scroll horizontally together.
 - [done] Filter changes are written back, so both front ends read the same
   values.
 - [done] The open charts are kept in a settings row: each one's statistic,

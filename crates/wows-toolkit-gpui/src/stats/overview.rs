@@ -41,6 +41,7 @@ const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 const SHIP_COLUMN_WIDTH: Pixels = px(200.);
 const NUMBER_COLUMN_WIDTH: Pixels = px(96.);
+const TABLE_MIN_WIDTH: Pixels = px(640.);
 /// One achievement's column. The icon is the egui roundup's size; the column
 /// is wider than the icon so a two-word name wraps rather than being cut.
 const ACHIEVEMENT_COLUMN_WIDTH: Pixels = px(84.);
@@ -68,6 +69,7 @@ pub struct StatsOverviewPanel {
     personal_rating: Option<Arc<PersonalRatingData>>,
     list_state: ListState,
     scroll: ScrollHandle,
+    horizontal_scroll: ScrollHandle,
     focus_handle: FocusHandle,
 }
 
@@ -82,6 +84,7 @@ impl StatsOverviewPanel {
             personal_rating: None,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             scroll: ScrollHandle::new(),
+            horizontal_scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
         }
     }
@@ -281,12 +284,25 @@ impl Render for StatsOverviewPanel {
                 .into_any_element()
         };
 
-        let table = div()
-            .relative()
+        let table_rows = h_flex()
             .flex_1()
             .min_h(px(0.))
-            .child(list(self.list_state.clone(), render_row).size_full())
+            .child(div().relative().flex_1().min_w(px(0.)).child(list(self.list_state.clone(), render_row).size_full()))
             .child(Scrollbar::vertical(&self.list_state));
+
+        let table = v_flex()
+            .flex_1()
+            .min_h(px(0.))
+            .child(
+                div()
+                    .id("stats-overview-horizontal-content")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_x_scroll()
+                    .track_scroll(&self.horizontal_scroll)
+                    .child(v_flex().min_w(TABLE_MIN_WIDTH).h_full().child(header).child(table_rows)),
+            )
+            .child(Scrollbar::horizontal(&self.horizontal_scroll));
 
         let achievements = (!self.computed.achievements.is_empty()).then(|| {
             v_flex()
@@ -346,7 +362,6 @@ impl Render for StatsOverviewPanel {
             .id("stats-overview")
             .size_full()
             .child(summary_row)
-            .child(header)
             .child(table)
             .when_some(achievements, |this, section| this.child(section))
             .into_any_element()
