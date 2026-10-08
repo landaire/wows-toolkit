@@ -120,7 +120,8 @@ run = "cargo clippy --fix --all-features --all-targets --allow-dirty --allow-sta
 depends_post = ["fmt"]
 
 [tasks.bump]
-description = "Bump versions for published crates and sync workspace deps (usage: mise run bump -- minor)"
+description = "Bump published crate versions, sync workspace deps and Buck metadata (usage: mise run bump -- minor)"
+depends_post = ["sync-buck-versions"]
 run = [
     "cargo set-version -p wows-core --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wowsunpack --bump {{arg(name=\"level\", i=0)}}",
@@ -132,3 +133,7 @@ run = [
     "cargo set-version -p wt-translations --bump {{arg(name=\"level\", i=0)}}",
     "cargo upgrade -p wows-core -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-battle-world -p wows-data-mgr -p wows-replay-insights -p wt-translations --incompatible allow --pinned allow",
 ]
+
+[tasks.sync-buck-versions]
+description = "Copy Cargo package versions into Buck and Windows resource metadata"
+run = "nu scripts/update_buck_versions.nu"
