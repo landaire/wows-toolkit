@@ -1,41 +1,20 @@
 name: Deploy site to GitHub Pages
 
 on:
-  # Deploy on every push to main (site content updates), and rebuild the
-  # tactics WASM on a release tag. The release is cut by build.yml using
-  # GITHUB_TOKEN, which suppresses the release event, so we key off the tag.
+  # Publish only stable releases. Development and prerelease changes do not
+  # update the production site.
   push:
-    branches: [main]
-    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
-  # Also rebuild tactics for a manually published release.
-  release:
-    types: [published]
-  # Manual trigger, optionally skipping the tactics rebuild.
-  workflow_dispatch:
-    inputs:
-      build_tactics:
-        description: "Rebuild tactics WASM app"
-        type: boolean
-        default: true
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# One deployment at a time. cancel-in-progress: true cancelled the tag and
-# release runs, which are the only ones that rebuild tactics, because a release
-# tag is pushed alongside a main push. This keeps a running tactics build alive.
-# It does not make the group safe: GitHub still evicts a PENDING run when a
-# newer one arrives, so a main push landing while a tag build runs can still
-# displace a queued tag run, and the deploy then falls back to a stale
-# tactics-dist- cache with only a warning.
+# Serialize release deployments.
 concurrency:
   group: pages
   cancel-in-progress: false
-
-env:
-  BUILD_TACTICS: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.build_tactics) }}
 
 jobs:
   deploy:
@@ -45,19 +24,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Expand runner swap
-        if: env.BUILD_TACTICS == 'true'
         run: bash scripts/expand-runner-swap.sh 16
 
       - name: Install Nix
-        if: env.BUILD_TACTICS == 'true'
         uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Cachix
-        if: env.BUILD_TACTICS == 'true'
         uses: cachix/cachix-action@v15
         with:
           name: landaire-gh-public
@@ -69,19 +47,14 @@ jobs:
       # sha: this action writes GITHUB_ENV and GITHUB_PATH for the whole job,
       # so a hijacked floating tag could poison every later step.
       - uses: nicknovitski/nix-develop@9be7cfb4b10451d3390a75dc18ad0465bed4932a # v1.2.1
-        if: env.BUILD_TACTICS == 'true'
 
-      # Keyed to match warm-release-cache.yml. The tactics build only runs on
-      # tags and releases, so this key is populated from main and never
-      # written back here.
+      # Use the release build cache to reduce compile time.
       - uses: Swatinem/rust-cache@v2
-        if: env.BUILD_TACTICS == 'true'
         with:
           shared-key: wasm-release
           save-if: "false"
 
       - name: Build wt-web WASM app
-        if: env.BUILD_TACTICS == 'true'
         env:
           # Release-mode wasm codegen at full runner parallelism exhausts the
           # 16 GB hosted runner and it gets killed with no diagnostic.
@@ -94,42 +67,43 @@ jobs:
         run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/
         working-directory: crates/wt-web
 
-      - name: Save tactics build to cache
-        if: env.BUILD_TACTICS == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: crates/wt-web/dist
-          key: tactics-dist-${{ github.sha }}
-
-      - name: Restore tactics build from cache
-        if: env.BUILD_TACTICS != 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: crates/wt-web/dist
-          key: tactics-dist-will-not-match
-          restore-keys: tactics-dist-
+      - name: Check latest stable tag
+        id: latest
+        run: |
+          latest_tag="$(git ls-remote --tags --refs origin 'refs/tags/v*' | cut -f2 | sed 's#refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+          if [ -z "$latest_tag" ]; then
+            echo "::error::No stable version tag was found."
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" = "$latest_tag" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping stale release $GITHUB_REF_NAME; latest stable tag is $latest_tag."
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Assemble deploy directory
+        if: steps.latest.outputs.is_latest == 'true'
         run: |
           mkdir -p _deploy/tactics
           cp -r site/* _deploy/
-          if [ -d crates/wt-web/dist ] && [ "$(ls -A crates/wt-web/dist)" ]; then
-            cp -r crates/wt-web/dist/* _deploy/tactics/
-          elif [ "$BUILD_TACTICS" = "true" ]; then
-            echo "::error::The tactics build ran but produced no output in crates/wt-web/dist."
+          if [ ! -f crates/wt-web/dist/index.html ]; then
+            echo "::error::The tactics build produced no output in crates/wt-web/dist."
             exit 1
-          else
-            echo "::warning::No tactics build found in cache. Deploying site without tactics."
           fi
+          cp -r crates/wt-web/dist/* _deploy/tactics/
 
       - name: Setup Pages
+        if: steps.latest.outputs.is_latest == 'true'
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
+        if: steps.latest.outputs.is_latest == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _deploy
 
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.latest.outputs.is_latest == 'true'
         uses: actions/deploy-pages@v4
