@@ -733,7 +733,8 @@ kept so the next audit does not re-report them.
 - [done] The tab opens showing everything and the results follow the query
   as it is typed, after a short pause rather than per keystroke.
 - [done] The tab opens on the query it was left with, and saves it back.
-  Sort order and operator preferences are still not persisted.
+  Sort order and last-used operator preferences are read and written in the
+  shared settings row as well.
 - [done] No structural editing: no selection, grouping, negate, delete,
   ungroup or connector flip, and no right-click menu on a pill. Every pill
   carries a menu offering all six, and a selected pill reads as selected so

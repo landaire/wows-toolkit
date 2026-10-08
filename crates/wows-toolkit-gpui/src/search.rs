@@ -39,6 +39,7 @@ use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
@@ -206,6 +207,77 @@ const COMPLETIONS_MAX_WIDTH: f32 = 460.0;
 /// How long the caret sits still before its value lookup is sent.
 const VALUE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
 
+fn sort_from_value(value: &serde_json::Value) -> Option<SortSpec> {
+    let pair = value.as_array()?;
+    if pair.len() != 2 {
+        return None;
+    }
+    let column = match pair.first()?.as_str()? {
+        "Date" => SortColumn::Date,
+        "Map" => SortColumn::Map,
+        "Mode" => SortColumn::Mode,
+        "Outcome" => SortColumn::Outcome,
+        "Damage" => SortColumn::Damage,
+        "Kills" => SortColumn::Kills,
+        "Pr" => SortColumn::Pr,
+        _ => return None,
+    };
+    let direction = match pair.get(1)?.as_str()? {
+        "Ascending" => SortDirection::Ascending,
+        "Descending" => SortDirection::Descending,
+        _ => return None,
+    };
+    Some(SortSpec { column, direction })
+}
+
+fn sort_value(sort: SortSpec) -> serde_json::Value {
+    let column = match sort.column {
+        SortColumn::Date => "Date",
+        SortColumn::Map => "Map",
+        SortColumn::Mode => "Mode",
+        SortColumn::Outcome => "Outcome",
+        SortColumn::Damage => "Damage",
+        SortColumn::Kills => "Kills",
+        SortColumn::Pr => "Pr",
+    };
+    let direction = match sort.direction {
+        SortDirection::Ascending => "Ascending",
+        SortDirection::Descending => "Descending",
+    };
+    serde_json::json!([column, direction])
+}
+
+fn parse_saved_settings(
+    stored: Option<serde_json::Value>,
+) -> Result<(String, Vec<String>, SortSpec, OperatorPreferences), String> {
+    let Some(stored) = stored else {
+        return Ok((String::new(), Vec::new(), SortSpec::default(), OperatorPreferences::default()));
+    };
+    let object = stored.as_object().ok_or_else(|| "Search settings must be a JSON object".to_string())?;
+    let query = match object.get("query") {
+        None => String::new(),
+        Some(value) => value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "Search settings field 'query' must be a string".to_string())?,
+    };
+    let history = match object.get("history") {
+        None => Vec::new(),
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("Search settings field 'history' is invalid: {error}"))?,
+    };
+    let sort = match object.get("sort") {
+        None => SortSpec::default(),
+        Some(value) => sort_from_value(value).ok_or_else(|| "Search settings field 'sort' is invalid".to_string())?,
+    };
+    let operator_preferences = match object.get("op_prefs") {
+        None => OperatorPreferences::default(),
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("Search settings field 'op_prefs' is invalid: {error}"))?,
+    };
+    Ok((query, history, sort, operator_preferences))
+}
+
 /// The values `request` asks the index for.
 ///
 /// Ships and players are searched by what has been typed so far; maps and
@@ -370,6 +442,8 @@ pub struct SearchView {
     /// result table uses, so a pill and a row name a ship the same way.
     name_cache: wows_toolkit_viewmodel::query_bar::label::NameCache,
     sort: SortSpec,
+    operator_preferences: OperatorPreferences,
+    settings_write_lock: std::sync::Arc<futures::lock::Mutex<()>>,
     hits: Vec<MatchHit>,
     state: SearchState,
     /// The query the current results came from, so the game-mode hint knows
@@ -411,6 +485,13 @@ pub struct SearchView {
     /// what the query bar was left holding, the way the egui tab does, rather
     /// than an empty page with an instruction on it.
     opened: bool,
+    settings_load_error: Option<SharedString>,
+    query_settings_dirty: bool,
+    history_settings_dirty: bool,
+    sort_settings_dirty: bool,
+    operator_preferences_dirty: bool,
+    settings_save_error: Option<SharedString>,
+    settings_failed_write: Option<(&'static str, serde_json::Value)>,
     /// Whether a count is in flight, so concurrent searches do not each start
     /// another scan.
     gap_lookup_running: bool,
@@ -458,6 +539,8 @@ impl SearchView {
             redo: Vec::new(),
             name_cache: Default::default(),
             sort: SortSpec::default(),
+            operator_preferences: OperatorPreferences::default(),
+            settings_write_lock: std::sync::Arc::new(futures::lock::Mutex::new(())),
             hits: Vec::new(),
             state: SearchState::Idle,
             expr: None,
@@ -469,6 +552,13 @@ impl SearchView {
             game_mode_gap: None,
             truncated: false,
             opened: false,
+            settings_load_error: None,
+            query_settings_dirty: false,
+            history_settings_dirty: false,
+            sort_settings_dirty: false,
+            operator_preferences_dirty: false,
+            settings_save_error: None,
+            settings_failed_write: None,
             gap_lookup_running: false,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -639,6 +729,7 @@ impl SearchView {
 
     /// Replaces the bar's text with `text` and runs it.
     fn set_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.query_settings_dirty = true;
         self.committed = text;
         self.set_bar_text("", Offer::Nothing, window, cx);
         self.reading = query_text::parse_query(&self.committed).ok();
@@ -849,26 +940,57 @@ impl SearchView {
         self.history.retain(|entry| entry != &text);
         self.history.insert(0, text);
         self.history.truncate(HISTORY_DEPTH);
+        self.history_settings_dirty = true;
         self.save_history(cx);
     }
 
     /// Writes the history back into the shared row beside the query.
     fn save_history(&self, cx: &mut Context<Self>) {
+        self.save_search_value("history", serde_json::json!(self.history), cx);
+    }
+
+    fn save_search_value(&self, field: &'static str, value: serde_json::Value, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        let history = self.history.clone();
-        cx.spawn(async move |_this, cx| {
-            let _ = runtime::spawn(cx, async move {
-                let mut stored =
-                    wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY)
-                        .await
-                        .unwrap_or_else(|| serde_json::json!({}));
-                if let Some(object) = stored.as_object_mut() {
-                    object.insert("history".to_string(), serde_json::json!(history));
-                }
+        let write_lock = self.settings_write_lock.clone();
+        let retry_value = value.clone();
+        cx.spawn(async move |this, cx| {
+            let _guard = write_lock.lock().await;
+            let written = runtime::spawn(cx, async move {
+                let mut stored = match wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(
+                    &pool,
+                    SEARCH_SETTINGS_KEY,
+                )
+                .await
+                {
+                    Ok(Some(value)) => value,
+                    Ok(None) => serde_json::json!({}),
+                    Err(error) => {
+                        return Err(format!("Could not read Search settings before saving {field}: {error}"));
+                    }
+                };
+                let Some(object) = stored.as_object_mut() else {
+                    return Err(format!("Search settings are not an object; {field} was not saved"));
+                };
+                object.insert(field.to_string(), value);
                 let json = stored.to_string();
-                wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json).await
+                wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json)
+                    .await
+                    .map_err(|error| format!("Search {field} could not be saved: {error}"))
             })
             .await;
+            let message = match written {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error),
+                Err(error) => Some(format!("Search settings update for {field} did not complete: {error}")),
+            };
+            if let Some(message) = &message {
+                tracing::warn!("{message}");
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.settings_save_error = message.map(Into::into);
+                this.settings_failed_write = this.settings_save_error.as_ref().map(|_| (field, retry_value));
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -1079,6 +1201,7 @@ impl SearchView {
                 if std::mem::take(&mut self.took_completion_on_enter) {
                     return;
                 }
+                self.query_settings_dirty = true;
                 self._rerun = None;
                 // Running is an answer to what the dropdown was offering, so
                 // it closes: the arrows then walk the history instead.
@@ -1089,6 +1212,7 @@ impl SearchView {
                 cx.notify();
             }
             InputEvent::Change => {
+                self.query_settings_dirty = true;
                 let text = self.full_query(cx);
                 if text == self.last_run_query {
                     return;
@@ -1229,29 +1353,85 @@ impl SearchView {
 
         cx.spawn(async move |this, cx| {
             let stored = runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY).await
+                wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY).await
             })
             .await;
-            let stored = stored.ok().flatten();
-            let query = stored
-                .as_ref()
-                .and_then(|value| value.get("query").and_then(|query| query.as_str()).map(str::to_owned))
-                .unwrap_or_default();
-            let history: Vec<String> = stored
-                .as_ref()
-                .and_then(|value| value.get("history"))
-                .and_then(|history| serde_json::from_value(history.clone()).ok())
-                .unwrap_or_default();
+            let stored = match stored {
+                Ok(Ok(stored)) => stored,
+                Ok(Err(error)) => {
+                    let message = format!("Could not read Search settings: {error}");
+                    let _ = this.update(cx, |this, cx| {
+                        this.settings_load_error = Some(message.clone().into());
+                        if !this.query_settings_dirty
+                            && !this.sort_settings_dirty
+                            && !this.history_settings_dirty
+                            && !this.operator_preferences_dirty
+                        {
+                            this.state = SearchState::Failed(message);
+                        }
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(error) => {
+                    let message = format!("Search settings read did not complete: {error}");
+                    let _ = this.update(cx, |this, cx| {
+                        this.settings_load_error = Some(message.clone().into());
+                        if !this.query_settings_dirty
+                            && !this.sort_settings_dirty
+                            && !this.history_settings_dirty
+                            && !this.operator_preferences_dirty
+                        {
+                            this.state = SearchState::Failed(message);
+                        }
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let (query, history, sort, operator_preferences) = match parse_saved_settings(stored) {
+                Ok(settings) => settings,
+                Err(message) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.settings_load_error = Some(message.clone().into());
+                        if !this.query_settings_dirty
+                            && !this.sort_settings_dirty
+                            && !this.history_settings_dirty
+                            && !this.operator_preferences_dirty
+                        {
+                            this.state = SearchState::Failed(message);
+                        }
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
 
             let _ = this.update_in(cx, |this, window, cx| {
-                this.history = history;
-                if !query.is_empty() {
-                    this.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
+                this.settings_load_error = None;
+                let restored_sort = !this.sort_settings_dirty;
+                if !this.history_settings_dirty {
+                    this.history = history;
                 }
-                // An empty query matches everything, which is the page the
-                // egui tab opens on.
-                this.completions_open = false;
-                this.run(cx);
+                if !this.sort_settings_dirty {
+                    this.sort = sort;
+                }
+                if !this.operator_preferences_dirty {
+                    this.operator_preferences = operator_preferences;
+                }
+                if !this.query_settings_dirty {
+                    if !query.is_empty() {
+                        this.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
+                    }
+                    // An empty query matches everything, which is the page the
+                    // egui tab opens on.
+                    this.completions_open = false;
+                    this.run(cx);
+                } else if restored_sort && this.last_run_query == this.full_query(cx) {
+                    this.run(cx);
+                } else {
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -1261,22 +1441,7 @@ impl SearchView {
     /// Writes the query text back into the shared row, keeping every other
     /// field the egui tab stores beside it.
     fn save_query(&self, text: String, cx: &mut Context<Self>) {
-        let Some(pool) = crate::settings_store::pool(cx) else { return };
-        cx.spawn(async move |_this, cx| {
-            let _ = runtime::spawn(cx, async move {
-                let mut stored =
-                    wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY)
-                        .await
-                        .unwrap_or_else(|| serde_json::json!({}));
-                if let Some(object) = stored.as_object_mut() {
-                    object.insert("query".to_string(), serde_json::Value::String(text));
-                }
-                let json = stored.to_string();
-                wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json).await
-            })
-            .await;
-        })
-        .detach();
+        self.save_search_value("query", serde_json::Value::String(text), cx);
     }
 
     /// Adopts the game data the replay inspector opened, so results can be
@@ -1359,6 +1524,15 @@ impl SearchView {
             }
         };
         self.expr = Some(expr.clone());
+        let prior_preferences = self.operator_preferences.clone();
+        select::record_operators(&expr, &mut self.operator_preferences);
+        if self.operator_preferences != prior_preferences {
+            self.operator_preferences_dirty = true;
+            match serde_json::to_value(&self.operator_preferences) {
+                Ok(value) => self.save_search_value("op_prefs", value, cx),
+                Err(error) => tracing::warn!("search: operator preferences could not be serialized: {error}"),
+            }
+        }
         self.save_query(text.clone(), cx);
 
         let Some(pool) = crate::settings_store::pool(cx) else {
@@ -1414,7 +1588,9 @@ impl SearchView {
     /// A header click re-sorts, which means re-running: the ordering is done
     /// by the query, not over the page already fetched.
     fn sort_by(&mut self, column: SortColumn, cx: &mut Context<Self>) {
+        self.sort_settings_dirty = true;
         self.sort = self.sort.after_click(column);
+        self.save_search_value("sort", sort_value(self.sort), cx);
         if matches!(self.state, SearchState::Done | SearchState::Running) {
             self.run(cx);
         } else {
@@ -1654,6 +1830,7 @@ impl Render for SearchView {
                     expr,
                     &self.name_cache,
                     &self.selection,
+                    &self.operator_preferences,
                     cx,
                     move |taken, window, cx| {
                         entity.update(cx, |this, cx| this.set_query_text(taken, window, cx));
@@ -2100,6 +2277,8 @@ impl Render for SearchView {
             SearchState::Done if self.hits.is_empty() => Some(t!("ui.search.no_matches").into_owned()),
             SearchState::Done => None,
         };
+        let settings_error_needs_banner = status.is_none();
+        let search_entity = cx.entity();
 
         // Singular at exactly one, so it never reads "1 indexed matches".
         let gap_hint = self
@@ -2127,6 +2306,21 @@ impl Render for SearchView {
                 .items_center()
                 .justify_center()
                 .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
+                .when_some(self.settings_load_error.clone(), |this, _reason| {
+                    let search_entity = search_entity.clone();
+                    this.child(
+                        Button::new("search-settings-retry")
+                            .label(t!("ui.buttons.retry").to_string())
+                            .compact()
+                            .on_click(move |_event, window, cx: &mut App| {
+                                search_entity.update(cx, |this, cx| {
+                                    this.settings_load_error = None;
+                                    this.opened = false;
+                                    this.open_saved_query(window, cx);
+                                });
+                            }),
+                    )
+                })
                 .into_any_element(),
             None => div()
                 .id("search-results")
@@ -2193,6 +2387,64 @@ impl Render for SearchView {
                     .text_color(rgb(0xe8a54a))
                     .child(gap_hint.unwrap_or_default()),
             )
+            .when_some(self.settings_save_error.clone(), |this, error| {
+                let search_entity = search_entity.clone();
+                this.child(
+                    h_flex()
+                        .id("search-settings-save-error")
+                        .test_support()
+                        .flex_none()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(rgb(0xe8a54a))
+                        .child(error)
+                        .child(
+                            Button::new("search-settings-save-retry")
+                                .label(t!("ui.buttons.retry").to_string())
+                                .compact()
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    search_entity.update(cx, |this, cx| {
+                                        if let Some((field, value)) = this.settings_failed_write.clone() {
+                                            this.save_search_value(field, value, cx);
+                                        }
+                                    });
+                                }),
+                        ),
+                )
+            })
+            .when(settings_error_needs_banner, |this| {
+                this.when_some(self.settings_load_error.clone(), |this, error| {
+                    let search_entity = search_entity.clone();
+                    this.child(
+                        h_flex()
+                            .id("search-settings-load-error")
+                            .test_support()
+                            .flex_none()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .py_1()
+                            .text_xs()
+                            .text_color(rgb(0xe8a54a))
+                            .child(error)
+                            .child(
+                                Button::new("search-settings-load-retry")
+                                    .label(t!("ui.buttons.retry").to_string())
+                                    .compact()
+                                    .on_click(move |_event, window, cx: &mut App| {
+                                        search_entity.update(cx, |this, cx| {
+                                            this.settings_load_error = None;
+                                            this.opened = false;
+                                            this.open_saved_query(window, cx);
+                                        });
+                                    }),
+                            ),
+                    )
+                })
+            })
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
             .child(footer)

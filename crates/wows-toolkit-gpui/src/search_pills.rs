@@ -114,7 +114,17 @@ pub fn with_operator(expr: &MatchExpr, path: &[usize], op: Op) -> Option<String>
 /// Empty when that part has nothing to pick from, which is a value that is
 /// typed rather than chosen; the bar then opens no picker at all rather than
 /// an empty one.
+#[cfg(test)]
 pub fn choices(expr: &MatchExpr, path: &[usize], part: EditablePart) -> Vec<Choice> {
+    choices_with_operator_preferences(expr, path, part, &OperatorPreferences::default())
+}
+
+pub fn choices_with_operator_preferences(
+    expr: &MatchExpr,
+    path: &[usize],
+    part: EditablePart,
+    operator_preferences: &OperatorPreferences,
+) -> Vec<Choice> {
     match part {
         EditablePart::Operator => operator_choices(expr, path)
             .map(|(choices, current)| {
@@ -130,7 +140,7 @@ pub fn choices(expr: &MatchExpr, path: &[usize], part: EditablePart) -> Vec<Choi
                     .collect()
             })
             .unwrap_or_default(),
-        EditablePart::Field => field_choices(expr, path),
+        EditablePart::Field => field_choices(expr, path, operator_preferences),
         EditablePart::Value => value_choices(expr, path),
     }
 }
@@ -140,7 +150,7 @@ pub fn choices(expr: &MatchExpr, path: &[usize], part: EditablePart) -> Vec<Choi
 /// Roster terms are left alone: their field list is a different one and
 /// changing it reshapes the quantifier around it, which the bar does not do
 /// yet.
-fn field_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
+fn field_choices(expr: &MatchExpr, path: &[usize], operator_preferences: &OperatorPreferences) -> Vec<Choice> {
     let Some((current, _, _)) = select::term_at(expr, path) else { return Vec::new() };
     if !matches!(current, TermField::Match(_)) {
         return Vec::new();
@@ -148,7 +158,7 @@ fn field_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
 
     // The operator a field was last given, so switching to it lands on the
     // same operator the user chose before rather than the field's default.
-    let mut prefs = OperatorPreferences::default();
+    let mut prefs = operator_preferences.clone();
     select::record_operators(expr, &mut prefs);
 
     MatchField::ALL
@@ -204,6 +214,7 @@ pub fn pill_strip(
     expr: &MatchExpr,
     cache: &NameCache,
     selection: &Selection,
+    operator_preferences: &OperatorPreferences,
     cx: &App,
     on_choice: impl Fn(String, &mut Window, &mut App) + Clone + 'static,
     on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
@@ -237,7 +248,7 @@ pub fn pill_strip(
                     // which is the part the reader is looking for.
                     let dimmed = !matches!(segment.role, SegmentRole::Value);
                     let part = EditablePart::of(segment.role);
-                    let offered = choices(expr, &token.path, part);
+                    let offered = choices_with_operator_preferences(expr, &token.path, part, operator_preferences);
                     let id = index * SEGMENTS_PER_PILL + slot;
 
                     // A divider between the cells, as the egui bar draws
