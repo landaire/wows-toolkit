@@ -42,6 +42,10 @@ impl ShipConfig {
         self.ship_params_id
     }
 
+    pub fn set_ship_params_id(&mut self, ship_params_id: GameParamId) {
+        self.ship_params_id = ship_params_id;
+    }
+
     pub fn exteriors(&self) -> &[GameParamId] {
         self.exteriors.as_ref()
     }
@@ -459,5 +463,12 @@ mod tests {
         assert!(config.ecoboosts().is_empty());
         assert_eq!(config.naval_flag(), None);
         assert_eq!(config.last_boarded_crew(), None);
+    }
+
+    #[test]
+    fn roster_ship_id_overrides_config_header_id() {
+        let mut config = ShipConfig::stock(GameParamId::from(4_076_779_344u32));
+        config.set_ship_params_id(GameParamId::from(438_335u32));
+        assert_eq!(config.ship_params_id(), GameParamId::from(438_335u32));
     }
 }

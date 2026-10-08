@@ -4,6 +4,36 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.0.2
+
+### Replay analysis
+
+- Replay parsing follows the 15.9 roster layout while retaining the older layout for earlier replays. Player teams and ship identities resolve correctly, and roster data links to vehicle packets so captain skills and ship configurations are retained.
+- Normalized replay reports include stable player ordering, battle outcome, and ship identity. Replay analysis can resolve effective fire chance and track damage, spotting, and consumable use over battle time.
+- `replayshark` can inspect rosters, battle results, and constants mappings.
+
+### Game data and compatibility
+
+- Game data downloads cover multiple required builds in one plan, deduplicate shared files, verify downloaded content, and report which build contains a corrupt file.
+- Steam public-branch depot manifests are pinned for reproducible game data downloads. WoWs 15.8 data is included.
+- Fixed `wows-data-mgr` link and library behavior when unused files are removed by aggressive cache cleanup.
+- Ship configuration and captain skill parsing handles the current packet data and older replay layouts.
+
+### Armor viewer
+
+- The 3D model export dialog lets you select model export settings before writing a file.
+
+### Performance and memory
+
+- Game data loading uses less memory by storing VFS paths in one buffer, reducing per-entry index data, sharing skill lists, releasing unused parameter capacity, and loading asset paths only when required.
+- Replay listing reuses indexed row summaries, avoiding repeated replay reads for unchanged files.
+- Minimap rendering shares game fonts and limits its decoded map cache.
+- Replay parsing reduces metadata copies and per-packet hashing, dispatch, and allocation work.
+
+### Tools and builds
+
+- The command-line tools archive restores the `wows-data-mgr` executable name and adds a CPU-only `minimap_renderer_cpu`.
+
 ## 1.0.0
 
 We've reached 1.0! I'm calling it now: this will cause confusion for people who say "omg I have 1.70 I don't have this feature???" but no you are on _0.1.70_.

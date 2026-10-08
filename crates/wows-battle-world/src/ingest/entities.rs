@@ -487,6 +487,12 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
         let ship_config_dump = player.ship_config_dump();
         let args = arena_state_to_args(player, ship_config_dump.as_deref());
         let mut props = VehicleProps::from_create_props(&args, version, constants);
+        if let Some(ship_params_id) = player.ship_params_id() {
+            props.set_ship_params_id(ship_params_id);
+        }
+        if let Some(crew_params_id) = player.crew_params_id() {
+            props.set_crew_params_id(crew_params_id);
+        }
         // Arena state does not broadcast live health; seed from max so HP is full
         // instead of 0 until the first EntityProperty(health) arrives.
         props.seed_initial_health();
