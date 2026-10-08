@@ -4,7 +4,7 @@ buildscript = workspace_buildscript(
     name = "wows-battle-world-buildscript",
     crate = "wows_battle_world",
     package = "wows-battle-world",
-    version = "0.13.0",
+    version = "0.14.0",
     deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
 )
 
@@ -12,7 +12,7 @@ workspace_library(
     name = "wows_battle_world",
     crate = "wows_battle_world",
     package = "wows-battle-world",
-    version = "0.13.0",
+    version = "0.14.0",
     buildscript = buildscript,
     deps = [
         "//crates/wows-core:wows_core",
@@ -32,7 +32,7 @@ workspace_test(
     crate = "wows_battle_world",
     crate_root = "src/lib.rs",
     package = "wows-battle-world",
-    version = "0.13.0",
+    version = "0.14.0",
     buildscript = buildscript,
     deps = [
         "//crates/wows-core:wows_core",

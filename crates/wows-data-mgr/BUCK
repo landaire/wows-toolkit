@@ -25,7 +25,7 @@ workspace_library(
     name = "wows_data_mgr",
     crate = "wows_data_mgr",
     package = "wows-data-mgr",
-    version = "0.21.0",
+    version = "0.22.0",
     features = ["constants", "download"],
     deps = WDM_DEPS,
 )
@@ -34,7 +34,7 @@ workspace_binary(
     name = "wows_data_mgr_bin",
     crate = "wows_data_mgr",
     package = "wows-data-mgr",
-    version = "0.21.0",
+    version = "0.22.0",
     crate_root = "src/main.rs",
     features = ["constants", "download"],
     deps = [":wows_data_mgr"] + WDM_DEPS,
@@ -49,7 +49,7 @@ workspace_test(
     crate = "wows_data_mgr",
     crate_root = "src/lib.rs",
     package = "wows-data-mgr",
-    version = "0.21.0",
+    version = "0.22.0",
     features = ["constants", "download"],
     deps = WDM_DEPS,
 )
