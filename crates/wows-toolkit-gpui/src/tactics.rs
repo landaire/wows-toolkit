@@ -2700,22 +2700,38 @@ impl TacticsBoard {
                         }),
                 )
             }))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.renderer.annotations.nib").to_string()),
+            )
             .child({
                 let board = board.clone();
-                Button::new("tactics-nib-down").label("-").compact().disabled(nib <= MIN_NIB).on_click(
-                    move |_event, _window, cx: &mut App| {
+                let label = t!("ui.renderer.annotations.thinner").into_owned();
+                Button::new("tactics-nib-down")
+                    .label("-")
+                    .compact()
+                    .disabled(nib <= MIN_NIB)
+                    .accessibility_label(label.clone())
+                    .tooltip(label)
+                    .on_click(move |_event, _window, cx: &mut App| {
                         board.update(cx, |board, cx| board.step_nib(-1.0, cx));
-                    },
-                )
+                    })
             })
             .child(div().text_xs().text_color(crate::theme::text_dim()).child(format!("{nib:.0}")))
             .child({
                 let board = board.clone();
-                Button::new("tactics-nib-up").label("+").compact().disabled(nib >= MAX_NIB).on_click(
-                    move |_event, _window, cx: &mut App| {
+                let label = t!("ui.renderer.annotations.thicker").into_owned();
+                Button::new("tactics-nib-up")
+                    .label("+")
+                    .compact()
+                    .disabled(nib >= MAX_NIB)
+                    .accessibility_label(label.clone())
+                    .tooltip(label)
+                    .on_click(move |_event, _window, cx: &mut App| {
                         board.update(cx, |board, cx| board.step_nib(1.0, cx));
-                    },
-                )
+                    })
             })
             .when(has_drawing, |this| {
                 this.child({
