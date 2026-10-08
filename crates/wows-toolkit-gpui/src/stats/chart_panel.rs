@@ -336,7 +336,9 @@ impl StatsChartPanel {
         if self.mode == ChartMode::Line {
             return Vec::new();
         }
-        bar_chart_series(&self.ships, self.stat, &self.selected_ships, self.personal_rating.as_deref())
+        let mut ships = self.ships.clone();
+        ships.sort_by(|left, right| left.0.cmp(&right.0));
+        bar_chart_series(&ships, self.stat, &self.selected_ships, self.personal_rating.as_deref())
     }
 
     /// What the value axis is called: the statistic, plus how it is being
