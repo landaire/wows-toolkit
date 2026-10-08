@@ -615,6 +615,19 @@ impl CollabLink {
         self.local_tx.is_some()
     }
 
+    /// Whether this end may steer the shared session, or is running alone.
+    pub fn may_steer(&self) -> bool {
+        self.state.as_ref().is_none_or(|state| {
+            let role = state.lock().role;
+            role.is_host() || role.is_co_host()
+        })
+    }
+
+    /// Whether this end is prevented from changing annotations in the session.
+    pub fn annotations_locked(&self) -> bool {
+        self.state.as_ref().is_some_and(|state| state.lock().permissions.annotations_locked)
+    }
+
     /// The same link, speaking for one tactics board.
     ///
     /// A board's shapes and capture points are its own: two boards open on
@@ -644,12 +657,14 @@ impl CollabLink {
             // still names these shapes afterwards, and in order, so the session
             // holds them the way the reader drew them.
             for one in held {
-                let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set {
+                let event = wt_collab_client::peer::LocalAnnotationEvent::Set {
                     board_id: self.board,
                     id: one.id,
                     annotation: one.annotation,
                     owner: one.owner,
-                }));
+                };
+                self.apply_local_annotation(&event);
+                let _ = tx.send(LocalEvent::Annotation(event));
             }
             return;
         }
@@ -660,7 +675,7 @@ impl CollabLink {
             ids: held.iter().map(|one| one.id).collect(),
         };
         let highest = alone.ids.iter().copied().max().unwrap_or_default();
-        self.next_alone_id.store(highest + 1, std::sync::atomic::Ordering::Relaxed);
+        self.next_alone_id.store(highest.saturating_add(1), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Who this app is in the session, where it is in one.
@@ -760,6 +775,7 @@ impl CollabLink {
         if let wt_collab_client::peer::LocalAnnotationEvent::Set { board_id, .. } = &mut event {
             *board_id = self.board;
         }
+        self.apply_local_annotation(&event);
         let _ = tx.send(LocalEvent::Annotation(event));
     }
 
@@ -787,7 +803,51 @@ impl CollabLink {
             self.adopt(was.to_vec());
             return;
         };
-        for change in wt_collab_client::drawing::undo_plan(was, &self.annotations_held()) {
+        let Some(state) = &self.state else { return };
+        // The board reads this snapshot while the worker drains the ordered
+        // events, so publish the target before sending its deltas.
+        let changes = {
+            let mut state = state.lock();
+            let changes = {
+                let sync = match self.board {
+                    Some(board_id) => state.tactics_boards.get_mut(&board_id).map(|board| &mut board.annotation_sync),
+                    None => Some(state.current_annotation_sync.get_or_insert_with(Default::default)),
+                };
+                let Some(sync) = sync else { return };
+                let current = sync
+                    .annotations
+                    .iter()
+                    .enumerate()
+                    .map(|(at, annotation)| wt_collab_client::drawing::Held {
+                        id: sync.ids.get(at).copied().unwrap_or_default(),
+                        owner: sync.owners.get(at).copied().unwrap_or_default(),
+                        annotation: annotation.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                let changes = wt_collab_client::drawing::undo_plan(was, &current);
+                if !changes.is_empty() {
+                    *sync = wt_collab_client::AnnotationSyncState {
+                        annotations: was.iter().map(|held| held.annotation.clone()).collect(),
+                        owners: was.iter().map(|held| held.owner).collect(),
+                        ids: was.iter().map(|held| held.id).collect(),
+                    };
+                }
+                changes
+            };
+            if !changes.is_empty() {
+                match self.board {
+                    Some(board_id) => {
+                        if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                            board.annotation_sync_version += 1;
+                            state.tactics_boards_version += 1;
+                        }
+                    }
+                    None => state.annotation_sync_version += 1,
+                }
+            }
+            changes
+        };
+        for change in changes {
             let event = match change {
                 Change::Set(held) => LocalAnnotationEvent::Set {
                     board_id: self.board,
@@ -798,6 +858,93 @@ impl CollabLink {
                 Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: self.board, id },
             };
             let _ = tx.send(LocalEvent::Annotation(event));
+        }
+    }
+
+    /// Replaces every annotation with the supplied set.
+    pub fn replace_annotations(&self, annotations: Vec<wt_collab_client::types::Annotation>) {
+        let owner = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let held = annotations
+            .into_iter()
+            .map(|annotation| wt_collab_client::drawing::Held {
+                id: if self.is_active() {
+                    wt_collab_client::peer::fresh_id()
+                } else {
+                    self.next_alone_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                },
+                owner,
+                annotation,
+            })
+            .collect::<Vec<_>>();
+        self.restore(&held);
+    }
+
+    fn apply_local_annotation(&self, event: &wt_collab_client::peer::LocalAnnotationEvent) {
+        use wt_collab_client::peer::LocalAnnotationEvent;
+
+        let Some(state) = &self.state else { return };
+        // Apply before enqueueing so a following edit observes this one.
+        let mut state = state.lock();
+        let event_board = match event {
+            LocalAnnotationEvent::Set { board_id, .. }
+            | LocalAnnotationEvent::Remove { board_id, .. }
+            | LocalAnnotationEvent::Clear { board_id } => *board_id,
+        };
+        if event_board != self.board {
+            return;
+        }
+        let changed = {
+            let sync = match self.board {
+                Some(board_id) => state.tactics_boards.get_mut(&board_id).map(|board| &mut board.annotation_sync),
+                None => Some(state.current_annotation_sync.get_or_insert_with(Default::default)),
+            };
+            let Some(sync) = sync else { return };
+            match event {
+                LocalAnnotationEvent::Set { id, annotation, owner, .. } => {
+                    if let Some(at) = sync.ids.iter().position(|held| held == id) {
+                        if sync.annotations[at] == *annotation && sync.owners[at] == *owner {
+                            false
+                        } else {
+                            sync.annotations[at] = annotation.clone();
+                            sync.owners[at] = *owner;
+                            true
+                        }
+                    } else {
+                        sync.annotations.push(annotation.clone());
+                        sync.owners.push(*owner);
+                        sync.ids.push(*id);
+                        true
+                    }
+                }
+                LocalAnnotationEvent::Remove { id, .. } => {
+                    if let Some(at) = sync.ids.iter().position(|held| held == id) {
+                        sync.annotations.remove(at);
+                        sync.owners.remove(at);
+                        sync.ids.remove(at);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                LocalAnnotationEvent::Clear { .. } => {
+                    let changed = !sync.ids.is_empty();
+                    sync.annotations.clear();
+                    sync.owners.clear();
+                    sync.ids.clear();
+                    changed
+                }
+            }
+        };
+        if changed {
+            match self.board {
+                Some(board_id) => {
+                    if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                        board.annotation_sync_version += 1;
+                        state.tactics_boards_version += 1;
+                    }
+                }
+                None => state.annotation_sync_version += 1,
+            }
         }
     }
 
@@ -817,12 +964,9 @@ impl CollabLink {
         let sync = self.held();
         let Some(id) = sync.ids.get(index).copied() else { return };
         let owner = sync.owners.get(index).copied().unwrap_or_default();
-        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set {
-            board_id: self.board,
-            id,
-            annotation,
-            owner,
-        }));
+        let event = wt_collab_client::peer::LocalAnnotationEvent::Set { board_id: self.board, id, annotation, owner };
+        self.apply_local_annotation(&event);
+        let _ = tx.send(LocalEvent::Annotation(event));
     }
 
     /// Takes the annotation at `index` of [`Self::annotations`] off the map.
@@ -841,10 +985,9 @@ impl CollabLink {
             return;
         };
         let Some(id) = self.held().ids.get(index).copied() else { return };
-        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Remove {
-            board_id: self.board,
-            id,
-        }));
+        let event = wt_collab_client::peer::LocalAnnotationEvent::Remove { board_id: self.board, id };
+        self.apply_local_annotation(&event);
+        let _ = tx.send(LocalEvent::Annotation(event));
     }
 
     /// Puts this board's map in front of the session, so a peer can open the
@@ -856,14 +999,31 @@ impl CollabLink {
     /// to reach the peer task before the board's zones and shapes do.
     pub fn announce_board(&self, map: BoardMap) {
         let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let owner_user_id = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let map_image_png = map.art_png.unwrap_or_default();
+        let map_info = map.info;
+        if let Some(state) = &self.state {
+            let mut state = state.lock();
+            let owner = if owner_user_id == 0 { state.my_user_id } else { owner_user_id };
+            let board = state.tactics_boards.entry(board_id).or_default();
+            board.owner_user_id = owner;
+            board.tactics_map = wt_collab_client::TacticsMapInfo {
+                map_name: map.space.clone(),
+                display_name: map.label.clone(),
+                map_id: map.map_id,
+                map_image_png: map_image_png.clone(),
+                map_info: map_info.clone(),
+            };
+            state.tactics_boards_version += 1;
+        }
         let _ = tx.send(LocalEvent::TacticsMapOpened {
             board_id,
-            owner_user_id: self.my_user_id().map(UserId::raw).unwrap_or_default(),
+            owner_user_id,
             map_name: map.space,
             display_name: map.label,
             map_id: map.map_id,
-            map_image_png: map.art_png.unwrap_or_default(),
-            map_info: map.info,
+            map_image_png,
+            map_info,
         });
     }
 
@@ -877,12 +1037,36 @@ impl CollabLink {
     /// Puts a capture point on this board for everyone in the session.
     pub fn set_cap(&self, cap: wt_collab_client::protocol::WireCapPoint) {
         let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        if let Some(state) = &self.state {
+            // Board handoff can read this state before the worker drains the event.
+            let mut state = state.lock();
+            if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                if let Some(existing) = board.cap_point_sync.cap_points.iter_mut().find(|held| held.id == cap.id) {
+                    *existing = cap.clone();
+                } else {
+                    board.cap_point_sync.cap_points.push(cap.clone());
+                }
+                board.cap_point_sync_version += 1;
+                state.tactics_boards_version += 1;
+            }
+        }
         let _ = tx.send(LocalEvent::CapPoint { board_id, event: wt_collab_client::peer::LocalCapPointEvent::Set(cap) });
     }
 
     /// Takes one off it.
     pub fn remove_cap(&self, id: CapPointId) {
         let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        if let Some(state) = &self.state {
+            let mut state = state.lock();
+            if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                let before = board.cap_point_sync.cap_points.len();
+                board.cap_point_sync.cap_points.retain(|cap| cap.id != id.raw());
+                if before != board.cap_point_sync.cap_points.len() {
+                    board.cap_point_sync_version += 1;
+                    state.tactics_boards_version += 1;
+                }
+            }
+        }
         let _ = tx.send(LocalEvent::CapPoint {
             board_id,
             event: wt_collab_client::peer::LocalCapPointEvent::Remove { id: id.raw() },
