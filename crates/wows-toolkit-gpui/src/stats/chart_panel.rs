@@ -548,7 +548,11 @@ impl StatsChartPanel {
         let active = self.active_filters().clone();
         let modes = self.offered_modes();
 
-        let trigger = Button::new(("chart-settings", id)).label(t!("ui.stats.settings").to_string()).compact();
+        let trigger = Button::new(("chart-settings", id))
+            .child(crate::icons::icon(crate::icons::GEAR_FINE))
+            .compact()
+            .tooltip(t!("ui.stats.settings").to_string())
+            .accessibility_label(t!("ui.stats.settings").to_string());
         Popover::new(("chart-settings-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
             let stat_entity = entity.clone();
             let stat_buttons: Vec<_> = stats
