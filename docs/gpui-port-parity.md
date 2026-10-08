@@ -634,8 +634,8 @@ kept so the next audit does not re-report them.
   name.
 - [done] Add-chart is a menu of statistics, so a chart opens on the one asked
   for rather than on a default to be changed afterwards.
-- [done] Chart tabs identify line and bar plots with their chart glyph, matching
-  the egui dock titles.
+- [done] Chart tabs identify line and bar plots with their chart glyph and name
+  average, combined and rolling plots the way the egui dock titles do.
 - [done] A chart can be taken off the tab's filter bar and narrow the session
   itself (division and mode), which is the per-pane override the tab lacked.
   The Overview and Ships panels still follow the bar only.
