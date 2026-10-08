@@ -127,6 +127,12 @@ impl StatsShipsPanel {
         cx.notify();
     }
 
+    /// Rebuilds cached cell text after the shared locale changes.
+    pub fn set_locale(&mut self, cx: &mut Context<Self>) {
+        self.rebuild();
+        cx.notify();
+    }
+
     /// Adopts the games the filter bar has already selected.
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
         // A confirmation only stands for the table it was asked about: the
