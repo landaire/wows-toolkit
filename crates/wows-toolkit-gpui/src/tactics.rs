@@ -113,6 +113,28 @@ pub struct ModeChoice {
     pub label: String,
 }
 
+#[derive(Clone)]
+struct ModeItem {
+    key: Option<CapLayoutKey>,
+    label: String,
+}
+
+impl SearchableListItem for ModeItem {
+    type Value = Option<CapLayoutKey>;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.label.clone())
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.key
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        self.label.to_lowercase().contains(&query.trim().to_lowercase())
+    }
+}
+
 /// A capture point on the board.
 ///
 /// Editable, unlike the layout it was seeded from: moving a cap and widening
@@ -458,6 +480,12 @@ pub fn modes(layouts: &CapLayoutDb, map_id: Option<u32>, game_data: Option<&Game
     found.into_iter().zip(labels).map(|(layout, label)| ModeChoice { key: layout.key.clone(), label }).collect()
 }
 
+fn mode_items(modes: &[ModeChoice]) -> Vec<ModeItem> {
+    std::iter::once(ModeItem { key: None, label: t!("ui.replay.hover.blank_mode").into_owned() })
+        .chain(modes.iter().map(|mode| ModeItem { key: Some(mode.key.clone()), label: mode.label.clone() }))
+        .collect()
+}
+
 /// The capture points a mode puts on the map.
 pub fn caps_of(layouts: &CapLayoutDb, key: &CapLayoutKey) -> Vec<BoardCapPoint> {
     layouts.get(key).map(|layout| layout.points.iter().map(BoardCapPoint::from_layout).collect()).unwrap_or_default()
@@ -700,6 +728,9 @@ pub struct TacticsBoard {
     map_select: Entity<SelectState<SearchableVec<MapItem>>>,
     _map_select_subscription: Subscription,
     map_picker_sync_needed: bool,
+    mode_select: Entity<SelectState<SearchableVec<ModeItem>>>,
+    _mode_select_subscription: Subscription,
+    mode_picker_sync_needed: bool,
     /// The ship the next placement is of, and whether it is on the reader's
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
@@ -761,6 +792,21 @@ impl TacticsBoard {
                 window.focus(&this.focus_handle, cx);
             },
         );
+        let mode_select =
+            cx.new(|cx| SelectState::new(SearchableVec::new(mode_items(&[])), None, window, cx).searchable(true));
+        let mode_select_subscription = cx.subscribe_in(
+            &mode_select,
+            window,
+            |this, _state, event: &SelectEvent<SearchableVec<ModeItem>>, window, cx| {
+                let SelectEvent::Confirm(Some(key)) = event else { return };
+                match key {
+                    Some(key) if this.mode.as_ref() != Some(key) => this.set_mode(key.clone(), cx),
+                    None if this.mode.is_some() => this.set_blank_mode(cx),
+                    _ => return,
+                }
+                window.focus(&this.focus_handle, cx);
+            },
+        );
         let preset_name = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.tactics.preset_name").into_owned())
@@ -788,6 +834,9 @@ impl TacticsBoard {
             map_select,
             _map_select_subscription: map_select_subscription,
             map_picker_sync_needed: false,
+            mode_select,
+            _mode_select_subscription: mode_select_subscription,
+            mode_picker_sync_needed: false,
             placing: None,
             ship_catalog: None,
             range_filter: wt_collab_client::types::AnnotationRangeFilter::default(),
@@ -950,6 +999,7 @@ impl TacticsBoard {
                     }
                     let map_id = map.map_id;
                     this.modes = modes(&this.layouts, map_id, this.game_data.as_ref());
+                    this.mode_picker_sync_needed = true;
                 }
                 this.sync_map_picker(window, cx);
                 crate::toast::info(t!("ui.tactics.scan_done", added = added, total = total).into_owned(), window, cx);
@@ -1040,6 +1090,7 @@ impl TacticsBoard {
         // The saved capture points stand, whatever mode the map has: they are
         // what the reader put there.
         self.mode = None;
+        self.mode_picker_sync_needed = true;
         self.map = Some(map);
         self.sync_map_picker(window, cx);
         let caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
@@ -1074,6 +1125,16 @@ impl TacticsBoard {
             if let Some(key) = selected.as_ref() {
                 state.set_selected_value(key, window, cx);
             }
+        });
+    }
+
+    fn sync_mode_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let items = SearchableVec::new(mode_items(&self.modes));
+        let selected = self.mode.clone();
+        self.mode_select.update(cx, |state, cx| {
+            state.set_items(items, window, cx);
+            state.set_selected_index(None, window, cx);
+            state.set_selected_value(&selected, window, cx);
         });
     }
 
@@ -1391,6 +1452,7 @@ impl TacticsBoard {
         self.map_picker_sync_needed = true;
         self.modes = modes(&self.layouts, self.map.as_ref().and_then(|map| map.map_id), self.game_data.as_ref());
         self.mode = None;
+        self.mode_picker_sync_needed = true;
         // Already in the session by definition, so nothing is announced back.
         self.announced = true;
         self.peer_map_info = board.map.info.clone();
@@ -2098,6 +2160,7 @@ impl TacticsBoard {
         // The first mode the map has, so a board opens with capture points on
         // it rather than empty.
         self.mode = self.modes.first().map(|mode| mode.key.clone());
+        self.mode_picker_sync_needed = true;
         let caps = self.mode.as_ref().map(|key| caps_of(&self.layouts, key)).unwrap_or_default();
         self.set_caps(caps);
         self.map = Some(map);
@@ -2121,6 +2184,7 @@ impl TacticsBoard {
         self.set_caps(caps);
         self.selected = None;
         self.mode = Some(key);
+        self.mode_picker_sync_needed = true;
         self.redraw(cx);
     }
 
@@ -2130,6 +2194,7 @@ impl TacticsBoard {
             return;
         }
         self.mode = None;
+        self.mode_picker_sync_needed = true;
         self.set_caps(Vec::new());
         self.selected = None;
         self.redraw(cx);
@@ -2417,6 +2482,9 @@ impl Render for TacticsBoard {
         if std::mem::replace(&mut self.map_picker_sync_needed, false) {
             self.sync_map_picker(window, cx);
         }
+        if std::mem::replace(&mut self.mode_picker_sync_needed, false) {
+            self.sync_mode_picker(window, cx);
+        }
         // Taken at draw time because nothing else knows it, and the menu needs
         // it to bring this board forward.
         self.window = Some(window.window_handle());
@@ -2444,8 +2512,6 @@ impl Render for TacticsBoard {
 impl TacticsBoard {
     /// The map and mode pickers.
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let board = cx.entity();
-        let chosen_mode = self.mode.clone();
         let border = cx.theme().border;
 
         v_flex()
@@ -2476,7 +2542,6 @@ impl TacticsBoard {
                 this.child(
                     h_flex()
                         .gap_2()
-                        .flex_wrap()
                         .items_center()
                         .py_1()
                         .border_t_1()
@@ -2488,41 +2553,17 @@ impl TacticsBoard {
                                 .child(t!("ui.tactics.mode").to_string()),
                         )
                         .child(
-                            h_flex()
-                                .flex_wrap()
-                                .gap_1()
-                                .child(crate::ui::selectable(
-                                    "tactics-mode-blank",
-                                    self.mode.is_none(),
-                                    Button::new("tactics-mode-blank-button")
-                                        .label(t!("ui.tactics.blank_mode").into_owned())
-                                        .compact()
-                                        .selected(self.mode.is_none())
-                                        .on_click({
-                                            let board = board.clone();
-                                            move |_event, _window, cx: &mut App| {
-                                                board.update(cx, |board, cx| board.set_blank_mode(cx));
-                                            }
-                                        }),
-                                ))
-                                .children(self.modes.iter().cloned().enumerate().map(|(index, mode)| {
-                                    let chosen = chosen_mode.as_ref() == Some(&mode.key);
-                                    crate::ui::selectable(
-                                        ("tactics-mode", index),
-                                        chosen,
-                                        Button::new(("tactics-mode-button", index))
-                                            .label(mode.label.clone())
-                                            .compact()
-                                            .selected(chosen)
-                                            .on_click({
-                                                let board = board.clone();
-                                                move |_event, _window, cx: &mut App| {
-                                                    let key = mode.key.clone();
-                                                    board.update(cx, |board, cx| board.set_mode(key, cx));
-                                                }
-                                            }),
-                                    )
-                                })),
+                            crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                Select::new(&self.mode_select)
+                                    .id("tactics-mode-select")
+                                    .title_prefix(t!("ui.tactics.mode").into_owned())
+                                    .accessibility_label(t!("ui.tactics.mode").into_owned())
+                                    .placeholder(t!("ui.tactics.mode").into_owned())
+                                    .search_placeholder(t!("ui.tactics.mode").into_owned())
+                                    .small()
+                                    .w(px(240.))
+                                    .menu_width(px(360.)),
+                            ),
                         ),
                 )
             })
