@@ -368,6 +368,10 @@ fn band_in_world(map: &wows_minimap_renderer::MapInfo) -> f32 {
     if per_unit > f32::EPSILON { RESIZE_BAND_PX / per_unit } else { RESIZE_BAND_PX }
 }
 
+fn shortcut_modifier_name() -> &'static str {
+    if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" }
+}
+
 /// Every map the board can be set on.
 ///
 /// The recorded layouts first, then whatever else the loaded build ships art
@@ -2871,6 +2875,7 @@ impl TacticsBoard {
                     .label(t!("ui.tactics.add_cap").into_owned())
                     .compact()
                     .selected(adding)
+                    .tooltip(t!("ui.tactics.add_cap_tooltip").to_string())
                     .on_click({
                         let board = board.clone();
                         move |_event, _window, cx: &mut App| {
@@ -2896,19 +2901,23 @@ impl TacticsBoard {
                 )
                 .child({
                     let board = board.clone();
-                    Button::new("tactics-cap-narrow").label("-").compact().on_click(
-                        move |_event, _window, cx: &mut App| {
+                    Button::new("tactics-cap-narrow")
+                        .label("-")
+                        .compact()
+                        .tooltip(t!("ui.tactics.cap_narrow_tooltip").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(-RADIUS_STEP_KM, cx));
-                        },
-                    )
+                        })
                 })
                 .child({
                     let board = board.clone();
-                    Button::new("tactics-cap-widen").label("+").compact().on_click(
-                        move |_event, _window, cx: &mut App| {
+                    Button::new("tactics-cap-widen")
+                        .label("+")
+                        .compact()
+                        .tooltip(t!("ui.tactics.cap_widen_tooltip").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(RADIUS_STEP_KM, cx));
-                        },
-                    )
+                        })
                 })
                 .child({
                     let board = board.clone();
@@ -2923,6 +2932,7 @@ impl TacticsBoard {
                     Button::new("tactics-cap-delete")
                         .label(t!("ui.tactics.delete_cap").into_owned())
                         .compact()
+                        .tooltip(t!("ui.tactics.delete_cap_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.remove_selected(cx));
                         })
@@ -2934,6 +2944,9 @@ impl TacticsBoard {
                     .label(t!("ui.renderer.annotations.undo").into_owned())
                     .compact()
                     .disabled(!self.can_undo())
+                    .tooltip(
+                        t!("ui.tactics.undo_tooltip", shortcut = format!("{}+Z", shortcut_modifier_name())).to_string(),
+                    )
                     .on_click(move |_event, _window, cx: &mut App| {
                         board.update(cx, |board, cx| board.undo(cx));
                     })
@@ -2944,6 +2957,14 @@ impl TacticsBoard {
                     .label(t!("ui.renderer.annotations.redo").into_owned())
                     .compact()
                     .disabled(!self.can_redo())
+                    .tooltip(
+                        t!(
+                            "ui.tactics.redo_tooltip",
+                            shortcut = format!("{}+Y", shortcut_modifier_name()),
+                            alternate = format!("{}+Shift+Z", shortcut_modifier_name())
+                        )
+                        .to_string(),
+                    )
                     .on_click(move |_event, _window, cx: &mut App| {
                         board.update(cx, |board, cx| board.redo(cx));
                     })
