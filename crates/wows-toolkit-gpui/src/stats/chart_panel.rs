@@ -755,7 +755,15 @@ impl BasePanel for StatsChartPanel {
 
 impl Panel for StatsChartPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from(self.value_label())
+        h_flex()
+            .gap_1()
+            .items_center()
+            .child(crate::icons::icon(if self.mode == ChartMode::Line {
+                crate::icons::CHART_LINE
+            } else {
+                crate::icons::CHART_BAR
+            }))
+            .child(self.value_label())
     }
 }
 
