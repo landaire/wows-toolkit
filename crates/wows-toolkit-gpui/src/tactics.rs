@@ -6,6 +6,7 @@
 //! renderer, with the capture points of one of the ship's own game modes on it
 //! rather than a battle's.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
@@ -14,6 +15,12 @@ use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::searchable_list::SearchableListItem;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::select::SelectEvent;
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -46,6 +53,57 @@ pub struct MapChoice {
     pub space: String,
     /// What the reader is shown.
     pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MapChoiceKey {
+    map_id: Option<u32>,
+    space: String,
+}
+
+impl From<&MapChoice> for MapChoiceKey {
+    fn from(map: &MapChoice) -> Self {
+        Self { map_id: map.map_id, space: map.space.clone() }
+    }
+}
+
+#[derive(Clone)]
+struct MapItem {
+    choice: MapChoice,
+    key: MapChoiceKey,
+    title: String,
+}
+
+impl MapItem {
+    fn new(choice: MapChoice, disambiguate: bool) -> Self {
+        let key = MapChoiceKey::from(&choice);
+        let title = if disambiguate {
+            format!("{} ({})", choice.label, choice.map_id.map_or_else(|| choice.space.clone(), |id| id.to_string()))
+        } else {
+            choice.label.clone()
+        };
+        Self { choice, key, title }
+    }
+}
+
+impl SearchableListItem for MapItem {
+    type Value = MapChoiceKey;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.title.clone())
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.key
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        self.title.to_lowercase().contains(&query)
+            || self.choice.label.to_lowercase().contains(&query)
+            || self.choice.space.to_lowercase().contains(&query)
+            || self.choice.map_id.is_some_and(|id| id.to_string().contains(&query))
+    }
 }
 
 /// One game mode the chosen map has a recorded layout for.
@@ -342,6 +400,26 @@ pub fn maps(layouts: &CapLayoutDb, game_data: Option<&GameDataCache>) -> Vec<Map
     maps
 }
 
+fn map_items_for_picker(maps: &[MapChoice]) -> Vec<MapItem> {
+    let mut label_counts = HashMap::new();
+    for map in maps {
+        *label_counts.entry(map.label.to_lowercase()).or_insert(0usize) += 1;
+    }
+    maps.iter()
+        .cloned()
+        .map(|map| {
+            let disambiguate = label_counts.get(&map.label.to_lowercase()).is_some_and(|count| *count > 1);
+            MapItem::new(map, disambiguate)
+        })
+        .collect()
+}
+
+fn unique_map_for_space(maps: &[MapChoice], space: &str) -> Option<MapChoice> {
+    let mut matches = maps.iter().filter(|map| map.space == space);
+    let map = matches.next()?.clone();
+    matches.next().is_none().then_some(map)
+}
+
 /// The spaces the build ships a minimap for.
 ///
 /// A dock scene is not a map anyone plays on, and a space with no minimap art
@@ -412,13 +490,13 @@ const DEFAULT_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0xff];
 const DEFAULT_NIB: f32 = 2.0;
 
 /// The inks the board offers, which are the replay viewport's own.
-const INKS: [[u8; 4]; 6] = [
-    [0xff, 0xd7, 0x3a, 0xff],
-    [0xe8, 0x73, 0x7b, 0xff],
-    [0x6f, 0xd9, 0x8a, 0xff],
-    [0x7f, 0xb4, 0xe8, 0xff],
-    [0xe9, 0xe5, 0xdd, 0xff],
-    [0x1a, 0x1a, 0x18, 0xff],
+const INKS: [([u8; 4], &str); 6] = [
+    ([0xff, 0xd7, 0x3a, 0xff], "ui.tactics.ink_yellow"),
+    ([0xe8, 0x73, 0x7b, 0xff], "ui.tactics.ink_red"),
+    ([0x6f, 0xd9, 0x8a, 0xff], "ui.tactics.ink_green"),
+    ([0x7f, 0xb4, 0xe8, 0xff], "ui.tactics.ink_blue"),
+    ([0xe9, 0xe5, 0xdd, 0xff], "ui.tactics.ink_white"),
+    ([0x1a, 0x1a, 0x18, 0xff], "ui.tactics.ink_black"),
 ];
 
 /// How wide the nib can be drawn, which is the span the replay viewport holds
@@ -615,11 +693,9 @@ pub struct TacticsBoard {
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
-    /// What is typed into the map search, so every map a build ships is
-    /// reachable rather than only the first few.
-    map_search: Entity<gpui_kit::component::input::InputState>,
-    map_search_text: String,
-    _map_search_subscription: Subscription,
+    map_select: Entity<SelectState<SearchableVec<MapItem>>>,
+    _map_select_subscription: Subscription,
+    map_picker_sync_needed: bool,
     /// The ship the next placement is of, and whether it is on the reader's
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
@@ -669,6 +745,18 @@ impl TacticsBoard {
         cx: &mut Context<Self>,
     ) -> Self {
         let maps = maps(&layouts, game_data.as_ref());
+        let map_items = SearchableVec::new(map_items_for_picker(&maps));
+        let map_select = cx.new(|cx| SelectState::new(map_items, None, window, cx).searchable(true));
+        let map_select_subscription = cx.subscribe_in(
+            &map_select,
+            window,
+            |this, _state, event: &SelectEvent<SearchableVec<MapItem>>, window, cx| {
+                let SelectEvent::Confirm(Some(key)) = event else { return };
+                let Some(map) = this.maps.iter().find(|map| MapChoiceKey::from(*map) == *key).cloned() else { return };
+                this.set_map(map, cx);
+                window.focus(&this.focus_handle, cx);
+            },
+        );
         let preset_name = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.tactics.preset_name").into_owned())
@@ -676,15 +764,6 @@ impl TacticsBoard {
         let ship_search = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.renderer.annotations.ship_hint").into_owned())
-        });
-        let map_search = cx.new(|cx| {
-            gpui_kit::component::input::InputState::new(window, cx).placeholder(t!("ui.tactics.map_hint").into_owned())
-        });
-        let map_search_subscription = cx.subscribe(&map_search, |this, state, event, cx| {
-            if matches!(event, gpui_kit::component::input::InputEvent::Change) {
-                this.map_search_text = state.read(cx).value().to_string();
-                cx.notify();
-            }
         });
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, gpui_kit::component::input::InputEvent::Change) {
@@ -702,9 +781,9 @@ impl TacticsBoard {
             version: None,
             ship_search,
             matched_ships: Vec::new(),
-            map_search,
-            map_search_text: String::new(),
-            _map_search_subscription: map_search_subscription,
+            map_select,
+            _map_select_subscription: map_select_subscription,
+            map_picker_sync_needed: false,
             placing: None,
             ship_catalog: None,
             range_filter: wt_collab_client::types::AnnotationRangeFilter::default(),
@@ -863,12 +942,12 @@ impl TacticsBoard {
                     // id, which is what its modes are looked up by: without
                     // this the scan that found them would show none.
                     if map.map_id.is_none() {
-                        map.map_id =
-                            this.maps.iter().find(|found| found.space == map.space).and_then(|found| found.map_id);
+                        map.map_id = unique_map_for_space(&this.maps, &map.space).and_then(|found| found.map_id);
                     }
                     let map_id = map.map_id;
                     this.modes = modes(&this.layouts, map_id, this.game_data.as_ref());
                 }
+                this.sync_map_picker(window, cx);
                 crate::toast::info(t!("ui.tactics.scan_done", added = added, total = total).into_owned(), window, cx);
                 // The app holds the copy a later board starts from, which would
                 // otherwise not know what this walk turned up.
@@ -938,16 +1017,27 @@ impl TacticsBoard {
         // nothing has a layout for carries the id zero, which names no map.
         let metadata =
             self.game_data.as_ref().and_then(|data| data.newest_loaded()).map(|loaded| loaded.provider().clone());
-        let map = self.maps.iter().find(|map| map.space == read.map_name).cloned().unwrap_or_else(|| MapChoice {
-            map_id: (read.map_id != 0).then_some(read.map_id),
+        let map_id = (read.map_id != 0).then_some(read.map_id);
+        let matching_map = self
+            .maps
+            .iter()
+            .find(|map| map.space == read.map_name && map.map_id == map_id)
+            .cloned()
+            .or_else(|| if map_id.is_none() { unique_map_for_space(&self.maps, &read.map_name) } else { None });
+        let map = matching_map.unwrap_or_else(|| MapChoice {
+            map_id,
             label: naming::map_label(&read.map_name, metadata.as_deref()),
             space: read.map_name.clone(),
         });
+        if !self.maps.iter().any(|candidate| MapChoiceKey::from(candidate) == MapChoiceKey::from(&map)) {
+            self.maps.push(map.clone());
+        }
         self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
         // The saved capture points stand, whatever mode the map has: they are
         // what the reader put there.
         self.mode = None;
         self.map = Some(map);
+        self.sync_map_picker(window, cx);
         let caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
         self.set_caps(caps);
         self.replace_shapes(read.annotations.iter().map(preset::PresetAnnotation::to_annotation).collect());
@@ -971,21 +1061,16 @@ impl TacticsBoard {
         cx.notify();
     }
 
-    /// The maps the picker offers: the ones whose names match what has been
-    /// typed, or the first few when nothing has been.
-    ///
-    /// Every map is reachable this way, which a capped list on its own is not.
-    fn offered_maps(&self) -> Vec<MapChoice> {
-        let typed = self.map_search_text.trim().to_lowercase();
-        if typed.is_empty() {
-            return self.maps.iter().take(MAPS_SHOWN).cloned().collect();
-        }
-        self.maps
-            .iter()
-            .filter(|map| map.label.to_lowercase().contains(&typed) || map.space.to_lowercase().contains(&typed))
-            .take(MAPS_SHOWN)
-            .cloned()
-            .collect()
+    fn sync_map_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let items = SearchableVec::new(map_items_for_picker(&self.maps));
+        let selected = self.map.as_ref().map(MapChoiceKey::from);
+        self.map_select.update(cx, |state, cx| {
+            state.set_items(items, window, cx);
+            state.set_selected_index(None, window, cx);
+            if let Some(key) = selected.as_ref() {
+                state.set_selected_value(key, window, cx);
+            }
+        });
     }
 
     /// Where a window position falls on the map, in the map's own pixels.
@@ -1290,11 +1375,16 @@ impl TacticsBoard {
         self.board_id = board.board_id;
         self.owner = Some(board.owner_user_id);
         self.collab = self.collab.on_board(board.board_id);
-        self.map = Some(MapChoice {
+        let map = MapChoice {
             map_id: (board.map.map_id > 0).then_some(board.map.map_id),
             space: board.map.space,
             label: board.map.label,
-        });
+        };
+        if !self.maps.iter().any(|candidate| MapChoiceKey::from(candidate) == MapChoiceKey::from(&map)) {
+            self.maps.push(map.clone());
+        }
+        self.map = Some(map);
+        self.map_picker_sync_needed = true;
         self.modes = modes(&self.layouts, self.map.as_ref().and_then(|map| map.map_id), self.game_data.as_ref());
         self.mode = None;
         // Already in the session by definition, so nothing is announced back.
@@ -2312,6 +2402,9 @@ impl TacticsBoard {
 
 impl Render for TacticsBoard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::replace(&mut self.map_picker_sync_needed, false) {
+            self.sync_map_picker(window, cx);
+        }
         // Taken at draw time because nothing else knows it, and the menu needs
         // it to bring this board forward.
         self.window = Some(window.window_handle());
@@ -2340,55 +2433,42 @@ impl TacticsBoard {
     /// The map and mode pickers.
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
-        let chosen_map = self.map.clone();
         let chosen_mode = self.mode.clone();
+        let border = cx.theme().border;
 
         v_flex()
-            .gap_1()
-            .p_2()
+            .gap_0()
+            .px_2()
+            .py_1()
             .child(
                 h_flex()
                     .gap_2()
+                    .flex_wrap()
                     .items_center()
+                    .py_1()
                     .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.tactics.map").to_string()))
                     .child(
-                        gpui_kit::component::input::Input::new(&self.map_search)
-                            .id("tactics-map-search")
-                            .small()
-                            .w(px(140.)),
-                    )
-                    .child(h_flex().flex_wrap().gap_1().children(self.offered_maps().into_iter().enumerate().map(
-                        |(index, map)| {
-                            let chosen = chosen_map.as_ref() == Some(&map);
-                            crate::ui::selectable(
-                                ("tactics-map", index),
-                                chosen,
-                                Button::new(("tactics-map-button", index))
-                                    .label(map.label.clone())
-                                    .compact()
-                                    .selected(chosen)
-                                    .on_click({
-                                        let board = board.clone();
-                                        move |_event, _window, cx: &mut App| {
-                                            let map = map.clone();
-                                            board.update(cx, |board, cx| board.set_map(map, cx));
-                                        }
-                                    }),
-                            )
-                        },
-                    ))),
+                        crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                            Select::new(&self.map_select)
+                                .id("tactics-map-select")
+                                .accessibility_label(t!("ui.tactics.map").to_string())
+                                .placeholder(t!("ui.tactics.map_hint").into_owned())
+                                .search_placeholder(t!("ui.tactics.map_hint").into_owned())
+                                .small()
+                                .w(px(280.))
+                                .menu_width(px(360.)),
+                        ),
+                    ),
             )
-            .child(self.render_cap_tools(cx))
-            .child(self.render_draw_tools(cx))
-            .child(self.render_ship_picker(cx))
-            .child(self.render_range_circles(cx))
-            .child(self.render_presets(cx))
-            .child(self.render_scan(cx))
             .when(!self.modes.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .gap_2()
+                        .flex_wrap()
                         .items_center()
+                        .py_1()
+                        .border_t_1()
+                        .border_color(border)
                         .child(
                             div()
                                 .text_xs()
@@ -2417,6 +2497,33 @@ impl TacticsBoard {
                         ))),
                 )
             })
+            .child(
+                h_flex()
+                    .gap_3()
+                    .flex_wrap()
+                    .items_center()
+                    .py_1()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(self.render_cap_tools(cx))
+                    .child(crate::ui::rule_v(cx))
+                    .child(self.render_draw_tools(cx)),
+            )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .flex_wrap()
+                    .items_center()
+                    .py_1()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(self.render_ship_picker(cx))
+                    .child(crate::ui::rule_v(cx))
+                    .child(self.render_range_circles(cx))
+                    .child(crate::ui::rule_v(cx))
+                    .child(self.render_presets(cx))
+                    .child(self.render_scan(cx)),
+            )
     }
 
     /// Reading the replays for the modes they were played in.
@@ -2469,17 +2576,35 @@ impl TacticsBoard {
                         }),
                 )
             }))
-            .children(INKS.iter().enumerate().map(|(index, ink)| {
+            .children(INKS.iter().enumerate().map(|(index, (ink, label_key))| {
                 let board = board.clone();
                 let ink = *ink;
                 let chosen = self.drawing.color() == ink;
+                let label: SharedString = t!(*label_key).into_owned().into();
                 crate::ui::selectable(
                     ("tactics-ink", index),
                     chosen,
                     Button::new(("tactics-ink-button", index))
                         .compact()
                         .selected(chosen)
-                        .child(div().size_3().rounded_full().bg(rgb(u32::from_be_bytes([0, ink[0], ink[1], ink[2]]))))
+                        .accessibility_label(label.clone())
+                        .tooltip(label)
+                        .child(
+                            div()
+                                .size_4()
+                                .rounded_full()
+                                .border_1()
+                                .border_color(rgb(0xfffefc))
+                                .bg(rgb(0xfffefc))
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(rgb(0x171715))
+                                        .bg(rgb(u32::from_be_bytes([0, ink[0], ink[1], ink[2]]))),
+                                ),
+                        )
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.set_ink(ink, cx));
                         }),
@@ -2519,28 +2644,30 @@ impl TacticsBoard {
     fn render_range_circles(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
         let filter = self.range_filter.clone();
-
-        h_flex()
-            .gap_1()
-            .flex_wrap()
-            .items_center()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .child(t!("ui.renderer.context.ranges").to_string()),
+        let active = RANGE_CIRCLES.iter().filter(|(circle, _)| circle.is_on(&filter)).count();
+        Popover::new("tactics-range-menu")
+            .trigger(
+                Button::new("tactics-range-trigger")
+                    .label(format!("{} ({active})", t!("ui.renderer.context.ranges")))
+                    .compact(),
             )
-            .children(RANGE_CIRCLES.into_iter().enumerate().map(|(index, (circle, key))| {
+            .content(move |_state, _window, _cx| {
+                let filter = filter.clone();
                 let board = board.clone();
-                let on = circle.is_on(&filter);
-                gpui_kit::component::checkbox::Checkbox::new(("tactics-range", index))
-                    .label(t!(key).into_owned())
-                    .checked(on)
-                    .on_click(move |checked, _window, cx: &mut App| {
-                        let checked = *checked;
-                        board.update(cx, |board, cx| board.set_range_circle(circle, checked, cx));
-                    })
-            }))
+                v_flex().min_w(px(190.)).gap_1().p_2().children(RANGE_CIRCLES.into_iter().enumerate().map(
+                    move |(index, (circle, key))| {
+                        let board = board.clone();
+                        let on = circle.is_on(&filter);
+                        gpui_kit::component::checkbox::Checkbox::new(("tactics-range", index))
+                            .label(t!(key).into_owned())
+                            .checked(on)
+                            .on_click(move |checked, _window, cx: &mut App| {
+                                let checked = *checked;
+                                board.update(cx, |board, cx| board.set_range_circle(circle, checked, cx));
+                            })
+                    },
+                ))
+            })
     }
 
     /// Picking a ship to place, and which side it is on.
@@ -2601,69 +2728,81 @@ impl TacticsBoard {
     /// Saving the board, and opening one that was saved.
     fn render_presets(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
-
-        v_flex()
-            .gap_1()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        gpui_kit::component::input::Input::new(&self.preset_name)
-                            .id("tactics-preset-name")
-                            .small()
-                            .w(px(180.)),
-                    )
-                    .child({
-                        let board = board.clone();
-                        Button::new("tactics-preset-save")
-                            .label(t!("ui.tactics.preset_save").into_owned())
-                            .compact()
-                            .on_click(move |_event, window, cx: &mut App| {
-                                board.update(cx, |board, cx| board.save_preset(window, cx));
-                            })
-                    }),
+        let preset_name = self.preset_name.clone();
+        let presets = self.presets.clone();
+        Popover::new("tactics-presets-menu")
+            .trigger(
+                Button::new("tactics-presets-trigger")
+                    .label(if presets.is_empty() {
+                        t!("ui.tactics.presets").to_string()
+                    } else {
+                        format!("{} ({})", t!("ui.tactics.presets"), presets.len())
+                    })
+                    .compact(),
             )
-            .when(!self.presets.is_empty(), |this| {
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(crate::theme::text_dim())
-                                .child(t!("ui.tactics.presets").to_string()),
-                        )
-                        .child(h_flex().flex_wrap().gap_1().children(self.presets.iter().cloned().enumerate().map(
-                            |(index, name)| {
-                                let opening = board.clone();
-                                let dropping = board.clone();
-                                h_flex()
-                                    .gap_0p5()
-                                    .items_center()
-                                    .child({
-                                        let name = name.clone();
-                                        Button::new(("tactics-preset-open", index))
-                                            .label(name.clone())
-                                            .compact()
-                                            .on_click(move |_event, window, cx: &mut App| {
-                                                let name = name.clone();
-                                                opening.update(cx, |board, cx| board.load_preset(&name, window, cx));
-                                            })
+            .content(move |_state, _window, cx| {
+                let board = board.clone();
+                v_flex()
+                    .min_w(px(300.))
+                    .gap_2()
+                    .p_2()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                gpui_kit::component::input::Input::new(&preset_name)
+                                    .id("tactics-preset-name")
+                                    .small()
+                                    .w(px(180.)),
+                            )
+                            .child({
+                                let board = board.clone();
+                                Button::new("tactics-preset-save")
+                                    .label(t!("ui.tactics.preset_save").into_owned())
+                                    .compact()
+                                    .on_click(move |_event, window, cx: &mut App| {
+                                        board.update(cx, |board, cx| board.save_preset(window, cx));
                                     })
-                                    .child(
-                                        Button::new(("tactics-preset-drop", index))
-                                            .label(t!("ui.tactics.preset_delete").into_owned())
-                                            .compact()
-                                            .on_click(move |_event, window, cx: &mut App| {
-                                                let name = name.clone();
-                                                dropping.update(cx, |board, cx| board.delete_preset(&name, window, cx));
-                                            }),
-                                    )
-                            },
-                        ))),
-                )
+                            }),
+                    )
+                    .when(!presets.is_empty(), |this| {
+                        this.child(crate::ui::rule_h(cx)).child(
+                            div().id("tactics-preset-list").max_h(px(320.)).overflow_y_scroll().child(
+                                v_flex().gap_1().children(presets.iter().cloned().enumerate().map(|(index, name)| {
+                                    let opening = board.clone();
+                                    let dropping = board.clone();
+                                    let open_name = name.clone();
+                                    let delete_name = name.clone();
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(div().flex_1().child(name.clone()))
+                                        .child(
+                                            Button::new(("tactics-preset-open", index))
+                                                .label(t!("ui.tactics.preset_open").into_owned())
+                                                .compact()
+                                                .on_click(move |_event, window, cx: &mut App| {
+                                                    let name = open_name.clone();
+                                                    opening
+                                                        .update(cx, |board, cx| board.load_preset(&name, window, cx));
+                                                }),
+                                        )
+                                        .child(
+                                            Button::new(("tactics-preset-drop", index))
+                                                .label(t!("ui.tactics.preset_delete").into_owned())
+                                                .compact()
+                                                .on_click(move |_event, window, cx: &mut App| {
+                                                    let name = delete_name.clone();
+                                                    dropping
+                                                        .update(cx, |board, cx| board.delete_preset(&name, window, cx));
+                                                }),
+                                        )
+                                })),
+                            ),
+                        )
+                    })
             })
     }
 
@@ -2822,13 +2961,6 @@ impl TacticsBoard {
             })
     }
 }
-
-/// How many maps the picker offers at once.
-///
-/// A build ships dozens, and the strip is for reaching one rather than reading
-/// them all: the search narrows to what the reader typed, and this caps what is
-/// offered before they have typed anything.
-const MAPS_SHOWN: usize = 24;
 
 #[cfg(test)]
 mod tests {

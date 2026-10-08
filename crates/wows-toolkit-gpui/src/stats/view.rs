@@ -9,10 +9,17 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use gpui_kit::component::dock::DockArea;
+use gpui_kit::component::dock::DockAreaState;
+use gpui_kit::component::dock::DockEvent;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::dock::PanelId;
@@ -43,6 +50,7 @@ use wows_toolkit_viewmodel::stats::setting_keys;
 
 use crate::ui::selectable;
 
+use super::chart_panel::ChartId;
 use super::chart_panel::ChartSettings;
 use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
@@ -74,68 +82,412 @@ pub struct StatsView {
     /// Ids are never reused, so a closed chart's element ids cannot collide
     /// with a later one's.
     next_chart_id: usize,
-    /// Whether the clear button has been pressed once and is waiting to be
-    /// confirmed.
-    clear_armed: bool,
     /// Why the last clear did not go through, if it did not.
     clear_error: Option<SharedString>,
     /// Handed to every panel so the rating is computed against one table.
     personal_rating: Option<std::sync::Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
     focus_handle: FocusHandle,
-    /// Whether the saved charts have been read back yet. One shot, on the
-    /// first frame.
-    charts_loaded: bool,
+    /// Whether reading saved charts has started, once the config pool is available.
+    charts_load_started: bool,
+    charts_load_finished: bool,
+    charts_restoring: bool,
+    charts_load_error: Option<SharedString>,
+    charts_error_is_save: bool,
+    chart_save_failed: bool,
+    dock_save_failed: bool,
+    charts_user_modified: bool,
+    charts_persistence_enabled: bool,
+    settings_write_lock: Arc<futures::lock::Mutex<()>>,
+    _chart_subscriptions: Vec<Subscription>,
+    _chart_save_task: Option<Task<()>>,
+    chart_save_generation: u64,
+    _dock_save_task: Option<Task<()>>,
+    dock_save_generation: u64,
+    _keep_layout_save_task: Option<Task<()>>,
+    keep_layout_save_generation: u64,
     _subscriptions: Vec<Subscription>,
 }
 
 /// The settings row the Stats tab keeps its charts in.
 const CHARTS_SETTINGS_KEY: &str = "stats_charts";
+const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout";
 
 impl StatsView {
     /// Writes the open charts back to the settings row, so the tab reopens
     /// with the charts it was left with rather than one default chart.
-    ///
-    /// The whole set is written on every change: a chart's place in the dock
-    /// is what its index means, so there is nothing smaller to write.
-    /// A chart was set up differently, so the set is written back.
+    /// The whole set is written on every change because a chart can be added,
+    /// removed or configured independently.
     fn on_chart_settings_changed(
         &mut self,
         _chart: Entity<StatsChartPanel>,
         _event: &ChartSettingsChanged,
         cx: &mut Context<Self>,
     ) {
+        self._keep_layout_save_task.take();
+        self.keep_layout_save_generation = self.keep_layout_save_generation.wrapping_add(1);
+        self.charts_user_modified = true;
+        self.charts_persistence_enabled = true;
         self.save_charts(cx);
     }
 
-    fn save_charts(&self, cx: &mut Context<Self>) {
+    fn save_charts(&mut self, cx: &mut Context<Self>) {
+        if !self.charts_persistence_enabled {
+            return;
+        }
         let settings: Vec<ChartSettings> = self.charts.iter().map(|chart| chart.read(cx).settings()).collect();
-        crate::settings_store::save(CHARTS_SETTINGS_KEY, &settings, cx);
+        let Some(pool) = crate::settings_store::pool(cx) else {
+            tracing::warn!("stats: chart settings were not saved because the config database is not open");
+            self.chart_save_failed = true;
+            self.charts_load_error = Some("The settings database is not available".into());
+            self.charts_error_is_save = true;
+            cx.notify();
+            return;
+        };
+        self._chart_save_task.take();
+        self.chart_save_generation = self.chart_save_generation.wrapping_add(1);
+        let generation = self.chart_save_generation;
+        let write_lock = self.settings_write_lock.clone();
+        self._chart_save_task =
+            Some(cx.spawn(async move |this, cx| {
+                let _guard = write_lock.lock().await;
+                if !matches!(this.update(cx, |this, _cx| this.chart_save_generation == generation), Ok(true)) {
+                    return;
+                }
+                let written = crate::runtime::spawn(cx, async move {
+                    queries::set_setting(&pool, CHARTS_SETTINGS_KEY, &settings).await
+                })
+                .await;
+                let failure = match written {
+                    Ok(Ok(())) => None,
+                    Ok(Err(error)) => Some(format!("Chart settings could not be saved: {error}")),
+                    Err(error) => Some(format!("Chart settings write did not complete: {error}")),
+                };
+                let _ = this.update(cx, |this, cx| {
+                    if this.chart_save_generation == generation {
+                        if let Some(failure) = failure {
+                            this.charts_load_error = Some(failure.into());
+                            this.charts_error_is_save = true;
+                            this.chart_save_failed = true;
+                            cx.notify();
+                        } else {
+                            this.chart_save_failed = false;
+                            if this.charts_error_is_save && !this.dock_save_failed {
+                                this.charts_load_error = None;
+                                this.charts_error_is_save = false;
+                                cx.notify();
+                            }
+                        }
+                    }
+                });
+            }));
     }
 
-    /// Reopens the charts the tab was left with.
-    ///
-    /// The first chart is already open, so it takes the first saved setting
-    /// and the rest are added beside it. A row with nothing in it leaves that
-    /// one chart on its defaults, which is what a first run shows.
-    fn load_charts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(pool) = crate::settings_store::pool(cx) else { return };
-        cx.spawn_in(window, async move |this, cx| {
-            let stored = crate::runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::get_setting::<Vec<ChartSettings>>(&pool, CHARTS_SETTINGS_KEY).await
+    fn keep_current_chart_layout(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else {
+            self.charts_load_error = Some("The settings database is not available".into());
+            self.charts_error_is_save = true;
+            self.chart_save_failed = true;
+            self.dock_save_failed = true;
+            cx.notify();
+            return;
+        };
+        self.charts_user_modified = true;
+        let settings: Vec<ChartSettings> = self.charts.iter().map(|chart| chart.read(cx).settings()).collect();
+        let layout = self.dock_area.read(cx).dump(cx);
+        self._chart_save_task.take();
+        self._dock_save_task.take();
+        self.chart_save_generation = self.chart_save_generation.wrapping_add(1);
+        self.dock_save_generation = self.dock_save_generation.wrapping_add(1);
+        self.keep_layout_save_generation = self.keep_layout_save_generation.wrapping_add(1);
+        let generation = self.keep_layout_save_generation;
+        let write_lock = self.settings_write_lock.clone();
+        self._keep_layout_save_task = Some(cx.spawn(async move |this, cx| {
+            let _guard = write_lock.lock().await;
+            if !matches!(this.update(cx, |this, _cx| this.keep_layout_save_generation == generation), Ok(true)) {
+                return;
+            }
+            let written = crate::runtime::spawn(cx, async move {
+                let charts = queries::set_setting(&pool, CHARTS_SETTINGS_KEY, &settings).await;
+                let dock = queries::set_setting(&pool, CHARTS_DOCK_LAYOUT_KEY, &layout).await;
+                (charts, dock)
             })
             .await;
-            let Ok(Some(saved)) = stored else { return };
-            let _ = this.update_in(cx, |this, window, cx| {
-                let mut saved = saved.into_iter();
-                if let Some(first) = saved.next()
-                    && let Some(chart) = this.charts.first().cloned()
-                {
-                    chart.update(cx, |panel, cx| panel.apply_settings(first, cx));
+            let (chart_failure, dock_failure) = match written {
+                Ok((charts, dock)) => (
+                    charts.err().map(|error| format!("Could not save chart settings: {error}")),
+                    dock.err().map(|error| format!("Could not save chart layout: {error}")),
+                ),
+                Err(error) => {
+                    let reason = format!("Chart settings could not be saved: {error}");
+                    (Some(reason.clone()), Some(reason))
                 }
-                for settings in saved {
-                    this.add_chart_with(settings, window, cx);
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.keep_layout_save_generation != generation {
+                    return;
+                }
+                this.chart_save_failed = chart_failure.is_some();
+                this.dock_save_failed = dock_failure.is_some();
+                let failure = chart_failure.or(dock_failure);
+                if let Some(failure) = failure {
+                    this.charts_load_error = Some(failure.into());
+                    this.charts_error_is_save = true;
+                } else {
+                    this.charts_load_error = None;
+                    this.charts_error_is_save = false;
+                    this.charts_load_finished = true;
+                    this.charts_persistence_enabled = true;
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn schedule_dock_layout_save(&mut self, dock: Entity<DockArea>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else {
+            self.charts_load_error = Some("The settings database is not available".into());
+            self.charts_error_is_save = true;
+            self.dock_save_failed = true;
+            cx.notify();
+            return;
+        };
+        self._dock_save_task.take();
+        self.dock_save_generation = self.dock_save_generation.wrapping_add(1);
+        let generation = self.dock_save_generation;
+        let write_lock = self.settings_write_lock.clone();
+        self._dock_save_task =
+            Some(cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(500)).await;
+                let _guard = write_lock.lock().await;
+                let layout = this
+                    .update(cx, |this, cx| (this.dock_save_generation == generation).then(|| dock.read(cx).dump(cx)));
+                let Ok(Some(layout)) = layout else { return };
+                let written = crate::runtime::spawn(cx, async move {
+                    queries::set_setting(&pool, CHARTS_DOCK_LAYOUT_KEY, &layout).await
+                })
+                .await;
+                let failure = match written {
+                    Ok(Ok(())) => None,
+                    Ok(Err(error)) => Some(format!("Chart layout could not be saved: {error}")),
+                    Err(error) => Some(format!("Chart layout write did not complete: {error}")),
+                };
+                let _ = this.update(cx, |this, cx| {
+                    if this.dock_save_generation == generation {
+                        if let Some(failure) = failure {
+                            this.charts_load_error = Some(failure.into());
+                            this.charts_error_is_save = true;
+                            this.dock_save_failed = true;
+                            cx.notify();
+                        } else {
+                            this.dock_save_failed = false;
+                            if this.charts_error_is_save && !this.chart_save_failed {
+                                this.charts_load_error = None;
+                                this.charts_error_is_save = false;
+                                cx.notify();
+                            }
+                        }
+                    }
+                });
+            }));
+    }
+
+    /// Rebuilds the saved dock with this view's live panels.
+    fn restore_dock_layout(&mut self, state: DockAreaState, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let mut chart_ids = Vec::new();
+        if !collect_chart_ids(&state.center, &mut chart_ids)
+            || state.left_dock.as_ref().is_some_and(|dock| !collect_chart_ids(dock.panel(), &mut chart_ids))
+            || state.right_dock.as_ref().is_some_and(|dock| !collect_chart_ids(dock.panel(), &mut chart_ids))
+            || state.bottom_dock.as_ref().is_some_and(|dock| !collect_chart_ids(dock.panel(), &mut chart_ids))
+        {
+            tracing::warn!("stats: saved dock layout has an invalid chart panel; keeping the default layout");
+            return false;
+        }
+        let mut unique_ids = std::collections::HashSet::new();
+        if chart_ids.iter().any(|id| !unique_ids.insert(*id)) {
+            tracing::warn!("stats: saved dock layout repeats a chart panel; keeping the default layout");
+            return false;
+        }
+
+        let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> =
+            chart_ids.iter().copied().map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, cx)))).collect();
+        let chart_registry: Arc<Mutex<HashMap<ChartId, WeakEntity<StatsChartPanel>>>> =
+            Arc::new(Mutex::new(chart_entities.iter().map(|(id, chart)| (*id, chart.downgrade())).collect()));
+
+        let overview = self.overview.downgrade();
+        gpui_kit::component::dock::register_panel(cx, "StatsOverviewPanel", move |_state, _window, cx| {
+            let panel = overview.upgrade().unwrap_or_else(|| cx.new(StatsOverviewPanel::new));
+            panel_handle(panel)
+        });
+        let ships = self.ships.downgrade();
+        gpui_kit::component::dock::register_panel(cx, "StatsShipsPanel", move |_state, _window, cx| {
+            let panel = ships.upgrade().unwrap_or_else(|| cx.new(StatsShipsPanel::new));
+            panel_handle(panel)
+        });
+        let chart_registry_for_build = chart_registry.clone();
+        gpui_kit::component::dock::register_panel(cx, "StatsChartPanel", move |context, _window, cx| {
+            let id = chart_id_from_state(context.state()).unwrap_or(0);
+            let panel = chart_registry_for_build
+                .lock()
+                .expect("Stats chart restore registry lock is not poisoned")
+                .get(&id)
+                .and_then(WeakEntity::upgrade)
+                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, cx)));
+            panel_handle(panel)
+        });
+
+        self.charts = chart_ids.iter().filter_map(|id| chart_entities.get(id).cloned()).collect();
+        self._chart_subscriptions =
+            self.charts.iter().map(|chart| cx.subscribe(chart, Self::on_chart_settings_changed)).collect();
+        self.next_chart_id = chart_ids.iter().copied().max().map_or(0, |id| id.saturating_add(1));
+
+        let loaded = self.dock_area.update(cx, |dock, cx| dock.load(state, window, cx));
+        match loaded {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("stats: saved dock layout could not be loaded: {error:#}");
+                false
+            }
+        }
+    }
+
+    /// Reopens the charts and dock arrangement the tab was left with.
+    fn load_charts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.charts_load_started {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.charts_load_started = true;
+        self.charts_load_finished = false;
+        cx.spawn_in(window, async move |this, cx| {
+            let stored = crate::runtime::spawn(cx, async move {
+                let charts =
+                    wows_toolkit_config::queries::try_get_setting::<Vec<ChartSettings>>(&pool, CHARTS_SETTINGS_KEY)
+                        .await;
+                let dock =
+                    wows_toolkit_config::queries::try_get_setting::<DockAreaState>(&pool, CHARTS_DOCK_LAYOUT_KEY).await;
+                (charts, dock)
+            })
+            .await;
+            let (saved, saved_layout) = match stored {
+                Ok(saved) => saved,
+                Err(error) => {
+                    let message: SharedString = error.to_string().into();
+                    let _ = this.update(cx, |this, cx| {
+                        this.charts_load_started = false;
+                        this.charts_load_finished = true;
+                        this.charts_load_error = Some(message);
+                        this.charts_error_is_save = false;
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let (saved, saved_layout) = match (saved, saved_layout) {
+                (Ok(saved), Ok(layout)) => (saved, layout),
+                (charts, layout) => {
+                    let message: SharedString = match (charts, layout) {
+                        (Err(error), _) => format!("Could not read saved chart settings: {error}").into(),
+                        (_, Err(error)) => format!("Could not read saved chart layout: {error}").into(),
+                        _ => unreachable!(),
+                    };
+                    let _ = this.update(cx, |this, cx| {
+                        this.charts_load_started = false;
+                        this.charts_load_finished = true;
+                        this.charts_load_error = Some(message);
+                        this.charts_error_is_save = false;
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.charts_user_modified {
+                    this.charts_load_finished = true;
+                    return;
+                }
+                this.charts_load_error = None;
+                this.charts_error_is_save = false;
+                this.charts_restoring = true;
+                let saved_is_empty = saved.as_ref().is_some_and(Vec::is_empty);
+                let mut restored_layout = false;
+                if let Some(layout) = saved_layout {
+                    restored_layout = this.restore_dock_layout(layout, window, cx);
+                    if !restored_layout {
+                        this.charts_restoring = false;
+                        this.charts_load_finished = true;
+                        this.charts_load_error = Some("Saved chart layout could not be restored".into());
+                        this.charts_error_is_save = false;
+                        cx.notify();
+                        return;
+                    }
+                }
+                if !restored_layout {
+                    if let Some(first) = this.charts.first().cloned() {
+                        this.dock_area.update(cx, |dock, cx| {
+                            if dock.panel(PanelId::from(first.entity_id())).is_none() {
+                                dock.add_panel_view(
+                                    panel_handle(first.clone()),
+                                    DockPlacement::Right,
+                                    Some(px(500.)),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        });
+                    }
+                }
+                if saved_is_empty {
+                    let charts = std::mem::take(&mut this.charts);
+                    this._chart_subscriptions.clear();
+                    this.dock_area.update(cx, |dock, cx| {
+                        for chart in charts {
+                            dock.remove_panel(chart, window, cx);
+                        }
+                    });
+                    this.charts_restoring = false;
+                    this.charts_persistence_enabled = true;
+                    this.charts_load_finished = true;
+                    this.save_charts(cx);
+                    cx.notify();
+                    return;
+                }
+                if let Some(saved) = saved {
+                    if !restored_layout {
+                        let mut saved = saved.into_iter();
+                        if let (Some(chart), Some(settings)) = (this.charts.first().cloned(), saved.next()) {
+                            chart.update(cx, |panel, cx| panel.apply_settings(settings, cx));
+                        }
+                        for settings in saved {
+                            this.add_chart_with(settings, window, cx);
+                        }
+                    } else {
+                        let saved_ids: Vec<_> =
+                            saved.iter().enumerate().map(|(index, settings)| settings.id.unwrap_or(index)).collect();
+                        for (id, settings) in saved_ids.into_iter().zip(saved) {
+                            if let Some(chart) = this.charts.iter().find(|chart| chart.read(cx).id() == id).cloned() {
+                                chart.update(cx, |panel, cx| panel.apply_settings(settings, cx));
+                            } else {
+                                this.add_chart_with(ChartSettings { id: Some(id), ..settings }, window, cx);
+                            }
+                        }
+                    }
+                }
+                if this.charts.is_empty() {
+                    this.charts_restoring = false;
+                    this.charts_persistence_enabled = true;
+                    this.charts_load_finished = true;
+                    cx.notify();
+                    return;
+                }
+                if !restored_layout {
+                    this.next_chart_id =
+                        this.charts.iter().map(|chart| chart.read(cx).id()).max().map_or(0, |id| id.saturating_add(1));
                 }
                 this.push_filtered(cx);
+                this.charts_restoring = false;
+                this.charts_persistence_enabled = true;
+                this.charts_load_finished = true;
+                this.save_charts(cx);
                 cx.notify();
             });
         })
@@ -155,9 +507,8 @@ impl StatsView {
         });
         let first_chart = cx.new(|cx| StatsChartPanel::new(0, cx));
         dock_area.update(cx, |dock, cx| {
-            dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Center, None, window, cx);
-            // Each add activates what it added, so the chart would be showing;
-            // the egui tab opens on its overview.
+            dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
+            // Overview and Ships share the main tab group; Charts opens beside them.
             dock.select_panel(PanelId::from(overview.entity_id()), window, cx);
         });
 
@@ -171,8 +522,23 @@ impl StatsView {
             cx.subscribe_in(&limit_input, window, Self::on_limit_step),
             cx.subscribe_in(&limit_input, window, Self::on_limit_changed),
             cx.subscribe(&ships, Self::on_ships_event),
-            cx.subscribe(&first_chart, Self::on_chart_settings_changed),
+            cx.subscribe_in(&dock_area, window, |this, dock, event, window, cx| {
+                if matches!(event, DockEvent::LayoutChanged) {
+                    if this.charts_restoring {
+                        return;
+                    }
+                    this._keep_layout_save_task.take();
+                    this.keep_layout_save_generation = this.keep_layout_save_generation.wrapping_add(1);
+                    this.charts_user_modified = true;
+                    this.drop_closed_charts(cx);
+                    this.charts_persistence_enabled = true;
+                    if this.charts_persistence_enabled {
+                        this.schedule_dock_layout_save(dock.clone(), window, cx);
+                    }
+                }
+            }),
         ];
+        let chart_subscriptions = vec![cx.subscribe(&first_chart, Self::on_chart_settings_changed)];
 
         Self {
             games: Vec::new(),
@@ -184,11 +550,26 @@ impl StatsView {
             ships,
             charts: vec![first_chart],
             next_chart_id: 1,
-            clear_armed: false,
             clear_error: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
-            charts_loaded: false,
+            charts_load_started: false,
+            charts_load_finished: false,
+            charts_restoring: false,
+            charts_load_error: None,
+            charts_error_is_save: false,
+            chart_save_failed: false,
+            dock_save_failed: false,
+            charts_user_modified: false,
+            charts_persistence_enabled: false,
+            settings_write_lock: Arc::new(futures::lock::Mutex::new(())),
+            _chart_subscriptions: chart_subscriptions,
+            _chart_save_task: None,
+            chart_save_generation: 0,
+            _dock_save_task: None,
+            dock_save_generation: 0,
+            _keep_layout_save_task: None,
+            keep_layout_save_generation: 0,
             _subscriptions: subscriptions,
         }
     }
@@ -248,22 +629,33 @@ impl StatsView {
         self.charts.retain(|chart| dock.panel(PanelId::from(chart.entity_id())).is_some());
         // A chart that was closed is one the tab must not reopen.
         if self.charts.len() != before {
+            self.charts_user_modified = true;
+            self.charts_persistence_enabled = true;
             self.save_charts(cx);
         }
     }
 
-    /// Forgets every recorded game, once the button has been pressed twice.
-    ///
-    /// The first press arms it and says so; the second empties the table the
-    /// session is kept in and the panels reading from it.
-    fn clear_session(&mut self, cx: &mut Context<Self>) {
-        if !self.clear_armed {
-            self.clear_armed = true;
-            cx.notify();
+    /// Asks before forgetting every recorded game.
+    fn confirm_clear_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.games.is_empty() {
             return;
         }
-        self.clear_armed = false;
+        let view = cx.entity();
+        window.open_alert_dialog(cx, move |alert, _window, _cx| {
+            let view = view.clone();
+            alert
+                .title(t!("ui.stats.clear").into_owned())
+                .description(t!("confirm.clear_all_session_stats").into_owned())
+                .show_cancel(true)
+                .on_ok(move |_event, _window, cx| {
+                    view.update(cx, |this, cx| this.clear_session(cx));
+                    true
+                })
+        });
+    }
 
+    /// Forgets every recorded game and refreshes the panels that read them.
+    fn clear_session(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         // The rows go once the delete has gone through, not before: a
         // failure would otherwise leave the tab showing an empty session that
@@ -344,17 +736,21 @@ impl StatsView {
     /// it opens: a new chart that always plotted damage meant opening one,
     /// finding its settings and changing it every time.
     fn add_chart(&mut self, stat: ChartableStat, window: &mut Window, cx: &mut Context<Self>) {
+        self._keep_layout_save_task.take();
+        self.keep_layout_save_generation = self.keep_layout_save_generation.wrapping_add(1);
+        self.charts_user_modified = true;
+        self.charts_persistence_enabled = true;
         self.add_chart_with(ChartSettings { stat, ..ChartSettings::default() }, window, cx);
         self.save_charts(cx);
     }
 
     /// Opens a chart already set up the way `settings` says.
     fn add_chart_with(&mut self, settings: ChartSettings, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self.next_chart_id;
-        self.next_chart_id += 1;
+        let id = settings.id.unwrap_or(self.next_chart_id);
+        self.next_chart_id = self.next_chart_id.max(id.saturating_add(1));
 
         let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
-        self._subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
+        self._chart_subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
         let games = self.games.clone();
         let filters = self.filters.clone();
@@ -367,7 +763,7 @@ impl StatsView {
         });
 
         self.dock_area.update(cx, |dock, cx| {
-            dock.add_panel_view(panel_handle(chart.clone()), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
         });
         self.charts.push(chart);
         cx.notify();
@@ -483,11 +879,29 @@ impl Focusable for StatsView {
     }
 }
 
+fn chart_id_from_state(state: &gpui_kit::component::dock::PanelState) -> Option<ChartId> {
+    let gpui_kit::component::dock::PanelInfo::Panel(value) = &state.info else { return None };
+    usize::try_from(value.get("id")?.as_u64()?).ok()
+}
+
+fn collect_chart_ids(state: &gpui_kit::component::dock::PanelState, chart_ids: &mut Vec<ChartId>) -> bool {
+    match &state.info {
+        gpui_kit::component::dock::PanelInfo::Stack { .. } | gpui_kit::component::dock::PanelInfo::Tabs { .. } => {
+            state.children.iter().all(|child| collect_chart_ids(child, chart_ids))
+        }
+        gpui_kit::component::dock::PanelInfo::Panel(_) if state.panel_name == "StatsChartPanel" => {
+            let Some(id) = chart_id_from_state(state) else { return false };
+            chart_ids.push(id);
+            true
+        }
+        gpui_kit::component::dock::PanelInfo::Panel(_) => true,
+    }
+}
+
 impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Read on the first frame rather than in `new`, which runs before the
-        // config database is open.
-        if !std::mem::replace(&mut self.charts_loaded, true) {
+        // Read when the pool is ready; an early frame can precede its setup.
+        if !self.charts_load_started && self.charts_load_error.is_none() {
             self.load_charts(window, cx);
         }
         let border = cx.theme().border;
@@ -506,42 +920,73 @@ impl Render for StatsView {
             )
         });
 
+        let stats_view = cx.entity();
+        let selected_modes = self.filters.game_modes.clone();
         let mode_row = (self.available_modes.len() > 1).then(|| {
-            h_flex()
-                .gap_1()
-                .items_center()
-                .child(
-                    div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.stats.mode_label").to_string()),
-                )
-                .child(selectable(
-                    "stats-mode-all",
-                    self.filters.game_modes.is_empty(),
-                    Button::new("stats-mode-all-button")
-                        .label(t!("ui.stats.div_all").to_string())
+            let selected_count = self.filters.game_modes.len();
+            let modes = self.available_modes.clone();
+            Popover::new("stats-mode-filter")
+                .trigger(
+                    Button::new("stats-mode-filter-trigger")
+                        .label(if selected_count == 0 {
+                            t!("ui.stats.mode_label").to_string()
+                        } else {
+                            format!("{} ({selected_count})", t!("ui.stats.mode_label"))
+                        })
                         .compact()
-                        .selected(self.filters.game_modes.is_empty())
-                        .on_click(cx.listener(|this, _event, _window, cx| this.clear_modes(cx))),
-                ))
-                .children(self.available_modes.iter().enumerate().map(|(index, mode)| {
-                    let mode = mode.clone();
-                    let chosen = self.filters.game_modes.contains(&mode);
-                    selectable(
-                        ("stats-mode", index),
-                        chosen,
-                        Button::new(("stats-mode-button", index))
-                            .label(match_group_display_name(&mode).to_string())
-                            .compact()
-                            .selected(chosen)
-                            .on_click(cx.listener(move |this, _event, _window, cx| {
-                                let mode = mode.clone();
-                                this.toggle_mode(&mode, cx);
-                            })),
-                    )
-                }))
+                        .selected(selected_count > 0),
+                )
+                .content(move |_state, _window, _cx| {
+                    let all_selected = selected_count == 0;
+                    let view = stats_view.clone();
+                    v_flex()
+                        .min_w(px(220.))
+                        .gap_1()
+                        .p_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.stats.mode_label").to_string()),
+                        )
+                        .child(selectable(
+                            "stats-mode-all",
+                            all_selected,
+                            Button::new("stats-mode-all-button")
+                                .label(t!("ui.stats.div_all").to_string())
+                                .compact()
+                                .selected(all_selected)
+                                .w_full()
+                                .justify_start()
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    view.update(cx, |this, cx| this.clear_modes(cx));
+                                }),
+                        ))
+                        .children(modes.iter().enumerate().map(|(index, mode)| {
+                            let mode = mode.clone();
+                            let chosen = selected_modes.contains(&mode);
+                            let view = stats_view.clone();
+                            selectable(
+                                ("stats-mode", index),
+                                chosen,
+                                Button::new(("stats-mode-button", index))
+                                    .label(match_group_display_name(&mode).to_string())
+                                    .compact()
+                                    .selected(chosen)
+                                    .w_full()
+                                    .justify_start()
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        let mode = mode.clone();
+                                        view.update(cx, |this, cx| this.toggle_mode(&mode, cx));
+                                    }),
+                            )
+                        }))
+                })
         });
 
         let filter_bar = h_flex()
             .flex_none()
+            .flex_wrap()
             .gap_2()
             .items_center()
             .px_2()
@@ -572,25 +1017,53 @@ impl Render for StatsView {
             .child(crate::ui::rule_v(cx))
             .child(add_chart_menu(cx.entity()))
             .child(div().flex_1())
+            .when_some(self.charts_load_error.clone(), |this, reason| {
+                let view = cx.entity();
+                let retry_view = view.clone();
+                let retry_save = self.charts_error_is_save;
+                this.child(
+                    h_flex()
+                        .items_center()
+                        .gap_1()
+                        .child(div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason))
+                        .child(
+                            Button::new("stats-retry-chart-load")
+                                .label(t!("ui.buttons.retry").to_string())
+                                .compact()
+                                .on_click(move |_event, window, cx: &mut App| {
+                                    retry_view.update(cx, |this, cx| {
+                                        if retry_save {
+                                            this.keep_current_chart_layout(cx);
+                                        } else {
+                                            this.charts_load_error = None;
+                                            this.charts_error_is_save = false;
+                                            this.charts_load_started = false;
+                                            this.load_charts(window, cx);
+                                        }
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("stats-keep-current-layout")
+                                .label(t!("ui.stats.keep_current_layout").to_string())
+                                .compact()
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    view.update(cx, |this, cx| this.keep_current_chart_layout(cx));
+                                }),
+                        ),
+                )
+            })
             .when_some(self.clear_error.clone(), |this, reason| {
                 this.child(div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason))
             })
-            // Two presses rather than a dialog: the first says what the second
-            // will do, and clicking anything else forgets it. The egui tab
-            // asks the same question through its confirm panel.
             .child(
                 Button::new("stats-clear")
                     .child(crate::icons::icon(crate::icons::ERASER))
-                    .label(if self.clear_armed {
-                        t!("ui.stats.clear_confirm").into_owned()
-                    } else {
-                        t!("ui.stats.clear").into_owned()
-                    })
+                    .label(t!("ui.stats.clear").into_owned())
                     .compact()
-                    .selected(self.clear_armed)
                     .disabled(self.games.is_empty())
                     .tooltip(t!("ui.stats.clear_tooltip").to_string())
-                    .on_click(cx.listener(|this, _event, _window, cx| this.clear_session(cx))),
+                    .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear_session(window, cx))),
             );
 
         v_flex()
