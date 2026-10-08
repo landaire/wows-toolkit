@@ -3076,6 +3076,13 @@ impl TacticsBoard {
                     }),
             ))
             .when_some(selected, |this, cap| {
+                let team_label_key = match cap.team.map(|team| team.raw()) {
+                    None => "ui.tactics.team_neutral",
+                    Some(0) => "ui.tactics.team_one",
+                    Some(_) => "ui.tactics.team_two",
+                };
+                let cap_color = team_color(cap.team);
+                let cap_team_label = t!(team_label_key).into_owned();
                 this.child(
                     div()
                         .text_xs()
@@ -3110,11 +3117,43 @@ impl TacticsBoard {
                 })
                 .child({
                     let board = board.clone();
-                    Button::new("tactics-cap-team").label(t!("ui.tactics.cap_team").into_owned()).compact().on_click(
-                        move |_event, _window, cx: &mut App| {
-                            board.update(cx, |board, cx| board.cycle_selected_team(cx));
-                        },
-                    )
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.tactics.cap_team").into_owned()),
+                        )
+                        .child(
+                            Button::new("tactics-cap-team")
+                                .compact()
+                                .accessibility_label(format!("{}: {cap_team_label}", t!("ui.tactics.cap_team")))
+                                .tooltip(t!("ui.tactics.cap_team_tooltip").to_string())
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .size_3()
+                                                .rounded_full()
+                                                .border_1()
+                                                .border_color(cx.theme().border)
+                                                .bg(rgb(u32::from_be_bytes([
+                                                    0,
+                                                    cap_color[0],
+                                                    cap_color[1],
+                                                    cap_color[2],
+                                                ]))),
+                                        )
+                                        .child(cap_team_label),
+                                )
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    board.update(cx, |board, cx| board.cycle_selected_team(cx));
+                                }),
+                        )
                 })
                 .child({
                     let board = board.clone();
