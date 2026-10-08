@@ -104,6 +104,12 @@ pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &
     draw(plot, bounds, colors, &mut canvas);
 }
 
+/// Whether the bounds leave room for a plot after its axis gutters.
+pub fn has_drawable_area(bounds: Bounds<Pixels>) -> bool {
+    let area = plot_area(bounds);
+    area.size.width > px(0.) && area.size.height > px(0.)
+}
+
 /// Draws `plot` into `bounds` on any canvas.
 pub fn draw(plot: &Plot<'_>, bounds: Bounds<Pixels>, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let area = plot_area(bounds);
