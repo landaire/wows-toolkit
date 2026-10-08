@@ -65,6 +65,8 @@ pub type ChartId = usize;
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChartSettings {
     #[serde(default)]
+    pub id: Option<ChartId>,
+    #[serde(default)]
     pub stat: ChartableStat,
     #[serde(default)]
     pub mode: ChartMode,
@@ -182,6 +184,7 @@ impl StatsChartPanel {
     /// How this chart is currently set up.
     pub fn settings(&self) -> ChartSettings {
         ChartSettings {
+            id: Some(self.id),
             stat: self.stat,
             mode: self.mode,
             running: self.running,
@@ -201,6 +204,9 @@ impl StatsChartPanel {
     /// Called before the session is handed over, so the narrowing is in place
     /// the first time the games are filtered.
     pub fn apply_settings(&mut self, settings: ChartSettings, cx: &mut Context<Self>) {
+        if let Some(id) = settings.id {
+            self.id = id;
+        }
         self.stat = settings.stat;
         self.mode = settings.mode;
         self.running = settings.running;
@@ -212,6 +218,10 @@ impl StatsChartPanel {
             self.selection_touched = true;
         }
         cx.notify();
+    }
+
+    pub fn id(&self) -> ChartId {
+        self.id
     }
 
     /// Adopts the whole session and the tab's filters.
@@ -732,6 +742,14 @@ impl Focusable for StatsChartPanel {
 impl BasePanel for StatsChartPanel {
     fn panel_name(&self) -> &'static str {
         "StatsChartPanel"
+    }
+
+    fn dump(&self, _cx: &App) -> gpui_kit::component::dock::PanelState {
+        gpui_kit::component::dock::PanelState {
+            panel_name: "StatsChartPanel".to_string(),
+            children: Vec::new(),
+            info: gpui_kit::component::dock::PanelInfo::panel(serde_json::json!({ "id": self.id })),
+        }
     }
 }
 

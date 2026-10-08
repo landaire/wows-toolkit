@@ -207,6 +207,13 @@ pub struct ReplayPanel {
     export_stem: Option<String>,
     /// What the last export did, shown beside the menu.
     export_status: Option<String>,
+    /// Whether a parse is running. Repeated file events are folded into one
+    /// follow-up parse rather than replacing the loading panel repeatedly.
+    parse_in_flight: bool,
+    reparse_queued: bool,
+    /// An alternative accepted while another parse was running. Assigned to
+    /// `alt_on_trial` only when the parse that includes it starts.
+    queued_alt_trial: Option<PathBuf>,
     _parse_task: Task<()>,
     /// Subscription to `table`'s `PlayerTableEvent`s, live once the replay
     /// finishes loading (`apply_result` creates both `table` and this
@@ -258,6 +265,9 @@ impl ReplayPanel {
             export: None,
             export_stem: None,
             export_status: None,
+            parse_in_flight: true,
+            reparse_queued: false,
+            queued_alt_trial: None,
             auto_export,
             path,
             alts: Vec::new(),
@@ -276,17 +286,28 @@ impl ReplayPanel {
 
     /// Reads the replay again, for a file that has changed under an open tab.
     ///
-    /// The tab stays where it is and returns to its loading state, which is what
-    /// the egui app does with a modified replay it has open
-    /// (`tab_state.rs`'s `NotifyFileEvent::Modified` arm).
+    /// The loaded view remains visible while new data is read. Repeated file
+    /// notifications during a parse collapse into one later read.
     pub fn reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+        if self.parse_in_flight {
+            self.reparse_queued = true;
+            cx.notify();
+            return;
+        }
+        self.start_reparse(game_data, window, cx);
+    }
+
+    fn start_reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(alt) = self.queued_alt_trial.take() {
+            self.alt_on_trial = Some(alt);
+        }
         let parse_task =
             spawn_parse_with_alts(self.path.clone(), self.alts.clone(), game_data, self.personal_rating.clone(), cx);
+        self.parse_in_flight = true;
         self._parse_task = cx.spawn_in(window, async move |this, cx| {
             let result = parse_task.await;
             let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
         });
-        self.state = LoadState::Loading;
         cx.notify();
     }
 
@@ -325,7 +346,12 @@ impl ReplayPanel {
                         if this.alts.iter().any(|kept| same_file(kept, &alt)) {
                             return;
                         }
-                        this.alt_on_trial = Some(alt.clone());
+                        if this.parse_in_flight {
+                            this.queued_alt_trial = Some(alt.clone());
+                            this.reparse_queued = true;
+                        } else {
+                            this.alt_on_trial = Some(alt.clone());
+                        }
                         this.alts.push(alt);
                         this.reparse(game_data.clone(), window, cx);
                     });
@@ -506,6 +532,12 @@ impl ReplayPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.reparse_queued && self.alt_on_trial.is_none() {
+            self.reparse_queued = false;
+            self.start_reparse(self.game_data.clone(), window, cx);
+            return;
+        }
+        self.parse_in_flight = false;
         self.state = match result {
             Ok(ParsedReplay {
                 model,
@@ -543,6 +575,7 @@ impl ReplayPanel {
                 // battle again without it.
                 if let Some(refused) = self.alt_on_trial.take() {
                     self.alts.retain(|kept| !same_file(kept, &refused));
+                    self.reparse_queued = false;
                     crate::toast::failed(
                         t!("ui.replay.load_alt_perspective_failed", error = err.to_string()).into_owned(),
                         window,
@@ -559,6 +592,10 @@ impl ReplayPanel {
                 LoadState::Failed(err)
             }
         };
+        if self.reparse_queued {
+            self.reparse_queued = false;
+            self.start_reparse(self.game_data.clone(), window, cx);
+        }
         cx.notify();
     }
 
@@ -638,6 +675,9 @@ impl ReplayPanel {
             path: PathBuf::from("test.wowsreplay"),
             alts: Vec::new(),
             game_data: GameDataCache::new(PathBuf::from("test")),
+            parse_in_flight: false,
+            reparse_queued: false,
+            queued_alt_trial: None,
             _parse_task: Task::ready(()),
             _table_subscription: None,
         };
@@ -949,6 +989,7 @@ struct HeaderState {
     /// Whether the parse has produced a document to export yet.
     can_export: bool,
     export_status: Option<String>,
+    refreshing: bool,
     debug: bool,
     side_panel: SidePanel,
     /// How many other recordings this tab is already reading.
@@ -1129,6 +1170,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         self_stats_hidden,
         can_export,
         export_status,
+        refreshing,
         debug,
         side_panel,
         alts,
@@ -1151,6 +1193,9 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         .flex_none()
         .items_center()
         .gap_1()
+        .when(refreshing, |this| {
+            this.child(div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.replay.loading").into_owned()))
+        })
         .when_some(export_status, |this, status| {
             this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
         })
@@ -1250,13 +1295,15 @@ impl ReplayPanel {
 impl Render for ReplayPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.state {
-            LoadState::Loading => div()
+            LoadState::Loading => v_flex()
+                .size_full()
                 .p_2()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
                 .child(t!("ui.replay.loading").into_owned())
                 .into_any_element(),
             LoadState::Failed(err) => v_flex()
+                .size_full()
                 .p_2()
                 .gap_1()
                 .child(
@@ -1304,6 +1351,7 @@ impl Render for ReplayPanel {
                             self_stats_hidden,
                             can_export: self.export.is_some(),
                             export_status: self.export_status.clone(),
+                            refreshing: self.parse_in_flight,
                             debug: self.debug,
                             side_panel: self.side_panel,
                             alts: self.alts.len(),
