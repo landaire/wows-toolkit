@@ -3,11 +3,11 @@
 //! Ports the egui app's `ui/command_palette.rs`, which opens on ctrl+k or
 //! ctrl+p over a fuzzy-matched list. What is offered here is the flat root set --
 //! going to a tab, setting the theme, opening a replay, the seeded searches.
-//! The egui palette's cascading sub-modes (search a player, a ship, a ship's
-//! armor) are not here yet; they need a bounded index query per keystroke.
+//! The egui palette's cascading sub-modes search the index or loaded ship
+//! catalogue as the reader types.
 //!
-//! One list, in one order, built once: `Command` filters it itself, so this
-//! only says what exists and what each entry does.
+//! The root list is built once and `Command` filters it; cascading modes query
+//! the replay index or the loaded ship catalogue as the reader types.
 
 use gpui_kit::component::command::CommandItem;
 use rust_i18n::t;
@@ -72,14 +72,11 @@ impl PaletteMode {
     }
 }
 
-/// How many rows a cascading mode offers.
-///
-/// The palette filters what it is given as the reader types, so the list is read
-/// once on entering the mode rather than re-queried per keystroke; this is what
-/// keeps that one read small.
-pub const MODE_LIMIT: i64 = 200;
+/// Maximum rows returned by one cascading index query.
+pub const MODE_LIMIT: i64 = 50;
 
 /// One entry: what it is called and what it does.
+#[derive(Clone)]
 pub struct PaletteEntry {
     pub label: String,
     pub action: PaletteAction,
@@ -93,11 +90,19 @@ pub fn entries() -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
 
     for tab in AppTab::ALL {
+        if tab == AppTab::Search {
+            continue;
+        }
         entries.push(PaletteEntry {
             label: t!("ui.palette.go_to", tab = t!(tab.label_key())).into_owned(),
             action: PaletteAction::GoTo(tab),
         });
     }
+
+    entries.push(PaletteEntry {
+        label: t!("ui.palette.advanced_search").into_owned(),
+        action: PaletteAction::GoTo(AppTab::Search),
+    });
 
     // The cascading modes first, as the egui palette lists them: they are the
     // entries that lead somewhere rather than doing something.
@@ -173,58 +178,60 @@ pub fn items(entries: &[PaletteEntry]) -> Vec<CommandItem> {
     entries.iter().map(|entry| CommandItem::new().label(entry.label.clone())).collect()
 }
 
-/// The rows one mode offers, read from the index.
+/// Rows one index-backed mode offers for the current query.
 ///
-/// Empty rather than an error when nothing is indexed: the palette says so with a
-/// row of its own rather than looking broken.
-pub async fn mode_entries(mode: PaletteMode, pool: &sqlx::sqlite::SqlitePool) -> Vec<PaletteEntry> {
+/// An empty result is distinct from a query failure so the palette can report
+/// each one correctly.
+pub async fn mode_entries(
+    mode: PaletteMode,
+    pool: &sqlx::sqlite::SqlitePool,
+    needle: &str,
+) -> Result<Vec<PaletteEntry>, String> {
     use wows_toolkit_config::index::query;
     use wows_toolkit_viewmodel::query_bar::seed;
 
     match mode {
-        PaletteMode::Players => match query::search_players(pool, "", MODE_LIMIT).await {
-            Ok(found) => found
-                .into_iter()
-                .map(|player| {
-                    let named = match player.clan.as_str() {
-                        "" => player.latest_name.clone(),
-                        clan => format!("[{clan}] {}", player.latest_name),
-                    };
-                    PaletteEntry {
-                        label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
+        PaletteMode::Players => query::search_players(pool, needle, MODE_LIMIT)
+            .await
+            .map(|found| {
+                found
+                    .into_iter()
+                    .map(|player| {
+                        let named = match player.clan.as_str() {
+                            "" => player.latest_name.clone(),
+                            clan => format!("[{clan}] {}", player.latest_name),
+                        };
+                        PaletteEntry {
+                            label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
+                            action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
+                                &seed::matches_with_player(player.account_id),
+                            )),
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(|err| format!("The indexed players could not be read: {err}")),
+        PaletteMode::MyShips => query::search_self_ships(pool, needle, MODE_LIMIT)
+            .await
+            .map(|found| {
+                found
+                    .into_iter()
+                    .map(|ship| PaletteEntry {
+                        label: format!(
+                            "{} -- {}",
+                            ship.ship_name,
+                            t!("ui.palette.matches_found", count = ship.match_count)
+                        ),
                         action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                            &seed::matches_with_player(player.account_id),
+                            &seed::my_matches_in_ship(ship.ship_id),
                         )),
-                    }
-                })
-                .collect(),
-            Err(err) => {
-                tracing::warn!(%err, "palette: the indexed players could not be read");
-                Vec::new()
-            }
-        },
-        PaletteMode::MyShips => match query::search_self_ships(pool, "", MODE_LIMIT).await {
-            Ok(found) => found
-                .into_iter()
-                .map(|ship| PaletteEntry {
-                    label: format!(
-                        "{} -- {}",
-                        ship.ship_name,
-                        t!("ui.palette.matches_found", count = ship.match_count)
-                    ),
-                    action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                        &seed::my_matches_in_ship(ship.ship_id),
-                    )),
-                })
-                .collect(),
-            Err(err) => {
-                tracing::warn!(%err, "palette: the indexed ships could not be read");
-                Vec::new()
-            }
-        },
+                    })
+                    .collect()
+            })
+            .map_err(|err| format!("The indexed ships could not be read: {err}")),
         // Read from the loaded build rather than the index: armor is a property of
         // the ship, not of anything the reader has played.
-        PaletteMode::ArmorShips => Vec::new(),
+        PaletteMode::ArmorShips => Ok(Vec::new()),
     }
 }
 
@@ -309,10 +316,9 @@ mod tests {
         use wows_toolkit_viewmodel::query_bar::seed;
 
         let pool = wows_toolkit_config::test_pool().await;
-        // Nothing indexed: the modes offer nothing rather than failing, which is
-        // what the palette says with a row of its own.
-        assert!(mode_entries(PaletteMode::Players, &pool).await.is_empty());
-        assert!(mode_entries(PaletteMode::MyShips, &pool).await.is_empty());
+        // Nothing indexed returns an empty result rather than a query error.
+        assert!(mode_entries(PaletteMode::Players, &pool, "").await.expect("query players").is_empty());
+        assert!(mode_entries(PaletteMode::MyShips, &pool, "").await.expect("query ships").is_empty());
 
         // What a row would do, checked against the seed rather than the SQL: a
         // query the Search tab cannot parse back is a row that does nothing.

@@ -41,8 +41,11 @@ kept so the next audit does not re-report them.
   with no `Root` at all.
 - [done] The command palette is `gpui_kit::component::command` over
   `palette.rs`, on ctrl+k and ctrl+p, which is what the egui app binds. The
-  egui palette's cascading sub-modes (search a player, a ship, a ship's armor)
-  are not ported, nor are its eight other actions; see the gaps list.
+  player and ship modes query the index as the reader types, with the same
+  result limit and Escape-to-root behavior as egui. Armor ships filter against
+  the loaded build's catalogue with the same 50-row cap. Advanced Search opens
+  the Search tab directly. The root actions and eight added actions are
+  listed in the gaps file.
 - [done] The file viewers and the raw-JSON panels are read-only
   `EditorState`s with a grammar, so they highlight, select and search.
 - [done] The settings tab is `component::form`: one labelled section card
