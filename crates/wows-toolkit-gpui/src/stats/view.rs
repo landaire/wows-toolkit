@@ -611,6 +611,7 @@ impl StatsView {
     /// opens filtered the same way in the other; every path that changes a
     /// filter goes through here, so none of them can forget to save.
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
+        self.filters.game_modes.retain(|mode| self.available_modes.contains(mode));
         self.save_filters(cx);
         self.drop_closed_charts(cx);
         // The summary counts the session's own last N; the per-ship table counts
@@ -934,6 +935,12 @@ impl Render for StatsView {
         let mode_row = (self.available_modes.len() > 1).then(|| {
             let selected_count = self.filters.game_modes.len();
             let modes = self.available_modes.clone();
+            let selected_names = modes
+                .iter()
+                .filter(|mode| selected_modes.contains(*mode))
+                .map(|mode| match_group_display_name(mode).to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             Popover::new("stats-mode-filter")
                 .trigger(
                     Button::new("stats-mode-filter-trigger")
@@ -943,7 +950,8 @@ impl Render for StatsView {
                             format!("{} ({selected_count})", t!("ui.stats.mode_label"))
                         })
                         .compact()
-                        .selected(selected_count > 0),
+                        .selected(selected_count > 0)
+                        .tooltip(if selected_count == 0 { t!("ui.stats.div_all").to_string() } else { selected_names }),
                 )
                 .content(move |_state, _window, _cx| {
                     let all_selected = selected_count == 0;
