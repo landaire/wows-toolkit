@@ -687,6 +687,7 @@ pub struct TacticsBoard {
     /// every tick.
     adopted_caps: Option<u64>,
     adopted_shapes: Option<u64>,
+    toolbar_permissions: Option<(bool, bool)>,
     /// Whether this board has told the session which map it is on. Announced
     /// once per map rather than per tick.
     announced: bool,
@@ -741,6 +742,7 @@ pub struct TacticsBoard {
     /// Which circles a placed ship shows. Every ship already on the board is
     /// given the same set, so two ships are compared on the same terms.
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
+    _preset_name_subscription: Subscription,
     _ship_search_subscription: Subscription,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
@@ -813,6 +815,11 @@ impl TacticsBoard {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.tactics.preset_name").into_owned())
         });
+        let preset_name_subscription = cx.subscribe(&preset_name, |_this, _state, event, cx| {
+            if matches!(event, gpui_kit::component::input::InputEvent::Change) {
+                cx.notify();
+            }
+        });
         let ship_search = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.renderer.annotations.ship_hint").into_owned())
@@ -842,6 +849,7 @@ impl TacticsBoard {
             placing: None,
             ship_catalog: None,
             range_filter: wt_collab_client::types::AnnotationRangeFilter::default(),
+            _preset_name_subscription: preset_name_subscription,
             _ship_search_subscription: ship_search_subscription,
             focus_handle: cx.focus_handle(),
             game_data,
@@ -863,6 +871,7 @@ impl TacticsBoard {
             owner: None,
             adopted_caps: None,
             adopted_shapes: None,
+            toolbar_permissions: None,
             announced: false,
             joining: None,
             _collab_tick: None,
@@ -1020,6 +1029,9 @@ impl TacticsBoard {
     ///
     /// A board with no map is not a board: it names nothing to open again.
     fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() {
+            return;
+        }
         let name = self.preset_name.read(cx).value().trim().to_owned();
         if name.is_empty() {
             crate::toast::warn(t!("ui.tactics.preset_needs_a_name").into_owned(), window, cx);
@@ -1057,6 +1069,9 @@ impl TacticsBoard {
 
     /// Opens a saved board.
     fn load_preset(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() || self.collab.annotations_locked() {
+            return;
+        }
         let read = match preset::load_preset(name) {
             Ok(read) => read,
             Err(why) => {
@@ -1104,8 +1119,39 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
+    /// Restores the selected mode's capture points and removes annotations.
+    fn reset_board(&mut self, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() || self.collab.annotations_locked() {
+            return;
+        }
+
+        let caps = self.mode.as_ref().map(|key| caps_of(&self.layouts, key)).unwrap_or_default();
+        let caps_match = self.caps.len() == caps.len()
+            && self.caps.iter().zip(&caps).all(|(current, default)| {
+                current.index == default.index
+                    && current.world_x == default.world_x
+                    && current.world_z == default.world_z
+                    && current.radius == default.radius
+                    && current.team == default.team
+                    && current.frozen == default.frozen
+            });
+        if caps_match && self.collab.annotation_count() == 0 {
+            return;
+        }
+
+        self.remember();
+        self.set_caps(caps);
+        self.replace_shapes(Vec::new());
+        self.selected = None;
+        self.adding = false;
+        self.redraw(cx);
+    }
+
     /// Drops a saved board.
     fn delete_preset(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() {
+            return;
+        }
         if let Err(why) = preset::delete_preset(name) {
             crate::toast::failed(
                 t!("ui.tactics.preset_delete_failed", error = why.to_string()).into_owned(),
@@ -1330,6 +1376,9 @@ impl TacticsBoard {
 
     /// Turns placing capture points on or off.
     pub fn set_adding(&mut self, adding: bool, cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         self.adding = adding;
         cx.notify();
     }
@@ -1345,6 +1394,9 @@ impl TacticsBoard {
 
     /// Erases the shapes the reader has picked out.
     pub fn erase_picked(&mut self, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         if self.picked.picked().is_empty() {
             return;
         }
@@ -1383,6 +1435,9 @@ impl TacticsBoard {
 
     /// Takes the last change back.
     pub fn undo(&mut self, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         let Some(was) = self.history.pop() else { return };
         self.undone.push(self.board_state());
         self.adopt(was, cx);
@@ -1390,6 +1445,9 @@ impl TacticsBoard {
 
     /// Puts back what was taken.
     pub fn redo(&mut self, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         let Some(again) = self.undone.pop() else { return };
         self.history.push(self.board_state());
         self.adopt(again, cx);
@@ -1441,7 +1499,8 @@ impl TacticsBoard {
     pub fn adopt_session_board(&mut self, board: crate::collab::SessionBoard, cx: &mut Context<Self>) {
         self.board_id = board.board_id;
         self.owner = Some(board.owner_user_id);
-        self.collab = self.collab.on_board(board.board_id);
+        let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
+        self.collab = link.on_board(board.board_id);
         let map = MapChoice {
             map_id: (board.map.map_id > 0).then_some(board.map.map_id),
             space: board.map.space,
@@ -1526,6 +1585,7 @@ impl TacticsBoard {
                     session.set_cap(cap);
                 }
                 this.collab = session;
+                this.follow_collab(cx);
                 this.follow_session(cx);
                 this.redraw(cx);
             });
@@ -1550,7 +1610,7 @@ impl TacticsBoard {
 
     /// Notices what peers change, while a session is running.
     fn follow_collab(&mut self, cx: &mut Context<Self>) {
-        if !self.collab.is_active() {
+        if !self.collab.is_active() && self.joining.is_none() {
             self._collab_tick = None;
             return;
         }
@@ -1597,6 +1657,21 @@ impl TacticsBoard {
 
     /// Takes what the session holds that this board has not drawn yet.
     fn follow_session(&mut self, cx: &mut Context<Self>) {
+        let permissions = (self.collab.may_steer(), self.collab.annotations_locked());
+        if self.toolbar_permissions != Some(permissions) {
+            self.toolbar_permissions = Some(permissions);
+            if permissions.1 {
+                self.drawing.cancel();
+                self.turning = None;
+                self.moving = None;
+            }
+            if permissions.1 && !permissions.0 {
+                self.adding = false;
+                self.dragging = None;
+                self.adopted_caps = None;
+            }
+            cx.notify();
+        }
         let Some(versions) = self.collab.board_versions() else { return };
         let mut changed = false;
 
@@ -1671,17 +1746,20 @@ impl TacticsBoard {
     /// Puts `shapes` on the board in place of what is there, which is what
     /// opening a saved board does.
     fn replace_shapes(&mut self, shapes: Vec<wt_collab_client::types::Annotation>) {
-        for at in (0..self.collab.annotation_count()).rev() {
-            self.collab.erase_annotation(at);
-        }
-        for shape in shapes {
-            self.collab.add_annotation(shape);
-        }
+        self.collab.replace_annotations(shapes);
+        self.drawing.cancel();
         self.picked.clear();
+        self.panning = None;
+        self.dragging = None;
+        self.moving = None;
+        self.turning = None;
     }
 
     /// Places a capture point where the reader clicked.
     fn add_cap_at(&mut self, world: (f32, f32), cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         self.remember();
         // Lettered past the highest already there, so a cap taken off does not
         // hand its letter to the next one placed.
@@ -1706,6 +1784,9 @@ impl TacticsBoard {
     /// A frozen one stays: it is where the game put it, and the egui board holds
     /// its own the same way.
     pub fn remove_selected(&mut self, cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         let Some(at) = self.selected else { return };
         if self.caps.get(at).is_none_or(|cap| cap.frozen) {
             return;
@@ -1724,6 +1805,9 @@ impl TacticsBoard {
     /// Read and set in kilometres, which is how a cap circle is talked about;
     /// the model itself is in the world's own units.
     pub fn step_selected_radius(&mut self, by_km: f32, cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         let Some(at) = self.selected else { return };
         if self.caps.get(at).is_none() {
             return;
@@ -1738,6 +1822,9 @@ impl TacticsBoard {
     /// Hands the selected capture point to the next team round: nobody, the
     /// reader's side, then the other.
     pub fn cycle_selected_team(&mut self, cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         let Some(at) = self.selected else { return };
         if self.caps.get(at).is_none() {
             return;
@@ -1755,6 +1842,9 @@ impl TacticsBoard {
 
     /// Takes every capture point off the board.
     pub fn clear_caps(&mut self, cx: &mut Context<Self>) {
+        if !self.can_edit_caps() {
+            return;
+        }
         if !self.caps.iter().any(|cap| !cap.frozen) {
             return;
         }
@@ -1772,11 +1862,19 @@ impl TacticsBoard {
     /// Whether a drawing tool is in hand, which is what takes the pointer away
     /// from the capture points.
     fn has_tool(&self) -> bool {
-        *self.drawing.tool() != wt_collab_client::drawing::Tool::None
+        !self.collab.annotations_locked() && *self.drawing.tool() != wt_collab_client::drawing::Tool::None
+    }
+
+    /// Capture points remain editable by peers until the host locks annotations.
+    fn can_edit_caps(&self) -> bool {
+        self.collab.may_steer() || !self.collab.annotations_locked()
     }
 
     /// Takes up a tool, or puts it down again when it is already in hand.
     pub fn set_tool(&mut self, tool: wt_collab_client::drawing::Tool, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         let putting_down = *self.drawing.tool() == tool;
         let next = if putting_down { wt_collab_client::drawing::Tool::None } else { tool };
         self.drawing.set_tool(next);
@@ -1806,7 +1904,7 @@ impl TacticsBoard {
         &mut self,
         typed: &str,
     ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
-        let query = typed.trim().to_lowercase();
+        let query = unidecode::unidecode(typed.trim()).to_lowercase();
         if query.is_empty() {
             return Vec::new();
         }
@@ -1835,6 +1933,9 @@ impl TacticsBoard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         use wowsunpack::game_params::types::GameParamProvider as _;
 
         let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else { return };
@@ -1857,6 +1958,9 @@ impl TacticsBoard {
 
     /// Which side the ship being placed is on.
     pub fn set_placing_friendly(&mut self, friendly: bool, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         let Some(placed) = self.placing.as_mut() else { return };
         placed.friendly = friendly;
         let species = format!("{:?}", placed.species);
@@ -1890,6 +1994,9 @@ impl TacticsBoard {
     /// Turns one circle on or off, for the ships already placed and the ones to
     /// come.
     pub fn set_range_circle(&mut self, circle: RangeCircle, on: bool, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         circle.set(&mut self.range_filter, on);
         for (at, mut annotation) in self.shapes().into_iter().enumerate() {
             let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = &mut annotation else {
@@ -1901,15 +2008,40 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
+    fn set_all_range_circles(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
+        for (circle, _) in RANGE_CIRCLES {
+            circle.set(&mut self.range_filter, on);
+        }
+        for (at, mut annotation) in self.shapes().into_iter().enumerate() {
+            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = &mut annotation else {
+                continue;
+            };
+            for (circle, _) in RANGE_CIRCLES {
+                circle.set(&mut config.range_filter, on);
+            }
+            self.collab.update_annotation(at, annotation);
+        }
+        self.redraw(cx);
+    }
+
     /// Draws in a different ink from here on. What is already drawn keeps the
     /// ink it was drawn in.
     pub fn set_ink(&mut self, ink: [u8; 4], cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         self.drawing.set_color(ink);
         cx.notify();
     }
 
     /// Widens or narrows the nib, within what the board draws with.
     pub fn step_nib(&mut self, by: f32, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         let stepped = (self.drawing.width() + by).clamp(MIN_NIB, MAX_NIB);
         self.drawing.set_width(stepped);
         cx.notify();
@@ -1917,6 +2049,9 @@ impl TacticsBoard {
 
     /// Takes everything drawn off the board, leaving the capture points.
     pub fn clear_annotations(&mut self, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         if self.collab.annotation_count() == 0 {
             return;
         }
@@ -1927,6 +2062,9 @@ impl TacticsBoard {
 
     /// Hands a pointer event to the tool and keeps what it drew.
     fn stroke(&mut self, stroke: wt_collab_client::drawing::Stroke, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         match self.drawing.handle(stroke, &self.shapes()) {
             Some(wt_collab_client::drawing::Drawn::Added(annotation)) => self.add_shape(annotation),
             Some(wt_collab_client::drawing::Drawn::Erased(index)) => self.collab.erase_annotation(index),
@@ -1938,6 +2076,9 @@ impl TacticsBoard {
     /// The same, for a stroke that only moved the shape being built: the frame
     /// is redrawn by the pointer that moved it, not again here.
     fn stroke_without_redraw(&mut self, stroke: wt_collab_client::drawing::Stroke) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         if let Some(wt_collab_client::drawing::Drawn::Added(annotation)) = self.drawing.handle(stroke, &self.shapes()) {
             self.add_shape(annotation);
         }
@@ -1955,7 +2096,7 @@ impl TacticsBoard {
             self.stroke(wt_collab_client::drawing::Stroke::Began { at: [at.0, at.1] }, cx);
             return;
         }
-        if self.adding {
+        if self.adding && self.can_edit_caps() {
             let Some(world) = self.world_point(event.position) else { return };
             self.add_cap_at(world, cx);
             return;
@@ -1968,13 +2109,17 @@ impl TacticsBoard {
         }
         // The handle takes the drag before anything else: it sits above the
         // shape, over map nobody is reaching for.
-        if let Some((index, annotation)) = self.handle_under(event.position) {
+        if !self.collab.annotations_locked()
+            && let Some((index, annotation)) = self.handle_under(event.position)
+        {
             self.remember();
             self.turning = Some((index, annotation));
             return;
         }
 
-        if let Some(at) = self.map_point(event.position) {
+        if !self.collab.annotations_locked()
+            && let Some(at) = self.map_point(event.position)
+        {
             // A shape already picked out is dragged as a whole, which is what
             // moving a line or a circle means.
             if !self.picked.is_empty()
@@ -1995,7 +2140,7 @@ impl TacticsBoard {
             }
         }
 
-        match self.cap_under(event.position) {
+        match self.can_edit_caps().then(|| self.cap_under(event.position)).flatten() {
             Some((index, what)) => {
                 self.selected = Some(index);
                 if what != CapDrag::None {
@@ -2017,6 +2162,13 @@ impl TacticsBoard {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            self.turning = None;
+            self.moving = None;
+            if self.drawing.is_drawing() {
+                self.drawing.cancel();
+            }
+        }
         // A drag released off the map never reports its release here, so a
         // pointer moving with nothing held has let go of whatever it had.
         if event.pressed_button.is_none() {
@@ -2042,7 +2194,9 @@ impl TacticsBoard {
             return;
         }
 
-        if let Some((index, before)) = self.turning.clone() {
+        if !self.collab.annotations_locked()
+            && let Some((index, before)) = self.turning.clone()
+        {
             let Some(at) = self.map_point(event.position) else { return };
             let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
             let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
@@ -2056,7 +2210,9 @@ impl TacticsBoard {
             return;
         }
 
-        if let Some((from, was)) = self.moving.clone() {
+        if !self.collab.annotations_locked()
+            && let Some((from, was)) = self.moving.clone()
+        {
             let Some(at) = self.map_point(event.position) else { return };
             let delta = [at.0 - from[0], at.1 - from[1]];
             // Measured from where the drag began rather than from the last
@@ -2081,6 +2237,10 @@ impl TacticsBoard {
             return;
         }
 
+        if !self.can_edit_caps() {
+            self.dragging = None;
+            return;
+        }
         let Some((index, what)) = self.dragging else { return };
         let Some((x, z)) = self.world_point(event.position) else { return };
         let Some(cap) = self.caps.get_mut(index) else { return };
@@ -2103,12 +2263,7 @@ impl TacticsBoard {
         self.panning = None;
         self.moving = None;
         self.turning = None;
-        // Said once, when it is let go: a drag moves a zone at pointer-event
-        // rate, and every peer would redraw its board for each of them.
-        if let Some((index, _)) = self.dragging {
-            self.report_cap(index);
-        }
-        let held = self.dragging.take().is_some();
+        let held = self.finish_cap_drag(cx);
         // A shape part way through is abandoned rather than finished somewhere
         // the reader did not put it.
         let drawing = self.drawing.is_drawing();
@@ -2118,6 +2273,22 @@ impl TacticsBoard {
         if held || drawing {
             self.redraw(cx);
         }
+    }
+
+    /// Sends one completed cap drag, or restores it after a lock change.
+    fn finish_cap_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        // Said once, when it is let go: a drag moves a zone at pointer-event
+        // rate, and every peer would redraw its board for each of them.
+        let cap_edit_allowed = self.can_edit_caps();
+        let Some((index, _)) = self.dragging.take() else { return false };
+        if cap_edit_allowed {
+            self.report_cap(index);
+        } else {
+            self.selected = None;
+            self.adopted_caps = None;
+            self.follow_session(cx);
+        }
+        true
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -2130,6 +2301,10 @@ impl TacticsBoard {
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.panning = None;
         self.moving = None;
+        self.turning = None;
+        if self.collab.annotations_locked() && self.drawing.is_drawing() {
+            self.drawing.cancel();
+        }
         if self.has_tool() {
             let Some(at) = self.map_point(event.position) else { return };
             let stroke = if self.drawing.is_drawing() {
@@ -2142,7 +2317,7 @@ impl TacticsBoard {
             self.stroke(stroke, cx);
             return;
         }
-        if self.dragging.take().is_some() {
+        if self.finish_cap_drag(cx) {
             cx.notify();
         }
     }
@@ -2158,6 +2333,9 @@ impl TacticsBoard {
 
     /// Sets the board on a map, which replaces whatever was on it.
     pub fn set_map(&mut self, map: MapChoice, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() {
+            return;
+        }
         if self.map.as_ref() == Some(&map) {
             return;
         }
@@ -2181,6 +2359,9 @@ impl TacticsBoard {
     /// blank entry: an empty map to place capture points on from nothing. The
     /// layout's own caps come back by picking it again.
     pub fn set_mode(&mut self, key: CapLayoutKey, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() {
+            return;
+        }
         if self.mode.as_ref() == Some(&key) {
             self.set_blank_mode(cx);
             return;
@@ -2195,6 +2376,9 @@ impl TacticsBoard {
 
     /// Clears the selected layout and its capture points.
     pub fn set_blank_mode(&mut self, cx: &mut Context<Self>) {
+        if !self.collab.may_steer() {
+            return;
+        }
         if self.mode.is_none() && self.caps.is_empty() {
             return;
         }
@@ -2499,6 +2683,9 @@ impl TacticsBoard {
     }
 
     fn set_shortcut_tool(&mut self, tool: wt_collab_client::drawing::Tool, cx: &mut Context<Self>) {
+        if self.collab.annotations_locked() {
+            return;
+        }
         self.drawing.set_tool(tool);
         self.adding = false;
         self.selected = None;
@@ -2543,68 +2730,71 @@ impl TacticsBoard {
     /// The map and mode pickers.
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let border = cx.theme().border;
+        let may_steer = self.collab.may_steer();
 
         v_flex()
             .gap_0()
             .px_2()
             .py_1()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .items_center()
-                    .py_1()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(crate::theme::text_dim())
-                                    .child(t!("ui.tactics.map").to_string()),
-                            )
-                            .child(
-                                crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                                    Select::new(&self.map_select)
-                                        .id("tactics-map-select")
-                                        .accessibility_label(t!("ui.tactics.map").to_string())
-                                        .placeholder(t!("ui.tactics.map_hint").into_owned())
-                                        .search_placeholder(t!("ui.tactics.map_hint").into_owned())
-                                        .small()
-                                        .w(px(280.))
-                                        .menu_width(px(360.)),
-                                ),
-                            ),
-                    )
-                    .when(self.map.is_some(), |this| {
-                        this.child(
+            .when(may_steer, |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .items_center()
+                        .py_1()
+                        .child(
                             h_flex()
                                 .gap_2()
                                 .items_center()
-                                .child(crate::ui::rule_v(cx))
                                 .child(
                                     div()
                                         .text_xs()
                                         .text_color(crate::theme::text_dim())
-                                        .child(t!("ui.tactics.mode").to_string()),
+                                        .child(t!("ui.tactics.map").to_string()),
                                 )
                                 .child(
-                                    crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                                        Select::new(&self.mode_select)
-                                            .id("tactics-mode-select")
-                                            .title_prefix(t!("ui.tactics.mode").into_owned())
-                                            .accessibility_label(t!("ui.tactics.mode").into_owned())
-                                            .placeholder(t!("ui.tactics.mode").into_owned())
-                                            .search_placeholder(t!("ui.tactics.mode").into_owned())
+                                    crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                        Select::new(&self.map_select)
+                                            .id("tactics-map-select")
+                                            .accessibility_label(t!("ui.tactics.map").to_string())
+                                            .placeholder(t!("ui.tactics.map_hint").into_owned())
+                                            .search_placeholder(t!("ui.tactics.map_hint").into_owned())
                                             .small()
-                                            .w(px(240.))
+                                            .w(px(280.))
                                             .menu_width(px(360.)),
                                     ),
                                 ),
                         )
-                    }),
-            )
+                        .when(self.map.is_some(), |this| {
+                            this.child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(crate::ui::rule_v(cx))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(crate::theme::text_dim())
+                                            .child(t!("ui.tactics.mode").to_string()),
+                                    )
+                                    .child(
+                                        crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                            Select::new(&self.mode_select)
+                                                .id("tactics-mode-select")
+                                                .title_prefix(t!("ui.tactics.mode").into_owned())
+                                                .accessibility_label(t!("ui.tactics.mode").into_owned())
+                                                .placeholder(t!("ui.tactics.mode").into_owned())
+                                                .search_placeholder(t!("ui.tactics.mode").into_owned())
+                                                .small()
+                                                .w(px(240.))
+                                                .menu_width(px(360.)),
+                                        ),
+                                    ),
+                            )
+                        }),
+                )
+            })
             .child(
                 h_flex()
                     .gap_3()
@@ -2613,8 +2803,7 @@ impl TacticsBoard {
                     .py_1()
                     .border_t_1()
                     .border_color(border)
-                    .child(self.render_cap_tools(cx))
-                    .child(crate::ui::rule_v(cx))
+                    .when(may_steer, |this| this.child(self.render_cap_tools(cx)).child(crate::ui::rule_v(cx)))
                     .child(self.render_draw_tools(cx)),
             )
             .child(
@@ -2628,9 +2817,9 @@ impl TacticsBoard {
                     .child(self.render_ship_picker(cx))
                     .child(crate::ui::rule_v(cx))
                     .child(self.render_range_circles(cx))
-                    .child(crate::ui::rule_v(cx))
-                    .child(self.render_presets(cx))
-                    .child(self.render_scan(cx)),
+                    .when(may_steer, |this| {
+                        this.child(crate::ui::rule_v(cx)).child(self.render_presets(cx)).child(self.render_scan(cx))
+                    }),
             )
     }
 
@@ -2661,6 +2850,7 @@ impl TacticsBoard {
     /// What can be drawn on the board, and in what.
     fn render_draw_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
+        let locked = self.collab.annotations_locked();
         let in_hand = self.drawing.tool().clone();
         let nib = self.drawing.width();
         let has_drawing = self.collab.annotation_count() > 0;
@@ -2669,6 +2859,7 @@ impl TacticsBoard {
             .gap_1()
             .flex_wrap()
             .items_center()
+            .when(locked, |this| this.child(crate::icons::icon(crate::icons::LOCK)))
             .children(tools().into_iter().enumerate().map(|(index, (tool, key, glyph, shortcut))| {
                 let board = board.clone();
                 let chosen = in_hand == tool;
@@ -2682,6 +2873,7 @@ impl TacticsBoard {
                         .selected(chosen)
                         .accessibility_label(label)
                         .tooltip(tooltip)
+                        .disabled(locked)
                         .child(crate::icons::icon(glyph).text_size(px(16.)))
                         .on_click(move |_event, _window, cx: &mut App| {
                             let tool = tool.clone();
@@ -2702,6 +2894,7 @@ impl TacticsBoard {
                         .selected(chosen)
                         .accessibility_label(label.clone())
                         .tooltip(label)
+                        .disabled(locked)
                         .child(
                             div()
                                 .size_4()
@@ -2735,7 +2928,7 @@ impl TacticsBoard {
                 Button::new("tactics-nib-down")
                     .label("-")
                     .compact()
-                    .disabled(nib <= MIN_NIB)
+                    .disabled(locked || nib <= MIN_NIB)
                     .accessibility_label(label.clone())
                     .tooltip(label)
                     .on_click(move |_event, _window, cx: &mut App| {
@@ -2749,7 +2942,7 @@ impl TacticsBoard {
                 Button::new("tactics-nib-up")
                     .label("+")
                     .compact()
-                    .disabled(nib >= MAX_NIB)
+                    .disabled(locked || nib >= MAX_NIB)
                     .accessibility_label(label.clone())
                     .tooltip(label)
                     .on_click(move |_event, _window, cx: &mut App| {
@@ -2757,12 +2950,44 @@ impl TacticsBoard {
                     })
             })
             .child(self.render_shortcuts())
+            .child({
+                let board = board.clone();
+                Button::new("tactics-undo")
+                    .label(t!("ui.renderer.annotations.undo").into_owned())
+                    .compact()
+                    .disabled(locked || !self.can_undo())
+                    .tooltip(
+                        t!("ui.tactics.undo_tooltip", shortcut = format!("{}+Z", shortcut_modifier_name())).to_string(),
+                    )
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.undo(cx));
+                    })
+            })
+            .child({
+                let board = board.clone();
+                Button::new("tactics-redo")
+                    .label(t!("ui.renderer.annotations.redo").into_owned())
+                    .compact()
+                    .disabled(locked || !self.can_redo())
+                    .tooltip(
+                        t!(
+                            "ui.tactics.redo_tooltip",
+                            shortcut = format!("{}+Y", shortcut_modifier_name()),
+                            alternate = format!("{}+Shift+Z", shortcut_modifier_name())
+                        )
+                        .to_string(),
+                    )
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.redo(cx));
+                    })
+            })
             .when(has_drawing, |this| {
                 this.child({
                     let board = board.clone();
                     Button::new("tactics-clear-drawing")
                         .label(t!("ui.tactics.clear_drawing").into_owned())
                         .compact()
+                        .disabled(locked)
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.clear_annotations(cx));
                         })
@@ -2829,36 +3054,92 @@ impl TacticsBoard {
     /// Which range circles the placed ships show.
     fn render_range_circles(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
+        let locked = self.collab.annotations_locked();
         let filter = self.range_filter.clone();
-        let active = RANGE_CIRCLES.iter().filter(|(circle, _)| circle.is_on(&filter)).count();
+        let ship_filters: Vec<_> = self
+            .shapes()
+            .into_iter()
+            .filter_map(|annotation| match annotation {
+                wt_collab_client::types::Annotation::Ship { config: Some(config), .. } => Some(config.range_filter),
+                _ => None,
+            })
+            .collect();
+        let active = RANGE_CIRCLES
+            .iter()
+            .filter(|(circle, _)| circle.is_on(&filter) || ship_filters.iter().any(|ship| circle.is_on(ship)))
+            .count();
+        let all_ranges_on = RANGE_CIRCLES
+            .iter()
+            .all(|(circle, _)| circle.is_on(&filter) && ship_filters.iter().all(|ship| circle.is_on(ship)));
+        let all_ranges_off = RANGE_CIRCLES
+            .iter()
+            .all(|(circle, _)| !circle.is_on(&filter) && ship_filters.iter().all(|ship| !circle.is_on(ship)));
         Popover::new("tactics-range-menu")
             .trigger(
                 Button::new("tactics-range-trigger")
                     .label(format!("{} ({active})", t!("ui.renderer.context.ranges")))
-                    .compact(),
+                    .compact()
+                    .disabled(locked),
             )
             .content(move |_state, _window, _cx| {
                 let filter = filter.clone();
                 let board = board.clone();
-                v_flex().min_w(px(190.)).gap_1().p_2().children(RANGE_CIRCLES.into_iter().enumerate().map(
-                    move |(index, (circle, key))| {
+                let ship_filters = ship_filters.clone();
+                v_flex()
+                    .min_w(px(190.))
+                    .gap_1()
+                    .p_2()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child({
+                                let board = board.clone();
+                                Button::new("tactics-ranges-enable-all")
+                                    .label(t!("ui.renderer.context.enable_all").into_owned())
+                                    .compact()
+                                    .disabled(locked || all_ranges_on)
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        board.update(cx, |board, cx| board.set_all_range_circles(true, cx));
+                                    })
+                            })
+                            .child({
+                                let board = board.clone();
+                                Button::new("tactics-ranges-disable-all")
+                                    .label(t!("ui.renderer.context.disable_all").into_owned())
+                                    .compact()
+                                    .disabled(locked || all_ranges_off)
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        board.update(cx, |board, cx| board.set_all_range_circles(false, cx));
+                                    })
+                            }),
+                    )
+                    .children(RANGE_CIRCLES.into_iter().enumerate().map(move |(index, (circle, key))| {
                         let board = board.clone();
-                        let on = circle.is_on(&filter);
+                        let enabled = usize::from(circle.is_on(&filter))
+                            + ship_filters.iter().filter(|ship| circle.is_on(ship)).count();
+                        let total = ship_filters.len() + 1;
+                        let on = enabled == total;
+                        let label = if enabled > 0 && enabled < total {
+                            format!("{} ({enabled}/{total})", t!(key))
+                        } else {
+                            t!(key).into_owned()
+                        };
                         gpui_kit::component::checkbox::Checkbox::new(("tactics-range", index))
-                            .label(t!(key).into_owned())
+                            .label(label)
                             .checked(on)
+                            .disabled(locked)
                             .on_click(move |checked, _window, cx: &mut App| {
                                 let checked = *checked;
                                 board.update(cx, |board, cx| board.set_range_circle(circle, checked, cx));
                             })
-                    },
-                ))
+                    }))
             })
     }
 
     /// Picking a ship to place, and which side it is on.
     fn render_ship_picker(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let board = cx.entity();
+        let locked = self.collab.annotations_locked();
         let placing = self.placing.clone();
 
         v_flex()
@@ -2871,7 +3152,8 @@ impl TacticsBoard {
                         gpui_kit::component::input::Input::new(&self.ship_search)
                             .id("tactics-ship-search")
                             .small()
-                            .w(px(180.)),
+                            .w(px(180.))
+                            .disabled(locked),
                     )
                     .when_some(placing, |this, placed| {
                         let friendly = placed.friendly;
@@ -2890,6 +3172,7 @@ impl TacticsBoard {
                                     t!("ui.tactics.side_enemy").into_owned()
                                 })
                                 .compact()
+                                .disabled(locked)
                                 .on_click(move |_event, _window, cx: &mut App| {
                                     board.update(cx, |board, cx| board.set_placing_friendly(!friendly, cx));
                                 })
@@ -2908,10 +3191,15 @@ impl TacticsBoard {
                             |(index, (species, ship))| {
                                 let board = board.clone();
                                 Button::new(("tactics-ship-match", index))
-                                    .label(ship.display_name.clone())
+                                    .label(format!(
+                                        "{} {}",
+                                        crate::armor_viewer::catalog::tier_roman(ship.tier),
+                                        ship.display_name
+                                    ))
                                     .compact()
                                     .w_full()
                                     .justify_start()
+                                    .disabled(locked)
                                     .on_click(move |_event, window, cx: &mut App| {
                                         let ship = ship.clone();
                                         board.update(cx, |board, cx| board.pick_ship(species, &ship, window, cx));
@@ -2927,6 +3215,10 @@ impl TacticsBoard {
         let board = cx.entity();
         let preset_name = self.preset_name.clone();
         let presets = self.presets.clone();
+        let locked = self.collab.annotations_locked();
+        let can_reset = self.collab.may_steer() && !locked;
+        let can_save =
+            self.collab.may_steer() && self.map.is_some() && !self.preset_name.read(cx).value().trim().is_empty();
         Popover::new("tactics-presets-menu")
             .trigger(
                 Button::new("tactics-presets-trigger")
@@ -2943,6 +3235,16 @@ impl TacticsBoard {
                     .min_w(px(300.))
                     .gap_2()
                     .p_2()
+                    .child({
+                        let board = board.clone();
+                        Button::new("tactics-preset-reset")
+                            .label(t!("ui.buttons.reset").into_owned())
+                            .compact()
+                            .disabled(!can_reset)
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                board.update(cx, |board, cx| board.reset_board(cx));
+                            })
+                    })
                     .child(
                         h_flex()
                             .gap_2()
@@ -2958,6 +3260,7 @@ impl TacticsBoard {
                                 Button::new("tactics-preset-save")
                                     .label(t!("ui.tactics.preset_save").into_owned())
                                     .compact()
+                                    .disabled(!can_save)
                                     .on_click(move |_event, window, cx: &mut App| {
                                         board.update(cx, |board, cx| board.save_preset(window, cx));
                                     })
@@ -2980,6 +3283,7 @@ impl TacticsBoard {
                                             Button::new(("tactics-preset-open", index))
                                                 .label(t!("ui.tactics.preset_open").into_owned())
                                                 .compact()
+                                                .disabled(locked)
                                                 .on_click(move |_event, window, cx: &mut App| {
                                                     let name = open_name.clone();
                                                     opening
@@ -3105,6 +3409,7 @@ impl TacticsBoard {
                         .label("-")
                         .compact()
                         .disabled(cap.radius <= MIN_CAP_RADIUS)
+                        .accessibility_label(t!("ui.tactics.cap_narrow_tooltip").to_string())
                         .tooltip(t!("ui.tactics.cap_narrow_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(-RADIUS_STEP_KM, cx));
@@ -3116,6 +3421,7 @@ impl TacticsBoard {
                         .label("+")
                         .compact()
                         .disabled(cap.radius >= MAX_CAP_RADIUS)
+                        .accessibility_label(t!("ui.tactics.cap_widen_tooltip").to_string())
                         .tooltip(t!("ui.tactics.cap_widen_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(RADIUS_STEP_KM, cx));
@@ -3176,37 +3482,6 @@ impl TacticsBoard {
                             board.update(cx, |board, cx| board.remove_selected(cx));
                         })
                 })
-            })
-            .child({
-                let board = board.clone();
-                Button::new("tactics-undo")
-                    .label(t!("ui.renderer.annotations.undo").into_owned())
-                    .compact()
-                    .disabled(!self.can_undo())
-                    .tooltip(
-                        t!("ui.tactics.undo_tooltip", shortcut = format!("{}+Z", shortcut_modifier_name())).to_string(),
-                    )
-                    .on_click(move |_event, _window, cx: &mut App| {
-                        board.update(cx, |board, cx| board.undo(cx));
-                    })
-            })
-            .child({
-                let board = board.clone();
-                Button::new("tactics-redo")
-                    .label(t!("ui.renderer.annotations.redo").into_owned())
-                    .compact()
-                    .disabled(!self.can_redo())
-                    .tooltip(
-                        t!(
-                            "ui.tactics.redo_tooltip",
-                            shortcut = format!("{}+Y", shortcut_modifier_name()),
-                            alternate = format!("{}+Shift+Z", shortcut_modifier_name())
-                        )
-                        .to_string(),
-                    )
-                    .on_click(move |_event, _window, cx: &mut App| {
-                        board.update(cx, |board, cx| board.redo(cx));
-                    })
             })
             .when(has_removable_caps, |this| {
                 this.child({
