@@ -1033,7 +1033,7 @@ impl TacticsBoardViewer {
                     if inserted > 0 {
                         // Save to SQLite if available, otherwise fall back to file.
                         if let (Some(pool), Some(rt)) = (&scan_pool, &scan_rt) {
-                            if let Err(e) = rt.block_on(db.lock().save_to_db(pool)) {
+                            if let Err(e) = rt.block_on(crate::data::cap_layout::save_to_db(pool, &db.lock())) {
                                 tracing::warn!("failed to save cap layouts to db: {e}");
                             } else {
                                 tracing::info!(

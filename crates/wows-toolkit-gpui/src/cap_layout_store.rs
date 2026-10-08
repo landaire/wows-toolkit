@@ -1,14 +1,5 @@
-//! Capture-point layout persistence for the desktop application.
-
-use std::path::PathBuf;
-
 use tracing::warn;
-
-pub use wows_replay_insights::cap_layout::*;
-
-pub fn cache_path() -> Option<PathBuf> {
-    wows_toolkit_config::storage_dir().map(|dir| dir.join("cap_layouts.bin"))
-}
+use wows_replay_insights::cap_layout::{CapLayout, CapLayoutDb, CapLayoutKey};
 
 pub async fn load_from_db(pool: &sqlx::SqlitePool) -> CapLayoutDb {
     let mut db = CapLayoutDb::default();
@@ -29,18 +20,6 @@ pub async fn load_from_db(pool: &sqlx::SqlitePool) -> CapLayoutDb {
     }
     tracing::info!("loaded {} cap layouts from SQLite", db.len());
     db
-}
-
-pub async fn save_to_db(
-    pool: &sqlx::SqlitePool,
-    db: &CapLayoutDb,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    for (key, layout) in &db.layouts {
-        let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|err| format!("{err}"))?;
-        wows_toolkit_config::queries::upsert_cap_layout(pool, key.map_id as i64, key.scenario_config_id as i64, &blob)
-            .await?;
-    }
-    Ok(())
 }
 
 pub async fn save_layout_to_db(

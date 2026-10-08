@@ -449,9 +449,8 @@ fn parse_replay_data_in_background(
                                         debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
                                         // Save to SQLite if available.
                                         if let (Some(pool), Some(rt)) = (&cap_pool, &cap_rt) {
-                                            let _ = rt.block_on(
-                                                crate::data::cap_layout::CapLayoutDb::save_layout_to_db(pool, &layout),
-                                            );
+                                            let _ =
+                                                rt.block_on(crate::data::cap_layout::save_layout_to_db(pool, &layout));
                                         } else if let Some(cache_path) = crate::data::cap_layout::cache_path() {
                                             let _ = db.save(&cache_path);
                                         }

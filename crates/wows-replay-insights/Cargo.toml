@@ -26,13 +26,11 @@ serde_json = { workspace = true, optional = true }
 jiff = { workspace = true, features = ["serde"], optional = true }
 flate2 = { workspace = true, optional = true }
 data-encoding = { workspace = true, optional = true }
-# The cap layout cache, which is rkyv on disk and read by both front ends.
+# Cap layout values use rkyv for the desktop cache.
 rkyv = { workspace = true }
-wows-toolkit-config = { workspace = true }
-# The cap layout cache is written through a temporary file beside it.
+# The cap layout cache uses a temporary file for atomic replacement.
 tempfile = "3.27.0"
-# The cap layout cache also lives in the settings database.
-sqlx = { workspace = true }
+
 
 [dev-dependencies]
 wows-data-mgr = { workspace = true }
