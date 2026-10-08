@@ -511,7 +511,8 @@ const RESIZE_BAND_PX: f32 = 8.0;
 
 /// The smallest a zone can be made, in world units, so one cannot be shrunk to
 /// nothing and lost. The egui board holds its own to the same floor.
-const MIN_CAP_RADIUS: f32 = 0.5;
+const MIN_CAP_RADIUS: f32 = 0.1 * WORLD_UNITS_PER_KM;
+const MAX_CAP_RADIUS: f32 = 10.0 * WORLD_UNITS_PER_KM;
 
 /// What a capture point added by hand starts as. A cap circle is about 5 km,
 /// which is about 167 world units; the egui board starts one at 150.
@@ -1724,12 +1725,12 @@ impl TacticsBoard {
     /// the model itself is in the world's own units.
     pub fn step_selected_radius(&mut self, by_km: f32, cx: &mut Context<Self>) {
         let Some(at) = self.selected else { return };
-        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
+        if self.caps.get(at).is_none() {
             return;
         }
         self.remember();
         let Some(cap) = self.caps.get_mut(at) else { return };
-        cap.radius = (cap.radius + by_km * WORLD_UNITS_PER_KM).max(MIN_CAP_RADIUS);
+        cap.radius = (cap.radius + by_km * WORLD_UNITS_PER_KM).clamp(MIN_CAP_RADIUS, MAX_CAP_RADIUS);
         self.report_cap(at);
         self.redraw(cx);
     }
@@ -1738,7 +1739,7 @@ impl TacticsBoard {
     /// reader's side, then the other.
     pub fn cycle_selected_team(&mut self, cx: &mut Context<Self>) {
         let Some(at) = self.selected else { return };
-        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
+        if self.caps.get(at).is_none() {
             return;
         }
         self.remember();
@@ -1754,14 +1755,17 @@ impl TacticsBoard {
 
     /// Takes every capture point off the board.
     pub fn clear_caps(&mut self, cx: &mut Context<Self>) {
-        if self.caps.is_empty() {
+        if !self.caps.iter().any(|cap| !cap.frozen) {
             return;
         }
         self.remember();
-        for gone in std::mem::take(&mut self.caps) {
-            self.collab.remove_cap(gone.id);
+        let selected_id = self.selected_cap().map(|cap| cap.id);
+        let removed: Vec<_> = self.caps.iter().filter(|cap| !cap.frozen).map(|cap| cap.id).collect();
+        self.caps.retain(|cap| cap.frozen);
+        for id in removed {
+            self.collab.remove_cap(id);
         }
-        self.selected = None;
+        self.selected = selected_id.and_then(|id| self.caps.iter().position(|cap| cap.id == id));
         self.redraw(cx);
     }
 
@@ -2088,7 +2092,7 @@ impl TacticsBoard {
             }
             CapDrag::Resize => {
                 let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
-                cap.radius = away.max(MIN_CAP_RADIUS);
+                cap.radius = away.clamp(MIN_CAP_RADIUS, MAX_CAP_RADIUS);
             }
         }
         self.redraw(cx);
@@ -3052,7 +3056,7 @@ impl TacticsBoard {
         let board = cx.entity();
         let adding = self.adding;
         let selected = self.selected_cap().cloned();
-        let has_caps = !self.caps.is_empty();
+        let has_removable_caps = self.caps.iter().any(|cap| !cap.frozen);
 
         h_flex()
             .gap_1()
@@ -3100,6 +3104,7 @@ impl TacticsBoard {
                     Button::new("tactics-cap-narrow")
                         .label("-")
                         .compact()
+                        .disabled(cap.radius <= MIN_CAP_RADIUS)
                         .tooltip(t!("ui.tactics.cap_narrow_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(-RADIUS_STEP_KM, cx));
@@ -3110,6 +3115,7 @@ impl TacticsBoard {
                     Button::new("tactics-cap-widen")
                         .label("+")
                         .compact()
+                        .disabled(cap.radius >= MAX_CAP_RADIUS)
                         .tooltip(t!("ui.tactics.cap_widen_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.step_selected_radius(RADIUS_STEP_KM, cx));
@@ -3160,7 +3166,12 @@ impl TacticsBoard {
                     Button::new("tactics-cap-delete")
                         .label(t!("ui.tactics.delete_cap").into_owned())
                         .compact()
-                        .tooltip(t!("ui.tactics.delete_cap_tooltip").to_string())
+                        .disabled(cap.frozen)
+                        .tooltip(if cap.frozen {
+                            t!("ui.tactics.cap_replay_delete_tooltip").to_string()
+                        } else {
+                            t!("ui.tactics.delete_cap_tooltip").to_string()
+                        })
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.remove_selected(cx));
                         })
@@ -3197,12 +3208,13 @@ impl TacticsBoard {
                         board.update(cx, |board, cx| board.redo(cx));
                     })
             })
-            .when(has_caps, |this| {
+            .when(has_removable_caps, |this| {
                 this.child({
                     let board = board.clone();
                     Button::new("tactics-clear-caps")
                         .label(t!("ui.tactics.clear_caps").into_owned())
                         .compact()
+                        .tooltip(t!("ui.tactics.clear_added_caps_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
                             board.update(cx, |board, cx| board.clear_caps(cx));
                         })
