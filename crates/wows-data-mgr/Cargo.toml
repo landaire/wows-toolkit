@@ -1,6 +1,6 @@
 [package]
 name = "wows-data-mgr"
-version = "0.21.0"
+version = "0.22.0"
 # Integration tests download real game data; they cannot run from the published
 # crate.
 exclude = ["tests/"]

@@ -126,6 +126,9 @@ pub struct PlayerStateData {
     pub(crate) player_id: PlayerId,
     /// This player's entity created by a CreateEntity packet
     pub(crate) entity_id: EntityId,
+    /// The ship's GameParam id; its roster field changed in 15.9.
+    #[serde(skip_deserializing)]
+    ship_params_id: Option<GameParamId>,
     /// Which team they're on.
     pub(crate) team_id: i64,
     /// Their starting health
@@ -203,10 +206,50 @@ impl PlayerStateData {
     }
 
     fn player_key_map(version: &Version) -> HashMap<&'static str, i64> {
-        // This 38-field layout is stable from 0.11.11 onward: verified against real
-        // 0.11.11 replays, every field this code reads sits at the same index as it
-        // does at 0.12.8 (only keyTargetMarkers at 22 differs, which is unused here).
-        if version.is_at_least(&Version::from_client_exe("0,11,11,0")) {
+        // 15.9 inserts a player field before teamId, shifting teamId and ttkStatus.
+        if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
+            let mut h = HashMap::new();
+            h.insert(Self::KEY_ACCOUNT_DBID, 0);
+            h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
+            h.insert(Self::KEY_AVATAR_ID, 2);
+            h.insert(Self::KEY_CAMOUFLAGE_INFO, 3);
+            h.insert(Self::KEY_CLAN_COLOR, 4);
+            h.insert(Self::KEY_CLAN_ID, 5);
+            h.insert(Self::KEY_CLAN_TAG, 6);
+            h.insert(Self::KEY_CREW_PARAMS, 7);
+            h.insert(Self::KEY_DOG_TAG, 8);
+            h.insert(Self::KEY_FRAGS_COUNT, 9);
+            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 10);
+            h.insert(Self::KEY_ID, 11);
+            h.insert(Self::KEY_INVITATIONS_ENABLED, 12);
+            h.insert(Self::KEY_IS_ABUSER, 13);
+            h.insert(Self::KEY_IS_ALIVE, 14);
+            h.insert(Self::KEY_IS_BOT, 15);
+            h.insert(Self::KEY_IS_CLIENT_LOADED, 16);
+            h.insert(Self::KEY_IS_CONNECTED, 17);
+            h.insert(Self::KEY_IS_HIDDEN, 18);
+            h.insert(Self::KEY_IS_LEAVER, 19);
+            h.insert(Self::KEY_IS_PRE_BATTLE_OWNER, 20);
+            h.insert(Self::KEY_IS_T_SHOOTER, 21);
+            h.insert(Self::KEY_KEY_TARGET_MARKERS, 22);
+            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 23);
+            h.insert(Self::KEY_MAX_HEALTH, 24);
+            h.insert(Self::KEY_NAME, 25);
+            h.insert(Self::KEY_PLAYER_MODE, 26);
+            h.insert(Self::KEY_PRE_BATTLE_ID_ON_START, 27);
+            h.insert(Self::KEY_PRE_BATTLE_SIGN, 28);
+            h.insert(Self::KEY_PREBATTLE_ID, 29);
+            h.insert(Self::KEY_REALM, 30);
+            h.insert(Self::KEY_SHIP_COMPONENTS, 31);
+            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 32);
+            h.insert(Self::KEY_SHIP_ID, 33);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 34);
+            h.insert(Self::KEY_SKIN_ID, 35);
+            h.insert(Self::KEY_TEAM_ID, 37);
+            h.insert(Self::KEY_TTK_STATUS, 38);
+            h
+        } else if version.is_at_least(&Version::from_client_exe("0,11,11,0")) {
+            // This 38-field layout is stable from 0.11.11 through 15.8.
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
             h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
@@ -435,7 +478,7 @@ impl PlayerStateData {
     fn from_values(
         raw_values: HashMap<i64, pickled::Value>,
         mut mapped_values: HashMap<&'static str, pickled::Value>,
-        _version: &Version,
+        version: &Version,
     ) -> Self {
         // Older arena-state layouts (pre-0.10.7) only provide a subset of these
         // fields, so every lookup must tolerate a missing key rather than unwrap.
@@ -447,7 +490,17 @@ impl PlayerStateData {
         let clan = get_str(Self::KEY_CLAN_TAG).unwrap_or_default();
         let clan_id = get_i64(Self::KEY_CLAN_ID).unwrap_or(0);
 
-        let shipid = get_i64(Self::KEY_SHIP_ID).unwrap_or(0);
+        let shipid = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
+            get_i64(Self::KEY_SHIP_PARAMS_ID).unwrap_or(0)
+        } else {
+            get_i64(Self::KEY_SHIP_ID).unwrap_or(0)
+        };
+        let ship_params_id = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
+            mapped_values.get(Self::KEY_SKIN_ID).and_then(|v| v.i64_ref().copied())
+        } else {
+            get_i64(Self::KEY_SHIP_PARAMS_ID)
+        }
+        .map(|id| GameParamId::from(id as u32));
         let player_id = get_i64(Self::KEY_ID).unwrap_or(0);
         let team = get_i64(Self::KEY_TEAM_ID).unwrap_or(0);
         let health = get_i64(Self::KEY_MAX_HEALTH).unwrap_or(0);
@@ -501,6 +554,7 @@ impl PlayerStateData {
             db_id: AccountId::from(db_id),
             player_id: PlayerId::from(player_id),
             entity_id: EntityId::from(shipid),
+            ship_params_id,
             team_id: team,
             max_health: health,
             is_abuser,
@@ -694,9 +748,16 @@ impl PlayerStateData {
 
     /// The ship's GameParamId, if present in the decoded data.
     pub fn ship_params_id(&self) -> Option<GameParamId> {
+        self.ship_params_id
+    }
+
+    /// The captain's GameParam id from the arena roster, when present.
+    pub fn crew_params_id(&self) -> Option<GameParamId> {
         self.raw_with_names
-            .get(Self::KEY_SHIP_PARAMS_ID)
-            .and_then(|v| v.as_u64())
+            .get(Self::KEY_CREW_PARAMS)
+            .and_then(|v| v.as_array())
+            .and_then(|params| params.first())
+            .and_then(|id| id.as_u64())
             .map(|id| GameParamId::from(id as u32))
     }
 
@@ -2889,6 +2950,59 @@ mod player_key_map_tests {
         ] {
             assert_eq!(a.get(key), b.get(key), "field {key} diverges at 0.11.11");
         }
+    }
+
+    #[test]
+    fn v15_9_moves_team_id_after_new_player_field() {
+        let old = PlayerStateData::player_key_map(&v(15, 8, 0));
+        let new = PlayerStateData::player_key_map(&v(15, 9, 0));
+
+        assert_eq!(old.get(PlayerStateData::KEY_TEAM_ID), Some(&36));
+        assert_eq!(new.get(PlayerStateData::KEY_TEAM_ID), Some(&37));
+        assert_eq!(new.get(PlayerStateData::KEY_TTK_STATUS), Some(&38));
+
+        let raw_values = HashMap::from([
+            (33, Value::I64(32)),
+            (34, Value::I64(438_335)),
+            (35, Value::I64(4_076_779_344)),
+            (36, Value::I64(4_156_157_872)),
+            (37, Value::I64(1)),
+        ]);
+        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &v(15, 9, 0), false);
+        let player = PlayerStateData::from_values(raw_values, mapped_values, &v(15, 9, 0));
+
+        assert_eq!(player.entity_id(), EntityId::from(438_335u32));
+        assert_eq!(player.ship_params_id(), Some(GameParamId::from(4_076_779_344u32)));
+        assert_eq!(player.team_id(), 1);
+    }
+
+    #[test]
+    fn v15_8_keeps_legacy_player_ship_fields() {
+        let raw_values = HashMap::from([
+            (33, Value::I64(968_041)),
+            (34, Value::I64(3_655_251_408)),
+            (35, Value::I64(3_655_251_408)),
+        ]);
+        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &v(15, 8, 0), false);
+        let player = PlayerStateData::from_values(raw_values, mapped_values, &v(15, 8, 0));
+
+        assert_eq!(player.entity_id(), EntityId::from(968_041u32));
+        assert_eq!(player.ship_params_id(), Some(GameParamId::from(3_655_251_408u32)));
+    }
+
+    #[test]
+    fn v15_9_reads_captain_id_from_crew_params() {
+        let values = HashMap::from([(
+            7,
+            Value::List(pickled::value::Shared::new(vec![
+                Value::I64(3_556_943_696),
+                Value::List(pickled::value::Shared::new(vec![Value::I64(0), Value::I64(0)])),
+            ])),
+        )]);
+        let mapped = PlayerStateData::convert_raw_dict(&values, &v(15, 9, 0), false);
+        let player = PlayerStateData::from_values(values, mapped, &v(15, 9, 0));
+
+        assert_eq!(player.crew_params_id(), Some(GameParamId::from(3_556_943_696u32)));
     }
 }
 

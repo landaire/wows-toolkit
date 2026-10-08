@@ -49,6 +49,15 @@ pub struct Skills {
 }
 
 impl Skills {
+    fn is_empty(&self) -> bool {
+        self.aircraft_carrier.is_empty()
+            && self.battleship.is_empty()
+            && self.cruiser.is_empty()
+            && self.destroyer.is_empty()
+            && self.auxiliary.is_empty()
+            && self.submarine.is_empty()
+    }
+
     pub fn submarine(&self) -> &[u8] {
         self.submarine.as_ref()
     }
@@ -437,7 +446,7 @@ pub struct VehicleState {
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct CrewModifiersCompactParams {
     params_id: GameParamId,
-    is_in_adaption: bool,
+    is_in_adaptation: Option<bool>,
     learned_skills: Skills,
 }
 
@@ -448,6 +457,30 @@ impl CrewModifiersCompactParams {
 
     pub fn learned_skills(&self) -> &Skills {
         &self.learned_skills
+    }
+
+    pub fn is_in_adaptation(&self) -> Option<bool> {
+        self.is_in_adaptation
+    }
+
+    pub fn set_params_id(&mut self, params_id: GameParamId) {
+        self.params_id = params_id;
+    }
+
+    pub fn has_learned_skills(&self) -> bool {
+        !self.learned_skills.is_empty()
+    }
+
+    pub fn merge_from(&mut self, source: &Self) {
+        if self.params_id.raw() == 0 && source.params_id.raw() != 0 {
+            self.params_id = source.params_id;
+        }
+        if !source.learned_skills.is_empty() {
+            self.learned_skills = source.learned_skills.clone();
+        }
+        if let Some(is_in_adaptation) = source.is_in_adaptation {
+            self.is_in_adaptation = Some(is_in_adaptation);
+        }
     }
 }
 
@@ -575,14 +608,14 @@ macro_rules! arg_value_to_type {
 impl UpdateFromReplayArgs for CrewModifiersCompactParams {
     fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, _constants: &GameConstants) {
         const PARAMS_ID_KEY: &str = "paramsId";
-        const IS_IN_ADAPTION_KEY: &str = "isInAdaption";
+        const IS_IN_ADAPTATION_KEY: &str = "isInAdaptation";
         const LEARNED_SKILLS_KEY: &str = "learnedSkills";
 
         if args.contains_key(PARAMS_ID_KEY) {
             self.params_id = GameParamId::from(arg_value_to_type!(args, PARAMS_ID_KEY, u32));
         }
-        if args.contains_key(IS_IN_ADAPTION_KEY) {
-            self.is_in_adaption = arg_value_to_type!(args, IS_IN_ADAPTION_KEY, bool);
+        if args.contains_key(IS_IN_ADAPTATION_KEY) {
+            self.is_in_adaptation = Some(arg_value_to_type!(args, IS_IN_ADAPTATION_KEY, bool));
         }
 
         // The captain-skill rework changed the `learnedSkills` shape. Gate on the
@@ -933,6 +966,14 @@ impl VehicleProps {
 
     pub fn ship_config(&self) -> &ShipConfig {
         &self.ship_config
+    }
+
+    pub fn set_ship_params_id(&mut self, ship_params_id: GameParamId) {
+        self.ship_config.set_ship_params_id(ship_params_id);
+    }
+
+    pub fn set_crew_params_id(&mut self, params_id: GameParamId) {
+        self.crew_modifiers_compact_params.set_params_id(params_id);
     }
 
     pub fn wave_local_pos(&self) -> u16 {
@@ -1360,6 +1401,7 @@ mod tests {
 
     use crate::game_constants::GameConstants;
     use crate::types::BurningFlags;
+    use crate::types::GameParamId;
 
     use super::VehicleProps;
 
@@ -1372,6 +1414,53 @@ mod tests {
             [("regenerationHealth", ArgValue::Float32(2295.0))].into_iter().collect();
         props.update_from_args(&args, version, &constants);
         assert_eq!(props.regeneration_health(), 2295.0);
+    }
+
+    #[test]
+    fn crew_params_reads_adaptation_field_name_from_protocol() {
+        let version = Version::from_client_exe("15,9,0,13357625");
+        let constants = GameConstants::defaults();
+        let mut fields = HashMap::new();
+        fields.insert("isInAdaptation", ArgValue::Uint8(1));
+        let mut crew = VehicleProps::default();
+        let args: HashMap<&str, ArgValue<'_>> =
+            [("crewModifiersCompactParams", ArgValue::FixedDict(fields))].into_iter().collect();
+        crew.update_from_args(&args, version, &constants);
+        assert_eq!(crew.crew_modifiers_compact_params().is_in_adaptation(), Some(true));
+    }
+
+    #[test]
+    fn crew_skill_update_merges_after_roster_captain_id() {
+        let version = Version::from_client_exe("15,9,0,13357625");
+        let constants = GameConstants::defaults();
+        let skills = ArgValue::Array(vec![
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![ArgValue::Uint8(2), ArgValue::Uint8(9)]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+        ]);
+        let mut fields = HashMap::new();
+        fields.insert("learnedSkills", skills);
+        fields.insert("paramsId", ArgValue::Uint32(123));
+        let mut vehicle_props = VehicleProps::default();
+        let args: HashMap<&str, ArgValue<'_>> =
+            [("crewModifiersCompactParams", ArgValue::FixedDict(fields))].into_iter().collect();
+        vehicle_props.update_from_args(&args, version, &constants);
+
+        let mut initial_props = VehicleProps::default();
+        let initial_fields = HashMap::from([("isInAdaptation", ArgValue::Uint8(1))]);
+        let initial_args: HashMap<&str, ArgValue<'_>> =
+            [("crewModifiersCompactParams", ArgValue::FixedDict(initial_fields))].into_iter().collect();
+        initial_props.update_from_args(&initial_args, version, &constants);
+        let mut roster_crew = initial_props.crew_modifiers_compact_params().clone();
+        roster_crew.set_params_id(GameParamId::from(456u32));
+        roster_crew.merge_from(vehicle_props.crew_modifiers_compact_params());
+
+        assert_eq!(roster_crew.params_id(), GameParamId::from(456u32));
+        assert_eq!(roster_crew.learned_skills().battleship(), &[2, 9]);
+        assert_eq!(roster_crew.is_in_adaptation(), Some(true));
     }
 
     /// `burningFlags` must be read leniently across builds. A strict `Uint16`

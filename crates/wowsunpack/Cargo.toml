@@ -1,7 +1,7 @@
 [package]
 name = "wowsunpack"
 description = "Utility for interacting with World of Warships game assets"
-version = "0.45.0"
+version = "0.46.0"
 repository = "https://github.com/landaire/wows-toolkit"
 documentation = "https://docs.rs/wowsunpack/"
 # Integration tests need a real game install, so they cannot run from the

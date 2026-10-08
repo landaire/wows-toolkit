@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use wowsunpack::data::Version;
 use wowsunpack::data::ship_config::ShipConfig;
+use wowsunpack::data::ship_config::parse_ship_config;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 
@@ -97,8 +98,9 @@ impl<'c> VehicleFactsAccumulator<'c> {
                         entry.vehicle_id = parsed.ship_config().ship_params_id();
                     }
                 }
-                if entry.crew.params_id().raw() == 0 && parsed.crew_modifiers_compact_params().params_id().raw() != 0 {
-                    entry.crew = parsed.crew_modifiers_compact_params().clone();
+                let parsed_crew = parsed.crew_modifiers_compact_params();
+                if parsed_crew.params_id().raw() != 0 || parsed_crew.has_learned_skills() {
+                    entry.crew.merge_from(parsed_crew);
                 }
             }
             _ => {}
@@ -110,11 +112,24 @@ impl<'c> VehicleFactsAccumulator<'c> {
                 if entry.max_health == 0.0 && player.max_health() > 0 {
                     entry.max_health = player.max_health() as f32;
                 }
-                if entry.vehicle_id.raw() == 0
-                    && let Some(spid) = player.ship_params_id()
+                if let Some(spid) = player.ship_params_id()
                     && spid.raw() != 0
                 {
                     entry.vehicle_id = spid;
+                    entry.ship_config.set_ship_params_id(spid);
+                    if let Some(blob) = player.ship_config_dump()
+                        && let Ok(mut ship_config) = parse_ship_config(&blob, &self.version)
+                    {
+                        ship_config.set_ship_params_id(spid);
+                        if entry.ship_config.abilities().is_empty() {
+                            entry.ship_config = ship_config;
+                        }
+                    }
+                }
+                if let Some(crew_id) = player.crew_params_id()
+                    && crew_id.raw() != 0
+                {
+                    entry.crew.set_params_id(crew_id);
                 }
             }
         }
@@ -149,10 +164,8 @@ impl Default for VehicleFacts {
 /// Also folds in `maxHealth` from any later `EntityProperty(maxHealth)`
 /// update, since some ships only broadcast it on first damage.
 ///
-/// Also seeds `max_health` + `vehicle_id` from `onArenaStateReceived` for
-/// ships the active perspective never detects (the corresponding
-/// `EntityCreate` never arrives but `onArenaStateReceived` lists every
-/// participant with their max HP and ship params id).
+/// Also seeds `max_health`, ship configuration, and captain id from
+/// `onArenaStateReceived` for ships the active perspective never detects.
 pub fn gather_replay_facts(
     constants: &GameConstants,
     version: Version,
@@ -181,8 +194,9 @@ pub fn gather_replay_facts(
         let replay_facts = acc.into_facts();
         for (entity_id, src) in replay_facts {
             let dst = combined.entry(entity_id).or_default();
-            if dst.vehicle_id.raw() == 0 && src.vehicle_id.raw() != 0 {
+            if src.vehicle_id.raw() != 0 {
                 dst.vehicle_id = src.vehicle_id;
+                dst.ship_config.set_ship_params_id(src.vehicle_id);
             }
             if dst.max_health == 0.0 && src.max_health > 0.0 {
                 dst.max_health = src.max_health;
@@ -190,8 +204,8 @@ pub fn gather_replay_facts(
             if dst.ship_config.abilities().is_empty() && !src.ship_config.abilities().is_empty() {
                 dst.ship_config = src.ship_config;
             }
-            if dst.crew.params_id().raw() == 0 && src.crew.params_id().raw() != 0 {
-                dst.crew = src.crew;
+            if src.crew.params_id().raw() != 0 || src.crew.has_learned_skills() {
+                dst.crew.merge_from(&src.crew);
             }
         }
         let with_ship_config = combined.values().filter(|f| !f.ship_config.abilities().is_empty()).count();
@@ -237,7 +251,39 @@ pub fn fold_props_into(
     if entry.ship_config.abilities().is_empty() && !parsed_ship_config.abilities().is_empty() {
         entry.ship_config = parsed_ship_config;
     }
-    if entry.crew.params_id().raw() == 0 && parsed_crew.params_id().raw() != 0 {
-        entry.crew = parsed_crew;
+    if parsed_crew.params_id().raw() != 0 || parsed_crew.has_learned_skills() {
+        entry.crew.merge_from(&parsed_crew);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    #[test]
+    fn fold_props_merges_skills_into_roster_crew() {
+        let version = Version::from_client_exe("15,9,0,13357625");
+        let constants = GameConstants::defaults();
+        let skills = ArgValue::Array(vec![
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![ArgValue::Uint8(2), ArgValue::Uint8(9)]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+        ]);
+        let crew_fields = HashMap::from([("paramsId", ArgValue::Uint32(123)), ("learnedSkills", skills)]);
+        let props: HashMap<&str, ArgValue<'_>> =
+            HashMap::from([("crewModifiersCompactParams", ArgValue::FixedDict(crew_fields))]);
+        let entity_id = EntityId::from(438_335u32);
+        let mut facts = HashMap::new();
+        facts.entry(entity_id).or_insert_with(VehicleFacts::default).crew.set_params_id(GameParamId::from(456u32));
+
+        fold_props_into(&mut facts, entity_id, &props, version, &constants);
+
+        let crew = &facts[&entity_id].crew;
+        assert_eq!(crew.params_id(), GameParamId::from(456u32));
+        assert_eq!(crew.learned_skills().battleship(), &[2, 9]);
     }
 }
