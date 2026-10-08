@@ -14575,7 +14575,7 @@ dependencies = [
 
 [[package]]
 name = "wows-toolkit-gpui"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -14744,7 +14744,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -14921,7 +14921,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-client"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "data-encoding",
  "iroh",
@@ -14939,7 +14939,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-egui"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -14952,7 +14952,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-protocol"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "data-encoding",
  "egui",
@@ -14976,7 +14976,7 @@ dependencies = [
 
 [[package]]
 name = "wt-web"
-version = "1.0.2-beta2"
+version = "1.0.2"
 dependencies = [
  "eframe",
  "egui",
