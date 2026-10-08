@@ -568,6 +568,8 @@ impl StatsChartPanel {
         let ship_search = self.ship_search.clone();
         let ship_query = self.ship_search.read(cx).value().trim().to_lowercase();
         let selected = self.selected_ships.clone();
+        let selected_ship_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
+        let played_ship_count = played.len();
         let overrides = self.overrides_tab();
         let active = self.active_filters().clone();
         let modes = self.offered_modes();
@@ -764,7 +766,17 @@ impl StatsChartPanel {
                         )
                     })
                 })
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.ships").to_string()))
+                .child(
+                    h_flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.ships").to_string()))
+                        .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!(
+                            "ui.stats.ship_selection_count",
+                            selected = selected_ship_count,
+                            total = played_ship_count
+                        ))),
+                )
                 .child(Input::new(&ship_search).id(("chart-ship-search", id)).small().w_full())
                 .child(
                     h_flex()
@@ -774,6 +786,7 @@ impl StatsChartPanel {
                                 .label(t!("ui.stats.all_ships").to_string())
                                 .compact()
                                 .disabled(!has_visible_ships)
+                                .tooltip(t!("ui.stats.all_ships_tooltip").to_string())
                                 .on_click(move |_event, _window, cx| {
                                     let ships = all_ship_ids.clone();
                                     all_entity.update(cx, |this, cx| this.set_ships_selected(&ships, true, cx));
@@ -784,6 +797,7 @@ impl StatsChartPanel {
                                 .label(t!("ui.stats.no_ships").to_string())
                                 .compact()
                                 .disabled(!has_visible_ships)
+                                .tooltip(t!("ui.stats.no_ships_tooltip").to_string())
                                 .on_click(move |_event, _window, cx| {
                                     let ships = no_ship_ids.clone();
                                     none_entity.update(cx, |this, cx| this.set_ships_selected(&ships, false, cx));
