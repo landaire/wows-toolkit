@@ -1238,12 +1238,7 @@ impl ReplayInspectorView {
 
         // A plain open takes the place of the replay tab on screen, as the
         // egui listing does; the reader asks for a second tab by name.
-        if target == OpenTarget::ShowingTab
-            && let Some(showing) = self.replaceable_panel(cx)
-        {
-            self.open_panels.remove(&showing.path);
-            self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(showing.panel, window, cx));
-        }
+        let replaced = (target == OpenTarget::ShowingTab).then(|| self.replaceable_panel(cx)).flatten();
 
         let columns = default_columns(&self.replay_settings);
         let personal_rating = self.personal_rating.clone();
@@ -1268,9 +1263,15 @@ impl ReplayInspectorView {
                 this.recover_constants(event.build, event.version.clone(), window, cx);
             },
         ));
+        if let Some(showing) = &replaced {
+            self.open_panels.remove(&showing.path);
+        }
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {
+            if let Some(showing) = &replaced {
+                dock_area.remove_panel_id(showing.panel, window, cx);
+            }
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         self.has_opened_replay = true;
