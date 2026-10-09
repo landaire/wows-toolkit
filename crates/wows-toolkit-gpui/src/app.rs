@@ -1459,7 +1459,7 @@ impl App {
             return;
         };
         self.stats_game_data_requested = true;
-        self.stats.update(cx, |stats, cx| stats.set_game_data(loaded.vfs(), cx));
+        self.stats.update(cx, |stats, cx| stats.set_game_data(loaded.vfs(), loaded.provider().clone(), cx));
     }
 
     /// Forwards the replay inspector's preloaded game data to the Armor

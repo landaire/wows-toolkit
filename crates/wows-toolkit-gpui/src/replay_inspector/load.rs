@@ -49,6 +49,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use gettext::Catalog;
 use gpui_kit::App;
@@ -118,42 +120,63 @@ fn game_params_bin_path(build: u32) -> PathBuf {
     }
 }
 
-/// Loads the English gettext translation catalog for `build` from the live
-/// install (`bin/{build}/res/texts/en/LC_MESSAGES/global.mo`), matching the
-/// egui app's `WowsData::reload_translations` (`data/wows_data.rs`) minus its
-/// locale-preference and dump-directory fallbacks -- this port has neither a
-/// locale setting nor dump-directory support yet, so English from the live
-/// install is the only path. A missing or unparsable catalog is not fatal:
-/// ship/map names simply keep showing their untranslated raw form (see
-/// `browser_view.rs`'s translation fallback), and this is only logged.
-fn load_translations_catalog(wows_dir: &Path, build: u32) -> Option<Catalog> {
-    let mo_path = wows_dir.join(format!("bin/{build}/res/texts/en/LC_MESSAGES/global.mo"));
-    let file = match std::fs::File::open(&mo_path) {
-        Ok(file) => file,
-        Err(e) => {
-            tracing::warn!(build, path = %mo_path.display(), error = %e, "no English translation catalog for this build");
-            return None;
-        }
-    };
-    match Catalog::parse(file) {
-        Ok(catalog) => Some(catalog),
-        Err(e) => {
-            tracing::warn!(build, path = %mo_path.display(), error = %e, "failed to parse translation catalog");
-            None
+fn translation_directories(locale: &str) -> Vec<String> {
+    let normalized = locale.replace('-', "_");
+    let primary = normalized.split('_').next().unwrap_or("en").to_owned();
+    let mut directories = Vec::new();
+    for directory in [normalized, primary, "en".to_owned()] {
+        if !directories.contains(&directory) {
+            directories.push(directory);
         }
     }
+    directories
 }
 
-/// The English catalogue out of a dumped build, which carries its texts under
-/// `translations/` rather than `res/texts/`.
-fn load_dump_translations(cas: &BuildCas) -> Option<Catalog> {
-    let mo_path = cas.derived_path("translations/en/LC_MESSAGES/global.mo")?;
-    let file = std::fs::File::open(&mo_path)
-        .inspect_err(|err| tracing::warn!(path = %mo_path.display(), error = %err, "no catalog in this dump"))
-        .ok()?;
+fn parse_translation_catalog(path: &Path, build: u32, locale: &str) -> Option<Catalog> {
+    let file = std::fs::File::open(path).ok()?;
     Catalog::parse(file)
-        .inspect_err(|err| tracing::warn!(path = %mo_path.display(), error = ?err, "a dump's catalog would not parse"))
+        .inspect_err(|err| tracing::warn!(build, locale, path = %path.display(), error = ?err, "game translation catalog would not parse"))
         .ok()
+}
+
+fn load_translations_catalog(wows_dir: &Path, build: u32, locale: &str) -> Option<Catalog> {
+    for directory in translation_directories(locale) {
+        let path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
+        if let Some(catalog) = parse_translation_catalog(&path, build, &directory) {
+            return Some(catalog);
+        }
+    }
+    None
+}
+
+fn load_dump_translations(cas: &BuildCas, locale: &str) -> Option<Catalog> {
+    for directory in translation_directories(locale) {
+        let Some(path) = cas.derived_path(&format!("translations/{directory}/LC_MESSAGES/global.mo")) else {
+            continue;
+        };
+        if let Some(catalog) = parse_translation_catalog(&path, cas.metadata().build, &directory) {
+            return Some(catalog);
+        }
+    }
+    None
+}
+
+fn load_translations_for_build(wows_dir: &Path, dump_base: Option<&Path>, build: u32, locale: &str) -> Option<Catalog> {
+    let dump_dir = dump_base.and_then(|base| dump_for_build(base, build, None));
+    let cas = dump_dir.as_deref().and_then(BuildCas::open);
+    for directory in translation_directories(locale) {
+        let live_path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
+        if let Some(catalog) = parse_translation_catalog(&live_path, build, &directory) {
+            return Some(catalog);
+        }
+        if let Some(cas) = &cas
+            && let Some(path) = cas.derived_path(&format!("translations/{directory}/LC_MESSAGES/global.mo"))
+            && let Some(catalog) = parse_translation_catalog(&path, build, &directory)
+        {
+            return Some(catalog);
+        }
+    }
+    None
 }
 
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
@@ -237,14 +260,14 @@ impl LoadedGameData {
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors
     /// that can still occur while actually reading that build's files.
-    fn load_build(wows_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
+    fn load_build(wows_dir: &Path, build: u32, locale: &str) -> Result<Self, ReplayLoadError> {
         crate::heap_profile::mark(&format!("build{build}.begin"));
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build, AssetsBin::Omit)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
         crate::heap_profile::mark(&format!("build{build}.vfs"));
         let provider = Self::load_provider(&vfs, build)?;
         crate::heap_profile::mark(&format!("build{build}.params"));
-        if let Some(catalog) = load_translations_catalog(wows_dir, build) {
+        if let Some(catalog) = load_translations_catalog(wows_dir, build, locale) {
             provider.set_translations(catalog);
         }
         let provider = Arc::new(provider);
@@ -267,7 +290,7 @@ impl LoadedGameData {
     /// (the China client ships its own for the same major.minor.patch). The
     /// params are cached under the dump's own build number for that reason: one
     /// server's parameters must not answer for another's.
-    fn load_dump(dump_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
+    fn load_dump(dump_dir: &Path, build: u32, locale: &str) -> Result<Self, ReplayLoadError> {
         let cas = BuildCas::open(dump_dir).ok_or_else(|| {
             ReplayLoadError::GameData(format!("no metadata.toml in the dump at {}", dump_dir.display()))
         })?;
@@ -291,7 +314,7 @@ impl LoadedGameData {
         };
         let provider = GameMetadataProvider::from_params_with_vfs(params, &vfs)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        if let Some(catalog) = load_dump_translations(&cas) {
+        if let Some(catalog) = load_dump_translations(&cas, locale) {
             provider.set_translations(catalog);
         }
 
@@ -367,6 +390,8 @@ pub struct GameDataCache {
     /// Whether a build loaded out of the install is written to that cache, which
     /// is the `auto_dump_game_data` setting.
     auto_dump: bool,
+    locale: Arc<Mutex<String>>,
+    locale_generation: Arc<AtomicU64>,
     loaded: Arc<Mutex<HashMap<u32, Arc<BuildSlot>>>>,
 }
 
@@ -376,7 +401,38 @@ impl GameDataCache {
             wows_dir,
             dump_base: wows_toolkit_config::game_data_dump_base(),
             auto_dump: false,
+            locale: Arc::new(Mutex::new("en".to_owned())),
+            locale_generation: Arc::new(AtomicU64::new(0)),
             loaded: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn with_locale(self, locale: &str) -> Self {
+        let mut current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *current = locale.to_owned();
+        self.locale_generation.fetch_add(1, Ordering::AcqRel);
+        drop(current);
+        self
+    }
+
+    pub fn set_locale(&self, locale: &str) {
+        let generation = {
+            let mut current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            *current = locale.to_owned();
+            self.locale_generation.fetch_add(1, Ordering::AcqRel) + 1
+        };
+        let slots: Vec<_> =
+            self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).values().cloned().collect();
+        for slot in slots {
+            let Some(Ok(loaded)) = slot.get() else { continue };
+            let build = loaded.build();
+            let catalog = load_translations_for_build(&self.wows_dir, self.dump_base.as_deref(), build, locale);
+            if let Some(catalog) = catalog {
+                let current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                if *current == locale && self.locale_generation.load(Ordering::Acquire) == generation {
+                    loaded.provider().set_translations(catalog);
+                }
+            }
         }
     }
 
@@ -482,9 +538,30 @@ impl GameDataCache {
             Arc::clone(guard.entry(build).or_insert_with(|| Arc::new(OnceLock::new())))
         };
 
+        let (locale, generation) = {
+            let locale = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            (locale.clone(), self.locale_generation.load(Ordering::Acquire))
+        };
         let result = slot
-            .get_or_init(|| Self::load_build_checked(&self.wows_dir, self.dump_base.as_deref(), build, hint.as_deref()))
+            .get_or_init(|| {
+                Self::load_build_checked(&self.wows_dir, self.dump_base.as_deref(), build, hint.as_deref(), &locale)
+            })
             .clone();
+
+        let (current_locale, current_generation) = {
+            let locale = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            (locale.clone(), self.locale_generation.load(Ordering::Acquire))
+        };
+        if generation != current_generation
+            && let Ok(loaded) = &result
+            && let Some(catalog) =
+                load_translations_for_build(&self.wows_dir, self.dump_base.as_deref(), loaded.build(), &current_locale)
+        {
+            let locale = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *locale == current_locale && self.locale_generation.load(Ordering::Acquire) == current_generation {
+                loaded.provider().set_translations(catalog);
+            }
+        }
 
         // Written after the load rather than during it: the dump reads the same
         // files, and a reader waiting for a replay should not wait for gigabytes
@@ -551,18 +628,19 @@ impl GameDataCache {
         dump_base: Option<&Path>,
         build: u32,
         version: Option<&str>,
+        locale: &str,
     ) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let available = wowsunpack::game_data::list_available_builds(wows_dir)
                 .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
             if available.contains(&build) {
-                return LoadedGameData::load_build(wows_dir, build);
+                return LoadedGameData::load_build(wows_dir, build, locale);
             }
 
             // Not installed: the game-data cache is asked next, which is what it
             // is kept for.
             match dump_base.and_then(|base| dump_for_build(base, build, version)) {
-                Some(dump_dir) => LoadedGameData::load_dump(&dump_dir, build),
+                Some(dump_dir) => LoadedGameData::load_dump(&dump_dir, build, locale),
                 None => Err(ReplayLoadError::UnsupportedVersion { build }),
             }
         }));

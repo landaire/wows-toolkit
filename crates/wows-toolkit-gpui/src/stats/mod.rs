@@ -10,3 +10,7 @@ pub mod plot;
 pub mod plot_image;
 pub mod ships;
 pub mod view;
+
+pub(crate) fn normalize_ship_search(text: &str) -> String {
+    unidecode::unidecode(text.trim()).to_lowercase()
+}

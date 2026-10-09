@@ -261,6 +261,12 @@ impl StatsChartPanel {
         self.own_filters.as_ref().unwrap_or(&self.tab_filters)
     }
 
+    fn effective_filters(&self) -> StatsFilters {
+        let mut filters = self.active_filters().clone();
+        filters.limit = self.tab_filters.limit;
+        filters
+    }
+
     /// Whether this chart narrows the session itself rather than following
     /// the tab's filter bar.
     fn overrides_tab(&self) -> bool {
@@ -307,7 +313,7 @@ impl StatsChartPanel {
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         // Per ship, as the egui charts count it (`ui/stats_tab.rs:541`): a chart
         // of ten ships under "last 25" plots 25 battles in each.
-        let games = filter_games_per_ship(&self.all_games, self.active_filters());
+        let games = filter_games_per_ship(&self.all_games, &self.effective_filters());
         self.ships = per_ship_performance_by_id(&games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
         self.played = ships_played(&games);
@@ -566,12 +572,13 @@ impl StatsChartPanel {
             (self.stat, self.mode, self.running, self.combined, self.show_values);
         let played = self.played.clone();
         let ship_search = self.ship_search.clone();
-        let ship_query = self.ship_search.read(cx).value().trim().to_lowercase();
+        let ship_query = self.ship_search.read(cx).value().to_string();
+        let normalized_ship_query = super::normalize_ship_search(&ship_query);
         let selected = self.selected_ships.clone();
         let selected_ship_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
         let played_ship_count = played.len();
         let overrides = self.overrides_tab();
-        let active = self.active_filters().clone();
+        let active = self.effective_filters();
         let modes = self.offered_modes();
 
         let trigger = Button::new(("chart-settings", id))
@@ -632,14 +639,18 @@ impl StatsChartPanel {
             let all_entity = entity.clone();
             let none_entity = entity.clone();
             let ship_entity = entity.clone();
+            let clear_ship_search_entity = entity.clone();
 
             let visible_ships: Vec<_> = played
                 .iter()
-                .filter(|(_, name)| ship_query.is_empty() || name.to_lowercase().contains(&ship_query))
+                .filter(|(_, name)| {
+                    normalized_ship_query.is_empty()
+                        || super::normalize_ship_search(name).contains(&normalized_ship_query)
+                })
                 .cloned()
                 .collect();
             let visible_ship_ids: Vec<_> = visible_ships.iter().map(|(ship_id, _)| *ship_id).collect();
-            let no_ship_matches = !ship_query.is_empty() && visible_ships.is_empty();
+            let no_ship_matches = !normalized_ship_query.is_empty() && visible_ships.is_empty();
             let has_visible_ships = !visible_ship_ids.is_empty();
             let all_ship_ids = visible_ship_ids.clone();
             let no_ship_ids = visible_ship_ids;
@@ -777,7 +788,25 @@ impl StatsChartPanel {
                             total = played_ship_count
                         ))),
                 )
-                .child(Input::new(&ship_search).id(("chart-ship-search", id)).small().w_full())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .child(Input::new(&ship_search).id(("chart-ship-search", id)).small().flex_1())
+                        .when(!ship_query.is_empty(), |this| {
+                            this.child(
+                                Button::new(("chart-ship-search-clear", id))
+                                    .child(crate::icons::icon(crate::icons::X))
+                                    .compact()
+                                    .tooltip(t!("ui.buttons.clear").to_string())
+                                    .accessibility_label(t!("ui.buttons.clear").to_string())
+                                    .on_click(move |_event, window, cx| {
+                                        clear_ship_search_entity.update(cx, |this, cx| {
+                                            this.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
+                                        });
+                                    }),
+                            )
+                        }),
+                )
                 .child(
                     h_flex()
                         .gap_1()

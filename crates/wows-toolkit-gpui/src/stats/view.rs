@@ -6,6 +6,7 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
+use gpui_kit::component::ElementExt as _;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
@@ -13,7 +14,9 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,6 +24,7 @@ use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockAreaState;
 use gpui_kit::component::dock::DockEvent;
 use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSizing;
 use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::dock::panel_handle;
@@ -69,11 +73,13 @@ pub struct StatsView {
     /// Every recorded game, oldest first. The filters narrow this per render.
     games: Vec<PerGameStat>,
     filters: StatsFilters,
+    last_game_limit_count: usize,
     /// Match groups present in `games`, so the bar only offers modes that
     /// actually occur.
     available_modes: Vec<String>,
     limit_input: Entity<InputState>,
     dock_area: Entity<DockArea>,
+    chart_split_dragging: Rc<Cell<bool>>,
     overview: Entity<StatsOverviewPanel>,
     ships: Entity<StatsShipsPanel>,
     /// One per open chart sub-tab. The egui tab opens with a chart alongside
@@ -329,8 +335,8 @@ impl StatsView {
             panel_handle(panel)
         });
         let ships = self.ships.downgrade();
-        gpui_kit::component::dock::register_panel(cx, "StatsShipsPanel", move |_state, _window, cx| {
-            let panel = ships.upgrade().unwrap_or_else(|| cx.new(StatsShipsPanel::new));
+        gpui_kit::component::dock::register_panel(cx, "StatsShipsPanel", move |_state, window, cx| {
+            let panel = ships.upgrade().unwrap_or_else(|| cx.new(|cx| StatsShipsPanel::new(window, cx)));
             panel_handle(panel)
         });
         let chart_registry_for_build = chart_registry.clone();
@@ -511,7 +517,7 @@ impl StatsView {
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(overview.clone()), DockPlacement::Center, None, window, cx);
         });
-        let ships = cx.new(StatsShipsPanel::new);
+        let ships = cx.new(|cx| StatsShipsPanel::new(window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
@@ -553,9 +559,11 @@ impl StatsView {
         Self {
             games: Vec::new(),
             filters: StatsFilters::default(),
+            last_game_limit_count: DEFAULT_GAME_LIMIT,
             available_modes: Vec::new(),
             limit_input,
             dock_area,
+            chart_split_dragging: Rc::new(Cell::new(false)),
             overview,
             ships,
             charts: vec![first_chart],
@@ -599,7 +607,10 @@ impl StatsView {
         }
 
         if let GameLimit::Recent(count) = self.filters.limit {
-            self.limit_input.update(cx, |state, cx| state.set_value(count.to_string(), window, cx));
+            self.last_game_limit_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
+            self.filters.limit = GameLimit::Recent(self.last_game_limit_count);
+            self.limit_input
+                .update(cx, |state, cx| state.set_value(self.last_game_limit_count.to_string(), window, cx));
         }
         self.push_filtered(cx);
     }
@@ -695,8 +706,13 @@ impl StatsView {
     }
 
     /// Hands the roundup the build's art for its achievements.
-    pub fn set_game_data(&mut self, vfs: &wowsunpack::vfs::VfsPath, cx: &mut Context<Self>) {
-        self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, cx));
+    pub fn set_game_data(
+        &mut self,
+        vfs: &wowsunpack::vfs::VfsPath,
+        provider: Arc<wowsunpack::game_params::provider::GameMetadataProvider>,
+        cx: &mut Context<Self>,
+    ) {
+        self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, provider, cx));
     }
 
     /// Forgets one ship's games, which the Ships panel asks for but the tab
@@ -779,10 +795,18 @@ impl StatsView {
         cx.notify();
     }
 
-    fn set_limit_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        let count = self.limit_input.read(cx).value().parse::<usize>().unwrap_or(DEFAULT_GAME_LIMIT);
-        self.filters.limit =
-            if enabled { GameLimit::Recent(count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT)) } else { GameLimit::All };
+    fn set_limit_enabled(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if enabled {
+            if let Ok(count) = self.limit_input.read(cx).value().parse::<usize>() {
+                self.last_game_limit_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
+            }
+            self.limit_input.update(cx, |input, cx| {
+                input.set_value(self.last_game_limit_count.to_string(), window, cx);
+            });
+            self.filters.limit = GameLimit::Recent(self.last_game_limit_count);
+        } else {
+            self.filters.limit = GameLimit::All;
+        }
         self.push_filtered(cx);
     }
 
@@ -806,7 +830,7 @@ impl StatsView {
         .clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
 
         state.update(cx, |input, cx| input.set_value(next.to_string(), window, cx));
-        self.set_limit_count(next, cx);
+        self.set_limit_count(next, window, cx);
     }
 
     /// A typed value counts as well as a stepped one.
@@ -814,7 +838,7 @@ impl StatsView {
         &mut self,
         state: &Entity<InputState>,
         event: &InputEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let InputEvent::Change = event else { return };
@@ -823,14 +847,20 @@ impl StatsView {
             // applied value stands until the field parses again.
             return;
         };
-        self.set_limit_count(count, cx);
+        self.set_limit_count(count, window, cx);
     }
 
-    fn set_limit_count(&mut self, count: usize, cx: &mut Context<Self>) {
+    fn set_limit_count(&mut self, count: usize, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.filters.limit, GameLimit::All) {
             return;
         }
-        self.filters.limit = GameLimit::Recent(count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT));
+        self.last_game_limit_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
+        if count != self.last_game_limit_count {
+            self.limit_input.update(cx, |input, cx| {
+                input.set_value(self.last_game_limit_count.to_string(), window, cx);
+            });
+        }
+        self.filters.limit = GameLimit::Recent(self.last_game_limit_count);
         self.push_filtered(cx);
     }
 
@@ -910,6 +940,7 @@ fn collect_chart_ids(state: &gpui_kit::component::dock::PanelState, chart_ids: &
 
 impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let accent = cx.theme().primary;
         // Read when the pool is ready; an early frame can precede its setup.
         if !self.charts_load_started && self.charts_load_error.is_none() {
             self.load_charts(window, cx);
@@ -1014,7 +1045,9 @@ impl Render for StatsView {
                 Checkbox::new("stats-limit-enabled")
                     .label(t!("ui.stats.limit_to_recent").to_string())
                     .checked(limited)
-                    .on_click(cx.listener(|this, checked: &bool, _window, cx| this.set_limit_enabled(*checked, cx))),
+                    .on_click(
+                        cx.listener(|this, checked: &bool, window, cx| this.set_limit_enabled(*checked, window, cx)),
+                    ),
             )
             .child(
                 // NumberInput carries no id of its own, so the wrapper is what
@@ -1083,11 +1116,70 @@ impl Render for StatsView {
                     .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear_session(window, cx))),
             );
 
-        v_flex()
-            .id("stats-root")
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .child(filter_bar)
-            .child(div().flex_1().min_h(px(0.)).child(self.dock_area.clone()))
+        let dock_bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
+        let dock_bounds_for_layout = dock_bounds.clone();
+        let dock_area = self.dock_area.clone();
+        let dock_layout = div()
+            .relative()
+            .flex_1()
+            .min_h(px(0.))
+            .on_prepaint(move |bounds, _, _| dock_bounds_for_layout.set(bounds))
+            .child(dock_area.clone());
+        let chart_splitter = dock_area.read(cx).dock_size(DockPlacement::Right).map(|size| {
+            let drag_active = self.chart_split_dragging.clone();
+            let drag_start = drag_active.clone();
+            let bounds = dock_bounds.clone();
+            let dock_for_resize = dock_area.clone();
+            div()
+                .id("stats-chart-splitter")
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right(size - px(8.))
+                .w(px(16.))
+                .cursor_col_resize()
+                .group("stats-chart-splitter")
+                .occlude()
+                .on_mouse_down(MouseButton::Left, move |_event: &MouseDownEvent, _, cx: &mut App| {
+                    drag_start.set(true);
+                    cx.stop_propagation();
+                })
+                .on_prepaint(move |_, window, _| {
+                    let dock = dock_for_resize.clone();
+                    let bounds = bounds.clone();
+                    let drag_active_move = drag_active.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                        if !phase.bubble() || !drag_active_move.get() {
+                            return;
+                        }
+                        let area_bounds = bounds.get();
+                        dock.update(cx, |dock, cx| {
+                            let sizing = DockSizing::new(DockPlacement::Right)
+                                .with_area_bounds(area_bounds)
+                                .with_opposite_dock_size(dock.dock_size(DockPlacement::Left).unwrap_or(px(0.)));
+                            let size = sizing.clamp(sizing.size_from_pointer(event.position));
+                            dock.set_dock_size(DockPlacement::Right, size, window, cx);
+                        });
+                    });
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
+                        if phase.bubble() && event.button == MouseButton::Left {
+                            drag_active.set(false);
+                        }
+                    });
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(7.))
+                        .w(px(2.))
+                        .bg(border)
+                        .group_hover("stats-chart-splitter", |this| this.bg(accent)),
+                )
+        });
+        let dock_layout = dock_layout.children(chart_splitter);
+
+        v_flex().id("stats-root").track_focus(&self.focus_handle).size_full().child(filter_bar).child(dock_layout)
     }
 }

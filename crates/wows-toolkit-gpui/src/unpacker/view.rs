@@ -18,6 +18,7 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::dock::DockSkin;
@@ -794,9 +795,11 @@ impl UnpackerView {
 /// opening a menu whose every item would fail.
 fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoElement {
     let trigger = Button::new("unpacker-dump-params")
-        .label(t!("ui.unpacker.dump_parameters").to_string())
+        .child(crate::icons::icon(crate::icons::DATABASE))
         .compact()
+        .ghost()
         .disabled(!enabled)
+        .accessibility_label(t!("ui.unpacker.dump_parameters").to_string())
         .tooltip(if enabled {
             t!("ui.unpacker.dump_parameters_tooltip").into_owned()
         } else {

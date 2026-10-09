@@ -7,6 +7,8 @@
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
@@ -14,6 +16,8 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::replay_inspector::icons::IconCache;
@@ -63,6 +67,7 @@ pub struct StatsOverviewPanel {
     /// generic glyph gives way to the real icon.
     icons: IconCache,
     achievement_vfs: Option<VfsPath>,
+    achievement_provider: Option<Arc<GameMetadataProvider>>,
     loaded_achievement_icons: HashSet<String>,
     /// The name each ship in the session goes by, for the records that name
     /// only an id.
@@ -72,6 +77,7 @@ pub struct StatsOverviewPanel {
     list_state: ListState,
     scroll: ScrollHandle,
     horizontal_scroll: ScrollHandle,
+    achievements_expanded: bool,
     focus_handle: FocusHandle,
 }
 
@@ -82,6 +88,7 @@ impl StatsOverviewPanel {
         Self {
             icons: IconCache::new(),
             achievement_vfs: None,
+            achievement_provider: None,
             loaded_achievement_icons: HashSet::new(),
             ship_names: HashMap::new(),
             computed: Computed::default(),
@@ -89,13 +96,15 @@ impl StatsOverviewPanel {
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             scroll: ScrollHandle::new(),
             horizontal_scroll: ScrollHandle::new(),
+            achievements_expanded: true,
             focus_handle: cx.focus_handle(),
         }
     }
 
     /// Adopts the build's files for achievement art.
-    pub fn set_game_data(&mut self, vfs: &VfsPath, cx: &mut Context<Self>) {
+    pub fn set_game_data(&mut self, vfs: &VfsPath, provider: Arc<GameMetadataProvider>, cx: &mut Context<Self>) {
         self.achievement_vfs = Some(vfs.clone());
+        self.achievement_provider = Some(provider);
         self.icons = IconCache::new();
         self.loaded_achievement_icons.clear();
         self.load_achievement_icons(&self.computed.achievements.clone());
@@ -124,6 +133,11 @@ impl StatsOverviewPanel {
         self.list_state.reset(self.computed.ships.len());
         cx.notify();
     }
+
+    fn toggle_achievements(&mut self, cx: &mut Context<Self>) {
+        self.achievements_expanded = !self.achievements_expanded;
+        cx.notify();
+    }
 }
 
 impl StatsOverviewPanel {
@@ -141,6 +155,30 @@ impl StatsOverviewPanel {
             .cloned()
             .collect();
         self.icons.populate_achievements(&missing, &vfs);
+    }
+
+    fn achievement_name(&self, achievement: &SerializableAchievement) -> String {
+        self.achievement_provider
+            .as_ref()
+            .and_then(|provider| {
+                wowsunpack::game_params::translations::translate_achievement_name(
+                    &achievement.icon_key,
+                    provider.as_ref() as &dyn ResourceLoader,
+                )
+            })
+            .unwrap_or_else(|| achievement.display_name.clone())
+    }
+
+    fn achievement_description(&self, achievement: &SerializableAchievement) -> String {
+        self.achievement_provider
+            .as_ref()
+            .and_then(|provider| {
+                wowsunpack::game_params::translations::translate_achievement_description(
+                    &achievement.icon_key,
+                    provider.as_ref() as &dyn ResourceLoader,
+                )
+            })
+            .unwrap_or_else(|| achievement.description.clone())
     }
 }
 
@@ -200,38 +238,56 @@ impl Render for StatsOverviewPanel {
             .border_color(border)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(record))
             .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
-                // The band is the text's own colour over the panel, which is
-                // what `chip_text` is solved for; filling behind it with
-                // `chip_hue` would put one tone of a band on another.
                 let dark = crate::theme::is_dark_mode();
+                let hue: Hsla = rgb(personal_rating::chip_hue(rating.category)).into();
+                let text = rgb(personal_rating::chip_text(rating.category, dark));
                 this.child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(rgb(personal_rating::chip_text(rating.category, dark)))
-                        .child(format!("{} {:.0} ({})", t!("ui.stats.pr"), rating.pr, rating.category.name())),
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(crate::ui::rule_v(cx))
+                        .child(div().text_sm().text_color(dim).child(t!("ui.stats.pr").into_owned()))
+                        .child(
+                            h_flex()
+                                .px_1()
+                                .rounded(px(3.))
+                                .bg(hue.opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(text)
+                                .child(format!("{:.0} ({})", rating.pr, rating.category.name())),
+                        ),
                 )
             })
             .child(
-                div()
-                    .text_sm()
-                    .text_color(crate::theme::text_dim())
-                    .child(t!("ui.stats.frags", count = summary.total_frags).to_string()),
+                h_flex().gap_3().items_center().child(crate::ui::rule_v(cx)).child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.stats.frags", count = summary.total_frags).to_string()),
+                ),
             )
             .when_some(summary.best_frags, |this, (ship, frags)| {
                 let ship = self.ship_name(ship);
                 this.child(
-                    div()
-                        .text_sm()
-                        .text_color(dim)
-                        .child(t!("ui.stats.best_frags", ship = ship, count = frags).to_string()),
+                    h_flex().gap_3().items_center().child(crate::ui::rule_v(cx)).child(
+                        div()
+                            .text_sm()
+                            .text_color(dim)
+                            .child(t!("ui.stats.best_frags", ship = ship, count = frags).to_string()),
+                    ),
                 )
             })
             .when_some(summary.best_damage, |this, (ship, damage)| {
                 let ship = self.ship_name(ship);
-                this.child(div().text_sm().text_color(dim).child(
-                    t!("ui.stats.max_damage", ship = ship, damage = separate_thousands(damage, &locale)).to_string(),
-                ))
+                this.child(
+                    h_flex().gap_3().items_center().child(crate::ui::rule_v(cx)).child(
+                        div().text_sm().text_color(dim).child(
+                            t!("ui.stats.max_damage", ship = ship, damage = separate_thousands(damage, &locale))
+                                .to_string(),
+                        ),
+                    ),
+                )
             });
 
         let header = h_flex()
@@ -320,58 +376,105 @@ impl Render for StatsOverviewPanel {
             )
             .child(Scrollbar::horizontal(&self.horizontal_scroll));
 
-        let achievements = (!self.computed.achievements.is_empty()).then(|| {
+        let mut sorted_achievements = self.computed.achievements.clone();
+        sorted_achievements.sort_by(|a, b| {
+            b.count.cmp(&a.count).then_with(|| self.achievement_name(a).cmp(&self.achievement_name(b)))
+        });
+        let achievements = (!sorted_achievements.is_empty()).then(|| {
+            let expanded = self.achievements_expanded;
+            let panel = cx.entity();
+            let achievements: Vec<_> = sorted_achievements
+                .into_iter()
+                .map(|achievement| {
+                    let name = self.achievement_name(&achievement);
+                    let description = self.achievement_description(&achievement);
+                    (achievement, name, description)
+                })
+                .collect();
             v_flex()
                 .flex_none()
-                .max_h(px(190.))
+                .when(expanded, |this| this.max_h(px(190.)))
                 .gap_1()
                 .px_2()
                 .py_1()
                 .border_t_1()
                 .border_color(border)
                 .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .child(t!("ui.replay.sections.achievements").to_string()),
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Button::new("stats-achievements-toggle")
+                                .ghost()
+                                .compact()
+                                .flex_1()
+                                .justify_start()
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(Icon::new(if expanded {
+                                            IconName::ChevronDown
+                                        } else {
+                                            IconName::ChevronRight
+                                        }))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::BOLD)
+                                                .child(t!("ui.replay.sections.achievements").to_string()),
+                                        ),
+                                )
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    panel.update(cx, |this, cx| this.toggle_achievements(cx));
+                                }),
+                        )
+                        .child(div().text_xs().text_color(dim).child(achievements.len().to_string())),
                 )
-                .child(div().id("stats-achievements").overflow_y_scroll().track_scroll(&self.scroll).child(
-                    h_flex().flex_wrap().gap_3().children(self.computed.achievements.iter().enumerate().map(
-                        |(ix, earned)| {
-                            let art = self.icons.get_keyed(&format!("achievement:{}", earned.icon_key));
-                            let hover = if earned.description.is_empty() {
-                                earned.display_name.clone()
-                            } else {
-                                format!("{}: {}", earned.display_name, earned.description)
-                            };
-                            v_flex()
-                                .id(("stats-achievement", ix))
-                                .w(ACHIEVEMENT_COLUMN_WIDTH)
-                                .items_center()
-                                .gap_0()
-                                .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
-                                .child(match art {
-                                    Some(image) => {
-                                        img(image).w(ACHIEVEMENT_ICON_SIZE).h(ACHIEVEMENT_ICON_SIZE).into_any_element()
-                                    }
-                                    None => Icon::new(IconName::Star).into_any_element(),
-                                })
-                                .child(
-                                    div().text_xs().font_weight(FontWeight::BOLD).child(format!("x{}", earned.count)),
-                                )
-                                // Wrapped, not truncated: the name is what
-                                // tells two achievements apart, and half of
-                                // one tells the reader nothing.
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_center()
-                                        .text_color(crate::theme::text_dim())
-                                        .child(earned.display_name.clone()),
-                                )
-                        },
-                    )),
-                ))
+                .when(expanded, |this| {
+                    this.child(div().id("stats-achievements").overflow_y_scroll().track_scroll(&self.scroll).child(
+                        h_flex().flex_wrap().gap_3().children(achievements.iter().enumerate().map(
+                            |(ix, (earned, name, description))| {
+                                let art = self.icons.get_keyed(&format!("achievement:{}", earned.icon_key));
+                                let hover = if description.is_empty() {
+                                    name.clone()
+                                } else {
+                                    format!("{}: {}", name, description)
+                                };
+                                v_flex()
+                                    .id(("stats-achievement", ix))
+                                    .w(ACHIEVEMENT_COLUMN_WIDTH)
+                                    .items_center()
+                                    .gap_0()
+                                    .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+                                    .child(match art {
+                                        Some(image) => img(image)
+                                            .w(ACHIEVEMENT_ICON_SIZE)
+                                            .h(ACHIEVEMENT_ICON_SIZE)
+                                            .into_any_element(),
+                                        None => Icon::new(IconName::Star).into_any_element(),
+                                    })
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .child(format!("x{}", earned.count)),
+                                    )
+                                    // Wrapped, not truncated: the name is what
+                                    // tells two achievements apart, and half of
+                                    // one tells the reader nothing.
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_center()
+                                            .text_color(crate::theme::text_dim())
+                                            .child(name.clone()),
+                                    )
+                            },
+                        )),
+                    ))
+                })
         });
 
         v_flex()
