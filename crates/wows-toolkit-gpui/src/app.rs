@@ -3924,7 +3924,7 @@ impl Render for App {
             // what separates the chrome from the page rather than two greys
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
-            .child(div().flex_1().min_h(px(0.)).bg(cx.theme().background).child(body))
+            .child(div().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)))
             .children(self.status_strip(cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Dialogs, sheets and toasts are held by `Root` but drawn by

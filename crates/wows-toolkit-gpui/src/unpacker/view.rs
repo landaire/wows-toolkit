@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
@@ -849,8 +848,6 @@ impl Focusable for UnpackerView {
 
 impl Render for UnpackerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let border = cx.theme().border;
-
         // The egui tab shows the version bar only when there is a choice to
         // make; a single-build install gets no chrome for it.
         let version_bar = (self.builds.len() > 1).then(|| {
@@ -871,14 +868,8 @@ impl Render for UnpackerView {
         // One row of chrome: the build this listing is of, and the dump that
         // acts on the build rather than on the queue. Everything that acts on
         // the queue lives with the queue (`queue_panel.rs`).
-        let chrome = h_flex()
-            .flex_none()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
+        let chrome = crate::ui::toolbar(cx)
+            .flex_wrap()
             .when_some(version_bar, |this, bar| this.child(bar))
             .child(dump_params_popover(cx.entity(), self.package_vfs.is_some()))
             .when_some(self.dump_status.clone(), |this, status| {

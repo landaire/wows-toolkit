@@ -1035,15 +1035,8 @@ impl Render for StatsView {
                 })
         });
 
-        let filter_bar = h_flex()
-            .flex_none()
+        let filter_bar = crate::ui::toolbar(cx)
             .flex_wrap()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
             .child(
                 h_flex()
                     .gap_2()

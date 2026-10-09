@@ -215,7 +215,12 @@ impl Render for Shell {
         let dialogs = Root::render_dialog_layer(window, cx);
         let notifications = Root::render_notification_layer(window, cx);
 
-        div().size_full().child(self.content.clone()).children(sheets).children(dialogs).children(notifications)
+        div()
+            .size_full()
+            .child(crate::ui::workspace(self.content.clone(), cx))
+            .children(sheets)
+            .children(dialogs)
+            .children(notifications)
     }
 }
 

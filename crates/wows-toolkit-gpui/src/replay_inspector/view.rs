@@ -1889,14 +1889,8 @@ impl Render for ReplayInspectorView {
         self.share_session_with_renderers(cx);
         cx.defer_in(window, Self::open_what_the_host_asked_for);
         let session = crate::collab_popover::render(self, &entity, cx);
-        let replay_header = h_flex()
-            .flex_none()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
+        let replay_header = crate::ui::toolbar(cx)
+            .flex_wrap()
             .child(session)
             .child(
                 Button::new("replay-header-open-manually")
@@ -1924,12 +1918,15 @@ impl Render for ReplayInspectorView {
                     .id("replay-header-directory")
                     .test_support()
                     .aria_label(shown.clone())
+                    .max_w(px(280.))
+                    .min_w_0()
                     .gap_1()
                     .items_center()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
                     .child(crate::icons::icon(crate::icons::FOLDER))
-                    .child(shown)
+                    .child(div().min_w_0().truncate().child(shown.clone()))
+                    .tooltip(move |window, cx| Tooltip::new(shown.clone()).build(window, cx))
                     .into_any_element()
             }))
             .child(
