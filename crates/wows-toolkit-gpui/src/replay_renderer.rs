@@ -2773,11 +2773,9 @@ impl Panel for ReplayRendererPanel {
     }
 }
 
-impl Render for ReplayRendererPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let border = cx.theme().border;
-
-        let body: AnyElement = match &self.state {
+impl ReplayRendererPanel {
+    fn render_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        match &self.state {
             State::Baking => v_flex()
                 .size_full()
                 .items_center()
@@ -2869,8 +2867,11 @@ impl Render for ReplayRendererPanel {
                 }
                 None => div().size_full().into_any_element(),
             },
-        };
+        }
+    }
 
+    fn render_transport(&self, cx: &mut Context<Self>) -> AnyElement {
+        let border = cx.theme().border;
         let ready = matches!(self.state, State::Ready(_));
         let last_frame = self.frame_count().saturating_sub(1);
         // Refused until the second walk has read the battle, and at whichever
@@ -3032,7 +3033,14 @@ impl Render for ReplayRendererPanel {
             }))
             .child(scrubber)
             .child(controls);
+        transport.into_any_element()
+    }
+}
 
+impl Render for ReplayRendererPanel {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.render_body(cx);
+        let transport = self.render_transport(cx);
         v_flex()
             .id("replay-renderer")
             .relative()
@@ -3084,6 +3092,139 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
         })
     };
 
+    // Separate statements limit temporary storage in debug builds.
+    let mut content = v_flex().gap_1();
+    content = content.child(
+        h_flex()
+            .justify_between()
+            .items_center()
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child(player.clone()))
+            .child({
+                let owner = owner.clone();
+                Button::new("replay-renderer-ship-menu-close")
+                    .child(crate::icons::icon(crate::icons::X))
+                    .compact()
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
+                    })
+            }),
+    );
+    content = content.child({
+        let owner = owner.clone();
+        let player = player.clone();
+        Checkbox::new("replay-renderer-ship-trail")
+            .label(t!("ui.renderer.context.show_trail").to_string())
+            .checked(trail_on)
+            .on_click(move |checked, _window, cx: &mut App| {
+                let checked = *checked;
+                let player = player.clone();
+                owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
+            })
+    });
+    content = content.children(view.has_armor_to_show(menu.entity_id).then(|| {
+        let owner = owner.clone();
+        let entity_id = menu.entity_id;
+        Button::new("replay-renderer-ship-armor")
+            .label(t!("ui.renderer.context.realtime_armor").into_owned())
+            .compact()
+            .on_click(move |_event, _window, cx: &mut App| {
+                owner.update(cx, |panel, cx| panel.show_armor(entity_id, cx));
+            })
+    }));
+    content = content.child({
+        let owner = owner.clone();
+        let player = player.clone();
+        Button::new("replay-renderer-ship-only-trail")
+            .label(t!("ui.renderer.context.disable_other_trails").into_owned())
+            .compact()
+            .on_click(move |_event, _window, cx: &mut App| {
+                let player = player.clone();
+                owner.update(cx, |panel, cx| panel.only_trail(&player, cx));
+            })
+    });
+    content = content.child(
+        div()
+            .pt_1()
+            .text_xs()
+            .text_color(crate::theme::text_dim())
+            .child(t!("ui.renderer.context.ranges").into_owned()),
+    );
+    content = content.child(range_switch(
+        "replay-renderer-range-detection",
+        "ui.renderer.context.detection",
+        ranges.detection,
+        |filter, on| filter.detection = on,
+    ));
+    content = content.child(range_switch(
+        "replay-renderer-range-main",
+        "ui.renderer.context.main_battery",
+        ranges.main_battery,
+        |filter, on| filter.main_battery = on,
+    ));
+    content = content.child(range_switch(
+        "replay-renderer-range-secondary",
+        "ui.renderer.context.secondary",
+        ranges.secondary_battery,
+        |filter, on| filter.secondary_battery = on,
+    ));
+    content = content.child(range_switch(
+        "replay-renderer-range-torpedo",
+        "ui.renderer.context.torpedo",
+        ranges.torpedo,
+        |filter, on| filter.torpedo = on,
+    ));
+    content = content.child(range_switch(
+        "replay-renderer-range-radar",
+        "ui.renderer.context.radar",
+        ranges.radar,
+        |filter, on| filter.radar = on,
+    ));
+    content = content.child(range_switch(
+        "replay-renderer-range-hydro",
+        "ui.renderer.context.hydro",
+        ranges.hydro,
+        |filter, on| filter.hydro = on,
+    ));
+    content = content.child({
+        let owner = owner.clone();
+        let player = player.clone();
+        let all_on = ranges == ALL_RANGES;
+        Button::new("replay-renderer-every-range")
+            .label(
+                if all_on { t!("ui.renderer.context.disable_all") } else { t!("ui.renderer.context.enable_all") }
+                    .into_owned(),
+            )
+            .compact()
+            .on_click(move |_event, _window, cx: &mut App| {
+                let player = player.clone();
+                owner.update(cx, |panel, cx| panel.set_every_range_for(&player, !all_on, cx));
+            })
+    });
+    content = content.child(
+        h_flex()
+            .gap_1()
+            .child({
+                let owner = owner.clone();
+                let player = player.clone();
+                Button::new("replay-renderer-only-ranges")
+                    .label(t!("ui.renderer.context.disable_other_ranges").into_owned())
+                    .compact()
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        let player = player.clone();
+                        owner.update(cx, |panel, cx| panel.only_ranges(&player, cx));
+                    })
+            })
+            .child({
+                let owner = owner.clone();
+                Button::new("replay-renderer-all-ranges")
+                    .label(t!("ui.renderer.context.enable_all_ranges").into_owned())
+                    .compact()
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        owner.update(cx, |panel, cx| panel.all_ranges(cx));
+                    })
+            }),
+    );
+
     let at = menu.at;
     Some(
         deferred(
@@ -3095,144 +3236,7 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
                     .border_1()
                     .border_color(crate::theme::border_bright())
                     .bg(crate::theme::surface())
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                h_flex()
-                                    .justify_between()
-                                    .items_center()
-                                    .child(div().text_xs().font_weight(FontWeight::BOLD).child(player.clone()))
-                                    .child({
-                                        let owner = owner.clone();
-                                        Button::new("replay-renderer-ship-menu-close")
-                                            .child(crate::icons::icon(crate::icons::X))
-                                            .compact()
-                                            .on_click(move |_event, _window, cx: &mut App| {
-                                                owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
-                                            })
-                                    }),
-                            )
-                            .child({
-                                let owner = owner.clone();
-                                let player = player.clone();
-                                Checkbox::new("replay-renderer-ship-trail")
-                                    .label(t!("ui.renderer.context.show_trail").to_string())
-                                    .checked(trail_on)
-                                    .on_click(move |checked, _window, cx: &mut App| {
-                                        let checked = *checked;
-                                        let player = player.clone();
-                                        owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
-                                    })
-                            })
-                            .children(view.has_armor_to_show(menu.entity_id).then(|| {
-                                let owner = owner.clone();
-                                let entity_id = menu.entity_id;
-                                Button::new("replay-renderer-ship-armor")
-                                    .label(t!("ui.renderer.context.realtime_armor").into_owned())
-                                    .compact()
-                                    .on_click(move |_event, _window, cx: &mut App| {
-                                        owner.update(cx, |panel, cx| panel.show_armor(entity_id, cx));
-                                    })
-                            }))
-                            .child({
-                                let owner = owner.clone();
-                                let player = player.clone();
-                                Button::new("replay-renderer-ship-only-trail")
-                                    .label(t!("ui.renderer.context.disable_other_trails").into_owned())
-                                    .compact()
-                                    .on_click(move |_event, _window, cx: &mut App| {
-                                        let player = player.clone();
-                                        owner.update(cx, |panel, cx| panel.only_trail(&player, cx));
-                                    })
-                            })
-                            .child(
-                                div()
-                                    .pt_1()
-                                    .text_xs()
-                                    .text_color(crate::theme::text_dim())
-                                    .child(t!("ui.renderer.context.ranges").into_owned()),
-                            )
-                            .child(range_switch(
-                                "replay-renderer-range-detection",
-                                "ui.renderer.context.detection",
-                                ranges.detection,
-                                |filter, on| filter.detection = on,
-                            ))
-                            .child(range_switch(
-                                "replay-renderer-range-main",
-                                "ui.renderer.context.main_battery",
-                                ranges.main_battery,
-                                |filter, on| filter.main_battery = on,
-                            ))
-                            .child(range_switch(
-                                "replay-renderer-range-secondary",
-                                "ui.renderer.context.secondary",
-                                ranges.secondary_battery,
-                                |filter, on| filter.secondary_battery = on,
-                            ))
-                            .child(range_switch(
-                                "replay-renderer-range-torpedo",
-                                "ui.renderer.context.torpedo",
-                                ranges.torpedo,
-                                |filter, on| filter.torpedo = on,
-                            ))
-                            .child(range_switch(
-                                "replay-renderer-range-radar",
-                                "ui.renderer.context.radar",
-                                ranges.radar,
-                                |filter, on| filter.radar = on,
-                            ))
-                            .child(range_switch(
-                                "replay-renderer-range-hydro",
-                                "ui.renderer.context.hydro",
-                                ranges.hydro,
-                                |filter, on| filter.hydro = on,
-                            ))
-                            .child({
-                                let owner = owner.clone();
-                                let player = player.clone();
-                                let all_on = ranges == ALL_RANGES;
-                                Button::new("replay-renderer-every-range")
-                                    .label(
-                                        if all_on {
-                                            t!("ui.renderer.context.disable_all")
-                                        } else {
-                                            t!("ui.renderer.context.enable_all")
-                                        }
-                                        .into_owned(),
-                                    )
-                                    .compact()
-                                    .on_click(move |_event, _window, cx: &mut App| {
-                                        let player = player.clone();
-                                        owner.update(cx, |panel, cx| panel.set_every_range_for(&player, !all_on, cx));
-                                    })
-                            })
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .child({
-                                        let owner = owner.clone();
-                                        let player = player.clone();
-                                        Button::new("replay-renderer-only-ranges")
-                                            .label(t!("ui.renderer.context.disable_other_ranges").into_owned())
-                                            .compact()
-                                            .on_click(move |_event, _window, cx: &mut App| {
-                                                let player = player.clone();
-                                                owner.update(cx, |panel, cx| panel.only_ranges(&player, cx));
-                                            })
-                                    })
-                                    .child({
-                                        let owner = owner.clone();
-                                        Button::new("replay-renderer-all-ranges")
-                                            .label(t!("ui.renderer.context.enable_all_ranges").into_owned())
-                                            .compact()
-                                            .on_click(move |_event, _window, cx: &mut App| {
-                                                owner.update(cx, |panel, cx| panel.all_ranges(cx));
-                                            })
-                                    }),
-                            ),
-                    ),
+                    .child(content),
             ),
         )
         .with_priority(1)
