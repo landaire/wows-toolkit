@@ -124,16 +124,17 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                         .gap_1()
                         .when_some(message.clan_tag.as_ref().zip(message.clan_color_rgb), |this, (tag, color)| {
                             let clan_color: Hsla = rgb(color).into();
-                            this.child(div().text_color(clan_color).child(format!("[{tag}]")))
+                            this.child(
+                                div()
+                                    .text_color(clan_color)
+                                    .child(crate::ui::selectable_text(("chat-clan", ix), format!("[{tag}]"))),
+                            )
                         })
-                        .child(div().text_color(name_color).child(format!("{}:", message.sender_name))),
+                        .child(div().text_color(name_color).child(crate::ui::selectable_text(
+                            ("chat-sender", ix),
+                            format!("{}:", message.sender_name),
+                        ))),
                 )
-                // The message itself is selectable; the clan tag and the
-                // sender are not. The pane draws every message it holds on
-                // every frame, and a selection run registers itself each
-                // time, so a battle log's worth of them is paid for three
-                // times over for two words nobody lifts out on their own. The
-                // copy button beside the row takes the whole line.
                 .child(
                     div()
                         .text_color(body_color)
