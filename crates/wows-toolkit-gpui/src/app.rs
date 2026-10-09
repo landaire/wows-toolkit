@@ -398,7 +398,7 @@ impl AppTab {
     /// (`app.rs`'s `icon_t` pairs).
     pub fn glyph(self) -> &'static str {
         match self {
-            AppTab::ReplayInspector => crate::icons::ARCHIVE,
+            AppTab::ReplayInspector => crate::icons::MAGNIFYING_GLASS,
             AppTab::Stats => crate::icons::CHART_BAR,
             AppTab::PlayerTracker => crate::icons::DETECTIVE,
             AppTab::Search => crate::icons::MAGNIFYING_GLASS,
