@@ -25,6 +25,7 @@ use gpui_kit::component::Side;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::button::Toggle;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
@@ -119,8 +120,7 @@ pub fn render_toolbar(
         .border_l_2()
         .border_color(if trajectory_active { crate::theme::accent() } else { cx.theme().border })
         .when(trajectory_active, |row| row.bg(crate::theme::accent().opacity(0.08)))
-        .child(render_trajectory_button(view, entity))
-        .when_some(view.pane(), |this, pane| this.child(render_firing_controls(&pane, cx)));
+        .child(render_trajectory_button(view, entity));
 
     crate::ui::toolbar(cx).flex_col().items_stretch().p_0().gap_0().w_full().child(commands).child(trajectory).when(
         trajectory_active,
@@ -384,8 +384,18 @@ fn render_trajectory_section(
 
     v_flex()
         .gap_1()
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.trajectory").to_string()))
-        .child(labeled_slider_row(t!("ui.armor.trajectory_range").into_owned(), range_slider, cast_range.value(), !on))
+        .child(
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .text_sm()
+                        .child(t!("ui.armor.trajectory_range").to_string())
+                        .child(format!("{:.1}", cast_range.value())),
+                )
+                .child(div().w_full().h(crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(range_slider).disabled(!on))),
+        )
         .child({
             let entity = entity.clone();
             let continuing = state.continue_on_ricochet;
@@ -472,11 +482,10 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
     )
 }
 
-/// The attacker and ammunition used by trajectory casts, kept beside the
-/// mode button so both inputs are visible at the point of use.
-fn render_firing_controls(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
+/// The attacker and ammunition used by trajectory casts.
+fn render_firing_controls(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>) -> AnyElement {
     let (ships, firing_ship, firing_shell) = {
-        let pen = pane.read(cx).penetration();
+        let pen = view.penetration();
         (pen.ships.clone(), pen.firing_ship.clone(), pen.firing_shell)
     };
     let selected_ship = ships.iter().find(|ship| Some(ship.param_index.as_str()) == firing_ship.as_deref());
@@ -506,18 +515,10 @@ fn render_firing_controls(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElemen
         .unwrap_or_else(|| t!("ui.armor.trajectory_select_shell").into_owned());
 
     let ship_picker: AnyElement = if ships.is_empty() {
-        let pane = pane.clone();
-        Button::new("armor-trajectory-ship")
-            .label(t!("ui.armor.trajectory_add_ship").to_string())
-            .compact()
-            .tooltip(t!("ui.armor.trajectory_add_ship_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                pane.update(cx, |pane, cx| {
-                    if !pane.analysis_open() {
-                        pane.toggle_analysis(cx);
-                    }
-                });
-            })
+        div()
+            .text_xs()
+            .text_color(crate::theme::text_dim())
+            .child(t!("ui.armor.pen.add_a_ship").to_string())
             .into_any_element()
     } else {
         let pane = pane.clone();
@@ -573,7 +574,62 @@ fn render_firing_controls(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElemen
             })
     };
 
-    h_flex().flex_wrap().min_w(px(0.)).gap_1().items_center().child(ship_picker).child(shell_picker).into_any_element()
+    v_flex().min_w_0().gap_1().items_start().child(ship_picker).child(shell_picker).into_any_element()
+}
+
+pub(super) fn render_trajectory_panel(
+    view: &ArmorViewerPane,
+    pane: &Entity<ArmorViewerPane>,
+    viewport: &Entity<ViewportView>,
+    cx: &App,
+) -> AnyElement {
+    let viewport_view = viewport.read(cx);
+    let state = viewport_view.trajectory_state();
+    let range = viewport_view.cast_range();
+    let slider = viewport_view.display_sliders.cast_range.clone();
+    v_flex()
+        .gap_2()
+        .p_2()
+        .min_w_0()
+        .border_1()
+        .border_color(crate::theme::accent().opacity(0.45))
+        .rounded_md()
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(crate::theme::accent())
+                .child(t!("ui.armor.trajectory_on").to_string()),
+        )
+        .child(analysis::render_ship_search(view, pane, cx))
+        .child(render_firing_controls(view, pane))
+        .children(view.penetration().ships.iter().enumerate().map(|(index, ship)| {
+            let pane = pane.clone();
+            h_flex()
+                .min_w_0()
+                .gap_1()
+                .items_center()
+                .child(div().flex_1().min_w_0().text_xs().child(ship.display_name.clone()))
+                .child(
+                    Button::new(("trajectory-remove-ship", index))
+                        .icon(IconName::Close)
+                        .ghost()
+                        .compact()
+                        .tooltip("Remove ship")
+                        .on_click(move |_event, _window, cx| {
+                            pane.update(cx, |pane, cx| pane.remove_comparison_ship(index, cx));
+                        }),
+                )
+        }))
+        .child(render_trajectory_section(viewport, &state, range, &slider))
+        .child(
+            div()
+                .text_xs()
+                .whitespace_normal()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.armor.trajectory_tooltip").to_string()),
+        )
+        .into_any_element()
 }
 
 /// Toolbar toggle for splash mode, carrying how many zones the last burst
@@ -1285,11 +1341,6 @@ struct DisplayPopoverSnapshot {
     /// How far the hull is currently heeled over, for the readout beside its
     /// slider.
     roll_deg: f32,
-    trajectory: TrajectoryState,
-    /// The range cast shells are fired from, for the readout beside its
-    /// slider.
-    cast_range: Km,
-    cast_range_slider: Entity<SliderState>,
     camera_rings: CameraRingSettings,
     /// The modes this ship's own GameParams name.
     camera_modes: Vec<String>,
@@ -1345,9 +1396,6 @@ pub(crate) fn render_display_popover_content(
             roll_deg: view.model_roll_deg(),
             camera_rings: view.camera_rings(),
             camera_modes: view.camera_modes(),
-            trajectory: view.trajectory_state(),
-            cast_range: view.cast_range(),
-            cast_range_slider: view.display_sliders.cast_range.clone(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
             camera_height_slider: view.display_sliders.camera_height.clone(),
             perspective: view.perspective(),
@@ -1370,9 +1418,6 @@ pub(crate) fn render_display_popover_content(
         lighting,
         camera_rings,
         camera_modes,
-        trajectory,
-        cast_range,
-        cast_range_slider,
         camera_fov_slider,
         camera_height_slider,
         perspective,
@@ -1490,8 +1535,6 @@ pub(crate) fn render_display_popover_content(
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
         .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
-        .child(div().h(px(1.)).bg(border))
-        .child(render_trajectory_section(entity, &trajectory, cast_range, &cast_range_slider))
         .child(div().h(px(1.)).bg(border))
         .child(render_camera_rings_section(
             entity,

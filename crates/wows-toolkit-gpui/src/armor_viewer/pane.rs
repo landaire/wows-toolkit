@@ -738,6 +738,12 @@ impl ArmorViewerPane {
     /// never re-triggers the event it's reacting to.
     fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportEvent, cx: &mut Context<Self>) {
         match event {
+            ViewportEvent::TrajectoryModeChanged => {
+                if source.read(cx).trajectory_state().shown {
+                    self.show_options = true;
+                }
+                cx.notify();
+            }
             ViewportEvent::CameraChanged if self.mirror_cameras => self.push_camera_from(&source, cx),
             ViewportEvent::SettingsChanged => {
                 if self.sync_options {
