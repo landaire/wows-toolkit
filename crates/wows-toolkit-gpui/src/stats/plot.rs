@@ -12,6 +12,7 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_toolkit_viewmodel::stats::chart::ChartBar;
 use wows_toolkit_viewmodel::stats::chart::ChartSeries;
 use wows_toolkit_viewmodel::stats::chart::Rgb;
@@ -21,9 +22,14 @@ const LEFT_GUTTER: f32 = 64.0;
 const BOTTOM_GUTTER: f32 = 40.0;
 const TOP_GUTTER: f32 = 24.0;
 const RIGHT_GUTTER: f32 = 16.0;
+const LEGEND_MIN_WIDTH: f32 = 96.0;
+const LEGEND_MAX_WIDTH: f32 = 190.0;
+const LEGEND_GAP: f32 = 12.0;
 
 /// Ticks per axis. Enough to read a value off, few enough not to crowd.
 const TICKS: usize = 5;
+const MIN_GAME_TICK_SPACING: f32 = 56.0;
+const MIN_VALUE_TICK_SPACING: f32 = 28.0;
 
 const TICK_FONT: f32 = 11.0;
 const LABEL_FONT: f32 = 12.0;
@@ -104,13 +110,14 @@ pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &
 
 /// Whether the bounds leave room for a plot after its axis gutters.
 pub fn has_drawable_area(bounds: Bounds<Pixels>) -> bool {
-    let area = plot_area(bounds);
+    let area = plot_area(bounds, 0.0);
     area.size.width > px(0.) && area.size.height > px(0.)
 }
 
 /// Draws `plot` into `bounds` on any canvas.
 pub fn draw(plot: &Plot<'_>, bounds: Bounds<Pixels>, colors: Colors, canvas: &mut dyn PlotCanvas) {
-    let area = plot_area(bounds);
+    let legend_width = legend_width(plot, bounds, canvas);
+    let area = plot_area(bounds, legend_width);
     if area.size.width <= px(0.) || area.size.height <= px(0.) {
         return;
     }
@@ -139,7 +146,7 @@ pub fn draw(plot: &Plot<'_>, bounds: Bounds<Pixels>, colors: Colors, canvas: &mu
     });
 
     paint_axis_titles(plot, bounds, area, colors.text, canvas);
-    paint_legend(plot, area, colors.text, canvas);
+    paint_legend(plot, bounds, legend_width, colors.text, canvas);
 }
 
 /// What a plot draws through.
@@ -195,8 +202,9 @@ pub struct Colors {
 
 /// The rectangle the data itself is drawn in, inside the gutters the axes
 /// and their titles take.
-fn plot_area(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    let width = (bounds.size.width.as_f32() - LEFT_GUTTER - RIGHT_GUTTER).max(0.0);
+fn plot_area(bounds: Bounds<Pixels>, legend_width: f32) -> Bounds<Pixels> {
+    let legend_space = if legend_width > 0.0 { legend_width + LEGEND_GAP } else { 0.0 };
+    let width = (bounds.size.width.as_f32() - LEFT_GUTTER - RIGHT_GUTTER - legend_space).max(0.0);
     let height = (bounds.size.height.as_f32() - TOP_GUTTER - BOTTOM_GUTTER).max(0.0);
     Bounds::new(point(bounds.origin.x + px(LEFT_GUTTER), bounds.origin.y + px(TOP_GUTTER)), size(px(width), px(height)))
 }
@@ -266,7 +274,9 @@ fn viewed(x: f32, y: f32, view: PlotView) -> Point<Pixels> {
 
 fn paint_grid(ticks: &[f64], frame: &Frame, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let area = frame.area;
-    for tick in ticks {
+    let base_spacing = area.size.height.as_f32() / ticks.len().saturating_sub(1).max(1) as f32;
+    let stride = spacing_stride(base_spacing * frame.view.zoom, MIN_VALUE_TICK_SPACING);
+    for tick in ticks.iter().step_by(stride) {
         let y = viewed(0.0, value_to_y(*tick, frame.min, frame.max, area), frame.view).y;
         if y < area.origin.y || y > area.origin.y + area.size.height {
             continue;
@@ -290,7 +300,9 @@ fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, canvas: &mut
         return;
     }
     let area = frame.area;
-    let step = (count / TICKS).max(1);
+    let base_step = (count / TICKS).max(1);
+    let point_spacing = area.size.width.as_f32() / count.saturating_sub(1).max(1) as f32 * frame.view.zoom;
+    let step = base_step.max(spacing_stride(point_spacing, MIN_GAME_TICK_SPACING));
     for index in (0..count).step_by(step) {
         let x = viewed(index_to_x(index, count, area), 0.0, frame.view).x;
         if x < area.origin.x || x > area.origin.x + area.size.width {
@@ -304,6 +316,11 @@ fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, canvas: &mut
     }
 }
 
+/// Drops axis marks whose transformed spacing would make their labels overlap.
+fn spacing_stride(spacing: f32, minimum: f32) -> usize {
+    if !spacing.is_finite() || spacing <= 0.0 { usize::MAX } else { (minimum / spacing).ceil().max(1.0) as usize }
+}
+
 fn paint_axes(area: Bounds<Pixels>, color: Hsla, canvas: &mut dyn PlotCanvas) {
     canvas.fill(
         Bounds::new(point(area.origin.x, area.origin.y + area.size.height), size(area.size.width, px(1.))),
@@ -314,16 +331,21 @@ fn paint_axes(area: Bounds<Pixels>, color: Hsla, canvas: &mut dyn PlotCanvas) {
 }
 
 fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
+    let (line_width, point_radius, opacity) = match plot.series.len() {
+        0..=7 => (1.5, POINT_RADIUS, 1.0),
+        8..=15 => (1.2, 2.25, 0.82),
+        _ => (1.0, 1.75, 0.68),
+    };
     for series in plot.series {
         let count = series.points.len();
         let positions: Vec<Point<Pixels>> =
             series.points.iter().enumerate().map(|(index, point)| frame.place(index, count, point.value)).collect();
         let color = hsla_from(series.color);
 
-        canvas.polyline(&positions, 1.5, color);
+        canvas.polyline(&positions, line_width, color.opacity(opacity));
 
         for (index, position) in positions.iter().enumerate() {
-            canvas.fill(dot_bounds(*position), color, px(POINT_RADIUS));
+            canvas.fill(dot_bounds(*position, point_radius), color.opacity(opacity), px(point_radius));
             if plot.show_values {
                 let label = format_value(series.points[index].value);
                 let width = canvas.measure(&label, TICK_FONT);
@@ -391,27 +413,78 @@ fn paint_axis_titles(
     canvas.text(origin, plot.x_label, LABEL_FONT, color);
 }
 
-/// Names each line beside its own colour, in the top right of the plot. Bars
-/// carry their name under them, so they are not listed again.
-fn paint_legend(plot: &Plot<'_>, area: Bounds<Pixels>, color: Hsla, canvas: &mut dyn PlotCanvas) {
-    for (row, series) in plot.series.iter().enumerate() {
-        let top = area.origin.y + px(LEGEND_ROW * row as f32 + 2.0);
-        if top + px(LEGEND_ROW) > area.origin.y + area.size.height {
-            return;
-        }
-        let width = canvas.measure(&series.name, TICK_FONT);
-        let right = area.origin.x + area.size.width;
-        let swatch = point(right - width - px(LEGEND_SWATCH + 10.0), top + px(3.));
-        canvas.fill(Bounds::new(swatch, size(px(LEGEND_SWATCH), px(LEGEND_SWATCH))), hsla_from(series.color), px(2.));
-        canvas.text(point(swatch.x + px(LEGEND_SWATCH + 4.0), top), &series.name, TICK_FONT, color);
+/// Names each line in a column beside the plot. Bars carry their name under
+/// them, so they are not listed again.
+fn legend_width(plot: &Plot<'_>, bounds: Bounds<Pixels>, canvas: &mut dyn PlotCanvas) -> f32 {
+    if plot.series.is_empty() {
+        return 0.0;
     }
+    let available = (bounds.size.width.as_f32() - LEFT_GUTTER - RIGHT_GUTTER - LEGEND_GAP - 120.0).max(0.0);
+    if available < LEGEND_MIN_WIDTH {
+        return 0.0;
+    }
+    let widest = plot.series.iter().map(|series| canvas.measure(&series.name, TICK_FONT).as_f32()).fold(0.0, f32::max);
+    (widest + LEGEND_SWATCH + 10.0).clamp(LEGEND_MIN_WIDTH.min(available), LEGEND_MAX_WIDTH.min(available))
 }
 
-fn dot_bounds(centre: Point<Pixels>) -> Bounds<Pixels> {
-    Bounds::new(
-        point(centre.x - px(POINT_RADIUS), centre.y - px(POINT_RADIUS)),
-        size(px(POINT_RADIUS * 2.0), px(POINT_RADIUS * 2.0)),
-    )
+fn paint_legend(plot: &Plot<'_>, bounds: Bounds<Pixels>, width: f32, color: Hsla, canvas: &mut dyn PlotCanvas) {
+    if width == 0.0 {
+        return;
+    }
+    let right = bounds.origin.x + bounds.size.width - px(RIGHT_GUTTER);
+    let column = Bounds::new(
+        point(right - px(width), bounds.origin.y + px(TOP_GUTTER)),
+        size(px(width), (bounds.size.height - px(TOP_GUTTER + BOTTOM_GUTTER)).max(px(0.))),
+    );
+    let rows = (column.size.height.as_f32() / LEGEND_ROW).floor() as usize;
+    let show_more = plot.series.len() > rows && rows > 0;
+    let visible = if show_more { rows.saturating_sub(1) } else { rows };
+
+    canvas.clipped(column, &mut |canvas| {
+        for (row, series) in plot.series.iter().take(visible).enumerate() {
+            let top = column.origin.y + px(LEGEND_ROW * row as f32 + 2.0);
+            let swatch = point(column.origin.x, top + px(3.));
+            canvas.fill(
+                Bounds::new(swatch, size(px(LEGEND_SWATCH), px(LEGEND_SWATCH))),
+                hsla_from(series.color),
+                px(2.),
+            );
+            let label_width = (width - LEGEND_SWATCH - 6.0).max(0.0);
+            let label = fit_legend_label(&series.name, label_width, canvas);
+            canvas.text(point(swatch.x + px(LEGEND_SWATCH + 6.0), top), &label, TICK_FONT, color);
+        }
+        if show_more {
+            let top = column.origin.y + px(LEGEND_ROW * visible as f32 + 2.0);
+            let remaining = plot.series.len() - visible;
+            canvas.text(
+                point(column.origin.x, top),
+                &t!("ui.stats.series_more", count = remaining).into_owned(),
+                TICK_FONT,
+                color,
+            );
+        }
+    });
+}
+
+fn fit_legend_label(name: &str, width: f32, canvas: &mut dyn PlotCanvas) -> String {
+    if canvas.measure(name, TICK_FONT).as_f32() <= width {
+        return name.to_string();
+    }
+    let mut label = String::new();
+    for character in name.chars() {
+        let mut candidate = label.clone();
+        candidate.push(character);
+        candidate.push_str("...");
+        if canvas.measure(&candidate, TICK_FONT).as_f32() > width {
+            break;
+        }
+        label.push(character);
+    }
+    format!("{label}...")
+}
+
+fn dot_bounds(centre: Point<Pixels>, radius: f32) -> Bounds<Pixels> {
+    Bounds::new(point(centre.x - px(radius), centre.y - px(radius)), size(px(radius * 2.0), px(radius * 2.0)))
 }
 
 /// Draws a plot onto the window, which is what the chart panel shows.

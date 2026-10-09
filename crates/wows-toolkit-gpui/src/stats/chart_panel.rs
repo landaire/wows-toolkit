@@ -41,6 +41,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
 use wows_toolkit_viewmodel::stats::chart::line_chart_series;
 use wows_toolkit_viewmodel::stats::chart::ships_played;
+use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
@@ -316,7 +317,11 @@ impl StatsChartPanel {
         let games = filter_games_per_ship(&self.all_games, &self.effective_filters());
         self.ships = per_ship_performance_by_id(&games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
-        self.played = ships_played(&games);
+        // The chart keeps up to N games per ship, but its picker follows the
+        // tab's last N games for the session. Otherwise old ships remain
+        // offered after the recent-games limit is enabled.
+        let recent_games = filter_games(&self.all_games, &self.effective_filters());
+        self.played = ships_played(&recent_games);
         // Listed by name: a long session's picker has no other order anyone
         // could look a ship up in.
         self.played.sort_by(|left, right| left.1.cmp(&right.1));
@@ -570,13 +575,6 @@ impl StatsChartPanel {
         let stats = self.selectable_stats();
         let (stat, mode, running, combined, show_values) =
             (self.stat, self.mode, self.running, self.combined, self.show_values);
-        let played = self.played.clone();
-        let ship_search = self.ship_search.clone();
-        let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_ship_query = super::normalize_ship_search(&ship_query);
-        let selected = self.selected_ships.clone();
-        let selected_ship_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
-        let played_ship_count = played.len();
         let overrides = self.overrides_tab();
         let active = self.effective_filters();
         let modes = self.offered_modes();
@@ -636,38 +634,6 @@ impl StatsChartPanel {
             let combined_entity = entity.clone();
             let running_entity = entity.clone();
             let values_entity = entity.clone();
-            let all_entity = entity.clone();
-            let none_entity = entity.clone();
-            let ship_entity = entity.clone();
-            let clear_ship_search_entity = entity.clone();
-
-            let visible_ships: Vec<_> = played
-                .iter()
-                .filter(|(_, name)| {
-                    normalized_ship_query.is_empty()
-                        || super::normalize_ship_search(name).contains(&normalized_ship_query)
-                })
-                .cloned()
-                .collect();
-            let visible_ship_ids: Vec<_> = visible_ships.iter().map(|(ship_id, _)| *ship_id).collect();
-            let no_ship_matches = !normalized_ship_query.is_empty() && visible_ships.is_empty();
-            let has_visible_ships = !visible_ship_ids.is_empty();
-            let all_ship_ids = visible_ship_ids.clone();
-            let no_ship_ids = visible_ship_ids;
-            let ship_rows: Vec<_> = visible_ships
-                .iter()
-                .map(|(ship_id, name)| {
-                    let ship_id = *ship_id;
-                    let name = name.clone();
-                    let entity = ship_entity.clone();
-                    Checkbox::new(SharedString::from(format!("chart-ship-{id}-{}", ship_id.raw())))
-                        .label(name)
-                        .checked(selected.contains(&ship_id))
-                        .on_click(move |_checked, _window, cx| {
-                            entity.update(cx, |this, cx| this.toggle_ship(ship_id, cx));
-                        })
-                })
-                .collect();
 
             v_flex()
                 .min_w(SETTINGS_MIN_WIDTH)
@@ -777,6 +743,70 @@ impl StatsChartPanel {
                         )
                     })
                 })
+                .into_any_element()
+        })
+    }
+
+    fn ship_filter_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let id = self.id;
+        let entity = cx.entity();
+        let played = self.played.clone();
+        let ship_search = self.ship_search.clone();
+        let ship_query = self.ship_search.read(cx).value().to_string();
+        let normalized_query = super::normalize_ship_search(&ship_query);
+        let selected = self.selected_ships.clone();
+        let selected_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
+        let total_count = played.len();
+        let selection_count = t!("ui.stats.ship_selection_count", selected = selected_count, total = total_count);
+        let accessibility_label = format!("{}: {selection_count}", t!("ui.stats.filter_ships"));
+
+        let trigger = Button::new(("chart-ship-filter", id))
+            .child(crate::icons::icon(crate::icons::FUNNEL))
+            .child(t!("ui.stats.ships").to_string())
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child(selection_count.clone()))
+            .compact()
+            .selected(selected_count < total_count)
+            .tooltip(t!("ui.stats.filter_ships").to_string())
+            .accessibility_label(accessibility_label);
+
+        Popover::new(("chart-ship-filter-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
+            let visible: Vec<_> = played
+                .iter()
+                .filter(|(_, name)| {
+                    normalized_query.is_empty() || super::normalize_ship_search(name).contains(&normalized_query)
+                })
+                .cloned()
+                .collect();
+            let visible_ids: Vec<_> = visible.iter().map(|(ship_id, _)| *ship_id).collect();
+            let no_matches = !normalized_query.is_empty() && visible.is_empty();
+            let has_visible = !visible_ids.is_empty();
+            let all_ids = visible_ids.clone();
+            let none_ids = visible_ids;
+            let ship_rows: Vec<_> = visible
+                .iter()
+                .map(|(ship_id, name)| {
+                    let ship_id = *ship_id;
+                    let entity = entity.clone();
+                    Checkbox::new(SharedString::from(format!("chart-ship-{id}-{}", ship_id.raw())))
+                        .label(name.clone())
+                        .checked(selected.contains(&ship_id))
+                        .on_click(move |_checked, _window, cx| {
+                            entity.update(cx, |this, cx| this.toggle_ship(ship_id, cx));
+                        })
+                })
+                .collect();
+            let clear_search = entity.clone();
+            let all_entity = entity.clone();
+            let none_entity = entity.clone();
+
+            v_flex()
+                .min_w(SETTINGS_MIN_WIDTH)
+                .max_w(SETTINGS_MAX_WIDTH)
+                .max_h(SETTINGS_MAX_HEIGHT)
+                .gap_2()
+                .p_2()
+                .id(("chart-ship-filter-body", id))
+                .overflow_scroll()
                 .child(
                     h_flex()
                         .items_center()
@@ -784,8 +814,8 @@ impl StatsChartPanel {
                         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.ships").to_string()))
                         .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!(
                             "ui.stats.ship_selection_count",
-                            selected = selected_ship_count,
-                            total = played_ship_count
+                            selected = selected_count,
+                            total = total_count
                         ))),
                 )
                 .child(
@@ -800,7 +830,7 @@ impl StatsChartPanel {
                                     .tooltip(t!("ui.buttons.clear").to_string())
                                     .accessibility_label(t!("ui.buttons.clear").to_string())
                                     .on_click(move |_event, window, cx| {
-                                        clear_ship_search_entity.update(cx, |this, cx| {
+                                        clear_search.update(cx, |this, cx| {
                                             this.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
                                         });
                                     }),
@@ -814,26 +844,24 @@ impl StatsChartPanel {
                             Button::new(("chart-ships-all", id))
                                 .label(t!("ui.stats.all_ships").to_string())
                                 .compact()
-                                .disabled(!has_visible_ships)
+                                .disabled(!has_visible)
                                 .tooltip(t!("ui.stats.all_ships_tooltip").to_string())
                                 .on_click(move |_event, _window, cx| {
-                                    let ships = all_ship_ids.clone();
-                                    all_entity.update(cx, |this, cx| this.set_ships_selected(&ships, true, cx));
+                                    all_entity.update(cx, |this, cx| this.set_ships_selected(&all_ids, true, cx));
                                 }),
                         )
                         .child(
                             Button::new(("chart-ships-none", id))
                                 .label(t!("ui.stats.no_ships").to_string())
                                 .compact()
-                                .disabled(!has_visible_ships)
+                                .disabled(!has_visible)
                                 .tooltip(t!("ui.stats.no_ships_tooltip").to_string())
                                 .on_click(move |_event, _window, cx| {
-                                    let ships = no_ship_ids.clone();
-                                    none_entity.update(cx, |this, cx| this.set_ships_selected(&ships, false, cx));
+                                    none_entity.update(cx, |this, cx| this.set_ships_selected(&none_ids, false, cx));
                                 }),
                         ),
                 )
-                .when(no_ship_matches, |this| {
+                .when(no_matches, |this| {
                     this.child(
                         div()
                             .text_xs()
@@ -898,6 +926,7 @@ impl Render for StatsChartPanel {
             .border_b_1()
             .border_color(border)
             .child(self.settings_menu(cx))
+            .child(self.ship_filter_menu(cx))
             .child(div().flex_1())
             .when(!empty && self.plot_bounds.is_some_and(plot::has_drawable_area), |this| {
                 this.child(

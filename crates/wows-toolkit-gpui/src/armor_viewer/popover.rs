@@ -29,6 +29,8 @@ use gpui_kit::component::button::Toggle;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::sidebar::SidebarToggleButton;
 use gpui_kit::component::slider::Slider;
@@ -83,14 +85,14 @@ pub fn render_toolbar(
     entity: &Entity<ViewportView>,
     cx: &mut Context<ViewportView>,
 ) -> impl IntoElement + use<> {
-    h_flex()
+    let trajectory_active = view.trajectory_state().shown;
+    let commands = h_flex()
         .flex_none()
+        .flex_wrap()
         .gap_2()
         .items_center()
         .px_2()
         .py_1()
-        .border_b_1()
-        .border_color(cx.theme().border)
         // What this viewport is showing, where the controls that act on it
         // are, rather than on a strip of its own above them.
         .when_some(view.shown_ship_name(), |this, name| {
@@ -98,7 +100,6 @@ pub fn render_toolbar(
         })
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
-        .child(render_trajectory_button(view, entity))
         .child(render_splash_button(view, entity))
         .child(render_splash_boxes_button(view, entity))
         .child(render_export_button(view, entity))
@@ -107,6 +108,39 @@ pub fn render_toolbar(
             this.child(crate::ui::rule_v(cx))
                 .child(render_options_button(pane.clone(), cx))
                 .child(render_penetration_button(pane, cx))
+        });
+
+    let trajectory = h_flex()
+        .flex_wrap()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .border_l_2()
+        .border_color(if trajectory_active { crate::theme::accent() } else { cx.theme().border })
+        .when(trajectory_active, |row| row.bg(crate::theme::accent().opacity(0.08)))
+        .child(render_trajectory_button(view, entity))
+        .when_some(view.pane(), |this, pane| this.child(render_firing_controls(&pane, cx)));
+
+    v_flex()
+        .flex_none()
+        .w_full()
+        .min_w(px(0.))
+        .bg(crate::theme::surface())
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(commands)
+        .child(trajectory)
+        .when(trajectory_active, |toolbar| {
+            toolbar.child(
+                div()
+                    .px_2()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .whitespace_normal()
+                    .child(t!("ui.armor.trajectory_tooltip").to_string()),
+            )
         })
 }
 
@@ -422,7 +456,7 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
     let entity = entity.clone();
 
     let label = if state.shown {
-        format!("{} ({})", t!("ui.armor.trajectory"), state.count)
+        format!("{} ({})", t!("ui.armor.trajectory_on"), state.count)
     } else {
         t!("ui.armor.trajectory").into_owned()
     };
@@ -435,12 +469,117 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
             .label(label)
             .compact()
             .selected(state.shown)
+            .when(state.shown, |button| button.bg(crate::theme::accent()).text_color(crate::theme::accent_foreground()))
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
                 entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
             }),
     )
+}
+
+/// The attacker and ammunition used by trajectory casts, kept beside the
+/// mode button so both inputs are visible at the point of use.
+fn render_firing_controls(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
+    let (ships, firing_ship, firing_shell) = {
+        let pen = pane.read(cx).penetration();
+        (pen.ships.clone(), pen.firing_ship.clone(), pen.firing_shell)
+    };
+    let selected_ship = ships.iter().find(|ship| Some(ship.param_index.as_str()) == firing_ship.as_deref());
+    let ship_label = selected_ship.map_or_else(
+        || t!("ui.armor.trajectory_select_ship").into_owned(),
+        |ship| format!("{} {}", t!("ui.armor.trajectory_ship").to_string(), ship.display_name),
+    );
+    let active_shell_index = selected_ship.and_then(|ship| {
+        firing_shell
+            .filter(|index| *index < ship.shells.len())
+            .or_else(|| {
+                ship.shells.iter().position(|shell| shell.ammo_type == wowsunpack::game_params::types::AmmoType::AP)
+            })
+            .or_else(|| (!ship.shells.is_empty()).then_some(0))
+    });
+    let shell_label = selected_ship
+        .zip(active_shell_index)
+        .map(|(ship, index)| {
+            let shell = &ship.shells[index];
+            format!(
+                "{} {} {:.0} mm",
+                t!("ui.armor.trajectory_shell").to_string(),
+                shell.ammo_type.display_name(),
+                shell.caliber.value(),
+            )
+        })
+        .unwrap_or_else(|| t!("ui.armor.trajectory_select_shell").into_owned());
+
+    let ship_picker: AnyElement = if ships.is_empty() {
+        let pane = pane.clone();
+        Button::new("armor-trajectory-ship")
+            .label(t!("ui.armor.trajectory_add_ship").to_string())
+            .compact()
+            .tooltip(t!("ui.armor.trajectory_add_ship_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| {
+                    if !pane.analysis_open() {
+                        pane.toggle_analysis(cx);
+                    }
+                });
+            })
+            .into_any_element()
+    } else {
+        let pane = pane.clone();
+        let menu_ships = ships.clone();
+        Button::new("armor-trajectory-ship")
+            .label(ship_label.clone())
+            .max_w(px(220.))
+            .compact()
+            .dropdown_caret(true)
+            .tooltip(format!("{}\n{}", ship_label, t!("ui.armor.trajectory_ship_tooltip")))
+            .dropdown_menu(move |mut menu, _window, _cx| {
+                for ship in &menu_ships {
+                    let pane = pane.clone();
+                    let param_index = ship.param_index.clone();
+                    let active = Some(ship.param_index.as_str()) == firing_ship.as_deref();
+                    let label =
+                        if active { format!("{} (selected)", ship.display_name) } else { ship.display_name.clone() };
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
+                        pane.update(cx, |pane, cx| pane.set_firing_ship(&param_index, cx));
+                    }));
+                }
+                menu
+            })
+            .into_any_element()
+    };
+
+    let shell_picker = {
+        let pane = pane.clone();
+        let selected_shells = selected_ship.map(|ship| ship.shells.clone()).unwrap_or_default();
+        Button::new("armor-trajectory-shell")
+            .label(shell_label)
+            .max_w(px(180.))
+            .compact()
+            .dropdown_caret(true)
+            .disabled(selected_shells.is_empty())
+            .tooltip(t!("ui.armor.trajectory_shell_tooltip").to_string())
+            .dropdown_menu(move |mut menu, _window, _cx| {
+                for (index, shell) in selected_shells.iter().enumerate() {
+                    let pane = pane.clone();
+                    let ammo = shell.ammo_type.display_name();
+                    let caliber = shell.caliber.value();
+                    let selected = Some(index) == active_shell_index;
+                    let label = if selected {
+                        format!("{} {:.0} mm (selected)", ammo, caliber)
+                    } else {
+                        format!("{} {:.0} mm", ammo, caliber)
+                    };
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
+                        pane.update(cx, |pane, cx| pane.set_firing_shell(index, cx));
+                    }));
+                }
+                menu
+            })
+    };
+
+    h_flex().flex_wrap().min_w(px(0.)).gap_1().items_center().child(ship_picker).child(shell_picker).into_any_element()
 }
 
 /// Toolbar toggle for splash mode, carrying how many zones the last burst

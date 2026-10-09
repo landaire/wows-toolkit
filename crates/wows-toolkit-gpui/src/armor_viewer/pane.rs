@@ -471,7 +471,12 @@ impl ArmorViewerPane {
     pub(crate) fn add_comparison_ship(&mut self, param_index: &str, window: &mut Window, cx: &mut Context<Self>) {
         let BundleState::Ready(bundle) = &self.bundle else { return };
         let Some(ship) = resolve_ship_shells(bundle.assets.metadata(), param_index) else { return };
+        let first_ship = self.pen.ships.is_empty();
         self.pen.add(ship);
+        if first_ship {
+            self.pen.firing_ship = Some(param_index.to_string());
+            self.pen.firing_shell = None;
+        }
         self.pen.search.update(cx, |state, cx| state.set_value(String::new(), window, cx));
         self.push_cast_ship(cx);
         cx.notify();
@@ -479,25 +484,61 @@ impl ArmorViewerPane {
 
     pub(crate) fn remove_comparison_ship(&mut self, index: usize, cx: &mut Context<Self>) {
         self.pen.remove(index);
+        if !self.pen.ships.iter().any(|ship| Some(ship.param_index.as_str()) == self.pen.firing_ship.as_deref()) {
+            self.pen.firing_ship = None;
+            self.pen.firing_shell = None;
+        }
         self.push_cast_ship(cx);
         cx.notify();
     }
 
     pub(crate) fn clear_comparison_ships(&mut self, cx: &mut Context<Self>) {
         self.pen.clear();
+        self.pen.firing_ship = None;
+        self.pen.firing_shell = None;
+        self.push_cast_ship(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn set_firing_ship(&mut self, param_index: &str, cx: &mut Context<Self>) {
+        if !self.pen.ships.iter().any(|ship| ship.param_index == param_index) {
+            return;
+        }
+        self.pen.firing_ship = Some(param_index.to_string());
+        self.pen.firing_shell = None;
+        self.push_cast_ship(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn set_firing_shell(&mut self, shell_index: usize, cx: &mut Context<Self>) {
+        let Some(ship) =
+            self.pen.ships.iter().find(|ship| Some(ship.param_index.as_str()) == self.pen.firing_ship.as_deref())
+        else {
+            return;
+        };
+        if shell_index >= ship.shells.len() || self.pen.firing_shell == Some(shell_index) {
+            return;
+        }
+        self.pen.firing_shell = Some(shell_index);
         self.push_cast_ship(cx);
         cx.notify();
     }
 
     /// Hands the viewport the ship a trajectory cast fires.
     ///
-    /// The first of the compared ships, which is the one the egui viewer
-    /// casts the shared ray with; the rest contribute their own arcs there,
-    /// which this port does not draw yet.
+    /// The selected ship supplies the trajectory shell; the first ship is the
+    /// default until the reader chooses another.
     fn push_cast_ship(&mut self, cx: &mut Context<Self>) {
-        let first = self.pen.ships.first().cloned();
+        let selected = self
+            .pen
+            .firing_ship
+            .as_deref()
+            .and_then(|param_index| self.pen.ships.iter().find(|ship| ship.param_index == param_index).cloned());
+        let first = selected.or_else(|| self.pen.ships.first().cloned());
+        self.pen.firing_ship = first.as_ref().map(|ship| ship.param_index.clone());
+        let shell_index = self.pen.firing_shell;
         let viewport = self.dock.read(cx).active_viewport().clone();
-        viewport.update(cx, |view, cx| view.set_cast_ship(first, cx));
+        viewport.update(cx, |view, cx| view.set_cast_ship(first, shell_index, cx));
     }
 
     /// Whether the checker's panel is up.

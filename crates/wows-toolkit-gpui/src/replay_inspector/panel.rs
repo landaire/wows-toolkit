@@ -60,6 +60,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -1296,11 +1297,16 @@ impl ReplayPanel {
 impl Render for ReplayPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.state {
-            LoadState::Loading => v_flex()
-                .size_full()
-                .p_2()
+            LoadState::Loading => div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap_2()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
+                .child(Spinner::new())
                 .child(t!("ui.replay.loading").into_owned())
                 .into_any_element(),
             LoadState::Failed(err) => v_flex()
@@ -1381,7 +1387,7 @@ impl Render for ReplayPanel {
             }
         };
 
-        v_flex().id("replay-panel").track_focus(&self.focus_handle).size_full().child(body)
+        v_flex().id("replay-panel").track_focus(&self.focus_handle).relative().size_full().child(body)
     }
 }
 

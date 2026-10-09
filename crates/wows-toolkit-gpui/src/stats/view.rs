@@ -1042,27 +1042,41 @@ impl Render for StatsView {
             .border_b_1()
             .border_color(border)
             .child(
-                Checkbox::new("stats-limit-enabled")
-                    .label(t!("ui.stats.limit_to_recent").to_string())
-                    .checked(limited)
-                    .on_click(
-                        cx.listener(|this, checked: &bool, window, cx| this.set_limit_enabled(*checked, window, cx)),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Checkbox::new("stats-limit-enabled")
+                            .label(t!("ui.stats.limit_to_recent").to_string())
+                            .tooltip(t!("ui.stats.limit_to_recent_tooltip").to_string())
+                            .checked(limited)
+                            .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                this.set_limit_enabled(*checked, window, cx)
+                            })),
+                    )
+                    .child(
+                        // NumberInput carries no id of its own, so the wrapper
+                        // is what the interaction tests address.
+                        div()
+                            .id("stats-limit-count")
+                            .test_support()
+                            .w(px(90.))
+                            .child(NumberInput::new(&self.limit_input).small().disabled(!limited)),
                     ),
-            )
-            .child(
-                // NumberInput carries no id of its own, so the wrapper is what
-                // the interaction tests address.
-                div()
-                    .id("stats-limit-count")
-                    .test_support()
-                    .w(px(90.))
-                    .child(NumberInput::new(&self.limit_input).small().disabled(!limited)),
             )
             .child(crate::ui::rule_v(cx))
             .child(
-                div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.stats.division_label").to_string()),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.stats.division_label").to_string()),
+                    )
+                    .children(division_buttons),
             )
-            .children(division_buttons)
             .when_some(mode_row, |this, row| this.child(crate::ui::rule_v(cx)).child(row))
             .child(crate::ui::rule_v(cx))
             .child(add_chart_menu(cx.entity()))
@@ -1144,29 +1158,36 @@ impl Render for StatsView {
                     drag_start.set(true);
                     cx.stop_propagation();
                 })
-                .on_prepaint(move |_, window, _| {
-                    let dock = dock_for_resize.clone();
-                    let bounds = bounds.clone();
-                    let drag_active_move = drag_active.clone();
-                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
-                        if !phase.bubble() || !drag_active_move.get() {
-                            return;
-                        }
-                        let area_bounds = bounds.get();
-                        dock.update(cx, |dock, cx| {
-                            let sizing = DockSizing::new(DockPlacement::Right)
-                                .with_area_bounds(area_bounds)
-                                .with_opposite_dock_size(dock.dock_size(DockPlacement::Left).unwrap_or(px(0.)));
-                            let size = sizing.clamp(sizing.size_from_pointer(event.position));
-                            dock.set_dock_size(DockPlacement::Right, size, window, cx);
-                        });
-                    });
-                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
-                        if phase.bubble() && event.button == MouseButton::Left {
-                            drag_active.set(false);
-                        }
-                    });
-                })
+                .child(
+                    canvas(
+                        |_, _, _| (),
+                        move |_, (), window, _| {
+                            let dock = dock_for_resize.clone();
+                            let bounds = bounds.clone();
+                            let drag_active_move = drag_active.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                                if !phase.bubble() || !drag_active_move.get() {
+                                    return;
+                                }
+                                let area_bounds = bounds.get();
+                                dock.update(cx, |dock, cx| {
+                                    let sizing = DockSizing::new(DockPlacement::Right)
+                                        .with_area_bounds(area_bounds)
+                                        .with_opposite_dock_size(dock.dock_size(DockPlacement::Left).unwrap_or(px(0.)));
+                                    let size = sizing.clamp(sizing.size_from_pointer(event.position));
+                                    dock.set_dock_size(DockPlacement::Right, size, window, cx);
+                                });
+                            });
+                            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
+                                if phase.bubble() && event.button == MouseButton::Left {
+                                    drag_active.set(false);
+                                }
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_full(),
+                )
                 .child(
                     div()
                         .absolute()

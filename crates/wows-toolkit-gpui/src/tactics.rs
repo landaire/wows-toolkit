@@ -15,6 +15,8 @@ use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::searchable_list::SearchableVec;
@@ -1220,7 +1222,10 @@ impl TacticsBoard {
     /// sit over the shape it belongs to. `None` for a point the window has
     /// scrolled off the map, which has nowhere on screen to be.
     fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
+        let bounds = self.painted.get()?;
         let (x, y) = self.letterbox()?.to_element((self.view.x(at.0), self.view.y(at.1)))?;
+        let x = x - bounds.origin.x.as_f32();
+        let y = y - bounds.origin.y.as_f32();
         Some((px(x), px(y)))
     }
 
@@ -2161,6 +2166,15 @@ impl TacticsBoard {
         cx.notify();
     }
 
+    fn on_context_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((index, _)) = self.cap_under(event.position)
+            && self.selected != Some(index)
+        {
+            self.selected = Some(index);
+            cx.notify();
+        }
+    }
+
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if self.collab.annotations_locked() {
             self.turning = None;
@@ -2736,65 +2750,77 @@ impl TacticsBoard {
             .gap_0()
             .px_2()
             .py_1()
-            .when(may_steer, |this| {
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .flex_wrap()
-                        .items_center()
-                        .py_1()
-                        .child(
+            .child(
+                h_flex()
+                    .gap_2()
+                    .flex_wrap()
+                    .items_center()
+                    .py_1()
+                    .when(may_steer, |this| {
+                        this.child(
                             h_flex()
                                 .gap_2()
                                 .items_center()
+                                .flex_wrap()
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(crate::theme::text_dim())
-                                        .child(t!("ui.tactics.map").to_string()),
-                                )
-                                .child(
-                                    crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                                        Select::new(&self.map_select)
-                                            .id("tactics-map-select")
-                                            .accessibility_label(t!("ui.tactics.map").to_string())
-                                            .placeholder(t!("ui.tactics.map_hint").into_owned())
-                                            .search_placeholder(t!("ui.tactics.map_hint").into_owned())
-                                            .small()
-                                            .w(px(280.))
-                                            .menu_width(px(360.)),
-                                    ),
-                                ),
-                        )
-                        .when(self.map.is_some(), |this| {
-                            this.child(
-                                h_flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(crate::ui::rule_v(cx))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(crate::theme::text_dim())
-                                            .child(t!("ui.tactics.mode").to_string()),
-                                    )
-                                    .child(
-                                        crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                                            Select::new(&self.mode_select)
-                                                .id("tactics-mode-select")
-                                                .title_prefix(t!("ui.tactics.mode").into_owned())
-                                                .accessibility_label(t!("ui.tactics.mode").into_owned())
-                                                .placeholder(t!("ui.tactics.mode").into_owned())
-                                                .search_placeholder(t!("ui.tactics.mode").into_owned())
-                                                .small()
-                                                .w(px(240.))
-                                                .menu_width(px(360.)),
+                                    h_flex()
+                                        .gap_2()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(crate::theme::text_dim())
+                                                .child(t!("ui.tactics.map").to_string()),
+                                        )
+                                        .child(
+                                            crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                                Select::new(&self.map_select)
+                                                    .id("tactics-map-select")
+                                                    .accessibility_label(t!("ui.tactics.map").to_string())
+                                                    .placeholder(t!("ui.tactics.map_hint").into_owned())
+                                                    .search_placeholder(t!("ui.tactics.map_hint").into_owned())
+                                                    .small()
+                                                    .w(px(280.))
+                                                    .menu_width(px(360.)),
+                                            ),
                                         ),
-                                    ),
-                            )
-                        }),
-                )
-            })
+                                )
+                                .when(self.map.is_some(), |this| {
+                                    this.child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(crate::ui::rule_v(cx))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(crate::theme::text_dim())
+                                                    .child(t!("ui.tactics.mode").to_string()),
+                                            )
+                                            .child(
+                                                crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                                    Select::new(&self.mode_select)
+                                                        .id("tactics-mode-select")
+                                                        .accessibility_label(t!("ui.tactics.mode").into_owned())
+                                                        .placeholder(t!("ui.tactics.mode").into_owned())
+                                                        .search_placeholder(t!("ui.tactics.mode").into_owned())
+                                                        .small()
+                                                        .w(px(240.))
+                                                        .menu_width(px(360.)),
+                                                ),
+                                            ),
+                                    )
+                                })
+                                .child(crate::ui::rule_v(cx)),
+                        )
+                    })
+                    .child(self.render_ship_picker(cx))
+                    .child(crate::ui::rule_v(cx))
+                    .child(self.render_range_circles(cx))
+                    .when(may_steer, |this| {
+                        this.child(crate::ui::rule_v(cx)).child(self.render_presets(cx)).child(self.render_scan(cx))
+                    }),
+            )
             .child(
                 h_flex()
                     .gap_3()
@@ -2805,21 +2831,6 @@ impl TacticsBoard {
                     .border_color(border)
                     .when(may_steer, |this| this.child(self.render_cap_tools(cx)).child(crate::ui::rule_v(cx)))
                     .child(self.render_draw_tools(cx)),
-            )
-            .child(
-                h_flex()
-                    .gap_3()
-                    .flex_wrap()
-                    .items_center()
-                    .py_1()
-                    .border_t_1()
-                    .border_color(border)
-                    .child(self.render_ship_picker(cx))
-                    .child(crate::ui::rule_v(cx))
-                    .child(self.render_range_circles(cx))
-                    .when(may_steer, |this| {
-                        this.child(crate::ui::rule_v(cx)).child(self.render_presets(cx)).child(self.render_scan(cx))
-                    }),
             )
     }
 
@@ -2881,6 +2892,7 @@ impl TacticsBoard {
                         }),
                 )
             }))
+            .child(crate::ui::rule_v(cx))
             .children(INKS.iter().enumerate().map(|(index, (ink, label_key))| {
                 let board = board.clone();
                 let ink = *ink;
@@ -2916,40 +2928,48 @@ impl TacticsBoard {
                         }),
                 )
             }))
+            .child(crate::ui::rule_v(cx))
             .child(
-                div()
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .child(t!("ui.renderer.annotations.nib").to_string()),
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.renderer.annotations.nib").to_string()),
+                    )
+                    .child({
+                        let board = board.clone();
+                        let label = t!("ui.renderer.annotations.thinner").into_owned();
+                        Button::new("tactics-nib-down")
+                            .label("-")
+                            .compact()
+                            .disabled(locked || nib <= MIN_NIB)
+                            .accessibility_label(label.clone())
+                            .tooltip(label)
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                board.update(cx, |board, cx| board.step_nib(-1.0, cx));
+                            })
+                    })
+                    .child(div().text_xs().text_color(crate::theme::text_dim()).child(format!("{nib:.0}")))
+                    .child({
+                        let board = board.clone();
+                        let label = t!("ui.renderer.annotations.thicker").into_owned();
+                        Button::new("tactics-nib-up")
+                            .label("+")
+                            .compact()
+                            .disabled(locked || nib >= MAX_NIB)
+                            .accessibility_label(label.clone())
+                            .tooltip(label)
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                board.update(cx, |board, cx| board.step_nib(1.0, cx));
+                            })
+                    }),
             )
-            .child({
-                let board = board.clone();
-                let label = t!("ui.renderer.annotations.thinner").into_owned();
-                Button::new("tactics-nib-down")
-                    .label("-")
-                    .compact()
-                    .disabled(locked || nib <= MIN_NIB)
-                    .accessibility_label(label.clone())
-                    .tooltip(label)
-                    .on_click(move |_event, _window, cx: &mut App| {
-                        board.update(cx, |board, cx| board.step_nib(-1.0, cx));
-                    })
-            })
-            .child(div().text_xs().text_color(crate::theme::text_dim()).child(format!("{nib:.0}")))
-            .child({
-                let board = board.clone();
-                let label = t!("ui.renderer.annotations.thicker").into_owned();
-                Button::new("tactics-nib-up")
-                    .label("+")
-                    .compact()
-                    .disabled(locked || nib >= MAX_NIB)
-                    .accessibility_label(label.clone())
-                    .tooltip(label)
-                    .on_click(move |_event, _window, cx: &mut App| {
-                        board.update(cx, |board, cx| board.step_nib(1.0, cx));
-                    })
-            })
+            .child(crate::ui::rule_v(cx))
             .child(self.render_shortcuts())
+            .child(crate::ui::rule_v(cx))
             .child({
                 let board = board.clone();
                 Button::new("tactics-undo")
@@ -3238,8 +3258,9 @@ impl TacticsBoard {
                     .child({
                         let board = board.clone();
                         Button::new("tactics-preset-reset")
-                            .label(t!("ui.buttons.reset").into_owned())
+                            .label(t!("ui.tactics.reset_board").into_owned())
                             .compact()
+                            .tooltip(t!("ui.tactics.reset_board_tooltip").to_string())
                             .disabled(!can_reset)
                             .on_click(move |_event, _window, cx: &mut App| {
                                 board.update(cx, |board, cx| board.reset_board(cx));
@@ -3328,30 +3349,169 @@ impl TacticsBoard {
                 .into_any_element();
         };
 
+        let board = cx.entity();
+
         div()
             .id("tactics-map")
             .flex_1()
             .min_h(px(0.))
             .relative()
-            .child(img(drawn).size_full().object_fit(ObjectFit::Contain))
-            // Where the map was painted, which is what a pointer position is
-            // read against. Taken at paint time because nothing else knows it.
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(self.has_tool() || self.adding, |this| this.cursor_crosshair())
+            .when(!self.has_tool() && !self.adding, |this| this.cursor_grab())
             .child(
-                canvas(
-                    {
-                        let painted = std::rc::Rc::clone(&self.painted);
-                        move |bounds, _window, _cx| painted.set(Some(bounds))
-                    },
-                    |_bounds, _state, _window, _cx| {},
-                )
-                .absolute()
-                .inset_0(),
+                div()
+                    .id("tactics-map-square")
+                    .relative()
+                    .h_full()
+                    .max_w(relative(1.0))
+                    .aspect_ratio(1.0)
+                    .child(img(drawn).size_full().object_fit(ObjectFit::Contain))
+                    // Pointer and overlay geometry use the visible square,
+                    // rather than the wider viewport around it.
+                    .child(
+                        canvas(
+                            {
+                                let painted = std::rc::Rc::clone(&self.painted);
+                                move |bounds, _window, _cx| painted.set(Some(bounds))
+                            },
+                            |_bounds, _state, _window, _cx| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    )
+                    .children(self.rotation_handle_overlay()),
             )
-            .children(self.rotation_handle_overlay())
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_context_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
+            .context_menu(move |mut menu, _window, cx| {
+                let opening_board = board.clone();
+                opening_board.update(cx, |board, cx| {
+                    board.set_tool(wt_collab_client::drawing::Tool::None, cx);
+                    board.set_adding(false, cx);
+                });
+                let (locked, can_edit_caps, can_undo, can_redo, has_drawing, has_map, selected_cap) = {
+                    let board = board.read(cx);
+                    let locked = board.collab.annotations_locked();
+                    (
+                        locked,
+                        board.can_edit_caps(),
+                        board.can_undo() && !locked,
+                        board.can_redo() && !locked,
+                        board.collab.annotation_count() > 0 && !locked,
+                        board.map_info().is_some(),
+                        board.selected_cap().cloned(),
+                    )
+                };
+
+                let reset_board = board.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(t!("ui.tactics.reset_view").into_owned())
+                        .on_click(move |_event, _window, cx| reset_board.update(cx, |board, cx| board.reset_view(cx))),
+                );
+
+                if !locked {
+                    menu = menu.separator();
+                    for (tool, key, _glyph, shortcut) in tools() {
+                        let tool_board = board.clone();
+                        let label = format!("{} ({}+{})", t!(key), shortcut_modifier_name(), shortcut);
+                        menu = menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
+                            let tool = tool.clone();
+                            tool_board.update(cx, |board, cx| board.set_tool(tool, cx));
+                        }));
+                    }
+                }
+
+                let has_cap_actions = can_edit_caps && (selected_cap.is_some() || has_map);
+                if has_cap_actions {
+                    menu = menu.separator();
+                    if let Some(cap) = selected_cap {
+                        let team_label_key = match cap.team.map(|team| team.raw()) {
+                            None => "ui.tactics.team_neutral",
+                            Some(0) => "ui.tactics.team_one",
+                            Some(_) => "ui.tactics.team_two",
+                        };
+                        let team_board = board.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(format!("{}: {}", t!("ui.tactics.cap_team"), t!(team_label_key)))
+                                .on_click(move |_event, _window, cx| {
+                                    team_board.update(cx, |board, cx| board.cycle_selected_team(cx));
+                                }),
+                        );
+                        if cap.radius > MIN_CAP_RADIUS {
+                            let narrow_board = board.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(t!("ui.tactics.cap_narrow_tooltip").into_owned()).on_click(
+                                    move |_event, _window, cx| {
+                                        narrow_board.update(cx, |board, cx| {
+                                            board.step_selected_radius(-RADIUS_STEP_KM, cx);
+                                        });
+                                    },
+                                ),
+                            );
+                        }
+                        if cap.radius < MAX_CAP_RADIUS {
+                            let widen_board = board.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(t!("ui.tactics.cap_widen_tooltip").into_owned()).on_click(
+                                    move |_event, _window, cx| {
+                                        widen_board.update(cx, |board, cx| {
+                                            board.step_selected_radius(RADIUS_STEP_KM, cx);
+                                        });
+                                    },
+                                ),
+                            );
+                        }
+                        if !cap.frozen {
+                            let delete_board = board.clone();
+                            menu = menu.item(PopupMenuItem::new(t!("ui.tactics.delete_cap").into_owned()).on_click(
+                                move |_event, _window, cx| {
+                                    delete_board.update(cx, |board, cx| board.remove_selected(cx))
+                                },
+                            ));
+                        }
+                    }
+                    if has_map {
+                        let add_board = board.clone();
+                        menu = menu.item(PopupMenuItem::new(t!("ui.tactics.add_cap").into_owned()).on_click(
+                            move |_event, _window, cx| {
+                                add_board.update(cx, |board, cx| board.set_adding(true, cx));
+                            },
+                        ));
+                    }
+                }
+
+                if can_undo || can_redo || has_drawing {
+                    menu = menu.separator();
+                }
+                if can_undo {
+                    let undo_board = board.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(t!("ui.renderer.annotations.undo").into_owned())
+                            .on_click(move |_event, _window, cx| undo_board.update(cx, |board, cx| board.undo(cx))),
+                    );
+                }
+                if can_redo {
+                    let redo_board = board.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(t!("ui.renderer.annotations.redo").into_owned())
+                            .on_click(move |_event, _window, cx| redo_board.update(cx, |board, cx| board.redo(cx))),
+                    );
+                }
+                if has_drawing {
+                    let clear_board = board.clone();
+                    menu = menu.item(PopupMenuItem::new(t!("ui.tactics.clear_drawing").into_owned()).on_click(
+                        move |_event, _window, cx| clear_board.update(cx, |board, cx| board.clear_annotations(cx)),
+                    ));
+                }
+
+                menu
+            })
             .into_any_element()
     }
 
