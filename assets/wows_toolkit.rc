@@ -10,8 +10,8 @@
 1 ICON "wows_toolkit.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,2,0
-PRODUCTVERSION 1,0,2,0
+FILEVERSION 1,1,0,0
+PRODUCTVERSION 1,1,0,0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -24,11 +24,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "landaire"
             VALUE "FileDescription", "WoWs Toolkit"
-            VALUE "FileVersion", "1.0.2"
+            VALUE "FileVersion", "1.1.0-beta1"
             VALUE "InternalName", "wows_toolkit.exe"
             VALUE "OriginalFilename", "wows_toolkit.exe"
             VALUE "ProductName", "WoWs Toolkit"
-            VALUE "ProductVersion", "1.0.2"
+            VALUE "ProductVersion", "1.1.0-beta1"
         END
     END
     BLOCK "VarFileInfo"

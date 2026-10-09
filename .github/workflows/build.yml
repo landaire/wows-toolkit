@@ -17,8 +17,31 @@ jobs:
   create-release:
     name: Create release
     runs-on: ubuntu-latest
+    outputs:
+      binary: ${{ steps.desktop.outputs.binary }}
+      frontend: ${{ steps.desktop.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select desktop frontend
+        id: desktop
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              version = tomllib.load(manifest)["workspace"]["package"]["version"]
+          if os.environ["GITHUB_REF"].startswith("refs/tags/"):
+              tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+              if tag_version != version:
+                  raise SystemExit(f"Release tag {tag_version} does not match workspace version {version}")
+          frontend = "gpui" if "-" in version else "egui"
+          binary = "wows_toolkit_gpui" if frontend == "gpui" else "wows_toolkit"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"frontend={frontend}", file=output)
+              print(f"binary={binary}", file=output)
+          PY
 
       - name: Extract release notes for this tag
         id: notes
@@ -64,6 +87,9 @@ jobs:
     name: Windows
     needs: create-release
     runs-on: windows-latest
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     environment: release-signing
     defaults:
       run:
@@ -103,18 +129,19 @@ jobs:
         run: |
           $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
           $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
-          $common = @("-c", "native_build.mode=release", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
+          $common = @("-c", "native_build.mode=release", "-c", "release.frontend=$env:APP_FRONTEND", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
 
           $slug = "${{ github.ref_name }}" -replace "/", "-"
           $msiName = "wows-toolkit-$slug-windows-x86_64.msi"
 
-          $exeOut = & $buck2 build @common --show-output //:wows_toolkit "//:wows_toolkit[pdb]"
+          $target = "//:$env:APP_BINARY"
+          $exeOut = & $buck2 build @common --show-output $target "${target}[pdb]"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $msiOut = & $buck2 build @common --show-output toolchains//windows:wows_toolkit_msi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          $exe = ($exeOut | Select-String -Pattern 'wows_toolkit\.exe$' | Select-Object -Last 1).ToString().Split(" ")[-1]
-          $pdb = ($exeOut | Select-String -Pattern 'wows_toolkit\.pdb$' | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $exe = ($exeOut | Select-String -Pattern "$([regex]::Escape($env:APP_BINARY))\.exe$" | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $pdb = ($exeOut | Select-String -Pattern "$([regex]::Escape($env:APP_BINARY))\.pdb$" | Select-Object -Last 1).ToString().Split(" ")[-1]
           $msi = ($msiOut | Select-String -Pattern '\.msi$' | Select-Object -Last 1).ToString().Split(" ")[-1]
 
           # Buck outputs are read-only, and signing rewrites in place.
@@ -174,6 +201,9 @@ jobs:
     name: Linux Flatpak
     needs: create-release
     runs-on: ubuntu-22.04
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
 
@@ -192,9 +222,9 @@ jobs:
       - name: Build the release binary
         id: buck
         run: |
-          out=$(nix develop --command buck2 build -c native_build.mode=release --show-output //:wows_toolkit)
+          out=$(nix develop --command buck2 build -c native_build.mode=release --show-output "//:$APP_BINARY")
           echo "$out"
-          rel=$(echo "$out" | awk '/wows_toolkit$/ { print $NF }' | tail -1)
+          rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
           mkdir -p dist
           cp "$rel" dist/wows_toolkit
           chmod +w dist/wows_toolkit
@@ -252,6 +282,9 @@ jobs:
     name: macOS
     needs: create-release
     runs-on: macos-14
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
 
@@ -271,9 +304,9 @@ jobs:
 
       - name: Build the release binary
         run: |
-          out=$(nix develop --command buck2 build -c native_build.mode=release             --target-platforms toolchains//platforms:macos_arm64 --show-output //:wows_toolkit)
+          out=$(nix develop --command buck2 build -c native_build.mode=release             --target-platforms toolchains//platforms:macos_arm64 --show-output "//:$APP_BINARY")
           echo "$out"
-          rel=$(echo "$out" | awk '/wows_toolkit$/ { print $NF }' | tail -1)
+          rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
           mkdir -p dist
           cp "$rel" dist/wows_toolkit
           chmod +w dist/wows_toolkit

@@ -8,7 +8,9 @@
            Scope="perUser"
            Language="1033">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."/>
+    <!-- Beta and stable packages share MSI's numeric version. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed."/>
     <MediaTemplate EmbedCab="yes"/>
 
     <!-- App icon shown in Add/Remove Programs -->

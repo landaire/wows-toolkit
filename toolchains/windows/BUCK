@@ -46,6 +46,7 @@ windows_resource(
     src = "root//assets:wows_toolkit_gpui_rc",
     resources = [
         "root//assets:wows_toolkit_gpui_manifest",
+        "root//assets:wows_toolkit_rc",
         "root//assets:wows_toolkit_ico",
     ],
     tools = ":msvc_tools",
@@ -62,12 +63,15 @@ wix_msi(
         "root//wix:banner_bmp",
         "root//wix:license_rtf",
     ],
-    binaries = {"wows_toolkit.exe": "root//crates/wows-toolkit:wows_toolkit_bin"},
+    binaries = {"wows_toolkit.exe": {
+        "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
+        "gpui": "root//crates/wows-toolkit-gpui:gpui_bin",
+    }[read_root_config("release", "frontend", "egui")]},
     pdbs = {},
     # MSI ProductVersion is numeric only, so a pre-release tag ships under its
     # release version. scripts/test-workspace-package-metadata.nu holds this to
     # the numeric core of the workspace version.
-    version = "1.0.2",
+    version = "1.1.0",
     out = "wows-toolkit-windows-x86_64-unsigned.msi",
     visibility = ["PUBLIC"],
 )
