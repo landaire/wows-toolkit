@@ -48,9 +48,7 @@ impl Default for PlotView {
     }
 }
 
-/// Zoom stops, so a chart cannot be scrolled into a flat wall of colour or
-/// away into nothing.
-const MIN_ZOOM: f32 = 1.0;
+/// Maximum zoom-in keeps the plot usable at extreme magnification.
 const MAX_ZOOM: f32 = 40.0;
 
 impl PlotView {
@@ -61,7 +59,7 @@ impl PlotView {
     /// Zooms by `factor` about `cursor`, which is where the pointer is inside
     /// the plot.
     pub fn zoom_about(&mut self, factor: f32, cursor: Point<Pixels>) {
-        let zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        let zoom = (self.zoom * factor).clamp(f32::MIN_POSITIVE, MAX_ZOOM);
         let applied = zoom / self.zoom;
         if applied == 1.0 {
             return;
@@ -520,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn the_zoom_has_stops() {
+    fn zoom_in_has_a_stop_and_zoom_out_can_continue() {
         let mut view = PlotView::default();
         for _ in 0..40 {
             view.zoom_about(2.0, point(px(0.), px(0.)));
@@ -529,7 +527,7 @@ mod tests {
 
         let mut view = PlotView::default();
         view.zoom_about(0.01, point(px(0.), px(0.)));
-        assert_eq!(view.zoom, super::MIN_ZOOM, "the whole plot is as far out as it goes");
+        assert!(view.zoom < 1.0, "zooming out passes the initial view");
     }
 
     #[test]

@@ -402,6 +402,9 @@ impl ReplayInspectorView {
     /// and rescans the directory, which a language change has no reason to
     /// do, and which would strand every open panel on the discarded cache.
     pub fn set_locale(&mut self, locale: Option<String>, cx: &mut Context<Self>) {
+        if let Some(game_data) = &self.game_data {
+            game_data.set_locale(locale.as_deref().unwrap_or("en"));
+        }
         self.browser.update(cx, |browser, cx| browser.set_locale(locale, cx));
         cx.notify();
     }
@@ -427,7 +430,7 @@ impl ReplayInspectorView {
             self.collab_name.update(cx, |state, cx| state.set_value(collab_display_name, window, cx));
         }
         self.browser.update(cx, |browser, cx| {
-            browser.set_locale(locale, cx);
+            browser.set_locale(locale.clone(), cx);
             // The listing's second line is what the index knows about each
             // file, so it is read once the directory is known.
             browser.load_summaries(cx);
@@ -457,6 +460,7 @@ impl ReplayInspectorView {
         crate::minimap_preview::forget_renderers();
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir))
             .with_cache_dir(&game_data_cache_dir)
+            .with_locale(locale.as_deref().unwrap_or("en"))
             .with_auto_dump(auto_dump_game_data);
         // The per-build caches for builds nothing can open any more, which is
         // gigabytes after a year of game updates.
@@ -1269,10 +1273,10 @@ impl ReplayInspectorView {
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
             if let Some(showing) = &replaced {
                 dock_area.remove_panel_id(showing.panel, window, cx);
             }
-            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         self.has_opened_replay = true;
         // A closed viewport leaves a dangling weak handle behind, and the
@@ -1825,21 +1829,21 @@ fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplayS
 
 impl Render for ReplayInspectorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dock_content: AnyElement = if self.has_opened_replay {
-            self.dock_area.clone().into_any_element()
-        } else {
-            v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(t!("ui.replay.select_replay").to_string()),
+        let dock_content: AnyElement = div()
+            .relative()
+            .size_full()
+            .child(self.dock_area.clone())
+            .when(!self.has_opened_replay, |this| {
+                this.child(
+                    div().absolute().inset_0().flex().items_center().justify_center().bg(cx.theme().background).child(
+                        div()
+                            .text_sm()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.replay.select_replay").to_string()),
+                    ),
                 )
-                .into_any_element()
-        };
+            })
+            .into_any_element();
 
         // The listing says so itself while the game data loads (it is what
         // the rows are named from), so the banner carries only the failure,

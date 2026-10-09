@@ -14,12 +14,16 @@ use wows_replays::types::GameParamId;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::input::InputEvent;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
@@ -89,6 +93,8 @@ pub struct StatsShipsPanel {
     /// when the expected-values table arrives after them.
     games: Vec<PerGameStat>,
     personal_rating: Option<Arc<PersonalRatingData>>,
+    ship_search: Entity<InputState>,
+    _ship_search_subscription: Subscription,
     scroll: ScrollHandle,
     focus_handle: FocusHandle,
 }
@@ -97,13 +103,23 @@ impl EventEmitter<PanelEvent> for StatsShipsPanel {}
 impl EventEmitter<ShipsPanelEvent> for StatsShipsPanel {}
 
 impl StatsShipsPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let ship_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.stats.search_ships").into_owned()));
+        let ship_search_subscription = cx.subscribe(&ship_search, |this, _state, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.scroll.set_offset(point(px(0.), px(0.)));
+            }
+            cx.notify();
+        });
         Self {
             sections: Vec::new(),
             expanded: HashSet::new(),
             clear_armed: None,
             games: Vec::new(),
             personal_rating: None,
+            ship_search,
+            _ship_search_subscription: ship_search_subscription,
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
         }
@@ -250,8 +266,19 @@ impl Render for StatsShipsPanel {
 
         let border = cx.theme().border;
         let entity = cx.entity();
+        let ship_query = self.ship_search.read(cx).value().to_string();
+        let normalized_query = super::normalize_ship_search(&ship_query);
+        let visible_sections: Vec<_> = self
+            .sections
+            .iter()
+            .filter(|section| {
+                normalized_query.is_empty() || super::normalize_ship_search(&section.ship).contains(&normalized_query)
+            })
+            .collect();
+        let visible_count = visible_sections.len();
+        let total_count = self.sections.len();
 
-        let sections = self.sections.iter().map(|section| {
+        let sections = visible_sections.into_iter().map(|section| {
             let open = self.expanded.contains(&section.ship_id);
             let ship_id = section.ship_id;
             let ship = section.ship.clone();
@@ -293,16 +320,23 @@ impl Render for StatsShipsPanel {
                 .child({
                     let armed = self.clear_armed == Some(ship_id);
                     let panel = entity.clone();
+                    let label = if armed {
+                        t!("ui.stats.clear_ship_confirm").into_owned()
+                    } else {
+                        t!("ui.stats.remove_games_hint", ship = ship).into_owned()
+                    };
+                    let accessibility_label = if armed {
+                        format!("{}: {}", label, t!("ui.stats.remove_games_hint", ship = ship))
+                    } else {
+                        label.clone()
+                    };
                     Button::new(SharedString::from(format!("ship-clear-{ship_id}")))
-                        .child(icons::icon(icons::ERASER))
+                        .child(icons::icon(if armed { icons::CHECK_CIRCLE } else { icons::ERASER }))
                         .ghost()
                         .compact()
                         .selected(armed)
-                        .tooltip(if armed {
-                            t!("ui.stats.clear_ship_confirm").into_owned()
-                        } else {
-                            t!("ui.stats.remove_games_hint", ship = ship).into_owned()
-                        })
+                        .accessibility_label(accessibility_label)
+                        .tooltip(label)
                         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
                             let skip_confirmation = event.modifiers().secondary();
                             panel.update(cx, |this, cx| this.clear_ship(ship_id, skip_confirmation, cx));
@@ -335,20 +369,26 @@ impl Render for StatsShipsPanel {
                                 .w(CELL_COLUMN_WIDTH)
                                 .text_sm()
                                 .when(column == stats_table::Column::Average, |this| this.font_weight(FontWeight::BOLD))
-                                // A rating is coloured by the band it carries,
-                                // and names that band on hover as the egui chip
-                                // does. Dark only, like the rest of the port.
+                                // The chip carries the rating band and names it on hover.
                                 .when_some(cell.rating.as_ref(), |this, rating| {
-                                    this.text_color(rgb(personal_rating::chip_text(
-                                        rating.category,
-                                        crate::theme::is_dark_mode(),
-                                    )))
+                                    let hue: Hsla = rgb(personal_rating::chip_hue(rating.category)).into();
+                                    let text =
+                                        rgb(personal_rating::chip_text(rating.category, crate::theme::is_dark_mode()));
+                                    this.child(
+                                        h_flex()
+                                            .flex_none()
+                                            .px_1()
+                                            .rounded(px(3.))
+                                            .bg(hue.opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
+                                            .text_color(text)
+                                            .child(cell.text.clone()),
+                                    )
                                     .tooltip({
                                         let name = rating.category.name().to_string();
                                         move |window, cx| Tooltip::new(name.clone()).build(window, cx)
                                     })
                                 })
-                                .child(cell.text.clone())
+                                .when(cell.rating.is_none(), |this| this.child(cell.text.clone()))
                         }))
                 });
 
@@ -373,9 +413,48 @@ impl Render for StatsShipsPanel {
         v_flex()
             .id("stats-ships")
             .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .children(sections)
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .p_2()
+                    .child(Input::new(&self.ship_search).id("stats-ships-search").small().flex_1())
+                    .when(!ship_query.is_empty(), |this| {
+                        this.child(
+                            Button::new("stats-ships-clear-search")
+                                .child(icons::icon(icons::X))
+                                .compact()
+                                .tooltip(t!("ui.buttons.clear").to_string())
+                                .accessibility_label(t!("ui.buttons.clear").to_string())
+                                .on_click(cx.listener(|this, _event, window, cx| {
+                                    this.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
+                                })),
+                        )
+                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(format!("{visible_count}/{total_count}")),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .id("stats-ships-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .when(visible_count == 0, |this| {
+                        this.items_center().justify_center().child(
+                            div()
+                                .text_sm()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.stats.no_ship_matches").to_string()),
+                        )
+                    })
+                    .children(sections),
+            )
             .into_any_element()
     }
 }
@@ -465,7 +544,7 @@ mod tests {
     #[gpui_kit::test]
     fn each_ship_carries_its_record_and_the_newest_leads(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
 
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -490,7 +569,7 @@ mod tests {
     #[gpui_kit::test]
     fn two_ships_sharing_a_name_stay_apart(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
 
         let games = [
             game("Mikasa", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -512,7 +591,7 @@ mod tests {
     #[gpui_kit::test]
     fn an_unrated_session_has_no_rating_row(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -530,7 +609,7 @@ mod tests {
     #[gpui_kit::test]
     fn clicking_a_header_opens_only_that_ship(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
             game("Shima", SHIMA, "2026-02-13 16:00:00", 70_000, 1, true),
@@ -573,7 +652,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_copy_menu_writes_the_table_it_shows(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -596,7 +675,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_rating_table_arriving_late_still_rates_the_ships(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
         let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
         let rated_ship = crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
         let games = [game("Yamato", rated_ship, "2026-02-13 14:00:00", 100_000, 2, true)];
