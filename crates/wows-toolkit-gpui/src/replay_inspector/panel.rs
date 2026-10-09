@@ -70,6 +70,8 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
+use wowsunpack::game_assets::GuiAsset;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::icons;
@@ -157,7 +159,15 @@ enum LoadState {
     Failed(ReplayLoadError),
 }
 
+struct TitleIcons {
+    nation: Option<Arc<RenderImage>>,
+    class_dark: Option<Arc<RenderImage>>,
+    class_light: Option<Arc<RenderImage>>,
+}
+
 pub struct ReplayPanel {
+    title_icons: Option<TitleIcons>,
+    title_icon_task: Option<Task<()>>,
     focus_handle: FocusHandle,
     state: LoadState,
     /// Which entity occupies the side-panel slot; mirrors the egui app's
@@ -276,6 +286,8 @@ impl ReplayPanel {
             game_data: kept_game_data,
             _parse_task: parse_task,
             _table_subscription: None,
+            title_icons: None,
+            title_icon_task: None,
         }
     }
 
@@ -563,6 +575,7 @@ impl ReplayPanel {
                 {
                     cx.emit(ConstantsMismatched { build, version: Some(model.context.version.clone()) });
                 }
+                self.load_title_icons(&model, &game_data, cx);
                 self.alt_on_trial = None;
                 self.export = Some(export);
                 self.export_stem = Some(export_stem);
@@ -650,6 +663,47 @@ impl ReplayPanel {
         }))
     }
 
+    fn load_title_icons(
+        &mut self,
+        model: &ReplayReportModel,
+        game_data: &super::load::LoadedGameData,
+        cx: &mut Context<Self>,
+    ) {
+        self.title_icons = None;
+        self.title_icon_task = None;
+        let Some(player) = model.rows.iter().find(|row| row.is_self) else { return };
+        let species = player.ship_class;
+        let nation = player
+            .ship_id
+            .and_then(|id| game_data.provider().game_param_by_id(id))
+            .map(|param| param.nation().to_string());
+        let vfs = game_data.vfs().clone();
+        let renderer = cx.svg_renderer();
+        let task = cx.background_spawn(async move {
+            let mut icons = super::icons::IconCache::new();
+            if let Some(nation) = nation {
+                if let Some(bytes) = GuiAsset::NationFlag(&nation).read(&vfs, None) {
+                    icons.set_keyed("nation".to_string(), &bytes);
+                }
+            }
+            for tint in [0xffffff, 0x303840] {
+                icons.load_ship_class(species, tint, &vfs, &renderer);
+            }
+            TitleIcons {
+                nation: icons.get_keyed("nation"),
+                class_dark: icons.get(species, 0xffffff),
+                class_light: icons.get(species, 0x303840),
+            }
+        });
+        self.title_icon_task = Some(cx.spawn(async move |this, cx| {
+            let icons = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.title_icons = Some(icons);
+                cx.notify();
+            });
+        }));
+    }
+
     /// A panel already showing `model`, with no parse behind it. Test-only:
     /// production panels always reach this state through `apply_result`.
     #[cfg(test)]
@@ -681,6 +735,8 @@ impl ReplayPanel {
             queued_alt_trial: None,
             _parse_task: Task::ready(()),
             _table_subscription: None,
+            title_icons: None,
+            title_icon_task: None,
         };
         let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
         let payloads =
@@ -736,7 +792,19 @@ impl Panel for ReplayPanel {
             LoadState::Loaded(loaded) => loaded.title.to_string(),
             LoadState::Failed(_) => t!("ui.messages.replay_load_failed").into_owned(),
         };
-        div().w(px(220.)).truncate().child(title)
+        let images = matches!(self.state, LoadState::Loaded(_)).then_some(self.title_icons.as_ref()).flatten();
+        let nation = images.and_then(|icons| icons.nation.clone());
+        let class = images.and_then(|icons| {
+            if crate::theme::is_dark_mode() { icons.class_dark.clone() } else { icons.class_light.clone() }
+        });
+        h_flex()
+            .gap_1()
+            .items_center()
+            .max_w(px(300.))
+            .min_w_0()
+            .when_some(nation, |row, image| row.child(img(image).w(px(23.)).h(px(16.)).flex_none()))
+            .when_some(class, |row, image| row.child(img(image).size(px(16.)).flex_none()))
+            .child(div().min_w_0().truncate().child(title))
     }
 }
 
@@ -1319,7 +1387,12 @@ impl Render for ReplayPanel {
                         .font_weight(FontWeight::BOLD)
                         .child(t!("ui.messages.replay_load_failed").into_owned()),
                 )
-                .child(div().text_sm().text_color(crate::theme::text_dim()).child(err.to_string()))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(err.to_string()),
+                )
                 .into_any_element(),
             LoadState::Loaded(loaded) => {
                 let has_chat = loaded.chat_panel.is_some();
