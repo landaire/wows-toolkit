@@ -619,6 +619,11 @@ impl PlayerStateData {
         {
             self.clan_color = *id;
         }
+        if let Some(v) = values.get(Self::KEY_SHIP_PARAMS_ID)
+            && let Some(id) = v.i64_ref()
+        {
+            self.ship_params_id = Some(GameParamId::from(*id as u32));
+        }
         if let Some(v) = values.get(Self::KEY_SHIP_ID)
             && let Some(id) = v.i64_ref()
         {
@@ -1578,28 +1583,12 @@ where
     'rawpacket: 'replay,
     'rawpacket: 'argtype,
 {
-    fn from(
-        version: &Version,
-        audit: bool,
-        payload: &'rawpacket crate::packet2::PacketType<'replay, 'argtype>,
-        _packet_type: crate::packet2::PacketTypeId,
-        battle_constants: &wowsunpack::game_constants::BattleConstants,
-        common_constants: &wowsunpack::game_constants::CommonConstants,
-        ships_constants: &wowsunpack::game_constants::ShipsConstants,
-        player_member_map: Option<&HashMap<String, i64>>,
-        bot_member_map: Option<&HashMap<String, i64>>,
-    ) -> Self {
+    fn from(decoder: &PacketDecoder<'_>, payload: &'rawpacket crate::packet2::PacketType<'replay, 'argtype>) -> Self {
+        let version = &decoder.version;
+        let audit = decoder.audit;
+        let battle_constants = decoder.battle_constants;
         match payload {
-            PacketType::EntityMethod(em) => DecodedPacketPayload::from_entity_method(
-                version,
-                audit,
-                em,
-                battle_constants,
-                common_constants,
-                ships_constants,
-                player_member_map,
-                bot_member_map,
-            ),
+            PacketType::EntityMethod(em) => DecodedPacketPayload::from_entity_method(decoder, em),
             PacketType::Camera(camera) => DecodedPacketPayload::Camera(camera),
             PacketType::CameraMode(mode) => {
                 if let Some(cm) = CameraMode::from_id(*mode as i32, battle_constants, *version) {
@@ -1695,16 +1684,14 @@ where
         WorldPos(Self::extract_vec3(val))
     }
 
-    fn from_entity_method(
-        version: &Version,
-        audit: bool,
-        packet: &'rawpacket EntityMethodPacket<'argtype>,
-        battle_constants: &wowsunpack::game_constants::BattleConstants,
-        common_constants: &wowsunpack::game_constants::CommonConstants,
-        ships_constants: &wowsunpack::game_constants::ShipsConstants,
-        player_member_map: Option<&HashMap<String, i64>>,
-        bot_member_map: Option<&HashMap<String, i64>>,
-    ) -> Self {
+    fn from_entity_method(decoder: &PacketDecoder<'_>, packet: &'rawpacket EntityMethodPacket<'argtype>) -> Self {
+        let version = &decoder.version;
+        let audit = decoder.audit;
+        let battle_constants = decoder.battle_constants;
+        let common_constants = decoder.common_constants;
+        let ships_constants = decoder.ships_constants;
+        let player_member_map = decoder.player_member_map;
+        let bot_member_map = decoder.bot_member_map;
         let entity_id = &packet.entity_id;
         let method = &packet.method;
         let args = &packet.args;
@@ -2868,17 +2855,7 @@ impl<'a> PacketDecoder<'a> {
         DecodedPacket {
             clock: packet.clock,
             packet_type: packet.packet_type,
-            payload: DecodedPacketPayload::from(
-                &self.version,
-                self.audit,
-                &packet.payload,
-                packet.packet_type,
-                self.battle_constants,
-                self.common_constants,
-                self.ships_constants,
-                self.player_member_map,
-                self.bot_member_map,
-            ),
+            payload: DecodedPacketPayload::from(self, &packet.payload),
             leftover: packet.leftover,
         }
     }

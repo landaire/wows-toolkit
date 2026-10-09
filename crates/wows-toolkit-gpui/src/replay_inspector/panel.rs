@@ -681,10 +681,10 @@ impl ReplayPanel {
         let renderer = cx.svg_renderer();
         let task = cx.background_spawn(async move {
             let mut icons = super::icons::IconCache::new();
-            if let Some(nation) = nation {
-                if let Some(bytes) = GuiAsset::NationFlag(&nation).read(&vfs, None) {
-                    icons.set_keyed("nation".to_string(), &bytes);
-                }
+            if let Some(nation) = nation
+                && let Some(bytes) = GuiAsset::NationFlag(&nation).read(&vfs, None)
+            {
+                icons.set_keyed("nation".to_string(), &bytes);
             }
             for tint in [0xffffff, 0x303840] {
                 icons.load_ship_class(species, tint, &vfs, &renderer);

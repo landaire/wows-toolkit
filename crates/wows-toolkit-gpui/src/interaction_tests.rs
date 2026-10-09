@@ -764,7 +764,7 @@ fn the_cache_controls_appear_only_once_something_is_cached(cx: &mut TestAppConte
         window.render_frame(cx);
         assert!(window.try_find("cache-auto-dump").is_some(), "the toggle does not depend on a cache");
         assert!(window.try_find("cache-dir").is_some(), "the directory does not depend on a cache");
-        assert!(window.try_find("cache-check-updates").is_none(), "there is nothing cached to check");
+        assert!(window.try_find("cache-actions").is_none(), "there is nothing cached to check");
         assert!(window.try_find("cache-open-folder").is_none(), "there is no size to report");
     })
     .expect("the test window stays open");
@@ -774,15 +774,21 @@ fn the_cache_controls_appear_only_once_something_is_cached(cx: &mut TestAppConte
     let mut settings = test_settings();
     settings.game_data_cache_dir = filled.path().to_string_lossy().into_owned();
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+    cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
     cx.run_until_parked();
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.try_find("cache-check-updates").is_some(), "a cached build can be checked");
-        assert!(window.try_find("cache-validate").is_some(), "a cached build can be validated");
+        assert!(window.try_find("cache-actions").is_some(), "a cached build has maintenance actions");
         assert!(window.try_find("cache-open-folder").is_some(), "a cached build has a folder to open");
         // Pruning keeps the newest build, so one build is nothing to prune.
         assert!(window.try_find("cache-delete-old").is_none(), "a lone build is not an old version");
+        window.click("cache-actions", cx);
+        window.render_frame(cx);
+        let offered = menu_items(window);
+        for label in ["Check for Updates", "Validate Cache"] {
+            assert!(offered.iter().any(|(_, item)| item.label() == Some(label)), "missing cache action: {label}");
+        }
     })
     .expect("the test window stays open");
 }
@@ -881,19 +887,13 @@ fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
-/// Brings the Stats tab's first chart to the front. The tab opens on its
-/// overview, so a chart's own controls are behind its dock tab.
-fn show_first_chart(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
-    window.within(DOCK_TABS).click(2usize, cx);
-}
-
 #[gpui_kit::test]
 fn the_chart_mode_toggle_is_single_select(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
-        show_first_chart(window, cx);
+        assert!(window.try_find(("chart-settings", 0usize)).is_some(), "the first chart is visible beside the table");
 
         // The first chart pane is id 0, so its mode ids start at 0.
         let line = ("chart-mode", 0usize);
@@ -916,7 +916,7 @@ fn switching_to_a_bar_chart_offers_win_rate_which_a_line_cannot_plot(cx: &mut Te
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
-        show_first_chart(window, cx);
+        assert!(window.try_find(("chart-settings", 0usize)).is_some(), "the first chart is visible beside the table");
 
         // Win rate is the last statistic; a line chart does not offer it.
         let win_rate = ("chart-stat", ChartableStat::WinRate as usize);
@@ -2010,11 +2010,13 @@ fn the_stats_dock_puts_its_panels_on_tabs(cx: &mut TestAppContext) {
             "the tab opens on its overview, as the egui tab does"
         );
 
-        window.within(DOCK_TABS).click(2usize, cx);
-        assert_eq!(window.within(DOCK_TABS).find(2usize).selected(), Some(true));
+        assert!(window.try_find(("chart-settings", 0usize)).is_some(), "the chart is visible beside the overview");
+        window.within(DOCK_TABS).click(1usize, cx);
+        assert_eq!(window.within(DOCK_TABS).find(1usize).selected(), Some(true));
+        assert_eq!(window.within(DOCK_TABS).find(0usize).selected(), Some(false));
         assert!(
             window.try_find(("chart-settings", 0usize)).is_some(),
-            "the third tab is the first chart, and its controls are on screen"
+            "the chart stays visible beside the ship listing"
         );
     })
     .expect("the test window stays open");

@@ -245,16 +245,16 @@ impl StatsShipsPanel {
             let mut nations = HashSet::new();
             let mut classes = HashSet::new();
             for param in provider.params().iter().filter(|param| param.vehicle().is_some()) {
-                if nations.insert(param.nation().to_string()) {
-                    if let Some(bytes) = GuiAsset::NationFlag(param.nation()).read(&vfs, None) {
-                        icons.set_keyed(format!("nation:{}", param.nation()), &bytes);
-                    }
+                if nations.insert(param.nation().to_string())
+                    && let Some(bytes) = GuiAsset::NationFlag(param.nation()).read(&vfs, None)
+                {
+                    icons.set_keyed(format!("nation:{}", param.nation()), &bytes);
                 }
-                if let Some(species) = param.species().and_then(|species| species.known()).copied() {
-                    if classes.insert(species) {
-                        for tint in [0xffffff, 0x303840] {
-                            icons.load_ship_class(species, tint, &vfs, &renderer);
-                        }
+                if let Some(species) = param.species().and_then(|species| species.known()).copied()
+                    && classes.insert(species)
+                {
+                    for tint in [0xffffff, 0x303840] {
+                        icons.load_ship_class(species, tint, &vfs, &renderer);
                     }
                 }
             }
@@ -526,8 +526,8 @@ impl Render for StatsShipsPanel {
                             Button::new("stats-ships-clear-search")
                                 .child(icons::icon(icons::X))
                                 .compact()
-                                .tooltip(t!("ui.buttons.clear").to_string())
-                                .accessibility_label(t!("ui.buttons.clear").to_string())
+                                .tooltip(t!("ui.stats.clear").to_string())
+                                .accessibility_label(t!("ui.stats.clear").to_string())
                                 .on_click(cx.listener(|this, _event, window, cx| {
                                     this.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
                                 })),
@@ -646,7 +646,7 @@ mod tests {
     #[gpui_kit::test]
     fn each_ship_carries_its_record_and_the_newest_leads(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
 
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -671,7 +671,7 @@ mod tests {
     #[gpui_kit::test]
     fn two_ships_sharing_a_name_stay_apart(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
 
         let games = [
             game("Mikasa", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -693,7 +693,7 @@ mod tests {
     #[gpui_kit::test]
     fn an_unrated_session_has_no_rating_row(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -711,7 +711,7 @@ mod tests {
     #[gpui_kit::test]
     fn clicking_a_header_opens_only_that_ship(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
             game("Shima", SHIMA, "2026-02-13 16:00:00", 70_000, 1, true),
@@ -754,7 +754,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_copy_menu_writes_the_table_it_shows(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -777,7 +777,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_rating_table_arriving_late_still_rates_the_ships(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| StatsShipsPanel::new(window, cx));
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
         let rated_ship = crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
         let games = [game("Yamato", rated_ship, "2026-02-13 14:00:00", 100_000, 2, true)];

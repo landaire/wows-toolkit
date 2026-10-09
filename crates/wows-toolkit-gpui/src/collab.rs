@@ -1386,7 +1386,7 @@ mod annotation_tests {
         state.lock().current_annotation_sync = Some(AnnotationSyncState {
             annotations: vec![circle(5.0), circle(6.0)],
             ids: vec![77, 88],
-            ..Default::default()
+            owners: vec![1, 2],
         });
         let (link, events) = CollabLink::for_test(Arc::clone(&state));
 
@@ -1492,7 +1492,7 @@ mod annotation_tests {
     fn an_index_the_session_does_not_have_rubs_nothing_out() {
         let state = Arc::new(Mutex::new(SessionState::default()));
         state.lock().current_annotation_sync =
-            Some(AnnotationSyncState { annotations: vec![circle(5.0)], ids: vec![77], ..Default::default() });
+            Some(AnnotationSyncState { annotations: vec![circle(5.0)], ids: vec![77], owners: vec![1] });
         let (link, events) = CollabLink::for_test(Arc::clone(&state));
 
         link.erase_annotation(9);

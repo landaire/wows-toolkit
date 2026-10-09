@@ -6,7 +6,7 @@
 //!
 //! The sections act on the pane the reader last clicked in
 //! (`ViewportDock::active_viewport`), which the header names. Nothing here
-//! knows about `sync_options`: a change emits `ViewportEvent::SettingsChanged`
+//! knows about `sync_options`: a change emits `ViewportChange::Settings`
 //! from that pane, and `ArmorViewerPane::push_settings_from` is what widens it
 //! to the others.
 //!

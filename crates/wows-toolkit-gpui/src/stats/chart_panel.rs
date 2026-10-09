@@ -827,8 +827,8 @@ impl StatsChartPanel {
                                 Button::new(("chart-ship-search-clear", id))
                                     .child(crate::icons::icon(crate::icons::X))
                                     .compact()
-                                    .tooltip(t!("ui.buttons.clear").to_string())
-                                    .accessibility_label(t!("ui.buttons.clear").to_string())
+                                    .tooltip(t!("ui.stats.clear").to_string())
+                                    .accessibility_label(t!("ui.stats.clear").to_string())
                                     .on_click(move |_event, window, cx| {
                                         clear_search.update(cx, |this, cx| {
                                             this.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
@@ -1050,6 +1050,7 @@ mod tests {
     #[test]
     fn a_chart_round_trips_through_the_settings_row() {
         let saved = ChartSettings {
+            id: Some(7),
             stat: ChartableStat::Frags,
             mode: ChartMode::Bar,
             running: true,

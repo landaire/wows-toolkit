@@ -456,12 +456,7 @@ fn paint_legend(plot: &Plot<'_>, bounds: Bounds<Pixels>, width: f32, color: Hsla
         if show_more {
             let top = column.origin.y + px(LEGEND_ROW * visible as f32 + 2.0);
             let remaining = plot.series.len() - visible;
-            canvas.text(
-                point(column.origin.x, top),
-                &t!("ui.stats.series_more", count = remaining).into_owned(),
-                TICK_FONT,
-                color,
-            );
+            canvas.text(point(column.origin.x, top), &t!("ui.stats.series_more", count = remaining), TICK_FONT, color);
         }
     });
 }

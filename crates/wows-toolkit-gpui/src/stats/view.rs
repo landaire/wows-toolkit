@@ -17,7 +17,8 @@ use gpui_kit::component::checkbox::Checkbox;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use gpui_kit::component::dock::DockArea;
@@ -439,20 +440,18 @@ impl StatsView {
                         return;
                     }
                 }
-                if !restored_layout {
-                    if let Some(first) = this.charts.first().cloned() {
-                        this.dock_area.update(cx, |dock, cx| {
-                            if dock.panel(PanelId::from(first.entity_id())).is_none() {
-                                dock.add_panel_view(
-                                    panel_handle(first.clone()),
-                                    DockPlacement::Right,
-                                    Some(px(500.)),
-                                    window,
-                                    cx,
-                                );
-                            }
-                        });
-                    }
+                if !restored_layout && let Some(first) = this.charts.first().cloned() {
+                    this.dock_area.update(cx, |dock, cx| {
+                        if dock.panel(PanelId::from(first.entity_id())).is_none() {
+                            dock.add_panel_view(
+                                panel_handle(first.clone()),
+                                DockPlacement::Right,
+                                Some(px(500.)),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
                 }
                 if saved_is_empty {
                     let charts = std::mem::take(&mut this.charts);

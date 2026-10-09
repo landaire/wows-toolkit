@@ -273,10 +273,10 @@ const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
 /// silent counterparts [`ViewportView::set_camera`]/[`ViewportView::apply_synced`]
 /// never emit, which is what keeps the broadcast from echoing back into a loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ViewportEvent {
-    CameraChanged,
-    SettingsChanged,
-    TrajectoryModeChanged,
+pub(crate) enum ViewportChange {
+    Camera,
+    Settings,
+    TrajectoryMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -762,7 +762,7 @@ fn color_rgb(color: gpui_kit::Hsla) -> [f32; 3] {
     [rgba.r, rgba.g, rgba.b]
 }
 
-impl EventEmitter<ViewportEvent> for ViewportView {}
+impl EventEmitter<ViewportChange> for ViewportView {}
 
 impl ViewportView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -1070,7 +1070,7 @@ impl ViewportView {
         self.viewport.camera.clone()
     }
 
-    /// Sets the camera directly, with no `ViewportEvent::CameraChanged` emit.
+    /// Sets the camera directly, with no `ViewportChange::Camera` emit.
     /// The silent counterpart to every user-driven camera mutation (orbit,
     /// pan, zoom, wasd, gizmo/double-click reset): `pane.rs`'s camera-mirror
     /// broadcast and the Compare-clone both call this on the RECEIVING
@@ -1096,7 +1096,7 @@ impl ViewportView {
         }
     }
 
-    /// Applies `settings` to this pane, with no `ViewportEvent::SettingsChanged`
+    /// Applies `settings` to this pane, with no `ViewportChange::Settings`
     /// emit and no undo-stack entry -- the silent counterpart to every
     /// visibility/display/hull mutator, matching the egui app's own
     /// `SyncedPaneSettings::apply_to` (also a direct field assignment with no
@@ -1689,7 +1689,7 @@ impl ViewportView {
         if on {
             self.splash_mode = false;
         }
-        cx.emit(ViewportEvent::TrajectoryModeChanged);
+        cx.emit(ViewportChange::TrajectoryMode);
         cx.notify();
     }
 
@@ -1712,7 +1712,7 @@ impl ViewportView {
         self.splash_mode = on;
         if on && self.trajectory_mode {
             self.trajectory_mode = false;
-            cx.emit(ViewportEvent::TrajectoryModeChanged);
+            cx.emit(ViewportChange::TrajectoryMode);
         }
         cx.notify();
     }
@@ -1928,7 +1928,7 @@ impl ViewportView {
                     if let Some((min, max)) = self.model_bounds {
                         self.viewport.camera.reset(min, max);
                         self.viewport.mark_dirty();
-                        cx.emit(ViewportEvent::CameraChanged);
+                        cx.emit(ViewportChange::Camera);
                         cx.notify();
                     }
                     self.drag = None;
@@ -1991,7 +1991,7 @@ impl ViewportView {
         }
         if camera_changed {
             self.viewport.mark_dirty();
-            cx.emit(ViewportEvent::CameraChanged);
+            cx.emit(ViewportChange::Camera);
         }
 
         // Plate picking only runs while not dragging the camera/gizmo, so it
@@ -2351,7 +2351,7 @@ impl ViewportView {
                 self.viewport.camera.zoom(dy);
             }
             self.viewport.mark_dirty();
-            cx.emit(ViewportEvent::CameraChanged);
+            cx.emit(ViewportChange::Camera);
             cx.notify();
         }
     }
@@ -2455,7 +2455,7 @@ impl ViewportView {
                     let moved = this.apply_held_keys();
                     if moved {
                         this.viewport.mark_dirty();
-                        cx.emit(ViewportEvent::CameraChanged);
+                        cx.emit(ViewportChange::Camera);
                         cx.notify();
                     }
                     !this.held_keys.is_empty()
@@ -2664,7 +2664,7 @@ impl ViewportView {
         });
         mutate(self);
         self.reupload_current_armor(cx);
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
     }
 
     /// Toggles a single plate's visibility. Shared by the raycast click-to-
@@ -2848,7 +2848,7 @@ impl ViewportView {
         self.part_visibility = prev.part_visibility;
         self.plate_visibility = prev.plate_visibility;
         self.reupload_current_armor(cx);
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
     }
 
     /// Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R: re-applies the next visibility
@@ -2859,7 +2859,7 @@ impl ViewportView {
         self.part_visibility = next.part_visibility;
         self.plate_visibility = next.plate_visibility;
         self.reupload_current_armor(cx);
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
     }
 
     /// Re-uploads `current_armor` honoring the current `part_visibility`/
@@ -3019,7 +3019,7 @@ impl ViewportView {
     ) {
         mutate(&mut self.display_settings);
         self.reupload_current_armor(cx);
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
     }
 
     /// Re-uploads only the hull meshes (`upload_hull::upload_hull_meshes`),
@@ -3059,7 +3059,7 @@ impl ViewportView {
     ) {
         mutate(&mut self.hull_visibility);
         self.reupload_hull();
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -3074,7 +3074,7 @@ impl ViewportView {
         }
         self.display_settings.hull_opaque = opaque;
         self.reupload_hull();
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -3104,7 +3104,7 @@ impl ViewportView {
             self.active_camo_textures.clear();
             self.active_camo_uvs.clear();
             self.reupload_hull();
-            cx.emit(ViewportEvent::SettingsChanged);
+            cx.emit(ViewportChange::Settings);
             cx.notify();
             return;
         };
@@ -3134,7 +3134,7 @@ impl ViewportView {
         self.active_camo_textures = decode.textures;
         self.active_camo_uvs = decode.uvs;
         self.reupload_hull();
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -3442,7 +3442,7 @@ impl ViewportView {
     pub(crate) fn mutate_lighting(&mut self, cx: &mut Context<Self>, mutate: impl FnOnce(&mut LightingSettings)) {
         mutate(&mut self.viewport.lighting);
         self.viewport.mark_dirty();
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -3470,7 +3470,7 @@ impl ViewportView {
         self.lighting_colors.flat.update(cx, |picker, cx| picker.set_value(flat, window, cx));
         self.lighting_colors.key.update(cx, |picker, cx| picker.set_value(key, window, cx));
         self.viewport.mark_dirty();
-        cx.emit(ViewportEvent::SettingsChanged);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -3478,7 +3478,7 @@ impl ViewportView {
         let (az, el) = camera::ortho_view(axis, positive, self.viewport.camera.azimuth);
         self.viewport.camera.animate_to(az, el, GIZMO_SNAP_DURATION_SECS);
         self.viewport.mark_dirty();
-        cx.emit(ViewportEvent::CameraChanged);
+        cx.emit(ViewportChange::Camera);
         cx.notify();
         self.start_animation_ticker(cx);
     }
@@ -3504,7 +3504,7 @@ impl ViewportView {
                     // Every frame of the snap is a camera change, so a
                     // mirrored pane follows the whole eased move rather than
                     // sitting at the old orientation until the next drag.
-                    cx.emit(ViewportEvent::CameraChanged);
+                    cx.emit(ViewportChange::Camera);
                     cx.notify();
                     still
                 });
