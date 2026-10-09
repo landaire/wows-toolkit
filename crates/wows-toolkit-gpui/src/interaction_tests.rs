@@ -133,7 +133,9 @@ fn open_tall_app(cx: &mut TestAppContext) -> WindowHandle<App> {
 /// reads the frame. Dialogs, notifications and text selection are hosted by
 /// `Root`, so whatever exercises those has to be mounted the way production
 /// mounts it.
-fn open_app_in_root(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, gpui_kit::Entity<App>) {
+pub(crate) fn open_app_in_root(
+    cx: &mut TestAppContext,
+) -> (WindowHandle<gpui_kit::component::Root>, gpui_kit::Entity<App>) {
     use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
     let app = std::cell::RefCell::new(None);

@@ -14630,6 +14630,7 @@ dependencies = [
  "wowsunpack",
  "wt-collab-client",
  "wt-translations",
+ "zip",
 ]
 
 [[package]]

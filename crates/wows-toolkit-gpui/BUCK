@@ -62,6 +62,7 @@ GPUI_DEPS = [
     "//third-party/rust:unidecode",
     "//third-party/rust:web-time",
     "//third-party/rust:wgpu",
+    "//third-party/rust:zip",
 ]
 
 # Not wows_toolkit_gpui_bin: the target name is a path component of every

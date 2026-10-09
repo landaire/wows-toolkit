@@ -71,6 +71,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 # fetches this crate makes. Matches the egui app's feature set so both resolve
 # one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 # The chat poll behind the roster's possible-stream-sniper chip. Same version
 # and features as the egui app, so the two resolve one Twitch client.
 twitch_api = { version = "0.7.2", features = [
