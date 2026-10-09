@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-# --- Ensure WiX is installed ---------------------------------------------------
+# Ensure WiX is installed
 $wixCmd = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wixCmd) {
     Write-Host "Installing WiX v6..."
@@ -22,19 +22,20 @@ if (-not $wixCmd) {
     $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "User") + ";" + $env:PATH
 }
 
-# --- Build the Rust binary -----------------------------------------------------
+$version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' |
+    Select-Object -First 1).Matches.Groups[1].Value
+$msiVersion = ($version -split '-', 2)[0]
+$package = if ($version.Contains('-')) { 'wows-toolkit-gpui' } else { 'wows_toolkit' }
+$binaryName = "$package.exe"
+Write-Host "Version: $version ($package)"
+
 if (-not $SkipBuild) {
     Write-Host "Building release binary..."
-    cargo build --release -p wows_toolkit
+    cargo build --release --target x86_64-pc-windows-msvc -p $package
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-# --- Extract version from Cargo.toml ------------------------------------------
-$version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' |
-    Select-Object -First 1).Matches.Groups[1].Value
-Write-Host "Version: $version"
-
-# --- Generate installer banner ------------------------------------------------
+# Generate installer banner
 Add-Type -AssemblyName System.Drawing
 
 $png = [System.Drawing.Image]::FromFile("$PWD\assets\wows_toolkit.png")
@@ -55,24 +56,23 @@ $bmp24.Dispose()
 $banner.Dispose()
 $png.Dispose()
 
-# --- Generate license RTF from plaintext LICENSE ------------------------------
+# Generate license RTF from plaintext LICENSE
 $licenseText = (Get-Content -Raw "$PWD\LICENSE").Replace("`r`n", "`n").Replace("`n", "\par`n")
 $rtf = "{\rtf1\ansi\deff0{\fonttbl{\f0\fswiss Segoe UI;}}\viewkind4\uc1\pard\f0\fs20 \b MIT License\b0\par\par $licenseText}"
 Set-Content -Path "$PWD\wix\license.rtf" -Value $rtf -Encoding ASCII
 
-# --- Determine binary directory -----------------------------------------------
-# CI builds with --target, local builds without. Check both locations.
-if (Test-Path "target\x86_64-pc-windows-msvc\release\wows_toolkit.exe") {
-    $binDir = "target\x86_64-pc-windows-msvc\release"
-} else {
-    $binDir = "target\release"
+# Cargo uses the package name for each frontend's executable.
+$binary = "target\x86_64-pc-windows-msvc\release\$binaryName"
+if (-not (Test-Path -LiteralPath $binary)) {
+    $binary = "target\release\$binaryName"
 }
-Write-Host "Binary dir: $binDir"
-
-# --- Build MSI ----------------------------------------------------------------
+if (-not (Test-Path -LiteralPath $binary)) {
+    throw "Release executable is missing: $binary"
+}
 $outDir = "target\wix"
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-
+$binDir = Join-Path $outDir 'payload'
+New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+Copy-Item -LiteralPath $binary -Destination (Join-Path $binDir 'wows_toolkit.exe') -Force
 $msiPath = "$outDir\wows-toolkit-v${version}-windows-x86_64.msi"
 Write-Host "Building MSI: $msiPath"
 
@@ -82,7 +82,7 @@ wix extension add WixToolset.Util.wixext/6.0.2 2>$null
 
 wix build wix\main.wxs `
     -d BinDir=$binDir `
-    -d Version=$version `
+    -d Version=$msiVersion `
     -ext WixToolset.UI.wixext `
     -ext WixToolset.Util.wixext `
     -o $msiPath

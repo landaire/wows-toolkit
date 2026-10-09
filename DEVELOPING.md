@@ -109,6 +109,24 @@ buck2 build --target-platforms toolchains//platforms:linux_x86_64 //:wgcheck
 
 Platforms are `toolchains//platforms:linux_x86_64`, `:macos_arm64`, and `:windows_x86_64_msvc`.
 
+### Desktop release channels
+
+Suffixed versions such as `1.1.0-beta1` ship the GPUI frontend. Stable versions
+ship egui. The release tag must match `[workspace.package].version` in
+`Cargo.toml`. Manual and `ci/**` builds select the frontend from that version.
+
+Both frontends ship as `wows_toolkit.exe` on Windows and `wows_toolkit` on Linux
+and macOS. The installer retains the same application identity and replaces the
+existing installation. Windows version resources retain the full beta version;
+MSI ProductVersion uses the numeric core, such as `1.1.0`. Installers with the
+same numeric version replace each other in either direction, including beta
+and stable builds.
+
+For a local Buck beta installer, use
+`buck2 build -c native_build.mode=release -c release.frontend=gpui toolchains//windows:wows_toolkit_msi`.
+The Cargo installer script, `scripts/build-msi.ps1`, selects the frontend from
+the workspace version and stages it under the installed executable name.
+
 ### Remote action cache
 
 Actions can read and write a remote action cache, which is off unless one is configured. `root//platforms:default` turns it on only when `[buck2_re_client]` names an engine address, because CI has no cache and enabling it without one fails every action rather than falling back to local execution. Point it at a cache by writing the section into `~/.buckconfig.d/`:

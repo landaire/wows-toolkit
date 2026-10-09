@@ -9,6 +9,5 @@
 
 1 RT_MANIFEST "wows_toolkit_gpui.manifest.xml"
 
-// The icon Windows shows on the window, in the taskbar and in Explorer. The
-// Cargo build embeds the same file through the crate's build script.
-1 ICON "wows_toolkit.ico"
+// Both frontends use the installed executable name and version resources.
+#include "wows_toolkit.rc"
