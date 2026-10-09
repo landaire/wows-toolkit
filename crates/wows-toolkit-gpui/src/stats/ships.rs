@@ -11,6 +11,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use wows_replays::types::GameParamId;
+use wowsunpack::game_assets::GuiAsset;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::vfs::VfsPath;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Selectable;
@@ -40,6 +44,7 @@ use wows_toolkit_viewmodel::stats::PrStats;
 use wows_toolkit_viewmodel::stats::table as stats_table;
 
 use crate::icons;
+use crate::replay_inspector::icons::IconCache;
 
 const LABEL_COLUMN_WIDTH: Pixels = px(140.);
 const CELL_COLUMN_WIDTH: Pixels = px(110.);
@@ -63,6 +68,8 @@ struct ShipSection {
     ship: SharedString,
     /// The collapsed line: record, win rate, and the rating when there is one.
     header: SharedString,
+    performance: PerformanceInfo,
+    rating: Option<PrStats>,
     rows: Vec<stats_table::StatRow>,
     horizontal_scroll: ScrollHandle,
     /// `sort_key` of this ship's most recent game, which orders the list.
@@ -93,6 +100,9 @@ pub struct StatsShipsPanel {
     /// when the expected-values table arrives after them.
     games: Vec<PerGameStat>,
     personal_rating: Option<Arc<PersonalRatingData>>,
+    provider: Option<Arc<GameMetadataProvider>>,
+    icons: IconCache,
+    icon_task: Option<Task<()>>,
     ship_search: Entity<InputState>,
     _ship_search_subscription: Subscription,
     scroll: ScrollHandle,
@@ -118,6 +128,9 @@ impl StatsShipsPanel {
             clear_armed: None,
             games: Vec::new(),
             personal_rating: None,
+            provider: None,
+            icons: IconCache::new(),
+            icon_task: None,
             ship_search,
             _ship_search_subscription: ship_search_subscription,
             scroll: ScrollHandle::new(),
@@ -209,6 +222,8 @@ impl StatsShipsPanel {
                     rows,
                     horizontal_scroll: ScrollHandle::new(),
                     last_played: info.last_played().to_string(),
+                    performance: info,
+                    rating,
                 }
             })
             .collect();
@@ -218,6 +233,41 @@ impl StatsShipsPanel {
         sections.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.ship_id.raw().cmp(&b.ship_id.raw())));
 
         self.sections = sections;
+    }
+
+    pub fn set_game_data(&mut self, vfs: &VfsPath, provider: Arc<GameMetadataProvider>, cx: &mut Context<Self>) {
+        self.provider = Some(provider.clone());
+        self.icons = IconCache::new();
+        let vfs = vfs.clone();
+        let renderer = cx.svg_renderer();
+        let task = cx.background_spawn(async move {
+            let mut icons = IconCache::new();
+            let mut nations = HashSet::new();
+            let mut classes = HashSet::new();
+            for param in provider.params().iter().filter(|param| param.vehicle().is_some()) {
+                if nations.insert(param.nation().to_string()) {
+                    if let Some(bytes) = GuiAsset::NationFlag(param.nation()).read(&vfs, None) {
+                        icons.set_keyed(format!("nation:{}", param.nation()), &bytes);
+                    }
+                }
+                if let Some(species) = param.species().and_then(|species| species.known()).copied() {
+                    if classes.insert(species) {
+                        for tint in [0xffffff, 0x303840] {
+                            icons.load_ship_class(species, tint, &vfs, &renderer);
+                        }
+                    }
+                }
+            }
+            icons
+        });
+        self.icon_task = Some(cx.spawn(async move |this, cx| {
+            let icons = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.icons = icons;
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     fn toggle(&mut self, ship_id: GameParamId, cx: &mut Context<Self>) {
@@ -283,6 +333,40 @@ impl Render for StatsShipsPanel {
             let ship_id = section.ship_id;
             let ship = section.ship.clone();
             let panel = entity.clone();
+            let param = self.provider.as_ref().and_then(|provider| provider.game_param_by_id(ship_id));
+            let nation_icon =
+                param.as_ref().and_then(|param| self.icons.get_keyed(&format!("nation:{}", param.nation())));
+            let class_icon = param.as_ref().and_then(|param| {
+                let species = param.species()?.known()?;
+                let tint = if crate::theme::is_dark_mode() { 0xffffff } else { 0x303840 };
+                self.icons.get(*species, tint)
+            });
+            let record = h_flex()
+                .flex_wrap()
+                .gap_1()
+                .text_xs()
+                .child(
+                    div()
+                        .text_color(rgb(crate::theme::semantic().win))
+                        .child(format!("{}W", section.performance.wins())),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(crate::theme::semantic().loss))
+                        .child(format!("{}L", section.performance.losses())),
+                )
+                .when(section.performance.draws() > 0, |row| row.child(format!("{}D", section.performance.draws())))
+                .when_some(section.performance.win_rate(), |row, rate| row.child(format!("({rate:.0}%)")))
+                .when_some(section.rating.as_ref(), |row, rating| {
+                    row.child(
+                        div()
+                            .text_color(rgb(personal_rating::chip_text(
+                                rating.average.category,
+                                crate::theme::is_dark_mode(),
+                            )))
+                            .child(format!("PR: {:.0}", rating.average.pr)),
+                    )
+                });
 
             let header = h_flex()
                 .id(SharedString::from(format!("ship-header-{ship_id}")))
@@ -298,6 +382,9 @@ impl Render for StatsShipsPanel {
                         .ghost()
                         .compact()
                         .flex_1()
+                        .min_w_0()
+                        .h_auto()
+                        .accessibility_label(section.header.clone())
                         .justify_start()
                         .child(
                             h_flex()
@@ -308,7 +395,20 @@ impl Render for StatsShipsPanel {
                                 // goes through `icons::icon` rather than into a
                                 // label the UI font would render as a box.
                                 .child(icons::icon(if open { icons::CARET_DOWN } else { icons::CARET_RIGHT }))
-                                .child(div().text_sm().child(section.header.clone())),
+                                .when_some(nation_icon, |row, image| {
+                                    row.child(img(image).w(px(23.)).h(px(16.)).flex_none())
+                                })
+                                .when_some(class_icon, |row, image| {
+                                    row.child(img(image).w(px(16.)).h(px(16.)).flex_none())
+                                })
+                                .child(
+                                    v_flex()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .gap_1()
+                                        .child(div().text_sm().truncate().child(section.ship.clone()))
+                                        .child(record),
+                                ),
                         )
                         .on_click(move |_event, _window, cx: &mut App| {
                             panel.update(cx, |this, cx| this.toggle(ship_id, cx));
@@ -401,6 +501,7 @@ impl Render for StatsShipsPanel {
                             .id(SharedString::from(format!("ship-table-scroll-{ship_id}")))
                             .w_full()
                             .overflow_x_scroll()
+                            .restrict_scroll_to_axis()
                             .track_scroll(&section.horizontal_scroll)
                             .child(v_flex().min_w(SHIP_TABLE_MIN_WIDTH).py_1().child(heading).children(rows)),
                     )
@@ -444,6 +545,7 @@ impl Render for StatsShipsPanel {
                     .id("stats-ships-list")
                     .flex_1()
                     .overflow_y_scroll()
+                    .restrict_scroll_to_axis()
                     .track_scroll(&self.scroll)
                     .when(visible_count == 0, |this| {
                         this.items_center().justify_center().child(

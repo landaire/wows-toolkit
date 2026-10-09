@@ -68,6 +68,8 @@ use super::ships::StatsShipsPanel;
 const DEFAULT_GAME_LIMIT: usize = 25;
 const MIN_GAME_LIMIT: usize = 1;
 const MAX_GAME_LIMIT: usize = 999;
+const MIN_STATS_PANEL_WIDTH: Pixels = px(280.);
+const MIN_CHART_PANEL_WIDTH: Pixels = px(200.);
 
 pub struct StatsView {
     /// Every recorded game, oldest first. The filters narrow this per render.
@@ -712,6 +714,7 @@ impl StatsView {
         provider: Arc<wowsunpack::game_params::provider::GameMetadataProvider>,
         cx: &mut Context<Self>,
     ) {
+        self.ships.update(cx, |panel, cx| panel.set_game_data(vfs, provider.clone(), cx));
         self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, provider, cx));
     }
 
@@ -1133,11 +1136,33 @@ impl Render for StatsView {
         let dock_bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
         let dock_bounds_for_layout = dock_bounds.clone();
         let dock_area = self.dock_area.clone();
+        let dock_for_layout = dock_area.clone();
+        let resize_loaded_layout = self.charts_load_finished && self.charts_persistence_enabled;
         let dock_layout = div()
             .relative()
             .flex_1()
             .min_h(px(0.))
-            .on_prepaint(move |bounds, _, _| dock_bounds_for_layout.set(bounds))
+            .on_prepaint(move |bounds, window, cx| {
+                dock_bounds_for_layout.set(bounds);
+                // A layout adjustment emits LayoutChanged; wait for saved settings before enabling writes.
+                if !resize_loaded_layout {
+                    return;
+                }
+                let dock = dock_for_layout.read(cx);
+                let Some(size) = dock.dock_size(DockPlacement::Right) else { return };
+                // An absent left dock occupies no width.
+                let opposite = dock.dock_size(DockPlacement::Left).unwrap_or(px(0.));
+                let maximum = (bounds.size.width - opposite - MIN_STATS_PANEL_WIDTH).max(MIN_CHART_PANEL_WIDTH);
+                let fitted = size.clamp(MIN_CHART_PANEL_WIDTH, maximum);
+                if size != fitted {
+                    let dock = dock_for_layout.clone();
+                    window.defer(cx, move |window, cx| {
+                        dock.update(cx, |dock, cx| {
+                            dock.set_dock_size(DockPlacement::Right, fitted, window, cx);
+                        });
+                    });
+                }
+            })
             .child(dock_area.clone());
         let chart_splitter = dock_area.read(cx).dock_size(DockPlacement::Right).map(|size| {
             let drag_active = self.chart_split_dragging.clone();
@@ -1174,7 +1199,13 @@ impl Render for StatsView {
                                     let sizing = DockSizing::new(DockPlacement::Right)
                                         .with_area_bounds(area_bounds)
                                         .with_opposite_dock_size(dock.dock_size(DockPlacement::Left).unwrap_or(px(0.)));
-                                    let size = sizing.clamp(sizing.size_from_pointer(event.position));
+                                    // An absent left dock occupies no width.
+                                    let opposite = dock.dock_size(DockPlacement::Left).unwrap_or(px(0.));
+                                    let maximum = (area_bounds.size.width - opposite - MIN_STATS_PANEL_WIDTH)
+                                        .max(MIN_CHART_PANEL_WIDTH);
+                                    let size = sizing
+                                        .clamp(sizing.size_from_pointer(event.position))
+                                        .clamp(MIN_CHART_PANEL_WIDTH, maximum);
                                     dock.set_dock_size(DockPlacement::Right, size, window, cx);
                                 });
                             });
