@@ -42,12 +42,11 @@ use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 use wows_toolkit_viewmodel::stats::session_personal_rating;
 
 const ROW_HEIGHT: Pixels = px(24.);
-const LIST_OVERDRAW: Pixels = px(200.);
 const SHIP_COLUMN_WIDTH: Pixels = px(200.);
 const NUMBER_COLUMN_WIDTH: Pixels = px(96.);
 const TABLE_MIN_WIDTH: Pixels = px(640.);
-/// One achievement's column. The icon is the egui roundup's size; the column
-/// is wider than the icon so a two-word name wraps rather than being cut.
+/// One achievement's column. Compact spacing keeps a full row beside a chart
+/// at the default dock split while leaving room for longer names.
 const ACHIEVEMENT_COLUMN_WIDTH: Pixels = px(84.);
 const ACHIEVEMENT_ICON_SIZE: Pixels = px(48.);
 
@@ -74,7 +73,7 @@ pub struct StatsOverviewPanel {
     ship_names: HashMap<GameParamId, String>,
     computed: Computed,
     personal_rating: Option<Arc<PersonalRatingData>>,
-    list_state: ListState,
+    ship_scroll: ScrollHandle,
     scroll: ScrollHandle,
     horizontal_scroll: ScrollHandle,
     achievements_expanded: bool,
@@ -93,7 +92,7 @@ impl StatsOverviewPanel {
             ship_names: HashMap::new(),
             computed: Computed::default(),
             personal_rating: None,
-            list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            ship_scroll: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
             horizontal_scroll: ScrollHandle::new(),
             achievements_expanded: true,
@@ -130,7 +129,7 @@ impl StatsOverviewPanel {
         };
         self.load_achievement_icons(&computed.achievements);
         self.computed = computed;
-        self.list_state.reset(self.computed.ships.len());
+        self.ship_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
 
@@ -334,12 +333,7 @@ impl Render for StatsOverviewPanel {
                     .child(t!("ui.stats.column_avg_frags").to_string()),
             );
 
-        let ships: Vec<(String, PerformanceInfo)> = self.computed.ships.clone();
-        let locale = locale.clone();
-        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
-            let Some((ship, info)) = ships.get(ix) else {
-                return div().into_any_element();
-            };
+        let rows = self.computed.ships.iter().enumerate().map(|(ix, (ship, info))| {
             h_flex()
                 .id(ix)
                 .w_full()
@@ -354,13 +348,15 @@ impl Render for StatsOverviewPanel {
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_number(info.avg_damage(), &locale)))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_decimal(info.avg_frags())))
                 .into_any_element()
-        };
+        });
 
-        let table_rows = h_flex()
+        let table_rows = v_flex()
+            .id("stats-overview-ship-list")
             .flex_1()
             .min_h(px(0.))
-            .child(div().relative().flex_1().min_w(px(0.)).child(list(self.list_state.clone(), render_row).size_full()))
-            .child(Scrollbar::vertical(&self.list_state));
+            .overflow_y_scroll()
+            .track_scroll(&self.ship_scroll)
+            .children(rows);
 
         let table = v_flex()
             .flex_1()
@@ -434,7 +430,7 @@ impl Render for StatsOverviewPanel {
                 )
                 .when(expanded, |this| {
                     this.child(div().id("stats-achievements").overflow_y_scroll().track_scroll(&self.scroll).child(
-                        h_flex().flex_wrap().gap_3().children(achievements.iter().enumerate().map(
+                        h_flex().flex_wrap().gap_0().children(achievements.iter().enumerate().map(
                             |(ix, (earned, name, description))| {
                                 let art = self.icons.get_keyed(&format!("achievement:{}", earned.icon_key));
                                 let hover = if description.is_empty() {
@@ -481,8 +477,8 @@ impl Render for StatsOverviewPanel {
             .id("stats-overview")
             .size_full()
             .child(summary_row)
-            .child(table)
             .when_some(achievements, |this, section| this.child(section))
+            .child(table)
             .into_any_element()
     }
 }

@@ -81,21 +81,54 @@ pub fn normalize_proxy_url(raw: &str) -> Option<String> {
 /// the database; renaming a variant would silently read back as `System`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeChoice {
-    /// Follow the desktop's light/dark preference.
+    /// Follow the desktop's light or dark preference.
     #[default]
     System,
+    /// Stored as `Dark` to preserve existing preference rows.
     Dark,
+    /// Stored as `Light` to preserve existing preference rows.
     Light,
+    Dracula,
+    Nord,
+    Monokai,
+    SolarizedDark,
+    SolarizedLight,
+    GruvboxDark,
+    GruvboxLight,
+    CatppuccinMocha,
+    TokyoNight,
 }
 
 impl ThemeChoice {
-    pub const ALL: [ThemeChoice; 3] = [Self::System, Self::Dark, Self::Light];
+    pub const ALL: [ThemeChoice; 12] = [
+        Self::System,
+        Self::Dark,
+        Self::Light,
+        Self::Dracula,
+        Self::Nord,
+        Self::Monokai,
+        Self::SolarizedDark,
+        Self::SolarizedLight,
+        Self::GruvboxDark,
+        Self::GruvboxLight,
+        Self::CatppuccinMocha,
+        Self::TokyoNight,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::System => "Follow system",
-            Self::Dark => "Dark",
-            Self::Light => "Light",
+            Self::Dark => "Graphite & Bone",
+            Self::Light => "Bone",
+            Self::Dracula => "Dracula",
+            Self::Nord => "Nord",
+            Self::Monokai => "Monokai",
+            Self::SolarizedDark => "Solarized Dark",
+            Self::SolarizedLight => "Solarized Light",
+            Self::GruvboxDark => "Gruvbox Dark",
+            Self::GruvboxLight => "Gruvbox Light",
+            Self::CatppuccinMocha => "Catppuccin Mocha",
+            Self::TokyoNight => "Tokyo Night",
         }
     }
 
@@ -106,8 +139,15 @@ impl ThemeChoice {
     pub fn is_dark(self, system_is_dark: bool) -> bool {
         match self {
             Self::System => system_is_dark,
-            Self::Dark => true,
-            Self::Light => false,
+            Self::Dark
+            | Self::Dracula
+            | Self::Nord
+            | Self::Monokai
+            | Self::SolarizedDark
+            | Self::GruvboxDark
+            | Self::CatppuccinMocha
+            | Self::TokyoNight => true,
+            Self::Light | Self::SolarizedLight | Self::GruvboxLight => false,
         }
     }
 }

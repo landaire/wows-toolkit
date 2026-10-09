@@ -685,6 +685,8 @@ pub struct ViewportView {
     /// the comparison list. `None` until one is chosen, which still casts:
     /// the plates a ray crosses are worth showing without a shell.
     cast_ship: Option<ComparisonShip>,
+    /// Shell selected from that ship, when chosen in the toolbar.
+    cast_shell_index: Option<usize>,
     /// The range the cast shell is fired from, which sets how steeply it
     /// falls. The egui viewer offers the same slider over the same span.
     cast_range: Km,
@@ -796,6 +798,7 @@ impl ViewportView {
             trajectories: Vec::new(),
             continue_on_ricochet: false,
             cast_ship: None,
+            cast_shell_index: None,
             cast_range: DEFAULT_CAST_RANGE,
             splash_mode: false,
             splash_result: None,
@@ -1643,11 +1646,19 @@ impl ViewportView {
     ///
     /// Everything already cast is re-run, since a different shell reaches a
     /// different depth through the same plates.
-    pub(crate) fn set_cast_ship(&mut self, ship: Option<ComparisonShip>, cx: &mut Context<Self>) {
-        if self.cast_ship.as_ref().map(|held| &held.param_index) == ship.as_ref().map(|next| &next.param_index) {
+    pub(crate) fn set_cast_ship(
+        &mut self,
+        ship: Option<ComparisonShip>,
+        shell_index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.cast_ship.as_ref().map(|held| &held.param_index) == ship.as_ref().map(|next| &next.param_index)
+            && self.cast_shell_index == shell_index
+        {
             return;
         }
         self.cast_ship = ship;
+        self.cast_shell_index = shell_index;
         self.recast_trajectories(cx);
     }
 
@@ -2255,7 +2266,11 @@ impl ViewportView {
         // Armour-piercing first: it is the shell a trajectory through plating
         // says anything about. A ship carrying none still casts with what it
         // has rather than refusing.
-        let shell = ship.shells.iter().find(|shell| shell.ammo_type == AmmoType::AP).or_else(|| ship.shells.first())?;
+        let shell = self
+            .cast_shell_index
+            .and_then(|index| ship.shells.get(index))
+            .or_else(|| ship.shells.iter().find(|shell| shell.ammo_type == AmmoType::AP))
+            .or_else(|| ship.shells.first())?;
         let params = ShellParams::from_shell_info(shell)?;
         let impact = solve_for_range(&params, range.to_meters())?;
         Some((params, impact))

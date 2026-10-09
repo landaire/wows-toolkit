@@ -796,7 +796,7 @@ impl UnpackerView {
 fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoElement {
     let trigger = Button::new("unpacker-dump-params")
         .child(crate::icons::icon(crate::icons::DATABASE))
-        .compact()
+        .xsmall()
         .ghost()
         .disabled(!enabled)
         .accessibility_label(t!("ui.unpacker.dump_parameters").to_string())

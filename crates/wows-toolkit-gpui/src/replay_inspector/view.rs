@@ -20,6 +20,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
+use gpui_kit::component::dock::DockEvent;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::dock::PaneRef;
@@ -154,13 +155,9 @@ pub struct ReplayInspectorView {
     /// demand either way -- this only lets an already-warm build skip the
     /// wait.
     game_data_status: GameDataStatus,
-    /// Set once the first replay is opened. Approximates "the dock has at
-    /// least one tab" for the empty-state message without reaching into
-    /// `DockArea`'s private layout fields; it does not clear if every tab is
-    /// later closed, so the empty-state message can under-fire in that edge
-    /// case. Acceptable for this milestone: closing tabs back to zero and
-    /// re-showing the placeholder is not part of the brief.
-    has_opened_replay: bool,
+    /// Whether the dock has visible content, which controls the empty-state
+    /// overlay without replacing the dock when its first panel is opened.
+    has_dock_content: bool,
     /// Live replay panels keyed by the path they were opened from, so a
     /// repeat open on an already-open replay can be deduped instead of
     /// adding a second tab for it. Entries survive their panel's tab being
@@ -339,6 +336,15 @@ impl ReplayInspectorView {
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
         let (dock_area, _) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
+        let dock_subscription = cx.subscribe_in(&dock_area, window, |this, dock, event, _window, cx| {
+            if matches!(event, DockEvent::LayoutChanged) {
+                let has_content = !dock.read(cx).is_empty(DockPlacement::Center, cx);
+                if this.has_dock_content != has_content {
+                    this.has_dock_content = has_content;
+                    cx.notify();
+                }
+            }
+        });
         let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
         let items = SearchableVec::new(GROUPINGS.map(GroupingItem).to_vec());
@@ -365,7 +371,7 @@ impl ReplayInspectorView {
             dock_area,
             game_data: None,
             game_data_status: GameDataStatus::Loading { version: None },
-            has_opened_replay: false,
+            has_dock_content: false,
             open_panels: HashMap::new(),
             current_replay: None,
             open_renderers: HashMap::new(),
@@ -384,7 +390,7 @@ impl ReplayInspectorView {
             constants_asked: std::collections::BTreeSet::new(),
             constants_mismatched: std::collections::BTreeSet::new(),
             contributing: None,
-            _subscriptions: vec![subscription, grouping_subscription],
+            _subscriptions: vec![subscription, grouping_subscription, dock_subscription],
         }
     }
 
@@ -1278,7 +1284,6 @@ impl ReplayInspectorView {
                 dock_area.remove_panel_id(showing.panel, window, cx);
             }
         });
-        self.has_opened_replay = true;
         // A closed viewport leaves a dangling weak handle behind, and the
         // map is only walked when one is asked for, so it is swept here.
         self.open_renderers.retain(|_, panel| panel.upgrade().is_some());
@@ -1833,7 +1838,7 @@ impl Render for ReplayInspectorView {
             .relative()
             .size_full()
             .child(self.dock_area.clone())
-            .when(!self.has_opened_replay, |this| {
+            .when(!self.has_dock_content, |this| {
                 this.child(
                     div().absolute().inset_0().flex().items_center().justify_center().bg(cx.theme().background).child(
                         div()

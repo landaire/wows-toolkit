@@ -300,8 +300,8 @@ pub use wows_toolkit_viewmodel::settings::ThemeChoice;
 pub fn egui_theme_preference(choice: ThemeChoice) -> egui::ThemePreference {
     match choice {
         ThemeChoice::System => egui::ThemePreference::System,
-        ThemeChoice::Dark => egui::ThemePreference::Dark,
-        ThemeChoice::Light => egui::ThemePreference::Light,
+        choice if choice.is_dark(false) => egui::ThemePreference::Dark,
+        _ => egui::ThemePreference::Light,
     }
 }
 

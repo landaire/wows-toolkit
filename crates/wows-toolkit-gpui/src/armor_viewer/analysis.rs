@@ -112,6 +112,10 @@ pub struct PenetrationState {
     /// A list rather than one ship: the question the checker answers is which
     /// of several ships gets through a plate, which one at a time cannot ask.
     pub ships: Vec<ComparisonShip>,
+    /// Ship selected to supply the shell for a trajectory cast.
+    pub firing_ship: Option<String>,
+    /// Shell in that ship's parameter list, when explicitly selected.
+    pub firing_shell: Option<usize>,
     /// Bumped whenever the list changes, so anything caching a result against
     /// it can tell that it is stale.
     pub version: u64,
@@ -135,7 +139,16 @@ pub struct PlateUnderPointer {
 impl PenetrationState {
     pub fn new(window: &mut Window, cx: &mut App) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.armor.pen.search_hint").to_string()));
-        Self { ships: Vec::new(), version: 0, ifhe: false, plate: None, search, catalog: Vec::new() }
+        Self {
+            ships: Vec::new(),
+            firing_ship: None,
+            firing_shell: None,
+            version: 0,
+            ifhe: false,
+            plate: None,
+            search,
+            catalog: Vec::new(),
+        }
     }
 
     /// Flattens the catalog into the list the search runs over.
@@ -211,7 +224,7 @@ impl PenetrationState {
 /// inside that pane's own render, where reading the entity would panic. The
 /// entity is captured only for the callbacks, which run later.
 pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
-    let (ships, ifhe_on, plate, search, matches) = {
+    let (ships, firing_ship, ifhe_on, plate, search, matches) = {
         let state = view.penetration();
         let typed = state.search.read(cx).value().to_string();
         let matches: Vec<(String, String, u32)> = state
@@ -219,7 +232,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
             .into_iter()
             .map(|entry| (entry.param_index.clone(), entry.display_name.clone(), entry.tier))
             .collect();
-        (state.ships.clone(), state.ifhe, state.plate.clone(), state.search.clone(), matches)
+        (state.ships.clone(), state.firing_ship.clone(), state.ifhe, state.plate.clone(), state.search.clone(), matches)
     };
     let ifhe = Ifhe::from_enabled(ifhe_on);
 
@@ -279,9 +292,17 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     } else {
         v_flex()
             .gap_2()
-            .children(
-                ships.iter().enumerate().map(|(index, ship)| ship_block(pane, index, ship, plate.as_ref(), ifhe, cx)),
-            )
+            .children(ships.iter().enumerate().map(|(index, ship)| {
+                ship_block(
+                    pane,
+                    index,
+                    ship,
+                    firing_ship.as_deref() == Some(ship.param_index.as_str()),
+                    plate.as_ref(),
+                    ifhe,
+                    cx,
+                )
+            }))
             .into_any_element()
     };
 
@@ -908,6 +929,7 @@ fn ship_block(
     pane: &Entity<ArmorViewerPane>,
     index: usize,
     ship: &ComparisonShip,
+    firing: bool,
     plate: Option<&PlateUnderPointer>,
     ifhe: Ifhe,
     cx: &App,
@@ -935,6 +957,22 @@ fn ship_block(
                     tier_roman(ship.tier),
                     ship.display_name
                 )))
+                .child(crate::ui::selectable(
+                    ("armor-pen-firing", index),
+                    firing,
+                    Button::new(("armor-pen-firing-button", index))
+                        .label(t!("ui.armor.pen.use_for_trajectory").to_string())
+                        .compact()
+                        .selected(firing)
+                        .tooltip(t!("ui.armor.pen.firing_ship_tooltip").to_string())
+                        .on_click({
+                            let pane = pane.clone();
+                            let param_index = ship.param_index.clone();
+                            move |_event, _window, cx: &mut App| {
+                                pane.update(cx, |pane, cx| pane.set_firing_ship(&param_index, cx));
+                            }
+                        }),
+                ))
                 .child(
                     Button::new(("armor-pen-remove", index))
                         .child(crate::icons::icon(crate::icons::X))

@@ -611,10 +611,11 @@ pub struct App {
     /// load completes, updated live as the slider moves, and written back so
     /// it survives a restart the way the egui slider's does.
     zoom: f32,
-    /// Which palette is on screen. Seeded from the shared setting, then
+    /// The saved palette. Seeded from the shared setting, then
     /// changed from the Settings tab; a zoom change re-applies the theme, so
     /// it has to be kept rather than re-read.
     theme: ThemeChoice,
+    theme_preview: Option<ThemeChoice>,
     /// What the last credential paste did, shown beside the button. `None`
     /// before anything has been pasted this session.
     twitch_paste: Option<Result<String, String>>,
@@ -847,10 +848,10 @@ impl App {
         let appearance_changed = window.observe_window_appearance(move |window, cx| {
             let Some(app) = watched.upgrade() else { return };
             app.update(cx, |this, cx| {
-                if this.theme != ThemeChoice::System {
-                    return;
+                let displayed = this.theme_preview.unwrap_or(this.theme);
+                if displayed == ThemeChoice::System {
+                    theme::apply_egui_theme(displayed, this.zoom, window, cx);
                 }
-                theme::apply_egui_theme(this.theme, this.zoom, window, cx);
                 cx.notify();
             });
         });
@@ -865,6 +866,7 @@ impl App {
 
         Self {
             theme: ThemeChoice::default(),
+            theme_preview: None,
             twitch_paste: None,
             twitch_channel_input,
             _twitch_poll: None,
@@ -1615,6 +1617,7 @@ impl App {
             choice
         });
         self.theme = choice;
+        self.theme_preview = None;
         theme::apply_egui_theme(choice, self.zoom, window, cx);
     }
 
@@ -2152,7 +2155,7 @@ fn settings_section(
     description: String,
     border: Hsla,
     body: impl IntoElement,
-) -> impl IntoElement {
+) -> AnyElement {
     v_flex()
         .gap_2()
         .child(
@@ -2176,6 +2179,7 @@ fn settings_section(
                 .p_3()
                 .child(body),
         )
+        .into_any_element()
 }
 
 /// The layout every section's controls share: one column, labels beside the
@@ -2744,64 +2748,89 @@ impl App {
         let busy = self.cache.busy();
         let running = self.cache.running.is_some();
 
-        let summary = h_flex()
-            .gap_2()
-            .flex_wrap()
-            .items_center()
-            .child(
-                div().text_sm().child(
-                    t!(
-                        "ui.settings.wows.cache.stats",
-                        size = humansize::format_size(stats.total_bytes, humansize::BINARY),
-                        count = stats.version_count,
-                    )
-                    .to_string(),
-                ),
-            )
-            .child({
-                let folder = base.clone();
-                Button::new("cache-open-folder")
-                    .label(t!("ui.settings.wows.cache.open_folder").to_string())
-                    .compact()
-                    .on_click(move |_event, _window, _cx| open_directory(&folder))
-            })
-            // Nothing to prune while there is one build: the newest is kept.
-            .when(stats.version_count > 1, |this| {
-                let dir = base.clone();
-                this.child(
-                    Button::new("cache-delete-old")
-                        .label(t!("ui.settings.wows.cache.delete_old").to_string())
-                        .compact()
-                        .disabled(busy)
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            this.delete_old_cache_versions(dir.clone(), cx)
-                        })),
+        let summary =
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    div().text_sm().child(
+                        t!(
+                            "ui.settings.wows.cache.stats",
+                            size = humansize::format_size(stats.total_bytes, humansize::BINARY),
+                            count = stats.version_count,
+                        )
+                        .to_string(),
+                    ),
                 )
-            });
+                .child({
+                    let folder = base.clone();
+                    Button::new("cache-open-folder")
+                        .label(t!("ui.settings.wows.cache.open_folder").to_string())
+                        .compact()
+                        .on_click(move |_event, _window, _cx| open_directory(&folder))
+                        .into_any_element()
+                })
+                // Nothing to prune while there is one build: the newest is kept.
+                .when(stats.version_count > 1, |this| {
+                    let dir = base.clone();
+                    this.child(
+                        Button::new("cache-delete-old")
+                            .label(t!("ui.settings.wows.cache.delete_old").to_string())
+                            .compact()
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _event, _window, cx| {
+                                this.delete_old_cache_versions(dir.clone(), cx)
+                            }))
+                            .into_any_element(),
+                    )
+                })
+                .into_any_element();
 
         let jobs = h_flex()
             .gap_2()
             .items_center()
             .child({
-                let dir = base.clone();
-                Button::new("cache-check-updates")
-                    .label(t!("ui.settings.wows.cache.check_updates").to_string())
+                Button::new("cache-actions")
+                    .label(t!("ui.settings.wows.cache.actions").to_string())
                     .compact()
                     .disabled(busy)
-                    .on_click(
-                        cx.listener(move |this, _event, _window, cx| this.check_cache_for_updates(dir.clone(), cx)),
-                    )
+                    .tooltip(t!("ui.settings.wows.cache.actions_tooltip").to_string())
+                    .dropdown_menu({
+                        let app = cx.entity().downgrade();
+                        let check_dir = base.clone();
+                        let validate_dir = base.clone();
+                        move |menu, _window, _cx| {
+                            let app_for_check = app.clone();
+                            let app_for_validate = app.clone();
+                            let check_dir = check_dir.clone();
+                            let validate_dir = validate_dir.clone();
+                            menu.item(
+                                PopupMenuItem::new(t!("ui.settings.wows.cache.check_updates").into_owned()).on_click(
+                                    move |_event, _window, cx| {
+                                        if let Some(app) = app_for_check.upgrade() {
+                                            app.update(cx, |app, cx| {
+                                                app.check_cache_for_updates(check_dir.clone(), cx)
+                                            });
+                                        }
+                                    },
+                                ),
+                            )
+                            .item(
+                                PopupMenuItem::new(t!("ui.settings.wows.cache.validate").into_owned()).on_click(
+                                    move |_event, _window, cx| {
+                                        if let Some(app) = app_for_validate.upgrade() {
+                                            app.update(cx, |app, cx| app.validate_cache(validate_dir.clone(), cx));
+                                        }
+                                    },
+                                ),
+                            )
+                        }
+                    })
+                    .into_any_element()
             })
-            .child({
-                let dir = base.clone();
-                Button::new("cache-validate")
-                    .label(t!("ui.settings.wows.cache.validate").to_string())
-                    .compact()
-                    .disabled(busy)
-                    .tooltip(t!("ui.settings.wows.cache.validate_tooltip").to_string())
-                    .on_click(cx.listener(move |this, _event, _window, cx| this.validate_cache(dir.clone(), cx)))
-            })
-            .when(running, |this| this.child(Spinner::new()));
+            .when(running, |this| this.child(Spinner::new()))
+            .into_any_element();
 
         let progress = self.cache.progress.filter(|step| step.total > 0).map(|step| {
             div()
@@ -2979,25 +3008,37 @@ impl App {
 
         let chosen = self.settings()?.code_integrity;
         Some(
-            field()
-                .label(t!("ui.settings.app.code_integrity").to_string())
-                .description(t!("ui.settings.app.code_integrity_tooltip").to_string())
-                .child(h_flex().gap_2().children(CodeIntegrityPreference::ALL.map(|choice| {
-                    selectable(
-                        ("code-integrity", choice as usize),
-                        chosen == choice,
-                        Button::new(("code-integrity-button", choice as usize))
-                            .label(t!(choice.key()).to_string())
-                            .compact()
-                            .selected(chosen == choice)
-                            .on_click(cx.listener(move |this, _event, _window, cx| {
-                                this.edit_setting(keys::CODE_INTEGRITY, cx, |settings| {
-                                    settings.code_integrity = choice;
-                                    choice
-                                });
-                            })),
-                    )
-                }))),
+            field().label(t!("ui.settings.app.code_integrity").to_string()).child(
+                v_flex()
+                    // The form's content cell must size from its column, not the help text.
+                    .w(px(0.))
+                    .min_w_full()
+                    .gap_1()
+                    .child(h_flex().flex_wrap().gap_2().children(CodeIntegrityPreference::ALL.map(|choice| {
+                        selectable(
+                            ("code-integrity", choice as usize),
+                            chosen == choice,
+                            Button::new(("code-integrity-button", choice as usize))
+                                .label(t!(choice.key()).to_string())
+                                .compact()
+                                .selected(chosen == choice)
+                                .on_click(cx.listener(move |this, _event, _window, cx| {
+                                    this.edit_setting(keys::CODE_INTEGRITY, cx, |settings| {
+                                        settings.code_integrity = choice;
+                                        choice
+                                    });
+                                })),
+                        )
+                    })))
+                    .child(
+                        div()
+                            .w_full()
+                            .whitespace_normal()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.settings.app.code_integrity_tooltip").to_string()),
+                    ),
+            ),
         )
     }
 
@@ -3112,6 +3153,182 @@ impl App {
         self.player_tracker.update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, proxy_url, cx));
     }
 
+    fn settings_language_field(&self) -> gpui_kit::component::form::Field {
+        field().label(t!("ui.settings.app.language").to_string()).child(
+            crate::ui::boxed(LANGUAGE_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                Select::new(&self.language_select)
+                    .id("settings-language")
+                    .accessibility_label(t!("ui.settings.app.language").to_string())
+                    .small()
+                    .w(LANGUAGE_COMBO_WIDTH)
+                    .menu_width(LANGUAGE_COMBO_WIDTH),
+            ),
+        )
+    }
+
+    fn settings_theme_field(
+        &self,
+        theme_choice: ThemeChoice,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::component::form::Field {
+        field().label(t!("ui.settings.app.theme").to_string()).child(h_flex().flex_wrap().gap_2().children(
+            ThemeChoice::ALL.map(|choice| {
+                let colors = theme::swatches(choice, cx);
+                let color_summary = colors.iter().map(|color| format!("#{color:06X}")).collect::<Vec<_>>().join(" ");
+                div()
+                    .id(("theme-choice-preview", choice as usize))
+                    .on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
+                        if *hovered {
+                            this.theme_preview = Some(choice);
+                        } else if this.theme_preview == Some(choice) {
+                            this.theme_preview = None;
+                        } else {
+                            return;
+                        }
+                        let preview = this.theme_preview.unwrap_or(this.theme);
+                        theme::apply_egui_theme(preview, this.zoom, window, cx);
+                    }))
+                    .child(selectable(
+                        ("theme-choice", choice as usize),
+                        theme_choice == choice,
+                        Button::new(("theme-choice-button", choice as usize))
+                            .accessibility_label(choice.label())
+                            .child(v_flex().gap_1().child(div().text_xs().child(choice.label())).child(
+                                h_flex().gap_1().children(
+                                    colors.map(|color| div().w(px(22.)).h(px(9.)).rounded(px(1.)).bg(rgb(color))),
+                                ),
+                            ))
+                            .w(px(142.))
+                            .compact()
+                            .h_10()
+                            .selected(theme_choice == choice)
+                            .tooltip(format!("{}  {}", choice.label(), color_summary))
+                            .on_click(cx.listener(move |this, _event, window, cx| {
+                                this.set_theme(choice, window, cx);
+                            })),
+                    ))
+            }),
+        ))
+    }
+
+    fn settings_zoom_field(&self, cx: &Context<Self>) -> gpui_kit::component::form::Field {
+        field().label(t!("ui.settings.app.zoom_factor").to_string()).child(self.render_zoom_row(cx))
+    }
+
+    fn settings_data_sharing_field(
+        &self,
+        data_sharing: DataSharingMode,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::component::form::Field {
+        field()
+            .label(t!("ui.settings.app.data_sharing_mode").to_string())
+            .description(data_sharing.description())
+            .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
+                selectable(
+                    ("data-sharing", mode as usize),
+                    data_sharing == mode,
+                    Button::new(("data-sharing-button", mode as usize))
+                        .label(mode.label())
+                        .compact()
+                        .selected(data_sharing == mode)
+                        .tooltip(mode.description())
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            this.adopt_data_sharing(mode, cx);
+                        })),
+                )
+            })))
+    }
+
+    fn settings_proxy_field(&self) -> gpui_kit::component::form::Field {
+        field()
+            .label(t!("ui.settings.app.proxy_url").to_string())
+            .description(t!("ui.settings.app.proxy_url_hint").to_string())
+            .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full())
+    }
+
+    fn settings_app_behavior_field(
+        &self,
+        check_for_updates: bool,
+        enable_logging: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::component::form::Field {
+        field().child(
+            v_flex()
+                .gap_2()
+                .child(
+                    Checkbox::new("check-for-updates")
+                        .label(t!("ui.settings.app.check_for_updates").to_string())
+                        .checked(check_for_updates)
+                        .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                            let checked = *checked;
+                            this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
+                                settings.check_for_updates = checked;
+                                checked
+                            });
+                        })),
+                )
+                .child(
+                    Checkbox::new("enable-logging")
+                        .label(t!("ui.settings.app.enable_logging").to_string())
+                        .checked(enable_logging)
+                        .tooltip(t!("ui.settings.app.enable_logging_tooltip").to_string())
+                        .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                            let checked = *checked;
+                            this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
+                                settings.enable_logging = checked;
+                                checked
+                            });
+                        })),
+                ),
+        )
+    }
+
+    fn settings_data_directory_field(&self) -> gpui_kit::component::form::Field {
+        field().child(
+            h_flex().child(
+                Button::new("open-data-dir")
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
+                            .child(t!("ui.settings.app.open_data_dir").to_string()),
+                    )
+                    .compact()
+                    .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
+                    .on_click(|_event, _window, _cx| open_data_directory()),
+            ),
+        )
+    }
+
+    fn render_application_settings_section(
+        &mut self,
+        check_for_updates: bool,
+        enable_logging: bool,
+        data_sharing: DataSharingMode,
+        theme_choice: ThemeChoice,
+        border: Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let form = settings_form()
+            .child(self.settings_language_field())
+            .child(self.settings_theme_field(theme_choice, cx))
+            .child(self.settings_zoom_field(cx))
+            .child(self.settings_data_sharing_field(data_sharing, cx))
+            .children(self.render_code_integrity_row(cx))
+            .child(self.settings_proxy_field())
+            .child(self.settings_app_behavior_field(check_for_updates, enable_logging, cx))
+            .child(self.settings_data_directory_field());
+
+        settings_section(
+            crate::icons::GEAR_FINE,
+            t!("ui.settings.app.heading").into_owned(),
+            t!("ui.settings.app.description").into_owned(),
+            border,
+            form,
+        )
+        .into_any_element()
+    }
+
     fn render_settings_tab(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = match &self.settings {
             SettingsState::Loading => {
@@ -3150,115 +3367,17 @@ impl App {
             .armor_defaults
             .as_ref()
             .map(|defaults| (defaults.show_plate_edges, defaults.show_waterline, defaults.hull_opaque));
+        let suppress_ip_warning = settings.suppress_p2p_ip_warning;
+        let disable_auto_open = settings.disable_auto_open_session_windows;
         let border = cx.theme().border;
 
-        let application = settings_section(
-            crate::icons::GEAR_FINE,
-            t!("ui.settings.app.heading").into_owned(),
-            t!("ui.settings.app.description").into_owned(),
+        let application = self.render_application_settings_section(
+            check_for_updates,
+            enable_logging,
+            data_sharing,
+            theme_choice,
             border,
-            settings_form()
-                .child(
-                    field().label(t!("ui.settings.app.language").to_string()).child(
-                        crate::ui::boxed(LANGUAGE_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                            Select::new(&self.language_select)
-                                .id("settings-language")
-                                .accessibility_label(t!("ui.settings.app.language").to_string())
-                                .small()
-                                .w(LANGUAGE_COMBO_WIDTH)
-                                .menu_width(LANGUAGE_COMBO_WIDTH),
-                        ),
-                    ),
-                )
-                .child(field().label(t!("ui.settings.app.theme").to_string()).child(h_flex().gap_2().children(
-                    ThemeChoice::ALL.map(|choice| {
-                        selectable(
-                            ("theme-choice", choice as usize),
-                            theme_choice == choice,
-                            Button::new(("theme-choice-button", choice as usize))
-                                .label(choice.label())
-                                .compact()
-                                .selected(theme_choice == choice)
-                                .on_click(cx.listener(move |this, _event, window, cx| {
-                                    this.set_theme(choice, window, cx);
-                                })),
-                        )
-                    }),
-                )))
-                .child(field().label(t!("ui.settings.app.zoom_factor").to_string()).child(self.render_zoom_row(cx)))
-                .child(
-                    field()
-                        .label(t!("ui.settings.app.data_sharing_mode").to_string())
-                        .description(data_sharing.description())
-                        .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
-                            selectable(
-                                ("data-sharing", mode as usize),
-                                data_sharing == mode,
-                                Button::new(("data-sharing-button", mode as usize))
-                                    .label(mode.label())
-                                    .compact()
-                                    .selected(data_sharing == mode)
-                                    .tooltip(mode.description())
-                                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                                        this.adopt_data_sharing(mode, cx);
-                                    })),
-                            )
-                        }))),
-                )
-                .children(self.render_code_integrity_row(cx))
-                .child(
-                    field()
-                        .label(t!("ui.settings.app.proxy_url").to_string())
-                        .description(t!("ui.settings.app.proxy_url_hint").to_string())
-                        .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
-                )
-                .child(
-                    field().child(
-                        v_flex()
-                            .gap_2()
-                            .child(
-                                Checkbox::new("check-for-updates")
-                                    .label(t!("ui.settings.app.check_for_updates").to_string())
-                                    .checked(check_for_updates)
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
-                                            settings.check_for_updates = checked;
-                                            checked
-                                        });
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("enable-logging")
-                                    .label(t!("ui.settings.app.enable_logging").to_string())
-                                    .checked(enable_logging)
-                                    .tooltip(t!("ui.settings.app.enable_logging_tooltip").to_string())
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
-                                            settings.enable_logging = checked;
-                                            checked
-                                        });
-                                    })),
-                            ),
-                    ),
-                )
-                .child(
-                    field().child(
-                        h_flex().child(
-                            Button::new("open-data-dir")
-                                .child(
-                                    h_flex()
-                                        .gap_1()
-                                        .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
-                                        .child(t!("ui.settings.app.open_data_dir").to_string()),
-                                )
-                                .compact()
-                                .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
-                                .on_click(|_event, _window, _cx| open_data_directory()),
-                        ),
-                    ),
-                ),
+            cx,
         );
 
         let game = settings_section(
@@ -3300,11 +3419,8 @@ impl App {
                             ),
                     ),
             ),
-        );
-
-        // Read before the cache section, which takes `self` mutably.
-        let suppress_ip_warning = settings.suppress_p2p_ip_warning;
-        let disable_auto_open = settings.disable_auto_open_session_windows;
+        )
+        .into_any_element();
 
         let cache = self.render_cache_section(cx);
         let index = self.render_index_section(cx);
@@ -3350,7 +3466,8 @@ impl App {
                             })),
                     ),
                 ),
-        );
+        )
+        .into_any_element();
 
         let replay_section = settings_section(
             crate::icons::TABLE,
@@ -3429,7 +3546,8 @@ impl App {
                         .description(t!("ui.settings.replay.export_path_hint").to_string())
                         .child(self.render_auto_export_row(&replay, cx)),
                 ),
-        );
+        )
+        .into_any_element();
 
         let twitch = settings_section(
             crate::icons::BROADCAST,
@@ -3490,7 +3608,8 @@ impl App {
                             .child(Input::new(&self.twitch_channel_input).id("twitch-channel").small().w_full()),
                     ),
                 ),
-        );
+        )
+        .into_any_element();
 
         // The viewport writes these itself when a pane changes, so the tab
         // reports them rather than offering a second way to set them.
@@ -3529,7 +3648,8 @@ impl App {
                         .into_any_element(),
                 }),
             ),
-        );
+        )
+        .into_any_element();
 
         div()
             .id("settings-scroll")
@@ -3588,12 +3708,16 @@ fn open_directory(dir: &std::path::Path) {
 
 impl Render for App {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A tab can change without a pointer-leave event on the preview tile.
+        if self.active_tab != AppTab::Settings && self.theme_preview.take().is_some() {
+            theme::apply_egui_theme(self.theme, self.zoom, window, cx);
+        }
         // Pick up drag changes made directly on the zoom slider (the reset
         // button applies the theme itself, so this only fires for drags).
         let slider_zoom = self.zoom_slider.read(cx).value().start();
         if (slider_zoom - self.zoom).abs() > f32::EPSILON {
             self.zoom = slider_zoom;
-            theme::apply_egui_theme(self.theme, self.zoom, window, cx);
+            theme::apply_egui_theme(self.theme_preview.unwrap_or(self.theme), self.zoom, window, cx);
             settings_store::save(keys::ZOOM_FACTOR, &self.zoom, cx);
         }
 
@@ -3610,14 +3734,32 @@ impl Render for App {
                 // strip reports an install it cannot read (`app.rs`'s
                 // `alert_tab_style`).
                 let attention = *t == AppTab::Settings && self.wows_dir_invalid;
-                Tab::new().child(
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .when(attention, |row| row.text_color(danger))
-                        .child(crate::icons::icon(t.glyph()))
-                        .child(t.label()),
-                )
+                let selected = *t == self.active_tab;
+                Tab::new()
+                    .relative()
+                    .when(selected, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .bottom_0()
+                                .left_2()
+                                .right_2()
+                                .h(px(2.))
+                                .bg(theme::accent())
+                                .shadow(vec![theme::phosphor_glow()]),
+                        )
+                    })
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .when(selected, |row| {
+                                row.text_color(cx.theme().tab_active_foreground).font_weight(FontWeight::SEMIBOLD)
+                            })
+                            .when(attention, |row| row.text_color(danger))
+                            .child(crate::icons::icon(t.glyph()))
+                            .child(t.label()),
+                    )
             }))
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.active_tab = AppTab::ALL[*ix];

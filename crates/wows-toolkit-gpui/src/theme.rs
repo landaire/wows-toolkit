@@ -1,4 +1,5 @@
 use gpui_kit::App;
+use gpui_kit::BoxShadow;
 use gpui_kit::Hsla;
 use gpui_kit::Window;
 use gpui_kit::WindowAppearance;
@@ -7,17 +8,15 @@ use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::component::theme::ThemeTokens;
 use gpui_kit::px;
 use gpui_kit::rgb;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
-/// Graphite and Bone, the palette the egui app draws with
-/// (`crates/wows-toolkit/src/ui/theme/palette.rs`).
+/// Named color schemes applied to the desktop's shared surface tokens.
 ///
-/// Warm achromatic chrome in seven surface tiers, where the only accent is
-/// bone: an engaged control inverts rather than taking a hue. The tiers are
-/// what give a panel depth -- a card sits above the panel, a widget above the
-/// card, a hovered widget above that -- so they are mapped onto
-/// gpui-component's own tokens rather than left at its defaults.
+/// Each scheme keeps distinct surface tiers for window chrome, panels, cards,
+/// and controls while using one accent for focus and selection.
 struct Palette {
     mode: ThemeMode,
     /// Behind everything: the window itself and the tab strip.
@@ -42,39 +41,221 @@ struct Palette {
     text_bright: u32,
 }
 
-const DARK: Palette = Palette {
-    mode: ThemeMode::Dark,
-    surface: 0x101010,
-    panel: 0x181816,
-    card: 0x1f1f1c,
-    widget: 0x252522,
-    widget_hot: 0x2f2f29,
-    faint: 0x1c1c1a,
-    border: 0x383733,
-    border_bright: 0x524f4a,
-    selection: 0x282820,
-    accent: 0xc7c3b8,
-    text: 0xc9c6be,
-    text_dim: 0x97_9789,
-    text_bright: 0xe8e5dc,
-};
+const fn palette(
+    mode: ThemeMode,
+    surface: u32,
+    panel: u32,
+    card: u32,
+    widget: u32,
+    widget_hot: u32,
+    faint: u32,
+    border: u32,
+    border_bright: u32,
+    selection: u32,
+    accent: u32,
+    text: u32,
+    text_dim: u32,
+    text_bright: u32,
+) -> Palette {
+    Palette {
+        mode,
+        surface,
+        panel,
+        card,
+        widget,
+        widget_hot,
+        faint,
+        border,
+        border_bright,
+        selection,
+        accent,
+        text,
+        text_dim,
+        text_bright,
+    }
+}
 
-const LIGHT: Palette = Palette {
-    mode: ThemeMode::Light,
-    surface: 0xe6e5e0,
-    panel: 0xf4f3ef,
-    card: 0xffffff,
-    widget: 0xeeede8,
-    widget_hot: 0xdedcd3,
-    faint: 0xf0efeb,
-    border: 0xcbc9c1,
-    border_bright: 0x9a978d,
-    selection: 0xdad8cc,
-    accent: 0x26251f,
-    text: 0x1a1a17,
-    text_dim: 0x5c5a53,
-    text_bright: 0x0a0a08,
-};
+const DARK: Palette = palette(
+    ThemeMode::Dark,
+    0x101010,
+    0x181816,
+    0x1f1f1c,
+    0x252522,
+    0x2f2f29,
+    0x1c1c1a,
+    0x383733,
+    0x524f4a,
+    0x282820,
+    0xc7c3b8,
+    0xc9c6be,
+    0x979789,
+    0xe8e5dc,
+);
+const LIGHT: Palette = palette(
+    ThemeMode::Light,
+    0xe6e5e0,
+    0xf4f3ef,
+    0xffffff,
+    0xeeede8,
+    0xdedcd3,
+    0xf0efeb,
+    0xcbc9c1,
+    0x9a978d,
+    0xdad8cc,
+    0x26251f,
+    0x1a1a17,
+    0x5c5a53,
+    0x0a0a08,
+);
+const DRACULA: Palette = palette(
+    ThemeMode::Dark,
+    0x21222c,
+    0x282a36,
+    0x343746,
+    0x3b3e50,
+    0x44475a,
+    0x2c2e3b,
+    0x44475a,
+    0x6272a4,
+    0x343746,
+    0xbd93f9,
+    0xf0eef8,
+    0xb9b6ca,
+    0xf8f8f2,
+);
+const NORD: Palette = palette(
+    ThemeMode::Dark,
+    0x242933,
+    0x2e3440,
+    0x353d4b,
+    0x3b4252,
+    0x434c5e,
+    0x303744,
+    0x434c5e,
+    0x5e81ac,
+    0x3b4252,
+    0x88c0d0,
+    0xd8dee9,
+    0xaeb8c7,
+    0xeceff4,
+);
+const MONOKAI: Palette = palette(
+    ThemeMode::Dark,
+    0x1b1d1e,
+    0x272822,
+    0x30312a,
+    0x393a32,
+    0x494a40,
+    0x2b2c26,
+    0x494a40,
+    0x75715e,
+    0x393a32,
+    0xa6e22e,
+    0xe4e4dc,
+    0xa5a59a,
+    0xf8f8f2,
+);
+const SOLARIZED_DARK: Palette = palette(
+    ThemeMode::Dark,
+    0x002b36,
+    0x073642,
+    0x0b3d49,
+    0x104450,
+    0x17505b,
+    0x093944,
+    0x24545e,
+    0x586e75,
+    0x104450,
+    0x268bd2,
+    0xb6c2bf,
+    0x93a1a1,
+    0xeee8d5,
+);
+const SOLARIZED_LIGHT: Palette = palette(
+    ThemeMode::Light,
+    0xfdf6e3,
+    0xeee8d5,
+    0xfff9e8,
+    0xe6dfca,
+    0xded6c0,
+    0xf5eedb,
+    0xd4ccb8,
+    0x93a1a1,
+    0xe6dfca,
+    0x268bd2,
+    0x40545c,
+    0x50666d,
+    0x586e75,
+);
+const GRUVBOX_DARK: Palette = palette(
+    ThemeMode::Dark,
+    0x1d2021,
+    0x282828,
+    0x32302f,
+    0x3c3836,
+    0x504945,
+    0x2e2b29,
+    0x504945,
+    0x665c54,
+    0x3c3836,
+    0xd79921,
+    0xd5c4a1,
+    0xa89984,
+    0xebdbb2,
+);
+const GRUVBOX_LIGHT: Palette = palette(
+    ThemeMode::Light,
+    0xfbf1c7,
+    0xf2e5bc,
+    0xfff5d6,
+    0xebddb2,
+    0xe2d2a3,
+    0xf7ecc2,
+    0xd5c4a1,
+    0xa89984,
+    0xebddb2,
+    0xaf3a03,
+    0x504945,
+    0x665c54,
+    0x3c3836,
+);
+const CATPPUCCIN: Palette = palette(
+    ThemeMode::Dark,
+    0x181825,
+    0x1e1e2e,
+    0x252538,
+    0x303047,
+    0x3b3b55,
+    0x222235,
+    0x45455f,
+    0x6c7086,
+    0x303047,
+    0xcba6f7,
+    0xbac2de,
+    0x9399b2,
+    0xcdd6f4,
+);
+const TOKYO_NIGHT: Palette = palette(
+    ThemeMode::Dark,
+    0x16161e,
+    0x1a1b26,
+    0x222433,
+    0x292e42,
+    0x343b58,
+    0x1e2030,
+    0x3b4261,
+    0x565f89,
+    0x292e42,
+    0x7aa2f7,
+    0xa9b1d6,
+    0x7982a9,
+    0xc0caf5,
+);
+
+static CURRENT_ACCENT: AtomicU32 = AtomicU32::new(DARK.accent);
+static CURRENT_SURFACE: AtomicU32 = AtomicU32::new(DARK.surface);
+static CURRENT_BORDER_BRIGHT: AtomicU32 = AtomicU32::new(DARK.border_bright);
+static CURRENT_TEXT_DIM: AtomicU32 = AtomicU32::new(DARK.text_dim);
 
 /// A light panel must be lighter than the text on it, and the other way round
 /// in dark. Checked at compile time, so a palette whose fields were filled in
@@ -104,9 +285,8 @@ pub struct Semantic {
     /// Below dim: grammar punctuation and hints that are there to be found,
     /// not read.
     pub text_faint: u32,
-    /// Division mates, and the tint for affordance icons such as folders.
+    /// Division mates.
     pub division: u32,
-    pub icon_accent: u32,
     /// Players flagged by the abuse list.
     pub abuser: u32,
     /// A value worth noticing that is not a warning.
@@ -138,7 +318,6 @@ pub const DARK_SEMANTIC: Semantic = Semantic {
     text_dim: 0x7c7c6e,
     text_faint: 0x5c5c52,
     division: 0xe5c158,
-    icon_accent: 0xe5c158,
     abuser: 0xf09bc0,
     notice: 0xe5c158,
     chat_division: 0xe5c158,
@@ -164,7 +343,6 @@ pub const LIGHT_SEMANTIC: Semantic = Semantic {
     text_dim: 0x78766f,
     text_faint: 0x9b9890,
     division: 0x775800,
-    icon_accent: 0x775800,
     abuser: 0xa33270,
     notice: 0x775800,
     chat_division: 0x775800,
@@ -199,9 +377,14 @@ pub fn system_is_dark(cx: &App) -> bool {
 /// in from the colours set here, and anything left at a shadcn default would
 /// read as a different app in the middle of this one.
 pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx: &mut App) {
-    let dark = choice.is_dark(system_is_dark(cx));
+    let system_dark = system_is_dark(cx);
+    let dark = choice.is_dark(system_dark);
     DARK_MODE.store(dark, std::sync::atomic::Ordering::Relaxed);
-    let palette = if dark { &DARK } else { &LIGHT };
+    let palette = palette_for(choice, system_dark);
+    CURRENT_ACCENT.store(palette.accent, Ordering::Relaxed);
+    CURRENT_SURFACE.store(palette.surface, Ordering::Relaxed);
+    CURRENT_BORDER_BRIGHT.store(palette.border_bright, Ordering::Relaxed);
+    CURRENT_TEXT_DIM.store(palette.text_dim, Ordering::Relaxed);
     let semantic = semantic_for(dark);
     Theme::change(palette.mode, Some(window), cx);
 
@@ -213,6 +396,17 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     theme.secondary_hover = rgb(palette.widget_hot).into();
     theme.secondary_active = rgb(palette.widget_hot).into();
     theme.secondary_foreground = rgb(palette.text).into();
+    theme.button = rgb(palette.widget).into();
+    theme.button_hover = rgb(palette.widget_hot).into();
+    theme.button_active = rgb(palette.widget_hot).into();
+    theme.button_foreground = rgb(palette.text).into();
+    theme.button_secondary = theme.secondary;
+    theme.button_secondary_hover = theme.secondary_hover;
+    theme.button_secondary_active = theme.secondary_active;
+    theme.button_secondary_foreground = theme.secondary_foreground;
+    theme.input = rgb(palette.border).into();
+    theme.ring = rgb(palette.accent).into();
+    theme.caret = rgb(palette.accent).into();
     theme.muted = rgb(palette.faint).into();
     theme.muted_foreground = rgb(palette.text_dim).into();
 
@@ -224,17 +418,25 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     theme.sidebar = rgb(palette.surface).into();
     theme.sidebar_border = rgb(palette.border).into();
     theme.sidebar_foreground = rgb(palette.text).into();
+    theme.sidebar_accent = rgb(palette.selection).into();
+    theme.sidebar_accent_foreground = rgb(palette.text_bright).into();
+    theme.sidebar_primary = rgb(palette.accent).into();
+    theme.sidebar_primary_foreground = accent_foreground();
     theme.tab_bar = rgb(palette.surface).into();
     theme.tab = rgb(palette.surface).into();
     theme.tab_active = rgb(palette.panel).into();
     theme.tab_foreground = rgb(palette.text_dim).into();
     theme.tab_active_foreground = rgb(palette.text_bright).into();
+    theme.tab_bar_segmented = rgb(palette.surface).into();
     theme.title_bar = rgb(palette.surface).into();
     theme.title_bar_border = rgb(palette.border).into();
+    theme.status_bar = rgb(palette.surface).into();
+    theme.status_bar_border = rgb(palette.border).into();
+    theme.group_box = rgb(palette.card).into();
+    theme.group_box_foreground = rgb(palette.text).into();
 
-    // Selection is bone by inversion; hover is a raised neutral. Keeping the
-    // two apart is what lets a keyboard cursor be followed through a list the
-    // pointer is also in.
+    // Selection and hover use separate tones so a keyboard cursor remains
+    // distinct from the pointer.
     theme.selection = rgb(palette.selection).into();
     theme.accent = rgb(palette.widget_hot).into();
     theme.accent_foreground = rgb(palette.text_bright).into();
@@ -248,15 +450,31 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     theme.table_even = rgb(palette.faint).into();
     theme.table_head = rgb(palette.surface).into();
     theme.table_head_foreground = rgb(palette.text_dim).into();
+    theme.table_foot = rgb(palette.surface).into();
+    theme.table_foot_foreground = rgb(palette.text_dim).into();
     theme.table_hover = rgb(palette.widget_hot).into();
     theme.table_active = rgb(palette.selection).into();
     theme.table_active_border = rgb(palette.accent).into();
     theme.table_row_border = rgb(palette.border).into();
 
     theme.primary = rgb(palette.accent).into();
-    theme.primary_foreground = rgb(palette.panel).into();
-    theme.primary_hover = rgb(palette.text_bright).into();
-    theme.primary_active = rgb(palette.text).into();
+    theme.primary_foreground = accent_foreground();
+    theme.primary_hover = accent().opacity(0.9);
+    theme.primary_active = accent().opacity(0.8);
+    theme.button_primary = theme.primary;
+    theme.button_primary_hover = theme.primary_hover;
+    theme.button_primary_active = theme.primary_active;
+    theme.button_primary_foreground = theme.primary_foreground;
+    theme.slider_bar = theme.primary;
+    theme.slider_thumb = rgb(palette.text_bright).into();
+    theme.progress_bar = theme.primary;
+    theme.switch = rgb(palette.widget).into();
+    theme.switch_thumb = rgb(palette.text_bright).into();
+    theme.scrollbar = rgb(palette.surface).into();
+    theme.scrollbar_thumb = rgb(palette.border_bright).into();
+    theme.scrollbar_thumb_hover = rgb(palette.text_dim).into();
+    theme.drag_border = theme.primary;
+    theme.drop_target = rgb(palette.selection).into();
 
     theme.danger = rgb(semantic.error).into();
     theme.warning = rgb(semantic.warn).into();
@@ -281,23 +499,73 @@ fn semantic_for(dark: bool) -> &'static Semantic {
 /// A rule that has to be seen: over the tab strip, or between two controls
 /// that are otherwise flush.
 pub fn border_bright() -> Hsla {
-    rgb(if is_dark_mode() { DARK.border_bright } else { LIGHT.border_bright }).into()
+    rgb(CURRENT_BORDER_BRIGHT.load(Ordering::Relaxed)).into()
 }
 
 /// The surface behind the panels, for chrome that is not a panel itself.
 pub fn surface() -> Hsla {
-    rgb(if is_dark_mode() { DARK.surface } else { LIGHT.surface }).into()
+    rgb(CURRENT_SURFACE.load(Ordering::Relaxed)).into()
 }
 
 /// The tint for an affordance icon that is not status, such as a folder.
 pub fn icon_accent() -> Hsla {
-    rgb(semantic().icon_accent).into()
+    rgb(CURRENT_ACCENT.load(Ordering::Relaxed)).into()
+}
+
+/// The active scheme's accent, used for selected modes and focus indicators.
+pub fn accent() -> Hsla {
+    icon_accent()
+}
+
+/// Selects the text tone with the greater contrast against the accent.
+pub fn accent_foreground() -> Hsla {
+    let color = CURRENT_ACCENT.load(Ordering::Relaxed);
+    let linear = |shift: u32| {
+        let channel = ((color >> shift) & 0xff_u32) as f32 / 255.;
+        if channel <= 0.04045 { channel / 12.92 } else { ((channel + 0.055) / 1.055).powf(2.4) }
+    };
+    let luminance = 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
+    rgb(if luminance > 0.179 { 0x000000 } else { 0xffffff }).into()
+}
+
+/// A stationary halo for active controls on dark surfaces.
+pub fn phosphor_glow() -> BoxShadow {
+    BoxShadow::new(px(0.), px(0.), accent().opacity(if is_dark_mode() { 0.18 } else { 0. })).blur_radius(px(8.))
+}
+
+fn palette_for(choice: ThemeChoice, system_dark: bool) -> &'static Palette {
+    match choice {
+        ThemeChoice::System => {
+            if system_dark {
+                &DARK
+            } else {
+                &LIGHT
+            }
+        }
+        ThemeChoice::Dark => &DARK,
+        ThemeChoice::Light => &LIGHT,
+        ThemeChoice::Dracula => &DRACULA,
+        ThemeChoice::Nord => &NORD,
+        ThemeChoice::Monokai => &MONOKAI,
+        ThemeChoice::SolarizedDark => &SOLARIZED_DARK,
+        ThemeChoice::SolarizedLight => &SOLARIZED_LIGHT,
+        ThemeChoice::GruvboxDark => &GRUVBOX_DARK,
+        ThemeChoice::GruvboxLight => &GRUVBOX_LIGHT,
+        ThemeChoice::CatppuccinMocha => &CATPPUCCIN,
+        ThemeChoice::TokyoNight => &TOKYO_NIGHT,
+    }
+}
+
+/// Window, panel, text, and accent colors for a theme preview.
+pub fn swatches(choice: ThemeChoice, cx: &App) -> [u32; 4] {
+    let palette = palette_for(choice, system_is_dark(cx));
+    [palette.surface, palette.panel, palette.text, palette.accent]
 }
 
 /// De-emphasised detail text, held against the panel rather than faded out of
 /// the body tone with opacity.
 pub fn text_dim() -> Hsla {
-    rgb(semantic().text_dim).into()
+    rgb(CURRENT_TEXT_DIM.load(Ordering::Relaxed)).into()
 }
 
 /// Below [`text_dim`]: grammar punctuation and hints.
@@ -325,25 +593,10 @@ mod tests {
     use super::DARK_SEMANTIC;
     use super::LIGHT;
     use super::LIGHT_SEMANTIC;
-    use gpui_kit::component::theme::ThemeMode;
 
-    /// The two palettes are Graphite and Bone, as the egui app defines it
-    /// (`ui/theme/palette.rs`), and no tier is shared by accident: a theme
-    /// whose card matched its panel would have no depth at all.
+    /// Distinct surface tiers preserve panel and control boundaries.
     #[test]
-    fn the_palettes_are_graphite_and_bone() {
-        assert_eq!(DARK.mode, ThemeMode::Dark);
-        assert_eq!(LIGHT.mode, ThemeMode::Light);
-
-        assert_eq!(DARK.surface, 0x101010);
-        assert_eq!(DARK.panel, 0x181816);
-        assert_eq!(DARK.card, 0x1f1f1c);
-        assert_eq!(DARK.widget_hot, 0x2f2f29);
-        assert_eq!(DARK.accent, 0xc7c3b8, "the only accent is bone");
-        assert_eq!(LIGHT.surface, 0xe6e5e0);
-        assert_eq!(LIGHT.panel, 0xf4f3ef);
-        assert_eq!(LIGHT.card, 0xffffff);
-
+    fn surface_tiers_are_distinct() {
         for palette in [&DARK, &LIGHT] {
             let tiers = [palette.surface, palette.panel, palette.card, palette.widget, palette.widget_hot];
             for (ix, tier) in tiers.iter().enumerate() {

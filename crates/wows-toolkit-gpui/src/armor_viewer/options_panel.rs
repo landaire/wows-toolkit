@@ -1,4 +1,4 @@
-//! The armor viewer's options rail: the visibility, hull and display sections.
+//! The armor viewer's options rail: the armor, hull and display sections.
 //!
 //! The viewport toolbar carries the controls that are one click. These three
 //! hold a tree or a row of sliders, which a popover can only show by covering
@@ -54,11 +54,13 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         // Without this the harness cannot find a plain container by its id.
         .test_support()
         .size_full()
+        .border_l_1()
+        .border_color(cx.theme().border)
         .gap_2()
         .p_2()
         .overflow_y_scroll()
         .child(header)
-        .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.visibility").as_ref(), cx, |cx| {
+        .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.armor_options").as_ref(), cx, |cx| {
             popover::render_popover_content(&visibility, cx)
         }))
         .child(section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), cx, |cx| {
