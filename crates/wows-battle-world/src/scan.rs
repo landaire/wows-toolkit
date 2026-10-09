@@ -94,6 +94,8 @@ pub fn scan_replay(
         .battle_constants(game_constants.battle())
         .common_constants(game_constants.common())
         .ships_constants(game_constants.ships())
+        .player_member_map(game_constants.player_num_member_map())
+        .bot_member_map(game_constants.bot_num_member_map())
         .build();
     let mut remaining = replay.packet_data();
     while !remaining.is_empty() {

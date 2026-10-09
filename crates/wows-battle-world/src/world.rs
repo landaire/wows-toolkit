@@ -80,6 +80,8 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .battle_constants(resolved_constants.battle())
             .common_constants(resolved_constants.common())
             .ships_constants(resolved_constants.ships())
+            .player_member_map(resolved_constants.player_num_member_map())
+            .bot_member_map(resolved_constants.bot_num_member_map())
             .build();
         Self {
             world,
