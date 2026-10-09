@@ -7,6 +7,34 @@ use gpui_kit::component::list::ListItem;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+pub fn toolbar(cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .min_w_0()
+        .gap_2()
+        .items_center()
+        .px_2()
+        .py_1()
+        .bg(crate::theme::surface())
+        .border_b_1()
+        .border_color(cx.theme().border)
+}
+
+pub fn workspace(content: impl IntoElement, cx: &App) -> Div {
+    div().size_full().min_w_0().min_h_0().p_1().bg(crate::theme::surface()).child(
+        div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .overflow_hidden()
+            .child(content),
+    )
+}
+
 /// The background for row `index` of a list or table, or `None` for the rows
 /// that keep the panel's own.
 ///

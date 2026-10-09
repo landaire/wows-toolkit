@@ -122,16 +122,9 @@ pub fn render_toolbar(
         .child(render_trajectory_button(view, entity))
         .when_some(view.pane(), |this, pane| this.child(render_firing_controls(&pane, cx)));
 
-    v_flex()
-        .flex_none()
-        .w_full()
-        .min_w(px(0.))
-        .bg(crate::theme::surface())
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .child(commands)
-        .child(trajectory)
-        .when(trajectory_active, |toolbar| {
+    crate::ui::toolbar(cx).flex_col().items_stretch().p_0().gap_0().w_full().child(commands).child(trajectory).when(
+        trajectory_active,
+        |toolbar| {
             toolbar.child(
                 div()
                     .px_2()
@@ -141,7 +134,8 @@ pub fn render_toolbar(
                     .whitespace_normal()
                     .child(t!("ui.armor.trajectory_tooltip").to_string()),
             )
-        })
+        },
+    )
 }
 
 /// Toolbar toggle for "Show Hidden": the plates that are part of the combat

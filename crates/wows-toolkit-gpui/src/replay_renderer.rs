@@ -3018,6 +3018,7 @@ impl ReplayRendererPanel {
 
         let transport = v_flex()
             .flex_none()
+            .bg(crate::theme::surface())
             .border_t_1()
             .border_color(border)
             .children(self.export_failure.as_ref().map(|reason| {
@@ -3201,7 +3202,7 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
             })
     });
     content = content.child(
-        h_flex()
+        v_flex()
             .gap_1()
             .child({
                 let owner = owner.clone();

@@ -2027,13 +2027,10 @@ impl Render for SearchView {
                 .into_any_element()
             });
 
-        let query_bar = v_flex()
-            .flex_none()
+        let query_bar = crate::ui::toolbar(cx)
+            .flex_col()
+            .items_stretch()
             .gap_1()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
             .on_key_down(cx.listener(Self::on_bar_key))
             .child(entry_row)
             .when_some(calendar, |this, calendar| this.child(calendar))

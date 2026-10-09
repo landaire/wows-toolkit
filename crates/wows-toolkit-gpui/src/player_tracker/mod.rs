@@ -2729,20 +2729,11 @@ impl Render for PlayerTrackerView {
         if !std::mem::replace(&mut self.view_loaded, true) {
             self.load_view(window, cx);
         }
-        let border = cx.theme().border;
-
         // Not wrapping: a wrapped row does not grow its own height in this
         // layout, so a second line would be drawn over the table header
         // under it. The filter gives up width instead.
         let toolbar =
-            h_flex()
-                .flex_none()
-                .gap_2()
-                .items_center()
-                .px_2()
-                .py_1()
-                .border_b_1()
-                .border_color(border)
+            crate::ui::toolbar(cx)
                 .child(
                     crate::ui::boxed(PERIOD_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
                         Select::new(&self.period_select)

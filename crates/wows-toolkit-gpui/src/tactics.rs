@@ -2746,10 +2746,11 @@ impl TacticsBoard {
         let border = cx.theme().border;
         let may_steer = self.collab.may_steer();
 
-        v_flex()
+        crate::ui::toolbar(cx)
+            .flex_col()
+            .items_stretch()
+            .border_b_0()
             .gap_0()
-            .px_2()
-            .py_1()
             .child(
                 h_flex()
                     .gap_2()
