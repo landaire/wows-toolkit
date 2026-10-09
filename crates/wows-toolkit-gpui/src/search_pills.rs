@@ -6,14 +6,14 @@
 //! what may follow the caret; this module only draws the result, so the two
 //! bars cannot disagree about how a query reads.
 //!
-//! The egui bar additionally edits in place -- clicking a pill segment opens
-//! a picker for it. Here a pill is a reading of the query, not a handle on
-//! it; the text is still edited in the input beside it.
+//! Pill segments provide field, operator and value controls.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
@@ -218,6 +218,8 @@ pub fn pill_strip(
     cx: &App,
     on_choice: impl Fn(String, &mut Window, &mut App) + Clone + 'static,
     on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
+    editing: Option<(&NodePath, &Entity<InputState>)>,
+    on_edit: impl Fn(NodePath, &mut Window, &mut App) + Clone + 'static,
     caret: AnyElement,
 ) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
@@ -239,14 +241,14 @@ pub fn pill_strip(
                     .items_center()
                     .px_1p5()
                     .py(px(1.))
-                    .rounded_sm()
+                    .rounded(px(10.))
+                    .bg(theme.muted)
                     .border_1()
                     .border_color(if chosen { accent } else { border })
                     .when(chosen, |this| this.bg(accent.opacity(0.2)));
                 for (slot, segment) in segments.iter().enumerate() {
                     // The field and the operator are chrome around the value,
                     // which is the part the reader is looking for.
-                    let dimmed = !matches!(segment.role, SegmentRole::Value);
                     let part = EditablePart::of(segment.role);
                     let offered = choices_with_operator_preferences(expr, &token.path, part, operator_preferences);
                     let id = index * SEGMENTS_PER_PILL + slot;
@@ -261,16 +263,26 @@ pub fn pill_strip(
                     // to pick; a free value is typed in the bar instead, as
                     // it is in the egui one.
                     if offered.is_empty() {
-                        pill = pill.child(
-                            div()
-                                .id(("search-pill-segment", id))
-                                .test_support()
-                                .px_1()
-                                .text_xs()
-                                .when(dimmed, |this| this.text_color(crate::theme::text_dim()))
-                                .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
-                                .child(segment.text.clone()),
-                        );
+                        if matches!(segment.role, SegmentRole::Value)
+                            && select::segment_path(expr, &token.path).is_some()
+                        {
+                            if let Some((_, input)) = editing.filter(|(path, _)| *path == &token.path) {
+                                pill = pill.child(div().w(px(140.)).child(Input::new(input).small().appearance(false)));
+                            } else {
+                                let edit = on_edit.clone();
+                                let path = token.path.clone();
+                                pill = pill.child(
+                                    Button::new(("search-pill-segment", id))
+                                        .label(segment.text.clone())
+                                        .ghost()
+                                        .compact()
+                                        .tooltip("Edit value")
+                                        .on_click(move |_event, window, cx| edit(path.clone(), window, cx)),
+                                );
+                            }
+                        } else {
+                            pill = pill.child(div().px_1().text_xs().child(segment.text.clone()));
+                        }
                         continue;
                     }
 
