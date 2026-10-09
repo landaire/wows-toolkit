@@ -5,7 +5,7 @@ repository = "https://github.com/landaire/wows-toolkit"
 version = "0.14.0"
 # Golden snapshots and the bench both need a replay corpus plus a real game
 # install, neither of which is available to consumers of the published crate.
-exclude = ["tests/", "benches/"]
+exclude = ["BUCK", "tests/", "benches/"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

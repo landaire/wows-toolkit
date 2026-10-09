@@ -1,4 +1,5 @@
 [package]
+exclude = ["BUCK"]
 name = "wows-core"
 description = "Lightweight domain core (shared types and small derived data) for the WoWS toolkit"
 version = "0.14.0"

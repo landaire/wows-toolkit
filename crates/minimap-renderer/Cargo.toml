@@ -7,7 +7,7 @@ Library/CLI application for rendering World of Warships replay files as a minima
 """"
 repository = "https://github.com/landaire/wows-toolkit"
 # Draw-command parity snapshots need a replay corpus and a real game install.
-exclude = ["tests/"]
+exclude = ["BUCK", "tests/"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

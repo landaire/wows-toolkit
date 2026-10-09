@@ -6,7 +6,7 @@ repository = "https://github.com/landaire/wows-toolkit"
 documentation = "https://docs.rs/wowsunpack/"
 # Integration tests need a real game install, so they cannot run from the
 # published crate and only add weight to it.
-exclude = ["tests/"]
+exclude = ["BUCK", "tests/"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -6,7 +6,7 @@ description = "Derived, post-parse projections over a WoWs replay: build resolut
 repository = "https://github.com/landaire/wows-toolkit"
 # Fixture replays and normalized-report corpora are ~17 MiB and only serve the
 # in-repo tests, which also need a real game install.
-exclude = ["tests/"]
+exclude = ["BUCK", "tests/"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
