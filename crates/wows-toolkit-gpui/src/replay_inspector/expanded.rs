@@ -413,34 +413,64 @@ fn render_nda_gated_breakdown(rows: Option<&[BreakdownRow]>, row: &PlayerRow, de
     if row.should_hide_stats() && !debug {
         return Some(nda_text());
     }
-    rows.map(breakdown_grid)
+    rows.map(|rows| breakdown_grid(rows))
 }
 
 /// A label-and-value listing: labels in one column and values in another, so
 /// the two line up in the proportional font the rest of the row uses.
+#[track_caller]
 fn breakdown_grid(rows: &[BreakdownRow]) -> AnyElement {
+    let location = std::panic::Location::caller();
     h_flex()
+        .id(SharedString::from(format!("breakdown-{}-{}", location.line(), location.column())))
         .gap(px(BREAKDOWN_GAP))
         .items_start()
         .text_xs()
-        .child(v_flex().gap_px().children(rows.iter().map(|row| div().child(row.label.clone()))))
-        .child(v_flex().gap_px().items_end().children(rows.iter().map(|row| div().child(row.value.clone()))))
+        .child(
+            v_flex().gap_px().children(
+                rows.iter()
+                    .enumerate()
+                    .map(|(index, row)| div().id(("label", index)).child(detail_text(row.label.clone()))),
+            ),
+        )
+        .child(
+            v_flex().gap_px().items_end().children(
+                rows.iter()
+                    .enumerate()
+                    .map(|(index, row)| div().id(("value", index)).child(detail_text(row.value.clone()))),
+            ),
+        )
         .into_any_element()
 }
 
 /// Between a breakdown grid's two columns.
 const BREAKDOWN_GAP: f32 = 8.0;
 
+#[track_caller]
+fn detail_text(text: impl Into<SharedString>) -> impl IntoElement {
+    let text = text.into();
+    let location = std::panic::Location::caller();
+    let id = SharedString::from(format!("detail-{}-{}-{}", location.line(), location.column(), text));
+    div()
+        .id(id)
+        .on_click(|event, _window, cx| {
+            if !event.modifiers().secondary() {
+                cx.stop_propagation();
+            }
+        })
+        .child(crate::ui::selectable_text("text", text))
+}
+
 fn section_heading(text: String) -> AnyElement {
-    div().text_xs().font_weight(FontWeight::BOLD).child(text).into_any_element()
+    div().text_xs().font_weight(FontWeight::BOLD).child(detail_text(text)).into_any_element()
 }
 
 fn body_text(text: impl Into<SharedString>) -> AnyElement {
-    div().text_xs().child(text.into()).into_any_element()
+    div().text_xs().child(detail_text(text)).into_any_element()
 }
 
 fn nda_text() -> AnyElement {
-    div().text_xs().child(NDA).into_any_element()
+    div().text_xs().child(detail_text(NDA)).into_any_element()
 }
 
 /// A small icon-or-text cell shared by achievements, ribbons, modernizations,
@@ -462,7 +492,7 @@ fn icon_or_text_cell(
     let tooltip: SharedString = tooltip_text.into();
     let el = match icons.get_keyed(key) {
         Some(image) => div().child(img(image).w(px(size)).h(px(size))),
-        None => div().text_xs().child(display_name),
+        None => div().text_xs().child(detail_text(display_name)),
     };
     el.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
@@ -521,7 +551,7 @@ fn icon_label_row(
         let (w, h) = fit_within_box(&image, size);
         row = row.child(img(image).w(px(w)).h(px(h)).flex_none());
     }
-    row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(label));
+    row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(detail_text(label)));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .into_any_element()
@@ -537,7 +567,9 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
 
     let mut col = v_flex().gap(px(3.)).child(section_heading(t!("ui.replay.sections.fire_chance").into_owned()));
     if row.should_hide_stats() && !debug {
-        return Some(col.child(div().text_xs().child(t!("ui.replay.nda").into_owned())).into_any_element());
+        return Some(
+            col.child(div().text_xs().child(detail_text(t!("ui.replay.nda").into_owned()))).into_any_element(),
+        );
     }
 
     if fire_chance.eligible_hits == 0 {
@@ -547,7 +579,7 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
                 div()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned()),
+                    .child(detail_text(t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned())),
             )
             .into_any_element(),
         );
@@ -562,14 +594,17 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
             .font_weight(FontWeight::BOLD)
             .text_xs()
             .child(crate::icons::icon(crate::icons::FIRE))
-            .child(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits)),
+            .child(detail_text(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits))),
     );
     if let Some(expected) = fire_chance::expected_fires_text(fire_chance) {
-        headline = headline.child(div().text_xs().text_color(crate::theme::text_dim()).child(expected));
+        headline = headline.child(div().text_xs().text_color(crate::theme::text_dim()).child(detail_text(expected)));
     }
     headline = headline.child(copy_breakdown_button(row_ix, fire_chance));
     col = col.child(headline).child(
-        div().text_xs().text_color(crate::theme::text_dim()).child(fire_chance::ships_text(fire_chance).into_owned()),
+        div()
+            .text_xs()
+            .text_color(crate::theme::text_dim())
+            .child(detail_text(fire_chance::ships_text(fire_chance).into_owned())),
     );
 
     // The attacker-side formula: the shell's own chance and every modifier
@@ -577,7 +612,9 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
     let formula = fire_chance::fire_chance_formula_lines(fire_chance, &raw_source);
     if !formula.is_empty() {
         col = col.child(Separator::horizontal()).child(
-            v_flex().font_family("monospace").children(formula.into_iter().map(|line| div().text_xs().child(line))),
+            v_flex()
+                .font_family("monospace")
+                .children(formula.into_iter().map(|line| div().text_xs().child(detail_text(line)))),
         );
     }
 
@@ -605,16 +642,18 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
                     .gap_2()
                     .items_center()
                     .text_xs()
-                    .child(div().flex_none().w(FIRE_CHANCE_SHIP_WIDTH).child(ship.victim_ship_name.clone()))
+                    .child(
+                        div().flex_none().w(FIRE_CHANCE_SHIP_WIDTH).child(detail_text(ship.victim_ship_name.clone())),
+                    )
                     .child(
                         div()
                             .text_color(crate::theme::text_dim())
-                            .child(fire_chance::counts_text(ship.fires, ship.eligible_hits)),
+                            .child(detail_text(fire_chance::counts_text(ship.fires, ship.eligible_hits))),
                     ),
             );
         }
         if let Some(line) = fire_chance::no_target_ship_line(fire_chance) {
-            col = col.child(div().text_xs().text_color(crate::theme::text_faint()).child(line));
+            col = col.child(div().text_xs().text_color(crate::theme::text_faint()).child(detail_text(line)));
         }
     }
 
@@ -623,20 +662,26 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
 
 /// A count-and-label listing: counts in a column of their own, labels
 /// indented by the depth they sit at.
+#[track_caller]
 fn tally_block(rows: &[fire_chance::TallyRow]) -> AnyElement {
+    let location = std::panic::Location::caller();
     v_flex()
+        .id(SharedString::from(format!("tally-{}", location.line())))
         .gap_px()
-        .children(rows.iter().map(|row| {
+        .children(rows.iter().enumerate().map(|(index, row)| {
             h_flex()
+                .id(index)
                 .gap_2()
                 .items_start()
                 .text_xs()
-                .child(div().flex_none().w(TALLY_COUNT_WIDTH).text_right().child(separate_number(row.count)))
+                .child(
+                    div().flex_none().w(TALLY_COUNT_WIDTH).text_right().child(detail_text(separate_number(row.count))),
+                )
                 .child(
                     div()
                         .pl(px(row.depth as f32 * 12.))
                         .when(row.depth > 0, |cell| cell.text_color(crate::theme::text_dim()))
-                        .child(row.label.to_string()),
+                        .child(detail_text(row.label.to_string())),
                 )
         }))
         .into_any_element()
@@ -988,7 +1033,7 @@ fn signals_view(row_ix: usize, signals: &[TranslatedModule], icons: &IconCache) 
 /// Plain text with an optional hover tooltip, shared by the loadout list and
 /// the no-activations-recorded ability-name fallback list.
 fn text_row(tag: &'static str, row_ix: usize, idx: usize, text: String, tooltip_text: Option<String>) -> AnyElement {
-    let base = div().text_xs().child(text);
+    let base = div().id((tag, row_ix * DETAIL_ID_STRIDE + idx)).text_xs().child(detail_text(text));
     match tooltip_text.filter(|t| !t.is_empty()) {
         Some(hover) => {
             let hover: SharedString = hover.into();
@@ -1010,8 +1055,9 @@ fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCac
     for row in rows {
         let mut line = h_flex().gap_1().items_center();
         let cost_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
-        line =
-            line.child(div().w(px(14.)).flex_none().text_xs().text_color(crate::theme::text_dim()).child(cost_label));
+        line = line.child(
+            div().w(px(14.)).flex_none().text_xs().text_color(crate::theme::text_dim()).child(detail_text(cost_label)),
+        );
         for skill in &row.skills {
             line = line.child(skill_cell(row_ix, skill_idx, skill, icons));
             skill_idx += 1;
@@ -1041,7 +1087,10 @@ fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCac
                 Some(c) => format!("({}) {display_name}", c.get()),
                 None => display_name,
             };
-            div().text_xs().when(!skill.learned, |this| this.text_color(crate::theme::text_faint())).child(label)
+            div()
+                .text_xs()
+                .when(!skill.learned, |this| this.text_color(crate::theme::text_faint()))
+                .child(detail_text(label))
         }
     };
     el.id(("replay-skill", row_ix * DETAIL_ID_STRIDE + idx))
@@ -1066,7 +1115,7 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .child(t!("ui.replay.consumable_header_consumable").into_owned()),
+                .child(detail_text(t!("ui.replay.consumable_header_consumable").into_owned())),
         )
         .child(
             div()
@@ -1074,7 +1123,7 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .child(t!("ui.replay.consumable_header_remaining").into_owned()),
+                .child(detail_text(t!("ui.replay.consumable_header_remaining").into_owned())),
         )
         .child(
             div()
@@ -1082,7 +1131,7 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .child(t!("ui.replay.consumable_header_total").into_owned()),
+                .child(detail_text(t!("ui.replay.consumable_header_total").into_owned())),
         );
 
     let mut col = v_flex().gap_1().child(header);
@@ -1112,15 +1161,15 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
     if let Some(image) = icons.get_keyed(&key) {
         name_cell = name_cell.child(img(image).w(px(CONSUMABLE_ICON_SIZE)).h(px(CONSUMABLE_ICON_SIZE)));
     }
-    name_cell = name_cell.child(div().text_xs().child(consumable.display_name.clone()));
+    name_cell = name_cell.child(div().text_xs().child(detail_text(consumable.display_name.clone())));
 
     h_flex()
         .id(("replay-consumable", row_ix * DETAIL_ID_STRIDE + idx))
         .gap_2()
         .items_center()
         .child(name_cell)
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(remaining_text))
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(total_text))
+        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(remaining_text)))
+        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(total_text)))
         .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
         .into_any_element()
 }

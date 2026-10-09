@@ -173,7 +173,16 @@ fn measure_column_widths(
                     let text_w = text_width(cell.text.into(), window, false);
                     let species_w = text_width(row.ship_species_text.clone().into(), window, false);
                     let icon_w = species_w.max(SHIP_ICON_WIDTH);
-                    let mut row_w = icon_default + gap_1 + icon_w + gap_1 + text_w;
+                    let status_count = usize::from(row.is_hidden_profile)
+                        + usize::from(row.connection.is_some())
+                        + usize::from(!row.twitch_candidates.is_empty());
+                    let mut row_w = icon_default
+                        + gap_1
+                        + icon_w
+                        + gap_1
+                        + text_w
+                        + ROW_ACTIONS_WIDTH
+                        + status_count as f32 * (icon_default + gap_1);
                     if expanded.contains(&row.db_id) {
                         row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
                     }
@@ -763,6 +772,27 @@ impl PlayerTable {
         lines.join("\n")
     }
 
+    fn row_markdown(&self, player: AccountId) -> Option<String> {
+        let row = self.model.rows.iter().find(|row| row.db_id == player)?;
+        Some(self.markdown_table(std::iter::once(row)))
+    }
+
+    fn table_markdown(&self) -> String {
+        self.markdown_table(self.model.rows.iter())
+    }
+
+    fn markdown_table<'a>(&self, rows: impl Iterator<Item = &'a PlayerRow>) -> String {
+        let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+        let mut lines = vec![
+            line(self.model.columns.iter().map(|col| markdown_cell(&column_label(*col))).collect()),
+            line(self.model.columns.iter().map(|_| "---".to_owned()).collect()),
+        ];
+        lines.extend(rows.map(|row| {
+            line(self.model.columns.iter().map(|col| markdown_cell(&cell_value(row, *col, self.debug).text)).collect())
+        }));
+        lines.join("\n")
+    }
+
     /// Puts `col` back on its content-fitted width.
     fn reset_column_width(&mut self, col: ReplayColumn, cx: &mut Context<Self>) {
         self.resizing = None;
@@ -774,7 +804,7 @@ impl PlayerTable {
 
     fn header_cell(&self, col: ReplayColumn, cx: &mut Context<Self>) -> AnyElement {
         let base = div()
-            .w(self.width_of(col))
+            .w(self.drawn_widths[col as usize])
             .flex_none()
             .px_1()
             .py_1()
@@ -876,6 +906,11 @@ fn cell_element(
         .id(("replay-cell", ix * CELL_ID_STRIDE + col as usize))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, player, col))
+        .on_click(|event, _window, cx| {
+            if !event.modifiers().secondary() {
+                cx.stop_propagation();
+            }
+        })
         .w(px(width))
         .flex_none()
         .px_1()
@@ -929,16 +964,23 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
     let icon_tint = player_color_kind_rgb(player_color_kind(row));
 
-    let mut cell = h_flex()
+    let container = h_flex()
         .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Name as usize))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, ReplayColumn::Name))
+        .on_click(|event, _window, cx| {
+            if !event.modifiers().secondary() {
+                cx.stop_propagation();
+            }
+        })
         .w(px(width))
         .flex_none()
         .gap_1()
         .px_1()
+        .pr(px(ROW_ACTIONS_WIDTH + 4.))
         .items_center()
         .overflow_hidden();
+    let mut cell = h_flex().flex_1().min_w_0().gap_1().items_center().overflow_hidden();
     cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.is_expanded));
 
     cell = match layout.icons.get(row.ship_class, icon_tint) {
@@ -955,7 +997,12 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
                 )
             }
         }
-        None => cell.child(div().flex_none().text_xs().child(row.ship_species_text.clone())),
+        None => cell.child(
+            div()
+                .flex_none()
+                .text_xs()
+                .child(crate::ui::selectable_text(("replay-species", ix), row.ship_species_text.clone())),
+        ),
     };
 
     if let Some(div_label) = row.division_label.as_ref() {
@@ -983,9 +1030,13 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
 
     if row.is_hidden_profile {
         cell = cell.child(
-            crate::icons::icon(crate::icons::EYE_SLASH).id(("replay-hidden-profile", ix)).test_support().tooltip(
-                |window, cx| Tooltip::new(t!("ui.replay.player.hidden_profile").into_owned()).build(window, cx),
-            ),
+            crate::icons::icon(crate::icons::EYE_SLASH)
+                .flex_none()
+                .id(("replay-hidden-profile", ix))
+                .test_support()
+                .tooltip(|window, cx| {
+                    Tooltip::new(t!("ui.replay.player.hidden_profile").into_owned()).build(window, cx)
+                }),
         );
     }
 
@@ -997,13 +1048,14 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         let hover: SharedString = connection_hover_text(note).into();
         cell = cell.child(
             crate::icons::icon(crate::icons::PLUGS)
+                .flex_none()
                 .id(("replay-disconnect", ix))
                 .test_support()
                 .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx)),
         );
     }
 
-    cell.into_any_element()
+    container.child(cell).into_any_element()
 }
 
 /// What a connection history says, in the egui app's own wording.
@@ -1138,6 +1190,11 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Ent
         .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, row.db_id, ReplayColumn::Skills))
+        .on_click(|event, _window, cx| {
+            if !event.modifiers().secondary() {
+                cx.stop_propagation();
+            }
+        })
         .w(px(width))
         .flex_none()
         .px_1()
@@ -1409,6 +1466,19 @@ fn build_actions_menu(
             .on_click(move |_event, window, cx| copy_text(Some(table.read(cx).table_text()), window, cx)),
     );
 
+    let table = entity.clone();
+    menu = menu.item(
+        PopupMenuItem::new("Copy row as Markdown")
+            .icon(IconName::Copy)
+            .on_click(move |_event, window, cx| copy_text(table.read(cx).row_markdown(player), window, cx)),
+    );
+    let table = entity.clone();
+    menu = menu.item(
+        PopupMenuItem::new("Copy table as Markdown")
+            .icon(IconName::Copy)
+            .on_click(move |_event, window, cx| copy_text(Some(table.read(cx).table_markdown()), window, cx)),
+    );
+
     if debug && let Some(json) = row.raw_metadata_json.clone() {
         menu = menu.separator();
         menu = menu.item(
@@ -1422,6 +1492,24 @@ fn build_actions_menu(
     }
 
     menu
+}
+
+fn markdown_cell(text: &str) -> String {
+    let mut escaped = String::new();
+    for ch in text.replace("\r\n", "\n").chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\n' | '\r' => escaped.push_str("<br>"),
+            '\\' | '|' | '`' | '*' | '_' | '[' | ']' | '~' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 /// Writes `text` to the clipboard and says so.
@@ -1449,11 +1537,8 @@ fn note_cell(
 /// The dots that open one row's actions, revealed while the pointer is on that
 /// row.
 ///
-/// Laid over the end of the Name column rather than given a column of its own:
-/// the actions are about one player, the name is what says which, and a column
-/// of buttons would charge every row's width for something only the hovered row
-/// can be used on. The same items are on the row's right-click menu, and the
-/// chat pane reveals its copy button the same way (`chat.rs::render_message`).
+/// The Name cell reserves this space even when the trigger is hidden, so
+/// status icons and text do not move or overlap the button on hover.
 ///
 /// `ix` keys the trigger's `ElementId` so every row's popover state is its own,
 /// and `group` ties the reveal to that row's hover. `layout.entity` is threaded
@@ -1520,6 +1605,8 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     }
     match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held) {
         Some(detail) => v_flex()
+            .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
+            .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
             .w(layout.column_widths[col as usize])
             .flex_none()
             .gap_1()
@@ -1684,6 +1771,10 @@ impl Render for PlayerTable {
         // section's total all read the same number.
         self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
         let sticky_cap = self.sticky_cap().map(f32::from);
+        if let Some(cap) = sticky_cap {
+            self.drawn_widths[ReplayColumn::Name as usize] =
+                self.drawn_widths[ReplayColumn::Name as usize].min(px(cap));
+        }
         let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
         // Where the scrolling portion starts, which is where its own bar
         // belongs: the sticky columns to its left do not move.

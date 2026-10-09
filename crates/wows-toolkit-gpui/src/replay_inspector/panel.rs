@@ -997,7 +997,7 @@ fn personal_rating_badge(rating: PersonalRatingResult) -> AnyElement {
         .bg(tint)
         .font_weight(FontWeight::BOLD)
         .text_color(color)
-        .child(text)
+        .child(crate::ui::selectable_text("replay-pr-text", text))
         .into_any_element()
 }
 
@@ -1075,7 +1075,9 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
     let (friendly, enemy) = team_damage;
     let dim = crate::theme::text_dim();
     let separator = || div().flex_none().text_xs().text_color(dim).child(SEPARATOR);
-    let field = |text: String| div().flex_none().text_xs().text_color(dim).child(text);
+    let field = |index: usize, text: String| {
+        div().flex_none().text_xs().text_color(dim).child(crate::ui::selectable_text(("match-field", index), text))
+    };
 
     // The clan tag reads as part of the name, so it sits against it rather
     // than as a field of its own.
@@ -1086,25 +1088,37 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
 
     let mut line = h_flex().id("replay-match-context").test_support().flex_none().items_center().gap_1().px_2().pb_1();
     let mut drawn = 0usize;
-    for text in [&who, &context.game_type, &context.version, &context.game_mode, &context.map] {
+    for (index, text) in
+        [&who, &context.game_type, &context.version, &context.game_mode, &context.map].into_iter().enumerate()
+    {
         if text.is_empty() {
             continue;
         }
         if drawn > 0 {
             line = line.child(separator());
         }
-        line = line.child(field(text.clone()));
+        line = line.child(field(index, text.clone()));
         drawn += 1;
     }
 
     line.child(separator())
-        .child(field(t!("ui.replay.team_damage").into_owned()))
+        .child(field(5, t!("ui.replay.team_damage").into_owned()))
         .child(
-            div().flex_none().text_xs().text_color(rgb(crate::theme::semantic().win)).child(separate_number(friendly)),
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(rgb(crate::theme::semantic().win))
+                .child(crate::ui::selectable_text("friendly-damage", separate_number(friendly))),
         )
-        .child(field(" : ".to_string()))
-        .child(div().flex_none().text_xs().text_color(rgb(crate::theme::semantic().loss)).child(separate_number(enemy)))
-        .child(field(format!(" ({})", separate_number(friendly + enemy))))
+        .child(field(6, " : ".to_string()))
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(rgb(crate::theme::semantic().loss))
+                .child(crate::ui::selectable_text("enemy-damage", separate_number(enemy))),
+        )
+        .child(field(7, format!(" ({})", separate_number(friendly + enemy))))
         .into_any_element()
 }
 
@@ -1391,7 +1405,7 @@ impl Render for ReplayPanel {
                     div()
                         .text_sm()
                         .text_color(crate::theme::text_dim())
-                        .child(err.to_string()),
+                        .child(crate::ui::selectable_text("replay-error", err.to_string())),
                 )
                 .into_any_element(),
             LoadState::Loaded(loaded) => {
