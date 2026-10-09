@@ -190,47 +190,51 @@ fn run<V, Work, Fut>(
     Work: FnOnce(reqwest::Client, ProgressSink) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<CacheOutcome, String>>,
 {
-    view.update(cx, |view, cx| {
-        state(view).start(job);
-        cx.notify();
-    });
-
-    let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<Progress>();
     let view = view.clone();
-
-    // The bar follows the work rather than waiting for it, so a long
-    // validation is visibly running rather than looking hung.
-    let watched = view.clone();
-    cx.spawn(async move |cx: &mut AsyncApp| {
-        use futures::StreamExt as _;
-        while let Some(step) = progress_rx.next().await {
-            watched.update(cx, |view, cx| {
-                state(view).progress = Some(step);
-                cx.notify();
-            });
-        }
-    })
-    .detach();
-
-    cx.spawn(async move |cx: &mut AsyncApp| {
-        let outcome = match http::client(&proxy_url, reqwest::redirect::Policy::default()) {
-            Ok(client) => {
-                let sink = ProgressSink(progress_tx);
-                runtime::block_on(cx, move || work(client, sink)).await.unwrap_or_else(CacheOutcome::Failed)
-            }
-            Err(err) => CacheOutcome::Failed(err.to_string()),
-        };
-
+    // Callers can hold the owner entity while requesting an operation.
+    cx.defer(move |cx| {
         view.update(cx, |view, cx| {
-            state(view).finish();
-            if let CacheOutcome::Failed(reason) = &outcome {
-                state(view).failure = Some(reason.clone());
-            }
-            apply(view, outcome, cx);
+            state(view).start(job);
             cx.notify();
         });
-    })
-    .detach();
+
+        let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<Progress>();
+        let view = view.clone();
+
+        // The bar follows the work rather than waiting for it, so a long
+        // validation is visibly running rather than looking hung.
+        let watched = view.clone();
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            use futures::StreamExt as _;
+            while let Some(step) = progress_rx.next().await {
+                watched.update(cx, |view, cx| {
+                    state(view).progress = Some(step);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let outcome = match http::client(&proxy_url, reqwest::redirect::Policy::default()) {
+                Ok(client) => {
+                    let sink = ProgressSink(progress_tx);
+                    runtime::block_on(cx, move || work(client, sink)).await.unwrap_or_else(CacheOutcome::Failed)
+                }
+                Err(err) => CacheOutcome::Failed(err.to_string()),
+            };
+
+            view.update(cx, |view, cx| {
+                state(view).finish();
+                if let CacheOutcome::Failed(reason) = &outcome {
+                    state(view).failure = Some(reason.clone());
+                }
+                apply(view, outcome, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    });
 }
 
 /// The `Fn(u64, u64)` the `wows_data_mgr` calls want, forwarding to the UI.

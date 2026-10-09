@@ -161,13 +161,20 @@ fn load_dump_translations(cas: &BuildCas, locale: &str) -> Option<Catalog> {
     None
 }
 
-fn load_translations_for_build(wows_dir: &Path, dump_base: Option<&Path>, build: u32, locale: &str) -> Option<Catalog> {
+fn load_translations_for_build(
+    wows_dir: Option<&Path>,
+    dump_base: Option<&Path>,
+    build: u32,
+    locale: &str,
+) -> Option<Catalog> {
     let dump_dir = dump_base.and_then(|base| dump_for_build(base, build, None));
     let cas = dump_dir.as_deref().and_then(BuildCas::open);
     for directory in translation_directories(locale) {
-        let live_path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
-        if let Some(catalog) = parse_translation_catalog(&live_path, build, &directory) {
-            return Some(catalog);
+        if let Some(wows_dir) = wows_dir {
+            let live_path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
+            if let Some(catalog) = parse_translation_catalog(&live_path, build, &directory) {
+                return Some(catalog);
+            }
         }
         if let Some(cas) = &cas
             && let Some(path) = cas.derived_path(&format!("translations/{directory}/LC_MESSAGES/global.mo"))
@@ -381,7 +388,7 @@ type BuildSlot = OnceLock<Result<Arc<LoadedGameData>, ReplayLoadError>>;
 /// future open for the session.
 #[derive(Clone)]
 pub struct GameDataCache {
-    wows_dir: PathBuf,
+    wows_dir: Option<PathBuf>,
     /// Where the dumped builds are, for a replay the install cannot answer.
     ///
     /// `None` only when there is no storage directory at all, which is the one
@@ -397,6 +404,21 @@ pub struct GameDataCache {
 
 impl GameDataCache {
     pub fn new(wows_dir: PathBuf) -> Self {
+        Self::with_install(Some(wows_dir))
+    }
+
+    pub(super) fn same_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.loaded, &other.loaded)
+            && self.wows_dir == other.wows_dir
+            && self.dump_base == other.dump_base
+            && self.auto_dump == other.auto_dump
+    }
+
+    pub fn without_install() -> Self {
+        Self::with_install(None)
+    }
+
+    fn with_install(wows_dir: Option<PathBuf>) -> Self {
         Self {
             wows_dir,
             dump_base: wows_toolkit_config::game_data_dump_base(),
@@ -426,7 +448,8 @@ impl GameDataCache {
         for slot in slots {
             let Some(Ok(loaded)) = slot.get() else { continue };
             let build = loaded.build();
-            let catalog = load_translations_for_build(&self.wows_dir, self.dump_base.as_deref(), build, locale);
+            let catalog =
+                load_translations_for_build(self.wows_dir.as_deref(), self.dump_base.as_deref(), build, locale);
             if let Some(catalog) = catalog {
                 let current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 if *current == locale && self.locale_generation.load(Ordering::Acquire) == generation {
@@ -464,9 +487,9 @@ impl GameDataCache {
         if self.loaded_build(build).is_some() {
             return true;
         }
-        if wowsunpack::game_data::list_available_builds(&self.wows_dir)
-            .is_ok_and(|available| available.contains(&build))
-        {
+        if self.wows_dir.as_deref().is_some_and(|directory| {
+            wowsunpack::game_data::list_available_builds(directory).is_ok_and(|available| available.contains(&build))
+        }) {
             return true;
         }
         self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version)).is_some()
@@ -544,7 +567,13 @@ impl GameDataCache {
         };
         let result = slot
             .get_or_init(|| {
-                Self::load_build_checked(&self.wows_dir, self.dump_base.as_deref(), build, hint.as_deref(), &locale)
+                Self::load_build_checked(
+                    self.wows_dir.as_deref(),
+                    self.dump_base.as_deref(),
+                    build,
+                    hint.as_deref(),
+                    &locale,
+                )
             })
             .clone();
 
@@ -554,8 +583,12 @@ impl GameDataCache {
         };
         if generation != current_generation
             && let Ok(loaded) = &result
-            && let Some(catalog) =
-                load_translations_for_build(&self.wows_dir, self.dump_base.as_deref(), loaded.build(), &current_locale)
+            && let Some(catalog) = load_translations_for_build(
+                self.wows_dir.as_deref(),
+                self.dump_base.as_deref(),
+                loaded.build(),
+                &current_locale,
+            )
         {
             let locale = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if *locale == current_locale && self.locale_generation.load(Ordering::Acquire) == current_generation {
@@ -592,7 +625,8 @@ impl GameDataCache {
     /// copied, and a dump already present is left alone.
     fn dump_installed_build(&self, build: u32) {
         let Some(dump_base) = self.dump_base.clone() else { return };
-        let Some(version) = installed_version(&self.wows_dir) else {
+        let Some(wows_dir) = self.wows_dir.clone() else { return };
+        let Some(version) = installed_version(&wows_dir) else {
             tracing::warn!("auto-dump: the install names no version, so nothing is dumped");
             return;
         };
@@ -605,7 +639,6 @@ impl GameDataCache {
             return;
         }
 
-        let wows_dir = self.wows_dir.clone();
         // On a thread of its own: this walks the whole install and writes
         // gigabytes, and nothing waits for the result.
         std::thread::Builder::new()
@@ -624,17 +657,21 @@ impl GameDataCache {
     }
 
     fn load_build_checked(
-        wows_dir: &Path,
+        wows_dir: Option<&Path>,
         dump_base: Option<&Path>,
         build: u32,
         version: Option<&str>,
         locale: &str,
     ) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let available = wowsunpack::game_data::list_available_builds(wows_dir)
-                .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-            if available.contains(&build) {
-                return LoadedGameData::load_build(wows_dir, build, locale);
+            if let Some(wows_dir) = wows_dir {
+                match wowsunpack::game_data::list_available_builds(wows_dir) {
+                    Ok(available) if available.contains(&build) => {
+                        return LoadedGameData::load_build(wows_dir, build, locale);
+                    }
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(%error, "Could not list installed builds; checking cached data"),
+                }
             }
 
             // Not installed: the game-data cache is asked next, which is what it

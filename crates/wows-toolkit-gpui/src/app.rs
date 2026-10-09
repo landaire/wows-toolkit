@@ -1,3 +1,6 @@
+#[path = "replay_directories.rs"]
+mod replay_directories;
+
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -354,6 +357,7 @@ enum TwitchStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
     ReplayInspector,
+    ReplayDirectory(EntityId),
     Stats,
     PlayerTracker,
     Search,
@@ -380,6 +384,7 @@ impl AppTab {
     pub const fn label_key(self) -> &'static str {
         match self {
             AppTab::ReplayInspector => "ui.tabs.replay_parser",
+            AppTab::ReplayDirectory(_) => "ui.tabs.replay_directory",
             AppTab::Stats => "ui.tabs.stats",
             AppTab::PlayerTracker => "ui.tabs.player_tracker",
             AppTab::Search => "ui.tabs.search",
@@ -399,6 +404,7 @@ impl AppTab {
     pub fn glyph(self) -> &'static str {
         match self {
             AppTab::ReplayInspector => crate::icons::MAGNIFYING_GLASS,
+            AppTab::ReplayDirectory(_) => crate::icons::FOLDER_OPEN,
             AppTab::Stats => crate::icons::CHART_BAR,
             AppTab::PlayerTracker => crate::icons::DETECTIVE,
             AppTab::Search => crate::icons::MAGNIFYING_GLASS,
@@ -627,6 +633,11 @@ pub struct App {
     /// Starts its background directory scan once `apply_settings` knows the
     /// WoWs directory.
     replay_inspector: Entity<ReplayInspectorView>,
+    armor_owner: Option<WeakEntity<ReplayInspectorView>>,
+    replay_directories: Vec<replay_directories::DirectoryTab>,
+    directories_loaded: bool,
+    directories_restoring: bool,
+    directory_save_lock: Arc<futures::lock::Mutex<()>>,
     /// App-wide debug-mode flag, seeded from `AppPreferences.debug_mode` in
     /// `apply_settings`, then flippable at runtime via the global Ctrl+Shift+D
     /// shortcut (`toggle_debug_mode`), matching the egui app's
@@ -683,6 +694,8 @@ pub struct App {
     job_said: Vec<JobReport>,
     /// The builds already put to the reader as missing, so a walk that runs
     /// again does not ask about the same ones twice.
+    pending_missing_builds: Vec<MissingBuild>,
+    download_offer_open: bool,
     offered_builds: std::collections::BTreeSet<u32>,
     /// Whether the published result mappings have been checked this session. The
     /// egui app throttles its own check to one per half hour for the same reason:
@@ -763,6 +776,7 @@ impl App {
         // including if it already landed before this tab is ever opened.
         let subscription = cx.observe_in(&replay_inspector, window, |this, _replay_inspector, window, cx| {
             this.poll_armor_game_data(window, cx);
+            this.sync_directory_game_data(cx);
         });
         // A column toggle or the listing's collapse is a preference, so the
         // tab says when one changed and the row is written here.
@@ -770,6 +784,7 @@ impl App {
         // ships: the tab it lives in is this view's to switch to.
         let show_armor_requested = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
             let crate::replay_inspector::view::ShowArmorRequested { param_index, display_name, hits, incoming } = event;
+            this.armor_owner = Some(_view.downgrade());
             let (param_index, display_name) = (param_index.clone(), display_name.clone());
             let (hits, incoming) = (hits.clone(), incoming.clone());
             this.active_tab = AppTab::ArmorViewer;
@@ -782,12 +797,20 @@ impl App {
         let armor_seek = cx.subscribe_in(&armor_pane, window, |this, _pane, event, window, cx| {
             let crate::armor_viewer::pane::SeekRequested(clock) = event;
             let clock = *clock;
-            this.replay_inspector.update(cx, |view, cx| view.seek_following_playback(clock, window, cx));
+            let owner = this
+                .armor_owner
+                .as_ref()
+                .and_then(|owner| owner.upgrade())
+                .unwrap_or_else(|| this.replay_inspector.clone());
+            owner.update(cx, |view, cx| view.seek_following_playback(clock, window, cx));
         });
 
         // The followed ship took more hits, which the open viewer shows
         // without pulling the reader away from what they are watching.
         let armor_followed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
+            if this.armor_owner.as_ref().is_some_and(|owner| owner.entity_id() != _view.entity_id()) {
+                return;
+            }
             let crate::replay_inspector::view::ArmorFollowed { at, hits, health } = event;
             let (at, hits, health) = (*at, hits.clone(), *health);
             this.armor_pane.update(cx, |pane, cx| pane.follow_hits(at, hits, health, cx));
@@ -831,6 +854,16 @@ impl App {
                 this.open_tactics_board(window, cx);
             },
         );
+        let autoload_changed = cx.subscribe(
+            &replay_inspector,
+            |this, _view, event: &crate::replay_inspector::view::AutoloadChanged, cx| {
+                this.adopt_directory_autoload(event.0, cx);
+            },
+        );
+        let directory_requested = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
+            let crate::replay_inspector::view::OpenDirectoryRequested(root) = event;
+            this.open_directory_tab(root.clone(), false, true, window, cx);
+        });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -875,6 +908,11 @@ impl App {
             zoom: DEFAULT_ZOOM,
             zoom_slider,
             replay_inspector,
+            armor_owner: None,
+            replay_directories: Vec::new(),
+            directories_loaded: false,
+            directories_restoring: false,
+            directory_save_lock: Arc::new(futures::lock::Mutex::new(())),
             debug_mode: false,
             focus_handle,
             armor_pane,
@@ -891,6 +929,8 @@ impl App {
             proxy_input,
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
+            pending_missing_builds: Vec::new(),
+            download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
             tactics_board: None,
@@ -910,6 +950,8 @@ impl App {
             settings_scroll: ScrollHandle::new(),
             _subscriptions: vec![
                 subscription,
+                directory_requested,
+                autoload_changed,
                 show_armor_requested,
                 armor_followed,
                 armor_seek,
@@ -1116,7 +1158,15 @@ impl App {
         // that again would be a loop rather than a question.
         let missing: Vec<MissingBuild> =
             missing.into_iter().filter(|build| !self.offered_builds.contains(&build.build)).collect();
-        if missing.is_empty() || self.cache.busy() {
+        if missing.is_empty() {
+            return;
+        }
+        if self.cache.busy() || self.download_offer_open {
+            for build in missing {
+                if !self.pending_missing_builds.iter().any(|pending| pending.build == build.build) {
+                    self.pending_missing_builds.push(build);
+                }
+            }
             return;
         }
         let Some(base) = self.cache_base() else {
@@ -1128,6 +1178,7 @@ impl App {
         // whole selection would fetch, before the reader is asked to commit to
         // it: an offer to download data that was never published is worse than
         // saying so.
+        self.download_offer_open = true;
         crate::toast::info(t!("ui.dialogs.download_plan_pending").into_owned(), window, cx);
         let builds: Vec<(u32, Option<String>)> =
             missing.iter().map(|build| (build.build, build.version.clone())).collect();
@@ -1143,9 +1194,8 @@ impl App {
             move |this, outcome, cx| {
                 let plan = match outcome {
                     game_data_cache::CacheOutcome::Planned { plan } => Some(plan),
-                    // The repository could not be asked. The builds are still
-                    // missing and the data may still be there, so the offer is
-                    // made without the per-build detail rather than withheld.
+                    // Failed planning leaves every build disabled until a retry
+                    // can establish which downloads are available.
                     outcome => {
                         if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
@@ -1157,10 +1207,25 @@ impl App {
                 let proxy = this.proxy_url();
                 let rows = describe_missing_builds(&missing, plan.as_ref());
                 let total = plan.as_ref().map(|plan| plan.unique_missing_objects);
-                // Everything is ticked to begin with, because the reader was asked
-                // about these builds for the replays waiting on them.
-                let ticked: Rc<std::cell::RefCell<std::collections::BTreeSet<u32>>> =
-                    Rc::new(std::cell::RefCell::new(missing.iter().map(|build| build.build).collect()));
+                // Only builds resolved by the repository can be selected.
+                let eligible: std::collections::BTreeSet<u32> = plan
+                    .as_ref()
+                    .map(|plan| {
+                        plan.resolved
+                            .iter()
+                            .filter(|build| {
+                                matches!(
+                                    build.availability,
+                                    wows_data_mgr::download_repo::RemoteAvailability::Exact
+                                        | wows_data_mgr::download_repo::RemoteAvailability::Nearest { .. }
+                                )
+                            })
+                            .map(|build| build.requested_build)
+                            .collect()
+                    })
+                    // No verified plan means no eligible downloads.
+                    .unwrap_or_default();
+                let ticked = Rc::new(std::cell::RefCell::new(eligible.clone()));
                 let entity = cx.entity().downgrade();
                 let _ = held.update(cx, move |_root: gpui_kit::AnyView, window, cx| {
                     window.open_dialog(cx, move |dialog, _window, _cx| {
@@ -1171,7 +1236,18 @@ impl App {
                         let ticked = Rc::clone(&ticked);
                         let picking = Rc::clone(&ticked);
 
+                        let closing = entity.clone();
+                        let dismissed = missing.clone();
                         dialog
+                            .on_close(move |_event, _window, cx| {
+                                if let Some(entity) = closing.upgrade() {
+                                    entity.update(cx, |this, cx| {
+                                        this.download_offer_open = false;
+                                        this.offered_builds.extend(dismissed.iter().map(|build| build.build));
+                                        cx.notify();
+                                    });
+                                }
+                            })
                             .title(t!("ui.windows.download_game_data").into_owned())
                             .child(
                                 v_flex()
@@ -1187,6 +1263,7 @@ impl App {
                                         Checkbox::new(("download-build", build as usize))
                                             .label(said)
                                             .checked(on)
+                                            .disabled(!eligible.contains(&build))
                                             .on_click(move |checked, _window, _cx| {
                                                 let mut picked = picking.borrow_mut();
                                                 if *checked {
@@ -1213,6 +1290,7 @@ impl App {
                                         let proxy = proxy.clone();
                                         let ticked = Rc::clone(&ticked);
                                         Button::new("download-offer-ok")
+                                            .disabled(eligible.is_empty())
                                             .primary()
                                             .label(t!("ui.buttons.download").into_owned())
                                             .small()
@@ -1236,6 +1314,7 @@ impl App {
                                                 // rather than a question.
                                                 let offered = missing.clone();
                                                 entity.update(cx, |this, _cx| {
+                                                    this.download_offer_open = false;
                                                     for build in &offered {
                                                         this.offered_builds.insert(build.build);
                                                     }
@@ -1254,7 +1333,21 @@ impl App {
                                         Button::new("download-offer-cancel")
                                             .label(t!("ui.buttons.cancel").into_owned())
                                             .small()
-                                            .on_click(|_event, window, cx: &mut gpui_kit::App| window.close_dialog(cx)),
+                                            .on_click({
+                                                let entity = entity.clone();
+                                                let missing = missing.clone();
+                                                move |_event, window, cx: &mut gpui_kit::App| {
+                                                    if let Some(entity) = entity.upgrade() {
+                                                        entity.update(cx, |this, cx| {
+                                                            this.download_offer_open = false;
+                                                            this.offered_builds
+                                                                .extend(missing.iter().map(|build| build.build));
+                                                            cx.notify();
+                                                        });
+                                                    }
+                                                    window.close_dialog(cx);
+                                                }
+                                            }),
                                     ),
                             )
                     });
@@ -1301,6 +1394,9 @@ impl App {
                 // the directory is walked, so it is walked again.
                 if fetched {
                     this.replay_inspector.update(cx, |view, cx| view.relist(cx));
+                    for tab in &this.replay_directories {
+                        tab.inspector.update(cx, |view, cx| view.relist(cx));
+                    }
                 }
             },
         );
@@ -1321,7 +1417,10 @@ impl App {
         rust_i18n::set_locale(&code);
         wows_toolkit_viewmodel::set_locale(&code);
 
-        self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code), cx));
+        self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
+        for tab in &self.replay_directories {
+            tab.inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
+        }
         self.stats.update(cx, |view, cx| view.set_locale(cx));
         // Placeholders are stored on their input states, so the ones the
         // reader sees are rewritten rather than left in the old language.
@@ -1396,6 +1495,9 @@ impl App {
                     settings_store::save(keys::CONSTANTS_FILE_COMMIT, &Some(commit), cx);
                     crate::toast::info(t!("ui.replay.constants_latest_written").into_owned(), window, cx);
                     this.replay_inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
+                    for tab in &this.replay_directories {
+                        tab.inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
+                    }
                 }
                 crate::constants::Checked::UpToDate => {}
                 crate::constants::Checked::Failed(reason) => {
@@ -1823,7 +1925,8 @@ impl App {
             }
             PaletteAction::SetTheme(choice) => self.set_theme(choice, window, cx),
             PaletteAction::OpenReplayFile => {
-                self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
+                let inspector = self.active_replay_inspector();
+                inspector.update(cx, |view, cx| view.open_manually(window, cx));
             }
             PaletteAction::SearchFor(query) => self.run_search(query, window, cx),
             PaletteAction::EnterMode(mode) => self.enter_palette_mode(mode, window, cx),
@@ -2047,7 +2150,10 @@ impl App {
     /// inspector, which rates each replay's players against it.
     pub fn apply_session_stats(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(table) = data.personal_rating.clone() {
-            self.replay_inspector.update(cx, |view, cx| view.set_personal_rating(table, cx));
+            self.replay_inspector.update(cx, |view, cx| view.set_personal_rating(table.clone(), cx));
+            for tab in &self.replay_directories {
+                tab.inspector.update(cx, |view, cx| view.set_personal_rating(table.clone(), cx));
+            }
         }
         self.stats.update(cx, |stats, cx| stats.apply_session(data, window, cx));
         cx.notify();
@@ -2122,6 +2228,7 @@ impl App {
         });
         self.poll_armor_game_data(window, cx);
         self.settings = SettingsState::Loaded(Box::new(settings));
+        self.restore_directories(window, cx);
     }
 
     /// Record that the DB load failed. Called once from `main.rs` in place of
@@ -2137,6 +2244,9 @@ impl App {
         self.debug_mode = !self.debug_mode;
         let debug_mode = self.debug_mode;
         self.replay_inspector.update(cx, |view, cx| view.set_debug_mode(debug_mode, cx));
+        for tab in &self.replay_directories {
+            tab.inspector.update(cx, |view, cx| view.set_debug_mode(debug_mode, cx));
+        }
         cx.notify();
     }
 }
@@ -3060,6 +3170,9 @@ impl App {
         // choice on its next start.
         settings_store::save(keys::SEND_REPLAY_DATA, &mode.shares_anything(), cx);
         self.replay_inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
+        for tab in &self.replay_directories {
+            tab.inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
+        }
     }
 
     /// Rewrites the whole `ReplaySettings` blob, which is stored as one row,
@@ -3070,6 +3183,9 @@ impl App {
         let replay = settings.replay.clone();
         settings_store::save(keys::REPLAY_SETTINGS, &replay, cx);
         self.replay_inspector.update(cx, |view, cx| view.set_replay_settings(replay.clone(), cx));
+        for tab in &self.replay_directories {
+            tab.inspector.update(cx, |view, cx| view.set_replay_settings(replay.clone(), cx));
+        }
         cx.notify();
     }
 
@@ -3721,21 +3837,25 @@ impl Render for App {
             settings_store::save(keys::ZOOM_FACTOR, &self.zoom, cx);
         }
 
+        if !self.cache.busy() && !self.download_offer_open && !self.pending_missing_builds.is_empty() {
+            let pending = std::mem::take(&mut self.pending_missing_builds);
+            self.offer_missing_game_data(pending, window, cx);
+        }
         let sheet_layer = Root::render_sheet_layer(window, cx);
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
 
-        let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);
-        let danger = cx.theme().danger;
+        let tab_order = self.tab_order();
+        let active_ix = tab_order.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
-            .children(AppTab::ALL.iter().map(|t| {
+            .children(tab_order.iter().map(|t| {
                 // A tab that needs looking at says so, which is how the egui
                 // strip reports an install it cannot read (`app.rs`'s
                 // `alert_tab_style`).
                 let attention = *t == AppTab::Settings && self.wows_dir_invalid;
                 let selected = *t == self.active_tab;
-                Tab::new()
+                let tab = Tab::new()
                     .relative()
                     .when(selected, |tab| {
                         tab.child(
@@ -3749,20 +3869,12 @@ impl Render for App {
                                 .shadow(vec![theme::phosphor_glow()]),
                         )
                     })
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .when(selected, |row| {
-                                row.text_color(cx.theme().tab_active_foreground).font_weight(FontWeight::SEMIBOLD)
-                            })
-                            .when(attention, |row| row.text_color(danger))
-                            .child(crate::icons::icon(t.glyph()))
-                            .child(t.label()),
-                    )
+                    .child(self.directory_tab_label(*t, attention, selected, cx));
+                tab
             }))
-            .on_click(cx.listener(|this, ix: &usize, window, cx| {
-                this.active_tab = AppTab::ALL[*ix];
+            .on_click(cx.listener(move |this, ix: &usize, window, cx| {
+                let Some(tab) = tab_order.get(*ix).copied() else { return };
+                this.active_tab = tab;
                 this.poll_armor_game_data(window, cx);
                 if this.active_tab == AppTab::PlayerTracker {
                     this.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
@@ -3838,6 +3950,12 @@ impl Render for App {
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
+            AppTab::ReplayDirectory(id) => self
+                .replay_directories
+                .iter()
+                .find(|tab| tab.inspector.entity_id() == id)
+                .map(|tab| tab.inspector.clone().into_any_element())
+                .unwrap_or_else(|| self.replay_inspector.clone().into_any_element()),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
             AppTab::PlayerTracker => self.player_tracker.clone().into_any_element(),
