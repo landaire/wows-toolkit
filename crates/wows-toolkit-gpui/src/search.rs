@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -39,6 +38,7 @@ use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
@@ -350,8 +350,19 @@ enum SearchState {
     Done,
 }
 
+struct ValueEdit {
+    path: NodePath,
+    leaf: NodePath,
+    seed: MatchExpr,
+    tail: NodePath,
+    kind: wows_toolkit_config::index::query_ast::ValueKind,
+}
+
 pub struct SearchView {
     query_input: Entity<InputState>,
+    value_input: Entity<InputState>,
+    value_edit: Option<ValueEdit>,
+    value_error: bool,
     /// Set by Enter, acted on where a window is at hand: turning the typed
     /// term into a pill clears the box, and clearing a box needs one.
     pending_commit: bool,
@@ -504,13 +515,31 @@ pub struct SearchView {
 
 impl SearchView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let query_input = cx.new(|cx| InputState::new(window, cx).placeholder("outcome=win and map:ocean"));
+        let query_input = cx.new(|cx| InputState::new(window, cx).placeholder("Add filter"));
         let subscription = cx.subscribe(&query_input, Self::on_query_event);
+        let value_input = cx.new(|cx| InputState::new(window, cx));
+        let value_subscription = cx.subscribe_in(&value_input, window, |this, _input, event, window, cx| match event {
+            InputEvent::PressEnter { .. } => {
+                this.commit_value_edit(window, cx);
+                if this.value_edit.is_none() {
+                    this.query_input.read(cx).focus_handle(cx).focus(window, cx);
+                }
+            }
+            InputEvent::Blur => this.commit_value_edit(window, cx),
+            InputEvent::Change => {
+                this.value_error = false;
+                cx.notify();
+            }
+            _ => {}
+        });
         let calendar = cx.new(|cx| CalendarState::new(window, cx));
         let calendar_subscription = cx.subscribe_in(&calendar, window, Self::on_calendar_event);
 
         Self {
             query_input,
+            value_input,
+            value_edit: None,
+            value_error: false,
             committed: String::new(),
             pending_commit: false,
             calendar,
@@ -563,7 +592,7 @@ impl SearchView {
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
-            _subscriptions: vec![subscription, calendar_subscription],
+            _subscriptions: vec![subscription, calendar_subscription, value_subscription],
         }
     }
 
@@ -702,10 +731,12 @@ impl SearchView {
 
     /// Whether there is anything to step back to, and anything to step
     /// forward to.
+    #[cfg(test)]
     pub(crate) fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
+    #[cfg(test)]
     pub(crate) fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
@@ -730,16 +761,70 @@ impl SearchView {
     /// Replaces the bar's text with `text` and runs it.
     fn set_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.query_settings_dirty = true;
-        self.committed = text;
-        self.set_bar_text("", Offer::Nothing, window, cx);
-        self.reading = query_text::parse_query(&self.committed).ok();
+        self.restore_query_text(text, window, cx);
         self.run(cx);
         cx.notify();
+    }
+
+    fn begin_value_edit(&mut self, path: NodePath, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(expr) = self.reading.as_ref() else { return };
+        let Some(term_path) = select::segment_path(expr, &path) else { return };
+        let Some((field, _, value)) = select::term_at(expr, &term_path) else { return };
+        let kind = field.value_kind();
+        let literal = query_text::print_value(value);
+        let Some((leaf, seed, tail)) = select::leaf_seed(expr, &term_path) else { return };
+        self.value_edit = Some(ValueEdit { path, leaf, seed, tail, kind });
+        self.value_error = false;
+        self.close_completions(cx);
+        self.value_input.update(cx, |input, cx| input.set_value(literal, window, cx));
+        self.value_input.read(cx).focus_handle(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    fn commit_value_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.value_edit.as_ref() else { return };
+        let literal = self.value_input.read(cx).value();
+        let Some(value) = query_text::parse_roster_value(edit.kind, &literal) else {
+            self.value_error = true;
+            cx.notify();
+            return;
+        };
+        let Some(mut expr) = self.reading.clone() else { return };
+        if !select::commit_value(&mut expr, &edit.leaf, &edit.seed, &edit.tail, value) {
+            self.value_edit = None;
+            cx.notify();
+            return;
+        }
+        self.remember_for_undo(cx);
+        self.value_edit = None;
+        self.value_error = false;
+        self.committed = query_text::print_query(&expr);
+        self.reading = Some(expr);
+        self.query_settings_dirty = true;
+        self.run(cx);
+        cx.notify();
+    }
+
+    fn restore_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.value_edit = None;
+        self.value_error = false;
+        self.reading = query_text::parse_query(&text).ok();
+        if self.reading.is_some() {
+            self.committed = text;
+            self.set_bar_text("", Offer::Nothing, window, cx);
+        } else {
+            // Invalid saved queries must remain available for correction.
+            self.committed.clear();
+            self.set_bar_text(&text, Offer::Nothing, window, cx);
+        }
     }
 
     fn take_completion(&mut self, replacement: String, offer: Offer, window: &mut Window, cx: &mut Context<Self>) {
         self.set_bar_text(&replacement, offer, window, cx);
         self.completion_cursor = None;
+        if query_text::parse_query(&self.full_query(cx)).is_ok() {
+            self.commit_typed(window, cx);
+        }
         cx.notify();
     }
 
@@ -764,6 +849,15 @@ impl SearchView {
     /// highlighted runs the query, which is what the bar does with no
     /// dropdown open at all.
     fn on_bar_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.value_edit.is_some() {
+            if event.keystroke.key == "escape" {
+                self.value_edit = None;
+                self.value_error = false;
+                self.query_input.read(cx).focus_handle(cx).focus(window, cx);
+                cx.notify();
+            }
+            return;
+        }
         let offered = self.offered_completions().len();
         let modifiers = event.keystroke.modifiers;
         if modifiers.secondary() {
@@ -933,7 +1027,7 @@ impl SearchView {
     /// Only an explicit run is remembered: the results following a typed
     /// edit would otherwise fill the history with every prefix of it.
     fn remember_query(&mut self, cx: &mut Context<Self>) {
-        let text = self.query_input.read(cx).value().trim().to_string();
+        let text = self.full_query(cx);
         if text.is_empty() || self.history.first() == Some(&text) {
             return;
         }
@@ -1420,9 +1514,7 @@ impl SearchView {
                     this.operator_preferences = operator_preferences;
                 }
                 if !this.query_settings_dirty {
-                    if !query.is_empty() {
-                        this.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
-                    }
+                    this.restore_query_text(query, window, cx);
                     // An empty query matches everything, which is the page the
                     // egui tab opens on.
                     this.completions_open = false;
@@ -1826,6 +1918,7 @@ impl Render for SearchView {
             Some(expr) => {
                 let entity = entity.clone();
                 let structure_entity = entity.clone();
+                let edit_entity = entity.clone();
                 crate::search_pills::pill_strip(
                     expr,
                     &self.name_cache,
@@ -1837,6 +1930,10 @@ impl Render for SearchView {
                     },
                     move |path, edit, window, cx| {
                         structure_entity.update(cx, |this, cx| this.apply_structural_edit(path, edit, window, cx));
+                    },
+                    self.value_edit.as_ref().map(|edit| (&edit.path, &self.value_input)),
+                    move |path, window, cx| {
+                        edit_entity.update(cx, |this, cx| this.begin_value_edit(path, window, cx));
                     },
                     caret,
                 )
@@ -1850,22 +1947,6 @@ impl Render for SearchView {
             .gap_2()
             .items_center()
             .child(Icon::new(IconName::Search))
-            .child(
-                Button::new("search-undo")
-                    .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
-                    .compact()
-                    .disabled(!self.can_undo())
-                    .tooltip(t!("ui.search.undo").to_string())
-                    .on_click(cx.listener(|this: &mut Self, _event, window, cx| this.undo_edit(window, cx))),
-            )
-            .child(
-                Button::new("search-redo")
-                    .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
-                    .compact()
-                    .disabled(!self.can_redo())
-                    .tooltip(t!("ui.search.redo").to_string())
-                    .on_click(cx.listener(|this: &mut Self, _event, window, cx| this.redo_edit(window, cx))),
-            )
             .child(
                 div()
                     .id("search-pills")
@@ -2033,6 +2114,14 @@ impl Render for SearchView {
             .gap_1()
             .on_key_down(cx.listener(Self::on_bar_key))
             .child(entry_row)
+            .when(self.value_error, |bar| {
+                bar.child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::accent())
+                        .child("Invalid filter value. Correct the value or press Escape to cancel."),
+                )
+            })
             .when_some(calendar, |this, calendar| this.child(calendar))
             .when_some(dropdown, |this, rows| this.child(rows))
             .when_some(parse_error, |this, strip| this.child(strip));
