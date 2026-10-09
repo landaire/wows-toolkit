@@ -6,7 +6,7 @@ description = "A parser for World of Warships replay files"
 repository = "https://github.com/landaire/wows-toolkit"
 # Snapshot corpora and the replays they cover are not usable from the published
 # crate; the tests need replay files and game data that ship separately.
-exclude = ["tests/"]
+exclude = ["BUCK", "tests/"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
