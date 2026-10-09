@@ -226,7 +226,7 @@ fn main() {
                 async move { render_defaults::load(&pool).await }
             })
             .await;
-            if let Err(err) = window.update(cx, |_root, window, cx| {
+            if let Err(err) = cx.update_window(window.into(), |_root, window, cx| {
                 settings_store::init(pool.clone(), cx);
                 notices::adopt(loaded.suppress_p2p_ip_warning, loaded.suppress_gpu_encoder_warning, cx);
                 match render_defaults {
@@ -252,10 +252,11 @@ fn main() {
                 first_run::ask(&app_entity, &loaded, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.report_last_crash(window, cx);
-                    if loaded.check_for_updates {
+                    let check_for_updates = loaded.check_for_updates;
+                    app.apply_settings(loaded, window, cx);
+                    if check_for_updates {
                         app.check_for_update(app::Asked::AtStartup, window, cx);
                     }
-                    app.apply_settings(loaded, window, cx);
                     app.apply_session_stats(session, window, cx);
                     app.start_player_tracker(pool, cx);
                     cx.notify();

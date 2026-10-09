@@ -66,13 +66,16 @@ pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<P
 }
 
 /// Where the app's own releases are published.
-pub const RELEASES_URL: &str = "https://api.github.com/repos/landaire/wows-toolkit/releases/latest";
+pub const RELEASES_URL: &str = "https://api.github.com/repos/landaire/wows-toolkit/releases?per_page=100";
 
 /// A published release, as much of it as an update needs.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Release {
     /// The tag, which carries the version with a leading `v`.
     pub tag_name: String,
+    pub html_url: String,
+    pub draft: bool,
+    pub prerelease: bool,
     #[serde(default)]
     pub body: Option<String>,
     #[serde(default)]
@@ -104,13 +107,25 @@ impl Release {
         }
     }
 
-    /// The asset to download on this platform, by file extension.
-    ///
-    /// Windows only, as the egui app's updater is: nothing else has a single-file
-    /// executable to swap.
+    /// The application archive, excluding the installer and command-line tools.
     pub fn asset_for_windows(&self) -> Option<&ReleaseAsset> {
-        self.assets.iter().find(|asset| asset.name.ends_with(".exe"))
+        let name = format!("wows_toolkit_{}_windows.zip", self.tag_name);
+        self.assets.iter().find(|asset| asset.name == name)
     }
+}
+
+/// Select the newest published version in the running build's update channel.
+pub fn select_release(releases: Vec<Release>, running: &str) -> Result<Option<Release>, semver::Error> {
+    let running = semver::Version::parse(running)?;
+    Ok(releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| release.version().map(|version| (version, release)))
+        .filter(|(version, release)| {
+            version > &running && (!running.pre.is_empty() || (version.pre.is_empty() && !release.prerelease))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, release)| release))
 }
 
 #[cfg(test)]
@@ -120,6 +135,9 @@ mod release_tests {
     fn release(tag: &str, assets: &[&str]) -> Release {
         Release {
             tag_name: tag.to_owned(),
+            draft: false,
+            prerelease: tag.contains('-'),
+            html_url: format!("https://github.com/landaire/wows-toolkit/releases/tag/{tag}"),
             body: None,
             assets: assets
                 .iter()
@@ -155,14 +173,42 @@ mod release_tests {
         assert!(!release("v1.0.3", &[]).is_newer_than("not-a-version"));
     }
 
-    /// The executable is what is downloaded, not the installer or the archive
-    /// beside it.
     #[test]
-    fn the_windows_asset_is_the_executable() {
-        let picked = release("v1.0.3", &["wows_toolkit.msi", "wows_toolkit.exe", "notes.txt"])
-            .asset_for_windows()
-            .map(|asset| asset.name.clone());
-        assert_eq!(picked.as_deref(), Some("wows_toolkit.exe"));
+    fn update_channels_select_the_newest_published_version() {
+        let mut draft = release("v2.0.0", &[]);
+        draft.draft = true;
+        let mut marked_prerelease = release("v1.3.0", &[]);
+        marked_prerelease.prerelease = true;
+        let releases = vec![
+            release("v1.1.0-beta2", &[]),
+            release("v1.0.2", &[]),
+            draft,
+            release("nightly", &[]),
+            marked_prerelease,
+            release("v1.2.0-beta1", &[]),
+        ];
+        assert_eq!(select_release(releases.clone(), "1.0.0").unwrap().unwrap().tag_name, "v1.0.2");
+        assert_eq!(select_release(releases, "1.1.0-beta1").unwrap().unwrap().tag_name, "v1.3.0");
+        assert_eq!(select_release(vec![release("v1.1.0", &[])], "1.1.0-beta1").unwrap().unwrap().tag_name, "v1.1.0");
+        assert!(select_release(vec![release("v1.1.0-beta1", &[])], "1.1.0-beta1").unwrap().is_none());
+        assert!(select_release(vec![], "invalid").is_err());
+    }
+
+    #[test]
+    fn the_windows_asset_is_the_application_archive() {
+        let picked = release(
+            "v1.0.2",
+            &[
+                "wows-toolkit-v1.0.2-windows-x86_64.msi",
+                "wows_toolkit_tools_v1.0.2_windows.zip",
+                "wows_toolkit_tools_v1.0.2_win64.zip",
+                "wows_toolkit_v1.0.2_windows.zip",
+                "wows_toolkit.pdb",
+            ],
+        )
+        .asset_for_windows()
+        .map(|asset| asset.name.clone());
+        assert_eq!(picked.as_deref(), Some("wows_toolkit_v1.0.2_windows.zip"));
         assert!(release("v1.0.3", &["wows_toolkit.msi"]).asset_for_windows().is_none());
     }
 }

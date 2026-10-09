@@ -36,6 +36,7 @@ use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rust_i18n::t;
 use std::rc::Rc;
 
@@ -143,67 +144,79 @@ pub(crate) enum Asked {
 }
 
 /// Offers the release, and installs it if the reader says so.
-///
-/// Installing replaces this executable and restarts it, so the dialog is the last
-/// thing this process does.
 fn offer_update(
     release: wows_toolkit_viewmodel::update::Release,
-    asset_url: String,
-    proxy: String,
+    app: WeakEntity<App>,
     window: &mut Window,
     cx: &mut gpui_kit::App,
 ) {
-    let tag = release.tag_name.clone();
-    let notes = release.body.clone().unwrap_or_default();
-    // Built once, outside the builder: that closure runs on every draw of the
-    // dialog, and the release it describes does not change under one.
-    let announced = t!("ui.dialogs.update_message", tag = tag).into_owned();
-    let described =
-        if notes.trim().is_empty() { announced.clone() } else { format!("{announced}\n\n{}", notes.trim()) };
-
-    window.open_alert_dialog(cx, move |alert, _window, _cx| {
+    let asset_url = release.asset_for_windows().map(|asset| asset.browser_download_url.clone());
+    window.open_dialog(cx, move |dialog, _window, _cx| {
+        let app = app.clone();
+        let release_url = release.html_url.clone();
         let asset_url = asset_url.clone();
-        let proxy = proxy.clone();
-        let described = described.clone();
-        let installing_said = announced.clone();
-        alert
+        let can_install = cfg!(target_os = "windows") && asset_url.is_some();
+        dialog
             .title(t!("ui.windows.update_available").into_owned())
-            .description(described)
-            .ok_text(t!("ui.buttons.install_update").into_owned())
-            .show_cancel(true)
-            .on_ok(move |_event, window, cx| {
-                let asset_url = asset_url.clone();
-                let proxy = proxy.clone();
-                crate::toast::stuck(UPDATE_PROGRESS, installing_said.clone(), window, cx);
-                let (reports, mut progress) = futures::channel::mpsc::unbounded();
-                let installing = crate::update::install(asset_url, proxy, reports, cx);
-                window
-                    .spawn(cx, async move |cx| {
-                        let listen = async {
-                            while let Some(step) = futures::StreamExt::next(&mut progress).await {
-                                let said = describe_download(step);
-                                if cx
-                                    .update(|window, cx| crate::toast::progress(UPDATE_PROGRESS, said, window, cx))
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                        };
-                        // Only a failure returns: a successful install restarts
-                        // the app from the new executable.
-                        let (installed, ()) = futures::future::join(installing, listen).await;
-                        let _ = cx.update(|window, cx| {
-                            crate::toast::resolved(UPDATE_PROGRESS, window, cx);
-                            if let Err(reason) = installed {
-                                crate::toast::failed(reason, window, cx);
-                            }
-                        });
+            .w(px(680.))
+            .child(
+                v_flex()
+                    .id("update-offer")
+                    .gap_3()
+                    .child(crate::ui::selectable_text(
+                        "update-version",
+                        t!("ui.dialogs.update_message", tag = release.tag_name).into_owned(),
+                    ))
+                    .when_some(release.body.clone().filter(|notes| !notes.trim().is_empty()), |body, notes| {
+                        body.child(div().id("update-notes-scroll").max_h(px(420.)).overflow_y_scroll().child(
+                            gpui_kit::component::text::TextView::markdown("update-notes", notes).selectable(true),
+                        ))
                     })
-                    .detach();
-                true
-            })
+                    .when(!cfg!(target_os = "windows"), |body| {
+                        body.child(t!("ui.dialogs.update_windows_only").into_owned())
+                    })
+                    .when(cfg!(target_os = "windows") && asset_url.is_none(), |body| {
+                        body.child(t!("ui.dialogs.update_asset_pending").into_owned())
+                    }),
+            )
+            .footer(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("update-view-release")
+                            .small()
+                            .label(t!("ui.buttons.view_release").into_owned())
+                            .on_click(move |_, _, cx| cx.open_url(&release_url)),
+                    )
+                    .when(can_install, |footer| {
+                        footer.child(
+                            Button::new("update-install")
+                                .primary()
+                                .small()
+                                .label(t!("ui.buttons.install_update").into_owned())
+                                .on_click(move |_, window, cx| {
+                                    let (Some(app), Some(url)) = (app.upgrade(), asset_url.clone()) else { return };
+                                    window.close_dialog(cx);
+                                    app.update(cx, |app, cx| app.install_update(url, window, cx));
+                                }),
+                        )
+                    })
+                    .child(
+                        Button::new("update-close")
+                            .small()
+                            .label(t!("ui.buttons.cancel").into_owned())
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
+            )
     });
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateStatus {
+    Idle,
+    Checking(Asked),
+    Installing,
 }
 
 /// Identifies the message the update download keeps on screen, so each step
@@ -699,6 +712,7 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    update_status: UpdateStatus,
     /// The board already open, so the menu brings it forward rather than
     /// opening another.
     tactics_board: Option<WeakEntity<crate::tactics::TacticsBoard>>,
@@ -931,6 +945,7 @@ impl App {
             download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            update_status: UpdateStatus::Idle,
             tactics_board: None,
             _board_subscription: None,
             cap_layouts: wows_replay_insights::cap_layout::CapLayoutDb::default(),
@@ -978,25 +993,78 @@ impl App {
     /// A check nobody asked for says nothing when this build is the newest one:
     /// the egui app reports "up to date" only for a manual check too.
     pub(crate) fn check_for_update(&mut self, asked: Asked, window: &mut Window, cx: &mut Context<Self>) {
-        let proxy = self.proxy_url();
-        let found = crate::update::check(proxy.clone(), cx);
+        if self.update_status == UpdateStatus::Installing {
+            return;
+        }
+        if asked == Asked::ByHand {
+            crate::toast::progress("update-check", t!("ui.messages.checking_app_updates").into_owned(), window, cx);
+        }
+        if let UpdateStatus::Checking(ref mut pending) = self.update_status {
+            if asked == Asked::ByHand {
+                *pending = Asked::ByHand;
+            }
+            return;
+        }
+        self.update_status = UpdateStatus::Checking(asked);
+        let found = crate::update::check(self.proxy_url(), cx);
         cx.spawn_in(window, async move |this, cx| {
             let found = found.await;
-            let _ = this.update_in(cx, |_this, window, cx| match found {
-                crate::update::Found::Newer { release, asset_url } => {
-                    offer_update(release, asset_url, proxy, window, cx)
-                }
-                crate::update::Found::UpToDate => {
-                    if asked == Asked::ByHand {
+            let _ = this.update_in(cx, |this, window, cx| {
+                let UpdateStatus::Checking(asked) = this.update_status else { return };
+                this.update_status = UpdateStatus::Idle;
+                crate::toast::resolved("update-check", window, cx);
+                match found {
+                    Ok(Some(release)) => offer_update(release, cx.entity().downgrade(), window, cx),
+                    Ok(None) if asked == Asked::ByHand => {
                         crate::toast::ok(t!("ui.messages.app_up_to_date").into_owned(), window, cx);
                     }
-                }
-                crate::update::Found::Failed(reason) => {
-                    if asked == Asked::ByHand {
-                        crate::toast::failed(t!("ui.messages.update_check_failed").into_owned(), window, cx);
-                    } else {
-                        tracing::warn!("the update check failed: {reason}");
+                    Ok(None) => {}
+                    Err(error) => {
+                        let reason = format!("{}", error.format_with(&DefaultReportFormatter::ASCII));
+                        tracing::warn!("Update check failed: {reason}");
+                        if asked == Asked::ByHand {
+                            crate::notices::show_error(
+                                format!("{}\n\n{reason}", t!("ui.messages.update_check_failed")),
+                                window,
+                                cx,
+                            );
+                        }
                     }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn install_update(&mut self, asset_url: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.update_status != UpdateStatus::Idle {
+            return;
+        }
+        self.update_status = UpdateStatus::Installing;
+        crate::toast::progress(UPDATE_PROGRESS, t!("ui.messages.update_starting").into_owned(), window, cx);
+        let (reports, mut progress) = futures::channel::mpsc::unbounded();
+        let installing = crate::update::install(asset_url, self.proxy_url(), reports, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let listen = async {
+                while let Some(step) = futures::StreamExt::next(&mut progress).await {
+                    if cx
+                        .update(|window, cx| {
+                            crate::toast::progress(UPDATE_PROGRESS, describe_download(step), window, cx)
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            };
+            let (installed, ()) = futures::future::join(installing, listen).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.update_status = UpdateStatus::Idle;
+                crate::toast::resolved(UPDATE_PROGRESS, window, cx);
+                if let Err(error) = installed {
+                    let reason = format!("{}", error.format_with(&DefaultReportFormatter::ASCII));
+                    tracing::warn!("Update installation failed: {reason}");
+                    crate::notices::show_error(reason, window, cx);
                 }
             });
         })
@@ -4062,6 +4130,59 @@ mod tests {
 
     use super::MissingBuild;
     use super::describe_missing_builds;
+
+    #[gpui_kit::test]
+    fn manual_update_request_reports_a_pending_startup_failure(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::test::TestWindowExt as _;
+        let (window, app) = crate::interaction_tests::open_app_in_root(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            app.update(cx, |app, cx| {
+                // This harness has no network runtime, so discovery must report that failure.
+                app.check_for_update(super::Asked::AtStartup, window, cx);
+                app.check_for_update(super::Asked::ByHand, window, cx);
+            });
+        })
+        .expect("update check window");
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("notice-error-copy", cx);
+            let copied = cx.read_from_clipboard().expect("update error copied").text().expect("error text");
+            assert!(copied.contains("The update runtime is not available"), "{copied}");
+            app.update(cx, |app, _| assert!(app.update_status == super::UpdateStatus::Idle));
+        })
+        .expect("update error window");
+    }
+
+    #[gpui_kit::test]
+    fn update_dialog_has_platform_actions_and_can_be_closed(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::test::TestWindowExt as _;
+        let (window, app) = crate::interaction_tests::open_app_in_root(cx);
+        let release = serde_json::from_value(serde_json::json!({
+            "tag_name": "v1.0.2",
+            "html_url": "https://github.com/landaire/wows-toolkit/releases/tag/v1.0.2",
+            "draft": false,
+            "prerelease": false,
+            "body": "## Changes\nRelease notes",
+            "assets": [{
+                "name": "wows_toolkit_v1.0.2_windows.zip",
+                "browser_download_url": "https://example.invalid/update.zip"
+            }]
+        }))
+        .expect("release response");
+        cx.update_window(window.into(), |_, window, cx| {
+            super::offer_update(release, app.downgrade(), window, cx);
+            window.render_frame(cx);
+            assert!(window.try_find("update-view-release").is_some());
+            assert_eq!(window.try_find("update-install").is_some(), cfg!(target_os = "windows"));
+            window.click("update-close", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("update-view-release").is_none());
+        })
+        .expect("update dialog window");
+    }
 
     fn waiting(build: u32, version: &str, replays: usize) -> MissingBuild {
         MissingBuild { build, version: Some(version.to_owned()), replays }
