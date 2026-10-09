@@ -276,6 +276,7 @@ const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
 pub(crate) enum ViewportEvent {
     CameraChanged,
     SettingsChanged,
+    TrajectoryModeChanged,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1688,6 +1689,7 @@ impl ViewportView {
         if on {
             self.splash_mode = false;
         }
+        cx.emit(ViewportEvent::TrajectoryModeChanged);
         cx.notify();
     }
 
@@ -1708,8 +1710,9 @@ impl ViewportView {
             return;
         }
         self.splash_mode = on;
-        if on {
+        if on && self.trajectory_mode {
             self.trajectory_mode = false;
+            cx.emit(ViewportEvent::TrajectoryModeChanged);
         }
         cx.notify();
     }

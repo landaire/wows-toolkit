@@ -47,7 +47,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
 
     let visibility = viewport.clone();
     let hull = viewport.clone();
-    let display = viewport;
+    let display = viewport.clone();
 
     v_flex()
         .id("armor-options-panel")
@@ -59,6 +59,9 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .gap_2()
         .p_2()
         .overflow_y_scroll()
+        .when(viewport.read(cx).trajectory_state().shown, |panel| {
+            panel.child(popover::render_trajectory_panel(view, pane, &viewport, cx))
+        })
         .child(header)
         .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.armor_options").as_ref(), cx, |cx| {
             popover::render_popover_content(&visibility, cx)

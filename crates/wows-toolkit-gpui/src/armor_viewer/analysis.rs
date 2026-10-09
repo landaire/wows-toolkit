@@ -224,16 +224,9 @@ impl PenetrationState {
 /// inside that pane's own render, where reading the entity would panic. The
 /// entity is captured only for the callbacks, which run later.
 pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
-    let (ships, firing_ship, ifhe_on, plate, search, matches) = {
-        let state = view.penetration();
-        let typed = state.search.read(cx).value().to_string();
-        let matches: Vec<(String, String, u32)> = state
-            .matches(&typed)
-            .into_iter()
-            .map(|entry| (entry.param_index.clone(), entry.display_name.clone(), entry.tier))
-            .collect();
-        (state.ships.clone(), state.firing_ship.clone(), state.ifhe, state.plate.clone(), state.search.clone(), matches)
-    };
+    let state = view.penetration();
+    let (ships, firing_ship, ifhe_on, plate) =
+        (state.ships.clone(), state.firing_ship.clone(), state.ifhe, state.plate.clone());
     let ifhe = Ifhe::from_enabled(ifhe_on);
 
     let header = h_flex()
@@ -266,27 +259,6 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         None => hint(t!("ui.armor.pen.hover_a_plate").as_ref(), cx),
     };
 
-    let results: Option<AnyElement> = (!matches.is_empty()).then(|| {
-        v_flex()
-            .id("armor-pen-results")
-            .gap_0()
-            .max_h(RESULTS_MAX_HEIGHT)
-            .overflow_y_scroll()
-            .children(matches.into_iter().enumerate().map(|(ix, (param_index, name, tier))| {
-                let pane = pane.clone();
-                Button::new(("armor-pen-add", ix))
-                    .label(format!("{} {}", tier_roman(tier), name))
-                    .compact()
-                    .w_full()
-                    .on_click(move |_event, window, cx: &mut App| {
-                        let param_index = param_index.clone();
-                        pane.update(cx, |pane, cx| pane.add_comparison_ship(&param_index, window, cx));
-                    })
-                    .into_any_element()
-            }))
-            .into_any_element()
-    });
-
     let body: AnyElement = if ships.is_empty() {
         hint(t!("ui.armor.pen.add_a_ship").as_ref(), cx)
     } else {
@@ -312,8 +284,9 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .p_2()
         .child(header)
         .child(against)
-        .child(Input::new(&search).id("armor-pen-search").small().w_full())
-        .children(results)
+        .when(!(view.options_open() && view.active_viewport(cx).read(cx).trajectory_state().shown), |panel| {
+            panel.child(render_ship_search(view, pane, cx))
+        })
         .child(div().id("armor-pen-ships").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
         .child(render_arcs(view, cx))
         .child(render_incoming(view, pane, cx))
@@ -327,6 +300,44 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 ),
             )
         })
+        .into_any_element()
+}
+
+/// Shared ship selection for penetration analysis and trajectory configuration.
+pub(super) fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
+    let state = view.penetration();
+    let search = state.search.clone();
+    let typed = search.read(cx).value();
+    let matches: Vec<(String, String, u32)> = state
+        .matches(&typed)
+        .into_iter()
+        .map(|entry| (entry.param_index.clone(), entry.display_name.clone(), entry.tier))
+        .collect();
+    let results: Option<AnyElement> = (!matches.is_empty()).then(|| {
+        v_flex()
+            .id("armor-pen-results")
+            .gap_0()
+            .max_h(RESULTS_MAX_HEIGHT)
+            .overflow_y_scroll()
+            .children(matches.into_iter().enumerate().map(|(ix, (param_index, name, tier))| {
+                let pane = pane.clone();
+                Button::new(("armor-pen-add", ix))
+                    .label(format!("{} {}", tier_roman(tier), name))
+                    .compact()
+                    .w_full()
+                    .on_click(move |_event, window, cx: &mut App| {
+                        let param_index = param_index.clone();
+                        pane.update(cx, |pane, cx| pane.add_comparison_ship(&param_index, window, cx));
+                    })
+                    .into_any_element()
+            }))
+            .into_any_element()
+    });
+
+    v_flex()
+        .gap_1()
+        .child(Input::new(&search).id("armor-pen-search").small().w_full())
+        .children(results)
         .into_any_element()
 }
 
