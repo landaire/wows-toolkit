@@ -355,6 +355,7 @@ impl Render for StatsOverviewPanel {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .restrict_scroll_to_axis()
             .track_scroll(&self.ship_scroll)
             .children(rows);
 
@@ -367,6 +368,7 @@ impl Render for StatsOverviewPanel {
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_x_scroll()
+                    .restrict_scroll_to_axis()
                     .track_scroll(&self.horizontal_scroll)
                     .child(v_flex().min_w(TABLE_MIN_WIDTH).h_full().child(header).child(table_rows)),
             )
