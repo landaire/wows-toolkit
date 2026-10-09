@@ -73,6 +73,8 @@ impl DecoderBuilder {
                 .battle_constants(gc.battle())
                 .common_constants(gc.common())
                 .ships_constants(gc.ships())
+                .player_member_map(gc.player_num_member_map())
+                .bot_member_map(gc.bot_num_member_map())
                 .build(),
         };
         if !self.no_meta {
@@ -185,6 +187,7 @@ impl PlayerStateData {
     pub(crate) const KEY_REALM: &'static str = "realm";
     pub(crate) const KEY_SHIP_COMPONENTS: &'static str = "shipComponents";
     pub(crate) const KEY_SHIP_CONFIG_DUMP: &'static str = "shipConfigDump";
+    pub(crate) const KEY_SHIP_FRAGS: &'static str = "shipFrags";
     pub(crate) const KEY_SHIP_ID: &'static str = "shipId";
     pub(crate) const KEY_SHIP_PARAMS_ID: &'static str = "shipParamsId";
     pub(crate) const KEY_SKIN_ID: &'static str = "skinId";
@@ -192,8 +195,23 @@ impl PlayerStateData {
     pub(crate) const KEY_TTK_STATUS: &'static str = "ttkStatus";
 
     fn convert_raw_dict(values: &HashMap<i64, Value>, version: &Version, is_bot: bool) -> HashMap<&'static str, Value> {
-        let keys: HashMap<&'static str, i64> =
-            if is_bot { Self::bot_key_map(version) } else { Self::player_key_map(version) };
+        Self::convert_raw_dict_with_member_map(values, version, is_bot, None)
+    }
+
+    fn convert_raw_dict_with_member_map(
+        values: &HashMap<i64, Value>,
+        version: &Version,
+        is_bot: bool,
+        member_map: Option<&HashMap<String, i64>>,
+    ) -> HashMap<&'static str, Value> {
+        let mut keys = if is_bot { Self::bot_key_map(version) } else { Self::player_key_map(version) };
+        if let Some(member_map) = member_map {
+            for name in keys.keys().copied().collect::<Vec<_>>() {
+                if let Some(index) = member_map.get(name) {
+                    keys.insert(name, *index);
+                }
+            }
+        }
 
         let mut raw_with_names = HashMap::new();
         for (k, v) in values.iter() {
@@ -242,9 +260,10 @@ impl PlayerStateData {
             h.insert(Self::KEY_REALM, 30);
             h.insert(Self::KEY_SHIP_COMPONENTS, 31);
             h.insert(Self::KEY_SHIP_CONFIG_DUMP, 32);
-            h.insert(Self::KEY_SHIP_ID, 33);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 34);
-            h.insert(Self::KEY_SKIN_ID, 35);
+            h.insert(Self::KEY_SHIP_FRAGS, 33);
+            h.insert(Self::KEY_SHIP_ID, 34);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 35);
+            h.insert(Self::KEY_SKIN_ID, 36);
             h.insert(Self::KEY_TEAM_ID, 37);
             h.insert(Self::KEY_TTK_STATUS, 38);
             h
@@ -458,9 +477,10 @@ impl PlayerStateData {
             h.insert(Self::KEY_REALM, 20);
             h.insert(Self::KEY_SHIP_COMPONENTS, 21);
             h.insert(Self::KEY_SHIP_CONFIG_DUMP, 22);
-            h.insert(Self::KEY_SHIP_ID, 23);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 24);
-            h.insert(Self::KEY_SKIN_ID, 25);
+            h.insert(Self::KEY_SHIP_FRAGS, 23);
+            h.insert(Self::KEY_SHIP_ID, 24);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 25);
+            h.insert(Self::KEY_SKIN_ID, 26);
             h.insert(Self::KEY_TEAM_ID, team_id_index);
             h.insert(Self::KEY_TTK_STATUS, ttk_status_index);
             h
@@ -471,17 +491,27 @@ impl PlayerStateData {
         }
     }
 
-    pub(crate) fn from_pickle(value: &pickled::Value, version: &Version, is_bot: bool) -> Self {
+    pub(crate) fn from_pickle(
+        value: &pickled::Value,
+        version: &Version,
+        is_bot: bool,
+        player_member_map: Option<&HashMap<String, i64>>,
+        bot_member_map: Option<&HashMap<String, i64>>,
+    ) -> Self {
         let raw_values = convert_flat_dict_to_real_dict(value);
 
-        let mapped_values = Self::convert_raw_dict(&raw_values, version, is_bot);
+        let member_map = if is_bot { bot_member_map } else { player_member_map };
+        let mapped_values = match member_map.filter(|map| !map.is_empty()) {
+            Some(member_map) => Self::convert_raw_dict_with_member_map(&raw_values, version, is_bot, Some(member_map)),
+            None => Self::convert_raw_dict(&raw_values, version, is_bot),
+        };
         Self::from_values(raw_values, mapped_values, version)
     }
 
     fn from_values(
         raw_values: HashMap<i64, pickled::Value>,
         mut mapped_values: HashMap<&'static str, pickled::Value>,
-        version: &Version,
+        _version: &Version,
     ) -> Self {
         // Older arena-state layouts (pre-0.10.7) only provide a subset of these
         // fields, so every lookup must tolerate a missing key rather than unwrap.
@@ -493,17 +523,8 @@ impl PlayerStateData {
         let clan = get_str(Self::KEY_CLAN_TAG).unwrap_or_default();
         let clan_id = get_i64(Self::KEY_CLAN_ID).unwrap_or(0);
 
-        let shipid = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
-            get_i64(Self::KEY_SHIP_PARAMS_ID).unwrap_or(0)
-        } else {
-            get_i64(Self::KEY_SHIP_ID).unwrap_or(0)
-        };
-        let ship_params_id = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
-            mapped_values.get(Self::KEY_SKIN_ID).and_then(|v| v.i64_ref().copied())
-        } else {
-            get_i64(Self::KEY_SHIP_PARAMS_ID)
-        }
-        .map(|id| GameParamId::from(id as u32));
+        let shipid = get_i64(Self::KEY_SHIP_ID).unwrap_or(0);
+        let ship_params_id = get_i64(Self::KEY_SHIP_PARAMS_ID).map(|id| GameParamId::from(id as u32));
         let player_id = get_i64(Self::KEY_ID).unwrap_or(0);
         let team = get_i64(Self::KEY_TEAM_ID).unwrap_or(0);
         let health = get_i64(Self::KEY_MAX_HEALTH).unwrap_or(0);
@@ -801,6 +822,15 @@ impl PlayerStateData {
 /// that only wants the roster does not go through arms that panic on the
 /// other arguments of those methods.
 pub(crate) fn player_states_from_blob(blob: &[u8], version: &Version) -> Vec<PlayerStateData> {
+    player_states_from_blob_with_member_maps(blob, version, None, None)
+}
+
+pub(crate) fn player_states_from_blob_with_member_maps(
+    blob: &[u8],
+    version: &Version,
+    player_member_map: Option<&HashMap<String, i64>>,
+    bot_member_map: Option<&HashMap<String, i64>>,
+) -> Vec<PlayerStateData> {
     let Ok(value) = pickled::de::value_from_slice(blob, pickled::de::DeOptions::new()) else {
         return Vec::new();
     };
@@ -808,7 +838,11 @@ pub(crate) fn player_states_from_blob(blob: &[u8], version: &Version) -> Vec<Pla
     let pickled::value::Value::List(players) = &value else {
         return Vec::new();
     };
-    players.inner().iter().map(|player| PlayerStateData::from_pickle(player, version, false)).collect()
+    players
+        .inner()
+        .iter()
+        .map(|player| PlayerStateData::from_pickle(player, version, false, player_member_map, bot_member_map))
+        .collect()
 }
 
 /// Converts a list of key-value pairs to a real dictionary
@@ -1552,6 +1586,8 @@ where
         battle_constants: &wowsunpack::game_constants::BattleConstants,
         common_constants: &wowsunpack::game_constants::CommonConstants,
         ships_constants: &wowsunpack::game_constants::ShipsConstants,
+        player_member_map: Option<&HashMap<String, i64>>,
+        bot_member_map: Option<&HashMap<String, i64>>,
     ) -> Self {
         match payload {
             PacketType::EntityMethod(em) => DecodedPacketPayload::from_entity_method(
@@ -1561,6 +1597,8 @@ where
                 battle_constants,
                 common_constants,
                 ships_constants,
+                player_member_map,
+                bot_member_map,
             ),
             PacketType::Camera(camera) => DecodedPacketPayload::Camera(camera),
             PacketType::CameraMode(mode) => {
@@ -1664,6 +1702,8 @@ where
         battle_constants: &wowsunpack::game_constants::BattleConstants,
         common_constants: &wowsunpack::game_constants::CommonConstants,
         ships_constants: &wowsunpack::game_constants::ShipsConstants,
+        player_member_map: Option<&HashMap<String, i64>>,
+        bot_member_map: Option<&HashMap<String, i64>>,
     ) -> Self {
         let entity_id = &packet.entity_id;
         let method = &packet.method;
@@ -1833,7 +1873,12 @@ where
                     for player in players.inner().iter() {
                         let raw_values = convert_flat_dict_to_real_dict(player);
 
-                        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, version, false);
+                        let mapped_values = PlayerStateData::convert_raw_dict_with_member_map(
+                            &raw_values,
+                            version,
+                            false,
+                            player_member_map,
+                        );
                         players_out.push(mapped_values);
                     }
                 }
@@ -1849,7 +1894,13 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(players) = &value {
                         for player in players.inner().iter() {
-                            players_out.push(PlayerStateData::from_pickle(player, version, false));
+                            players_out.push(PlayerStateData::from_pickle(
+                                player,
+                                version,
+                                false,
+                                player_member_map,
+                                bot_member_map,
+                            ));
                         }
                     }
                 }
@@ -1861,7 +1912,13 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(bots) = &value {
                         for bot in bots.inner().iter() {
-                            bots_out.push(PlayerStateData::from_pickle(bot, version, true));
+                            bots_out.push(PlayerStateData::from_pickle(
+                                bot,
+                                version,
+                                true,
+                                player_member_map,
+                                bot_member_map,
+                            ));
                         }
                     }
                 }
@@ -1933,7 +1990,13 @@ where
                 let mut players_out = vec![];
                 if let pickled::value::Value::List(players) = &value {
                     for player in players.inner().iter() {
-                        players_out.push(PlayerStateData::from_pickle(player, version, false));
+                        players_out.push(PlayerStateData::from_pickle(
+                            player,
+                            version,
+                            false,
+                            player_member_map,
+                            bot_member_map,
+                        ));
                     }
                 }
 
@@ -1944,7 +2007,13 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(bots) = &value {
                         for bot in bots.inner().iter() {
-                            bots_out.push(PlayerStateData::from_pickle(bot, version, true));
+                            bots_out.push(PlayerStateData::from_pickle(
+                                bot,
+                                version,
+                                true,
+                                player_member_map,
+                                bot_member_map,
+                            ));
                         }
                     }
                 }
@@ -2783,6 +2852,8 @@ pub struct PacketDecoder<'a> {
     common_constants: &'a wowsunpack::game_constants::CommonConstants,
     #[builder(default = &DEFAULT_SHIPS_CONSTANTS)]
     ships_constants: &'a wowsunpack::game_constants::ShipsConstants,
+    player_member_map: Option<&'a HashMap<String, i64>>,
+    bot_member_map: Option<&'a HashMap<String, i64>>,
 }
 
 impl<'a> PacketDecoder<'a> {
@@ -2805,6 +2876,8 @@ impl<'a> PacketDecoder<'a> {
                 self.battle_constants,
                 self.common_constants,
                 self.ships_constants,
+                self.player_member_map,
+                self.bot_member_map,
             ),
             leftover: packet.leftover,
         }
