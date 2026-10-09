@@ -4,7 +4,6 @@ use gpui_kit::base::SelectableText;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 pub fn toolbar(cx: &App) -> Div {
@@ -81,13 +80,7 @@ pub fn tree_row(item: ListItem, cx: &App) -> ListItem {
 /// plain buttons with no indication of which one is active. Wrapping them
 /// carries that state without giving up the button's look.
 pub fn selectable(id: impl Into<ElementId>, selected: bool, control: impl IntoElement) -> impl IntoElement {
-    div()
-        .id(id)
-        .test_support()
-        .aria_selected(selected)
-        .rounded(px(2.))
-        .when(selected, |this| this.shadow(vec![crate::theme::phosphor_glow()]))
-        .child(control)
+    div().id(id).test_support().aria_selected(selected).rounded(px(2.)).child(control)
 }
 
 /// One run of text the reader can select and copy with the pointer.
