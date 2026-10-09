@@ -774,13 +774,28 @@ impl ReplayBrowser {
     ///
     /// Checked once per scan rather than per row: the answer is the same for
     /// every replay of a build, and reading the cache index is a file read.
-    fn report_missing_builds(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn report_missing_builds(&mut self, cx: &mut Context<Self>) {
         let Some(cache) = self.build_cache.clone() else { return };
         let missing = missing_builds(&self.files, &cache);
         if missing.is_empty() {
             return;
         }
         cx.emit(ReplayBrowserEvent::BuildsMissing(missing));
+    }
+
+    pub(super) fn missing_builds(&self) -> Vec<MissingBuild> {
+        match self.build_cache.as_ref() {
+            Some(cache) => missing_builds(&self.files, cache),
+            None => self
+                .listed_builds()
+                .into_iter()
+                .map(|(build, version)| MissingBuild {
+                    build,
+                    version,
+                    replays: self.files.iter().filter(|file| file.listed.build == Some(build)).count(),
+                })
+                .collect(),
+        }
     }
 
     /// Says which builds the listing holds, whatever can be read of them.
@@ -891,6 +906,8 @@ impl ReplayBrowser {
                             cx.emit(ReplayBrowserEvent::ReplayAppeared(touched));
                         }
                     }
+                    this.report_missing_builds(cx);
+                    this.report_listed_builds(cx);
                     cx.notify();
                     true
                 });
@@ -930,11 +947,7 @@ impl ReplayBrowser {
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
-        let Some(provider) = self.game_data.provider() else {
-            // Every label would be a raw id; the panel waits instead (see
-            // `render`), so there is nothing worth building yet.
-            return;
-        };
+        let provider = self.game_data.provider();
         let locale = self.locale.as_deref();
         let translated: Vec<ReplayLite> = self
             .files
@@ -942,7 +955,20 @@ impl ReplayBrowser {
             .map(|raw| ReplayLite {
                 path: raw.path.clone(),
                 map_name: raw.listed.map_name.clone(),
-                identity: listed_row_identity(&raw.listed, provider),
+                identity: {
+                    let loaded = raw.listed.build.and_then(|build| self.build_cache.as_ref()?.loaded_build(build));
+                    let metadata = loaded.as_ref().map(|data| data.provider().as_ref()).or(provider);
+                    match metadata {
+                        Some(metadata) => listed_row_identity(&raw.listed, metadata),
+                        None => wows_toolkit_viewmodel::listing_row::RowIdentity {
+                            ship: raw.listed.ship_id.map(|id| id.to_string()).unwrap_or_else(|| "Spectator".to_owned()),
+                            map: raw.listed.map_name.clone(),
+                            scenario: raw.listed.scenario.clone(),
+                            mode: raw.listed.game_type.clone(),
+                            date_time: raw.listed.date_time.clone(),
+                        },
+                    }
+                },
                 stats: resolve_row_stats(None, self.summaries.get(&raw.path)),
             })
             .collect();
@@ -1290,7 +1316,9 @@ impl Render for ReplayBrowser {
             // list built before it loads is a list of raw ids. The egui app
             // never shows that state: it builds its listing as part of the
             // same load (`task/replays.rs::load_wows_files`).
-            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading { .. }) => {
+            ScanStatus::Loaded
+                if self.chosen_directory.is_none() && matches!(self.game_data, GameData::Loading { .. }) =>
+            {
                 let said = loading_said(&self.game_data);
                 h_flex()
                     .id("replay-listing-loading")
