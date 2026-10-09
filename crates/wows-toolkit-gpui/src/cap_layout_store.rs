@@ -1,5 +1,7 @@
 use tracing::warn;
-use wows_replay_insights::cap_layout::{CapLayout, CapLayoutDb, CapLayoutKey};
+use wows_replay_insights::cap_layout::CapLayout;
+use wows_replay_insights::cap_layout::CapLayoutDb;
+use wows_replay_insights::cap_layout::CapLayoutKey;
 
 pub async fn load_from_db(pool: &sqlx::SqlitePool) -> CapLayoutDb {
     let mut db = CapLayoutDb::default();

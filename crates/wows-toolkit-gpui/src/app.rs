@@ -259,8 +259,6 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 /// How long a failure may be before it is worth a window rather than a toast.
 const TOO_LONG_TO_TOAST: usize = 160;
 
-/// What a palette mode backed by the replay index says when it has no rows.
-
 /// What a finished background job has to say, until the next draw says it.
 ///
 /// Kept rather than said where it is decided: a job finishes without a window,
@@ -3855,7 +3853,7 @@ impl Render for App {
                 // `alert_tab_style`).
                 let attention = *t == AppTab::Settings && self.wows_dir_invalid;
                 let selected = *t == self.active_tab;
-                let tab = Tab::new()
+                Tab::new()
                     .relative()
                     .when(selected, |tab| {
                         tab.child(
@@ -3869,8 +3867,7 @@ impl Render for App {
                                 .shadow(vec![theme::phosphor_glow()]),
                         )
                     })
-                    .child(self.directory_tab_label(*t, attention, selected, cx));
-                tab
+                    .child(self.directory_tab_label(*t, attention, selected, cx))
             }))
             .on_click(cx.listener(move |this, ix: &usize, window, cx| {
                 let Some(tab) = tab_order.get(*ix).copied() else { return };

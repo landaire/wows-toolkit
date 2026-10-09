@@ -491,7 +491,7 @@ fn render_firing_controls(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>
     let selected_ship = ships.iter().find(|ship| Some(ship.param_index.as_str()) == firing_ship.as_deref());
     let ship_label = selected_ship.map_or_else(
         || t!("ui.armor.trajectory_select_ship").into_owned(),
-        |ship| format!("{} {}", t!("ui.armor.trajectory_ship").to_string(), ship.display_name),
+        |ship| format!("{} {}", t!("ui.armor.trajectory_ship"), ship.display_name),
     );
     let active_shell_index = selected_ship.and_then(|ship| {
         firing_shell
@@ -507,7 +507,7 @@ fn render_firing_controls(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>
             let shell = &ship.shells[index];
             format!(
                 "{} {} {:.0} mm",
-                t!("ui.armor.trajectory_shell").to_string(),
+                t!("ui.armor.trajectory_shell"),
                 shell.ammo_type.display_name(),
                 shell.caliber.value(),
             )

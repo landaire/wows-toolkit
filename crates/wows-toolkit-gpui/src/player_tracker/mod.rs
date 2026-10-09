@@ -3068,7 +3068,7 @@ mod tests {
         assert!(hover.contains("Possible stream name: harvey635"), "got {hover:?}");
         assert!(hover.contains("Seen: -1, 5 minutes after match start"), "got {hover:?}");
         assert!(hover.contains("Possible stream name: harvey_635"), "got {hover:?}");
-        assert!(hover.ends_with(&rust_i18n::t!("ui.twitch.click_to_copy").into_owned()), "got {hover:?}");
+        assert!(hover.ends_with(rust_i18n::t!("ui.twitch.click_to_copy").as_ref()), "got {hover:?}");
     }
 
     /// A win-rate cell says both scopes, whichever one it is showing: a reader

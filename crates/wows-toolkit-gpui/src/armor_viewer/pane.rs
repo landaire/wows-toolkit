@@ -26,9 +26,9 @@
 //!
 //! Camera-mirror and settings-sync (Milestone 5 Task 9c): `mirror_cameras`/
 //! `sync_options` gate two broadcasts, both driven by subscribing to every
-//! pane's `viewport_view::ViewportEvent` (`on_viewport_event`, subscribed
+//! pane's `viewport_view::ViewportChange` (`on_viewport_event`, subscribed
 //! alongside each pane's creation here and in `on_compare_split`). A
-//! `CameraChanged`/`SettingsChanged` event from pane P re-reads P's camera/
+//! `Camera`/`Settings` event from pane P re-reads P's camera/
 //! `SyncedSettings` and applies it to every OTHER pane via `ViewportView`'s
 //! SILENT setters (`set_camera`/`apply_synced`, which never emit) -- the
 //! silence is what keeps this from echoing back into a loop. Toggling either
@@ -96,7 +96,7 @@ use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
-use super::viewport_view::ViewportEvent;
+use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
 use wowsunpack::game_params::types::Millimeters;
 
@@ -731,21 +731,21 @@ impl ArmorViewerPane {
         cx.notify();
     }
 
-    /// `ViewportEvent` handler, subscribed to every pane in `dock` (`new`,
+    /// `ViewportChange` handler, subscribed to every pane in `dock` (`new`,
     /// `on_compare_split`): broadcasts the source pane's camera/settings to
     /// every OTHER pane when the corresponding toggle is on. Uses
     /// `ViewportView`'s silent setters (`set_camera`/`apply_synced`), so this
     /// never re-triggers the event it's reacting to.
-    fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportEvent, cx: &mut Context<Self>) {
+    fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportChange, cx: &mut Context<Self>) {
         match event {
-            ViewportEvent::TrajectoryModeChanged => {
+            ViewportChange::TrajectoryMode => {
                 if source.read(cx).trajectory_state().shown {
                     self.show_options = true;
                 }
                 cx.notify();
             }
-            ViewportEvent::CameraChanged if self.mirror_cameras => self.push_camera_from(&source, cx),
-            ViewportEvent::SettingsChanged => {
+            ViewportChange::Camera if self.mirror_cameras => self.push_camera_from(&source, cx),
+            ViewportChange::Settings => {
                 if self.sync_options {
                     self.push_settings_from(&source, cx);
                 }

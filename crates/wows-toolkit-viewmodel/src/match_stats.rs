@@ -516,10 +516,7 @@ mod tests {
         assert!(wait <= RATE_LIMIT_WINDOW, "the reported wait must be inside the window");
     }
 
-    /// One human roster entry, deserialized because `PlayerStateData`'s fields
-    /// are crate-private to the parser. `raw_with_names` (which backs
-    /// `ship_params_id()`) is `#[serde(skip_deserializing)]`, so the ship id
-    /// is added afterward through the parser's public `update_from_dict`.
+    /// Populate the ship identifier through the roster update path used by the parser.
     fn player_state(name: &str, db_id: i64, realm: &str, ship_id: i64) -> PlayerStateData {
         let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
             "username": name,

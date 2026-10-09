@@ -176,8 +176,7 @@ impl App {
                 if this.armor_owner.as_ref().is_some_and(|owner| owner.entity_id() != _view.entity_id()) {
                     return;
                 }
-                this.armor_pane
-                    .update(cx, |pane, cx| pane.follow_hits(event.at, event.hits.clone(), event.health.clone(), cx));
+                this.armor_pane.update(cx, |pane, cx| pane.follow_hits(event.at, event.hits.clone(), event.health, cx));
             }),
             cx.subscribe(&inspector, |this, _view, event: &crate::replay_inspector::view::SessionShared, cx| {
                 this.share_session_with_board(event.0.clone(), cx);
