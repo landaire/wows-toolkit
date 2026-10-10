@@ -477,10 +477,16 @@ impl PlayerStateData {
             h.insert(Self::KEY_REALM, 20);
             h.insert(Self::KEY_SHIP_COMPONENTS, 21);
             h.insert(Self::KEY_SHIP_CONFIG_DUMP, 22);
-            h.insert(Self::KEY_SHIP_FRAGS, 23);
-            h.insert(Self::KEY_SHIP_ID, 24);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 25);
-            h.insert(Self::KEY_SKIN_ID, 26);
+            if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
+                h.insert(Self::KEY_SHIP_FRAGS, 23);
+                h.insert(Self::KEY_SHIP_ID, 24);
+                h.insert(Self::KEY_SHIP_PARAMS_ID, 25);
+                h.insert(Self::KEY_SKIN_ID, 26);
+            } else {
+                h.insert(Self::KEY_SHIP_ID, 23);
+                h.insert(Self::KEY_SHIP_PARAMS_ID, 24);
+                h.insert(Self::KEY_SKIN_ID, 25);
+            }
             h.insert(Self::KEY_TEAM_ID, team_id_index);
             h.insert(Self::KEY_TTK_STATUS, ttk_status_index);
             h
