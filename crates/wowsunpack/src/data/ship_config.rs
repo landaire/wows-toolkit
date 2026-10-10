@@ -152,7 +152,7 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
             take_u32(i);
         }
     }
-    
+
     if version.is_at_least(&Version::base(15, 9, 0)) {
         let _unk = take_u32(i);
     }
