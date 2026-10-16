@@ -278,6 +278,19 @@ pub fn handle_property_update(update: &PropertyUpdatePacket<'_>, clock: GameCloc
         apply_smoke_points_update(ecs_entity, action, world);
     }
 
+    // Buff zone status
+    if update.property == "visualState"
+        && let Some(InteractiveZoneRef::BuffZone) =
+            world.resource::<InteractiveZoneIndex>().0.get(&update.entity_id).copied()
+        && let UpdateAction::SetKey { key: "forOwner", value } = action
+        && let Some(v) = value.as_i64()
+        && let Some(entity) = world.resource::<EntityIndex>().get(update.entity_id)
+        && let Ok(mut er) = world.get_entity_mut(entity)
+        && let Some(mut data) = er.get_mut::<BuffZoneData>()
+    {
+        data.0.visual_state = v as u8;
+    }
+
     // InteractiveZone componentsState.captureLogic updates
     if update.property == "componentsState"
         && let Some(zone_ref) = world.resource::<InteractiveZoneIndex>().0.get(&update.entity_id).copied()
