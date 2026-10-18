@@ -392,12 +392,20 @@ fn handle_interactive_zone_create(
         // Buff zone (arms race powerup drop).
         // Apply any drop params that arrived before this entity was created.
         let drop_params_id = world.resource::<PendingDropParams>().0.get(&packet.entity_id).copied();
+        let visual_state = packet
+            .props
+            .get("visualState")
+            .and_then(as_dict)
+            .and_then(|d| d.get("forOwner"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as u8;
         let bz_state = BuffZoneState {
             entity_id: packet.entity_id,
             position,
             radius,
             team_id,
             is_active: is_enabled,
+            visual_state,
             drop_params_id,
         };
         let entity = spawn_or_get(world, packet.entity_id);
