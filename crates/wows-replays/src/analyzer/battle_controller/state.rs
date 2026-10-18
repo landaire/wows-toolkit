@@ -84,6 +84,8 @@ pub struct BuffZoneState {
     pub team_id: i64,
     /// Whether this zone is currently active and visible
     pub is_active: bool,
+    /// 1 = charging, 3 = ready, 0 = picked up
+    pub visual_state: u8,
     /// GameParam ID of the associated Drop (powerup type)
     pub drop_params_id: Option<GameParamId>,
 }
