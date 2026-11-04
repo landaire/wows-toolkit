@@ -91,7 +91,7 @@ Provisioning runs the platform toolchain bootstrap (`scripts/refresh-buck-toolch
 3. Update the `buck2` archive in `toolchains/windows/toolchain-manifest.json`,
    which is what CI's offline Windows toolchain installs from.
 
-`build-support/buck/check-prelude-version.sh` fails the build if step 2 is skipped.
+`buck2 test //ci:buck2_pins` fails if step 2 or 3 is skipped.
 
 ### Crate sources
 
@@ -157,17 +157,16 @@ Buck reads every file in that directory, so renaming one does not disable it; mo
 
 ### Hermeticity
 
-The point of the Buck build is that its actions cannot reach outside their declared inputs. This check fails if any action in a target's graph invokes Cargo, downloads, reads a cache directory, or names a tool by bare name or by a system path such as `/bin/sh`:
+The point of the Buck build is that its actions cannot reach outside their declared inputs. This check fails if any action in a target's graph invokes Cargo, reads a cache directory, or names a tool by bare name or by a system path such as `/bin/sh`. It runs over every alias in both modes:
 
 ```bash
-nu scripts/check-buck-hermetic.nu //:wows_toolkit
-nu scripts/check-buck-hermetic.nu //:wows_toolkit release
+buck2 run //ci:hermetic
 ```
 
 `scripts/test-*.nu` are the build-graph tests: toolchain configuration, build-script boundaries, build modes, workspace targets, and the hermeticity check against fixtures that must be rejected. Run them all after touching anything under `toolchains/`, `build-support/buck/`, or `third-party/rust/fixups/`:
 
 ```bash
-for t in scripts/test-*.nu; do nu "$t"; done
+buck2 run //ci:graph_tests
 ```
 
 ### Updating Rust dependencies
@@ -215,21 +214,9 @@ Cargo resolves `[target.'cfg(...)'.dependencies]` on its own. Buck does not. A `
 
 The same applies to features that are only valid on one platform. `crates/minimap-renderer/BUCK` and `crates/wows-toolkit/BUCK` are the examples.
 
-### Updating the Buck2 pin
+### Re-vendoring the prelude
 
-Buck2 is pinned to a specific release in three places that must agree, because the vendored prelude only loads under the release it was expanded from:
-
-- `buck2Release` in `flake.nix` (macOS and Linux; fetched from the release, not from nixpkgs, which tracks a different one)
-- the `buck2` entry in `toolchains/windows/toolchain-manifest.json`
-- the release recorded in `prelude/VENDORED_FROM`
-
-To move the pin: update the URLs and SHA-256s in the first two, install the new binary, then re-vendor the prelude against it:
-
-```bash
-nu scripts/vendor-prelude.nu
-```
-
-That expands the prelude bundled in the pinned binary and reapplies the patches this repo depends on: Nix-rooted `bash` in generated shell wrappers, pinned `tar`/`unzip`/`mkdir` and decompressors for archive extraction, and inline linker arguments on Windows. A patch upstream has since made unnecessary is skipped, but only when the result it was written to produce is already present; anything else fails and needs the patch rewritten by hand.
+The vendored prelude only loads under the Buck2 release it was expanded from, so step 2 of [Bumping Buck2](#bumping-buck2) is never optional. `nu scripts/vendor-prelude.nu` expands the prelude bundled in the pinned binary and reapplies the patches this repo depends on: Nix-rooted `bash` in generated shell wrappers, pinned `tar`/`unzip`/`mkdir` and decompressors for archive extraction, and inline linker arguments on Windows. A patch upstream has since made unnecessary is skipped, but only when the result it was written to produce is already present; anything else fails and needs the patch rewritten by hand.
 
 Expect the prelude to have renamed things. Rebuild everything on every platform afterwards, and never hand-edit files under `prelude/`.
 
@@ -276,7 +263,7 @@ That sets both `--local-only` and `--no-remote-cache`. Removing the `[buck2_re_c
 Replay parser tests run against committed fixture replays and require no external data:
 
 ```bash
-cargo test --workspace
+buck2 test root//crates/...
 ```
 
 Buck runs the same unit and integration tests. Doctests run under Cargo only.
@@ -357,14 +344,15 @@ To add a new fixture, drop a `.wowsreplay` file into the directory and add a cor
 
 ## CI
 
-The CI pipeline (`.github/workflows/rust.yml`) runs on every push and PR:
+CI runs only buck2 commands (`.github/workflows/buck.yml`), after `./bootstrap.sh` sets up Buck2 and the toolchain:
 
-- **Check**: `cargo check --workspace --all-features`
-- **Rustfmt**: `cargo fmt --all -- --check`
-- **Clippy**: `cargo clippy --workspace --all-features -- -D warnings`
-- **Test**: `cargo test --workspace`
+- `buck2 build root//:` and `buck2 build -m release root//:`: every alias in both modes, including the `wt-web` site.
+- `buck2 run //ci:hermetic`: the hermeticity check over every alias.
+- `buck2 run //ci:lint`: clippy and rustfmt over every first-party Rust target, and clippy over `wt-web` and the crates it uses as built for `wasm32`.
+- `buck2 test root//crates/... root//ci/...`: the crates' tests, plus the checks that the Buck2 pins agree and that no publishable crate depends on an unpublished one.
+- `buck2 run //ci:graph_tests`: the build-graph tests.
 
-`.github/workflows/buck.yml` builds every alias through Buck on Linux and macOS. Each job provisions only its pinned toolchain, drops network access before the first Buck action, builds every alias, and runs the hermeticity check. Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
+Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
 
 Release builds (`.github/workflows/build.yml`) run on GitHub release creation and produce:
 

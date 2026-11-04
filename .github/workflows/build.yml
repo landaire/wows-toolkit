@@ -216,8 +216,8 @@ jobs:
           name: landaire-gh-public
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-      - name: Provision the Buck toolchain
-        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
 
       - name: Build the release binary
         id: buck
@@ -299,8 +299,8 @@ jobs:
 
       # check-macos-sdk.nu asserts the pinned SDK is the one in use, so no host
       # Xcode is involved and the frameworks come from the flake.
-      - name: Provision the Buck toolchain
-        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
 
       - name: Build the release binary
         run: |

@@ -37,14 +37,11 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
-      - name: Provision the toolchain
-        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
-
-      # Fails with a clear message if the vendored prelude was expanded from a
-      # different buck2 than the pinned one, before the load-time error would.
-      - name: Verify the vendored prelude matches the pinned buck2
-        if: matrix.phase == 'checks'
-        run: nix build .#checks.x86_64-linux.prelude-version -L
+      # Installs DotSlash and the Buck2 release toolchains/buck2 pins, then the
+      # toolchain. Every step after it is a buck2 command; the devShell puts
+      # bin/buck2 first on PATH, so the scripts behind //ci run the same Buck2.
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
 
       - name: Build every alias
         if: matrix.phase == 'checks'
@@ -56,30 +53,25 @@ jobs:
 
       - name: Check the action graph is hermetic
         if: matrix.phase == 'checks'
-        run: |
-          for alias in $(nix develop --command buck2 targets $ALIASES); do
-            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
-            nix develop --command nu scripts/check-buck-hermetic.nu "$alias" release
-          done
+        run: nix develop --command buck2 run //ci:hermetic
 
       # bxl/lint.bxl builds the [clippy.json] sub-target of every first-party
       # rust target in one invocation, and lint.nu decides pass or fail from
       # the diagnostics: the prelude builds them with infallible_diagnostics,
       # so the action succeeds even when compilation does not.
-      - name: Lint through Buck
+      - name: Lint
         if: matrix.phase == 'checks'
-        run: nix develop --command nu scripts/lint.nu
+        run: nix develop --command buck2 run //ci:lint
 
-      - name: Run the unit tests through Buck
+      # The crates' tests, and the checks over the repository's own pins and
+      # manifests.
+      - name: Test
         if: matrix.phase == 'checks'
-        run: nix develop --command buck2 test root//crates/...
+        run: nix develop --command buck2 test root//crates/... root//ci/...
 
-      - name: Buck build-graph tests
+      - name: Build-graph tests
         if: matrix.phase == 'graph-tests'
-        run: |
-          for test in scripts/test-*.nu; do
-            nix develop --command nu "$test"
-          done
+        run: nix develop --command buck2 run //ci:graph_tests
 
   macos:
     name: macOS arm64
@@ -95,8 +87,8 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
-      - name: Provision the toolchain and crate sources
-        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
       # graph itself is already covered there in both modes.

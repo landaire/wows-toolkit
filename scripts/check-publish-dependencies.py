@@ -1,41 +1,67 @@
 #!/usr/bin/env python3
+"""Fails when a publishable workspace crate depends on an unpublished one.
 
-import json
-import subprocess
+crates.io rejects such a crate at publish time, long after the dependency was
+added. Reads the manifests directly, so it needs no Cargo.
+"""
+
 import sys
+import tomllib
 from pathlib import Path
+
+DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def load(path: Path) -> dict:
+    with path.open("rb") as f:
+        return tomllib.load(f)
+
+
+def dependency_tables(manifest: dict):
+    for table in DEPENDENCY_TABLES:
+        yield manifest.get(table, {})
+    for target in manifest.get("target", {}).values():
+        for table in DEPENDENCY_TABLES:
+            yield target.get(table, {})
 
 
 def main() -> int:
-    result = subprocess.run(
-        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    packages = json.loads(result.stdout)["packages"]
-    by_manifest = {Path(package["manifest_path"]).resolve(): package for package in packages}
-    private = {
-        Path(package["manifest_path"]).resolve()
-        for package in packages
-        if package.get("publish") is False or package.get("publish") == []
-    }
+    root = Path.cwd()
+    workspace = load(root / "Cargo.toml")["workspace"]
+    shared = workspace.get("dependencies", {})
+
+    members = {}
+    for member in workspace["members"]:
+        manifest_path = (root / member / "Cargo.toml").resolve()
+        members[manifest_path.parent] = load(manifest_path)
+
+    def is_private(manifest: dict) -> bool:
+        publish = manifest.get("package", {}).get("publish")
+        return publish is False or publish == []
 
     violations = []
-    for package in packages:
-        if Path(package["manifest_path"]).resolve() in private:
+    for directory, manifest in members.items():
+        if is_private(manifest):
             continue
-        for dependency in package["dependencies"]:
-            path = dependency.get("path")
-            if path is None:
-                continue
-            manifest = (Path(path) / "Cargo.toml").resolve()
-            target = by_manifest.get(manifest)
-            if target is not None and manifest in private:
-                violations.append((package["name"], target["name"]))
+        for table in dependency_tables(manifest):
+            for name, spec in table.items():
+                if not isinstance(spec, dict):
+                    continue
+                if spec.get("workspace"):
+                    shared_spec = shared.get(name, {})
+                    path = shared_spec.get("path") if isinstance(shared_spec, dict) else None
+                    base = root
+                else:
+                    path = spec.get("path")
+                    base = directory
+                if path is None:
+                    continue
+                target = members.get((base / path).resolve())
+                if target is not None and is_private(target):
+                    violations.append((manifest["package"]["name"], target["package"]["name"]))
 
     if violations:
-        for source, target in violations:
+        for source, target in sorted(set(violations)):
             print(f"{source} depends on unpublished workspace crate {target}", file=sys.stderr)
         return 1
 

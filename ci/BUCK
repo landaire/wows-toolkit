@@ -1,0 +1,30 @@
+load(":defs.bzl", "nu_script", "script_test")
+
+script_test(
+    name = "buck2_pins",
+    script = "//scripts:check-buck2-pins.py",
+)
+
+script_test(
+    name = "publish_dependencies",
+    script = "//scripts:check-publish-dependencies.py",
+)
+
+# Clippy and rustfmt over every first-party Rust target.
+nu_script(
+    name = "lint",
+    script = "//scripts:lint.nu",
+)
+
+# The action graph of every root alias, in both build modes, holds nothing that
+# reaches outside its declared inputs.
+nu_script(
+    name = "hermetic",
+    script = "hermetic.nu",
+)
+
+# The tests of the build graph itself, scripts/test-*.nu.
+nu_script(
+    name = "graph_tests",
+    script = "graph-tests.nu",
+)

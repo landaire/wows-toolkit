@@ -50,52 +50,6 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-      # Buck2 comes from its own release rather than nixpkgs, because the
-      # vendored prelude only loads under the release it was expanded from and
-      # nixpkgs tracks a different one. Keep this in step with
-      # prelude/VENDORED_FROM and the buck2 entry in
-      # toolchains/windows/toolchain-manifest.json.
-      buck2Release = rec {
-        tag = "2026-08-01";
-        version = "2026-07-31";
-        assets = {
-          x86_64-linux = {
-            asset = "buck2-x86_64-unknown-linux-gnu.zst";
-            sha256 = "aa304d471a79f69233b09767d4ba9add769049b7a37f78a3a71a72983372f511";
-          };
-          aarch64-darwin = {
-            asset = "buck2-aarch64-apple-darwin.zst";
-            sha256 = "ce8974521dcc9d78392943b4f90bc1a4160dd2df32947165eb895156d8303f17";
-          };
-        };
-        asset =
-          assets.${system}
-          or (throw "No pinned Buck2 release asset for ${system}; add its hash to flake.nix.");
-      };
-
-      buck2Pinned = pkgs.stdenv.mkDerivation {
-        pname = "buck2";
-        version = buck2Release.version;
-        src = pkgs.fetchurl {
-          url = "https://github.com/facebook/buck2/releases/download/${buck2Release.tag}/${buck2Release.asset.asset}";
-          inherit (buck2Release.asset) sha256;
-        };
-        nativeBuildInputs =
-          [pkgs.zstd]
-          # The release binary is linked against a glibc the store does not
-          # provide at the paths it expects.
-          ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.autoPatchelfHook;
-        buildInputs = pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.stdenv.cc.cc.lib;
-        dontUnpack = true;
-        installPhase = ''
-          runHook preInstall
-          mkdir -p $out/bin
-          zstd -d "$src" -o $out/bin/buck2
-          chmod +x $out/bin/buck2
-          runHook postInstall
-        '';
-      };
-
       # Include embedded assets in addition to standard Cargo sources
       srcFilter = path: type:
         (craneLib.filterCargoSources path type)
@@ -130,22 +84,8 @@
 
       # Build workspace deps once, share across packages
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-      # Fail if the vendored prelude was expanded from a different buck2 than the
-      # pinned one. This guards the version skew that breaks hermetic builds: a
-      # prelude and binary that disagree fail at load time. VENDORED_FROM records
-      # the buck2 that scripts/vendor-prelude.nu expanded the prelude from.
-      preludeVersionMatch = pkgs.runCommand "prelude-version-match" {
-        nativeBuildInputs = [pkgs.bash pkgs.gnugrep];
-      } ''
-        bash ${./build-support/buck/check-prelude-version.sh} \
-          "$(${buck2Pinned}/bin/buck2 --version)" ${./prelude/VENDORED_FROM}
-        touch $out
-      '';
     in
       with pkgs; {
-        checks.prelude-version = preludeVersionMatch;
-
         packages = let
           # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan) plus
           # libdbus for the keyring Secret Service backend.
@@ -275,7 +215,6 @@
               mise
               cargo-edit
               cargo-local-registry
-              buck2Pinned
               reindeer
               direnv
               nushell
@@ -325,14 +264,22 @@
           # /run/opengl-driver/lib; FHS distros: /usr/lib64) so libvulkan.so.1
           # and the system drivers resolve. Appended, not prefixed, so the nix
           # glibc and libstdc++ still win.
-          shellHook = lib.optionalString stdenv.hostPlatform.isLinux ''
-            for _gfx in /run/opengl-driver/lib /usr/lib64 /usr/lib; do
-              if [ -e "$_gfx/libvulkan.so.1" ]; then
-                export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$_gfx"
+          shellHook =
+            # bin/buck2 runs the Buck2 release toolchains/buck2 pins; ./bootstrap.sh
+            # installs the DotSlash it runs through.
+            ''
+              if [ -x "$PWD/bin/buck2" ]; then
+                export PATH="$PWD/bin:$PATH"
               fi
-            done
-            unset _gfx
-          '';
+            ''
+            + lib.optionalString stdenv.hostPlatform.isLinux ''
+              for _gfx in /run/opengl-driver/lib /usr/lib64 /usr/lib; do
+                if [ -e "$_gfx/libvulkan.so.1" ]; then
+                  export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$_gfx"
+                fi
+              done
+              unset _gfx
+            '';
 
         };
       });

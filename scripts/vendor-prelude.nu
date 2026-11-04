@@ -50,7 +50,7 @@ let local_config = ".buckconfig.local"
 let saved = (if ($local_config | path exists) { open --raw $local_config } else { "" })
 $"($saved)\n[external_cells]\n  prelude = bundled\n" | save -f $local_config
 try {
-    ^buck2 expand-external-cell prelude
+    ^bin/buck2 expand-external-cell prelude
 } catch { |err|
     $saved | save -f $local_config
     error make {msg: $"buck2 expand-external-cell failed: ($err.msg)"}
@@ -130,11 +130,23 @@ patch "prelude/decls/cxx_common.bzl" '"use_content_based_paths": attrs.bool(defa
 # rule attribute says.
 patch_all "prelude/rust/cargo_buildscript.bzl" "has_content_based_path = True" "has_content_based_path = False" 6
 
-let version = (^buck2 --version | str trim)
+# The release toolchains/buck2 pins; scripts/check-buck2-pins.py holds the other
+# pins to it.
+let release = (
+    open --raw toolchains/buck2
+    | parse -r 'releases/download/(?<tag>[^/]+)/'
+    | get tag
+    | uniq
+)
+if ($release | length) != 1 {
+    error make {msg: $"toolchains/buck2 names Buck2 releases ($release); it must name exactly one."}
+}
+let version = (^bin/buck2 --version | str trim)
 $"Expanded from the bundled prelude of: ($version)
+Buck2 release: ($release | first)
 
 Regenerate with `nu scripts/vendor-prelude.nu`, which reapplies the patches in
 that script. Do not hand-edit files under prelude/.
 " | save -f prelude/VENDORED_FROM
 
-print $"Vendored the prelude from ($version)."
+print $"Vendored the prelude from Buck2 release ($release | first)."
