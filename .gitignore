@@ -2,6 +2,8 @@ target/
 toolchains/windows/offline/installed/*
 !toolchains/windows/offline/installed/.gitkeep
 buck-out/
+# DotSlash and the Buck2 it fetches, installed by bootstrap.sh and bootstrap.ps1.
+/.tools/
 # Machine-local Nix toolchain root written by scripts/refresh-buck-toolchain.nu.
 .buckconfig.local
 # Anchored: a bare `dist/` also matches prelude/dist, and a partially checked-out

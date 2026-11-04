@@ -23,4 +23,4 @@
   manifest = toolchains/windows/toolchain-manifest.json
  
 [project]
-ignore = .jj
+ignore = .jj, .tools

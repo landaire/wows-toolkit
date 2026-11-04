@@ -6,7 +6,7 @@ Installs the pinned NASM and records its location in .buckconfig.local.
 
 .DESCRIPTION
 Repairs the `nasm` entry of an existing machine-local .buckconfig.local. The
-platform bootstrap (setup.ps1, or toolchains/windows/provision-toolchain.ps1)
+platform bootstrap (bootstrap.ps1, or toolchains/windows/provision-toolchain.ps1)
 provisions NASM and writes the entire file; this script covers the case where
 that single entry is absent or names a file that no longer exists. It
 terminates with an error when no bootstrap has produced a configuration.
@@ -35,7 +35,7 @@ $manifestPath = Join-Path $PSScriptRoot "toolchain-manifest.json"
 $installRoot = Join-Path $RepoRoot ".tooling\nasm"
 $nasmExe = Join-Path $installRoot "nasm.exe"
 $buckConfig = Join-Path $RepoRoot ".buckconfig.local"
-$bootstrapHint = "Run the platform bootstrap first: .\setup.ps1, or toolchains\windows\provision-toolchain.ps1."
+$bootstrapHint = "Run the platform bootstrap first: .\bootstrap.ps1, or toolchains\windows\provision-toolchain.ps1."
 
 function Read-BuckConfigLines {
     param([Parameter(Mandatory = $true)][string]$Path)

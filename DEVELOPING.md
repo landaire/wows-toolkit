@@ -16,9 +16,8 @@ Everything runs natively; Nix and WSL are not needed. You need:
   AV1 SIMD with it), locates clang and llvm-ar, and writes `.tooling/dev.env`
   with the `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown` that
   mise loads into every shell.
-- [DotSlash](https://dotslash-cli.com/docs/installation/) if you want to run
-  Buck. `tools/buck2` then resolves to the exact Buck2 release the vendored
-  prelude was expanded from, with no manual install. See `tools/README.md`.
+- Buck needs nothing installed by hand: `bootstrap.ps1` fetches DotSlash and
+  the pinned Buck2 (see [Setup](#setup)).
 - `mise run install-reindeer`, only if you need to regenerate
   `third-party/rust/BUCK` after changing a dependency.
 
@@ -58,7 +57,7 @@ cargo build -p wows_toolkit --release
 
 ## Buck
 
-Buck2 builds every binary from pinned sources and a pinned toolchain. No Buck action runs Cargo, downloads anything, or resolves a tool through PATH.
+Buck2 builds every binary from pinned sources and a pinned toolchain. No Buck action runs Cargo or resolves a tool through PATH, and every download is checked against a pinned digest.
 
 **Cargo is still supported and is fine for day-to-day work.** `cargo build`, `cargo test`, `cargo clippy`, and running against local game data all work as they always have, and Cargo remains the only way to author dependencies. What changed is the gate: **CI builds every alias with Buck, and every release ships from CI.** A change that builds under Cargo but not under Buck does not land. Run the Buck build yourself before pushing anything that touches dependencies, build scripts, or a crate's platform-specific deps, since those are where the two disagree.
 
@@ -69,18 +68,30 @@ Supported target platforms are `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin
 One command, once per machine:
 
 ```bash
-./setup.sh     # macOS and Linux, needs nix
+./bootstrap.sh    # macOS and Linux, needs nix
 ```
 
 ```powershell
-.\setup.ps1    # Windows, from an elevated shell
+powershell -ExecutionPolicy Bypass -File bootstrap.ps1    # Windows, from an elevated shell
 ```
 
-It provisions the pinned toolchain. Re-run it after the toolchain pin moves; it is cheap and skips whatever is already in place.
+It installs [DotSlash](https://dotslash-cli.com) into `.tools`, fetches the Buck2 release `toolchains/buck2` pins, and provisions the pinned toolchain. It reports any host tool it needs and does not install, such as Nix or git. Re-run it after the toolchain pin moves; it is cheap and skips whatever is already in place.
 
-On Windows it needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere.
+Run Buck through `bin/buck2` (`bin\buck2.cmd` on Windows), or put `bin` on PATH; `mise` does that for you. `bin/buck2` runs the bootstrap's Buck2 half by itself the first time, so a checkout that only needs Buck2 can skip the bootstrap.
 
-Under the hood setup runs the platform bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local`. You can run it directly; setup exists so you do not have to know which. Buck fails with a message naming the bootstrap if `.buckconfig.local` is missing.
+On Windows provisioning needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere.
+
+Provisioning runs the platform toolchain bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local`. Buck fails with a message naming it if `.buckconfig.local` is missing.
+
+### Bumping Buck2
+
+1. Replace `toolchains/buck2` with the DotSlash file from the new release:
+   `curl -fsSL https://github.com/facebook/buck2/releases/download/<tag>/buck2 -o toolchains/buck2`
+2. Re-vendor the prelude so it matches: `nu scripts/vendor-prelude.nu`
+3. Update the `buck2` archive in `toolchains/windows/toolchain-manifest.json`,
+   which is what CI's offline Windows toolchain installs from.
+
+`build-support/buck/check-prelude-version.sh` fails the build if step 2 is skipped.
 
 ### Crate sources
 

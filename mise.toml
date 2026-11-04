@@ -1,19 +1,19 @@
 [env]
 # Make the project-local tools discoverable without forcing contributors to
-# fix their system PATH. tools/ holds the DotSlash shims; .tooling/ holds what
+# fix their system PATH. bin/ holds the pinned buck2; .tooling/ holds what
 # `mise run setup` downloads. Nonexistent entries (e.g. the Windows paths on
 # Linux/macOS) are ignored. Active in any shell with `mise activate`, and via
 # `mise exec -- <cmd>`.
-_.path = ["tools", ".tooling/nasm", "C:/Program Files/NASM"]
+_.path = ["bin", ".tooling/nasm", "C:/Program Files/NASM"]
 # Written by `mise run setup`: the clang and llvm-ar that ring needs to build
 # for wasm32. Absent until setup has run, which mise tolerates.
 _.file = { path = ".tooling/dev.env", redact = false }
 
 # reindeer is not published to crates.io under that name. It used to be
 # reachable only through the Nix devShell, which is what forced Windows
-# contributors into WSL. buck2 is not installed here at all: it comes from
-# tools/buck2 via DotSlash, pinned to the release the vendored prelude was
-# expanded from. See tools/README.md.
+# contributors into WSL. buck2 is not installed here at all: bin/buck2 runs the
+# release toolchains/buck2 pins through DotSlash, which bootstrap.sh and
+# bootstrap.ps1 install.
 [tasks.install-reindeer]
 description = "Install the reindeer used to regenerate third-party/rust/BUCK"
 # Its repository holds several packages with binaries, hence the explicit
