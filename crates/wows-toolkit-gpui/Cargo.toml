@@ -45,6 +45,13 @@ humansize = "2.1.3"
 # extraction, search), shared with the egui app so the two front ends cannot
 # drift apart on what they show.
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
+# The Launcher tab's state and background work, shared with the egui app, and
+# the launcher crates whose types the tab shows.
+wows-toolkit-launcher = { workspace = true }
+wgc-auth = { workspace = true }
+wgc-catalog = { workspace = true }
+wgc-download = { workspace = true }
+wgc-install = { workspace = true }
 # `i18n!` generates its lookup per crate, so this front end's own chrome needs
 # its own invocation; the catalog behind it is parsed once per process
 # (`wt_translations::backend`). `wt-translations` also carries the language

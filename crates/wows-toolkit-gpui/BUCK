@@ -10,6 +10,10 @@ buildscript = workspace_buildscript(
 )
 
 GPUI_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
     "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
@@ -18,6 +22,7 @@ GPUI_DEPS = [
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-client:wt_collab_client",

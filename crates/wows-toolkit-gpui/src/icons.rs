@@ -116,6 +116,7 @@ pub const PLUGS: &str = "\u{EB56}";
 pub const PLUS_CIRCLE: &str = "\u{E3D6}";
 pub const PROHIBIT: &str = "\u{E3DE}";
 pub const REWIND: &str = "\u{E6A8}";
+pub const ROCKET_LAUNCH: &str = "\u{E3FE}";
 pub const RULER: &str = "\u{E6B8}";
 pub const SHARE: &str = "\u{E406}";
 pub const SHIELD: &str = "\u{E40A}";

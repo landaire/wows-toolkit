@@ -375,15 +375,18 @@ pub enum AppTab {
     ArmorViewer,
     Unpacker,
     Settings,
+    Launcher,
 }
 
 impl AppTab {
     /// Left-to-right order, following the egui app's own dock order
-    /// (`app.rs`'s `DockState::new`): replays first, settings last. The tabs
-    /// This is every tab the egui dock opens, in its order. `Tab::ModManager`
-    /// is deliberately absent: the egui app never adds it to its dock either.
-    pub const ALL: [AppTab; 7] = [
+    /// (`app.rs`'s `DockState::new`): replays first, settings last. The egui
+    /// dock opens the Launcher first; here it follows the Replay Inspector,
+    /// which the strip always leads with. `Tab::ModManager` is deliberately
+    /// absent: the egui app never adds it to its dock either.
+    pub const ALL: [AppTab; 8] = [
         AppTab::ReplayInspector,
+        AppTab::Launcher,
         AppTab::Stats,
         AppTab::PlayerTracker,
         AppTab::Search,
@@ -402,6 +405,7 @@ impl AppTab {
             AppTab::ArmorViewer => "ui.tabs.armor_viewer",
             AppTab::Unpacker => "ui.tabs.unpacker",
             AppTab::Settings => "ui.tabs.settings",
+            AppTab::Launcher => "ui.tabs.launcher",
         }
     }
 
@@ -422,6 +426,7 @@ impl AppTab {
             AppTab::ArmorViewer => crate::icons::SHIELD,
             AppTab::Unpacker => crate::icons::ARCHIVE,
             AppTab::Settings => crate::icons::GEAR_FINE,
+            AppTab::Launcher => crate::icons::ROCKET_LAUNCH,
         }
     }
 }
@@ -689,6 +694,8 @@ pub struct App {
     player_tracker: Entity<PlayerTrackerView>,
     /// The Search tab: a query over the replay index.
     search: Entity<SearchView>,
+    /// The Launcher tab: installs, sign-in, and fresh installs.
+    launcher: Entity<crate::launcher::LauncherView>,
     /// Settings tab text fields. Held so an edit can be read back and the
     /// saved value can be shown when the tab first renders.
     wows_dir_input: Entity<InputState>,
@@ -761,6 +768,7 @@ impl App {
         let stats = cx.new(|cx| StatsView::new(window, cx));
         let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
         let search = cx.new(|cx| SearchView::new(window, cx));
+        let launcher = cx.new(|cx| crate::launcher::LauncherView::new(window, cx));
         let wows_dir_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.wows.directory_hint").to_string()));
         let twitch_channel_input = cx
@@ -908,6 +916,14 @@ impl App {
             let SelectEvent::Confirm(Some(code)) = event else { return };
             this.set_locale((*code).to_string(), window, cx);
         });
+        // An install picked in the Launcher becomes the directory every other
+        // tab reads, as picking it in Settings does.
+        let use_for_toolkit = cx.subscribe_in(&launcher, window, |this, _launcher, event, window, cx| {
+            let crate::launcher::UseForToolkit(path) = event;
+            let path = path.to_string_lossy().into_owned();
+            this.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
+            this.apply_wows_dir(path, window, cx);
+        });
 
         Self {
             theme: ThemeChoice::default(),
@@ -937,6 +953,7 @@ impl App {
             stats,
             player_tracker,
             search,
+            launcher,
             wows_dir_input,
             proxy_input,
             cache_dir_input,
@@ -982,6 +999,7 @@ impl App {
                 collab_name_edited,
                 search_event,
                 tracker_event,
+                use_for_toolkit,
                 language_chosen,
             ],
         }
@@ -2285,6 +2303,7 @@ impl App {
         // Seed the text fields so the tab opens showing what is saved.
         self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
         self.proxy_input.update(cx, |state, cx| state.set_value(settings.proxy_url.clone(), window, cx));
+        self.launcher.update(cx, |launcher, cx| launcher.apply_settings(&settings.proxy_url, window, cx));
 
         let unpacker_dir = settings.wows_dir.clone();
         let output_dir = settings.output_dir.clone();
@@ -2448,6 +2467,7 @@ impl App {
         }
         settings.proxy_url = url.clone();
         settings_store::save(keys::PROXY_URL, &url, cx);
+        self.launcher.update(cx, |launcher, _| launcher.set_proxy(&url));
     }
 
     /// Adopts the channel to watch once the edit has settled, and polls it.
@@ -4014,6 +4034,7 @@ impl Render for App {
 
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
+            AppTab::Launcher => self.launcher.clone().into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ReplayDirectory(id) => self
                 .replay_directories

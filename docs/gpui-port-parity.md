@@ -381,7 +381,8 @@ kept so the next audit does not re-report them.
 - [done] Open in Game (behind a confirmation) and Show Replay Controls are in
   the row menu. Both are listed rather than swapped on alt, and the controls
   parse moved to `wows_toolkit_viewmodel::controls` so the two apps read the
-  same scheme.
+  same scheme. The launch goes through `wows_toolkit_launcher::open_replay_in_game`,
+  which both apps call.
 - [done] Set as / Add to Session Stats for a single replay, and for a
   marked set. The battle is read off the parsed report by
   `wows_toolkit_viewmodel::stats::PerGameStat::from_report` and written
@@ -807,6 +808,19 @@ kept so the next audit does not re-report them.
   that would hide it, then brings that tree forward. A listing-filter row
   still has no reveal of its own.
 - [done] Extraction progress names the file it is writing, under the bar.
+
+## Launcher
+
+- [done] The Launcher tab: install discovery (WGC, Steam and manually added
+  directories), launch with safe mode and per-launch args and environment,
+  Proton setup and auto-detect on Linux, per-install catalog update checks,
+  download, pause, resume and cancel, a fresh install of a known game, and
+  WGNI sign-in with two-factor and the keyring session. The state and the
+  background work live in `wows-toolkit-launcher`, which the egui tab drives
+  too, and both read the same `launcher` settings row. "Use for toolkit" sets
+  the game directory as the Settings field does. The egui dock opens the
+  Launcher first; here it follows the Replay Inspector, which always leads
+  the strip.
 
 ## Settings
 

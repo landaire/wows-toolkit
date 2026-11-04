@@ -25,6 +25,7 @@ mod http;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+mod launcher;
 mod logging;
 mod minimap_preview;
 mod notices;

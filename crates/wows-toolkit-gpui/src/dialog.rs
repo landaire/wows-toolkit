@@ -47,6 +47,12 @@ pub fn pick_folder(title: &str) -> impl Future<Output = Option<PathBuf>> + use<>
     async move { picked.await.map(|handle| handle.path().to_path_buf()) }
 }
 
+/// Asks for one directory, starting in `start`.
+pub fn pick_folder_in(title: &str, start: &std::path::Path) -> impl Future<Output = Option<PathBuf>> + use<> {
+    let picked = rfd::AsyncFileDialog::new().set_title(title).set_directory(start).pick_folder();
+    async move { picked.await.map(|handle| handle.path().to_path_buf()) }
+}
+
 /// Asks where to write a new file.
 pub fn save_file(
     title: Option<&str>,
