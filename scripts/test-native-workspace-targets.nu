@@ -35,7 +35,7 @@ def main [] {
         ^nu scripts/check-buck-hermetic.nu $target
     }
 
-    for alias in ["wows_toolkit" "replayshark" "minimap_renderer"] {
+    for alias in ["wows_toolkit_egui" "replayshark" "minimap_renderer"] {
         let target = $"//:($alias)"
         ^buck2 build -m release $target
         ^nu scripts/check-buck-hermetic.nu $target release

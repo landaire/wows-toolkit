@@ -122,11 +122,11 @@ One-time setup, then build any root alias:
 ./bootstrap.sh                                          # macOS and Linux, needs nix
 powershell -ExecutionPolicy Bypass -File bootstrap.ps1  # Windows, from an elevated shell
 
-bin/buck2 build //:wows_toolkit
-bin/buck2 build //:wows_toolkit?release
+bin/buck2 build //:wows_toolkit_egui
+bin/buck2 build //:wows_toolkit_egui?release
 ```
 
-The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. The aliases are `wows_toolkit`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
+The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit_egui` and `wows_toolkit_gpui` build the two desktop apps, and `buck2 build root//:` builds everything.
 
 See [DEVELOPING.md](DEVELOPING.md#buck) for the hermeticity check, dependency updates, fixups, and troubleshooting.
 

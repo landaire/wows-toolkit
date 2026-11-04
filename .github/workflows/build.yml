@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       binary: ${{ steps.desktop.outputs.binary }}
+      target: ${{ steps.desktop.outputs.target }}
       frontend: ${{ steps.desktop.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
@@ -37,10 +38,13 @@ jobs:
               if tag_version != version:
                   raise SystemExit(f"Release tag {tag_version} does not match workspace version {version}")
           frontend = "gpui" if "-" in version else "egui"
+          # The alias names the front end; the binary keeps its crate's name.
           binary = "wows_toolkit_gpui" if frontend == "gpui" else "wows_toolkit"
+          target = f"//:wows_toolkit_{frontend}"
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"frontend={frontend}", file=output)
               print(f"binary={binary}", file=output)
+              print(f"target={target}", file=output)
           PY
 
       - name: Extract release notes for this tag
@@ -89,6 +93,7 @@ jobs:
     runs-on: windows-latest
     env:
       APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
       APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     environment: release-signing
     defaults:
@@ -134,7 +139,7 @@ jobs:
           $slug = "${{ github.ref_name }}" -replace "/", "-"
           $msiName = "wows-toolkit-$slug-windows-x86_64.msi"
 
-          $target = "//:$env:APP_BINARY"
+          $target = $env:APP_TARGET
           $exeOut = & $buck2 build @common --show-output $target "${target}[pdb]"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $msiOut = & $buck2 build @common --show-output toolchains//windows:wows_toolkit_msi
@@ -203,6 +208,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
       APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
@@ -222,7 +228,7 @@ jobs:
       - name: Build the release binary
         id: buck
         run: |
-          out=$(nix develop --command buck2 build -m release --show-output "//:$APP_BINARY")
+          out=$(nix develop --command buck2 build -m release --show-output "$APP_TARGET")
           echo "$out"
           rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
           mkdir -p dist
@@ -284,6 +290,7 @@ jobs:
     runs-on: macos-14
     env:
       APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
       APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
@@ -304,7 +311,7 @@ jobs:
 
       - name: Build the release binary
         run: |
-          out=$(nix develop --command buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 --show-output "//:$APP_BINARY")
+          out=$(nix develop --command buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 --show-output "$APP_TARGET")
           echo "$out"
           rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
           mkdir -p dist

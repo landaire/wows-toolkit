@@ -137,4 +137,4 @@ cd "$root"
 env -u LD_LIBRARY_PATH nix develop --command nu scripts/refresh-buck-toolchain.nu
 
 say "Run bin/buck2 in place of buck2, or add $root/bin to PATH. Then:"
-say "  bin/buck2 build //:wows_toolkit"
+say "  bin/buck2 build //:wows_toolkit_egui"

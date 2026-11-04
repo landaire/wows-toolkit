@@ -168,4 +168,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Run bin\buck2 in place of buck2, or add $Root\bin to PATH. Then:"
-Write-Host "  bin\buck2 build //:wows_toolkit"
+Write-Host "  bin\buck2 build //:wows_toolkit_egui"

@@ -12,8 +12,8 @@ def probe_rustc_flags [config: list<string>] {
 }
 
 def main [] {
-    let debug_target = (^buck2 cquery //:wows_toolkit | complete)
-    let release_target = (^buck2 cquery -m release //:wows_toolkit | complete)
+    let debug_target = (^buck2 cquery //:wows_toolkit_egui | complete)
+    let release_target = (^buck2 cquery -m release //:wows_toolkit_egui | complete)
 
     if $debug_target.exit_code != 0 or $release_target.exit_code != 0 {
         error make {msg: "Buck cquery failed while checking native build modes."}
@@ -22,8 +22,8 @@ def main [] {
         error make {msg: "Debug and release use the same configured target identity."}
     }
 
-    let debug_actions = (^buck2 aquery 'all_actions(deps(//:wows_toolkit))' --output-all-attributes | complete)
-    let release_actions = (^buck2 aquery -m release 'all_actions(deps(//:wows_toolkit))' --output-all-attributes | complete)
+    let debug_actions = (^buck2 aquery 'all_actions(deps(//:wows_toolkit_egui))' --output-all-attributes | complete)
+    let release_actions = (^buck2 aquery -m release 'all_actions(deps(//:wows_toolkit_egui))' --output-all-attributes | complete)
 
     if $debug_actions.exit_code != 0 or $release_actions.exit_code != 0 {
         error make {msg: "Buck aquery failed while checking native build modes."}

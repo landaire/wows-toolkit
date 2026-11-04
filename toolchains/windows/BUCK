@@ -15,7 +15,7 @@ cxx_tools_info_toolchain(
     cxx_flags = ["/nologo", "/Brepro"],
     # rustc already passes /DEBUG to link.exe, so a PDB is written regardless.
     # Naming the flag here is what makes the prelude declare that PDB as an
-    # output, which is the only way to reach it as //:wows_toolkit[pdb].
+    # output, which is the only way to reach it as //:wows_toolkit_egui[pdb].
     link_flags = ["/Brepro", "/INCREMENTAL:NO", "/DEBUG"],
     visibility = ["PUBLIC"],
 )
