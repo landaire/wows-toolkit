@@ -1382,6 +1382,7 @@ version = "0.1.0"
 dependencies = [
  "dhat",
  "mimalloc",
+ "sevenz-rust2",
  "tar",
 ]
 

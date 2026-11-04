@@ -7,4 +7,7 @@ publish = false
 [dependencies]
 dhat = "0.3"
 mimalloc = "0.1"
+# wgc-download's unpack tests build a 7z fixture in-process, which needs the
+# dev-only "compress" feature.
+sevenz-rust2 = { version = "0.21", default-features = false, features = ["compress"] }
 tar = "0.4"

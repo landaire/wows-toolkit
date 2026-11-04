@@ -1,23 +1,41 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+WGC_AUTH_DEPS = [
+    "//crates/wgc-core:wgc-core",
+    "//crates/wgc-launch:wgc-launch",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:zeroize",
+    "//third-party/rust:sha3",
+    "//third-party/rust:url",
+    "//third-party/rust:rand",
+    "//third-party/rust:tokio",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:keyring",
+]
 
 workspace_library(
     name = "wgc-auth",
     crate = "wgc_auth",
     package = "wgc-auth",
     version = "0.1.0",
-    deps = [
-        "//crates/wgc-core:wgc-core",
-        "//crates/wgc-launch:wgc-launch",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:serde",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:zeroize",
-        "//third-party/rust:sha3",
-        "//third-party/rust:url",
-        "//third-party/rust:rand",
-        "//third-party/rust:tokio",
-        "//third-party/rust:reqwest",
-        "//third-party/rust:keyring",
-    ],
+    deps = WGC_AUTH_DEPS,
+)
+
+workspace_test(
+    name = "wgc_auth_test",
+    crate = "wgc_auth",
+    crate_root = "src/lib.rs",
+    package = "wgc-auth",
+    version = "0.1.0",
+    deps = WGC_AUTH_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wgc-auth",
+    version = "0.1.0",
+    library = ":wgc-auth",
+    deps = WGC_AUTH_DEPS,
 )

@@ -5,10 +5,13 @@ use wgc_install::steam::install_dir_from_library;
 use wgc_install::steam::libraries_from_root;
 
 /// Copy the fixture tree into a tempdir and rewrite FIXTURE_ROOT to it, since
-/// libraryfolders.vdf stores absolute library paths.
+/// libraryfolders.vdf stores absolute library paths. The install directory the
+/// appmanifest names is created here: an empty directory does not survive
+/// either version control or a build's source set.
 fn materialize(root: &Path) {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/steam");
     copy_dir(&src, root);
+    fs::create_dir_all(root.join("steamapps/common/World of Warships")).unwrap();
     let vdf = root.join("steamapps/libraryfolders.vdf");
     let text = fs::read_to_string(&vdf).unwrap().replace("FIXTURE_ROOT", root.to_str().unwrap());
     fs::write(&vdf, text).unwrap();

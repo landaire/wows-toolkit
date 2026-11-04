@@ -150,6 +150,27 @@ def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT
         deps = deps + test_deps,
     )
 
+def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = []):
+    """One test target per file directly under tests/, as Cargo builds them.
+
+    Each links `library`, the crate under test, as an integration test does.
+    A test that reaches the network is marked #[ignore] in its source, so these
+    run offline.
+    """
+    for path in glob(["tests/*.rs"], exclude = exclude):
+        stem = path.removeprefix("tests/").removesuffix(".rs")
+        workspace_test(
+            name = stem + "_test",
+            crate = stem,
+            crate_root = path,
+            package = package,
+            version = version,
+            edition = edition,
+            features = features,
+            deps = [library] + deps,
+            test_deps = test_deps,
+        )
+
 def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
     env = _cargo_env(crate, package, version)
     if buildscript != None:

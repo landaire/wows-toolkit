@@ -1,25 +1,45 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+WGC_INSTALL_DEPS = [
+    "//crates/wgc-core:wgc-core",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//third-party/rust:steamroom",
+    "//third-party/rust:steamroom-client",
+    "//third-party/rust:quick-xml",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:tracing",
+] + os_select(
+    macos = [],
+    linux = [],
+    # The cfg(windows) dependency section of Cargo.toml.
+    windows = ["//third-party/rust:windows-registry"],
+)
 
 workspace_library(
     name = "wgc-install",
     crate = "wgc_install",
     package = "wgc-install",
     version = "0.1.0",
-    deps = [
-        "//crates/wgc-core:wgc-core",
-        "//crates/wowsunpack:wowsunpack",
-        "//crates/wows-data-mgr:wows_data_mgr",
-        "//third-party/rust:steamroom",
-        "//third-party/rust:steamroom-client",
-        "//third-party/rust:quick-xml",
-        "//third-party/rust:serde",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:tracing",
-    ] + os_select(
-        macos = [],
-        linux = [],
-        # The cfg(windows) dependency section of Cargo.toml.
-        windows = ["//third-party/rust:windows-registry"],
-    ),
+    deps = WGC_INSTALL_DEPS,
+)
+
+workspace_test(
+    name = "wgc_install_test",
+    crate = "wgc_install",
+    crate_root = "src/lib.rs",
+    package = "wgc-install",
+    version = "0.1.0",
+    deps = WGC_INSTALL_DEPS,
+    test_deps = ["//third-party/rust:tempfile"],
+)
+
+workspace_integration_tests(
+    package = "wgc-install",
+    version = "0.1.0",
+    library = ":wgc-install",
+    deps = WGC_INSTALL_DEPS,
+    test_deps = ["//third-party/rust:tempfile"],
 )

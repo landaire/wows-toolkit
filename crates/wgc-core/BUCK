@@ -1,12 +1,23 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+WGC_CORE_DEPS = [
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+]
 
 workspace_library(
     name = "wgc-core",
     crate = "wgc_core",
     package = "wgc-core",
     version = "0.1.0",
-    deps = [
-        "//third-party/rust:serde",
-        "//third-party/rust:thiserror",
-    ],
+    deps = WGC_CORE_DEPS,
+)
+
+workspace_test(
+    name = "wgc_core_test",
+    crate = "wgc_core",
+    crate_root = "src/lib.rs",
+    package = "wgc-core",
+    version = "0.1.0",
+    deps = WGC_CORE_DEPS,
 )

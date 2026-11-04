@@ -21390,6 +21390,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "encoder",
         "optimization",
         "std",
     ],
@@ -36521,6 +36522,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "6",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["compress"],
     linkable_alias = "sevenz-rust2",
     visibility = [],
     deps = [

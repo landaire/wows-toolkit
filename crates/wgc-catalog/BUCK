@@ -1,17 +1,37 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+WGC_CATALOG_DEPS = [
+    "//crates/wgc-core:wgc-core",
+    "//third-party/rust:quick-xml",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:url",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:reqwest",
+]
 
 workspace_library(
     name = "wgc-catalog",
     crate = "wgc_catalog",
     package = "wgc-catalog",
     version = "0.1.0",
-    deps = [
-        "//crates/wgc-core:wgc-core",
-        "//third-party/rust:quick-xml",
-        "//third-party/rust:serde",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:url",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:reqwest",
-    ],
+    deps = WGC_CATALOG_DEPS,
+)
+
+workspace_test(
+    name = "wgc_catalog_test",
+    crate = "wgc_catalog",
+    crate_root = "src/lib.rs",
+    package = "wgc-catalog",
+    version = "0.1.0",
+    deps = WGC_CATALOG_DEPS,
+    test_deps = ["//third-party/rust:tokio"],
+)
+
+workspace_integration_tests(
+    package = "wgc-catalog",
+    version = "0.1.0",
+    library = ":wgc-catalog",
+    deps = WGC_CATALOG_DEPS,
+    test_deps = ["//third-party/rust:tokio"],
 )
