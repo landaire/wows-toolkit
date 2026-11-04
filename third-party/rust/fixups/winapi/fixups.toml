@@ -1,8 +1,9 @@
-# The upstream reindeer template links winapi's Windows import libraries via a
-# `shim//third-party/toolchains/win:*.lib` cell that this repo does not define.
-# The buck build targets Linux (Windows releases build via cargo), so those
-# import libs are never linked here; keeping the shim references only breaks
-# buckification of the whole third-party graph. winapi is a windows-only crate
-# pulled transitively (steamroom-client -> dirs-next); on non-windows it is a
-# no-op, so no buildscript and no extra deps are needed.
+# winapi's build script emits the cfgs for every module a requested feature
+# depends on, and the import libraries those modules link. Elsewhere the crate
+# is empty, so the script has nothing to do. The upstream template also adds
+# `shim//third-party/toolchains/win:*.lib` deps for a cell this repo does not
+# define; the MSVC toolchain's LIB path resolves the same libraries.
 buildscript.run = false
+
+['cfg(target_os = "windows")']
+buildscript.run = true
