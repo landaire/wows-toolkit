@@ -20,6 +20,10 @@ _DEFAULT_EDITION = "2024"
 # lints to allow anyway.
 _THIRD_PARTY = "root//third-party"
 
+# The label build-support/buck/wasm:transition gives the configurations it
+# creates.
+_WASM32_PLATFORM = "toolchains//platforms:wasm32#"
+
 def _first_party_rust(ctx):
     targets = ctx.cli_args.target
     nodes = ctx.uquery().kind(_RUST_KINDS, ctx.uquery().eval(targets))
@@ -28,20 +32,30 @@ def _first_party_rust(ctx):
 def _clippy_impl(ctx):
     nodes = _first_party_rust(ctx)
     configured = ctx.configured_targets(nodes, modifiers = ctx.modifiers)
-    labels = [target.label.with_sub_target("clippy.json") for target in configured]
+
+    # wt-web transitions to wasm32, which configures its first-party
+    # dependencies there too, with other features and cfgs. Those
+    # configurations are linted as well, as `cargo clippy --target` would.
+    reached = ctx.cquery().kind(_RUST_KINDS, ctx.cquery().deps(configured))
+    targets = {target.label: True for target in configured}
+    for target in reached:
+        label = target.label
+        if str(label.config()).startswith(_WASM32_PLATFORM) and not str(label.raw_target()).startswith(_THIRD_PARTY):
+            targets[label] = True
+    labels = [label.with_sub_target("clippy.json") for label in targets]
 
     ensured = ctx.output.ensure_multiple(ctx.build(labels))
+    # An incoming transition gives a target two labels with one output.
     diagnostics = {}
     for label, artifacts in ensured.items():
-        diagnostics[str(label.raw_target())] = [
-            artifact.abs_path()
-            for artifact in artifacts
-        ]
+        paths = diagnostics.setdefault(str(label.raw_target()), {})
+        for artifact in artifacts:
+            paths[artifact.abs_path()] = True
 
     ctx.output.print_json({
         "kind": "clippy",
         "root": ctx.root(),
-        "diagnostics": diagnostics,
+        "diagnostics": {target: list(paths) for target, paths in diagnostics.items()},
     })
 
 def _rustfmt_impl(ctx):

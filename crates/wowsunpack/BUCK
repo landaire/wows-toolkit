@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "wasm_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 export_file(
     name = "consumable_layouts",
@@ -70,13 +70,34 @@ WOWSUNPACK_FEATURES = [
     "vfs-mmap",
 ]
 
+# What Cargo resolves for wt-web, which leaves out every optional dependency.
+WOWSUNPACK_WASM_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//third-party/rust:bon",
+    "//third-party/rust:convert_case",
+    "//third-party/rust:flate2",
+    "//third-party/rust:gettext",
+    "//third-party/rust:itertools",
+    "//third-party/rust:paste",
+    "//third-party/rust:pickled",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:rustc-hash",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+    "//third-party/rust:winnow",
+]
+
+WOWSUNPACK_WASM_FEATURES = ["parsing", "rkyv"]
+
 workspace_library(
     name = "wowsunpack",
     crate = "wowsunpack",
     package = "wowsunpack",
     version = "0.46.0",
-    features = WOWSUNPACK_FEATURES,
-    deps = WOWSUNPACK_DEPS,
+    features = wasm_select(wasm = WOWSUNPACK_WASM_FEATURES, native = WOWSUNPACK_FEATURES),
+    deps = wasm_select(wasm = WOWSUNPACK_WASM_DEPS, native = WOWSUNPACK_DEPS),
     buildscript = buildscript,
 )
 

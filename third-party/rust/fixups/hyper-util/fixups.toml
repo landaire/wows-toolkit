@@ -1,0 +1,9 @@
+# The desktop crates' legacy client needs tokio's sockets, which wasm32 lacks.
+# Cargo enables none of these for wt-web.
+['cfg(target_arch = "wasm32")']
+omit_features = [
+    "client",
+    "client-legacy",
+    "http1",
+    "tokio",
+]

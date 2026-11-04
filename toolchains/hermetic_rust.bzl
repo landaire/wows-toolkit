@@ -170,6 +170,27 @@ def hermetic_rustfmt(name, visibility):
         visibility = visibility,
     )
 
+WasmToolsInfo = provider(fields = {
+    "wasm_bindgen": provider_field(RunInfo),
+    "wasm_opt": provider_field(RunInfo),
+})
+
+def _nix_wasm_tools_impl(_ctx):
+    return [
+        DefaultInfo(),
+        WasmToolsInfo(
+            wasm_bindgen = _tool("wasm-bindgen"),
+            wasm_opt = _tool("wasm-opt"),
+        ),
+    ]
+
+# The post-link tools of a wasm site (build-support/buck/wasm_rules.bzl).
+nix_wasm_tools = rule(
+    impl = _nix_wasm_tools_impl,
+    attrs = {},
+    is_toolchain_rule = True,
+)
+
 def _local_remote_test_execution_impl(_ctx):
     # Every action in this repo runs locally, and CI additionally runs Buck in a
     # network namespace, so there is no remote profile to offer.
@@ -194,15 +215,16 @@ def _hermetic_cxx_toolchain_impl(ctx):
     # Clang resolves `ld` through PATH, which the actions clear. Point it at the
     # pinned lld in the same Nix toolchain root instead.
     extra_linker_flags = ["-fuse-ld=" + _toolchain_root() + "/bin/ld.lld"] if ctx.attrs.use_lld else []
+    linker_flags = (["-L" + _toolchain_root() + "/lib"] if ctx.attrs.link_toolchain_lib else []) + extra_linker_flags
     return [
         DefaultInfo(),
         CxxToolchainInfo(
             as_compiler_info = CCompilerInfo(
-                compiler = _tool("clang"),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = "clang",
             ),
             asm_compiler_info = CCompilerInfo(
-                compiler = _tool("clang"),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = "clang",
             ),
             binary_utilities_info = BinaryUtilitiesInfo(
@@ -214,7 +236,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             ),
             bolt_enabled = False,
             c_compiler_info = CCompilerInfo(
-                compiler = _tool("clang"),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = "clang",
                 compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
@@ -223,7 +245,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             ),
             cpp_dep_tracking_mode = DepTrackingMode("show_headers"),
             cxx_compiler_info = CxxCompilerInfo(
-                compiler = _tool("clang++"),
+                compiler = _tool(ctx.attrs.cxx_compiler),
                 compiler_type = "clang",
                 compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
@@ -233,7 +255,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             header_mode = HeaderMode("symlink_tree_only"),
             internal_tools = ctx.attrs.internal_tools[CxxInternalTools],
             linker_info = LinkerInfo(
-                archiver = _tool("ar"),
+                archiver = _tool(ctx.attrs.archiver),
                 # Apple's ar predates @argfile support; GNU ar accepts it.
                 archiver_supports_argfiles = ctx.attrs.archiver_supports_argfiles,
                 archiver_type = "gnu",
@@ -247,8 +269,8 @@ def _hermetic_cxx_toolchain_impl(ctx):
                 link_libraries_locally = True,
                 link_style = LinkStyle("shared"),
                 link_weight = 1,
-                linker = _tool("clang++"),
-                linker_flags = ["-L" + _toolchain_root() + "/lib"] + extra_linker_flags,
+                linker = _tool(ctx.attrs.linker),
+                linker_flags = linker_flags,
                 lto_mode = LtoMode("none"),
                 object_file_extension = "o",
                 post_linker_flags = [],
@@ -274,8 +296,15 @@ def _hermetic_cxx_toolchain_impl(ctx):
 hermetic_cxx_toolchain = rule(
     impl = _hermetic_cxx_toolchain_impl,
     attrs = {
+        "archiver": attrs.string(default = "ar"),
         "archiver_supports_argfiles": attrs.bool(),
+        "c_compiler": attrs.string(default = "clang"),
         "compiler_flags": attrs.list(attrs.string()),
+        "cxx_compiler": attrs.string(default = "clang++"),
+        # The Nix wrappers link through clang, which needs the toolchain's own
+        # libraries on the search path.
+        "link_toolchain_lib": attrs.bool(default = True),
+        "linker": attrs.string(default = "clang++"),
         "linker_type": attrs.string(),
         "pic_behavior": attrs.string(),
         "platform_name": attrs.string(),
@@ -291,7 +320,8 @@ hermetic_cxx_toolchain = rule(
 )
 
 def nix_cxx_toolchain(name, os, visibility):
-    """Declare the Nix-rooted C++ toolchain for one host operating system."""
+    """Declare the Nix-rooted C++ toolchain for one host operating system, or
+    for wasm32 (`os = "none"`)."""
     if os == "macos":
         hermetic_cxx_toolchain(
             name = name,
@@ -315,6 +345,26 @@ def nix_cxx_toolchain(name, os, visibility):
             shared_library_name_format = "{}.so",
             shared_library_versioned_name_format = "{}.so.{}",
             use_lld = True,
+            visibility = visibility,
+        )
+    elif os == "none":
+        hermetic_cxx_toolchain(
+            name = name,
+            archiver = "llvm-ar",
+            archiver_supports_argfiles = True,
+            c_compiler = "wasm32-unknown-unknown-clang",
+            compiler_flags = ["--target=wasm32-unknown-unknown"] + _cxx_compiler_flags(),
+            cxx_compiler = "wasm32-unknown-unknown-clang",
+            # rustc calls the linker as wasm-ld and puts `-flavor wasm` first,
+            # which lld reads only as the first argument, so nothing may
+            # precede it.
+            link_toolchain_lib = False,
+            linker = "wasm-ld",
+            linker_type = "wasm",
+            pic_behavior = "not_supported",
+            platform_name = "wasm32",
+            shared_library_name_format = "{}.wasm",
+            shared_library_versioned_name_format = "{}.wasm",
             visibility = visibility,
         )
     else:

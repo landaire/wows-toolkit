@@ -750,14 +750,22 @@ cargo.rust_library(
     platform = {
         "linux-x86_64": dict(
             features = ["zeroize"],
-            deps = [":zeroize-1"],
+            deps = [
+                ":cpufeatures-0.2",
+                ":zeroize-1",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.2"],
         ),
     },
     visibility = [],
     deps = [
         ":cfg-if-1",
         ":cipher-0.4",
-        ":cpufeatures-0.2",
     ],
 )
 
@@ -789,11 +797,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cipher-0.5",
         ":cpubits-0.1",
-        ":cpufeatures-0.3",
     ],
 )
 
@@ -1453,6 +1471,7 @@ cargo.rust_library(
     platform = {
         "linux-x86_64": dict(
             deps = [
+                ":image-0.25",
                 ":log-0.4",
                 ":parking_lot-0.12",
                 ":percent-encoding-2",
@@ -1461,6 +1480,7 @@ cargo.rust_library(
         ),
         "macos-arm64": dict(
             deps = [
+                ":image-0.25",
                 ":objc2-0.6",
                 ":objc2-app-kit-0.3",
                 ":objc2-core-foundation-0.3",
@@ -1471,13 +1491,13 @@ cargo.rust_library(
         "windows-msvc": dict(
             deps = [
                 ":clipboard-win-5",
+                ":image-0.25",
                 ":log-0.4",
                 ":windows-sys-0.60",
             ],
         ),
     },
     visibility = [],
-    deps = [":image-0.25"],
 )
 
 http_archive(
@@ -1956,15 +1976,27 @@ cargo.rust_library(
         "bzip2",
         "futures-io",
         "gzip",
-        "tokio",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+        "macos-arm64": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+        "windows-msvc": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":compression-codecs-0.4",
         ":compression-core-0.4",
         ":futures-io-0.3",
         ":pin-project-lite-0.2",
-        ":tokio-1",
     ],
 )
 
@@ -2372,6 +2404,46 @@ cargo.rust_library(
         ":proc-macro2-1",
         ":quote-1",
         ":syn-3",
+    ],
+)
+
+http_archive(
+    name = "async_io_stream-0.3.3.crate",
+    sha256 = "b6d7b9decdf35d8908a7e3ef02f64c5e9b1695e230154c0e8de3969142d9b94c",
+    size_bytes = 15111,
+    strip_prefix = "async_io_stream-0.3.3",
+    urls = ["https://static.crates.io/crates/async_io_stream/0.3.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "async_io_stream-0.3",
+    srcs = [":async_io_stream-0.3.3.crate"],
+    crate = "async_io_stream",
+    crate_root = "async_io_stream-0.3.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "async_io_stream",
+        "CARGO_MANIFEST_DIR": "async_io_stream-0.3.3.crate",
+        "CARGO_PKG_AUTHORS": "Naja Melan <najamelan@autistici.org>",
+        "CARGO_PKG_DESCRIPTION": "IntoAsyncRead on steriods",
+        "CARGO_PKG_NAME": "async_io_stream",
+        "CARGO_PKG_REPOSITORY": "https://github.com/najamelan/async_io_stream",
+        "CARGO_PKG_VERSION": "0.3.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "map_pharos",
+        "pharos",
+    ],
+    rustc_flags = ["--cfg=stable"],
+    visibility = [],
+    deps = [
+        ":futures-0.3",
+        ":pharos-0.5",
     ],
 )
 
@@ -2834,14 +2906,28 @@ cargo.rust_library(
         "gloo-timers-sleep",
         "std",
         "std-blocking-sleep",
-        "tokio",
         "tokio-sleep",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+        "macos-arm64": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+        "wasm32": dict(
+            features = ["gloo-timers"],
+            deps = [":gloo-timers-0.3"],
+        ),
+        "windows-msvc": dict(
+            features = ["tokio"],
+            deps = [":tokio-1"],
+        ),
+    },
     visibility = [],
-    deps = [
-        ":fastrand-2",
-        ":tokio-1",
-    ],
+    deps = [":fastrand-2"],
 )
 
 http_archive(
@@ -2886,6 +2972,14 @@ cargo.rust_library(
             ],
         ),
         "macos-arm64": dict(
+            deps = [
+                ":addr2line-0.25",
+                ":libc-0.2",
+                ":miniz_oxide-0.8",
+                ":object-0.37",
+            ],
+        ),
+        "wasm32": dict(
             deps = [
                 ":addr2line-0.25",
                 ":libc-0.2",
@@ -3377,6 +3471,11 @@ cargo.rust_library(
         "serialize",
         "std",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":futures-channel-0.3"],
+        ),
+    },
     visibility = [],
     deps = [
         ":foldhash-0.2",
@@ -3499,6 +3598,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
+    platform = {
+        "wasm32": dict(
+            deps = [":uuid-1"],
+        ),
+    },
     proc_macro = True,
     visibility = [],
     deps = [
@@ -3542,6 +3646,14 @@ cargo.rust_library(
         "async_executor",
         "futures-lite",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":async-channel-2",
+                ":pin-project-1",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":async-executor-1",
@@ -5351,6 +5463,12 @@ cargo.rust_library(
         "macos-arm64": dict(
             deps = [":iana-time-zone-0.1"],
         ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+            ],
+        ),
         "windows-msvc": dict(
             deps = [":windows-link-0.2"],
         ),
@@ -6279,6 +6397,41 @@ cargo.rust_library(
     deps = [
         ":libc-0.2",
         ":unicode-width-0.2",
+    ],
+)
+
+http_archive(
+    name = "console_error_panic_hook-0.1.7.crate",
+    sha256 = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc",
+    size_bytes = 507196,
+    strip_prefix = "console_error_panic_hook-0.1.7",
+    urls = ["https://static.crates.io/crates/console_error_panic_hook/0.1.7/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "console_error_panic_hook-0.1",
+    srcs = [":console_error_panic_hook-0.1.7.crate"],
+    crate = "console_error_panic_hook",
+    crate_root = "console_error_panic_hook-0.1.7.crate/src/lib.rs",
+    edition = "2015",
+    env = {
+        "CARGO_CRATE_NAME": "console_error_panic_hook",
+        "CARGO_MANIFEST_DIR": "console_error_panic_hook-0.1.7.crate",
+        "CARGO_PKG_AUTHORS": "Nick Fitzgerald <fitzgen@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "A panic hook for `wasm32-unknown-unknown` that logs panics to `console.error`",
+        "CARGO_PKG_NAME": "console_error_panic_hook",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rustwasm/console_error_panic_hook",
+        "CARGO_PKG_VERSION": "0.1.7",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":cfg-if-1",
+        ":wasm-bindgen-0.2",
     ],
 )
 
@@ -10142,15 +10295,41 @@ cargo.rust_library(
         "wgpu_no_default_features",
     ],
     platform = {
+        "linux-x86_64": dict(
+            deps = [
+                ":egui-winit-0.35",
+                ":pollster-0.4",
+                ":winit-0.30",
+            ],
+        ),
         "macos-arm64": dict(
             deps = [
+                ":egui-winit-0.35",
                 ":objc2-0.6",
                 ":objc2-app-kit-0.3",
                 ":objc2-foundation-0.3",
+                ":pollster-0.4",
+                ":winit-0.30",
+            ],
+        ),
+        "wasm32": dict(
+            deps = [
+                ":bytemuck-1",
+                ":js-sys-0.3",
+                ":percent-encoding-2",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":web-sys-0.3",
+                ":wgpu-29",
             ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [
+                ":egui-winit-0.35",
+                ":pollster-0.4",
+                ":windows-sys-0.61",
+                ":winit-0.30",
+            ],
         ),
     },
     visibility = [],
@@ -10159,16 +10338,13 @@ cargo.rust_library(
         ":document-features-0.2",
         ":egui-0.35",
         ":egui-wgpu-0.35",
-        ":egui-winit-0.35",
         ":image-0.25",
         ":log-0.4",
         ":parking_lot-0.12",
-        ":pollster-0.4",
         ":profiling-1",
         ":raw-window-handle-0.6",
         ":static_assertions-1",
         ":web-time-1",
-        ":winit-0.30",
     ],
 )
 
@@ -10378,8 +10554,21 @@ cargo.rust_library(
         "fragile-send-sync-non-atomic-wasm",
         "macos-window-resize-jitter-fix",
         "wayland",
-        "winit",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["winit"],
+            deps = [":winit-0.30"],
+        ),
+        "macos-arm64": dict(
+            features = ["winit"],
+            deps = [":winit-0.30"],
+        ),
+        "windows-msvc": dict(
+            features = ["winit"],
+            deps = [":winit-0.30"],
+        ),
+    },
     visibility = [],
     deps = [
         ":ahash-0.8",
@@ -10393,7 +10582,6 @@ cargo.rust_library(
         ":type-map-0.5",
         ":web-time-1",
         ":wgpu-29",
-        ":winit-0.30",
     ],
 )
 
@@ -10732,6 +10920,26 @@ cargo.rust_library(
         "snapshot",
         "wgpu",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [
+                ":open-5",
+                ":tempfile-3",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":open-5",
+                ":tempfile-3",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":open-5",
+                ":tempfile-3",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":dify-0.8",
@@ -10740,10 +10948,8 @@ cargo.rust_library(
         ":image-0.25",
         ":kittest-0.4",
         ":log-0.4",
-        ":open-5",
         ":pollster-0.4",
         ":serde-1",
-        ":tempfile-3",
         ":toml-1",
         ":wgpu-29",
     ],
@@ -11366,12 +11572,17 @@ cargo.rust_library(
             deps = [
                 ":core_detect-1",
                 ":multiversion-0.9",
+                ":simdutf8-0.1",
             ],
+        ),
+        "macos-arm64": dict(
+            deps = [":simdutf8-0.1"],
         ),
         "windows-msvc": dict(
             deps = [
                 ":core_detect-1",
                 ":multiversion-0.9",
+                ":simdutf8-0.1",
             ],
         ),
     },
@@ -11381,7 +11592,6 @@ cargo.rust_library(
         ":cfg-if-1",
         ":multiversion_no_op-1",
         ":scopeguard-1",
-        ":simdutf8-0.1",
     ],
 )
 
@@ -12302,11 +12512,19 @@ cargo.rust_library(
         "parking",
         "std",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":parking-2"],
+        ),
+        "macos-arm64": dict(
+            deps = [":parking-2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":parking-2"],
+        ),
+    },
     visibility = [],
-    deps = [
-        ":parking-2",
-        ":pin-project-lite-0.2",
-    ],
+    deps = [":pin-project-lite-0.2"],
 )
 
 http_archive(
@@ -12470,6 +12688,11 @@ cargo.rust_library(
         "js",
         "std",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":getrandom-0.4"],
+        ),
+    },
     visibility = [],
 )
 
@@ -13011,6 +13234,11 @@ cargo.rust_library(
     ],
     named_deps = {
         "spin1": ":spin-0.9",
+    },
+    platform = {
+        "wasm32": dict(
+            features = ["spin"],
+        ),
     },
     visibility = [],
     deps = [
@@ -14286,6 +14514,12 @@ cargo.rust_library(
         "macos-arm64": dict(
             deps = [":libc-0.2"],
         ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+            ],
+        ),
     },
     visibility = [],
     deps = [":cfg-if-1"],
@@ -14327,9 +14561,19 @@ cargo.rust_library(
         "macos-arm64": dict(
             deps = [":libc-0.2"],
         ),
+        "wasm32": dict(
+            features = ["wasm_js"],
+            deps = [":wasm-bindgen-0.2"],
+        ),
     },
     visibility = [],
     deps = [":cfg-if-1"],
+)
+
+alias(
+    name = "getrandom",
+    actual = ":getrandom-0.4",
+    visibility = ["PUBLIC"],
 )
 
 http_archive(
@@ -14370,6 +14614,10 @@ cargo.rust_library(
         ),
         "macos-arm64": dict(
             deps = [":libc-0.2"],
+        ),
+        "wasm32": dict(
+            features = ["wasm_js"],
+            deps = [":wasm-bindgen-0.2"],
         ),
     },
     visibility = [],
@@ -14724,6 +14972,49 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "gloo-timers-0.3.0.crate",
+    sha256 = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994",
+    size_bytes = 5530,
+    strip_prefix = "gloo-timers-0.3.0",
+    urls = ["https://static.crates.io/crates/gloo-timers/0.3.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "gloo-timers-0.3",
+    srcs = [":gloo-timers-0.3.0.crate"],
+    crate = "gloo_timers",
+    crate_root = "gloo-timers-0.3.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "gloo_timers",
+        "CARGO_MANIFEST_DIR": "gloo-timers-0.3.0.crate",
+        "CARGO_PKG_AUTHORS": "Rust and WebAssembly Working Group",
+        "CARGO_PKG_DESCRIPTION": "Convenience crate for working with JavaScript timers",
+        "CARGO_PKG_NAME": "gloo-timers",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rustwasm/gloo/tree/master/crates/timers",
+        "CARGO_PKG_VERSION": "0.3.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "futures",
+        "futures-channel",
+        "futures-core",
+    ],
+    visibility = [],
+    deps = [
+        ":futures-channel-0.3",
+        ":futures-core-0.3",
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+    ],
+)
+
+http_archive(
     name = "glow-0.17.0.crate",
     sha256 = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5",
     size_bytes = 165357,
@@ -14750,6 +15041,16 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "17",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":slotmap-1",
+                ":wasm-bindgen-0.2",
+                ":web-sys-0.3",
+            ],
+        ),
     },
     visibility = [],
 )
@@ -15125,10 +15426,23 @@ cargo.rust_library(
         "OUT_DIR": "$(location :gpu-video-0.4-build-script-run[out_dir])",
     },
     features = ["wgpu"],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [
+                ":ash-0.38",
+                ":vk-mem-0.4",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":ash-0.38",
+                ":vk-mem-0.4",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :gpu-video-0.4-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
-        ":ash-0.38",
         ":bytemuck-1",
         ":bytes-1",
         ":derivative-2",
@@ -15137,7 +15451,6 @@ cargo.rust_library(
         ":rustc-hash-2",
         ":thiserror-1",
         ":tracing-0.1",
-        ":vk-mem-0.4",
         ":wgpu-29",
     ],
 )
@@ -15204,7 +15517,10 @@ cargo.rust_library(
     },
     platform = {
         "linux-x86_64": dict(
-            deps = [":ashpd-0.13"],
+            deps = [
+                ":ashpd-0.13",
+                ":smol-2",
+            ],
         ),
         "macos-arm64": dict(
             deps = [
@@ -15212,10 +15528,17 @@ cargo.rust_library(
                 ":objc2-app-kit-0.3",
                 ":objc2-foundation-0.3",
                 ":raw-window-handle-0.6",
+                ":smol-2",
             ],
         ),
+        "wasm32": dict(
+            deps = [":async-channel-2"],
+        ),
         "windows-msvc": dict(
-            deps = [":windows-0.58"],
+            deps = [
+                ":smol-2",
+                ":windows-0.58",
+            ],
         ),
     },
     rustc_flags = select({
@@ -15243,7 +15566,6 @@ cargo.rust_library(
         ":serde-1",
         ":serde_json-1",
         ":smallvec-1",
-        ":smol-2",
         ":tracing-0.1",
         ":unicode-segmentation-1",
         ":web-time-1",
@@ -15270,6 +15592,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     platform = {
+        "linux-x86_64": dict(
+            deps = [":smol-2"],
+        ),
         "macos-arm64": dict(
             deps = [
                 ":core-text-21",
@@ -15277,12 +15602,14 @@ cargo.rust_library(
                 ":objc2-app-kit-0.3",
                 ":objc2-foundation-0.3",
                 ":raw-window-handle-0.6",
+                ":smol-2",
             ],
         ),
         "windows-msvc": dict(
             deps = [
                 ":raw-window-handle-0.6",
                 ":resvg-0.45",
+                ":smol-2",
                 ":windows-0.58",
             ],
         ),
@@ -15319,7 +15646,6 @@ cargo.rust_library(
         ":serde_json-1",
         ":serde_repr-0.1",
         ":smallvec-1",
-        ":smol-2",
         ":tracing-0.1",
         ":uuid-1",
     ],
@@ -15384,6 +15710,11 @@ cargo.rust_library(
         "component",
         "default",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":gpui-pre-web-0.3"],
+        ),
+    },
     rustc_flags = select({
         "DEFAULT": [],
         "root//build-support/buck/test-support:enabled": ["--cfg=feature=\"test-support\""],
@@ -15418,13 +15749,32 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :gpui-kit-assets-0.6-build-script-run[out_dir])",
     },
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":rust-embed-8"],
+        ),
+        "macos-arm64": dict(
+            deps = [":rust-embed-8"],
+        ),
+        "wasm32": dict(
+            named_deps = {
+                "reqwest": ":gpui-pre-reqwest-0.12",
+            },
+            deps = [
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [":rust-embed-8"],
+        ),
+    },
     rustc_flags = ["@$(location :gpui-kit-assets-0.6-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":anyhow-1",
         ":gpui-pre-0.3",
         ":log-0.4",
-        ":rust-embed-8",
     ],
 )
 
@@ -15508,6 +15858,9 @@ cargo.rust_library(
                 "font_kit": ":zed-font-kit-0.14",
             },
             deps = [":core-video-0.5"],
+        ),
+        "wasm32": dict(
+            deps = [":getrandom-0.3"],
         ),
         "windows-msvc": dict(
             deps = [":windows-0.62"],
@@ -16152,6 +16505,12 @@ cargo.rust_library(
         "macos-arm64": dict(
             deps = [":gpui-pre-macos-0.3"],
         ),
+        "wasm32": dict(
+            deps = [
+                ":console_error_panic_hook-0.1",
+                ":gpui-pre-web-0.3",
+            ],
+        ),
         "windows-msvc": dict(
             deps = [":gpui-pre-windows-0.3"],
         ),
@@ -16197,6 +16556,70 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "gpui-pre-reqwest-0.12.15.crate",
+    sha256 = "05be23908e707966824f8c51a609904b7f30739e8d915e120a53c1b995ba964c",
+    size_bytes = 201267,
+    strip_prefix = "gpui-pre-reqwest-0.12.15",
+    urls = ["https://static.crates.io/crates/gpui-pre-reqwest/0.12.15/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "gpui-pre-reqwest-0.12",
+    srcs = [":gpui-pre-reqwest-0.12.15.crate"],
+    crate = "gpui_pre_reqwest",
+    crate_root = "gpui-pre-reqwest-0.12.15.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "gpui_pre_reqwest",
+        "CARGO_MANIFEST_DIR": "gpui-pre-reqwest-0.12.15.crate",
+        "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
+        "CARGO_PKG_DESCRIPTION": "higher level HTTP client library zed-industries/request@c156624",
+        "CARGO_PKG_NAME": "gpui-pre-reqwest",
+        "CARGO_PKG_REPOSITORY": "https://github.com/seanmonstar/reqwest",
+        "CARGO_PKG_VERSION": "0.12.15",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "12",
+        "CARGO_PKG_VERSION_PATCH": "15",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "__rustls",
+        "__rustls-ring",
+        "__tls",
+        "charset",
+        "h2",
+        "http2",
+        "macos-system-configuration",
+        "multipart",
+        "rustls-tls-native-roots",
+        "rustls-tls-native-roots-no-provider",
+        "socks",
+        "stream",
+    ],
+    visibility = [],
+    deps = [
+        ":base64-0.22",
+        ":bytes-1",
+        ":futures-core-0.3",
+        ":futures-util-0.3",
+        ":http-1",
+        ":js-sys-0.3",
+        ":mime_guess-2",
+        ":serde-1",
+        ":serde_json-1",
+        ":serde_urlencoded-0.7",
+        ":sync_wrapper-1",
+        ":tower-service-0.3",
+        ":url-2",
+        ":wasm-bindgen-0.2",
+        ":wasm-bindgen-futures-0.4",
+        ":wasm-streams-0.4",
+        ":web-sys-0.3",
+    ],
+)
+
+http_archive(
     name = "gpui-pre-scheduler-0.3.5.crate",
     sha256 = "6dd1b7ff2e7bf43302ae982cd786a22c16c52e16682e67b66cfbe2cb2bc3a72d",
     size_bytes = 32822,
@@ -16223,6 +16646,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "wasm32": dict(
+            features = ["wasm-threads"],
+            deps = [":wasm_thread-0.3"],
+        ),
     },
     visibility = [],
     deps = [
@@ -16389,6 +16818,64 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "gpui-pre-web-0.3.5.crate",
+    sha256 = "4f0daada903f106be946d87e25f5bc85ad6cf60d6d82cb8f8aed945417a9c1a3",
+    size_bytes = 96370,
+    strip_prefix = "gpui-pre-web-0.3.5",
+    urls = ["https://static.crates.io/crates/gpui-pre-web/0.3.5/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "gpui-pre-web-0.3",
+    srcs = [":gpui-pre-web-0.3.5.crate"],
+    crate = "gpui_web",
+    crate_root = "gpui-pre-web-0.3.5.crate/src/gpui_web.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "gpui_web",
+        "CARGO_MANIFEST_DIR": "gpui-pre-web-0.3.5.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Zed's `gpui_web` crate (gpui-pre snapshot of zed@d89e9c2)",
+        "CARGO_PKG_NAME": "gpui-pre-web",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zed-industries/zed",
+        "CARGO_PKG_VERSION": "0.3.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "multithreaded",
+    ],
+    visibility = [],
+    deps = [
+        ":anyhow-1",
+        ":console_error_panic_hook-0.1",
+        ":futures-0.3",
+        ":gpui-pre-0.3",
+        ":gpui-pre-http-client-0.3",
+        ":gpui-pre-scheduler-0.3",
+        ":gpui-pre-wgpu-0.3",
+        ":js-sys-0.3",
+        ":log-0.4",
+        ":parking_lot-0.12",
+        ":raw-window-handle-0.6",
+        ":smallvec-1",
+        ":unicode-properties-0.1",
+        ":unicode-script-0.5",
+        ":unicode-segmentation-1",
+        ":uuid-1",
+        ":wasm-bindgen-0.2",
+        ":wasm-bindgen-futures-0.4",
+        ":wasm_thread-0.3",
+        ":web-sys-0.3",
+        ":web-time-1",
+    ],
+)
+
+http_archive(
     name = "gpui-pre-wgpu-0.3.5.crate",
     sha256 = "640b666a16ddf9504e2eb3e7a997acb2b2adfaa7859925bdd36fc3acfd8f30a7",
     size_bytes = 88169,
@@ -16416,12 +16903,17 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "font-kit",
-    ],
-    named_deps = {
-        "font_kit": ":zed-font-kit-0.14",
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["font-kit"],
+            named_deps = {
+                "font_kit": ":zed-font-kit-0.14",
+            },
+        ),
+        "wasm32": dict(
+            deps = [":web-sys-0.3"],
+        ),
     },
     visibility = [],
     deps = [
@@ -18080,16 +18572,28 @@ cargo.rust_library(
         "client",
         "default",
         "http1",
-        "http2",
         "server",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["http2"],
+            deps = [":h2-0.4"],
+        ),
+        "macos-arm64": dict(
+            features = ["http2"],
+            deps = [":h2-0.4"],
+        ),
+        "windows-msvc": dict(
+            features = ["http2"],
+            deps = [":h2-0.4"],
+        ),
+    },
     visibility = [],
     deps = [
         ":atomic-waker-1",
         ":bytes-1",
         ":futures-channel-0.3",
         ":futures-core-0.3",
-        ":h2-0.4",
         ":http-1",
         ":http-body-1",
         ":httparse-1",
@@ -18193,7 +18697,6 @@ cargo.rust_library(
     },
     features = [
         "http1",
-        "http2",
         "log",
         "logging",
         "native-tokio",
@@ -18201,6 +18704,17 @@ cargo.rust_library(
         "rustls-native-certs",
         "tls12",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["http2"],
+        ),
+        "macos-arm64": dict(
+            features = ["http2"],
+        ),
+        "windows-msvc": dict(
+            features = ["http2"],
+        ),
+    },
     visibility = [],
     deps = [
         ":http-1",
@@ -18293,41 +18807,87 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "20",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "client",
-        "client-legacy",
-        "client-proxy",
-        "client-proxy-system",
-        "default",
-        "http1",
-        "http2",
-        "tokio",
-    ],
+    features = ["default"],
     platform = {
+        "linux-x86_64": dict(
+            features = [
+                "client",
+                "client-legacy",
+                "client-proxy",
+                "client-proxy-system",
+                "http1",
+                "http2",
+                "tokio",
+            ],
+            deps = [
+                ":base64-0.22",
+                ":futures-channel-0.3",
+                ":futures-util-0.3",
+                ":ipnet-2",
+                ":libc-0.2",
+                ":percent-encoding-2",
+                ":socket2-0.6",
+                ":tokio-1",
+                ":tower-service-0.3",
+                ":tracing-0.1",
+            ],
+        ),
         "macos-arm64": dict(
-            deps = [":system-configuration-0.7"],
+            features = [
+                "client",
+                "client-legacy",
+                "client-proxy",
+                "client-proxy-system",
+                "http1",
+                "http2",
+                "tokio",
+            ],
+            deps = [
+                ":base64-0.22",
+                ":futures-channel-0.3",
+                ":futures-util-0.3",
+                ":ipnet-2",
+                ":libc-0.2",
+                ":percent-encoding-2",
+                ":socket2-0.6",
+                ":system-configuration-0.7",
+                ":tokio-1",
+                ":tower-service-0.3",
+                ":tracing-0.1",
+            ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-registry-0.6"],
+            features = [
+                "client",
+                "client-legacy",
+                "client-proxy",
+                "client-proxy-system",
+                "http1",
+                "http2",
+                "tokio",
+            ],
+            deps = [
+                ":base64-0.22",
+                ":futures-channel-0.3",
+                ":futures-util-0.3",
+                ":ipnet-2",
+                ":libc-0.2",
+                ":percent-encoding-2",
+                ":socket2-0.6",
+                ":tokio-1",
+                ":tower-service-0.3",
+                ":tracing-0.1",
+                ":windows-registry-0.6",
+            ],
         ),
     },
     visibility = [],
     deps = [
-        ":base64-0.22",
         ":bytes-1",
-        ":futures-channel-0.3",
-        ":futures-util-0.3",
         ":http-1",
         ":http-body-1",
         ":hyper-1",
-        ":ipnet-2",
-        ":libc-0.2",
-        ":percent-encoding-2",
         ":pin-project-lite-0.2",
-        ":socket2-0.6",
-        ":tokio-1",
-        ":tower-service-0.3",
-        ":tracing-0.1",
     ],
 )
 
@@ -18806,9 +19366,19 @@ cargo.rust_library(
     features = [
         "alloc",
         "compiled_data",
-        "default",
         "std",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["default"],
+        ),
+        "macos-arm64": dict(
+            features = ["default"],
+        ),
+        "windows-msvc": dict(
+            features = ["default"],
+        ),
+    },
     visibility = [],
     deps = [
         ":idna_adapter-1",
@@ -19268,6 +19838,11 @@ cargo.rust_library(
         "default",
         "unicode-width",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":web-time-1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":console-0.15",
@@ -19317,6 +19892,11 @@ cargo.rust_library(
         "unicode-width",
         "wasmbind",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":web-time-1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":console-0.16",
@@ -19619,6 +20199,17 @@ cargo.rust_library(
         "wasm-bindgen_rs",
         "web-sys",
     ],
+    platform = {
+        "wasm32": dict(
+            named_deps = {
+                "wasm_bindgen_rs": ":wasm-bindgen-0.2",
+            },
+            deps = [
+                ":js-sys-0.3",
+                ":web-sys-0.3",
+            ],
+        ),
+    },
     visibility = [],
     deps = [":cfg-if-1"],
 )
@@ -19650,6 +20241,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "24",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "wasm32": dict(
+            deps = [":rustversion-1"],
+        ),
     },
     visibility = [],
 )
@@ -19861,6 +20457,24 @@ cargo.rust_library(
     named_deps = {
         "webpki_types": ":rustls-pki-types-1",
     },
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":portmapper-0.19"],
+        ),
+        "macos-arm64": dict(
+            deps = [":portmapper-0.19"],
+        ),
+        "wasm32": dict(
+            deps = [
+                ":getrandom-0.4",
+                ":time-0.3",
+                ":wasm-bindgen-futures-0.4",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [":portmapper-0.19"],
+        ),
+    },
     rustc_flags = ["@$(location :iroh-1-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
@@ -19888,7 +20502,6 @@ cargo.rust_library(
         ":papaya-0.2",
         ":pin-project-1",
         ":portable-atomic-1",
-        ":portmapper-0.19",
         ":rand-0.10",
         ":reqwest-0.13",
         ":rustc-hash-2",
@@ -19985,6 +20598,11 @@ cargo.rust_library(
         "key",
         "relay",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [":getrandom-0.4"],
+        ),
+    },
     visibility = [],
     deps = [
         ":curve25519-dalek-5",
@@ -20033,18 +20651,36 @@ cargo.rust_library(
         "default",
         "tls-ring",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [
+                ":n0-dns-resolver-0.1",
+                ":rustls-0.23",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":n0-dns-resolver-0.1",
+                ":rustls-0.23",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":n0-dns-resolver-0.1",
+                ":rustls-0.23",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :iroh-dns-1-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":arc-swap-1",
         ":derive_more-2",
         ":iroh-base-1",
-        ":n0-dns-resolver-0.1",
         ":n0-error-1",
         ":n0-future-0.3",
         ":portable-atomic-1",
         ":rand-0.10",
-        ":rustls-0.23",
         ":simple-dns-0.12",
         ":strum-0.28",
         ":tokio-1",
@@ -20211,6 +20847,14 @@ cargo.rust_library(
     features = ["tls-ring"],
     named_deps = {
         "webpki_types": ":rustls-pki-types-1",
+    },
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":getrandom-0.4",
+                ":ws_stream_wasm-0.7",
+            ],
+        ),
     },
     rustc_flags = ["@$(location :iroh-relay-1-build-script-run[rustc_flags])"],
     visibility = [],
@@ -20620,6 +21264,13 @@ cargo.rust_library(
         "jcore": ":jiff-core-0.1",
     },
     platform = {
+        "wasm32": dict(
+            deps = [
+                ":jiff-tzdb-platform-0.1",
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+            ],
+        ),
         "windows-msvc": dict(
             deps = [
                 ":jiff-tzdb-platform-0.1",
@@ -20772,6 +21423,53 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "js-sys",
+    actual = ":js-sys-0.3",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "js-sys-0.3.105.crate",
+    sha256 = "ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e",
+    size_bytes = 113002,
+    strip_prefix = "js-sys-0.3.105",
+    urls = ["https://static.crates.io/crates/js-sys/0.3.105/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "js-sys-0.3",
+    srcs = [":js-sys-0.3.105.crate"],
+    crate = "js_sys",
+    crate_root = "js-sys-0.3.105.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "js_sys",
+        "CARGO_MANIFEST_DIR": "js-sys-0.3.105.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Bindings for all JS global objects and functions in all JS environments like Node.js and browsers, built on `#[wasm_bindgen]` using the `wasm-bindgen` crate. ",
+        "CARGO_PKG_NAME": "js-sys",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys",
+        "CARGO_PKG_VERSION": "0.3.105",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "105",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+        "unsafe-eval",
+    ],
+    visibility = [],
+    deps = [
+        ":cfg-if-1",
+        ":futures-util-0.3",
+        ":wasm-bindgen-0.2",
+    ],
+)
+
 http_archive(
     name = "jsonwebtoken-10.4.0.crate",
     sha256 = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc",
@@ -20813,6 +21511,14 @@ cargo.rust_library(
         "simple_asn1",
         "use_pem",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":getrandom-0.2",
+                ":js-sys-0.3",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":base64-0.22",
@@ -22142,6 +22848,11 @@ cargo.rust_library(
         "default",
         "serde",
     ],
+    platform = {
+        "wasm32": dict(
+            features = ["nightly"],
+        ),
+    },
     visibility = [],
     deps = [
         ":scopeguard-1",
@@ -23558,10 +24269,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :mime_guess-2-build-script-run[out_dir])",
     },
-    features = [
-        "default",
-        "rev-mappings",
-    ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :mime_guess-2-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
@@ -23589,10 +24316,26 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "rev-mappings",
-    ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+    },
     visibility = [],
     deps = [":unicase-2"],
 )
@@ -23610,10 +24353,26 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "rev-mappings",
-    ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "default",
+                "rev-mappings",
+            ],
+        ),
+    },
     version = "2.0.5",
 )
 
@@ -24514,6 +25273,17 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :n0-future-0.3-build-script-run[out_dir])",
     },
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":send_wrapper-0.6",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":web-time-1",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :n0-future-0.3-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
@@ -24648,6 +25418,9 @@ cargo.rust_library(
         "macos-arm64": dict(
             features = ["msl-out"],
         ),
+        "wasm32": dict(
+            features = ["glsl-out"],
+        ),
         "windows-msvc": dict(
             features = [
                 "glsl-out",
@@ -24714,6 +25487,9 @@ cargo.rust_binary(
         "macos-arm64": dict(
             features = ["msl-out"],
         ),
+        "wasm32": dict(
+            features = ["glsl-out"],
+        ),
         "windows-msvc": dict(
             features = [
                 "glsl-out",
@@ -24754,6 +25530,9 @@ buildscript_run(
         ),
         "macos-arm64": dict(
             features = ["msl-out"],
+        ),
+        "wasm32": dict(
+            features = ["glsl-out"],
         ),
         "windows-msvc": dict(
             features = [
@@ -24887,6 +25666,13 @@ cargo.rust_library(
     },
     platform = {
         "linux-x86_64": dict(
+            features = [
+                "jobserver",
+                "parallel",
+            ],
+            deps = [":jobserver-0.1"],
+        ),
+        "wasm32": dict(
             features = [
                 "jobserver",
                 "parallel",
@@ -25404,24 +26190,39 @@ cargo.rust_library(
     platform = {
         "linux-x86_64": dict(
             deps = [
+                ":libc-0.2",
                 ":netdev-0.46",
                 ":netlink-packet-core-0.8",
                 ":netlink-packet-route-0.31",
                 ":netlink-proto-0.12",
                 ":netlink-sys-0.8",
+                ":noq-udp-1",
+                ":socket2-0.6",
             ],
         ),
         "macos-arm64": dict(
             deps = [
+                ":libc-0.2",
                 ":netdev-0.46",
+                ":noq-udp-1",
                 ":objc2-core-foundation-0.3",
                 ":objc2-system-configuration-0.3",
+                ":socket2-0.6",
+            ],
+        ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":web-sys-0.3",
             ],
         ),
         "windows-msvc": dict(
             deps = [
+                ":libc-0.2",
                 ":netdev-0.45",
+                ":noq-udp-1",
                 ":serde-1",
+                ":socket2-0.6",
                 ":windows-0.62",
                 ":windows-result-0.4",
                 ":wmi-0.18",
@@ -25435,13 +26236,10 @@ cargo.rust_library(
         ":bytes-1",
         ":derive_more-2",
         ":ipnet-2",
-        ":libc-0.2",
         ":n0-error-1",
         ":n0-future-0.3",
         ":n0-watcher-1",
-        ":noq-udp-1",
         ":pin-project-lite-0.2",
-        ":socket2-0.6",
         ":time-0.3",
         ":tokio-1",
         ":tokio-util-0.7",
@@ -25724,12 +26522,28 @@ cargo.rust_library(
     features = [
         "fast-apple-datapath",
         "ring",
-        "runtime-tokio",
         "rustls",
     ],
     named_deps = {
         "proto": ":noq-proto-1",
         "udp": ":noq-udp-1",
+    },
+    platform = {
+        "linux-x86_64": dict(
+            features = ["runtime-tokio"],
+            deps = [":socket2-0.6"],
+        ),
+        "macos-arm64": dict(
+            features = ["runtime-tokio"],
+            deps = [":socket2-0.6"],
+        ),
+        "wasm32": dict(
+            deps = [":web-time-1"],
+        ),
+        "windows-msvc": dict(
+            features = ["runtime-tokio"],
+            deps = [":socket2-0.6"],
+        ),
     },
     rustc_flags = ["@$(location :noq-1-build-script-run[rustc_flags])"],
     visibility = [],
@@ -25739,7 +26553,6 @@ cargo.rust_library(
         ":pin-project-lite-0.2",
         ":rustc-hash-2",
         ":rustls-0.23",
-        ":socket2-0.6",
         ":thiserror-2",
         ":tokio-1",
         ":tokio-stream-0.1",
@@ -25769,9 +26582,19 @@ cargo.rust_binary(
     features = [
         "fast-apple-datapath",
         "ring",
-        "runtime-tokio",
         "rustls",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["runtime-tokio"],
+        ),
+        "macos-arm64": dict(
+            features = ["runtime-tokio"],
+        ),
+        "windows-msvc": dict(
+            features = ["runtime-tokio"],
+        ),
+    },
     visibility = [],
     deps = [":cfg_aliases-0.2"],
 )
@@ -25792,9 +26615,19 @@ buildscript_run(
     features = [
         "fast-apple-datapath",
         "ring",
-        "runtime-tokio",
         "rustls",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["runtime-tokio"],
+        ),
+        "macos-arm64": dict(
+            features = ["runtime-tokio"],
+        ),
+        "windows-msvc": dict(
+            features = ["runtime-tokio"],
+        ),
+    },
     version = "1.3.0",
 )
 
@@ -25830,6 +26663,15 @@ cargo.rust_library(
         "ring",
         "rustls",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":getrandom-0.4",
+                ":rustls-pki-types-1",
+                ":web-time-1",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":aes-gcm-0.10",
@@ -25881,21 +26723,39 @@ cargo.rust_library(
         "OUT_DIR": "$(location :noq-udp-1-build-script-run[out_dir])",
     },
     features = [
-        "default",
         "fast-apple-datapath",
         "tracing",
-        "tracing-log",
     ],
     platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+            deps = [":socket2-0.6"],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+            deps = [":socket2-0.6"],
+        ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            features = [
+                "default",
+                "tracing-log",
+            ],
+            deps = [
+                ":socket2-0.6",
+                ":windows-sys-0.61",
+            ],
         ),
     },
     rustc_flags = ["@$(location :noq-udp-1-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":libc-0.2",
-        ":socket2-0.6",
         ":tracing-0.1",
     ],
 )
@@ -25920,11 +26780,29 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "default",
         "fast-apple-datapath",
         "tracing",
-        "tracing-log",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+    },
     visibility = [],
     deps = [":cfg_aliases-0.2"],
 )
@@ -25943,11 +26821,29 @@ buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "default",
         "fast-apple-datapath",
         "tracing",
-        "tracing-log",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "default",
+                "tracing-log",
+            ],
+        ),
+    },
     version = "1.3.0",
 )
 
@@ -26951,6 +27847,9 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "macos-arm64": dict(
+            deps = [":libc-0.2"],
+        ),
+        "wasm32": dict(
             deps = [":libc-0.2"],
         ),
     },
@@ -30053,6 +30952,11 @@ cargo.rust_library(
         "default",
         "serde",
     ],
+    platform = {
+        "wasm32": dict(
+            features = ["nightly"],
+        ),
+    },
     visibility = [],
     deps = [
         ":lock_api-0.4",
@@ -30096,6 +31000,9 @@ cargo.rust_library(
         "macos-arm64": dict(
             deps = [":libc-0.2"],
         ),
+        "wasm32": dict(
+            features = ["nightly"],
+        ),
         "windows-msvc": dict(
             deps = [":windows-link-0.2"],
         ),
@@ -30127,6 +31034,11 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "12",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    platform = {
+        "wasm32": dict(
+            features = ["nightly"],
+        ),
+    },
     visibility = [],
 )
 
@@ -30142,6 +31054,11 @@ buildscript_run(
         "CARGO_PKG_VERSION_MINOR": "9",
         "CARGO_PKG_VERSION_PATCH": "12",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "wasm32": dict(
+            features = ["nightly"],
+        ),
     },
     version = "0.9.12",
 )
@@ -30575,6 +31492,39 @@ cargo.rust_library(
         ":hashbrown-0.15",
         ":indexmap-2",
     ],
+)
+
+http_archive(
+    name = "pharos-0.5.3.crate",
+    sha256 = "e9567389417feee6ce15dd6527a8a1ecac205ef62c2932bcf3d9f6fc5b78b414",
+    size_bytes = 26028,
+    strip_prefix = "pharos-0.5.3",
+    urls = ["https://static.crates.io/crates/pharos/0.5.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "pharos-0.5",
+    srcs = [":pharos-0.5.3.crate"],
+    crate = "pharos",
+    crate_root = "pharos-0.5.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "pharos",
+        "CARGO_MANIFEST_DIR": "pharos-0.5.3.crate",
+        "CARGO_PKG_AUTHORS": "Naja Melan <najamelan@autistici.org>",
+        "CARGO_PKG_DESCRIPTION": "Observer pattern which generates a futures 0.3 stream of events",
+        "CARGO_PKG_NAME": "pharos",
+        "CARGO_PKG_REPOSITORY": "https://github.com/najamelan/pharos",
+        "CARGO_PKG_VERSION": "0.5.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    rustc_flags = ["--cfg=stable"],
+    visibility = [],
+    deps = [":futures-0.3"],
 )
 
 http_archive(
@@ -31596,10 +32546,20 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1",
-        ":cpufeatures-0.2",
         ":opaque-debug-0.3",
         ":universal-hash-0.5",
     ],
@@ -33963,6 +34923,13 @@ cargo.rust_library(
                 "nasm-rs",
             ],
         ),
+        "wasm32": dict(
+            features = [
+                "asm",
+                "cc",
+                "nasm-rs",
+            ],
+        ),
         "windows-msvc": dict(
             features = [
                 "asm",
@@ -34028,6 +34995,17 @@ cargo.rust_binary(
                 ":nasm-rs-0.3",
             ],
         ),
+        "wasm32": dict(
+            features = [
+                "asm",
+                "cc",
+                "nasm-rs",
+            ],
+            deps = [
+                ":cc-1",
+                ":nasm-rs-0.3",
+            ],
+        ),
         "windows-msvc": dict(
             features = [
                 "asm",
@@ -34064,6 +35042,13 @@ buildscript_run(
     features = ["threading"],
     platform = {
         "linux-x86_64": dict(
+            features = [
+                "asm",
+                "cc",
+                "nasm-rs",
+            ],
+        ),
+        "wasm32": dict(
             features = [
                 "asm",
                 "cc",
@@ -34834,39 +35819,106 @@ cargo.rust_library(
         "rustls-tls-native-roots-no-provider",
         "stream",
     ],
-    named_deps = {
-        "cookie_crate": ":cookie-0.18",
+    platform = {
+        "linux-x86_64": dict(
+            named_deps = {
+                "cookie_crate": ":cookie-0.18",
+            },
+            deps = [
+                ":cookie_store-0.22",
+                ":futures-channel-0.3",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-native-certs-0.8",
+                ":rustls-pki-types-1",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
+        "macos-arm64": dict(
+            named_deps = {
+                "cookie_crate": ":cookie-0.18",
+            },
+            deps = [
+                ":cookie_store-0.22",
+                ":futures-channel-0.3",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-native-certs-0.8",
+                ":rustls-pki-types-1",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":wasm-streams-0.4",
+                ":web-sys-0.3",
+            ],
+        ),
+        "windows-msvc": dict(
+            named_deps = {
+                "cookie_crate": ":cookie-0.18",
+            },
+            deps = [
+                ":cookie_store-0.22",
+                ":futures-channel-0.3",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-native-certs-0.8",
+                ":rustls-pki-types-1",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
     },
     visibility = [],
     deps = [
         ":base64-0.22",
         ":bytes-1",
-        ":cookie_store-0.22",
-        ":futures-channel-0.3",
         ":futures-core-0.3",
         ":futures-util-0.3",
         ":http-1",
-        ":http-body-1",
-        ":http-body-util-0.1",
-        ":hyper-1",
-        ":hyper-rustls-0.27",
-        ":hyper-util-0.1",
-        ":log-0.4",
-        ":percent-encoding-2",
-        ":pin-project-lite-0.2",
-        ":rustls-0.23",
-        ":rustls-native-certs-0.8",
-        ":rustls-pki-types-1",
         ":serde-1",
         ":serde_json-1",
         ":serde_urlencoded-0.7",
         ":sync_wrapper-1",
-        ":tokio-1",
-        ":tokio-rustls-0.26",
-        ":tokio-util-0.7",
-        ":tower-0.5",
-        ":tower-http-0.6",
-        ":tower-service-0.3",
         ":url-2",
     ],
 )
@@ -34910,36 +35962,99 @@ cargo.rust_library(
         "stream",
         "system-proxy",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [
+                ":encoding_rs-0.8",
+                ":h2-0.4",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":mime-0.3",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-pki-types-1",
+                ":rustls-platform-verifier-0.7",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":encoding_rs-0.8",
+                ":h2-0.4",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":mime-0.3",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-pki-types-1",
+                ":rustls-platform-verifier-0.7",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":wasm-streams-0.5",
+                ":web-sys-0.3",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":encoding_rs-0.8",
+                ":h2-0.4",
+                ":http-body-1",
+                ":http-body-util-0.1",
+                ":hyper-1",
+                ":hyper-rustls-0.27",
+                ":hyper-util-0.1",
+                ":log-0.4",
+                ":mime-0.3",
+                ":percent-encoding-2",
+                ":pin-project-lite-0.2",
+                ":rustls-0.23",
+                ":rustls-pki-types-1",
+                ":rustls-platform-verifier-0.7",
+                ":tokio-1",
+                ":tokio-rustls-0.26",
+                ":tokio-util-0.7",
+                ":tower-0.5",
+                ":tower-http-0.6",
+                ":tower-service-0.3",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":base64-0.23",
         ":bytes-1",
-        ":encoding_rs-0.8",
         ":futures-core-0.3",
         ":futures-util-0.3",
-        ":h2-0.4",
         ":http-1",
-        ":http-body-1",
-        ":http-body-util-0.1",
-        ":hyper-1",
-        ":hyper-rustls-0.27",
-        ":hyper-util-0.1",
-        ":log-0.4",
-        ":mime-0.3",
-        ":percent-encoding-2",
-        ":pin-project-lite-0.2",
-        ":rustls-0.23",
-        ":rustls-pki-types-1",
-        ":rustls-platform-verifier-0.7",
         ":serde-1",
         ":serde_json-1",
         ":sync_wrapper-1",
-        ":tokio-1",
-        ":tokio-rustls-0.26",
-        ":tokio-util-0.7",
-        ":tower-0.5",
-        ":tower-http-0.6",
-        ":tower-service-0.3",
         ":url-2",
     ],
 )
@@ -35243,6 +36358,14 @@ cargo.rust_library(
                 ":objc2-foundation-0.3",
             ],
         ),
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":web-sys-0.3",
+            ],
+        ),
         "windows-msvc": dict(
             deps = [":windows-sys-0.61"],
         ),
@@ -35348,6 +36471,12 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":bytemuck-1"],
+)
+
+alias(
+    name = "ring",
+    actual = ":ring-0.17",
+    visibility = ["PUBLIC"],
 )
 
 http_archive(
@@ -35471,6 +36600,10 @@ cargo.rust_library(
                 ":libc-0.2",
                 ":ring-0.17-ring-c-asm-macos-arm64",
             ],
+        ),
+        "wasm32": dict(
+            features = ["wasm32_unknown_unknown_js"],
+            deps = [":ring-0.17-ring-c-wasm32"],
         ),
         "windows-msvc": dict(
             deps = [
@@ -35717,6 +36850,68 @@ cxx_library(
     include_directories = ["fixups/ring/include"],
     preferred_linkage = "static",
     preprocessor_flags = ["-I$(location :ring-0.17.14.crate)/include"],
+    visibility = [],
+)
+
+cxx_library(
+    name = "ring-0.17-ring-c-wasm32",
+    srcs = [
+        ":ring-0.17.14.crate[crypto/curve25519/curve25519.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/aes/aes_nohw.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/bn/montgomery.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/bn/montgomery_inv.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/ecp_nistz.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/gfp_p256.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/gfp_p384.c]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/p256.c]",
+        ":ring-0.17.14.crate[crypto/limbs/limbs.c]",
+        ":ring-0.17.14.crate[crypto/mem.c]",
+        ":ring-0.17.14.crate[crypto/poly1305/poly1305.c]",
+    ],
+    headers = [
+        ":ring-0.17.14.crate[crypto/curve25519/curve25519_tables.h]",
+        ":ring-0.17.14.crate[crypto/curve25519/internal.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/bn/internal.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/ecp_nistz.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/ecp_nistz384.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/ecp_nistz384.inl]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/p256-nistz.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/p256-nistz-table.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/p256_shared.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/p256_table.h]",
+        ":ring-0.17.14.crate[crypto/fipsmodule/ec/util.h]",
+        ":ring-0.17.14.crate[crypto/internal.h]",
+        ":ring-0.17.14.crate[crypto/limbs/limbs.h]",
+        ":ring-0.17.14.crate[crypto/limbs/limbs.inl]",
+        ":ring-0.17.14.crate[include/ring-core/aes.h]",
+        ":ring-0.17.14.crate[include/ring-core/asm_base.h]",
+        ":ring-0.17.14.crate[include/ring-core/base.h]",
+        ":ring-0.17.14.crate[include/ring-core/check.h]",
+        ":ring-0.17.14.crate[include/ring-core/mem.h]",
+        ":ring-0.17.14.crate[include/ring-core/target.h]",
+        ":ring-0.17.14.crate[include/ring-core/type_check.h]",
+        ":ring-0.17.14.crate[third_party/fiat/curve25519_32.h]",
+        ":ring-0.17.14.crate[third_party/fiat/curve25519_64.h]",
+        ":ring-0.17.14.crate[third_party/fiat/curve25519_64_adx.h]",
+        ":ring-0.17.14.crate[third_party/fiat/curve25519_64_msvc.h]",
+        ":ring-0.17.14.crate[third_party/fiat/p256_32.h]",
+        ":ring-0.17.14.crate[third_party/fiat/p256_64.h]",
+        ":ring-0.17.14.crate[third_party/fiat/p256_64_msvc.h]",
+        "fixups/ring/include/ring_core_generated/prefix_symbols.h",
+        "fixups/ring/include/ring_core_generated/prefix_symbols_asm.h",
+    ],
+    compiler_flags = [
+        "-Wno-error",
+        "-fvisibility=hidden",
+        "-nostdlibinc",
+    ],
+    include_directories = ["fixups/ring/include"],
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-I$(location :ring-0.17.14.crate)/include",
+        "-DRING_CORE_NOSTDLIBINC=1",
+        "-DNDEBUG",
+    ],
     visibility = [],
 )
 
@@ -36219,6 +37414,9 @@ cargo.rust_library(
             deps = [":rust-crypto-0.2-rust_crypto_helpers"],
         ),
         "macos-arm64": dict(
+            deps = [":rust-crypto-0.2-rust_crypto_helpers"],
+        ),
+        "wasm32": dict(
             deps = [":rust-crypto-0.2-rust_crypto_helpers"],
         ),
         "windows-msvc": dict(
@@ -37226,6 +38424,15 @@ cargo.rust_library(
         "default",
         "std",
     ],
+    platform = {
+        "wasm32": dict(
+            features = [
+                "web",
+                "web-time",
+            ],
+            deps = [":web-time-1"],
+        ),
+    },
     visibility = [],
     deps = [":zeroize-1"],
 )
@@ -38183,6 +39390,37 @@ cargo.rust_library(
     visibility = [],
 )
 
+http_archive(
+    name = "send_wrapper-0.6.0.crate",
+    sha256 = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73",
+    size_bytes = 10519,
+    strip_prefix = "send_wrapper-0.6.0",
+    urls = ["https://static.crates.io/crates/send_wrapper/0.6.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "send_wrapper-0.6",
+    srcs = [":send_wrapper-0.6.0.crate"],
+    crate = "send_wrapper",
+    crate_root = "send_wrapper-0.6.0.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "send_wrapper",
+        "CARGO_MANIFEST_DIR": "send_wrapper-0.6.0.crate",
+        "CARGO_PKG_AUTHORS": "Thomas Keh",
+        "CARGO_PKG_DESCRIPTION": "This Rust library implements a wrapper type called SendWrapper which allows you to move around non-Send types between threads, as long as you access the contained value only from within the original thread. You also have to make sure that the wrapper is dropped from within the original thread. If any of these constraints is violated, a panic occurs.",
+        "CARGO_PKG_NAME": "send_wrapper",
+        "CARGO_PKG_REPOSITORY": "https://github.com/thk1/send_wrapper",
+        "CARGO_PKG_VERSION": "0.6.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "6",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+)
+
 alias(
     name = "serde",
     actual = ":serde-1",
@@ -38964,6 +40202,14 @@ cargo.rust_library(
     },
     features = ["compress"],
     linkable_alias = "sevenz-rust2",
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":crc32fast-1",
@@ -39010,10 +40256,20 @@ cargo.rust_library(
         "oid",
         "std",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1",
-        ":cpufeatures-0.2",
         ":digest-0.10",
     ],
 )
@@ -39051,10 +40307,20 @@ cargo.rust_library(
         "default",
         "oid",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.3"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1",
-        ":cpufeatures-0.3",
         ":digest-0.11",
     ],
 )
@@ -39129,10 +40395,20 @@ cargo.rust_library(
         "oid",
         "std",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1",
-        ":cpufeatures-0.2",
         ":digest-0.10",
     ],
 )
@@ -39165,15 +40441,35 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "alloc",
-        "default",
-        "oid",
-    ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "alloc",
+                "default",
+                "oid",
+            ],
+            deps = [":cpufeatures-0.3"],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "alloc",
+                "default",
+                "oid",
+            ],
+            deps = [":cpufeatures-0.3"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "alloc",
+                "default",
+                "oid",
+            ],
+            deps = [":cpufeatures-0.3"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1",
-        ":cpufeatures-0.3",
         ":digest-0.11",
     ],
 )
@@ -39581,9 +40877,19 @@ cargo.rust_library(
     },
     features = [
         "aarch64_neon",
-        "public_imp",
         "std",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["public_imp"],
+        ),
+        "macos-arm64": dict(
+            features = ["public_imp"],
+        ),
+        "windows-msvc": dict(
+            features = ["public_imp"],
+        ),
+    },
     visibility = [],
 )
 
@@ -41713,6 +43019,12 @@ cargo.rust_library(
                 "visit",
             ],
         ),
+        "wasm32": dict(
+            features = [
+                "extra-traits",
+                "visit",
+            ],
+        ),
         "windows-msvc": dict(
             features = [
                 "extra-traits",
@@ -42354,19 +43666,27 @@ cargo.rust_library(
     ],
     platform = {
         "linux-x86_64": dict(
-            deps = [":rustix-1"],
+            deps = [
+                ":getrandom-0.4",
+                ":rustix-1",
+            ],
         ),
         "macos-arm64": dict(
-            deps = [":rustix-1"],
+            deps = [
+                ":getrandom-0.4",
+                ":rustix-1",
+            ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [
+                ":getrandom-0.4",
+                ":windows-sys-0.61",
+            ],
         ),
     },
     visibility = [],
     deps = [
         ":fastrand-2",
-        ":getrandom-0.4",
         ":once_cell-1",
     ],
 )
@@ -42801,6 +44121,10 @@ cargo.rust_library(
                 ":num_threads-0.1",
             ],
         ),
+        "wasm32": dict(
+            features = ["wasm-bindgen"],
+            deps = [":js-sys-0.3"],
+        ),
     },
     visibility = [],
     deps = [
@@ -43206,51 +44530,91 @@ cargo.rust_library(
     features = [
         "bytes",
         "default",
-        "fs",
-        "full",
-        "io-std",
         "io-util",
-        "libc",
         "macros",
-        "mio",
-        "net",
-        "parking_lot",
-        "process",
         "rt",
-        "rt-multi-thread",
-        "signal",
-        "signal-hook-registry",
-        "socket2",
         "sync",
-        "test-util",
         "time",
         "tokio-macros",
     ],
     platform = {
         "linux-x86_64": dict(
+            features = [
+                "fs",
+                "full",
+                "io-std",
+                "libc",
+                "mio",
+                "net",
+                "parking_lot",
+                "process",
+                "rt-multi-thread",
+                "signal",
+                "signal-hook-registry",
+                "socket2",
+                "test-util",
+            ],
             deps = [
                 ":libc-0.2",
+                ":mio-1",
+                ":parking_lot-0.12",
                 ":signal-hook-registry-1",
+                ":socket2-0.6",
             ],
         ),
         "macos-arm64": dict(
+            features = [
+                "fs",
+                "full",
+                "io-std",
+                "libc",
+                "mio",
+                "net",
+                "parking_lot",
+                "process",
+                "rt-multi-thread",
+                "signal",
+                "signal-hook-registry",
+                "socket2",
+                "test-util",
+            ],
             deps = [
                 ":libc-0.2",
+                ":mio-1",
+                ":parking_lot-0.12",
                 ":signal-hook-registry-1",
+                ":socket2-0.6",
             ],
         ),
         "windows-msvc": dict(
-            features = ["windows-sys"],
-            deps = [":windows-sys-0.61"],
+            features = [
+                "fs",
+                "full",
+                "io-std",
+                "libc",
+                "mio",
+                "net",
+                "parking_lot",
+                "process",
+                "rt-multi-thread",
+                "signal",
+                "signal-hook-registry",
+                "socket2",
+                "test-util",
+                "windows-sys",
+            ],
+            deps = [
+                ":mio-1",
+                ":parking_lot-0.12",
+                ":socket2-0.6",
+                ":windows-sys-0.61",
+            ],
         ),
     },
     visibility = [],
     deps = [
         ":bytes-1",
-        ":mio-1",
-        ":parking_lot-0.12",
         ":pin-project-lite-0.2",
-        ":socket2-0.6",
         ":tokio-macros-2",
     ],
 )
@@ -43362,11 +44726,21 @@ cargo.rust_library(
     },
     features = [
         "default",
-        "fs",
         "sync",
         "time",
         "tokio-util",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["fs"],
+        ),
+        "macos-arm64": dict(
+            features = ["fs"],
+        ),
+        "windows-msvc": dict(
+            features = ["fs"],
+        ),
+    },
     visibility = [],
     deps = [
         ":futures-core-0.3",
@@ -43514,7 +44888,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "client",
         "getrandom",
         "rand",
         "ring",
@@ -43522,6 +44895,17 @@ cargo.rust_library(
         "server",
         "sha1_smol",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = ["client"],
+        ),
+        "macos-arm64": dict(
+            features = ["client"],
+        ),
+        "windows-msvc": dict(
+            features = ["client"],
+        ),
+    },
     visibility = [],
     deps = [
         ":base64-0.22",
@@ -44067,30 +45451,66 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "decompression-gzip",
         "default",
         "follow-redirect",
-        "futures-core",
         "futures-util",
         "map-response-body",
-        "tokio-util",
         "tower",
         "trace",
         "tracing",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            features = [
+                "decompression-gzip",
+                "futures-core",
+                "tokio-util",
+            ],
+            deps = [
+                ":async-compression-0.4",
+                ":futures-core-0.3",
+                ":http-body-util-0.1",
+                ":tokio-1",
+                ":tokio-util-0.7",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "decompression-gzip",
+                "futures-core",
+                "tokio-util",
+            ],
+            deps = [
+                ":async-compression-0.4",
+                ":futures-core-0.3",
+                ":http-body-util-0.1",
+                ":tokio-1",
+                ":tokio-util-0.7",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "decompression-gzip",
+                "futures-core",
+                "tokio-util",
+            ],
+            deps = [
+                ":async-compression-0.4",
+                ":futures-core-0.3",
+                ":http-body-util-0.1",
+                ":tokio-1",
+                ":tokio-util-0.7",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
-        ":async-compression-0.4",
         ":bitflags-2",
         ":bytes-1",
-        ":futures-core-0.3",
         ":futures-util-0.3",
         ":http-1",
         ":http-body-1",
-        ":http-body-util-0.1",
         ":pin-project-lite-0.2",
-        ":tokio-1",
-        ":tokio-util-0.7",
         ":tower-0.5",
         ":tower-layer-0.3",
         ":tower-service-0.3",
@@ -44435,6 +45855,50 @@ cargo.rust_library(
         ":tracing-0.1",
         ":tracing-core-0.1",
         ":tracing-log-0.2",
+    ],
+)
+
+alias(
+    name = "tracing-wasm",
+    actual = ":tracing-wasm-0.2",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "tracing-wasm-0.2.1.crate",
+    sha256 = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07",
+    size_bytes = 9372,
+    strip_prefix = "tracing-wasm-0.2.1",
+    urls = ["https://static.crates.io/crates/tracing-wasm/0.2.1/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "tracing-wasm-0.2",
+    srcs = [":tracing-wasm-0.2.1.crate"],
+    crate = "tracing_wasm",
+    crate_root = "tracing-wasm-0.2.1.crate/src/lib.rs",
+    dlopen_enable = True,
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "tracing_wasm",
+        "CARGO_MANIFEST_DIR": "tracing-wasm-0.2.1.crate",
+        "CARGO_PKG_AUTHORS": "Cole Lawrence <cole@colelawrence.com>:Story.ai Team <team@story.ai>",
+        "CARGO_PKG_DESCRIPTION": "tracing subscriber for browser WASM",
+        "CARGO_PKG_NAME": "tracing-wasm",
+        "CARGO_PKG_REPOSITORY": "https://github.com/storyai/tracing-wasm",
+        "CARGO_PKG_VERSION": "0.2.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    linkable_alias = "tracing-wasm",
+    visibility = [],
+    deps = [
+        ":tracing-0.1",
+        ":tracing-subscriber-0.3",
+        ":wasm-bindgen-0.2",
     ],
 )
 
@@ -45292,6 +46756,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["general-category"],
+    platform = {
+        "wasm32": dict(
+            features = [
+                "default",
+                "emoji",
+            ],
+        ),
+    },
     visibility = [],
 )
 
@@ -46065,9 +47537,23 @@ cargo.rust_library(
         "v5",
         "v7",
     ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":getrandom-0.4"],
+        ),
+        "macos-arm64": dict(
+            deps = [":getrandom-0.4"],
+        ),
+        "wasm32": dict(
+            features = ["js"],
+            deps = [":wasm-bindgen-0.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":getrandom-0.4"],
+        ),
+    },
     visibility = [],
     deps = [
-        ":getrandom-0.4",
         ":serde_core-1",
         ":sha1_smol-1",
     ],
@@ -46100,6 +47586,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "9",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "wasm32": dict(
+            deps = [":wasm-bindgen-0.2"],
+        ),
     },
     visibility = [],
     deps = [
@@ -46773,6 +48264,414 @@ cargo.rust_library(
     deps = [":try-lock-0.2"],
 )
 
+alias(
+    name = "wasm-bindgen",
+    actual = ":wasm-bindgen-0.2",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "wasm-bindgen-0.2.128.crate",
+    sha256 = "aecb87a33d3b0c5e3b7aa46336eaf486cffafbd281b195e4c8b80d50df2351bf",
+    size_bytes = 70345,
+    strip_prefix = "wasm-bindgen-0.2.128",
+    urls = ["https://static.crates.io/crates/wasm-bindgen/0.2.128/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-bindgen-0.2",
+    srcs = [":wasm-bindgen-0.2.128.crate"],
+    crate = "wasm_bindgen",
+    crate_root = "wasm-bindgen-0.2.128.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_bindgen",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Easy support for interacting between JS and Rust. ",
+        "CARGO_PKG_NAME": "wasm-bindgen",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :wasm-bindgen-0.2-build-script-run[out_dir])",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    rustc_flags = ["@$(location :wasm-bindgen-0.2-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":cfg-if-1",
+        ":once_cell-1",
+        ":wasm-bindgen-macro-0.2",
+        ":wasm-bindgen-shared-0.2",
+    ],
+)
+
+cargo.rust_binary(
+    name = "wasm-bindgen-0.2-build-script-build",
+    srcs = [":wasm-bindgen-0.2.128.crate"],
+    crate = "build_script_build",
+    crate_root = "wasm-bindgen-0.2.128.crate/build.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Easy support for interacting between JS and Rust. ",
+        "CARGO_PKG_NAME": "wasm-bindgen",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    named_deps = {
+        "rustversion_compat": ":rustversion-1",
+    },
+    visibility = [],
+)
+
+buildscript_run(
+    name = "wasm-bindgen-0.2-build-script-run",
+    package_name = "wasm-bindgen",
+    buildscript_rule = ":wasm-bindgen-0.2-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Easy support for interacting between JS and Rust. ",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    version = "0.2.128",
+)
+
+alias(
+    name = "wasm-bindgen-futures",
+    actual = ":wasm-bindgen-futures-0.4",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "wasm-bindgen-futures-0.4.78.crate",
+    sha256 = "6ef4c5d3d2cdf5c54f4231181768f5510842e350db025faf1f7163b1030ed928",
+    size_bytes = 8291,
+    strip_prefix = "wasm-bindgen-futures-0.4.78",
+    urls = ["https://static.crates.io/crates/wasm-bindgen-futures/0.4.78/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-bindgen-futures-0.4",
+    srcs = [":wasm-bindgen-futures-0.4.78.crate"],
+    crate = "wasm_bindgen_futures",
+    crate_root = "wasm-bindgen-futures-0.4.78.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_bindgen_futures",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-futures-0.4.78.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Bridging the gap between Rust Futures and JavaScript Promises",
+        "CARGO_PKG_NAME": "wasm-bindgen-futures",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures",
+        "CARGO_PKG_VERSION": "0.4.78",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "78",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+    ],
+)
+
+http_archive(
+    name = "wasm-bindgen-macro-0.2.128.crate",
+    sha256 = "a690d511e3c1a8b3a55e33511e3c2c00c78415cd23650f32b808627f5696b9ed",
+    size_bytes = 9595,
+    strip_prefix = "wasm-bindgen-macro-0.2.128",
+    urls = ["https://static.crates.io/crates/wasm-bindgen-macro/0.2.128/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-bindgen-macro-0.2",
+    srcs = [":wasm-bindgen-macro-0.2.128.crate"],
+    crate = "wasm_bindgen_macro",
+    crate_root = "wasm-bindgen-macro-0.2.128.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_bindgen_macro",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-macro-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Definition of the `#[wasm_bindgen]` attribute, an internal dependency ",
+        "CARGO_PKG_NAME": "wasm-bindgen-macro",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":quote-1",
+        ":wasm-bindgen-macro-support-0.2",
+    ],
+)
+
+http_archive(
+    name = "wasm-bindgen-macro-support-0.2.128.crate",
+    sha256 = "411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a",
+    size_bytes = 118512,
+    strip_prefix = "wasm-bindgen-macro-support-0.2.128",
+    urls = ["https://static.crates.io/crates/wasm-bindgen-macro-support/0.2.128/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-bindgen-macro-support-0.2",
+    srcs = [":wasm-bindgen-macro-support-0.2.128.crate"],
+    crate = "wasm_bindgen_macro_support",
+    crate_root = "wasm-bindgen-macro-support-0.2.128.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_bindgen_macro_support",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-macro-support-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Implementation APIs for the `#[wasm_bindgen]` attribute",
+        "CARGO_PKG_NAME": "wasm-bindgen-macro-support",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":bumpalo-3",
+        ":proc-macro2-1",
+        ":quote-1",
+        ":syn-3",
+        ":wasm-bindgen-shared-0.2",
+    ],
+)
+
+http_archive(
+    name = "wasm-bindgen-shared-0.2.128.crate",
+    sha256 = "81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e",
+    size_bytes = 12994,
+    strip_prefix = "wasm-bindgen-shared-0.2.128",
+    urls = ["https://static.crates.io/crates/wasm-bindgen-shared/0.2.128/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-bindgen-shared-0.2",
+    srcs = [":wasm-bindgen-shared-0.2.128.crate"],
+    crate = "wasm_bindgen_shared",
+    crate_root = "wasm-bindgen-shared-0.2.128.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_bindgen_shared",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-shared-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Shared support between wasm-bindgen and wasm-bindgen cli, an internal dependency. ",
+        "CARGO_PKG_NAME": "wasm-bindgen-shared",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :wasm-bindgen-shared-0.2-build-script-run[out_dir])",
+    },
+    rustc_flags = ["@$(location :wasm-bindgen-shared-0.2-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [":unicode-ident-1"],
+)
+
+cargo.rust_binary(
+    name = "wasm-bindgen-shared-0.2-build-script-build",
+    srcs = [":wasm-bindgen-shared-0.2.128.crate"],
+    crate = "build_script_build",
+    crate_root = "wasm-bindgen-shared-0.2.128.crate/build.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "wasm-bindgen-shared-0.2.128.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Shared support between wasm-bindgen and wasm-bindgen cli, an internal dependency. ",
+        "CARGO_PKG_NAME": "wasm-bindgen-shared",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",
+        "CARGO_PKG_VERSION": "0.2.128",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+)
+
+buildscript_run(
+    name = "wasm-bindgen-shared-0.2-build-script-run",
+    package_name = "wasm-bindgen-shared",
+    buildscript_rule = ":wasm-bindgen-shared-0.2-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Shared support between wasm-bindgen and wasm-bindgen cli, an internal dependency. ",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "128",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    version = "0.2.128",
+)
+
+http_archive(
+    name = "wasm-streams-0.4.2.crate",
+    sha256 = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65",
+    size_bytes = 36773,
+    strip_prefix = "wasm-streams-0.4.2",
+    urls = ["https://static.crates.io/crates/wasm-streams/0.4.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-streams-0.4",
+    srcs = [":wasm-streams-0.4.2.crate"],
+    crate = "wasm_streams",
+    crate_root = "wasm-streams-0.4.2.crate/src/lib.rs",
+    dlopen_enable = True,
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_streams",
+        "CARGO_MANIFEST_DIR": "wasm-streams-0.4.2.crate",
+        "CARGO_PKG_AUTHORS": "Mattias Buelens <mattias@buelens.com>",
+        "CARGO_PKG_DESCRIPTION": "Bridging between web streams and Rust streams using WebAssembly ",
+        "CARGO_PKG_NAME": "wasm-streams",
+        "CARGO_PKG_REPOSITORY": "https://github.com/MattiasBuelens/wasm-streams/",
+        "CARGO_PKG_VERSION": "0.4.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":futures-util-0.3",
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+        ":wasm-bindgen-futures-0.4",
+        ":web-sys-0.3",
+    ],
+)
+
+http_archive(
+    name = "wasm-streams-0.5.0.crate",
+    sha256 = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb",
+    size_bytes = 37790,
+    strip_prefix = "wasm-streams-0.5.0",
+    urls = ["https://static.crates.io/crates/wasm-streams/0.5.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm-streams-0.5",
+    srcs = [":wasm-streams-0.5.0.crate"],
+    crate = "wasm_streams",
+    crate_root = "wasm-streams-0.5.0.crate/src/lib.rs",
+    dlopen_enable = True,
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_streams",
+        "CARGO_MANIFEST_DIR": "wasm-streams-0.5.0.crate",
+        "CARGO_PKG_AUTHORS": "Mattias Buelens <mattias@buelens.com>",
+        "CARGO_PKG_DESCRIPTION": "Bridging between web streams and Rust streams using WebAssembly ",
+        "CARGO_PKG_NAME": "wasm-streams",
+        "CARGO_PKG_REPOSITORY": "https://github.com/MattiasBuelens/wasm-streams/",
+        "CARGO_PKG_VERSION": "0.5.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":futures-util-0.3",
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+        ":wasm-bindgen-futures-0.4",
+        ":web-sys-0.3",
+    ],
+)
+
+http_archive(
+    name = "wasm_thread-0.3.3.crate",
+    sha256 = "b7516db7f32decdadb1c3b8deb1b7d78b9df7606c5cc2f6241737c2ab3a0258e",
+    size_bytes = 26870,
+    strip_prefix = "wasm_thread-0.3.3",
+    urls = ["https://static.crates.io/crates/wasm_thread/0.3.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wasm_thread-0.3",
+    srcs = [":wasm_thread-0.3.3.crate"],
+    crate = "wasm_thread",
+    crate_root = "wasm_thread-0.3.3.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "wasm_thread",
+        "CARGO_MANIFEST_DIR": "wasm_thread-0.3.3.crate",
+        "CARGO_PKG_AUTHORS": "Jurgis Balciunas <chemicstry@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "An std thread replacement for wasm32 target",
+        "CARGO_PKG_NAME": "wasm_thread",
+        "CARGO_PKG_REPOSITORY": "https://github.com/chemicstry/wasm_thread",
+        "CARGO_PKG_VERSION": "0.3.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "es_modules",
+    ],
+    visibility = [],
+    deps = [
+        ":futures-0.3",
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+        ":web-sys-0.3",
+    ],
+)
+
 http_archive(
     name = "wayland-backend-0.3.17.crate",
     sha256 = "38a91b4eaddff87b1cd1074985e3713da4af2c49742d1b356b2c01670a67a078",
@@ -47277,6 +49176,213 @@ cargo.rust_library(
 )
 
 alias(
+    name = "web-sys",
+    actual = ":web-sys-0.3",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "web-sys-0.3.105.crate",
+    sha256 = "9fbddc4a036f00ec4f18c83445bd3115cb306a91da554919a099d9222fe4a7f8",
+    size_bytes = 682289,
+    strip_prefix = "web-sys-0.3.105",
+    urls = ["https://static.crates.io/crates/web-sys/0.3.105/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "web-sys-0.3",
+    srcs = [":web-sys-0.3.105.crate"],
+    crate = "web_sys",
+    crate_root = "web-sys-0.3.105.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "web_sys",
+        "CARGO_MANIFEST_DIR": "web-sys-0.3.105.crate",
+        "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
+        "CARGO_PKG_DESCRIPTION": "Bindings for all Web APIs, a procedurally generated crate from WebIDL ",
+        "CARGO_PKG_NAME": "web-sys",
+        "CARGO_PKG_REPOSITORY": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys",
+        "CARGO_PKG_VERSION": "0.3.105",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "105",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "AbortController",
+        "AbortSignal",
+        "AddEventListenerOptions",
+        "AngleInstancedArrays",
+        "BinaryType",
+        "Blob",
+        "BlobPropertyBag",
+        "Clipboard",
+        "ClipboardEvent",
+        "ClipboardItem",
+        "CloseEvent",
+        "CompositionEvent",
+        "CssStyleDeclaration",
+        "DataTransfer",
+        "DataTransferItem",
+        "DataTransferItemList",
+        "DedicatedWorkerGlobalScope",
+        "Document",
+        "DocumentFragment",
+        "DomException",
+        "DomRect",
+        "DomRectReadOnly",
+        "DragEvent",
+        "Element",
+        "Event",
+        "EventListener",
+        "EventTarget",
+        "ExtBlendMinmax",
+        "ExtColorBufferFloat",
+        "ExtColorBufferHalfFloat",
+        "ExtDisjointTimerQuery",
+        "ExtFragDepth",
+        "ExtSRgb",
+        "ExtShaderTextureLod",
+        "ExtTextureFilterAnisotropic",
+        "File",
+        "FileList",
+        "FileReader",
+        "FocusEvent",
+        "FocusOptions",
+        "FormData",
+        "Headers",
+        "HtmlAnchorElement",
+        "HtmlButtonElement",
+        "HtmlCanvasElement",
+        "HtmlElement",
+        "HtmlImageElement",
+        "HtmlInputElement",
+        "HtmlMediaElement",
+        "HtmlTextAreaElement",
+        "HtmlVideoElement",
+        "IdleDeadline",
+        "IdleRequestOptions",
+        "ImageBitmap",
+        "ImageData",
+        "InputEvent",
+        "KeyboardEvent",
+        "Location",
+        "MediaQueryList",
+        "MediaQueryListEvent",
+        "MessageEvent",
+        "MouseEvent",
+        "Navigator",
+        "Node",
+        "NodeList",
+        "OesElementIndexUint",
+        "OesStandardDerivatives",
+        "OesTextureFloat",
+        "OesTextureFloatLinear",
+        "OesTextureHalfFloat",
+        "OesTextureHalfFloatLinear",
+        "OesVertexArrayObject",
+        "OffscreenCanvas",
+        "OffscreenCanvasRenderingContext2d",
+        "OvrMultiview2",
+        "Performance",
+        "PerformanceTiming",
+        "PointerEvent",
+        "QueuingStrategy",
+        "ReadableByteStreamController",
+        "ReadableStream",
+        "ReadableStreamByobReader",
+        "ReadableStreamByobRequest",
+        "ReadableStreamDefaultController",
+        "ReadableStreamDefaultReader",
+        "ReadableStreamGetReaderOptions",
+        "ReadableStreamReadResult",
+        "ReadableStreamReaderMode",
+        "ReadableStreamType",
+        "ReadableWritablePair",
+        "ReferrerPolicy",
+        "Request",
+        "RequestCache",
+        "RequestCredentials",
+        "RequestInit",
+        "RequestMode",
+        "RequestRedirect",
+        "ResizeObserver",
+        "ResizeObserverBoxOptions",
+        "ResizeObserverEntry",
+        "ResizeObserverOptions",
+        "ResizeObserverSize",
+        "Response",
+        "Screen",
+        "ServiceWorkerGlobalScope",
+        "ShadowRoot",
+        "Storage",
+        "StreamPipeOptions",
+        "TextMetrics",
+        "Touch",
+        "TouchEvent",
+        "TouchList",
+        "TransformStream",
+        "TransformStreamDefaultController",
+        "Transformer",
+        "UiEvent",
+        "UnderlyingSink",
+        "UnderlyingSource",
+        "Url",
+        "UserActivation",
+        "VideoFrame",
+        "VisualViewport",
+        "WebGl2RenderingContext",
+        "WebGlActiveInfo",
+        "WebGlBuffer",
+        "WebGlFramebuffer",
+        "WebGlProgram",
+        "WebGlQuery",
+        "WebGlRenderbuffer",
+        "WebGlRenderingContext",
+        "WebGlSampler",
+        "WebGlShader",
+        "WebGlShaderPrecisionFormat",
+        "WebGlSync",
+        "WebGlTexture",
+        "WebGlTransformFeedback",
+        "WebGlUniformLocation",
+        "WebGlVertexArrayObject",
+        "WebSocket",
+        "WebglColorBufferFloat",
+        "WebglCompressedTextureAstc",
+        "WebglCompressedTextureEtc",
+        "WebglCompressedTextureEtc1",
+        "WebglCompressedTexturePvrtc",
+        "WebglCompressedTextureS3tc",
+        "WebglCompressedTextureS3tcSrgb",
+        "WebglDebugRendererInfo",
+        "WebglDebugShaders",
+        "WebglDepthTexture",
+        "WebglDrawBuffers",
+        "WebglLoseContext",
+        "WheelEvent",
+        "Window",
+        "Worker",
+        "WorkerGlobalScope",
+        "WorkerNavigator",
+        "WorkerOptions",
+        "WorkerType",
+        "WritableStream",
+        "WritableStreamDefaultController",
+        "WritableStreamDefaultWriter",
+        "console",
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":js-sys-0.3",
+        ":wasm-bindgen-0.2",
+    ],
+)
+
+alias(
     name = "web-time",
     actual = ":web-time-1",
     visibility = ["PUBLIC"],
@@ -47311,6 +49417,15 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["serde"],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":serde-1",
+                ":wasm-bindgen-0.2",
+            ],
+        ),
+    },
     visibility = [],
 )
 
@@ -47478,6 +49593,16 @@ cargo.rust_library(
         "wgpu-core",
         "wgsl",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+                ":wasm-bindgen-futures-0.4",
+                ":web-sys-0.3",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :wgpu-29-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
@@ -47603,8 +49728,6 @@ cargo.rust_library(
         "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
-        "portable-atomic",
-        "renderdoc",
         "std",
         "vulkan",
         "webgl",
@@ -47612,15 +49735,31 @@ cargo.rust_library(
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
             deps = [":wgpu-core-deps-windows-linux-android-29"],
         ),
         "macos-arm64": dict(
-            features = ["wgpu-core-deps-apple"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
+            ],
             deps = [":wgpu-core-deps-apple-29"],
         ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
+            deps = [":wgpu-core-deps-wasm-29"],
+        ),
         "windows-msvc": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
             deps = [":wgpu-core-deps-windows-linux-android-29"],
         ),
     },
@@ -47675,8 +49814,6 @@ cargo.rust_binary(
         "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
-        "portable-atomic",
-        "renderdoc",
         "std",
         "vulkan",
         "webgl",
@@ -47684,13 +49821,28 @@ cargo.rust_binary(
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
         ),
         "macos-arm64": dict(
-            features = ["wgpu-core-deps-apple"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
         ),
         "windows-msvc": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
         ),
     },
     visibility = [],
@@ -47716,8 +49868,6 @@ buildscript_run(
         "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
-        "portable-atomic",
-        "renderdoc",
         "std",
         "vulkan",
         "webgl",
@@ -47725,13 +49875,28 @@ buildscript_run(
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
         ),
         "macos-arm64": dict(
-            features = ["wgpu-core-deps-apple"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
         ),
         "windows-msvc": dict(
-            features = ["wgpu-core-deps-windows-linux-android"],
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
         ),
     },
     version = "29.0.4",
@@ -47766,6 +49931,39 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["metal"],
+    visibility = [],
+    deps = [":wgpu-hal-29"],
+)
+
+http_archive(
+    name = "wgpu-core-deps-wasm-29.0.4.crate",
+    sha256 = "af1fb1798be2a912497d4c224f72d39bb0cb34af50e8bcc29865bc339c943059",
+    size_bytes = 10719,
+    strip_prefix = "wgpu-core-deps-wasm-29.0.4",
+    urls = ["https://static.crates.io/crates/wgpu-core-deps-wasm/29.0.4/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wgpu-core-deps-wasm-29",
+    srcs = [":wgpu-core-deps-wasm-29.0.4.crate"],
+    crate = "wgpu_core_deps_wasm",
+    crate_root = "wgpu-core-deps-wasm-29.0.4.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wgpu_core_deps_wasm",
+        "CARGO_MANIFEST_DIR": "wgpu-core-deps-wasm-29.0.4.crate",
+        "CARGO_PKG_AUTHORS": "gfx-rs developers",
+        "CARGO_PKG_DESCRIPTION": "Feature unification helper crate for the WebAssembly platform",
+        "CARGO_PKG_NAME": "wgpu-core-deps-wasm",
+        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
+        "CARGO_PKG_VERSION": "29.0.4",
+        "CARGO_PKG_VERSION_MAJOR": "29",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["webgl"],
     visibility = [],
     deps = [":wgpu-hal-29"],
 )
@@ -47837,15 +50035,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :wgpu-hal-29-build-script-run[out_dir])",
     },
-    features = [
-        "fragile-send-sync-non-atomic-wasm",
-        "portable-atomic",
-    ],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
@@ -47859,11 +50055,15 @@ cargo.rust_library(
                 ":libloading-0.8",
                 ":ordered-float-5",
                 ":renderdoc-sys-1",
+                ":smallvec-1",
                 ":wayland-sys-0.31",
             ],
         ),
         "macos-arm64": dict(
-            features = ["metal"],
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
             deps = [
                 ":block2-0.6",
                 ":libc-0.2",
@@ -47873,12 +50073,23 @@ cargo.rust_library(
                 ":objc2-metal-0.3",
                 ":objc2-quartz-core-0.3",
                 ":raw-window-metal-1",
+                ":smallvec-1",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
+            deps = [
+                ":glow-0.17",
+                ":js-sys-0.3",
+                ":wasm-bindgen-0.2",
+                ":web-sys-0.3",
             ],
         ),
         "windows-msvc": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
@@ -47895,6 +50106,7 @@ cargo.rust_library(
                 ":ordered-float-5",
                 ":range-alloc-0.1",
                 ":renderdoc-sys-1",
+                ":smallvec-1",
                 ":windows-0.62",
                 ":windows-core-0.62",
                 ":windows-result-0.4",
@@ -47914,7 +50126,6 @@ cargo.rust_library(
         ":parking_lot-0.12",
         ":profiling-1",
         ":raw-window-handle-0.6",
-        ":smallvec-1",
         ":thiserror-2",
         ":wgpu-naga-bridge-29",
         ":wgpu-types-29",
@@ -47940,26 +50151,31 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "fragile-send-sync-non-atomic-wasm",
-        "portable-atomic",
-    ],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
         ),
         "macos-arm64": dict(
-            features = ["metal"],
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
         ),
         "windows-msvc": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
@@ -47982,26 +50198,31 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "fragile-send-sync-non-atomic-wasm",
-        "portable-atomic",
-    ],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
         ),
         "macos-arm64": dict(
-            features = ["metal"],
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
         ),
         "windows-msvc": dict(
             features = [
                 "dx12",
                 "gles",
+                "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
@@ -48078,6 +50299,14 @@ cargo.rust_library(
         "std",
         "web",
     ],
+    platform = {
+        "wasm32": dict(
+            deps = [
+                ":js-sys-0.3",
+                ":web-sys-0.3",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":bitflags-2",
@@ -49738,6 +51967,51 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
+)
+
+http_archive(
+    name = "ws_stream_wasm-0.7.5.crate",
+    sha256 = "6c173014acad22e83f16403ee360115b38846fe754e735c5d9d3803fe70c6abc",
+    size_bytes = 30684,
+    strip_prefix = "ws_stream_wasm-0.7.5",
+    urls = ["https://static.crates.io/crates/ws_stream_wasm/0.7.5/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "ws_stream_wasm-0.7",
+    srcs = [":ws_stream_wasm-0.7.5.crate"],
+    crate = "ws_stream_wasm",
+    crate_root = "ws_stream_wasm-0.7.5.crate/src/lib.rs",
+    dlopen_enable = True,
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "ws_stream_wasm",
+        "CARGO_MANIFEST_DIR": "ws_stream_wasm-0.7.5.crate",
+        "CARGO_PKG_AUTHORS": "Naja Melan <najamelan@autistici.org>",
+        "CARGO_PKG_DESCRIPTION": "A convenience library for using websockets in WASM",
+        "CARGO_PKG_NAME": "ws_stream_wasm",
+        "CARGO_PKG_REPOSITORY": "https://github.com/najamelan/ws_stream_wasm",
+        "CARGO_PKG_VERSION": "0.7.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    rustc_flags = ["--cfg=stable"],
+    visibility = [],
+    deps = [
+        ":async_io_stream-0.3",
+        ":futures-0.3",
+        ":js-sys-0.3",
+        ":log-0.4",
+        ":pharos-0.5",
+        ":send_wrapper-0.6",
+        ":thiserror-2",
+        ":wasm-bindgen-0.2",
+        ":wasm-bindgen-futures-0.4",
+        ":web-sys-0.3",
+    ],
 )
 
 http_archive(

@@ -1,0 +1,5 @@
+# Needs tokio's fs, which the tokio fixup leaves out of wasm32.
+['cfg(target_arch = "wasm32")']
+omit_features = [
+    "fs",
+]

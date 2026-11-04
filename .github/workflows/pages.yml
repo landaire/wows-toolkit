@@ -42,30 +42,11 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
-      # Exports the devShell into GITHUB_ENV so rust-cache finds rustc on PATH
-      # and keys the cache on the toolchain the build actually uses. Pinned by
-      # sha: this action writes GITHUB_ENV and GITHUB_PATH for the whole job,
-      # so a hijacked floating tag could poison every later step.
-      - uses: nicknovitski/nix-develop@9be7cfb4b10451d3390a75dc18ad0465bed4932a # v1.2.1
-
-      # Use the release build cache to reduce compile time.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: wasm-release
-          save-if: "false"
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
 
       - name: Build wt-web WASM app
-        env:
-          # Release-mode wasm codegen at full runner parallelism exhausts the
-          # 16 GB hosted runner and it gets killed with no diagnostic.
-          CARGO_BUILD_JOBS: "2"
-          # The wasm name section is dead weight over the wire. Desktop builds
-          # keep their symbols so the panic hook's backtrace stays readable.
-          # Must match warm-release-cache.yml or the cached artifacts
-          # fingerprint differently and get rebuilt.
-          CARGO_PROFILE_RELEASE_STRIP: symbols
-        run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/
-        working-directory: crates/wt-web
+        run: nix develop --command buck2 build -m release //crates/wt-web:site --out _tactics
 
       - name: Check latest stable tag
         id: latest
@@ -87,11 +68,11 @@ jobs:
         run: |
           mkdir -p _deploy/tactics
           cp -r site/* _deploy/
-          if [ ! -f crates/wt-web/dist/index.html ]; then
-            echo "::error::The tactics build produced no output in crates/wt-web/dist."
+          if [ ! -f _tactics/index.html ]; then
+            echo "::error::The tactics build produced no index.html in _tactics."
             exit 1
           fi
-          cp -r crates/wt-web/dist/* _deploy/tactics/
+          cp -r _tactics/* _deploy/tactics/
 
       - name: Setup Pages
         if: steps.latest.outputs.is_latest == 'true'

@@ -3,12 +3,11 @@
 #
 # Release-mode wasm codegen of wt-web runs cross-crate ThinLTO over the whole
 # egui/eframe/wgpu graph in a single rustc, and its peak exceeds the 16 GB of a
-# hosted runner. The runner is reclaimed with exit 143 and no diagnostic, which
-# also skips post-steps, so the rust-cache is never written either.
+# hosted runner. The runner is reclaimed with exit 143 and no diagnostic.
 #
-# Capping cargo's jobserver does not help: the peak is one process, not several.
-# Swap absorbs it without changing the profile, so the deployed artifact stays
-# byte-for-byte what the release profile produces.
+# Capping Buck's parallelism does not help: the peak is one process, not
+# several. Swap absorbs it without changing the profile, so the deployed
+# artifact stays byte-for-byte what the release profile produces.
 set -euo pipefail
 
 # Gigabytes. mkswap reserves a header, and `free -g` truncates, so the check

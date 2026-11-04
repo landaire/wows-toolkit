@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "wasm_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "minimap-renderer-buildscript",
@@ -70,13 +70,24 @@ MINIMAP_FEATURES = MINIMAP_CPU_FEATURES + os_select(
     windows = ["vulkan"],
 )
 
+# What Cargo resolves for wt-web: the replay data types, no rendering.
+MINIMAP_WASM_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:serde",
+    "//third-party/rust:tracing",
+]
+
 workspace_library(
     name = "wows_minimap_renderer",
     crate = "wows_minimap_renderer",
     package = "wows_minimap_renderer",
     version = "0.40.0",
-    features = MINIMAP_FEATURES,
-    deps = MINIMAP_DEPS,
+    features = wasm_select(wasm = ["rkyv"], native = MINIMAP_FEATURES),
+    deps = wasm_select(wasm = MINIMAP_WASM_DEPS, native = MINIMAP_DEPS),
     buildscript = buildscript,
 )
 

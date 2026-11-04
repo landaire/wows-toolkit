@@ -36,6 +36,18 @@ def os_select(macos, linux, windows):
         "config//os/constraints:windows": windows,
     })
 
+def wasm_select(wasm, native):
+    """Select a value for wasm32 (wt-web's target) or any native target.
+
+    A wasm32 build carries the features and dependencies Cargo resolves for
+    `cargo build -p wt-web --target wasm32-unknown-unknown`, which are not the
+    ones the desktop applications ask for.
+    """
+    return select({
+        "config//cpu/constraints:wasm32": wasm,
+        "DEFAULT": native,
+    })
+
 def _profile_rustc_flags():
     """Profile flags that apply to a final artifact rather than an rlib.
 
@@ -93,12 +105,17 @@ def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDIT
     )
     return run_name
 
-def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = []):
+def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], incoming_transition = None, target_compatible_with = []):
     env = _cargo_env(crate, package, version)
-    rustc_flags = []
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
-        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
+        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
+
+    kwargs = {}
+    if incoming_transition != None:
+        kwargs["incoming_transition"] = incoming_transition
+    if target_compatible_with:
+        kwargs["target_compatible_with"] = target_compatible_with
 
     # native.rust_library, not cargo.rust_library: the cargo wrappers exist for
     # reindeer's vendored crates and prepend --cap-lints=allow, which silently
@@ -116,6 +133,7 @@ def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION,
         resources = resources,
         visibility = ["PUBLIC"],
         deps = deps,
+        **kwargs
     )
 
 def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = [], run_env = {}, incoming_transition = None):

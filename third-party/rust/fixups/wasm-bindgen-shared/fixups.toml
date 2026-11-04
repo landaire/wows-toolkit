@@ -1,0 +1,3 @@
+# Hashes the crate's schema sources into SCHEMA_FILE_HASH, which the
+# wasm-bindgen CLI checks the module against.
+buildscript.run = true

@@ -1,0 +1,69 @@
+load("//build-support/buck:wasm_rules.bzl", "wasm_site", "wasm_target_compatible_with")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+# Built for wasm32 only, from whatever platform it is asked for, so the lint
+# checks the browser build too.
+workspace_library(
+    name = "wt_web",
+    crate = "wt_web",
+    package = "wt-web",
+    version = "1.1.0-beta1",
+    incoming_transition = "//build-support/buck/wasm:transition",
+    target_compatible_with = wasm_target_compatible_with(),
+    # Cargo's [profile.release] links with thin LTO. The name section is dead
+    # weight over the wire, and nothing reads a backtrace out of the module.
+    rustc_flags = select({
+        "toolchains//:release": ["-Clto=thin", "-Cstrip=symbols"],
+        "DEFAULT": [],
+    }),
+    deps = [
+        "//crates/minimap-renderer:wows_minimap_renderer",
+        "//crates/wt-collab-egui:wt_collab_egui",
+        "//crates/wt-collab-protocol:wt_collab_protocol",
+        "//crates/wt-translations:wt_translations",
+        "//third-party/rust:eframe",
+        "//third-party/rust:egui",
+        "//third-party/rust:egui-phosphor",
+        "//third-party/rust:egui_dock",
+        "//third-party/rust:getrandom",
+        "//third-party/rust:iroh",
+        "//third-party/rust:js-sys",
+        "//third-party/rust:png",
+        "//third-party/rust:rand",
+        "//third-party/rust:ring",
+        "//third-party/rust:rust-i18n",
+        "//third-party/rust:tracing",
+        "//third-party/rust:tracing-subscriber",
+        "//third-party/rust:tracing-wasm",
+        "//third-party/rust:wasm-bindgen",
+        "//third-party/rust:wasm-bindgen-futures",
+        "//third-party/rust:web-sys",
+        "//third-party/rust:web-time",
+        "//third-party/rust:wgpu",
+    ],
+)
+
+# The tactics board as GitHub Pages serves it.
+wasm_site(
+    name = "site",
+    index = "index.html",
+    module = ":wt_web[cdylib]",
+    out_name = "wt-web",
+    public_url = "/wows-toolkit/tactics/",
+    target_compatible_with = wasm_target_compatible_with(),
+    visibility = ["PUBLIC"],
+    # wasm-bindgen drops the target_features section, so wasm-opt cannot see
+    # which proposals the module uses and its validator rejects them. These are
+    # exactly the six that rustc enables by default for wasm32-unknown-unknown
+    # (rustc --print cfg --target wasm32-unknown-unknown), not a blanket
+    # --all-features.
+    wasm_opt_flags = [
+        "-O2",
+        "--enable-bulk-memory",
+        "--enable-multivalue",
+        "--enable-mutable-globals",
+        "--enable-nontrapping-float-to-int",
+        "--enable-reference-types",
+        "--enable-sign-ext",
+    ],
+)

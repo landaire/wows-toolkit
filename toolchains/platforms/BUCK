@@ -21,3 +21,14 @@ alias(
     actual = "//windows:windows_x86_64_msvc",
     visibility = ["PUBLIC"],
 )
+
+# wt-web's browser target. Nothing builds for it by default: wasm targets reach
+# it through //build-support/buck/wasm:transition.
+platform(
+    name = "wasm32",
+    constraint_values = [
+        "config//os/constraints:none",
+        "config//cpu/constraints:wasm32",
+    ],
+    visibility = ["PUBLIC"],
+)

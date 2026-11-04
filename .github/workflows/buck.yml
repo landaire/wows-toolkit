@@ -28,6 +28,13 @@ jobs:
         phase: [checks, release, graph-tests]
     steps:
       - uses: actions/checkout@v4
+
+      # The wt-web site's release link runs ThinLTO over the whole wasm graph
+      # in one rustc, which outgrows the runner's 16 GB on its own.
+      - name: Expand runner swap
+        if: matrix.phase == 'release'
+        run: bash scripts/expand-runner-swap.sh 16
+
       - uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
@@ -91,10 +98,15 @@ jobs:
         run: ./bootstrap.sh
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
-      # graph itself is already covered there in both modes.
+      # graph itself is already covered there in both modes. The tactics site is
+      # host-independent, and its release link needs more memory than this
+      # runner has, so only Linux builds it.
       - name: Build every alias
         run: |
-          nix develop --command buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $ALIASES
+          nix develop --command bash -euo pipefail -c '
+            aliases=$(buck2 uquery "$ALIASES - root//:wt_web_site")
+            buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $aliases
+          '
 
 # Windows is absent as a CI job. It builds and releases from the graph, but
 # provisioning mirrors a multi-GB Visual Studio layout on every run because

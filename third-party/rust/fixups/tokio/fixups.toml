@@ -1,0 +1,19 @@
+# The Buck graph unifies features across the whole workspace, so wasm32 would
+# inherit what the desktop crates ask for. tokio supports only these on wasm32,
+# which is all Cargo enables for wt-web.
+['cfg(target_arch = "wasm32")']
+omit_features = [
+    "fs",
+    "full",
+    "io-std",
+    "libc",
+    "mio",
+    "net",
+    "parking_lot",
+    "process",
+    "rt-multi-thread",
+    "signal",
+    "signal-hook-registry",
+    "socket2",
+    "test-util",
+]

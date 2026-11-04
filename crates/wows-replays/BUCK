@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "wasm_select", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows-replays-buildscript",
@@ -33,14 +33,24 @@ REPLAYS_TEST_DEPS = [
     "//third-party/rust:sha2",
 ]
 
+# What Cargo resolves for wt-web, which enables no feature.
+REPLAYS_WASM_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:flate2",
+    "//third-party/rust:kinded",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
 workspace_library(
     name = "wows_replays",
     crate = "wows_replays",
     package = "wows_replays",
     version = "0.47.0",
-    features = REPLAYS_FEATURES,
+    features = wasm_select(wasm = [], native = REPLAYS_FEATURES),
     buildscript = buildscript,
-    deps = REPLAYS_DEPS,
+    deps = wasm_select(wasm = REPLAYS_WASM_DEPS, native = REPLAYS_DEPS),
 )
 
 workspace_test(

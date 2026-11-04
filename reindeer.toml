@@ -38,3 +38,8 @@ target = "x86_64-unknown-linux-gnu"
 
 [platform.windows-msvc]
 target = "x86_64-pc-windows-msvc"
+
+# Only wt-web builds for it. The prelude maps `prelude//os:none` with
+# `prelude//cpu:wasm32` to this name.
+[platform.wasm32]
+target = "wasm32-unknown-unknown"

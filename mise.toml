@@ -57,7 +57,7 @@ description = "Runs the unit and integration tests through Buck"
 run = "buck2 test root//crates/..."
 
 [tasks.fix-all]
-description = "Autofixes with Cargo, lints through Buck, checks WASM, then formats"
+description = "Autofixes with Cargo, lints through Buck, then formats"
 run = [
     # Buck has no autofix, so this stays on Cargo. --allow-staged because jj
     # has no index of its own and anything in git's aborts the fix.
@@ -68,17 +68,14 @@ run = [
     # default-feature crate list here used to approximate: --all-features hides
     # feature-gated dead code, and no single Cargo invocation sees both. It
     # covers the rust_test targets too, so #[cfg(test)] modules are linted;
-    # benches and examples are not modelled in the graph and only rust.yml's
-    # --all-targets pass sees them.
+    # benches and examples are not modelled in the graph and only cargo-lint's
+    # --all-targets pass sees them. wt-web is linted as built for wasm32.
     "nu scripts/lint.nu clippy",
-    # Still Cargo: the Buck graph has no wasm32 platform yet, and wt-web has no
-    # BUCK file. Needs clang, which `mise run setup` provisions.
-    "cargo check -p wt-web --target wasm32-unknown-unknown",
 ]
 depends_post = ["fmt"]
 
 # Cargo equivalents. Faster to iterate with, and the only way to reach what the
-# Buck graph does not cover: autofix, the wasm32 target, and doctests.
+# Buck graph does not cover: autofix and doctests.
 
 [tasks.cargo-build]
 description = "Cargo: builds the workspace"

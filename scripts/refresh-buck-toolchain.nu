@@ -30,6 +30,12 @@ let required = [
     "rustdoc"
     "rustfmt"
     "strip"
+    # wt-web: its C compiler, linker and archiver, then the site's tools.
+    "wasm32-unknown-unknown-clang"
+    "wasm-ld"
+    "llvm-ar"
+    "wasm-bindgen"
+    "wasm-opt"
 ]
 
 for tool in $required {

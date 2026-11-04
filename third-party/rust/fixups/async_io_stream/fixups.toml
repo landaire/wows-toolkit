@@ -1,0 +1,4 @@
+# The build script asks rustc_version for the release channel. The pinned
+# toolchain is stable.
+buildscript.run = false
+cfgs = ["stable"]

@@ -112,3 +112,28 @@ preferred_linkage = "static"
 [['cfg(all(version = "=0.17.14", target_arch = "x86_64", target_os = "windows"))'.prebuilt_cxx_library]]
 name = "ring-asm-windows-x86_84"
 static_libs = ["pregenerated/*x86_64*-nasm.o"]
+
+# The portable C that ring's build script compiles for wasm32, with the flags
+# it adds there: no libc headers, so check.h emulates assert, and NDEBUG as for
+# any build from a published crate.
+[['cfg(all(version = "=0.17.14", target_arch = "wasm32"))'.cxx_library]]
+name = "ring-c-wasm32"
+srcs = [
+    "crypto/curve25519/curve25519.c",
+    "crypto/fipsmodule/aes/aes_nohw.c",
+    "crypto/fipsmodule/bn/montgomery.c",
+    "crypto/fipsmodule/bn/montgomery_inv.c",
+    "crypto/fipsmodule/ec/ecp_nistz.c",
+    "crypto/fipsmodule/ec/gfp_p256.c",
+    "crypto/fipsmodule/ec/gfp_p384.c",
+    "crypto/fipsmodule/ec/p256.c",
+    "crypto/limbs/limbs.c",
+    "crypto/mem.c",
+    "crypto/poly1305/poly1305.c",
+]
+headers = ["include/**/*.h", "crypto/**/*.h", "third_party/**/*.h", "crypto/**/*.inl"]
+include_paths = ["include"]
+fixup_include_paths = ["include"]
+compiler_flags = ["-Wno-error", "-fvisibility=hidden", "-nostdlibinc"]
+preprocessor_flags = ["-DRING_CORE_NOSTDLIBINC=1", "-DNDEBUG"]
+preferred_linkage = "static"

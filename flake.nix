@@ -84,6 +84,21 @@
 
       # Build workspace deps once, share across packages
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+      # The CLI refuses a module built against any other wasm-bindgen crate
+      # version, so this tracks the one Cargo.lock pins.
+      wasmBindgenCli = pkgs.buildWasmBindgenCli rec {
+        src = pkgs.fetchCrate {
+          pname = "wasm-bindgen-cli";
+          version = "0.2.128";
+          hash = "sha256-a7lcXJnnZkYReja+iUO7NqqrWyv3toxnUgQb8s4IS5s=";
+        };
+        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+          inherit src;
+          inherit (src) pname version;
+          hash = "sha256-R1Tas33Ursy8kqsxguAkG0ZhNed2n5uFTAhw1l2qlLY=";
+        };
+      };
     in
       with pkgs; {
         packages = let
@@ -160,7 +175,16 @@
               unzip
               xz
               zstd
+              # wt-web's site: wasm-bindgen and wasm-opt.
+              wasmBindgenCli
+              binaryen
             ];
+            # The wrapper's hardening flags (e.g. -fzero-call-used-regs) are
+            # invalid for wasm32, so C compiled for wt-web uses the unwrapped
+            # clang. The target prefix in the name selects wasm32 by default.
+            postBuild = ''
+              ln -s ${llvmPackages.clang-unwrapped}/bin/clang $out/bin/wasm32-unknown-unknown-clang
+            '';
           };
 
           wowsunpack = craneLib.buildPackage (commonArgs
@@ -211,7 +235,6 @@
 
               # Development tools
               depotdownloader
-              trunk
               mise
               cargo-edit
               cargo-local-registry

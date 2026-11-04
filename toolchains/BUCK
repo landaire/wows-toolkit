@@ -1,4 +1,4 @@
-load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "selected_toolchain")
+load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_wasm_tools", "selected_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 
 nix_cxx_toolchain(
@@ -10,6 +10,12 @@ nix_cxx_toolchain(
 nix_cxx_toolchain(
     name = "nix_cxx_linux",
     os = "linux",
+    visibility = ["PUBLIC"],
+)
+
+nix_cxx_toolchain(
+    name = "nix_cxx_wasm32",
+    os = "none",
     visibility = ["PUBLIC"],
 )
 
@@ -35,6 +41,11 @@ local_remote_test_execution_toolchain(
     visibility = ["PUBLIC"],
 )
 
+nix_wasm_tools(
+    name = "wasm_tools",
+    visibility = ["PUBLIC"],
+)
+
 hermetic_rust_toolchain(
     name = "nix_rust_macos",
     default_edition = "2024",
@@ -49,12 +60,21 @@ hermetic_rust_toolchain(
     visibility = ["PUBLIC"],
 )
 
+hermetic_rust_toolchain(
+    name = "nix_rust_wasm32",
+    default_edition = "2024",
+    rustc_target_triple = "wasm32-unknown-unknown",
+    visibility = ["PUBLIC"],
+)
+
 selected_toolchain(
     name = "cxx",
     actual = select({
         "config//os/constraints:linux": ":nix_cxx_linux",
         "config//os/constraints:macos": ":nix_cxx_macos",
         "config//os/constraints:windows": "//windows:cxx",
+        # wt-web. The Nix toolchain builds it, so it needs a Linux or macOS host.
+        "config//cpu/constraints:wasm32": ":nix_cxx_wasm32",
     }),
     visibility = ["PUBLIC"],
 )
@@ -65,6 +85,7 @@ selected_toolchain(
         "config//os/constraints:linux": ":nix_rust_linux",
         "config//os/constraints:macos": ":nix_rust_macos",
         "config//os/constraints:windows": "//windows:rust",
+        "config//cpu/constraints:wasm32": ":nix_rust_wasm32",
     }),
     visibility = ["PUBLIC"],
 )

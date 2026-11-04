@@ -108,7 +108,7 @@ buck2 build //:wows_toolkit?release
 
 `-m release` does the same for every target on the command line, which is the form queries take (`buck2 aquery -m release ...`).
 
-Aliases: `wows_toolkit`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`. `buck2 build root//:` builds all of them.
+Aliases: `wows_toolkit`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`, `wt_web_site`. `buck2 build root//:` builds all of them.
 
 The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). `build-support/release-tools.json` holds that mapping and `scripts/package-tools.*` checks the finished archive against it.
 
@@ -119,6 +119,17 @@ buck2 build --target-platforms toolchains//platforms:linux_x86_64 //:wgcheck
 ```
 
 Platforms are `toolchains//platforms:linux_x86_64`, `:macos_arm64`, and `:windows_x86_64_msvc`.
+
+### The tactics web client
+
+`wt-web` builds for `wasm32-unknown-unknown` whatever platform you ask for, so it needs a Linux or macOS host with the Nix toolchain. `//:wt_web_site` is the directory GitHub Pages serves under `/wows-toolkit/tactics/`:
+
+```bash
+buck2 build -m release //:wt_web_site --out /tmp/site/wows-toolkit/tactics
+python3 -m http.server -d /tmp/site
+```
+
+Then open <http://localhost:8000/wows-toolkit/tactics/>. Asset names carry a hash of their contents, so a deploy never serves a stale module. A debug build skips `wasm-opt`.
 
 ### Desktop release channels
 
@@ -200,6 +211,8 @@ Two things that will bite:
 
 A build script's `rustc_link_search` does not reach the final link under Buck, only that crate's own compile. If a crate links a bundled import library by bare name, the search path will not be enough; `windows-targets` is handled by building it with `windows_raw_dylib` instead.
 
+The third-party graph resolves features once per platform across the whole workspace, so on `wasm32` it inherits what the desktop crates ask for, not only what `wt-web` needs. When that pulls in something that cannot build for the browser, drop the feature for wasm32 only with a `['cfg(target_arch = "wasm32")']` section holding `omit_features`. See `tokio` and `hyper-util`.
+
 ### First-party platform-specific dependencies
 
 Cargo resolves `[target.'cfg(...)'.dependencies]` on its own. Buck does not. A `cfg(windows)` or `cfg(target_os = "macos")` dependency section in a crate's `Cargo.toml` has to be mirrored in its `BUCK` file with `os_select`, or the crate builds everywhere except the platform that needs it:
@@ -212,7 +225,7 @@ Cargo resolves `[target.'cfg(...)'.dependencies]` on its own. Buck does not. A `
 )
 ```
 
-The same applies to features that are only valid on one platform. `crates/minimap-renderer/BUCK` and `crates/wows-toolkit/BUCK` are the examples.
+The same applies to features that are only valid on one platform. `crates/minimap-renderer/BUCK` and `crates/wows-toolkit/BUCK` are the examples. A library that `wt-web` reaches carries the features Cargo resolves for `wasm32` through `wasm_select`; see `crates/wowsunpack/BUCK`.
 
 ### Re-vendoring the prelude
 
@@ -353,6 +366,8 @@ CI runs only buck2 commands (`.github/workflows/buck.yml`), after `./bootstrap.s
 - `buck2 run //ci:graph_tests`: the build-graph tests.
 
 Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
+
+`.github/workflows/pages.yml` deploys `//crates/wt-web:site` with the rest of `site/` on each stable tag.
 
 Release builds (`.github/workflows/build.yml`) run on GitHub release creation and produce:
 
