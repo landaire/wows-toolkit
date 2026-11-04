@@ -18,10 +18,10 @@
     },
     {
       "name": "windows_sdk",
-      "url": "https://download.microsoft.com/download/dba6f26e-0fb0-43bd-be9a-e3e24becb4a3/26100.8249.260414-1640.ge_release_svc_im_WindowsSDK.iso",
-      "sha256": "239d1505a6e739ba0a64712008198136186013d4b68c86389afe96112076b9dd",
-      "path": "archives/windows-sdk-10.0.26100.8249.iso",
-      "version": "10.0.26100.8249",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/26100.9457.260912-0409.ge_release_svc_im_WindowsSDK.iso",
+      "sha256": "a364f38f35a2ade85ca676361643276b87ec494b103988ae20d7cbbdf94523ad",
+      "path": "archives/windows-sdk-10.0.26100.9457.iso",
+      "version": "10.0.26100.9457",
       "install_path": "WindowsKits/10"
     },
     {
@@ -105,15 +105,15 @@
     },
     "rc": {
       "path": "WindowsKits/10/bin/10.0.26100.0/x64/rc.exe",
-      "version": "10.0.26100.8249 (WinBuild.160101.0800)"
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
     },
     "fxc": {
       "path": "WindowsKits/10/bin/10.0.26100.0/x64/fxc.exe",
-      "version": "10.0.26100.8249 (WinBuild.160101.0800)"
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
     },
     "midl": {
       "path": "WindowsKits/10/bin/10.0.26100.0/x64/midl.exe",
-      "version": "10.0.26100.8249 (WinBuild.160101.0800)"
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
     },
     "rustc": {
       "path": "Rust/1.97.1/Rust/bin/rustc.exe",
