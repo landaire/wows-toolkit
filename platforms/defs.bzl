@@ -9,6 +9,8 @@ def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
     constraints = dict()
     constraints.update(ctx.attrs.cpu_configuration[ConfigurationInfo].constraints)
     constraints.update(ctx.attrs.os_configuration[ConfigurationInfo].constraints)
+    mode = ctx.attrs.build_mode[ConstraintValueInfo]
+    constraints[mode.setting.label] = mode
     cfg = ConfigurationInfo(constraints = constraints, values = {})
 
     name = ctx.label.raw_target()
@@ -28,20 +30,36 @@ def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
         DefaultInfo(),
         platform,
         PlatformInfo(label = str(name), configuration = cfg),
-        ExecutionPlatformRegistrationInfo(
-            platforms = [platform],
-            exec_marker_constraint = get_exec_platform_marker(),
-        ),
     ]
 
+# One platform per build mode, because a build script or proc macro is built in
+# its execution platform's configuration, not its dependent's. Cargo builds
+# them without debug assertions in release, and some build scripts read that
+# (gpui's Windows backend compiles its shaders only then). The Rust and C++
+# toolchains require the platform whose mode matches the target's.
 execution_platform = rule(
     impl = _execution_platform_impl,
     attrs = {
+        "build_mode": attrs.dep(providers = [ConstraintValueInfo]),
         "cpu_configuration": attrs.dep(providers = [ConfigurationInfo]),
         "os_configuration": attrs.dep(providers = [ConfigurationInfo]),
         "remote_cache_enabled": attrs.bool(),
         "use_windows_path_separators": attrs.bool(),
     },
+)
+
+def _execution_platforms_impl(ctx: AnalysisContext) -> list[Provider]:
+    return [
+        DefaultInfo(),
+        ExecutionPlatformRegistrationInfo(
+            platforms = [p[ExecutionPlatformInfo] for p in ctx.attrs.platforms],
+            exec_marker_constraint = get_exec_platform_marker(),
+        ),
+    ]
+
+execution_platforms = rule(
+    impl = _execution_platforms_impl,
+    attrs = {"platforms": attrs.list(attrs.dep(providers = [ExecutionPlatformInfo]))},
 )
 
 def _host_cpu_configuration() -> str:

@@ -1,6 +1,5 @@
 load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "selected_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
-load(":native_build_mode.bzl", "native_build_mode_transition")
 
 nix_cxx_toolchain(
     name = "nix_cxx_macos",
@@ -70,6 +69,8 @@ selected_toolchain(
     visibility = ["PUBLIC"],
 )
 
+# The build mode, set by the `debug` and `release` modifiers (see the root
+# PACKAGE). A configuration without either builds debug.
 constraint_setting(
     name = "native_build_mode",
     visibility = ["PUBLIC"],
@@ -84,17 +85,5 @@ constraint_value(
 constraint_value(
     name = "release",
     constraint_setting = ":native_build_mode",
-    visibility = ["PUBLIC"],
-)
-
-native_build_mode_transition(
-    name = "debug_transition",
-    constraint_value = ":debug",
-    visibility = ["PUBLIC"],
-)
-
-native_build_mode_transition(
-    name = "release_transition",
-    constraint_value = ":release",
     visibility = ["PUBLIC"],
 )

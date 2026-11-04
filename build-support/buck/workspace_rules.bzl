@@ -1,5 +1,4 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
-load("@prelude//rust/buildscript:buildscript_platform.bzl", "transition_alias")
 
 # Every crate but wgcheck is on the workspace edition; a crate that pins its own
 # has to say so here too, because the Rust rules cannot read Cargo.toml.
@@ -37,12 +36,6 @@ def os_select(macos, linux, windows):
         "config//os/constraints:windows": windows,
     })
 
-def _native_build_mode():
-    mode = read_config("native_build", "mode", "debug")
-    if mode not in ["debug", "release"]:
-        fail("native_build.mode must be debug or release, got {}".format(mode))
-    return mode
-
 def _profile_rustc_flags():
     """Profile flags that apply to a final artifact rather than an rlib.
 
@@ -53,16 +46,18 @@ def _profile_rustc_flags():
     Omitting it entirely is what made Buck release binaries 25 to 40 percent
     larger than the Cargo ones they replaced.
     """
-    if _native_build_mode() == "release":
-        return ["-Clto=thin"]
-    return []
+    return select({
+        "toolchains//:release": ["-Clto=thin"],
+        "DEFAULT": [],
+    })
 
 def native_binary_alias(name, actual):
-    mode = _native_build_mode()
-    transition_alias(
+    # The build mode comes from the configuration: `?release` on the command
+    # line selects release, and no modifier is debug.
+    native.alias(
         name = name,
         actual = actual,
-        incoming_transition = "toolchains//:{}_transition".format(mode),
+        visibility = ["PUBLIC"],
     )
 
 def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDITION, deps = [], env = {}, srcs = None, rustc_flags = []):

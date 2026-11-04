@@ -52,7 +52,7 @@ jobs:
 
       - name: Build every alias in release mode
         if: matrix.phase == 'release'
-        run: nix develop --command buck2 build -c native_build.mode=release $ALIASES
+        run: nix develop --command buck2 build -m release $ALIASES
 
       - name: Check the action graph is hermetic
         if: matrix.phase == 'checks'
@@ -102,7 +102,7 @@ jobs:
       # graph itself is already covered there in both modes.
       - name: Build every alias
         run: |
-          nix develop --command buck2 build -c native_build.mode=release --target-platforms toolchains//platforms:macos_arm64 $ALIASES
+          nix develop --command buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $ALIASES
 
 # Windows is absent as a CI job. It builds and releases from the graph, but
 # provisioning mirrors a multi-GB Visual Studio layout on every run because

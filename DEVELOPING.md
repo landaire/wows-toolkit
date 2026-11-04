@@ -88,12 +88,14 @@ No crate source is committed. Buck downloads each registry crate and checks it a
 
 ### Building
 
-Builds default to debug.
+Builds default to debug. The `release` configuration modifier builds release:
 
 ```bash
 buck2 build //:wows_toolkit
-buck2 build -c native_build.mode=release //:wows_toolkit
+buck2 build //:wows_toolkit?release
 ```
+
+`-m release` does the same for every target on the command line, which is the form queries take (`buck2 aquery -m release ...`).
 
 Aliases: `wows_toolkit`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`. `buck2 build root//:` builds all of them.
 
@@ -121,7 +123,7 @@ same numeric version replace each other in either direction, including beta
 and stable builds.
 
 For a local Buck beta installer, use
-`buck2 build -c native_build.mode=release -c release.frontend=gpui toolchains//windows:wows_toolkit_msi`.
+`buck2 build -m release -c release.frontend=gpui toolchains//windows:wows_toolkit_msi`.
 The Cargo installer script, `scripts/build-msi.ps1`, selects the frontend from
 the workspace version and stages it under the installed executable name.
 

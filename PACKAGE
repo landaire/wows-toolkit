@@ -1,0 +1,15 @@
+load("@prelude//cfg/modifier:cfg_constructor.bzl", "cfg_constructor_post_constraint_analysis", "cfg_constructor_pre_constraint_analysis")
+load("@prelude//cfg/modifier:common.bzl", "MODIFIER_METADATA_KEY")
+
+# Build modes are configuration modifiers: `buck2 build //:wows_toolkit?release`
+# builds release, and no modifier builds debug.
+native.set_cfg_constructor(
+    stage0 = cfg_constructor_pre_constraint_analysis,
+    stage1 = cfg_constructor_post_constraint_analysis,
+    key = MODIFIER_METADATA_KEY,
+    aliases = struct(
+        debug = "toolchains//:debug",
+        release = "toolchains//:release",
+    ),
+    extra_data = struct(),
+)

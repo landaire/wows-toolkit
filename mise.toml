@@ -38,7 +38,7 @@ run = "buck2 build root//:"
 
 [tasks.build-release]
 description = "Builds every shipped binary through Buck in release mode"
-run = "buck2 build -c native_build.mode=release root//:"
+run = "buck2 build -m release root//:"
 
 [tasks.lint]
 description = "Lints the first-party Rust graph through Buck (clippy and rustfmt)"

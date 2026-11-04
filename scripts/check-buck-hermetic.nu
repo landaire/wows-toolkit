@@ -21,7 +21,7 @@ def main [target: string, native_build_mode = "debug"] {
 
     let query = $"all_actions\(deps\(($target)))"
     let actions = if $native_build_mode == "release" {
-        ^buck2 aquery -c native_build.mode=release $query --output-all-attributes
+        ^buck2 aquery -m release $query --output-all-attributes
     } else {
         ^buck2 aquery $query --output-all-attributes
     }

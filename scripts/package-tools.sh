@@ -32,7 +32,7 @@ for tool in spec["tools"]:
     print(tool["target"])
 ' "$spec")
 
-outputs_json=$("$@" build -c native_build.mode=release --show-json-output "${targets[@]}")
+outputs_json=$("$@" build -m release --show-json-output "${targets[@]}")
 
 rm -rf artifacts "$zip_name"
 mkdir -p artifacts

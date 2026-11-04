@@ -29,11 +29,10 @@ def _toolchain_root():
 def _tool(name):
     return RunInfo(args = [_toolchain_root() + "/bin/" + name])
 
-def _native_build_mode():
-    mode = read_root_config("native_build", "mode", "debug")
-    if mode not in ["debug", "release"]:
-        fail("native_build.mode must be debug or release, got {}".format(mode))
-    return mode
+# The build mode is the `toolchains//:native_build_mode` constraint, which the
+# `release` modifier sets (`buck2 build //:wows_toolkit?release`). Debug is the
+# configuration without it.
+_RELEASE = "toolchains//:release"
 
 # How much debug info a debug build carries. Release never carries any. CI reads
 # nothing out of the artifacts it builds, and full debug info is what makes
@@ -57,14 +56,16 @@ def _debug_debuginfo():
     return level
 
 def _rustc_flags():
-    if _native_build_mode() == "release":
-        return ["-Copt-level=3", "-Cdebuginfo=0"]
-    return ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()]
+    return select({
+        _RELEASE: ["-Copt-level=3", "-Cdebuginfo=0"],
+        "DEFAULT": ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()],
+    })
 
 def _cxx_compiler_flags():
-    if _native_build_mode() == "release":
-        return ["-O3"]
-    return ["-O0", "-g"]
+    return select({
+        _RELEASE: ["-O3"],
+        "DEFAULT": ["-O0", "-g"],
+    })
 
 def _hermetic_tool(name):
     path = read_root_config("hermetic_tools", name)
@@ -79,18 +80,11 @@ def native_buildscript_env():
     from ambient state. Every one of them is pinned here instead, so a build
     script cannot pick up a compiler that is merely on PATH.
     """
-    if _native_build_mode() == "release":
-        env = {
-            "DEBUG": "false",
-            "OPT_LEVEL": "3",
-            "PROFILE": "release",
-        }
-    else:
-        env = {
-            "DEBUG": "true",
-            "OPT_LEVEL": "0",
-            "PROFILE": "debug",
-        }
+    env = {
+        "DEBUG": select({_RELEASE: "false", "DEFAULT": "true"}),
+        "OPT_LEVEL": select({_RELEASE: "3", "DEFAULT": "0"}),
+        "PROFILE": select({_RELEASE: "release", "DEFAULT": "debug"}),
+    }
 
     for var, key in [("AR", "ar"), ("CC", "cc"), ("CXX", "cxx"), ("NASM", "nasm")]:
         env[var] = _hermetic_tool(key)
@@ -126,7 +120,7 @@ def _hermetic_rust_toolchain_impl(ctx):
             panic_runtime = PanicRuntime("unwind"),
             report_unused_deps = False,
             rustc_binary_flags = [],
-            rustc_flags = _rustc_flags(),
+            rustc_flags = ctx.attrs.rustc_flags,
             rustc_target_triple = ctx.attrs.rustc_target_triple,
             rustc_test_flags = [],
             rustdoc = _tool("rustdoc"),
@@ -135,14 +129,19 @@ def _hermetic_rust_toolchain_impl(ctx):
         ),
     ]
 
-hermetic_rust_toolchain = rule(
+_hermetic_rust_toolchain_rule = rule(
     impl = _hermetic_rust_toolchain_impl,
     attrs = {
         "default_edition": attrs.string(),
+        "rustc_flags": attrs.list(attrs.string()),
         "rustc_target_triple": attrs.string(),
     },
     is_toolchain_rule = True,
 )
+
+def hermetic_rust_toolchain(**kwargs):
+    """The Nix-rooted Rust toolchain, compiling in the selected build mode."""
+    _hermetic_rust_toolchain_rule(rustc_flags = _rustc_flags(), **kwargs)
 
 def _hermetic_rustfmt_impl(ctx):
     if not ctx.attrs.rustfmt:
@@ -217,7 +216,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             c_compiler_info = CCompilerInfo(
                 compiler = _tool("clang"),
                 compiler_type = "clang",
-                compiler_flags = _cxx_compiler_flags(),
+                compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
                 supports_content_based_paths = False,
                 supports_two_phase_compilation = False,
@@ -226,7 +225,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             cxx_compiler_info = CxxCompilerInfo(
                 compiler = _tool("clang++"),
                 compiler_type = "clang",
-                compiler_flags = _cxx_compiler_flags(),
+                compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
                 supports_content_based_paths = False,
                 supports_two_phase_compilation = False,
@@ -276,6 +275,7 @@ hermetic_cxx_toolchain = rule(
     impl = _hermetic_cxx_toolchain_impl,
     attrs = {
         "archiver_supports_argfiles": attrs.bool(),
+        "compiler_flags": attrs.list(attrs.string()),
         "linker_type": attrs.string(),
         "pic_behavior": attrs.string(),
         "platform_name": attrs.string(),
@@ -296,6 +296,7 @@ def nix_cxx_toolchain(name, os, visibility):
         hermetic_cxx_toolchain(
             name = name,
             archiver_supports_argfiles = False,
+            compiler_flags = _cxx_compiler_flags(),
             linker_type = "darwin",
             pic_behavior = "always_enabled",
             platform_name = "macos-arm64",
@@ -307,6 +308,7 @@ def nix_cxx_toolchain(name, os, visibility):
         hermetic_cxx_toolchain(
             name = name,
             archiver_supports_argfiles = True,
+            compiler_flags = _cxx_compiler_flags(),
             linker_type = "gnu",
             pic_behavior = "supported",
             platform_name = "linux-x86_64",
@@ -345,8 +347,21 @@ def hermetic_python_bootstrap_toolchain(name, visibility):
 def _selected_toolchain_impl(ctx):
     return ctx.attrs.actual.providers
 
-selected_toolchain = rule(
+_selected_toolchain_rule = rule(
     impl = _selected_toolchain_impl,
     attrs = {"actual": attrs.toolchain_dep()},
     is_toolchain_rule = True,
 )
+
+def selected_toolchain(name, actual, visibility):
+    # Build scripts and proc macros then build in the target's mode; see
+    # root//platforms:defs.bzl.
+    _selected_toolchain_rule(
+        name = name,
+        actual = actual,
+        exec_compatible_with = select({
+            _RELEASE: [_RELEASE],
+            "DEFAULT": ["toolchains//:debug"],
+        }),
+        visibility = visibility,
+    )

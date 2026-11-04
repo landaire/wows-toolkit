@@ -1,10 +1,29 @@
-load(":defs.bzl", "execution_platform", "host_configuration", "remote_cache_configured")
+load(":defs.bzl", "execution_platform", "execution_platforms", "host_configuration", "remote_cache_configured")
 
 execution_platform(
-    name = "default",
+    name = "default_debug",
+    build_mode = "toolchains//:debug",
     cpu_configuration = host_configuration.cpu,
     os_configuration = host_configuration.os,
     remote_cache_enabled = remote_cache_configured(),
     use_windows_path_separators = host_info().os.is_windows,
+    visibility = ["PUBLIC"],
+)
+
+execution_platform(
+    name = "default_release",
+    build_mode = "toolchains//:release",
+    cpu_configuration = host_configuration.cpu,
+    os_configuration = host_configuration.os,
+    remote_cache_enabled = remote_cache_configured(),
+    use_windows_path_separators = host_info().os.is_windows,
+    visibility = ["PUBLIC"],
+)
+
+# Debug first: a target without a Rust or C++ toolchain has no mode to match
+# and takes the first platform.
+execution_platforms(
+    name = "default",
+    platforms = [":default_debug", ":default_release"],
     visibility = ["PUBLIC"],
 )

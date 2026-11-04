@@ -19,9 +19,6 @@
 [build]
   execution_platforms = root//platforms:default
 
-[native_build]
-  mode = debug
-
 [windows_toolchain]
   manifest = toolchains/windows/toolchain-manifest.json
  

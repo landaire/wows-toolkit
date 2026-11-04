@@ -31,7 +31,7 @@ function Get-TargetKey {
 $spec = Get-Content -Raw build-support/release-tools.json | ConvertFrom-Json
 $targets = @($spec.tools | ForEach-Object { $_.target })
 
-$buildArgs = @("build", "-c", "native_build.mode=release")
+$buildArgs = @("build", "-m", "release")
 if ($TargetPlatform) { $buildArgs += @("--target-platforms", $TargetPlatform) }
 $buildArgs += "--show-json-output"
 $buildArgs += $targets

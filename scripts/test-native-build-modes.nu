@@ -13,7 +13,7 @@ def probe_rustc_flags [config: list<string>] {
 
 def main [] {
     let debug_target = (^buck2 cquery //:wows_toolkit | complete)
-    let release_target = (^buck2 cquery -c native_build.mode=release //:wows_toolkit | complete)
+    let release_target = (^buck2 cquery -m release //:wows_toolkit | complete)
 
     if $debug_target.exit_code != 0 or $release_target.exit_code != 0 {
         error make {msg: "Buck cquery failed while checking native build modes."}
@@ -23,7 +23,7 @@ def main [] {
     }
 
     let debug_actions = (^buck2 aquery 'all_actions(deps(//:wows_toolkit))' --output-all-attributes | complete)
-    let release_actions = (^buck2 aquery -c native_build.mode=release 'all_actions(deps(//:wows_toolkit))' --output-all-attributes | complete)
+    let release_actions = (^buck2 aquery -m release 'all_actions(deps(//:wows_toolkit))' --output-all-attributes | complete)
 
     if $debug_actions.exit_code != 0 or $release_actions.exit_code != 0 {
         error make {msg: "Buck aquery failed while checking native build modes."}
@@ -34,10 +34,10 @@ def main [] {
     if not ($release_actions.stdout | str contains "-Copt-level=3") {
         error make {msg: "Release action graph is missing -Copt-level=3."}
     }
-    # The probe is not behind the build-mode transition, so both modes write the
-    # same output path. Read each result before building the other.
+    # The probe carries no mode of its own, so both modes write the same output
+    # path. Read each result before building the other.
     let debug_flags = (probe_rustc_flags [])
-    let release_flags = (probe_rustc_flags ["-c" "native_build.mode=release"])
+    let release_flags = (probe_rustc_flags ["-m" "release"])
 
     if $debug_flags != "--env-set=BUILD_SCRIPT_OPT_LEVEL=0" {
         error make {msg: "Debug build scripts are missing OPT_LEVEL=0 propagation."}

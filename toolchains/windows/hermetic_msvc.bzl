@@ -31,12 +31,6 @@ def _tool(name, optional = False):
         fail("Missing [hermetic_tools] {}. Run toolchains/windows/verify-toolchain.ps1 before invoking Buck2.".format(name))
     return path
 
-def _native_build_mode():
-    mode = read_root_config("native_build", "mode", "debug")
-    if mode not in ["debug", "release"]:
-        fail("native_build.mode must be debug or release, got {}".format(mode))
-    return mode
-
 # How much debug info a debug build carries, as the Nix toolchain reads it too.
 # Release never carries any.
 _DEBUGINFO_LEVELS = {
@@ -58,9 +52,10 @@ def _debug_debuginfo():
 def _rustc_flags():
     # No -Clinker here: the prelude already points rustc at the linker from
     # CxxToolsInfo, which is the pinned link.exe wrapper.
-    if _native_build_mode() == "release":
-        return ["-Copt-level=3", "-Cdebuginfo=0"]
-    return ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()]
+    return select({
+        "toolchains//:release": ["-Copt-level=3", "-Cdebuginfo=0"],
+        "DEFAULT": ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()],
+    })
 
 def _wrapper(ctx, name, executable):
     # cl.exe and link.exe read their search paths from the environment. The

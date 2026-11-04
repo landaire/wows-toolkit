@@ -37,7 +37,7 @@ def main [] {
 
     for alias in ["wows_toolkit" "replayshark" "minimap_renderer"] {
         let target = $"//:($alias)"
-        ^buck2 build -c native_build.mode=release $target
+        ^buck2 build -m release $target
         ^nu scripts/check-buck-hermetic.nu $target release
     }
 }

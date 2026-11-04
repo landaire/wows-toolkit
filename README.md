@@ -123,7 +123,7 @@ One-time setup, then build any root alias:
 .\setup.ps1    # Windows, from an elevated shell
 
 buck2 build //:wows_toolkit
-buck2 build -c native_build.mode=release //:wows_toolkit
+buck2 build //:wows_toolkit?release
 ```
 
 Setup provisions the pinned toolchain and fetches the pinned crate sources; everything after it is offline. The aliases are `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
