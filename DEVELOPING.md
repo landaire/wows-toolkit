@@ -266,6 +266,12 @@ Replay parser tests run against committed fixture replays and require no externa
 cargo test --workspace
 ```
 
+Buck runs the same unit and integration tests. Doctests run under Cargo only.
+
+```bash
+buck2 test root//crates/...
+```
+
 ### Game Data Tests
 
 Some tests exercise game file parsing (VFS, PKG, MFM, GameParams) and require a local copy of World of Warships. These tests are skipped when game data is not available.

@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows-replays-buildscript",
@@ -8,30 +8,58 @@ buildscript = workspace_buildscript(
     deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
 )
 
+REPLAYS_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:bon",
+    "//third-party/rust:flate2",
+    "//third-party/rust:kinded",
+    "//third-party/rust:modular-bitfield",
+    "//third-party/rust:pickled",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+    "//third-party/rust:winnow",
+]
+
+REPLAYS_FEATURES = ["arc", "parsing", "vfs"]
+
+REPLAYS_TEST_DEPS = [
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//third-party/rust:insta",
+    "//third-party/rust:rust-crypto",
+    "//third-party/rust:sha2",
+]
+
 workspace_library(
     name = "wows_replays",
     crate = "wows_replays",
     package = "wows_replays",
     version = "0.47.0",
-    features = ["arc", "parsing", "vfs"],
+    features = REPLAYS_FEATURES,
     buildscript = buildscript,
-    deps = [
-        "//crates/wowsunpack:wowsunpack",
-        "//third-party/rust:bon",
-        "//third-party/rust:flate2",
-        "//third-party/rust:kinded",
-        "//third-party/rust:modular-bitfield",
-        "//third-party/rust:pickled",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:roxmltree",
-        "//third-party/rust:serde",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tracing",
-        "//third-party/rust:winnow",
-    ],
+    deps = REPLAYS_DEPS,
 )
 
-# No workspace_test here: the crate's unit tests use the rust-crypto and insta
-# dev-dependencies, and reindeer vendors normal dependencies only, so neither
-# has a target under //third-party/rust. `mise run cargo-test` covers them.
+workspace_test(
+    name = "wows_replays_test",
+    crate = "wows_replays",
+    crate_root = "src/lib.rs",
+    package = "wows_replays",
+    version = "0.47.0",
+    features = REPLAYS_FEATURES,
+    buildscript = buildscript,
+    deps = REPLAYS_DEPS,
+    test_deps = REPLAYS_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows_replays",
+    version = "0.47.0",
+    library = ":wows_replays",
+    deps = REPLAYS_DEPS,
+    features = REPLAYS_FEATURES,
+    test_deps = REPLAYS_TEST_DEPS,
+)

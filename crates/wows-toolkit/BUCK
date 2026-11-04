@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows_toolkit_build",
@@ -10,7 +10,8 @@ buildscript = workspace_buildscript(
     env = {"EMBEDDED_CONSTANTS": "$(location //embedded_resources:constants_json)", "WOWS_TOOLKIT_ICON": "$(location //assets:wows_toolkit_png)"},
 )
 
-TOOLKIT_DEPS = [
+# Without the two crates whose test-support variants the tests link instead.
+TOOLKIT_COMMON_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
@@ -20,13 +21,11 @@ TOOLKIT_DEPS = [
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
-    "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
-    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-egui:wt_collab_egui",
     "//crates/wt-collab-client:wt_collab_client",
-        "//crates/wt-collab-protocol:wt_collab_protocol",
+    "//crates/wt-collab-protocol:wt_collab_protocol",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:arboard",
     "//third-party/rust:bytemuck",
@@ -105,7 +104,9 @@ TOOLKIT_DEPS = [
     "//third-party/rust:web-time",
     "//third-party/rust:wgpu",
     "//third-party/rust:zip",
-] + os_select(
+]
+
+TOOLKIT_PLATFORM_DEPS = os_select(
     macos = [],
     linux = [],
     # The cfg(windows) dependency section of Cargo.toml.
@@ -114,6 +115,11 @@ TOOLKIT_DEPS = [
         "//third-party/rust:windows-sys",
     ],
 )
+
+TOOLKIT_DEPS = TOOLKIT_COMMON_DEPS + [
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+] + TOOLKIT_PLATFORM_DEPS
 
 TOOLKIT_FEATURES = ["logging", "launcher"]
 
@@ -201,6 +207,48 @@ workspace_binary(
     deps = [":wows_toolkit_profile"] + TOOLKIT_DEPS,
 )
 
-# No workspace_test here: the crate's unit tests use the egui_kittest
-# dev-dependency, and reindeer vendors normal dependencies only, so it has no
-# target under //third-party/rust. `mise run cargo-test` covers them.
+# The tests build against both crates' test-support variants: ZoneGuard for the
+# query bar's date assertions, and the shipped rating table.
+TOOLKIT_TEST_SUPPORT_DEPS = TOOLKIT_COMMON_DEPS + [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+] + TOOLKIT_PLATFORM_DEPS
+
+TOOLKIT_TEST_DEPS = [
+    "//third-party/rust:egui_kittest",
+    "//third-party/rust:insta",
+]
+
+# The library the integration tests link, built against the same variants.
+workspace_library(
+    name = "wows_toolkit_test_support",
+    crate = "wows_toolkit",
+    package = "wows_toolkit",
+    version = "1.1.0-beta1",
+    features = TOOLKIT_FEATURES,
+    deps = TOOLKIT_TEST_SUPPORT_DEPS,
+    buildscript = buildscript,
+    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
+)
+
+workspace_test(
+    name = "wows_toolkit_test",
+    crate = "wows_toolkit",
+    crate_root = "src/lib.rs",
+    package = "wows_toolkit",
+    version = "1.1.0-beta1",
+    features = TOOLKIT_FEATURES,
+    deps = TOOLKIT_TEST_SUPPORT_DEPS,
+    test_deps = TOOLKIT_TEST_DEPS,
+    buildscript = buildscript,
+    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
+)
+
+workspace_integration_tests(
+    package = "wows_toolkit",
+    version = "1.1.0-beta1",
+    library = ":wows_toolkit_test_support",
+    features = TOOLKIT_FEATURES,
+    deps = TOOLKIT_TEST_SUPPORT_DEPS,
+    test_deps = TOOLKIT_TEST_DEPS,
+)

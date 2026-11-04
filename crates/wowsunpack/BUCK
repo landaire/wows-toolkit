@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 export_file(
     name = "consumable_layouts",
@@ -110,6 +110,11 @@ workspace_binary(
     deps = [":wowsunpack_dhat"] + WOWSUNPACK_DEPS + ["//third-party/rust:dhat"],
 )
 
+WOWSUNPACK_TEST_DEPS = [
+    "//third-party/rust:insta",
+    "//third-party/rust:sha2",
+]
+
 workspace_test(
     name = "wowsunpack_test",
     crate = "wowsunpack",
@@ -118,5 +123,15 @@ workspace_test(
     version = "0.46.0",
     features = WOWSUNPACK_FEATURES,
     deps = WOWSUNPACK_DEPS,
+    test_deps = WOWSUNPACK_TEST_DEPS,
     buildscript = buildscript,
+)
+
+workspace_integration_tests(
+    package = "wowsunpack",
+    version = "0.46.0",
+    library = ":wowsunpack",
+    features = WOWSUNPACK_FEATURES,
+    deps = WOWSUNPACK_DEPS,
+    test_deps = WOWSUNPACK_TEST_DEPS,
 )

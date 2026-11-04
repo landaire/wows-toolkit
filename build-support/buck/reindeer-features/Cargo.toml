@@ -11,3 +11,12 @@ mimalloc = "0.1"
 # dev-only "compress" feature.
 sevenz-rust2 = { version = "0.21", default-features = false, features = ["compress"] }
 tar = "0.4"
+# Dev-dependencies of workspace crates. Reindeer generates rules only for
+# normal dependencies, so the Buck test targets reach these through here.
+egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
+filetime = "0.2"
+insta = { workspace = true }
+# gpui's proptest feature, which its test-support enables. The gpui-pre fixup
+# adds the feature only under //build-support/buck/test-support:enabled.
+proptest = { version = "1", features = ["attr-macro"] }
+rust-crypto = "0.2.36"

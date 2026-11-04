@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "gpui_build",
@@ -108,4 +108,27 @@ workspace_binary(
         linux = [],
         windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
     ),
+)
+
+_TEST_SUPPORT_VARIANTS = {
+    "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+}
+
+# The transition builds the gpui crates with their test-support features (see
+# //build-support/buck/test-support), which the binaries above never get.
+workspace_test(
+    name = "gpui_test",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.1.0-beta1",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    # test-support lets the tests point `storage_dir` at a temporary directory.
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in GPUI_DEPS],
+    test_deps = ["//third-party/rust:filetime"],
+    incoming_transition = "//build-support/buck/test-support:transition",
+    # Each test opens a window and a graphics device. One thread per core
+    # wedges the run on a machine with many of them.
+    run_env = {"RUST_TEST_THREADS": "4"},
 )

@@ -1381,7 +1381,12 @@ name = "buck-reindeer-features"
 version = "0.1.0"
 dependencies = [
  "dhat",
+ "egui_kittest",
+ "filetime",
+ "insta",
  "mimalloc",
+ "proptest",
+ "rust-crypto",
  "sevenz-rust2",
  "tar",
 ]

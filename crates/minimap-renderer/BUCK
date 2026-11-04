@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "minimap-renderer-buildscript",
@@ -116,6 +116,8 @@ workspace_binary(
     deps = [":wows_minimap_renderer_cpu"] + MINIMAP_CPU_DEPS,
 )
 
+MINIMAP_TEST_DEPS = ["//third-party/rust:insta"]
+
 workspace_test(
     name = "wows_minimap_renderer_test",
     crate = "wows_minimap_renderer",
@@ -124,5 +126,15 @@ workspace_test(
     version = "0.40.0",
     features = MINIMAP_FEATURES,
     deps = MINIMAP_DEPS,
+    test_deps = MINIMAP_TEST_DEPS,
     buildscript = buildscript,
+)
+
+workspace_integration_tests(
+    package = "wows_minimap_renderer",
+    version = "0.40.0",
+    library = ":wows_minimap_renderer",
+    features = MINIMAP_FEATURES,
+    deps = MINIMAP_DEPS,
+    test_deps = MINIMAP_TEST_DEPS,
 )

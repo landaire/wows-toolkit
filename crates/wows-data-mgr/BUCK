@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 WDM_DEPS = [
     "//crates/wowsunpack:wowsunpack",
@@ -40,16 +40,39 @@ workspace_binary(
     deps = [":wows_data_mgr"] + WDM_DEPS,
 )
 
+WDM_TEST_DEPS = [
+    "//third-party/rust:futures",
+    "//third-party/rust:tempfile",
+]
+
 workspace_test(
     name = "wows_data_mgr_test",
-    test_deps = [
-        "//third-party/rust:futures",
-        "//third-party/rust:tempfile",
-    ],
     crate = "wows_data_mgr",
     crate_root = "src/lib.rs",
     package = "wows-data-mgr",
     version = "0.22.0",
     features = ["constants", "download"],
     deps = WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
+)
+
+# The binary's own modules carry tests of their own.
+workspace_test(
+    name = "wows_data_mgr_bin_test",
+    crate = "wows_data_mgr",
+    crate_root = "src/main.rs",
+    package = "wows-data-mgr",
+    version = "0.22.0",
+    features = ["constants", "download"],
+    deps = [":wows_data_mgr"] + WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows-data-mgr",
+    version = "0.22.0",
+    library = ":wows_data_mgr",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
 )

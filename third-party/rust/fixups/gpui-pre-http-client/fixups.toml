@@ -1,0 +1,4 @@
+# test-support is for the GPUI tests only. They reach it through the
+# //build-support/buck/test-support:transition incoming transition, so the
+# shipped binaries build without it.
+rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:enabled" = ["--cfg=feature=\"test-support\""] }]

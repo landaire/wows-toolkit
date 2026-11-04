@@ -1,42 +1,29 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+CONFIG_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//third-party/rust:home",
+    "//third-party/rust:jiff",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+    "//third-party/rust:winnow",
+]
+
+CONFIG_TEST_DEPS = [
+    "//third-party/rust:filetime",
+    "//third-party/rust:tempfile",
+]
 
 workspace_library(
     name = "wows_toolkit_config",
     crate = "wows_toolkit_config",
     package = "wows-toolkit-config",
     version = "0.1.0",
-    deps = [
-        "//crates/wows-core:wows_core",
-        "//third-party/rust:home",
-        "//third-party/rust:jiff",
-        "//third-party/rust:serde",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:sqlx",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tokio",
-        "//third-party/rust:tracing",
-        "//third-party/rust:winnow",
-    ],
-)
-
-workspace_test(
-    name = "wows_toolkit_config_test",
-    crate = "wows_toolkit_config",
-    crate_root = "src/lib.rs",
-    package = "wows-toolkit-config",
-    version = "0.1.0",
-    deps = [
-        "//crates/wows-core:wows_core",
-        "//third-party/rust:home",
-        "//third-party/rust:jiff",
-        "//third-party/rust:serde",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:sqlx",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tokio",
-        "//third-party/rust:tracing",
-        "//third-party/rust:winnow",
-    ],
+    deps = CONFIG_DEPS,
 )
 
 # ZoneGuard and NowGuard, for the tests of crates that assert on this crate's
@@ -48,16 +35,27 @@ workspace_library(
     package = "wows-toolkit-config",
     version = "0.1.0",
     features = ["test-support"],
-    deps = [
-        "//crates/wows-core:wows_core",
-        "//third-party/rust:home",
-        "//third-party/rust:jiff",
-        "//third-party/rust:serde",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:sqlx",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tokio",
-        "//third-party/rust:tracing",
-        "//third-party/rust:winnow",
-    ],
+    deps = CONFIG_DEPS,
+)
+
+# With test-support, as `cargo test --workspace` builds it: the dev-dependency
+# edges from the other crates turn the feature on, and some tests need it.
+workspace_test(
+    name = "wows_toolkit_config_test",
+    crate = "wows_toolkit_config",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-config",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = CONFIG_DEPS,
+    test_deps = CONFIG_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows-toolkit-config",
+    version = "0.1.0",
+    library = ":wows_toolkit_config_test_support",
+    features = ["test-support"],
+    deps = CONFIG_DEPS,
+    test_deps = CONFIG_TEST_DEPS,
 )

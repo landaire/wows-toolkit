@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows-battle-world-buildscript",
@@ -8,41 +8,53 @@ buildscript = workspace_buildscript(
     deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
 )
 
+BATTLE_WORLD_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:bevy_ecs",
+    "//third-party/rust:pickled",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+# criterion is a dev-dependency for the benches only, which are not modelled.
+BATTLE_WORLD_TEST_DEPS = [
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//third-party/rust:insta",
+    "//third-party/rust:serde",
+]
+
 workspace_library(
     name = "wows_battle_world",
     crate = "wows_battle_world",
     package = "wows-battle-world",
     version = "0.14.0",
     buildscript = buildscript,
-    deps = [
-        "//crates/wows-core:wows_core",
-        "//crates/wows-replays:wows_replays",
-        "//crates/wowsunpack:wowsunpack",
-        "//third-party/rust:bevy_ecs",
-        "//third-party/rust:pickled",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tracing",
-    ],
+    deps = BATTLE_WORLD_DEPS,
 )
 
+# vfs only gates the tests that load a game install; //crates/wows-replays
+# always has it.
 workspace_test(
     name = "wows_battle_world_test",
     crate = "wows_battle_world",
     crate_root = "src/lib.rs",
     package = "wows-battle-world",
     version = "0.14.0",
+    features = ["vfs"],
     buildscript = buildscript,
-    deps = [
-        "//crates/wows-core:wows_core",
-        "//crates/wows-replays:wows_replays",
-        "//crates/wowsunpack:wowsunpack",
-        "//third-party/rust:bevy_ecs",
-        "//third-party/rust:pickled",
-        "//third-party/rust:rootcause",
-        "//third-party/rust:serde_json",
-        "//third-party/rust:thiserror",
-        "//third-party/rust:tracing",
-    ],
+    deps = BATTLE_WORLD_DEPS,
+    test_deps = BATTLE_WORLD_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows-battle-world",
+    version = "0.14.0",
+    library = ":wows_battle_world",
+    features = ["vfs"],
+    deps = BATTLE_WORLD_DEPS,
+    test_deps = BATTLE_WORLD_TEST_DEPS,
 )

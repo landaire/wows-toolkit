@@ -123,18 +123,30 @@ def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION,
         deps = deps,
     )
 
-def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = []):
+def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = [], run_env = {}, incoming_transition = None):
     """The crate's own #[test] functions, as a Buck test target.
 
-    test_deps are Cargo's [dev-dependencies]. reindeer is configured to vendor
-    normal dependencies only, so a dev-dependency is available here only when
-    something else in the graph already pulls it in.
+    test_deps are Cargo's [dev-dependencies]. A third-party one reaches
+    //third-party/rust through build-support/buck/reindeer-features.
     """
     env = _cargo_env(crate, package, version)
     rustc_flags = []
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
+
+    # Tests read fixtures through env!("CARGO_MANIFEST_DIR"), some of them
+    # outside the crate, so it names the crate's source directory as under
+    # Cargo rather than Buck's copy of its srcs. rustc_action makes the path
+    # absolute.
+    manifest = "_cargo_manifest"
+    if not native.rule_exists(manifest):
+        native.export_file(name = manifest, src = "Cargo.toml", mode = "reference", visibility = [])
+    env["CARGO_MANIFEST_DIR"] = "$(location :{})/..".format(manifest)
+
+    kwargs = {}
+    if incoming_transition != None:
+        kwargs["incoming_transition"] = incoming_transition
 
     native.rust_test(
         name = name,
@@ -143,14 +155,21 @@ def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT
         crate_root = crate_root,
         edition = edition,
         env = env,
+        # Tests run from the project root. insta otherwise runs `cargo
+        # metadata` to find the root its snapshot paths are relative to.
+        run_env = {
+            "CARGO_MANIFEST_DIR": native.package_name(),
+            "INSTA_WORKSPACE_ROOT": ".",
+        } | run_env,
         features = features,
         rustc_flags = rustc_flags,
         resources = resources,
         visibility = ["PUBLIC"],
         deps = deps + test_deps,
+        **kwargs
     )
 
-def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = []):
+def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = [], run_env = {}):
     """One test target per file directly under tests/, as Cargo builds them.
 
     Each links `library`, the crate under test, as an integration test does.
@@ -169,6 +188,7 @@ def workspace_integration_tests(package, version, library, deps = [], test_deps 
             features = features,
             deps = [library] + deps,
             test_deps = test_deps,
+            run_env = run_env,
         )
 
 def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
