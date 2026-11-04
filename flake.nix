@@ -212,7 +212,7 @@
               coreutils
               libiconv
               python3
-              # Unpacking the vendored .crate archives. GNU tar spawns its
+              # Unpacking the downloaded crate archives. GNU tar spawns its
               # decompressor as a separate process, so each one is needed too.
               gnutar
               bzip2

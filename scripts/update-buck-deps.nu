@@ -3,9 +3,10 @@
 # reindeer and rustc come from PATH: reindeer from `mise run install-reindeer`,
 # rustc from the rustup shim. Going through `nix develop` restricted this to
 # Linux and macOS, so Windows had to run it under WSL.
-^reindeer vendor
+#
+# Nothing is vendored: the generated rules download each crate, checked against
+# Cargo.lock, and fetch each git dependency at its locked commit.
 ^reindeer buckify
-rm -r -f third-party/rust/.cargo
 
 # Buck spills long command lines into a line-oriented args file, so an argument
 # containing a newline swallows every argument after it. Many crates describe
@@ -32,13 +33,3 @@ $"crate::version::Version {
     channel: crate::version::Channel::Stable,
 }
 " | save -f third-party/rust/fixups/rustversion/version.expr
-
-let download_rules = (
-    open --raw third-party/rust/BUCK
-    | lines
-    | where $it =~ '^\s*(http_(archive|file)|git_(fetch|repository))\('
-)
-if ($download_rules | is-not-empty) {
-    print -e ($download_rules | first 10 | str join "\n")
-    error make {msg: "Reindeer generated a network download rule; vendoring is incomplete."}
-}

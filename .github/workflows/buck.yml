@@ -6,8 +6,8 @@ on:
   pull_request:
 
 # Builds every public binary through the native Buck graph and proves the graph
-# stays hermetic. Provisioning is the only step allowed to reach the network:
-# every Buck step after it runs in a network namespace of its own.
+# stays hermetic. Buck downloads crate sources itself, each checked against the
+# checksum Cargo.lock pins or fetched at its locked commit.
 
 # root//: is every alias declared in the root BUCK file, so adding one does not
 # mean remembering to add it here as well.
@@ -37,9 +37,7 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
-      # Realize every store path and crate source Buck will need, while the
-      # network is still up.
-      - name: Provision the toolchain and crate sources
+      - name: Provision the toolchain
         run: nix develop --command nu scripts/refresh-buck-toolchain.nu
 
       # Fails with a clear message if the vendored prelude was expanded from a
@@ -48,22 +46,20 @@ jobs:
         if: matrix.phase == 'checks'
         run: nix build .#checks.x86_64-linux.prelude-version -L
 
-      # Every step below runs Buck without a network, run-offline.sh explains
-      # why each one needs the wrapper rather than the build steps alone.
       - name: Build every alias
         if: matrix.phase == 'checks'
-        run: nix develop --command bash scripts/run-offline.sh buck2 build $ALIASES
+        run: nix develop --command buck2 build $ALIASES
 
       - name: Build every alias in release mode
         if: matrix.phase == 'release'
-        run: nix develop --command bash scripts/run-offline.sh buck2 build -c native_build.mode=release $ALIASES
+        run: nix develop --command buck2 build -c native_build.mode=release $ALIASES
 
       - name: Check the action graph is hermetic
         if: matrix.phase == 'checks'
         run: |
           for alias in $(nix develop --command buck2 targets $ALIASES); do
-            nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias"
-            nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias" release
+            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
+            nix develop --command nu scripts/check-buck-hermetic.nu "$alias" release
           done
 
       # bxl/lint.bxl builds the [clippy.json] sub-target of every first-party
@@ -72,17 +68,17 @@ jobs:
       # so the action succeeds even when compilation does not.
       - name: Lint through Buck
         if: matrix.phase == 'checks'
-        run: nix develop --command bash scripts/run-offline.sh nu scripts/lint.nu
+        run: nix develop --command nu scripts/lint.nu
 
       - name: Run the unit tests through Buck
         if: matrix.phase == 'checks'
-        run: nix develop --command bash scripts/run-offline.sh buck2 test root//crates/...
+        run: nix develop --command buck2 test root//crates/...
 
       - name: Buck build-graph tests
         if: matrix.phase == 'graph-tests'
         run: |
           for test in scripts/test-*.nu; do
-            nix develop --command bash scripts/run-offline.sh nu "$test"
+            nix develop --command nu "$test"
           done
 
   macos:

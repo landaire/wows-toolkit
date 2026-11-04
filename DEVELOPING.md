@@ -76,17 +76,15 @@ One command, once per machine:
 .\setup.ps1    # Windows, from an elevated shell
 ```
 
-It provisions the pinned toolchain and fetches the pinned crate sources. Everything after it is offline. Re-run it after the toolchain pin moves or `Cargo.lock` changes; it is cheap and skips whatever is already in place.
+It provisions the pinned toolchain. Re-run it after the toolchain pin moves; it is cheap and skips whatever is already in place.
 
 On Windows it needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere.
 
-Under the hood setup runs the platform bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local` and then runs `scripts/fetch-buck-deps.py`. You can run those directly; setup exists so you do not have to know which. Buck fails with a message naming the bootstrap if `.buckconfig.local` is missing.
+Under the hood setup runs the platform bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local`. You can run it directly; setup exists so you do not have to know which. Buck fails with a message naming the bootstrap if `.buckconfig.local` is missing.
 
 ### Crate sources
 
-`third-party/rust/vendor/*.crate` is not committed. Every registry crate is pinned by version and SHA-256 in `Cargo.lock`, so `scripts/fetch-buck-deps.py` downloads them and verifies each against the lock. A cold fetch is about 150 MB and takes seconds; after that the build is offline.
-
-Archives that the lock cannot verify are committed instead, because there is nothing to check a download against. Right now that is two git dependencies, `egui-notify` and the five crates of `gpui-kit`. If you add another, the fetch script fails and names the file to commit.
+No crate source is committed. Buck downloads each registry crate and checks it against the SHA-256 that `Cargo.lock` pins for it, and fetches each git dependency at the commit `Cargo.lock` locks it to.
 
 ### Building
 
@@ -167,7 +165,7 @@ Edit `Cargo.toml` and `Cargo.lock` as usual and confirm Cargo is happy, then reg
 nu scripts/update-buck-deps.nu
 ```
 
-This vendors every crate source, regenerates `third-party/rust/BUCK`, flattens multi-line values in the generated environment, and fails if Reindeer emitted a network download rule. Commit `Cargo.toml`, `Cargo.lock`, the generated BUCK file, and any fixups together. The vendored `.crate` archives are not committed; other people get them from `Cargo.lock` on their next setup.
+This regenerates `third-party/rust/BUCK` and flattens multi-line values in the generated environment. Commit `Cargo.toml`, `Cargo.lock`, the generated BUCK file, and any fixups together.
 
 It needs `reindeer` and `rustc` on PATH; run `mise run install-reindeer` once. That applies to regeneration only. Building needs neither Nix nor Cargo.
 

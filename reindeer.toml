@@ -1,6 +1,8 @@
 manifest_path = "Cargo.toml"
 third_party_dir = "third-party/rust"
-vendor = "local-registry"
+# Crates are not vendored: Buck downloads each one and checks it against the
+# checksum in Cargo.lock, and fetches a git dependency at its locked commit.
+vendor = false
 cargo_env = [
     "CARGO_CRATE_NAME",
     "CARGO_MANIFEST_DIR",
