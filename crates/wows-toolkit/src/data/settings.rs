@@ -15,6 +15,8 @@ use crate::twitch::Token;
 
 pub use wows_toolkit_config::ReplayGrouping;
 pub use wows_toolkit_config::ReplaySettings;
+#[cfg(feature = "launcher")]
+pub use wows_toolkit_launcher::LauncherSettings;
 
 pub const fn default_bool<const V: bool>() -> bool {
     V
@@ -39,6 +41,7 @@ pub struct AppSettings {
     pub integrations: IntegrationSettings,
     pub collab: CollabSettings,
     pub search: SearchSettings,
+    #[cfg(feature = "launcher")]
     pub launcher: LauncherSettings,
 }
 
@@ -199,60 +202,6 @@ impl SearchSettings {
 /// Newest match first, which is the order the index query itself returns.
 fn default_result_sort() -> (ResultColumn, SortDir) {
     (ResultColumn::Date, SortDir::Descending)
-}
-
-/// Persisted state for the Launcher tab.
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct LauncherSettings {
-    #[serde(default)]
-    pub manual_installs: Vec<PathBuf>,
-    #[serde(default)]
-    pub wgc_data_dir_override: Option<PathBuf>,
-    #[serde(default)]
-    pub proton_prefix: Option<PathBuf>,
-    #[serde(default)]
-    pub proton_binary: Option<PathBuf>,
-    /// User-supplied extra command-line args applied to every launch.
-    #[serde(default)]
-    pub extra_args: Vec<String>,
-    /// User-supplied environment variables applied to every launch.
-    #[serde(default)]
-    pub env_vars: Vec<(String, String)>,
-    /// Args appended when Safe Mode is toggled. The exact payload that makes
-    /// WoWs skip res_mods is confirmed during the launch-handshake capture; kept
-    /// a setting so it is a one-line correction, not a code change.
-    #[serde(default)]
-    pub safe_mode_args: Vec<String>,
-    /// WGNI tracking id (`tid`), generated once on first sign-in and reused
-    /// after. Not secret -- just a stable per-install identifier WGC itself
-    /// keeps in a device file.
-    ///
-    /// Stored as a raw `String`, not `wgc_core::TrackingId`, on purpose:
-    /// that newtype's derived `Deserialize` accepts an empty string (its
-    /// `parse` validation is a constructor-only check), so a hand-edited or
-    /// corrupted config could smuggle an invalid value straight past it.
-    /// Keeping the field a bare `String` here means `TabState::ensure_tracking_id`
-    /// (in `tab_state.rs`) is the one place that validates and regenerates,
-    /// rather than that check being silently skipped on load.
-    #[cfg(feature = "launcher")]
-    #[serde(default)]
-    pub tracking_id: Option<String>,
-    /// Which signed-in account (if any) to load a session for from the OS
-    /// keyring at startup. No secret material lives here -- the token pair
-    /// itself is only ever in the keyring.
-    #[cfg(feature = "launcher")]
-    #[serde(default)]
-    pub active_account: Option<PersistedAccount>,
-}
-
-/// Non-secret index of a signed-in account, persisted so startup knows which
-/// keyring entry to load. See [`LauncherSettings::active_account`].
-#[cfg(feature = "launcher")]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PersistedAccount {
-    pub realm: wgc_auth::AccountRealm,
-    pub account_id: wgc_auth::AccountId,
-    pub nickname: wgc_auth::Nickname,
 }
 
 /// General application preferences.
@@ -484,23 +433,5 @@ mod search_sort_tests {
             Some(Op::Le),
             "the entry beside the unknown one must survive"
         );
-    }
-}
-
-#[cfg(test)]
-mod launcher_settings_tests {
-    use super::*;
-
-    #[test]
-    fn launcher_settings_default_is_empty() {
-        let s = LauncherSettings::default();
-        assert!(s.manual_installs.is_empty());
-        assert!(s.proton_prefix.is_none());
-    }
-
-    #[test]
-    fn app_settings_has_launcher_field() {
-        let s = AppSettings::default();
-        assert!(s.launcher.manual_installs.is_empty());
     }
 }

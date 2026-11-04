@@ -1,122 +1,52 @@
 //! The Launcher tab: discover, launch, and manage WoWs installs.
 
+use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+
+use wgc_catalog::known_games::KnownGame;
+use wows_toolkit_launcher::CatalogCheckState;
+use wows_toolkit_launcher::CatalogSummary;
+use wows_toolkit_launcher::DownloadState;
+use wows_toolkit_launcher::Launcher;
+use wows_toolkit_launcher::LauncherError;
+use wows_toolkit_launcher::proton::ProtonSetup;
+use wows_toolkit_launcher::proton::Severity;
 
 use crate::app::ToolkitTabViewer;
-use crate::tab_state::CatalogCheckState;
-use crate::tab_state::DownloadUiState;
 use crate::update_background_task;
 
-/// Fixed width of the whole download-progress block (progress bar + byte
-/// label + phase/file line), so the row's size stays constant frame to
-/// frame instead of jumping as the byte count and in-flight file name
-/// change width. See `show_download_status`.
+/// Fixed width of the whole download-progress block, so the row keeps its
+/// size as the byte count and the in-flight file name change width.
 const PROGRESS_AREA_WIDTH: f32 = 380.0;
 /// Fixed width of the "X / Y" byte label within the progress area.
 const BYTE_LABEL_WIDTH: f32 = 150.0;
 
-/// One row's download-status action the user triggered this frame (if
-/// any), collected by `show_download_status` and applied by the caller
-/// after the row loop -- same borrow-collection pattern as
-/// `to_launch`/`to_activate`/`to_recheck`.
+const WARN_COLOR: egui::Color32 = egui::Color32::from_rgb(230, 180, 40);
+const ERROR_COLOR: egui::Color32 = egui::Color32::from_rgb(230, 80, 80);
+const OK_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 200, 120);
+
+/// A download row's button press, applied after the row loop so the loop's
+/// borrows of the launcher have ended.
 enum DownloadRowAction {
-    None,
-    Cancel(Arc<AtomicBool>),
-    Pause(Arc<AtomicBool>),
-    /// Resume a paused download tracked under this `dest_key` in
-    /// `download_state`/`download_resume`.
+    Cancel(PathBuf),
+    Pause(PathBuf),
     Resume(PathBuf),
 }
 
-/// Display label for a WGNI account realm. Ru is flagged experimental
-/// everywhere it appears -- see `wgc_auth::AccountRealm::Ru`'s own doc.
-fn realm_label(realm: wgc_auth::AccountRealm) -> &'static str {
-    match realm {
-        wgc_auth::AccountRealm::Eu => "EU",
-        wgc_auth::AccountRealm::Na => "NA",
-        wgc_auth::AccountRealm::Asia => "Asia",
-        wgc_auth::AccountRealm::Ru => "RU (experimental)",
-    }
+/// What the user asked for this frame, applied after rendering.
+enum Intent {
+    Rescan,
+    AddInstall(PathBuf),
+    Launch(usize),
+    UseForToolkit(PathBuf),
+    Recheck(PathBuf),
+    Download { install: PathBuf, default_dir: PathBuf },
+    Install(KnownGame),
+    Row(DownloadRowAction),
+    RetryAvailableGames,
+    SetUpProton,
 }
 
-/// Coarse human-readable duration ("2h 15m", "3d 4h"), for the token-expiry
-/// display. No external crate: the app has no other duration-formatting
-/// need, so a few lines here beat a new dependency.
-fn format_duration(d: std::time::Duration) -> String {
-    let total_secs = d.as_secs();
-    let days = total_secs / 86400;
-    let hours = (total_secs % 86400) / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    if days > 0 {
-        format!("{days}d {hours}h")
-    } else if hours > 0 {
-        format!("{hours}h {minutes}m")
-    } else if minutes > 0 {
-        format!("{minutes}m")
-    } else {
-        "less than a minute".to_string()
-    }
-}
-
-/// Outcome of a Proton auto-detect attempt, so the settings panel and the
-/// per-install "Set up Proton" prompt report it identically.
-enum ProtonSetup {
-    /// Binary set, and (because it was unset) a prefix was chosen. `detail`
-    /// names which prefix.
-    Ready { detail: &'static str },
-    /// Binary set; an existing user-chosen prefix was left alone.
-    BinaryOnly,
-    /// A Proton binary was found but no app data dir exists for a managed prefix.
-    NoManagedPrefixDir,
-    /// Steam is installed but carries no Proton under its libraries.
-    NoProton,
-    /// No Steam installation was found.
-    NoSteam,
-}
-
-impl ProtonSetup {
-    /// Whether `launcher` was mutated (so the caller knows to persist).
-    fn changed(&self) -> bool {
-        matches!(self, ProtonSetup::Ready { .. } | ProtonSetup::BinaryOnly)
-    }
-}
-
-/// Fill in `launcher.proton_binary` and, when unset, `launcher.proton_prefix`
-/// from the local Steam/Proton install. A non-Steam (WGC-style) install has no
-/// Steam prefix to reuse, so it falls back to a toolkit-managed prefix Proton
-/// initializes on first launch.
-fn autodetect_proton(launcher: &mut crate::data::settings::LauncherSettings) -> ProtonSetup {
-    let Some(steam_root) = wgc_launch::proton::find_steam_root() else {
-        return ProtonSetup::NoSteam;
-    };
-    // With no prefix chosen yet there is no `config_info` to read, so
-    // `find_proton_in_library` falls back to the newest Proton in the library.
-    let compat_data = launcher.proton_prefix.clone().unwrap_or_else(|| steam_root.clone());
-    let Some(binary) = wgc_launch::proton::find_proton_in_library(&steam_root, &compat_data) else {
-        return ProtonSetup::NoProton;
-    };
-    launcher.proton_binary = Some(binary);
-    if launcher.proton_prefix.is_some() {
-        return ProtonSetup::BinaryOnly;
-    }
-    if let Some(existing) = wgc_launch::proton::steam_wows_prefix() {
-        launcher.proton_prefix = Some(existing);
-        return ProtonSetup::Ready { detail: "Reusing your Steam WoWs prefix." };
-    }
-    match crate::storage_dir() {
-        Some(base) => {
-            launcher.proton_prefix = Some(wgc_launch::proton::managed_prefix(&base));
-            ProtonSetup::Ready { detail: "Using a toolkit-managed prefix (created on first launch)." }
-        }
-        None => ProtonSetup::NoManagedPrefixDir,
-    }
-}
-
-/// Render one install's catalog-check status (checking/up to date/update
-/// available/error), skipping Steam installs entirely -- they are never
-/// checked, and the row already says "managed by Steam" above.
 fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
     match state {
         Some(CatalogCheckState::Checking) => {
@@ -124,29 +54,14 @@ fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
             ui.label("checking updates");
         }
         Some(CatalogCheckState::Ready(build)) => {
-            let mut changed = Vec::new();
-            let mut not_installed = Vec::new();
-            for (part, status) in &build.parts {
-                match status {
-                    wgc_catalog::update::PartStatus::UpdateAvailable { from, to } => {
-                        changed.push(format!("{part} {from} -> {to}"))
-                    }
-                    wgc_catalog::update::PartStatus::NotInstalled { to } => {
-                        not_installed.push(format!("{part} ({to})"))
-                    }
-                    wgc_catalog::update::PartStatus::UpToDate => {}
-                }
-            }
-            if changed.is_empty() {
+            let summary = CatalogSummary::of(build);
+            if summary.updates.is_empty() {
                 ui.label("Up to date");
             } else {
-                ui.colored_label(
-                    egui::Color32::from_rgb(230, 180, 40),
-                    format!("Update available: {}", changed.join(", ")),
-                );
+                ui.colored_label(WARN_COLOR, format!("Update available: {}", summary.updates.join(", ")));
             }
-            if !not_installed.is_empty() {
-                ui.weak(format!("not installed: {}", not_installed.join(", ")));
+            if !summary.not_installed.is_empty() {
+                ui.weak(format!("not installed: {}", summary.not_installed.join(", ")));
             }
         }
         Some(CatalogCheckState::Error(detail)) => {
@@ -156,20 +71,12 @@ fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
     }
 }
 
-/// Render one install's download/install run status, if any, in a
-/// fixed-width block so the row's size stays constant frame to frame as
-/// byte counts and the in-flight file name change (long names truncate
-/// rather than growing the row). Returns whatever action the user
-/// triggered this frame, so the caller can apply it after the row loop
-/// (same borrow-collection pattern as `to_launch`/`to_activate`/`to_recheck`).
-fn show_download_status(
-    ui: &mut egui::Ui,
-    dest_key: Option<&std::path::Path>,
-    state: Option<&DownloadUiState>,
-) -> DownloadRowAction {
-    let mut action = DownloadRowAction::None;
+/// One download's status in a fixed-width block; long file names truncate
+/// rather than growing the row.
+fn show_download_status(ui: &mut egui::Ui, key: &Path, state: Option<&DownloadState>) -> Option<DownloadRowAction> {
+    let mut action = None;
     match state {
-        Some(DownloadUiState::Running { phase, done_bytes, total_bytes, current, cancel, pause }) => {
+        Some(DownloadState::Running { phase, done_bytes, total_bytes, current }) => {
             ui.allocate_ui_with_layout(
                 egui::vec2(PROGRESS_AREA_WIDTH, ui.spacing().interact_size.y * 2.0 + ui.spacing().item_spacing.y),
                 egui::Layout::top_down(egui::Align::LEFT),
@@ -192,43 +99,40 @@ fn show_download_status(
                             ui.spinner();
                         }
                         if ui.small_button("Pause").clicked() {
-                            action = DownloadRowAction::Pause(Arc::clone(pause));
+                            action = Some(DownloadRowAction::Pause(key.to_path_buf()));
                         }
                         if ui.small_button("Cancel").clicked() {
-                            action = DownloadRowAction::Cancel(Arc::clone(cancel));
+                            action = Some(DownloadRowAction::Cancel(key.to_path_buf()));
                         }
                     });
                     ui.add(egui::Label::new(format!("{phase}: {current}")).truncate());
                 },
             );
         }
-        Some(DownloadUiState::Paused) => {
+        Some(DownloadState::Paused) => {
             ui.horizontal(|ui| {
                 ui.weak("Download paused; staged files are kept.");
-                // `dest_key` is only absent for a row that never started a
-                // download at all, which can't be in `Paused`; the guard is
-                // defensive, not expected to trip.
-                if let Some(dest_key) = dest_key
-                    && ui.small_button("Resume").clicked()
-                {
-                    action = DownloadRowAction::Resume(dest_key.to_path_buf());
+                if ui.small_button("Resume").clicked() {
+                    action = Some(DownloadRowAction::Resume(key.to_path_buf()));
                 }
             });
         }
-        Some(DownloadUiState::Done { skipped_deltas }) => {
+        Some(DownloadState::Done { skipped_deltas }) => {
             if *skipped_deltas > 0 {
                 ui.colored_label(
-                    egui::Color32::from_rgb(230, 180, 40),
-                    format!("Installed ({skipped_deltas} delta part(s) skipped -- not yet supported, downloaded but not applied)"),
+                    WARN_COLOR,
+                    format!(
+                        "Installed ({skipped_deltas} delta part(s) skipped: not yet supported, downloaded but not applied)"
+                    ),
                 );
             } else {
-                ui.colored_label(egui::Color32::from_rgb(120, 200, 120), "Installed");
+                ui.colored_label(OK_COLOR, "Installed");
             }
         }
-        Some(DownloadUiState::Failed(detail)) => {
-            ui.colored_label(egui::Color32::from_rgb(230, 80, 80), format!("Download failed: {detail}"));
+        Some(DownloadState::Failed(detail)) => {
+            ui.colored_label(ERROR_COLOR, format!("Download failed: {detail}"));
         }
-        Some(DownloadUiState::Cancelled) => {
+        Some(DownloadState::Cancelled) => {
             ui.weak("Download cancelled.");
         }
         None => {}
@@ -236,201 +140,76 @@ fn show_download_status(
     action
 }
 
-/// Render one known game's installable version, derived from a fresh
-/// catalog check (every part reports `NotInstalled` -- there is nothing
-/// installed yet to diff against). The client part's version is the
-/// headline: WGUS serves one current build per product, so this is "the"
-/// version a fresh install of this game gets, not a choice among several.
-fn show_available_game_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
+/// A known game's installable version, from a fresh catalog check. Returns
+/// whether the user asked to retry a failed check.
+fn show_available_game_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) -> bool {
     match state {
         Some(CatalogCheckState::Checking) => {
             ui.spinner();
             ui.label("checking available version");
         }
-        Some(CatalogCheckState::Ready(build)) => {
-            let client_version = build.parts.iter().find_map(|(part, status)| {
-                if *part != wgc_catalog::models::PartName::Client {
-                    return None;
-                }
-                match status {
-                    wgc_catalog::update::PartStatus::NotInstalled { to } => Some(to.to_string()),
-                    wgc_catalog::update::PartStatus::UpToDate
-                    | wgc_catalog::update::PartStatus::UpdateAvailable { .. } => None,
-                }
-            });
-            match client_version {
-                Some(v) => ui.label(format!("version {v}")),
-                None => ui.weak("client version not reported"),
-            };
-        }
+        Some(CatalogCheckState::Ready(build)) => match wows_toolkit_launcher::fresh_install_version(build) {
+            Some(v) => {
+                ui.label(format!("version {v}"));
+            }
+            None => {
+                ui.weak("client version not reported");
+            }
+        },
         Some(CatalogCheckState::Error(detail)) => {
             ui.weak(format!("unavailable: {detail}"));
+            return ui.small_button("Retry").clicked();
         }
         Some(CatalogCheckState::NoUpdateHost) | None => {}
     }
+    false
 }
 
 impl ToolkitTabViewer<'_> {
-    /// Toast the outcome of a Proton auto-detect attempt.
-    fn toast_proton_setup(&self, result: &ProtonSetup) {
+    fn toast_proton_setup(&self, result: ProtonSetup) {
         let mut toasts = self.tab_state.toasts.lock();
-        match result {
-            ProtonSetup::Ready { detail } => {
-                toasts.success(format!("Proton detected. {detail}"));
-            }
-            ProtonSetup::BinaryOnly => {
-                toasts.success("Proton binary detected.");
-            }
-            ProtonSetup::NoManagedPrefixDir => {
-                toasts.warning(
-                    "Found a Proton binary, but could not determine a data directory for a managed prefix -- set the prefix manually.",
-                );
-            }
-            ProtonSetup::NoProton => {
-                toasts.warning(
-                    "Found a Steam installation, but no Proton install under its library -- install Proton via Steam, then try again.",
-                );
-            }
-            ProtonSetup::NoSteam => {
-                toasts.error("Could not find a Steam installation. Proton needs Steam installed.");
-            }
-        }
+        match result.severity() {
+            Severity::Success => toasts.success(result.to_string()),
+            Severity::Warning => toasts.warning(result.to_string()),
+            Severity::Error => toasts.error(result.to_string()),
+        };
     }
 
-    /// Run Proton auto-detect against the persisted launcher settings and save.
-    /// Used by the per-install "Set up Proton" prompt (Linux only; other
-    /// platforms launch non-Steam installs natively).
-    #[cfg(target_os = "linux")]
-    fn apply_proton_autodetect(&mut self) {
-        let mut launcher = self.tab_state.persisted.read().settings.launcher.clone();
-        let result = autodetect_proton(&mut launcher);
-        if result.changed() {
-            self.tab_state.persisted.write().settings.launcher = launcher;
-            self.tab_state.request_save();
+    fn toast_launcher_error(&self, result: Result<(), LauncherError>) {
+        if let Err(e) = result {
+            self.tab_state.toasts.lock().error(e.to_string());
         }
-        self.toast_proton_setup(&result);
     }
 
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
         self.build_account_section(ui);
         ui.separator();
 
+        let mut intents = Vec::new();
         ui.horizontal(|ui| {
             ui.heading("Launcher");
             if ui.button("Rescan").clicked() {
-                self.tab_state.start_install_discovery();
+                intents.push(Intent::Rescan);
             }
             if ui.button("Add install...").clicked()
                 && let Some(dir) = rfd::FileDialog::new().pick_folder()
             {
-                self.tab_state.persisted.write().settings.launcher.manual_installs.push(dir);
-                self.tab_state.start_install_discovery();
+                intents.push(Intent::AddInstall(dir));
             }
-            if self.tab_state.discovering_installs {
+            if self.tab_state.launcher.is_discovering() {
                 ui.spinner();
             }
         });
 
         ui.checkbox(&mut self.tab_state.launch_safe_mode, "Safe mode (disable mods)");
 
-        ui.collapsing("Launch options", |ui| {
-            let mut launcher = self.tab_state.persisted.read().settings.launcher.clone();
-            let mut changed = false;
-
-            ui.label("Extra launch args (one per line):");
-            let mut args_text = launcher.extra_args.join("\n");
-            if ui.text_edit_multiline(&mut args_text).changed() {
-                launcher.extra_args = args_text.lines().map(str::to_string).filter(|s| !s.is_empty()).collect();
-                changed = true;
-            }
-
-            ui.label("Environment variables (KEY=VALUE, one per line):");
-            let mut env_text = launcher.env_vars.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("\n");
-            if ui.text_edit_multiline(&mut env_text).changed() {
-                launcher.env_vars = env_text
-                    .lines()
-                    .filter_map(|line| line.split_once('=').map(|(k, v)| (k.trim().to_string(), v.trim().to_string())))
-                    .filter(|(k, _)| !k.is_empty())
-                    .collect();
-                changed = true;
-            }
-
-            ui.separator();
-            ui.strong("Proton (Linux)");
-            ui.weak(
-                "A non-Steam install launches through this Proton binary and prefix. Steam installs launch through Steam and ignore these. Auto-detect fills both in; the prefix is a toolkit-managed one Proton sets up on first launch unless you already have WoWs on Steam.",
-            );
-
-            ui.horizontal(|ui| {
-                ui.label("Binary:");
-                match &launcher.proton_binary {
-                    Some(path) => {
-                        ui.add(egui::Label::new(path.display().to_string()).truncate());
-                    }
-                    None => {
-                        ui.weak("not set");
-                    }
-                }
-                if ui.small_button("Browse...").clicked()
-                    && let Some(path) = rfd::FileDialog::new().pick_file()
-                {
-                    launcher.proton_binary = Some(path);
-                    changed = true;
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Prefix:");
-                match &launcher.proton_prefix {
-                    Some(path) => {
-                        ui.add(egui::Label::new(path.display().to_string()).truncate());
-                    }
-                    None => {
-                        ui.weak("not set");
-                    }
-                }
-                if ui.small_button("Browse...").clicked()
-                    && let Some(path) = rfd::FileDialog::new().pick_folder()
-                {
-                    launcher.proton_prefix = Some(path);
-                    changed = true;
-                }
-            });
-            if ui.button("Auto-detect").clicked() {
-                let result = autodetect_proton(&mut launcher);
-                changed |= result.changed();
-                self.toast_proton_setup(&result);
-            }
-
-            if changed {
-                self.tab_state.persisted.write().settings.launcher = launcher;
-                self.tab_state.request_save();
-            }
-        });
+        ui.collapsing("Launch options", |ui| self.build_launch_options(ui));
 
         ui.separator();
 
-        // Collect launch/select intents first so we do not borrow-conflict with
-        // the install list while iterating it.
-        let mut to_launch: Option<usize> = None;
-        let mut to_activate: Option<std::path::PathBuf> = None;
-        let mut to_recheck: Option<std::path::PathBuf> = None;
-        // (install_path, folder-picker default dir).
-        let mut to_download: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
-        let mut to_cancel_download: Option<Arc<AtomicBool>> = None;
-        let mut to_pause_download: Option<Arc<AtomicBool>> = None;
-        let mut to_resume_download: Option<std::path::PathBuf> = None;
-        // Linux non-Steam installs launch through Proton; if it is not
-        // configured yet, offer one-click setup right at the install.
-        #[cfg(target_os = "linux")]
-        let mut to_setup_proton = false;
-        #[cfg(target_os = "linux")]
-        let proton_configured = {
-            let guard = self.tab_state.persisted.read();
-            let l = &guard.settings.launcher;
-            l.proton_binary.is_some() && l.proton_prefix.is_some()
-        };
-
-        for (i, install) in self.tab_state.discovered_installs.iter().enumerate() {
+        let launcher = &self.tab_state.launcher;
+        let settings = self.tab_state.persisted.read().settings.launcher.clone();
+        for (i, install) in launcher.installs().iter().enumerate() {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.strong(install.source.label());
@@ -443,40 +222,30 @@ impl ToolkitTabViewer<'_> {
                 });
                 if !install.source.is_read_only_content() {
                     ui.horizontal(|ui| {
-                        show_catalog_status(ui, self.tab_state.catalog_status.get(&install.path));
+                        show_catalog_status(ui, launcher.catalog_status(&install.path));
                         if ui.small_button("Recheck").clicked() {
-                            to_recheck = Some(install.path.clone());
+                            intents.push(Intent::Recheck(install.path.clone()));
                         }
                     });
 
-                    let download_state = self.tab_state.download_state.get(&install.path);
-                    let is_active =
-                        matches!(download_state, Some(DownloadUiState::Running { .. } | DownloadUiState::Paused));
-                    match show_download_status(ui, Some(&install.path), download_state) {
-                        DownloadRowAction::Cancel(cancel) => to_cancel_download = Some(cancel),
-                        DownloadRowAction::Pause(pause) => to_pause_download = Some(pause),
-                        DownloadRowAction::Resume(dest_key) => to_resume_download = Some(dest_key),
-                        DownloadRowAction::None => {}
+                    let download_state = launcher.download_state(&install.path);
+                    if let Some(action) = show_download_status(ui, &install.path, download_state) {
+                        intents.push(Intent::Row(action));
                     }
 
-                    let has_downloads = matches!(
-                        self.tab_state.catalog_status.get(&install.path),
-                        Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
-                    );
-                    if has_downloads && !is_active {
+                    let is_active = download_state.is_some_and(DownloadState::is_active);
+                    if launcher.has_downloads(&install.path) && !is_active {
                         ui.horizontal(|ui| {
                             if ui.button("Download / Update...").clicked() {
-                                // A discovered install with no detected version has
-                                // no real content on disk yet (e.g. a manually added
-                                // empty target directory), so default the folder
-                                // picker to the platform-standard suggestion instead
-                                // of that empty directory.
+                                // An install with no detected version has no content
+                                // on disk yet (e.g. a manually added empty directory),
+                                // so the picker starts at the platform default.
                                 let default_dir = if install.version.is_some() {
                                     install.path.clone()
                                 } else {
                                     wgc_download::default_install_dir()
                                 };
-                                to_download = Some((install.path.clone(), default_dir));
+                                intents.push(Intent::Download { install: install.path.clone(), default_dir });
                             }
                             ui.weak(
                                 "A fresh install is tens of GB; delta updates are not supported yet, so a changed part re-downloads in full.",
@@ -484,310 +253,359 @@ impl ToolkitTabViewer<'_> {
                         });
                     }
                 }
-                #[cfg(target_os = "linux")]
-                if !install.source.is_read_only_content() && !proton_configured {
+                if wows_toolkit_launcher::proton::needs_setup(install, &settings) {
                     ui.horizontal(|ui| {
-                        let warn = ui.visuals().warn_fg_color;
-                        ui.colored_label(warn, "Needs Proton to launch on Linux.");
+                        ui.colored_label(ui.visuals().warn_fg_color, "Needs Proton to launch on Linux.");
                         if ui.button("Set up Proton").clicked() {
-                            to_setup_proton = true;
+                            intents.push(Intent::SetUpProton);
                         }
                     });
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Launch").clicked() {
-                        to_launch = Some(i);
+                        intents.push(Intent::Launch(i));
                     }
                     if ui.button("Use for toolkit").clicked() {
-                        to_activate = Some(install.path.clone());
+                        intents.push(Intent::UseForToolkit(install.path.clone()));
                     }
                 });
             });
         }
 
-        #[cfg(target_os = "linux")]
-        if to_setup_proton {
-            self.apply_proton_autodetect();
+        ui.separator();
+        self.build_install_game_section(ui, &mut intents);
+
+        for intent in intents {
+            self.apply_intent(intent);
+        }
+    }
+
+    fn build_launch_options(&mut self, ui: &mut egui::Ui) {
+        let mut launcher = self.tab_state.persisted.read().settings.launcher.clone();
+        let mut changed = false;
+
+        ui.label("Extra launch args (one per line):");
+        let mut args_text = launcher.extra_args_text();
+        if ui.text_edit_multiline(&mut args_text).changed() {
+            launcher.set_extra_args_text(&args_text);
+            changed = true;
         }
 
-        if let Some(path) = to_recheck {
-            self.tab_state.recheck_catalog(&path);
-        }
-
-        if let Some(path) = to_activate {
-            self.tab_state.persisted.write().settings.game.wows_dir = path.display().to_string();
-            self.tab_state.revalidate_wows_dir();
-            if !self.tab_state.wows_dir_invalid {
-                self.tab_state.prevent_changing_wows_dir();
-                update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
-            }
-        }
-
-        if let Some(i) = to_launch {
-            self.launch_install(i);
-        }
-
-        if let Some(cancel) = to_cancel_download {
-            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        if let Some(pause) = to_pause_download {
-            pause.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        if let Some(dest_key) = to_resume_download {
-            self.tab_state.resume_download(&dest_key);
-        }
-
-        if let Some((install_path, default_dir)) = to_download
-            && let Some(dest_dir) = rfd::FileDialog::new().set_directory(&default_dir).pick_folder()
-        {
-            self.tab_state.start_download(install_path, dest_dir);
+        ui.label("Environment variables (KEY=VALUE, one per line):");
+        let mut env_text = launcher.env_vars_text();
+        if ui.text_edit_multiline(&mut env_text).changed() {
+            launcher.set_env_vars_text(&env_text);
+            changed = true;
         }
 
         ui.separator();
-        self.build_install_game_section(ui);
-    }
+        ui.strong("Proton (Linux)");
+        ui.weak(
+            "A non-Steam install launches through this Proton binary and prefix. Steam installs launch through Steam and ignore these. Auto-detect fills both in; the prefix is a toolkit-managed one Proton sets up on first launch unless you already have WoWs on Steam.",
+        );
 
-    /// "Install a game" section: lets a user with zero (or more) discovered
-    /// installs download and install one of the built-in known games
-    /// (`wgc_catalog::known_games`) from scratch. Each entry is the current
-    /// build WGUS serves for that product (live WoWs vs Public Test) -- WGUS
-    /// has no history of older builds to offer, so there is no version
-    /// dropdown here, only a choice of product.
-    fn build_install_game_section(&mut self, ui: &mut egui::Ui) {
-        // Guarded by "no results yet" rather than a one-shot flag: once every
-        // known game has an entry (Checking, Ready, or Error) this is
-        // permanently false, so the check fires exactly once per first
-        // render of this section (this fn only runs while the Launcher tab
-        // is visible), same effect `start_catalog_check`'s own per-install
-        // guard achieves for discovered installs.
-        if self.tab_state.available_games.is_empty() {
-            self.tab_state.start_available_games_check();
+        ui.horizontal(|ui| {
+            ui.label("Binary:");
+            match &launcher.proton_binary {
+                Some(path) => {
+                    ui.add(egui::Label::new(path.display().to_string()).truncate());
+                }
+                None => {
+                    ui.weak("not set");
+                }
+            }
+            if ui.small_button("Browse...").clicked()
+                && let Some(path) = rfd::FileDialog::new().pick_file()
+            {
+                launcher.proton_binary = Some(path);
+                changed = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Prefix:");
+            match &launcher.proton_prefix {
+                Some(path) => {
+                    ui.add(egui::Label::new(path.display().to_string()).truncate());
+                }
+                None => {
+                    ui.weak("not set");
+                }
+            }
+            if ui.small_button("Browse...").clicked()
+                && let Some(path) = rfd::FileDialog::new().pick_folder()
+            {
+                launcher.proton_prefix = Some(path);
+                changed = true;
+            }
+        });
+        if ui.button("Auto-detect").clicked() {
+            let result = wows_toolkit_launcher::proton::autodetect(&mut launcher, crate::storage_dir().as_deref());
+            changed |= result.changed();
+            self.toast_proton_setup(result);
         }
 
+        if changed {
+            self.tab_state.persisted.write().settings.launcher = launcher;
+            self.tab_state.request_save();
+        }
+    }
+
+    /// Lets a user download and install one of the built-in known games from
+    /// scratch. WGUS serves one current build per product and no history, so
+    /// there is a choice of product but not of version.
+    fn build_install_game_section(&mut self, ui: &mut egui::Ui, intents: &mut Vec<Intent>) {
+        // Only runs while the tab is visible; once every game has a result or
+        // a check in flight this is false, so the check fires once.
+        if !self.tab_state.launcher.available_games_checked() {
+            self.tab_state.launcher_op(|launcher, _, env| {
+                launcher.start_available_games_check(env);
+                false
+            });
+        }
+
+        let launcher = &self.tab_state.launcher;
         ui.collapsing("Install a game", |ui| {
             ui.weak("A fresh install is tens of GB.");
-
-            // Collect the install intent (and any row action) first so we
-            // do not borrow-conflict with `available_games`/`download_state`
-            // while iterating -- same pattern as `to_download`/`to_launch`
-            // above.
-            let mut to_install: Option<(String, std::path::PathBuf)> = None;
-            let mut to_cancel: Option<Arc<AtomicBool>> = None;
-            let mut to_pause: Option<Arc<AtomicBool>> = None;
-            let mut to_resume: Option<std::path::PathBuf> = None;
-
             for known in wgc_catalog::known_games::known_games() {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.strong(known.display_name);
-                        show_available_game_status(ui, self.tab_state.available_games.get(known.game_id));
+                        if show_available_game_status(ui, launcher.available_game(known)) {
+                            intents.push(Intent::RetryAvailableGames);
+                        }
                     });
-
-                    let dest = self.tab_state.installing_games.get(known.game_id).cloned();
-                    let download_state = dest.as_ref().and_then(|d| self.tab_state.download_state.get(d));
-                    let is_active =
-                        matches!(download_state, Some(DownloadUiState::Running { .. } | DownloadUiState::Paused));
-                    match show_download_status(ui, dest.as_deref(), download_state) {
-                        DownloadRowAction::Cancel(cancel) => to_cancel = Some(cancel),
-                        DownloadRowAction::Pause(pause) => to_pause = Some(pause),
-                        DownloadRowAction::Resume(dest_key) => to_resume = Some(dest_key),
-                        DownloadRowAction::None => {}
+                    if let Some((key, state)) = launcher.installing_download(known)
+                        && let Some(action) = show_download_status(ui, key, Some(state))
+                    {
+                        intents.push(Intent::Row(action));
                     }
-
-                    let is_ready = matches!(
-                        self.tab_state.available_games.get(known.game_id),
-                        Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
-                    );
-                    ui.add_enabled_ui(is_ready && !is_active, |ui| {
-                        if ui.button("Install...").clicked()
-                            && let Some(dest_dir) =
-                                rfd::FileDialog::new().set_directory(wgc_download::default_install_dir()).pick_folder()
-                        {
-                            to_install = Some((known.game_id.to_string(), dest_dir));
+                    ui.add_enabled_ui(launcher.can_install(known), |ui| {
+                        if ui.button("Install...").clicked() {
+                            intents.push(Intent::Install(*known));
                         }
                     });
                 });
-            }
-
-            if let Some(cancel) = to_cancel {
-                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-            if let Some(pause) = to_pause {
-                pause.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-            if let Some(dest_key) = to_resume {
-                self.tab_state.resume_download(&dest_key);
-            }
-            if let Some((game_id, dest_dir)) = to_install {
-                self.tab_state.install_known_game(game_id, dest_dir);
             }
         });
     }
 
-    /// Sign-in / signed-in summary. Renders from `tab_state`, then applies
-    /// the one action the user triggered this frame (if any) after the UI
-    /// closure ends -- `start_login`/`start_two_factor`/`sign_out` all need
-    /// `&mut self.tab_state`, which the closure's borrows of it must not
-    /// still be alive for, so intents are collected first and applied last
-    /// (the same shape `build_launcher_tab` uses for install actions).
-    fn build_account_section(&mut self, ui: &mut egui::Ui) {
-        let mut to_sign_in = false;
-        let mut to_submit_code = None;
-        let mut to_sign_out = false;
+    fn apply_intent(&mut self, intent: Intent) {
+        match intent {
+            Intent::Rescan => self.tab_state.launcher_op(|launcher, settings, env| {
+                launcher.start_install_discovery(settings, env);
+                false
+            }),
+            Intent::AddInstall(dir) => self.tab_state.launcher_op(|launcher, settings, env| {
+                settings.manual_installs.push(dir);
+                launcher.start_install_discovery(settings, env);
+                true
+            }),
+            Intent::Launch(index) => self.launch_install(index),
+            Intent::UseForToolkit(path) => {
+                self.tab_state.persisted.write().settings.game.wows_dir = path.display().to_string();
+                self.tab_state.revalidate_wows_dir();
+                if !self.tab_state.wows_dir_invalid {
+                    self.tab_state.prevent_changing_wows_dir();
+                    update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
+                }
+            }
+            Intent::Recheck(path) => self.tab_state.launcher_op(|launcher, _, env| {
+                launcher.recheck_catalog(&path, env);
+                false
+            }),
+            Intent::Download { install, default_dir } => {
+                let Some(dest_dir) = rfd::FileDialog::new().set_directory(&default_dir).pick_folder() else {
+                    return;
+                };
+                let mut result = Ok(());
+                self.tab_state.launcher_op(|launcher, _, env| {
+                    result = launcher.start_download(install, dest_dir, env);
+                    false
+                });
+                self.toast_launcher_error(result);
+            }
+            Intent::Install(game) => {
+                let Some(dest_dir) =
+                    rfd::FileDialog::new().set_directory(wgc_download::default_install_dir()).pick_folder()
+                else {
+                    return;
+                };
+                let mut result = Ok(());
+                self.tab_state.launcher_op(|launcher, _, env| {
+                    result = launcher.install_known_game(&game, dest_dir, env);
+                    false
+                });
+                self.toast_launcher_error(result);
+            }
+            Intent::Row(DownloadRowAction::Cancel(key)) => self.tab_state.launcher.cancel_download(&key),
+            Intent::Row(DownloadRowAction::Pause(key)) => self.tab_state.launcher.pause_download(&key),
+            Intent::Row(DownloadRowAction::Resume(key)) => {
+                let mut result = Ok(());
+                self.tab_state.launcher_op(|launcher, _, env| {
+                    result = launcher.resume_download(&key, env);
+                    false
+                });
+                self.toast_launcher_error(result);
+            }
+            Intent::RetryAvailableGames => self.tab_state.launcher_op(|launcher, _, env| {
+                launcher.start_available_games_check(env);
+                false
+            }),
+            Intent::SetUpProton => {
+                let mut settings = self.tab_state.persisted.read().settings.launcher.clone();
+                let result = wows_toolkit_launcher::proton::autodetect(&mut settings, crate::storage_dir().as_deref());
+                if result.changed() {
+                    self.tab_state.persisted.write().settings.launcher = settings;
+                    self.tab_state.request_save();
+                }
+                self.toast_proton_setup(result);
+            }
+        }
+    }
 
+    /// Sign-in form, or the signed-in account's summary.
+    fn build_account_section(&mut self, ui: &mut egui::Ui) {
+        let mut sign_in = false;
+        let mut submit_code = false;
+        let mut sign_out = false;
+        let mut dismiss_captcha = false;
+
+        let launcher: &Launcher = &self.tab_state.launcher;
+        let form = &mut self.tab_state.login_form;
         ui.group(|ui| {
             ui.heading("Account");
-            if let Some(session) = self.tab_state.active_session.as_ref() {
+            if let Some(session) = launcher.session() {
                 ui.horizontal(|ui| {
                     ui.strong(session.nickname.as_str());
-                    ui.label(format!("Region: {}", realm_label(session.realm)));
+                    ui.label(format!("Region: {}", wows_toolkit_launcher::realm_label(session.realm)));
                 });
                 match session.expiry {
-                    wgc_auth::TokenExpiry::KnownAt(expires_at) => match expires_at.duration_since(std::time::SystemTime::now()) {
-                        Ok(remaining) => {
-                            ui.label(format!("Signed in (expires in {})", format_duration(remaining)));
+                    wgc_auth::TokenExpiry::KnownAt(expires_at) => {
+                        match expires_at.duration_since(std::time::SystemTime::now()) {
+                            Ok(remaining) => {
+                                ui.label(format!(
+                                    "Signed in (expires in {})",
+                                    wows_toolkit_launcher::format_duration(remaining)
+                                ));
+                            }
+                            Err(_) => {
+                                ui.colored_label(ERROR_COLOR, "Session expired - sign in again");
+                            }
                         }
-                        Err(_) => {
-                            ui.colored_label(egui::Color32::from_rgb(230, 80, 80), "Session expired - sign in again");
-                        }
-                    },
+                    }
                     wgc_auth::TokenExpiry::Unknown => {
                         ui.weak("Signed in (expiry unknown; verified on launch)");
                     }
                 }
-                if !self.tab_state.session_persisted {
+                if !launcher.session_persisted() {
                     ui.weak("Not saved to keyring; you'll sign in again next launch.");
                 }
                 if ui.button("Sign out").clicked() {
-                    to_sign_out = true;
+                    sign_out = true;
                 }
-            } else if let Some(prompt) = self.tab_state.login_form.two_factor.clone() {
+            } else if launcher.two_factor_pending() {
                 ui.label("Two-factor code required.");
-                let mut code = prompt.code;
-                let mut use_backup = prompt.use_backup;
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut code).hint_text("code"));
-                    ui.checkbox(&mut use_backup, "Use backup code");
+                    ui.add(egui::TextEdit::singleline(&mut form.two_factor_code).hint_text("code"));
+                    ui.checkbox(&mut form.use_backup_code, "Use backup code");
                 });
-                if let Some(err) = &self.tab_state.login_form.error {
-                    ui.colored_label(egui::Color32::from_rgb(230, 80, 80), err);
+                if let Some(err) = launcher.login_error() {
+                    ui.colored_label(ERROR_COLOR, err);
                 }
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!self.tab_state.login_form.in_progress, |ui| {
+                    ui.add_enabled_ui(!launcher.login_in_progress(), |ui| {
                         if ui.button("Submit code").clicked() {
-                            to_submit_code = Some(if use_backup {
-                                wgc_auth::TwoFactorCode::Backup(code.clone())
-                            } else {
-                                wgc_auth::TwoFactorCode::Otp(code.clone())
-                            });
+                            submit_code = true;
                         }
                     });
-                    if self.tab_state.login_form.in_progress {
+                    if launcher.login_in_progress() {
                         ui.spinner();
                     }
                 });
-                if let Some(p) = self.tab_state.login_form.two_factor.as_mut() {
-                    p.code = code;
-                    p.use_backup = use_backup;
-                }
-            } else if self.tab_state.login_form.captcha_blocked {
+            } else if launcher.captcha_blocked() {
                 ui.colored_label(
-                    egui::Color32::from_rgb(230, 180, 40),
+                    WARN_COLOR,
                     "This login needs a CAPTCHA, which this launcher can't show yet. Sign in once via the official Wargaming Game Center or wargaming.net in a browser, then try again.",
                 );
-            } else if !self.tab_state.login_form.show {
+                if ui.button("Try again").clicked() {
+                    dismiss_captcha = true;
+                }
+            } else if !form.show {
                 ui.horizontal(|ui| {
                     ui.weak("Not signed in.");
                     if ui.button("Sign in").clicked() {
-                        self.tab_state.login_form.show = true;
+                        form.show = true;
                     }
                 });
             } else {
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("launcher_account_realm")
-                        .selected_text(realm_label(self.tab_state.login_form.realm))
+                        .selected_text(wows_toolkit_launcher::realm_label(form.realm))
                         .show_ui(ui, |ui| {
-                            for realm in [
-                                wgc_auth::AccountRealm::Eu,
-                                wgc_auth::AccountRealm::Na,
-                                wgc_auth::AccountRealm::Asia,
-                                wgc_auth::AccountRealm::Ru,
-                            ] {
-                                if ui.selectable_label(self.tab_state.login_form.realm == realm, realm_label(realm)).clicked() {
-                                    self.tab_state.login_form.realm = realm;
-                                }
+                            for realm in wows_toolkit_launcher::REALMS {
+                                ui.selectable_value(&mut form.realm, realm, wows_toolkit_launcher::realm_label(realm));
                             }
                         });
                     ui.label("Username:");
-                    ui.text_edit_singleline(&mut self.tab_state.login_form.username);
+                    ui.text_edit_singleline(&mut form.username);
                 });
                 ui.horizontal(|ui| {
                     ui.label("Password:");
-                    ui.add(egui::TextEdit::singleline(&mut self.tab_state.login_form.password).password(true));
+                    ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
                 });
-                if let Some(err) = &self.tab_state.login_form.error {
-                    ui.colored_label(egui::Color32::from_rgb(230, 80, 80), err);
+                if let Some(err) = launcher.login_error() {
+                    ui.colored_label(ERROR_COLOR, err);
                 }
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!self.tab_state.login_form.in_progress, |ui| {
+                    ui.add_enabled_ui(!launcher.login_in_progress(), |ui| {
                         if ui.button("Sign in").clicked() {
-                            to_sign_in = true;
+                            sign_in = true;
                         }
                     });
-                    if self.tab_state.login_form.in_progress {
+                    if launcher.login_in_progress() {
                         ui.spinner();
                     }
                 });
             }
         });
 
-        if to_sign_in {
-            self.tab_state.start_login();
+        if sign_in {
+            // Taken out of the non-zeroizing form field the moment it is used.
+            let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.tab_state.login_form.password));
+            let realm = self.tab_state.login_form.realm;
+            let username = self.tab_state.login_form.username.clone();
+            self.tab_state
+                .launcher_op(|launcher, settings, env| launcher.start_login(realm, username, password, settings, env));
         }
-        if let Some(code) = to_submit_code {
-            self.tab_state.start_two_factor(code);
+        if submit_code {
+            let form = &mut self.tab_state.login_form;
+            let code = std::mem::take(&mut form.two_factor_code);
+            let code = if form.use_backup_code {
+                wgc_auth::TwoFactorCode::Backup(code)
+            } else {
+                wgc_auth::TwoFactorCode::Otp(code)
+            };
+            self.tab_state.launcher_op(|launcher, settings, env| launcher.submit_two_factor(code, settings, env));
         }
-        if to_sign_out {
-            self.tab_state.sign_out();
+        if sign_out {
+            self.tab_state.launcher_op(|launcher, settings, env| launcher.sign_out(settings, env));
+        }
+        if dismiss_captcha {
+            self.tab_state.launcher.dismiss_captcha();
+            self.tab_state.login_form.show = true;
         }
     }
 
     fn launch_install(&mut self, index: usize) {
-        let Some(install) = self.tab_state.discovered_installs.get(index).cloned() else {
+        let Some(install) = self.tab_state.launcher.installs().get(index).cloned() else {
             return;
         };
-        let launcher = self.tab_state.persisted.read().settings.launcher.clone();
-        let proton = match (launcher.proton_binary, launcher.proton_prefix) {
-            (Some(binary), Some(prefix)) => {
-                Some(wgc_launch::proton::ProtonConfig { proton_binary: binary, compat_prefix: prefix })
-            }
-            _ => None,
-        };
-
-        // Compose user args + env, appending safe-mode args when toggled.
-        let mut extra = launcher.extra_args.clone();
-        if self.tab_state.launch_safe_mode {
-            extra.extend(launcher.safe_mode_args.clone());
-        }
-        let launch_args = wgc_launch::LaunchArgs { extra, env: launcher.env_vars.clone() };
-
-        // Online play. With no signed-in account the gate reports
-        // NotConfigured and allows the launch (the game shows its own
-        // login); with a signed-in account the gate reflects its real
-        // status, so an expired session refuses here with
-        // AuthenticationRequired instead of failing inside the game.
-        let resolved = match wgc_launch::resolve(&install, wgc_launch::LaunchMode::Online, &launch_args) {
-            Ok(r) => r,
-            Err(e) => {
-                self.tab_state.toasts.lock().error(format!("Cannot launch: {e}"));
-                return;
-            }
-        };
-        let token_status =
-            wgc_auth::launch_token_status(self.tab_state.active_session.as_ref(), std::time::SystemTime::now());
-        if let Err(e) = resolved.spawn(proton.as_ref(), token_status, |command| {
-            crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
-        }) {
+        let settings = self.tab_state.persisted.read().settings.launcher.clone();
+        let launched =
+            self.tab_state.launcher.launch(&install, &settings, self.tab_state.launch_safe_mode, |command| {
+                crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
+            });
+        if let Err(e) = launched {
             self.tab_state.toasts.lock().error(format!("Launch failed: {e}"));
         }
     }

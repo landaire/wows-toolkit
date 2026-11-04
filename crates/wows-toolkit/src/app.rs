@@ -1399,29 +1399,13 @@ impl WowsToolkitApp {
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
         state.tab_state.db_pool = state.db_pool.clone();
 
-        // Load a previously signed-in account's session from the OS keyring,
-        // if one was persisted. Local-only and fast (no network), so this
-        // runs synchronously rather than through the login background-task
-        // machinery. `.verify()` (a network call) is deliberately not run
-        // here -- expiry is checked lazily by the launch gate.
+        // A previously signed-in account's session, from the OS keyring. Expiry
+        // is checked lazily by the launch gate rather than verified here.
         #[cfg(feature = "launcher")]
-        if let Some(account) = state.tab_state.persisted.read().settings.launcher.active_account.clone() {
-            match wgc_auth::SessionStore::new().load(account.realm, account.account_id) {
-                Ok(session) => {
-                    state.tab_state.session_persisted = true;
-                    state.tab_state.active_session = Some(session);
-                }
-                // No entry is the normal "nothing persisted" case. NoSecretStore
-                // covers both a genuinely-absent store and a locked/erroring one
-                // (the keyring error taxonomy does not distinguish them), so log
-                // it rather than dropping a possibly-signed-in user silently.
-                Err(wgc_auth::AuthError::NoStoredSession) => {}
-                Err(wgc_auth::AuthError::NoSecretStore) => {
-                    tracing::debug!("no accessible OS secret store; starting signed out (session not restored)");
-                }
-                Err(e) => tracing::warn!("could not load stored session from keyring: {e}"),
-            }
-        }
+        state.tab_state.launcher_op(|launcher, settings, env| {
+            launcher.start_session_restore(settings, env);
+            false
+        });
 
         // Main window geometry is now restored via the ViewportBuilder in main.rs,
         // which is the only way to set window position. Size, fullscreen, and
@@ -3148,134 +3132,18 @@ impl WowsToolkitApp {
 
         self.tab_state.try_update_replays();
 
-        #[cfg(feature = "launcher")]
-        if let Some(inbox) = self.tab_state.install_discovery.as_ref()
-            && let Some(installs) = inbox.read(&self.tab_state.egui_ctx).last()
-        {
-            self.tab_state.discovered_installs = installs;
-            self.tab_state.discovering_installs = false;
-            // Runs exactly when a discovery round actually delivers a
-            // result (initial scan, rescan, or "Add install"), never every
-            // frame; start_catalog_check's own per-install guard skips
-            // installs it has already checked or is still checking.
-            self.tab_state.start_catalog_check();
-        }
-
-        // Kick off install discovery once, on first show of the app, rather
-        // than re-triggering every frame while no installs are found yet.
+        // Discovery starts once, on first show of the app; later rounds come
+        // from Rescan, Add install, or a finished fresh install.
         #[cfg(feature = "launcher")]
         if !self.started_install_discovery {
             self.started_install_discovery = true;
-            self.tab_state.start_install_discovery();
+            self.tab_state.launcher_op(|launcher, settings, env| {
+                launcher.start_install_discovery(settings, env);
+                false
+            });
         }
-
-        // Drain background catalog-update-check results. Every pending
-        // message is applied (not just the last), since each carries one
-        // install's own result and a later message for a different install
-        // must not shadow an earlier one still in the inbox.
         #[cfg(feature = "launcher")]
-        if let Some(inbox) = self.tab_state.catalog_check_inbox.as_ref() {
-            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
-            for (path, state) in updates {
-                self.tab_state.catalog_status.insert(path, state);
-            }
-        }
-
-        // Drain background download/install progress. Every pending message
-        // is applied, same reasoning as the catalog-check drain above: each
-        // carries one install's own status and a later message for a
-        // different install must not shadow an earlier one still queued.
-        #[cfg(feature = "launcher")]
-        if let Some(inbox) = self.tab_state.download_inbox.as_ref() {
-            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
-            for (path, state) in updates {
-                let is_fresh_install_done = matches!(state, crate::tab_state::DownloadUiState::Done { .. })
-                    && self.tab_state.installing_games.values().any(|dest| dest == &path);
-                self.tab_state.download_state.insert(path.clone(), state);
-                if is_fresh_install_done {
-                    let mut persisted = self.tab_state.persisted.write();
-                    if !persisted.settings.launcher.manual_installs.contains(&path) {
-                        persisted.settings.launcher.manual_installs.push(path);
-                    }
-                    drop(persisted);
-                    self.tab_state.request_save();
-                    self.tab_state.start_install_discovery();
-                }
-            }
-        }
-
-        // Drain background "available games" catalog-check results (the
-        // Launcher tab's "Install a game" section). Mirrors the
-        // `catalog_check_inbox` drain above, keyed by game id instead of
-        // install path.
-        #[cfg(feature = "launcher")]
-        if let Some(inbox) = self.tab_state.available_games_inbox.as_ref() {
-            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
-            for (game_id, state) in updates {
-                self.tab_state.available_games.insert(game_id, state);
-            }
-        }
-
-        // Drain background login/two-factor results. Every message is
-        // terminal for the in-flight attempt except `TwoFactorRequired`
-        // (which starts a new one) and `Persisted` (which always follows a
-        // `Success` for the same attempt), so `in_progress` and the retry
-        // secret are cleared on every variant except those two.
-        #[cfg(feature = "launcher")]
-        if let Some(inbox) = self.tab_state.login_inbox.as_ref() {
-            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
-            for msg in updates {
-                match msg {
-                    crate::tab_state::LoginMsg::Success(session) => {
-                        self.tab_state.persisted.write().settings.launcher.active_account =
-                            Some(crate::data::settings::PersistedAccount {
-                                realm: session.realm,
-                                account_id: session.account_id,
-                                nickname: session.nickname.clone(),
-                            });
-                        self.tab_state.request_save();
-                        self.tab_state.active_session = Some(*session);
-                        self.tab_state.login_form.in_progress = false;
-                        self.tab_state.login_form.pending_password = None;
-                        self.tab_state.login_form.two_factor = None;
-                        self.tab_state.login_form.show = false;
-                    }
-                    crate::tab_state::LoginMsg::Persisted(persisted) => {
-                        self.tab_state.session_persisted = persisted;
-                    }
-                    crate::tab_state::LoginMsg::TwoFactorRequired { twofactor_token } => {
-                        self.tab_state.login_form.in_progress = false;
-                        self.tab_state.login_form.two_factor = Some(crate::tab_state::TwoFactorPrompt {
-                            twofactor_token,
-                            code: String::new(),
-                            use_backup: false,
-                        });
-                    }
-                    crate::tab_state::LoginMsg::TwoFactorRetry(msg) => {
-                        // Keep the challenge (two_factor) and pending_password
-                        // so the user retries just the code; clear the rejected
-                        // code and show the error inline.
-                        self.tab_state.login_form.in_progress = false;
-                        self.tab_state.login_form.error = Some(msg);
-                        if let Some(prompt) = self.tab_state.login_form.two_factor.as_mut() {
-                            prompt.code.clear();
-                        }
-                    }
-                    crate::tab_state::LoginMsg::CaptchaRequired => {
-                        self.tab_state.login_form.in_progress = false;
-                        self.tab_state.login_form.captcha_blocked = true;
-                        self.tab_state.login_form.pending_password = None;
-                        self.tab_state.login_form.two_factor = None;
-                    }
-                    crate::tab_state::LoginMsg::Failed(msg) => {
-                        self.tab_state.login_form.in_progress = false;
-                        self.tab_state.login_form.error = Some(msg);
-                        self.tab_state.login_form.pending_password = None;
-                        self.tab_state.login_form.two_factor = None;
-                    }
-                }
-            }
-        }
+        self.tab_state.drain_launcher_events();
 
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
@@ -4146,18 +4014,15 @@ impl WowsToolkitApp {
             #[cfg(feature = "launcher")]
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
                 let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-                let install = wgc_install::GameInstall::manual(std::path::PathBuf::from(wows_dir));
-                let mode = wgc_launch::LaunchMode::Replay { path: replay_path };
-                match wgc_launch::resolve(&install, mode, &wgc_launch::LaunchArgs::default()) {
-                    Ok(resolved) => {
-                        // Replay playback is offline and never gated; native spawn
-                        // with the toolkit's process hardening, as before.
-                        let mut command = resolved.native_command();
-                        let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
-                    }
-                    Err(e) => {
-                        self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
-                    }
+                let opened = wows_toolkit_launcher::open_replay_in_game(
+                    std::path::Path::new(&wows_dir),
+                    replay_path,
+                    |command| {
+                        crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
+                    },
+                );
+                if let Err(e) = opened {
+                    self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
                 }
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.

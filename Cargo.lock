@@ -15473,6 +15473,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-launcher"
+version = "0.1.0"
+dependencies = [
+ "rand 0.10.3",
+ "reqwest 0.12.28",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wgc-auth",
+ "wgc-catalog",
+ "wgc-core",
+ "wgc-download",
+ "wgc-install",
+ "wgc-launch",
+]
+
+[[package]]
 name = "wows-toolkit-viewmodel"
 version = "0.1.0"
 dependencies = [
@@ -15657,10 +15677,7 @@ dependencies = [
  "web-time",
  "wgc-auth",
  "wgc-catalog",
- "wgc-core",
  "wgc-download",
- "wgc-install",
- "wgc-launch",
  "wgpu",
  "windows-registry 0.6.1",
  "windows-sys 0.61.2",
@@ -15670,6 +15687,7 @@ dependencies = [
  "wows-replay-insights",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
+ "wows-toolkit-launcher",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",

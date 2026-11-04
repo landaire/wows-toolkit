@@ -441,111 +441,20 @@ pub enum SearchOpenTarget {
     Opened { id: WorkspaceId, root: PathBuf },
 }
 
-/// Result of a per-install catalog update check, driven by
-/// [`TabState::start_catalog_check`] and drained by `app.rs` into
-/// [`TabState::catalog_status`].
-#[cfg(feature = "launcher")]
-#[derive(Debug, Clone)]
-pub enum CatalogCheckState {
-    /// A check is currently in flight.
-    Checking,
-    /// The check completed; per-part status is in the build.
-    Ready(wgc_catalog::update::LatestBuild),
-    /// The check failed (network, parse, or protocol error). Carries the
-    /// error's `Display` text -- the crate's own error type stays structured
-    /// (`wgc_catalog::CatalogError`), this is only what the UI shows.
-    Error(String),
-    /// The install has no `game_info.xml`, so there is no WGUS base URL to
-    /// check against (e.g. a manually added install WGC never touched).
-    NoUpdateHost,
-}
-
-/// UI-facing status of an in-progress or finished download/install run,
-/// driven by [`TabState::start_download`] and drained by `app.rs` into
-/// [`TabState::download_state`].
-#[cfg(feature = "launcher")]
-#[derive(Debug, Clone)]
-pub enum DownloadUiState {
-    /// A run is in flight. `cancel`/`pause` are the same `Arc`s across every
-    /// `Running` update for one run, so the UI's "Cancel"/"Pause" buttons
-    /// always flip the flags the background task is actually checking.
-    Running {
-        phase: String,
-        done_bytes: u64,
-        total_bytes: u64,
-        current: String,
-        cancel: Arc<std::sync::atomic::AtomicBool>,
-        pause: Arc<std::sync::atomic::AtomicBool>,
-    },
-    /// Every torrent's FULL packages were downloaded and extracted.
-    /// `skipped_deltas` is the total count of DELTA packages downloaded but
-    /// left un-extracted (not yet supported; see `wgc_download`).
-    Done { skipped_deltas: usize },
-    /// The run failed (network, hash mismatch, unpack error, ...). Carries
-    /// the error's `Display` text -- the crate's own error type stays
-    /// structured (`wgc_download::DownloadError`), this is only what the
-    /// UI shows.
-    Failed(String),
-    /// The user cancelled via `Running::cancel` before the run finished.
-    Cancelled,
-    /// The user paused via `Running::pause` before the run finished.
-    /// Sha1-verified staged files remain on disk; [`TabState::resume_download`]
-    /// re-dispatches the same run (see [`TabState::download_resume`]), which
-    /// skips them via `wgc_download`'s resume check and continues.
-    Paused,
-}
-
-/// How to re-dispatch a paused download when the user clicks Resume: the
-/// task that was running it has already exited (see [`DownloadUiState::Paused`]),
-/// so resuming means starting a fresh run rather than un-pausing the old one.
-#[cfg(feature = "launcher")]
-#[derive(Debug, Clone)]
-pub enum DownloadResumeSource {
-    /// Fresh install of a known game, re-dispatched via
-    /// [`TabState::install_known_game`].
-    KnownGame { game_id: String, dest_dir: PathBuf },
-    /// In-place update/reinstall of a discovered install, re-dispatched via
-    /// [`TabState::start_download`].
-    Update { install_path: PathBuf, dest_dir: PathBuf },
-}
-
-/// Pending two-factor challenge, set when a login attempt returns
-/// `AuthError::TwoFactorRequired`. The plaintext password needed to retry
-/// (WGNI resubmits full credentials alongside the code) is held separately
-/// in [`LoginForm::pending_password`], not here -- this struct only mirrors
-/// what the UI shows.
-#[cfg(feature = "launcher")]
-#[derive(Debug, Clone)]
-pub struct TwoFactorPrompt {
-    pub twofactor_token: String,
-    pub code: String,
-    pub use_backup: bool,
-}
-
-/// Sign-in form state for the Launcher tab's Account section, driven by
-/// [`TabState::start_login`] / [`TabState::start_two_factor`].
+/// The Launcher tab's sign-in fields.
 ///
-/// `Debug` is hand-written (not derived) to redact `password`, the same way
-/// `wgc_auth::SecretPassword`/`AccessToken` redact themselves -- this struct
-/// holds the same class of secret in a plain field for the UI's sake, and
-/// should not leak it through a future `{:?}` dump.
+/// `Debug` is hand-written to redact `password`, which is plaintext only
+/// because `egui::TextEdit` binds to a `String`; it is taken the moment a
+/// sign-in starts.
 #[cfg(feature = "launcher")]
 pub struct LoginForm {
     pub realm: wgc_auth::AccountRealm,
     pub username: String,
-    /// Plaintext only because `egui::TextEdit` needs a `String` to bind to.
-    /// Taken (cleared) the moment a request is built; never persisted.
     pub password: String,
     /// Whether the sign-in fields are expanded (signed-out state only).
     pub show: bool,
-    pub in_progress: bool,
-    pub error: Option<String>,
-    pub two_factor: Option<TwoFactorPrompt>,
-    pub captcha_blocked: bool,
-    /// The password as a zeroizing secret, held only while a two-factor
-    /// retry is pending (`two_factor.is_some()`). `app.rs` clears this on
-    /// every terminal inbox message (success, failure, or CAPTCHA block).
-    pub(crate) pending_password: Option<wgc_auth::SecretPassword>,
+    pub two_factor_code: String,
+    pub use_backup_code: bool,
 }
 
 #[cfg(feature = "launcher")]
@@ -556,12 +465,8 @@ impl std::fmt::Debug for LoginForm {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("show", &self.show)
-            .field("in_progress", &self.in_progress)
-            .field("error", &self.error)
-            .field("two_factor", &self.two_factor)
-            .field("captcha_blocked", &self.captcha_blocked)
-            .field("pending_password", &self.pending_password.is_some())
-            .finish()
+            .field("use_backup_code", &self.use_backup_code)
+            .finish_non_exhaustive()
     }
 }
 
@@ -573,31 +478,10 @@ impl Default for LoginForm {
             username: String::new(),
             password: String::new(),
             show: false,
-            in_progress: false,
-            error: None,
-            two_factor: None,
-            captcha_blocked: false,
-            pending_password: None,
+            two_factor_code: String::new(),
+            use_backup_code: false,
         }
     }
-}
-
-/// Result of a background login/two-factor attempt, drained by `app.rs`
-/// into [`TabState::active_session`] / [`TabState::login_form`].
-#[cfg(feature = "launcher")]
-pub enum LoginMsg {
-    Success(Box<wgc_auth::StoredSession>),
-    /// Whether `Success`'s session was written to the OS keyring.
-    Persisted(bool),
-    TwoFactorRequired {
-        twofactor_token: String,
-    },
-    /// The code was rejected but the challenge is still open: keep the prompt
-    /// and the pending password so the user retries the code, not the whole
-    /// login. Carries the inline error to show.
-    TwoFactorRetry(String),
-    CaptchaRequired,
-    Failed(String),
 }
 
 /// Main application state container.
@@ -796,79 +680,23 @@ pub struct TabState {
     /// Notify handle to wake the background save task when settings change.
     pub save_notify: Arc<tokio::sync::Notify>,
 
-    // ─── Launcher ───────────────────────────────────────────────────────────
-    /// Game installs found by the last completed discovery run.
     #[cfg(feature = "launcher")]
-    pub discovered_installs: Vec<wgc_install::GameInstall>,
-    /// Inbox for the background discovery thread started by [`Self::start_install_discovery`].
+    pub launcher: wows_toolkit_launcher::Launcher,
     #[cfg(feature = "launcher")]
-    pub install_discovery: Option<egui_inbox::UiInbox<Vec<wgc_install::GameInstall>>>,
-    /// Whether a discovery run is currently in flight.
-    #[cfg(feature = "launcher")]
-    pub discovering_installs: bool,
+    pub launcher_events: wows_toolkit_launcher::LauncherEvents,
     /// Transient Safe Mode toggle for the next launch.
     #[cfg(feature = "launcher")]
     pub launch_safe_mode: bool,
-    /// Last known catalog-update-check result per install path. Steam
-    /// installs never get an entry (they are never checked).
-    #[cfg(feature = "launcher")]
-    pub catalog_status: std::collections::HashMap<PathBuf, CatalogCheckState>,
-    /// Inbox for background catalog-check tasks started by
-    /// [`Self::start_catalog_check`].
-    #[cfg(feature = "launcher")]
-    pub catalog_check_inbox: Option<egui_inbox::UiInbox<(PathBuf, CatalogCheckState)>>,
-    /// Last known download/install run status per install path, driven by
-    /// [`Self::start_download`].
-    #[cfg(feature = "launcher")]
-    pub download_state: std::collections::HashMap<PathBuf, DownloadUiState>,
-    /// Inbox for background download tasks started by
-    /// [`Self::start_download`].
-    #[cfg(feature = "launcher")]
-    pub download_inbox: Option<egui_inbox::UiInbox<(PathBuf, DownloadUiState)>>,
-    /// How to re-dispatch each `download_state` entry if the user pauses and
-    /// later clicks Resume. Populated alongside every `download_state`
-    /// insert in [`Self::start_download_build`].
-    #[cfg(feature = "launcher")]
-    pub download_resume: std::collections::HashMap<PathBuf, DownloadResumeSource>,
-    /// Last known catalog-check result per known-game id (not per install
-    /// path -- there is no install yet), driven by
-    /// [`Self::start_available_games_check`]. Powers the Launcher tab's
-    /// "Install a game" section.
-    #[cfg(feature = "launcher")]
-    pub available_games: std::collections::HashMap<String, CatalogCheckState>,
-    /// Inbox for background catalog-check tasks started by
-    /// [`Self::start_available_games_check`].
-    #[cfg(feature = "launcher")]
-    pub available_games_inbox: Option<egui_inbox::UiInbox<(String, CatalogCheckState)>>,
-    /// Game id -> chosen destination directory for a fresh install kicked
-    /// off by [`Self::install_known_game`], still in flight or just
-    /// finished. Lets the Launcher tab find that download's
-    /// `download_state[dest]` entry to show progress, and lets `app.rs`
-    /// tell a fresh install apart from an ordinary update when a download
-    /// completes.
-    #[cfg(feature = "launcher")]
-    pub installing_games: std::collections::HashMap<String, PathBuf>,
-    /// The live in-memory account session, if any. Loaded from the OS
-    /// keyring at startup or set after a successful sign-in; consulted by
-    /// the online-launch gate.
-    #[cfg(feature = "launcher")]
-    pub active_session: Option<wgc_auth::StoredSession>,
-    /// False when the OS has no secret store and the active session is
-    /// session-only (never reached the keyring).
-    #[cfg(feature = "launcher")]
-    pub session_persisted: bool,
     #[cfg(feature = "launcher")]
     pub login_form: LoginForm,
-    /// Inbox for background login/two-factor tasks started by
-    /// [`Self::start_login`] / [`Self::start_two_factor`].
-    #[cfg(feature = "launcher")]
-    pub login_inbox: Option<egui_inbox::UiInbox<LoginMsg>>,
 }
 
 impl Default for TabState {
     fn default() -> Self {
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = egui_inbox::UiInbox::channel();
+        #[cfg(feature = "launcher")]
+        let (launcher, launcher_events) = wows_toolkit_launcher::Launcher::new();
         Self {
             persisted: Arc::new(TrackedPersistedState::default()),
             player_tracker: Default::default(),
@@ -961,37 +789,13 @@ impl Default for TabState {
             active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
             save_notify: Arc::new(tokio::sync::Notify::new()),
             #[cfg(feature = "launcher")]
-            discovered_installs: Vec::new(),
+            launcher,
             #[cfg(feature = "launcher")]
-            install_discovery: None,
-            #[cfg(feature = "launcher")]
-            discovering_installs: false,
+            launcher_events,
             #[cfg(feature = "launcher")]
             launch_safe_mode: false,
             #[cfg(feature = "launcher")]
-            catalog_status: HashMap::new(),
-            #[cfg(feature = "launcher")]
-            download_state: HashMap::new(),
-            #[cfg(feature = "launcher")]
-            download_inbox: None,
-            #[cfg(feature = "launcher")]
-            download_resume: HashMap::new(),
-            #[cfg(feature = "launcher")]
-            catalog_check_inbox: None,
-            #[cfg(feature = "launcher")]
-            available_games: HashMap::new(),
-            #[cfg(feature = "launcher")]
-            available_games_inbox: None,
-            #[cfg(feature = "launcher")]
-            installing_games: HashMap::new(),
-            #[cfg(feature = "launcher")]
-            active_session: None,
-            #[cfg(feature = "launcher")]
-            session_persisted: false,
-            #[cfg(feature = "launcher")]
             login_form: LoginForm::default(),
-            #[cfg(feature = "launcher")]
-            login_inbox: None,
         }
     }
 }
@@ -1903,741 +1707,48 @@ impl TabState {
         BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
     }
 
-    /// Kick off a background scan for game installs. A no-op while a scan is
-    /// already running; `app.rs` drains the result each frame.
+    /// What the launcher's background work runs on. `None` until the tokio
+    /// runtime is installed at startup.
     #[cfg(feature = "launcher")]
-    pub fn start_install_discovery(&mut self) {
-        if self.discovering_installs {
-            return;
-        }
-        let settings = self.persisted.read().settings.launcher.clone();
-        let (sender, inbox) = egui_inbox::UiInbox::channel();
-        self.install_discovery = Some(inbox);
-        self.discovering_installs = true;
+    pub fn launcher_env(&self) -> Option<wows_toolkit_launcher::LauncherEnv> {
+        let Some(runtime) = self.tokio_runtime.as_ref() else {
+            warn!("launcher: tokio runtime is not available");
+            return None;
+        };
         let ctx = self.egui_ctx.clone();
-        let _join_handle = crate::util::thread::spawn_logged("install-discovery", move || {
-            let installs =
-                wgc_install::discover_all(settings.wgc_data_dir_override.as_deref(), &settings.manual_installs);
-            let _ = sender.send(installs);
-            ctx.request_repaint();
-        });
-    }
-
-    /// Kick off background catalog-update checks for every discovered
-    /// install that WGC (not Steam) manages. Per-install a no-op if the
-    /// cached state is already `Checking` or `Ready`; call
-    /// [`Self::recheck_catalog`] to force a fresh check for one install.
-    /// `app.rs` drains results each frame via `catalog_check_inbox`.
-    #[cfg(feature = "launcher")]
-    pub fn start_catalog_check(&mut self) {
-        let installs = self.discovered_installs.clone();
-        for install in &installs {
-            self.spawn_catalog_check(install, false);
-        }
-    }
-
-    /// Force a fresh catalog check for one install, bypassing the
-    /// in-flight/Ready guard [`Self::start_catalog_check`] applies. Used by
-    /// the Launcher tab's "Recheck" button.
-    #[cfg(feature = "launcher")]
-    pub fn recheck_catalog(&mut self, path: &Path) {
-        let Some(install) = self.discovered_installs.iter().find(|i| i.path == path).cloned() else {
-            return;
-        };
-        self.spawn_catalog_check(&install, true);
-    }
-
-    /// Lazily create (once) the shared inbox catalog-check tasks send their
-    /// results over, and return a sender into it. Unlike install discovery,
-    /// which reruns as one scan producing one message, catalog checks are
-    /// many independent per-install tasks whose results trickle in over the
-    /// tab's lifetime, so the inbox must survive across calls rather than
-    /// being replaced per check.
-    #[cfg(feature = "launcher")]
-    fn catalog_check_sender(&mut self) -> egui_inbox::UiInboxSender<(PathBuf, CatalogCheckState)> {
-        match &self.catalog_check_inbox {
-            Some(inbox) => inbox.sender(),
-            None => {
-                let (sender, inbox) = egui_inbox::UiInbox::channel();
-                self.catalog_check_inbox = Some(inbox);
-                sender
-            }
-        }
-    }
-
-    /// Spawn one install's catalog check on the shared tokio runtime,
-    /// sending the result back over `catalog_check_inbox`. Skips Steam
-    /// installs (never patched by this app, so never checked) and, unless
-    /// `force`, installs whose cached state is already `Checking` or `Ready`.
-    #[cfg(feature = "launcher")]
-    fn spawn_catalog_check(&mut self, install: &wgc_install::GameInstall, force: bool) {
-        if install.source.is_read_only_content() {
-            return;
-        }
-        if !force
-            && matches!(
-                self.catalog_status.get(&install.path),
-                Some(CatalogCheckState::Checking) | Some(CatalogCheckState::Ready(_))
-            )
-        {
-            return;
-        }
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            warn!("cannot check for catalog updates: tokio runtime is not available");
-            return;
-        };
-
-        let sender = self.catalog_check_sender();
-        self.catalog_status.insert(install.path.clone(), CatalogCheckState::Checking);
-
-        let install_path = install.path.clone();
-        let game_info_path = install_path.join("game_info.xml");
-        // The toolkit resolves its proxy once at startup into a plain URL
-        // string; `CatalogClient` takes that shape directly rather than
-        // depending back on the toolkit's `ProxyConfig` type.
-        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
-        let ctx = self.egui_ctx.clone();
-
-        runtime.spawn(async move {
-            let state = check_install_catalog(&game_info_path, proxy_url.as_deref()).await;
-            let _ = sender.send((install_path, state));
-            ctx.request_repaint();
-        });
-    }
-
-    /// Kick off a background download+install run of `install_path`'s
-    /// newest catalog build into `dest_dir`. Requires a completed, non-empty
-    /// catalog check (`catalog_status[install_path]` must already be
-    /// `Ready` with at least one `downloads` entry) -- there is nothing to
-    /// fetch otherwise. `app.rs` drains progress each frame via
-    /// `download_inbox`.
-    #[cfg(feature = "launcher")]
-    pub fn start_download(&mut self, install_path: PathBuf, dest_dir: PathBuf) {
-        let Some(CatalogCheckState::Ready(latest)) = self.catalog_status.get(&install_path) else {
-            self.toasts.lock().error("No update check result for this install yet.");
-            return;
-        };
-        let latest = latest.clone();
-        let resume_source =
-            DownloadResumeSource::Update { install_path: install_path.clone(), dest_dir: dest_dir.clone() };
-        self.start_download_build(latest, install_path, dest_dir, resume_source);
-    }
-
-    /// Re-dispatch a paused download under `dest_key` (see
-    /// [`DownloadUiState::Paused`]), using the resume info
-    /// [`Self::start_download_build`] recorded in `download_resume` when the
-    /// run first started. A no-op with a toast if there is nothing recorded
-    /// (e.g. `dest_key` was never a download at all).
-    #[cfg(feature = "launcher")]
-    pub fn resume_download(&mut self, dest_key: &Path) {
-        let Some(source) = self.download_resume.get(dest_key).cloned() else {
-            self.toasts.lock().error("Nothing to resume for this download.");
-            return;
-        };
-        match source {
-            DownloadResumeSource::KnownGame { game_id, dest_dir } => self.install_known_game(game_id, dest_dir),
-            DownloadResumeSource::Update { install_path, dest_dir } => self.start_download(install_path, dest_dir),
-        }
-    }
-
-    /// Kick off a background download+install run of `latest` into
-    /// `dest_dir`, tracked under `dest_key` in `download_state`. Shared by
-    /// [`Self::start_download`] (in-place update/reinstall of a discovered
-    /// install, `dest_dir` is usually the install's own path) and
-    /// [`Self::install_known_game`] (fresh install of a known game into a
-    /// user-chosen empty directory). `resume_source` is recorded in
-    /// `download_resume` so [`Self::resume_download`] can re-dispatch this
-    /// same run if the user pauses it.
-    #[cfg(feature = "launcher")]
-    fn start_download_build(
-        &mut self,
-        latest: wgc_catalog::update::LatestBuild,
-        dest_key: PathBuf,
-        dest_dir: PathBuf,
-        resume_source: DownloadResumeSource,
-    ) {
-        if latest.downloads.is_empty() {
-            self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
-            return;
-        }
-        // WGUS advertises one web seed base per response, shared by every
-        // part (see `wgc_catalog::update::build_downloads`), so any part's
-        // value is the same base.
-        let Some(web_seed_base) = latest.downloads.iter().find_map(|d| d.web_seed_base.clone()) else {
-            self.toasts.lock().error("Catalog response has no web seed base to download from.");
-            return;
-        };
-        // Multiple parts can point at the same torrent (e.g. client and
-        // hotfix packaged together); download each distinct torrent once.
-        let mut torrent_urls: Vec<String> = Vec::new();
-        for download in &latest.downloads {
-            for url in &download.torrent_urls {
-                if !torrent_urls.contains(url) {
-                    torrent_urls.push(url.clone());
-                }
-            }
-        }
-        if torrent_urls.is_empty() {
-            self.toasts.lock().error("Catalog response has no torrent URLs to download from.");
-            return;
-        }
-
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            warn!("cannot start download: tokio runtime is not available");
-            return;
-        };
-        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
-        let client = match build_download_http_client(proxy_url.as_deref()) {
-            Ok(client) => client,
-            Err(e) => {
-                self.toasts.lock().error(format!("Cannot build download client: {e}"));
-                return;
-            }
-        };
-
-        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let pause = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.download_resume.insert(dest_key.clone(), resume_source);
-        self.download_state.insert(
-            dest_key.clone(),
-            DownloadUiState::Running {
-                phase: "Starting".to_string(),
-                done_bytes: 0,
-                total_bytes: 0,
-                current: String::new(),
-                cancel: Arc::clone(&cancel),
-                pause: Arc::clone(&pause),
-            },
-        );
-
-        let sender = self.download_sender();
-        let ctx = self.egui_ctx.clone();
-        // Staged downloads live under the destination directory so a
-        // resumed run (matching sha1, see `wgc_download::webseed`) finds
-        // its own previous partial files rather than starting cold.
-        let staging_dir = dest_dir.join(".wows-toolkit-download-staging");
-        let dest_key_for_task = dest_key.clone();
-        let control = wgc_download::DownloadControl { cancel, pause };
-        // WGUS advertises a suggested per-response concurrency
-        // (`web_seeds/url/@threads`); clamped so a full install's files -
-        // across every part, not just one at a time - saturate a fast link
-        // without opening an unreasonable number of sockets.
-        let concurrency = wgc_download::download_concurrency(latest.web_seed_threads);
-
-        // `spawn_blocking` + `Handle::block_on`, not `runtime.spawn`: the
-        // download chain nests several async fns that each take borrowed
-        // parameters (`wgc_download::download_all`/`download_and_install_all`,
-        // internally fanning a progress closure out through
-        // `stream::iter().map().buffer_unordered()`). Driving that chain
-        // through `spawn`'s `Send + 'static` future hits a known rustc
-        // higher-ranked-lifetime inference bug ("implementation of Send is
-        // not general enough"). `block_on` has no Send requirement, so
-        // running it on one of the runtime's blocking-pool threads (never
-        // the UI thread) sidesteps the bug entirely.
-        runtime.spawn_blocking(move || {
-            let handle = tokio::runtime::Handle::current();
-            let config = DownloadRunConfig {
-                torrent_urls: &torrent_urls,
-                web_seed_base: &web_seed_base,
-                staging_dir: &staging_dir,
-                install_dir: &dest_dir,
-                concurrency,
-            };
-            let final_state = handle.block_on(run_download(&client, &config, &control, |update| {
-                let _ = sender.send((dest_key_for_task.clone(), update));
-                ctx.request_repaint();
-            }));
-            let _ = sender.send((dest_key_for_task, final_state));
-            ctx.request_repaint();
-        });
-    }
-
-    /// Kick off background catalog checks for every built-in known game
-    /// (`wgc_catalog::known_games::known_games`), so the Launcher tab's
-    /// "Install a game" section can show each one's current installable
-    /// version. Per-game a no-op if the cached state is already `Checking`
-    /// or `Ready`, mirroring [`Self::spawn_catalog_check`]'s guard.
-    ///
-    /// All known games are EU-hosted WGUS descriptors today (see
-    /// `known_games`'s own doc); shown regardless of the signed-in account's
-    /// realm for now. A future wgcps product-discovery step is expected to
-    /// populate other realms' entries instead of this hand-seeded list.
-    #[cfg(feature = "launcher")]
-    pub fn start_available_games_check(&mut self) {
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            warn!("cannot check available games: tokio runtime is not available");
-            return;
-        };
-        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
-
-        for known in wgc_catalog::known_games::known_games() {
-            if matches!(
-                self.available_games.get(known.game_id),
-                Some(CatalogCheckState::Checking) | Some(CatalogCheckState::Ready(_))
-            ) {
-                continue;
-            }
-            let game_info = match known.to_fresh_game_info() {
-                Ok(info) => info,
-                Err(e) => {
-                    self.available_games.insert(known.game_id.to_string(), CatalogCheckState::Error(e.to_string()));
-                    continue;
-                }
-            };
-
-            let sender = self.available_games_sender();
-            self.available_games.insert(known.game_id.to_string(), CatalogCheckState::Checking);
-
-            let game_id = known.game_id.to_string();
-            let proxy_url = proxy_url.clone();
-            let ctx = self.egui_ctx.clone();
-            let runtime = Arc::clone(&runtime);
-            runtime.spawn(async move {
-                let state = match wgc_catalog::CatalogClient::with_proxy(proxy_url.as_deref()) {
-                    Ok(client) => match client.check_updates(&game_info).await {
-                        Ok(build) => CatalogCheckState::Ready(build),
-                        Err(e) => CatalogCheckState::Error(e.to_string()),
-                    },
-                    Err(e) => CatalogCheckState::Error(e.to_string()),
-                };
-                let _ = sender.send((game_id, state));
-                ctx.request_repaint();
-            });
-        }
-    }
-
-    /// Lazily create (once) the shared inbox available-games checks send
-    /// their results over. Mirrors [`Self::catalog_check_sender`].
-    #[cfg(feature = "launcher")]
-    fn available_games_sender(&mut self) -> egui_inbox::UiInboxSender<(String, CatalogCheckState)> {
-        match &self.available_games_inbox {
-            Some(inbox) => inbox.sender(),
-            None => {
-                let (sender, inbox) = egui_inbox::UiInbox::channel();
-                self.available_games_inbox = Some(inbox);
-                sender
-            }
-        }
-    }
-
-    /// Start a fresh install of `game_id` into `dest_dir`. Requires a
-    /// completed, non-empty catalog check (`available_games[game_id]` must
-    /// already be `Ready` with at least one `downloads` entry). Records
-    /// `dest_dir` in `installing_games` so the Launcher tab can find this
-    /// download's progress and `app.rs` can tell a fresh install apart from
-    /// an ordinary update once it completes.
-    #[cfg(feature = "launcher")]
-    pub fn install_known_game(&mut self, game_id: String, dest_dir: PathBuf) {
-        let Some(CatalogCheckState::Ready(latest)) = self.available_games.get(&game_id) else {
-            self.toasts.lock().error("No version check result for this game yet.");
-            return;
-        };
-        if latest.downloads.is_empty() {
-            self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
-            return;
-        }
-        let latest = latest.clone();
-        self.installing_games.insert(game_id.clone(), dest_dir.clone());
-        let resume_source = DownloadResumeSource::KnownGame { game_id, dest_dir: dest_dir.clone() };
-        self.start_download_build(latest, dest_dir.clone(), dest_dir, resume_source);
-    }
-
-    /// Lazily create (once) the shared inbox download tasks send their
-    /// results over, and return a sender into it. Mirrors
-    /// [`Self::catalog_check_sender`]: many independent per-install runs can
-    /// be in flight, so the inbox must survive across `start_download` calls.
-    #[cfg(feature = "launcher")]
-    fn download_sender(&mut self) -> egui_inbox::UiInboxSender<(PathBuf, DownloadUiState)> {
-        match &self.download_inbox {
-            Some(inbox) => inbox.sender(),
-            None => {
-                let (sender, inbox) = egui_inbox::UiInbox::channel();
-                self.download_inbox = Some(inbox);
-                sender
-            }
-        }
-    }
-
-    /// Lazily create (once) the shared inbox login/two-factor tasks send
-    /// their results over. Mirrors [`Self::catalog_check_sender`].
-    #[cfg(feature = "launcher")]
-    fn login_sender(&mut self) -> egui_inbox::UiInboxSender<LoginMsg> {
-        match &self.login_inbox {
-            Some(inbox) => inbox.sender(),
-            None => {
-                let (sender, inbox) = egui_inbox::UiInbox::channel();
-                self.login_inbox = Some(inbox);
-                sender
-            }
-        }
-    }
-
-    /// Returns the persisted WGNI tracking id (`tid`), generating and
-    /// persisting a fresh one (40 lowercase hex chars) the first time this
-    /// is called. `TrackingId::parse` only rejects an empty string, so the
-    /// only way it fails here is a hand-edited config; that is treated the
-    /// same as absent -- regenerate rather than propagate an error the user
-    /// cannot act on.
-    #[cfg(feature = "launcher")]
-    fn ensure_tracking_id(&mut self) -> wgc_core::TrackingId {
-        let existing = self.persisted.read().settings.launcher.tracking_id.clone();
-        // WGNI only accepts a numeric tid; drop any legacy non-numeric value
-        // and mint a fresh one.
-        if let Some(raw) = existing
-            && !raw.is_empty()
-            && raw.bytes().all(|b| b.is_ascii_digit())
-            && let Ok(id) = wgc_core::TrackingId::parse(&raw)
-        {
-            return id;
-        }
-        let generated = generate_tracking_id();
-        self.persisted.write().settings.launcher.tracking_id = Some(generated.clone());
-        self.request_save();
-        wgc_core::TrackingId::parse(&generated).expect("freshly generated tracking id is non-empty")
-    }
-
-    /// Kick off a background sign-in attempt using the current
-    /// [`Self::login_form`] contents. `app.rs` drains the result each frame
-    /// via `login_inbox`. The password buffer is taken (cleared) here,
-    /// before the request is even built, so it never lingers in the form
-    /// longer than the click that submitted it.
-    #[cfg(feature = "launcher")]
-    pub fn start_login(&mut self) {
-        // Clear the plaintext buffer first: even the no-runtime early return
-        // must not leave the password lingering in the (non-zeroizing) form
-        // String. The taken `SecretPassword` drops (zeroized) if we bail.
-        let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.login_form.password));
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            warn!("cannot sign in: tokio runtime is not available");
-            return;
-        };
-        let realm = self.login_form.realm;
-        let username = self.login_form.username.clone();
-        let tracking_id = self.ensure_tracking_id();
-
-        self.login_form.in_progress = true;
-        self.login_form.error = None;
-        self.login_form.captcha_blocked = false;
-        self.login_form.two_factor = None;
-
-        let sender = self.login_sender();
-        let ctx = self.egui_ctx.clone();
-        // A retry (start_two_factor) needs the same username/password again
-        // (WGNI resubmits full credentials alongside the code), so the
-        // secret is kept here rather than being fully consumed. A fresh
-        // `SecretPassword` is minted from it for each request.
-        self.login_form.pending_password = Some(wgc_auth::SecretPassword::new(password.expose_secret().to_string()));
-        runtime.spawn(async move {
-            let client = wgc_auth::AuthClient::new(realm, tracking_id);
-            let credentials = wgc_auth::AccountCredentials { username, password };
-            let result = client.login(credentials).await;
-            send_login_result(result, &sender).await;
-            ctx.request_repaint();
-        });
-    }
-
-    /// Resubmit the pending login with a two-factor code, after a prior
-    /// [`Self::start_login`] returned `TwoFactorRequired`. A no-op if there
-    /// is no pending challenge.
-    #[cfg(feature = "launcher")]
-    pub fn start_two_factor(&mut self, code: wgc_auth::TwoFactorCode) {
-        let Some(prompt) = self.login_form.two_factor.clone() else {
-            return;
-        };
-        let Some(pending) = self.login_form.pending_password.as_ref() else {
-            return;
-        };
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            warn!("cannot submit two-factor code: tokio runtime is not available");
-            return;
-        };
-        let realm = self.login_form.realm;
-        let username = self.login_form.username.clone();
-        let password = wgc_auth::SecretPassword::new(pending.expose_secret().to_string());
-        let tracking_id = self.ensure_tracking_id();
-
-        self.login_form.in_progress = true;
-        self.login_form.error = None;
-
-        let sender = self.login_sender();
-        let ctx = self.egui_ctx.clone();
-        runtime.spawn(async move {
-            let client = wgc_auth::AuthClient::new(realm, tracking_id);
-            let credentials = wgc_auth::AccountCredentials { username, password };
-            let result = client.login_with_two_factor(credentials, prompt.twofactor_token, code).await;
-            send_login_result(result, &sender).await;
-            ctx.request_repaint();
-        });
-    }
-
-    /// Best-effort server-side revoke, then clear the active session and its
-    /// keyring entry. The server call proceeds even if it fails; the local
-    /// state is cleared regardless.
-    #[cfg(feature = "launcher")]
-    pub fn sign_out(&mut self) {
-        let Some(session) = self.active_session.take() else {
-            return;
-        };
-        self.session_persisted = false;
-        self.persisted.write().settings.launcher.active_account = None;
-        self.request_save();
-
-        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
-            // No runtime to run the revoke/delete on; local state is already
-            // cleared above, so the stale keyring entry (if any) just
-            // outlives this run and gets overwritten on the next sign-in.
-            return;
-        };
-        let tracking_id = self.ensure_tracking_id();
-        let realm = session.realm;
-        let account_id = session.account_id;
-        runtime.spawn(async move {
-            let client = wgc_auth::AuthClient::new(realm, tracking_id);
-            // Best-effort: the local keyring entry is deleted below
-            // regardless of whether the server-side revoke succeeds.
-            if let Err(e) = client.logout(&session.tokens).await {
-                warn!("server-side session revoke failed (signing out locally anyway): {e}");
-            }
-            drop(session);
-            let _ = tokio::task::spawn_blocking(move || wgc_auth::SessionStore::new().delete(realm, account_id)).await;
-        });
-    }
-}
-
-/// Mints a WGNI tracking id (`tid`). WGC stores this as a nanosecond unix
-/// timestamp -- a 19-digit numeric string -- and WGNI only accepts a numeric
-/// tid. The toolkit has no device file, so it generates one from the current
-/// time and persists it as this install's stable device id.
-#[cfg(feature = "launcher")]
-fn generate_tracking_id() -> String {
-    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(since_epoch) => since_epoch.as_nanos().to_string(),
-        // A pre-epoch clock is not realistic; fall back to a random 19-digit
-        // numeric so the tid stays WGNI-valid.
-        Err(_) => rand::random_range(1_000_000_000_000_000_000u64..10_000_000_000_000_000_000u64).to_string(),
-    }
-}
-
-/// Turns a login/two-factor `AuthClient` result into `LoginMsg`(s) and sends
-/// them over `sender`. On success, also attempts to persist the session to
-/// the OS keyring (sync, so it runs on a blocking-pool thread) before
-/// reporting success, so `Persisted` always follows `Success`.
-#[cfg(feature = "launcher")]
-async fn send_login_result(
-    result: rootcause::Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
-    sender: &egui_inbox::UiInboxSender<LoginMsg>,
-) {
-    match result {
-        Ok(session) => {
-            let saved = tokio::task::spawn_blocking(move || {
-                let persisted = wgc_auth::SessionStore::new().save(&session);
-                (session, persisted)
-            })
-            .await;
-            match saved {
-                Ok((session, Ok(()))) => {
-                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
-                    let _ = sender.send(LoginMsg::Persisted(true));
-                }
-                Ok((session, Err(wgc_auth::AuthError::NoSecretStore))) => {
-                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
-                    let _ = sender.send(LoginMsg::Persisted(false));
-                }
-                Ok((session, Err(e))) => {
-                    warn!("could not save session to keyring: {e}");
-                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
-                    let _ = sender.send(LoginMsg::Persisted(false));
-                }
-                Err(join_err) => {
-                    warn!("keyring save task did not complete: {join_err}");
-                    let _ = sender.send(LoginMsg::Failed(
-                        "signed in, but could not save the session; sign in again next launch".to_string(),
-                    ));
-                }
-            }
-        }
-        Err(report) => {
-            let context = report.current_context();
-            match context {
-                wgc_auth::AuthError::TwoFactorRequired { twofactor_token } => {
-                    let twofactor_token = twofactor_token.clone();
-                    let _ = sender.send(LoginMsg::TwoFactorRequired { twofactor_token });
-                }
-                wgc_auth::AuthError::CaptchaRequired => {
-                    let _ = sender.send(LoginMsg::CaptchaRequired);
-                }
-                // A wrong code keeps the challenge open; a lockout/ban does not, so
-                // only the invalid-code case is a retry.
-                wgc_auth::AuthError::TwoFactorInvalidCode => {
-                    let _ = sender.send(LoginMsg::TwoFactorRetry(context.to_string()));
-                }
-                // Full report Display (includes any attached diagnostic context,
-                // e.g. the raw WGNI TokenRejection) so structured detail reaches
-                // the log; never a password/token, none of these error paths carry one.
-                _ => {
-                    let _ = sender.send(LoginMsg::Failed(report.to_string()));
-                }
-            }
-        }
-    }
-}
-
-/// Read and parse `game_info_path`, then fetch and diff the newest catalog
-/// chain against it. `game_info.xml` is a small file WGC writes once per
-/// install, so a synchronous read here (this runs on a tokio task, not the
-/// UI thread) is not worth pulling in tokio's `fs` feature for.
-#[cfg(feature = "launcher")]
-async fn check_install_catalog(game_info_path: &Path, proxy_url: Option<&str>) -> CatalogCheckState {
-    let xml = match std::fs::read_to_string(game_info_path) {
-        Ok(xml) => xml,
-        Err(_) => return CatalogCheckState::NoUpdateHost,
-    };
-    let game_info = match wgc_catalog::game_info::parse_game_info(&xml) {
-        Ok(info) => info,
-        Err(e) => return CatalogCheckState::Error(e.to_string()),
-    };
-    let client = match wgc_catalog::CatalogClient::with_proxy(proxy_url) {
-        Ok(client) => client,
-        Err(e) => return CatalogCheckState::Error(e.to_string()),
-    };
-    match client.check_updates(&game_info).await {
-        Ok(build) => CatalogCheckState::Ready(build),
-        Err(e) => CatalogCheckState::Error(e.to_string()),
-    }
-}
-
-/// Build a plain `reqwest::Client` for `wgc_download` calls, honoring the
-/// toolkit's resolved proxy the same way `wgc_catalog::CatalogClient::with_proxy`
-/// does. `wgc_download`'s functions take a bare `&reqwest::Client` (not a
-/// wrapper type), so this stays a free function rather than living on a
-/// download-specific client type.
-#[cfg(feature = "launcher")]
-fn build_download_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client, reqwest::Error> {
-    let mut builder = reqwest::Client::builder();
-    if let Some(proxy_url) = proxy_url {
-        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
-    }
-    builder.build()
-}
-
-/// Everything [`run_download`] needs about the run besides `control` and
-/// `progress` - grouped so the function stays under clippy's argument-count
-/// lint instead of taking each field as its own parameter.
-#[cfg(feature = "launcher")]
-struct DownloadRunConfig<'a> {
-    torrent_urls: &'a [String],
-    web_seed_base: &'a str,
-    staging_dir: &'a Path,
-    install_dir: &'a Path,
-    /// File-download concurrency across every torrent, from
-    /// `wgc_download::download_concurrency(latest.web_seed_threads)`.
-    concurrency: usize,
-}
-
-/// Fetch every unique torrent's manifest up front (so the overall progress
-/// bar can be sized correctly from the start), then download every real
-/// file of every torrent together (see `wgc_download::download_and_install_all`)
-/// and 7z-extract each torrent's FULL packages into `install_dir`.
-/// `control`'s flags are checked between manifest fetches, and inside the
-/// download/unpack calls themselves (down to the byte-streaming loop; see
-/// `wgc_download::webseed::DownloadControl`) so a multi-GB file in flight
-/// stops promptly rather than only between torrents. `progress` is called
-/// for every `Running` update; the final state
-/// (`Done`/`Failed`/`Cancelled`/`Paused`) is the return value.
-///
-/// `done_bytes` only ever increases across the whole run: it is backed by a
-/// single counter shared across every torrent's files (see
-/// `wgc_download::webseed::download_all`), so it stays monotonic even
-/// though files from different torrents can finish out of order while
-/// downloading concurrently. Downloading fully completes before any
-/// unpacking starts (two-phase), so by the time `Unpacking`/`Unpacked`
-/// events arrive (which carry no byte count of their own) `done_bytes` is
-/// already at `total_bytes` and stays pinned there rather than dropping.
-///
-/// Called via `Handle::block_on` from a blocking-pool thread (see
-/// `TabState::start_download`), not `tokio::spawn`, so nothing here needs
-/// to be `Send`.
-#[cfg(feature = "launcher")]
-async fn run_download(
-    client: &reqwest::Client,
-    config: &DownloadRunConfig<'_>,
-    control: &wgc_download::DownloadControl,
-    progress: impl Fn(DownloadUiState),
-) -> DownloadUiState {
-    use std::sync::atomic::Ordering;
-
-    let DownloadRunConfig { torrent_urls, web_seed_base, staging_dir, install_dir, concurrency } = *config;
-
-    progress(DownloadUiState::Running {
-        phase: "Fetching torrent manifests".to_string(),
-        done_bytes: 0,
-        total_bytes: 0,
-        current: String::new(),
-        cancel: Arc::clone(&control.cancel),
-        pause: Arc::clone(&control.pause),
-    });
-
-    let mut torrents = Vec::with_capacity(torrent_urls.len());
-    for url in torrent_urls {
-        if control.cancel.load(Ordering::SeqCst) {
-            return DownloadUiState::Cancelled;
-        }
-        if control.pause.load(Ordering::SeqCst) {
-            return DownloadUiState::Paused;
-        }
-        match wgc_download::fetch_torrent(client, url).await {
-            Ok(meta) => torrents.push(meta),
-            Err(e) => return DownloadUiState::Failed(format!("fetching torrent manifest {url}: {e}")),
-        }
-    }
-
-    let total_bytes: u64 = torrents.iter().map(|t| t.total_length).sum();
-    let reqs: Vec<wgc_download::InstallRequest> = torrents
-        .into_iter()
-        .map(|torrent| wgc_download::InstallRequest {
-            staging_dir: staging_dir.to_path_buf(),
-            install_dir: install_dir.to_path_buf(),
-            torrent,
-            web_seed_base: web_seed_base.to_string(),
-            is_steam_install: false,
+        Some(wows_toolkit_launcher::LauncherEnv {
+            runtime: runtime.handle().clone(),
+            proxy_url: self.proxy.as_ref().map(|p| p.url.clone()),
+            wake: Arc::new(move || ctx.request_repaint()),
         })
-        .collect();
+    }
 
-    let result = wgc_download::download_and_install_all(client, &reqs, control, concurrency, |update| {
-        // `dp.downloaded_bytes` is cumulative across every torrent's files
-        // (see `wgc_download::webseed::download_all`), and unpacking starts
-        // only once every torrent finished downloading, so `done_bytes`
-        // never decreases across the whole run.
-        let (phase, current, done_bytes) = match &update {
-            wgc_download::InstallProgress::Downloading(dp) => (
-                "Downloading".to_string(),
-                format!("{} (file {}/{})", dp.file, dp.files_done + 1, dp.files_total),
-                dp.downloaded_bytes,
-            ),
-            wgc_download::InstallProgress::Unpacking { file } => ("Unpacking".to_string(), file.clone(), total_bytes),
-            wgc_download::InstallProgress::Unpacked { file, .. } => {
-                ("Unpacking".to_string(), file.clone(), total_bytes)
-            }
+    /// Run a launcher operation against the persisted launcher settings,
+    /// saving them when `op` reports it changed them.
+    #[cfg(feature = "launcher")]
+    pub fn launcher_op(
+        &mut self,
+        op: impl FnOnce(
+            &mut wows_toolkit_launcher::Launcher,
+            &mut wows_toolkit_launcher::LauncherSettings,
+            &wows_toolkit_launcher::LauncherEnv,
+        ) -> bool,
+    ) {
+        let Some(env) = self.launcher_env() else {
+            return;
         };
-        progress(DownloadUiState::Running {
-            phase,
-            done_bytes,
-            total_bytes,
-            current,
-            cancel: Arc::clone(&control.cancel),
-            pause: Arc::clone(&control.pause),
-        });
-    })
-    .await;
-
-    match result {
-        Ok(outcomes) => {
-            let skipped_deltas = outcomes.iter().map(|o| o.skipped_deltas.len()).sum();
-            DownloadUiState::Done { skipped_deltas }
+        let changed = op(&mut self.launcher, &mut self.persisted.write().settings.launcher, &env);
+        if changed {
+            self.request_save();
         }
-        Err(wgc_download::DownloadError::Cancelled) => DownloadUiState::Cancelled,
-        Err(wgc_download::DownloadError::Paused) => DownloadUiState::Paused,
-        Err(e) => DownloadUiState::Failed(e.to_string()),
+    }
+
+    /// Apply every launcher event delivered since the last frame.
+    #[cfg(feature = "launcher")]
+    pub fn drain_launcher_events(&mut self) {
+        while let Some(event) = self.launcher_events.try_next() {
+            self.launcher_op(|launcher, settings, env| launcher.apply(event, settings, env));
+        }
     }
 }
 

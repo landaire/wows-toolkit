@@ -160,11 +160,12 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = search.clone() {
         s.search = v;
     }
-    // Nested struct: launcher (active account index, tracking id, Proton config,
-    // manual installs, launch args). Startup uses `launcher.active_account` to
-    // decide which keyring session to restore (see app.rs); without this load
-    // that field is always None and the user re-authenticates every launch.
-    if let Some(v) = queries::get_setting::<crate::data::settings::LauncherSettings>(pool, "launcher").await {
+    // Startup uses `launcher.active_account` to decide which keyring session
+    // to restore.
+    #[cfg(feature = "launcher")]
+    if let Some(v) =
+        queries::get_setting::<crate::data::settings::LauncherSettings>(pool, wows_toolkit_launcher::SETTINGS_KEY).await
+    {
         s.launcher = v;
     }
 

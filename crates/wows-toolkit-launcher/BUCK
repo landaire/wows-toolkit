@@ -1,0 +1,35 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+LAUNCHER_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-core:wgc-core",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
+    "//crates/wgc-launch:wgc-launch",
+    "//third-party/rust:rand",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+]
+
+workspace_library(
+    name = "wows_toolkit_launcher",
+    crate = "wows_toolkit_launcher",
+    package = "wows-toolkit-launcher",
+    version = "0.1.0",
+    deps = LAUNCHER_DEPS,
+)
+
+workspace_test(
+    name = "wows_toolkit_launcher_test",
+    crate = "wows_toolkit_launcher",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-launcher",
+    version = "0.1.0",
+    deps = LAUNCHER_DEPS,
+    test_deps = ["//third-party/rust:serde_json"],
+)

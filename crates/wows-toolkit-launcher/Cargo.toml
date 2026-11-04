@@ -1,0 +1,30 @@
+[package]
+name = "wows-toolkit-launcher"
+description = "Launcher state and background work shared by the egui app and the GPUI port"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_launcher"
+path = "src/lib.rs"
+
+[dependencies]
+wgc-auth = { workspace = true }
+wgc-catalog = { workspace = true }
+wgc-core = { workspace = true }
+wgc-download = { workspace = true }
+wgc-install = { workspace = true }
+wgc-launch = { workspace = true }
+rand = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+rootcause = { workspace = true }
+serde.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

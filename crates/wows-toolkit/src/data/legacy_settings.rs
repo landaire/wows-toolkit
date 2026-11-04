@@ -255,6 +255,7 @@ impl LegacyWowsToolkitApp {
             // with an empty bar.
             search: Default::default(),
             // Not present in the legacy `app.ron` format.
+            #[cfg(feature = "launcher")]
             launcher: Default::default(),
         };
 
