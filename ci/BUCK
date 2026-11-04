@@ -28,3 +28,9 @@ nu_script(
     name = "graph_tests",
     script = "graph-tests.nu",
 )
+
+# The first-party targets a change affects; see affected.nu.
+nu_script(
+    name = "affected",
+    script = "affected.nu",
+)

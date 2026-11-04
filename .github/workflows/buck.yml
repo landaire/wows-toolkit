@@ -4,15 +4,21 @@ on:
   push:
     branches: [main, "ci/**"]
   pull_request:
+  # A manual run checks everything.
+  workflow_dispatch:
 
-# Builds every public binary through the native Buck graph and proves the graph
+# Builds the public binaries through the native Buck graph and proves the graph
 # stays hermetic. Buck downloads crate sources itself, each checked against the
 # checksum Cargo.lock pins or fetched at its locked commit.
+#
+# Each run checks only the first-party targets whose code or dependencies differ
+# from the last successful run on main (ci/affected.nu). A change to the build
+# configuration, toolchains, or the checks themselves checks everything.
 
-# root//: is every alias declared in the root BUCK file, so adding one does not
-# mean remembering to add it here as well.
-env:
-  ALIASES: "root//:"
+permissions:
+  contents: read
+  # Finding the last successful run on main.
+  actions: read
 
 jobs:
   # Three phases of the same graph, run as separate jobs so their wall clock
@@ -50,17 +56,43 @@ jobs:
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
 
-      - name: Build every alias
-        if: matrix.phase == 'checks'
-        run: nix develop --command buck2 build $ALIASES
+      - name: Select the affected targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            nix develop --command buck2 run //ci:affected -- --full --out affected.json
+            exit 0
+          fi
+          # No answer means no base, which checks everything.
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""') || base=""
+          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
 
-      - name: Build every alias in release mode
+      - name: Build the affected aliases
+        if: matrix.phase == 'checks'
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 build $aliases
+
+      - name: Build the affected aliases in release mode
         if: matrix.phase == 'release'
-        run: nix develop --command buck2 build -m release $ALIASES
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 build -m release $aliases
 
       - name: Check the action graph is hermetic
         if: matrix.phase == 'checks'
-        run: nix develop --command buck2 run //ci:hermetic
+        run: |
+          if jq -e .full affected.json >/dev/null; then
+            nix develop --command buck2 run //ci:hermetic
+            exit 0
+          fi
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:hermetic -- $aliases
 
       # bxl/lint.bxl builds the [clippy.json] sub-target of every first-party
       # rust target in one invocation, and lint.nu decides pass or fail from
@@ -68,17 +100,22 @@ jobs:
       # so the action succeeds even when compilation does not.
       - name: Lint
         if: matrix.phase == 'checks'
-        run: nix develop --command buck2 run //ci:lint
+        run: |
+          lint=$(jq -r '.lint // empty' affected.json)
+          if [ -z "$lint" ]; then echo "No first-party Rust target is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:lint -- --target "$lint"
 
       # The crates' tests, and the checks over the repository's own pins and
       # manifests.
       - name: Test
         if: matrix.phase == 'checks'
-        run: nix develop --command buck2 test root//crates/... root//ci/...
+        run: nix develop --command buck2 test $(jq -r '.tests | join(" ")' affected.json)
 
       - name: Build-graph tests
         if: matrix.phase == 'graph-tests'
-        run: nix develop --command buck2 run //ci:graph_tests
+        run: |
+          if ! jq -e .graph_tests affected.json >/dev/null; then echo "No BUCK file or manifest changed."; exit 0; fi
+          nix develop --command buck2 run //ci:graph_tests
 
   macos:
     name: macOS arm64
@@ -97,16 +134,31 @@ jobs:
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
 
+      - name: Select the affected targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            nix develop --command buck2 run //ci:affected -- --full --out affected.json
+            exit 0
+          fi
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""') || base=""
+          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
+
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
       # graph itself is already covered there in both modes. The tactics site is
       # host-independent, and its release link needs more memory than this
       # runner has, so only Linux builds it.
-      - name: Build every alias
+      - name: Build the affected aliases
         run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
           nix develop --command bash -euo pipefail -c '
-            aliases=$(buck2 uquery "$ALIASES - root//:wt_web_site")
-            buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $aliases
-          '
+            targets=$(buck2 uquery "set($0) - root//:wt_web_site")
+            if [ -z "$targets" ]; then echo "No alias is affected."; exit 0; fi
+            buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $targets
+          ' "$aliases"
 
 # Windows is absent as a CI job. It builds and releases from the graph, but
 # provisioning mirrors a multi-GB Visual Studio layout on every run because

@@ -365,6 +365,8 @@ CI runs only buck2 commands (`.github/workflows/buck.yml`), after `./bootstrap.s
 - `buck2 test root//crates/... root//ci/...`: the crates' tests, plus the checks that the Buck2 pins agree and that no publishable crate depends on an unpublished one.
 - `buck2 run //ci:graph_tests`: the build-graph tests.
 
+Each run checks only the first-party targets a change affects. `buck2 run //ci:affected -- --base <commit>` compares every first-party target's recursive target hash against the last successful run on `main`. The hash covers the target's sources, attributes and dependencies, so a target is selected when its own code changes or when a crate or toolchain it depends on does. Third-party targets are never checked directly. A change to Buck configuration, `.bzl` rules, toolchains, the flake, or the checks themselves (`ci/`, `scripts/`) checks everything, because no target hash covers those. So does a manual run of the workflow. The build-graph tests run when everything is checked or a `BUCK` file or manifest changed. The `root//ci/...` checks always run.
+
 Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
 
 `.github/workflows/pages.yml` deploys `//crates/wt-web:site` with the rest of `site/` on each stable tag.
