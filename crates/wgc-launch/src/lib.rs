@@ -121,19 +121,28 @@ impl<'a> ResolvedLaunch<'a> {
 
     /// Spawn the game. Online launches are gated on `status` first. On Linux a
     /// non-Steam install needs `proton`; a Steam install launches through Steam.
+    /// `prepare` decorates the final command before it spawns, so the caller
+    /// can keep its own process state (e.g. renderer pins) out of the game.
     pub fn spawn(
         &self,
         proton: Option<&ProtonConfig>,
         status: TokenStatus,
-    ) -> Result<Option<std::process::Child>, LaunchError> {
+        prepare: impl FnOnce(&mut std::process::Command),
+    ) -> Result<std::process::Child, LaunchError> {
         gate(&self.mode, status)?;
+        let mut cmd = self.platform_command(proton)?;
+        prepare(&mut cmd);
+        cmd.spawn().map_err(LaunchError::SpawnFailed)
+    }
+
+    fn platform_command(&self, proton: Option<&ProtonConfig>) -> Result<std::process::Command, LaunchError> {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = proton;
             tracing::info!("Launching {} {}", self.exe.display(), self.args.join(" "));
             // TODO: a Steam-source install here still goes through native spawn instead of
             // `steam -applaunch 552990`; the Steam-through-Steam guarantee only holds on Linux.
-            return self.native_command().spawn().map(Some).map_err(LaunchError::SpawnFailed);
+            return Ok(self.native_command());
         }
         #[cfg(target_os = "linux")]
         {
@@ -144,7 +153,7 @@ impl<'a> ResolvedLaunch<'a> {
                 cmd.arg("-applaunch").arg("552990");
                 cmd.args(&self.args);
                 cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
-                return cmd.spawn().map(Some).map_err(LaunchError::SpawnFailed);
+                return Ok(cmd);
             }
             let proton = proton.ok_or(LaunchError::ProtonPrefixNotConfigured)?;
             if !proton.proton_binary.exists() {
@@ -186,7 +195,7 @@ impl<'a> ResolvedLaunch<'a> {
                     );
                 }
             }
-            cmd.spawn().map(Some).map_err(LaunchError::SpawnFailed)
+            Ok(cmd)
         }
     }
 }

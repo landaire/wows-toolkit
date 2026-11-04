@@ -785,7 +785,9 @@ impl ToolkitTabViewer<'_> {
         };
         let token_status =
             wgc_auth::launch_token_status(self.tab_state.active_session.as_ref(), std::time::SystemTime::now());
-        if let Err(e) = resolved.spawn(proton.as_ref(), token_status) {
+        if let Err(e) = resolved.spawn(proton.as_ref(), token_status, |command| {
+            crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
+        }) {
             self.tab_state.toasts.lock().error(format!("Launch failed: {e}"));
         }
     }
