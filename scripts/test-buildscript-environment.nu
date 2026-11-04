@@ -5,7 +5,7 @@ def main [] {
     let buck2 = (which buck2 | get 0.path)
     let actions = (
         with-env {
-            PATH: $"($hostile_marker)/path:($env.PATH)"
+            PATH: ($env.PATH | prepend $"($hostile_marker)/path")
             CARGO_HOME: $"($hostile_marker)/cargo-home"
             SCCACHE_DIR: $"($hostile_marker)/sccache"
             XDG_CACHE_HOME: $"($hostile_marker)/cache"
