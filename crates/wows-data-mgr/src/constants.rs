@@ -75,12 +75,19 @@ fn error_chain(err: &dyn std::error::Error) -> String {
 /// Fetch the repo's root manifest.json mapping build number -> friendly version.
 pub async fn fetch_constants_manifest() -> Result<std::collections::BTreeMap<u32, ConstantsVersion>, ConstantsFetchError>
 {
+    let client = octocrab::instance();
+    fetch_constants_manifest_with(&client).await
+}
+
+async fn fetch_constants_manifest_with(
+    client: &octocrab::Octocrab,
+) -> Result<std::collections::BTreeMap<u32, ConstantsVersion>, ConstantsFetchError> {
     use http_body_util::BodyExt;
     use octocrab::params::repos::Reference;
 
     const PATH: &str = "manifest.json";
 
-    let response = octocrab::instance()
+    let response = client
         .repos("padtrack", "wows-constants")
         .raw_file(Reference::Branch("main".to_string()), PATH)
         .await
@@ -154,8 +161,11 @@ pub fn fetch_versioned_constants_blocking(
         .enable_all()
         .build()
         .attach_with(|| "Failed to create tokio runtime")?;
+    let client = runtime
+        .block_on(async { octocrab::Octocrab::builder().build() })
+        .attach_with(|| "Failed to create GitHub client")?;
 
-    runtime.block_on(fetch_versioned_constants(build, target_version))
+    runtime.block_on(fetch_versioned_constants_with(&client, build, target_version))
 }
 
 /// Async version of [`fetch_versioned_constants_blocking`].
@@ -164,7 +174,16 @@ pub async fn fetch_versioned_constants(
     target_build: u32,
     target_version: Option<&str>,
 ) -> Result<(serde_json::Value, u32), rootcause::Report> {
-    let manifest = match fetch_constants_manifest().await {
+    let client = octocrab::instance();
+    fetch_versioned_constants_with(&client, target_build, target_version).await
+}
+
+async fn fetch_versioned_constants_with(
+    client: &octocrab::Octocrab,
+    target_build: u32,
+    target_version: Option<&str>,
+) -> Result<(serde_json::Value, u32), rootcause::Report> {
+    let manifest = match fetch_constants_manifest_with(client).await {
         Ok(manifest) => Some(manifest),
         Err(e) => {
             tracing::warn!(
@@ -178,7 +197,7 @@ pub async fn fetch_versioned_constants(
     if let Some(manifest) = manifest
         && let Some(resolved) = resolve_manifest_build(target_build, target_version, &manifest)
     {
-        match fetch_build(resolved).await {
+        match fetch_build_with(client, resolved).await {
             Ok(data) => return Ok((data, resolved)),
             Err(e) => {
                 tracing::warn!(
@@ -188,9 +207,9 @@ pub async fn fetch_versioned_constants(
             }
         }
     }
-    // Fallback: version-blind exact-then-nearest-older.
-    let available = list_available_builds().await?;
-    pick_constants(target_build, &available)
+
+    let available = list_available_builds_with(client).await?;
+    pick_constants_with(client, target_build, &available)
         .await
         .ok_or_else(|| report!("No constants found for build {target_build} or any older build"))
 }
@@ -198,9 +217,13 @@ pub async fn fetch_versioned_constants(
 /// Select constants for `target_build` given a pre-fetched `available` list:
 /// exact match first, otherwise nearest older build. Returns `None` only when
 /// nothing usable is published upstream.
-async fn pick_constants(target_build: u32, available: &[u32]) -> Option<(serde_json::Value, u32)> {
+async fn pick_constants_with(
+    client: &octocrab::Octocrab,
+    target_build: u32,
+    available: &[u32],
+) -> Option<(serde_json::Value, u32)> {
     if available.contains(&target_build) {
-        match fetch_build(target_build).await {
+        match fetch_build_with(client, target_build).await {
             Ok(data) => return Some((data, target_build)),
             Err(e) => tracing::warn!(build = target_build, "constants build fetch failed: {e}"),
         }
@@ -210,7 +233,7 @@ async fn pick_constants(target_build: u32, available: &[u32]) -> Option<(serde_j
         if build >= target_build {
             continue;
         }
-        match fetch_build(build).await {
+        match fetch_build_with(client, build).await {
             Ok(data) => return Some((data, build)),
             Err(e) => tracing::warn!(build, "constants build fetch failed: {e}"),
         }
@@ -223,6 +246,7 @@ async fn pick_constants(target_build: u32, available: &[u32]) -> Option<(serde_j
 /// for many builds in a row (e.g. backfilling via `wows-data-mgr refresh-derived`).
 pub struct ConstantsFetcher {
     runtime: tokio::runtime::Runtime,
+    client: octocrab::Octocrab,
     manifest: Option<std::collections::BTreeMap<u32, ConstantsVersion>>,
     available: Vec<u32>,
 }
@@ -234,15 +258,21 @@ impl ConstantsFetcher {
             .enable_all()
             .build()
             .attach_with(|| "Failed to create tokio runtime")?;
-        let manifest = match runtime.block_on(fetch_constants_manifest()) {
+        // Octocrab's buffered service is bound to the runtime active when the
+        // client is built. Keep both together so the worker cannot be left in
+        // the process-global client after this fetcher is dropped.
+        let client = runtime
+            .block_on(async { octocrab::Octocrab::builder().build() })
+            .attach_with(|| "Failed to create GitHub client")?;
+        let manifest = match runtime.block_on(fetch_constants_manifest_with(&client)) {
             Ok(manifest) => Some(manifest),
             Err(e) => {
                 tracing::warn!("constants manifest unavailable, will use version-blind lookup: {e}");
                 None
             }
         };
-        let available = runtime.block_on(list_available_builds())?;
-        Ok(Self { runtime, manifest, available })
+        let available = runtime.block_on(list_available_builds_with(&client))?;
+        Ok(Self { runtime, client, manifest, available })
     }
 
     /// Returns `(json_data, actual_build_fetched)` resolving the build via the
@@ -252,7 +282,7 @@ impl ConstantsFetcher {
         if let Some(manifest) = self.manifest.as_ref()
             && let Some(resolved) = resolve_manifest_build(target_build, target_version, manifest)
         {
-            match self.runtime.block_on(fetch_build(resolved)) {
+            match self.runtime.block_on(fetch_build_with(&self.client, resolved)) {
                 Ok(data) => return Some((data, resolved)),
                 Err(e) => {
                     tracing::warn!(
@@ -262,13 +292,18 @@ impl ConstantsFetcher {
                 }
             }
         }
-        self.runtime.block_on(pick_constants(target_build, &self.available))
+        self.runtime.block_on(pick_constants_with(&self.client, target_build, &self.available))
     }
 }
 
 /// List all available build numbers from the padtrack/wows-constants repo.
 pub async fn list_available_builds() -> Result<Vec<u32>, rootcause::Report> {
-    let items = octocrab::instance()
+    let client = octocrab::instance();
+    list_available_builds_with(&client).await
+}
+
+async fn list_available_builds_with(client: &octocrab::Octocrab) -> Result<Vec<u32>, rootcause::Report> {
+    let items = client
         .repos("padtrack", "wows-constants")
         .get_content()
         .path("data/versions")
@@ -374,11 +409,16 @@ pub async fn fetch_latest_constants(
 
 /// Fetch constants JSON for a specific build number.
 pub async fn fetch_build(build: u32) -> Result<serde_json::Value, ConstantsFetchError> {
+    let client = octocrab::instance();
+    fetch_build_with(&client, build).await
+}
+
+async fn fetch_build_with(client: &octocrab::Octocrab, build: u32) -> Result<serde_json::Value, ConstantsFetchError> {
     use http_body_util::BodyExt;
     use octocrab::params::repos::Reference;
 
     let path = format!("data/versions/{build}.json");
-    let response = octocrab::instance()
+    let response = client
         .repos("padtrack", "wows-constants")
         .raw_file(Reference::Branch("main".to_string()), &path)
         .await
@@ -441,6 +481,15 @@ mod tests {
     #[test]
     fn other_statuses_carry_their_code() {
         assert!(matches!(ConstantsFetchError::from_status(404, None), ConstantsFetchError::Http { status: 404 }));
+    }
+
+    #[test]
+    #[ignore = "requires GitHub"]
+    fn a_temporary_fetcher_does_not_close_the_process_github_worker() {
+        drop(ConstantsFetcher::new().expect("temporary fetcher"));
+
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("second tokio runtime");
+        runtime.block_on(fetch_latest_constants(None)).expect("the process GitHub client remains usable");
     }
 }
 
