@@ -17,7 +17,7 @@ per-commit history lives in `CHANGELOG.md`.
 - Game data downloads cover multiple required builds in one plan, deduplicate shared files, verify downloaded content, and report which build contains a corrupt file.
 - Steam public-branch depot manifests are pinned for reproducible game data downloads. WoWs 15.8 data is included.
 - Fixed `wows-data-mgr` link and library behavior when unused files are removed by aggressive cache cleanup.
-- Ship configuration and captain skill parsing handles the current packet data and older replay layouts.
+- Ship configuration and captain skill parsing handles current packet data, including the 15.9 exterior state layout, and older replay layouts.
 
 ### Armor viewer
 

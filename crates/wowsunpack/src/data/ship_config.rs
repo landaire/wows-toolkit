@@ -12,6 +12,29 @@ use super::parser_utils::WResult;
 use crate::game_types::GameParamId;
 use crate::rpc::typedefs::ArgValue;
 
+const EXTERIOR_KILL_TAG_STATE_MIN_VERSION: Version = Version::base(15, 9, 0);
+
+/// Per-exterior kill-tag visibility override added to ship descriptions in 15.9.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExteriorKillTagState {
+    exterior_id: GameParamId,
+    enabled: bool,
+}
+
+impl ExteriorKillTagState {
+    pub fn new(exterior_id: GameParamId, enabled: bool) -> Self {
+        Self { exterior_id, enabled }
+    }
+
+    pub fn exterior_id(self) -> GameParamId {
+        self.exterior_id
+    }
+
+    pub fn enabled(self) -> bool {
+        self.enabled
+    }
+}
 /// A player's ship loadout as encoded in replay data.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -23,6 +46,7 @@ pub struct ShipConfig {
     /// Exterior slot items (signals, camos, flags). Despite the field name, this covers
     /// all ExteriorSlots items, not just signal flags.
     exteriors: Vec<GameParamId>,
+    exterior_kill_tags: Option<Vec<ExteriorKillTagState>>,
     ensigns: Vec<GameParamId>,
     ecoboosts: Vec<GameParamId>,
     /// `None` when the (older, truncated) blob ended before these trailing fields.
@@ -73,6 +97,11 @@ impl ShipConfig {
 
     pub fn ecoboosts(&self) -> &[GameParamId] {
         self.ecoboosts.as_ref()
+    }
+
+    /// `None` when the client predates exterior kill-tag state or the blob is truncated.
+    pub fn exterior_kill_tags(&self) -> Option<&[ExteriorKillTagState]> {
+        self.exterior_kill_tags.as_deref()
     }
 
     /// `None` for older clients whose blob omits the naval-flag field.
@@ -143,9 +172,10 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     let modernization = take_section(i);
     // ExteriorSlots (signals, camos, flags)
     let exteriors = take_section(i);
-    // Supply state (purpose unknown, typically 0)
-    let _supply_state = take_u32(i);
-    // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs
+    // Bits 0 and 1 enable camouflage and signal auto-buy. Higher bits select
+    // the purchase currency for each exterior slot.
+    let _exterior_auto_buy_info = take_u32(i);
+    // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs.
     if let Some(color_scheme_count) = take_u32(i) {
         for _ in 0..color_scheme_count {
             take_u32(i);
@@ -153,9 +183,20 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
         }
     }
 
-    if version.is_at_least(&Version::base(15, 9, 0)) {
-        let _unk = take_u32(i);
-    }
+    // ExteriorStateKeeper.KillTagState: count + (exterior_id, enabled) pairs.
+    let exterior_kill_tags = if version.is_at_least(&EXTERIOR_KILL_TAG_STATE_MIN_VERSION) {
+        let states = take_u32(i).and_then(|count| {
+            (0..count)
+                .map(|_| Some(ExteriorKillTagState::new(GameParamId::from(take_u32(i)?), take_u32(i)? != 0)))
+                .collect::<Option<Vec<_>>>()
+        });
+        if states.is_none() {
+            *i = &[];
+        }
+        states
+    } else {
+        None
+    };
     // AbilitySlots (consumables)
     let abilities = take_section(i);
     // EnsignSlots
@@ -177,6 +218,7 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
         exteriors: to_ids(exteriors),
         ensigns: to_ids(ensigns),
         ecoboosts: to_ids(ecoboosts),
+        exterior_kill_tags,
         naval_flag,
         last_boarded_crew,
     })
@@ -191,88 +233,129 @@ mod tests {
         buf.extend_from_slice(&val.to_le_bytes());
     }
 
-    /// Build a ship config blob with the given parameters.
-    /// If `include_v13_2_field` is true, inserts the extra u32 after unit slots.
-    #[allow(clippy::too_many_arguments)]
-    fn build_blob(
+    fn push_section(buf: &mut Vec<u8>, values: &[u32]) {
+        push_u32(buf, values.len() as u32);
+        for &value in values {
+            push_u32(buf, value);
+        }
+    }
+
+    #[derive(Default)]
+    struct ShipConfigBlobBuilder {
         ship_params_id: u32,
-        units: &[u32],
-        modernization: &[u32],
-        exteriors: &[u32],
-        color_schemes: &[(u32, u32)],
-        abilities: &[u32],
-        ensigns: &[u32],
-        ecoboosts: &[u32],
+        units: Vec<u32>,
+        modernization: Vec<u32>,
+        exteriors: Vec<u32>,
+        color_schemes: Vec<(u32, u32)>,
+        exterior_kill_tags: Option<Vec<ExteriorKillTagState>>,
+        abilities: Vec<u32>,
+        ensigns: Vec<u32>,
+        ecoboosts: Vec<u32>,
         naval_flag: u32,
         last_boarded_crew: u32,
         include_v13_2_field: bool,
-    ) -> Vec<u8> {
-        let mut buf = Vec::new();
+    }
 
-        // Header
-        push_u32(&mut buf, 1); // version
-        push_u32(&mut buf, ship_params_id);
-        push_u32(&mut buf, 0); // element_count
-
-        // Units
-        push_u32(&mut buf, units.len() as u32);
-        for &u in units {
-            push_u32(&mut buf, u);
+    impl ShipConfigBlobBuilder {
+        fn new(ship_params_id: u32) -> Self {
+            Self { ship_params_id, ..Default::default() }
         }
 
-        // v13.2+ extra field
-        if include_v13_2_field {
+        fn units(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.units.extend(values);
+            self
+        }
+
+        fn modernization(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.modernization.extend(values);
+            self
+        }
+
+        fn exteriors(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.exteriors.extend(values);
+            self
+        }
+
+        fn color_schemes(mut self, values: impl IntoIterator<Item = (u32, u32)>) -> Self {
+            self.color_schemes.extend(values);
+            self
+        }
+
+        fn exterior_kill_tags(mut self, values: impl IntoIterator<Item = ExteriorKillTagState>) -> Self {
+            self.exterior_kill_tags = Some(values.into_iter().collect());
+            self
+        }
+
+        fn abilities(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.abilities.extend(values);
+            self
+        }
+
+        fn ensigns(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.ensigns.extend(values);
+            self
+        }
+
+        fn ecoboosts(mut self, values: impl IntoIterator<Item = u32>) -> Self {
+            self.ecoboosts.extend(values);
+            self
+        }
+
+        fn naval_flag(mut self, naval_flag: u32) -> Self {
+            self.naval_flag = naval_flag;
+            self
+        }
+
+        fn last_boarded_crew(mut self, last_boarded_crew: u32) -> Self {
+            self.last_boarded_crew = last_boarded_crew;
+            self
+        }
+
+        fn with_v13_2_field(mut self) -> Self {
+            self.include_v13_2_field = true;
+            self
+        }
+
+        fn build(self) -> Vec<u8> {
+            let mut buf = Vec::new();
+
+            push_u32(&mut buf, 1);
+            push_u32(&mut buf, self.ship_params_id);
             push_u32(&mut buf, 0);
+            push_section(&mut buf, &self.units);
+
+            if self.include_v13_2_field {
+                push_u32(&mut buf, 0);
+            }
+
+            push_section(&mut buf, &self.modernization);
+            push_section(&mut buf, &self.exteriors);
+            push_u32(&mut buf, 0);
+            push_u32(&mut buf, self.color_schemes.len() as u32);
+            for (slot, scheme) in self.color_schemes {
+                push_u32(&mut buf, slot);
+                push_u32(&mut buf, scheme);
+            }
+
+            if let Some(exterior_kill_tags) = self.exterior_kill_tags {
+                push_u32(&mut buf, exterior_kill_tags.len() as u32);
+                for state in exterior_kill_tags {
+                    push_u32(
+                        &mut buf,
+                        u32::try_from(state.exterior_id().raw()).expect("test exterior ID must fit the wire format"),
+                    );
+                    push_u32(&mut buf, state.enabled().into());
+                }
+            }
+
+            push_section(&mut buf, &self.abilities);
+            push_section(&mut buf, &self.ensigns);
+            push_section(&mut buf, &self.ecoboosts);
+            push_u32(&mut buf, self.naval_flag);
+            push_u32(&mut buf, 1);
+            push_u32(&mut buf, self.last_boarded_crew);
+            buf
         }
-
-        // Modernization
-        push_u32(&mut buf, modernization.len() as u32);
-        for &m in modernization {
-            push_u32(&mut buf, m);
-        }
-
-        // Exteriors
-        push_u32(&mut buf, exteriors.len() as u32);
-        for &e in exteriors {
-            push_u32(&mut buf, e);
-        }
-
-        // Supply state
-        push_u32(&mut buf, 0);
-
-        // Color schemes
-        push_u32(&mut buf, color_schemes.len() as u32);
-        for &(slot, scheme) in color_schemes {
-            push_u32(&mut buf, slot);
-            push_u32(&mut buf, scheme);
-        }
-
-        // Abilities
-        push_u32(&mut buf, abilities.len() as u32);
-        for &a in abilities {
-            push_u32(&mut buf, a);
-        }
-
-        // Ensigns
-        push_u32(&mut buf, ensigns.len() as u32);
-        for &e in ensigns {
-            push_u32(&mut buf, e);
-        }
-
-        // Ecoboosts
-        push_u32(&mut buf, ecoboosts.len() as u32);
-        for &e in ecoboosts {
-            push_u32(&mut buf, e);
-        }
-
-        // Naval flag
-        push_u32(&mut buf, naval_flag);
-
-        // isOwned + lastBoardedCrew
-        push_u32(&mut buf, 1); // isOwned
-        push_u32(&mut buf, last_boarded_crew);
-
-        buf
     }
 
     fn version_15_1() -> Version {
@@ -285,19 +368,7 @@ mod tests {
 
     #[test]
     fn parse_minimal_config() {
-        let blob = build_blob(
-            4_293_001_168, // ship_params_id (Vermont)
-            &[100],        // 1 unit (hull)
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            0,
-            0,
-            true,
-        );
+        let blob = ShipConfigBlobBuilder::new(4_293_001_168).units([100]).with_v13_2_field().build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 4_293_001_168);
         assert_eq!(config.hull().map(|h| h.raw()), Some(100));
@@ -313,19 +384,16 @@ mod tests {
 
     #[test]
     fn parse_config_v13_2_extra_field() {
-        let blob = build_blob(
-            1000,
-            &[10, 20, 30],
-            &[200, 201],
-            &[300],
-            &[],
-            &[400, 401, 402],
-            &[],
-            &[500, 501, 502, 503],
-            7,
-            9999,
-            true, // v13.2 field present
-        );
+        let blob = ShipConfigBlobBuilder::new(1000)
+            .units([10, 20, 30])
+            .modernization([200, 201])
+            .exteriors([300])
+            .abilities([400, 401, 402])
+            .ecoboosts([500, 501, 502, 503])
+            .naval_flag(7)
+            .last_boarded_crew(9999)
+            .with_v13_2_field()
+            .build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 1000);
         assert_eq!(config.hull().map(|h| h.raw()), Some(10));
@@ -341,19 +409,15 @@ mod tests {
 
     #[test]
     fn parse_config_pre_v13_2() {
-        let blob = build_blob(
-            2000,
-            &[50, 60],
-            &[150],
-            &[250, 251, 252],
-            &[],
-            &[350],
-            &[450],
-            &[],
-            3,
-            8888,
-            false, // no v13.2 field
-        );
+        let blob = ShipConfigBlobBuilder::new(2000)
+            .units([50, 60])
+            .modernization([150])
+            .exteriors([250, 251, 252])
+            .abilities([350])
+            .ensigns([450])
+            .naval_flag(3)
+            .last_boarded_crew(8888)
+            .build();
         let config = parse_ship_config(&blob, &version_12_3()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 2000);
         assert_eq!(config.hull().map(|h| h.raw()), Some(50));
@@ -369,19 +433,7 @@ mod tests {
 
     #[test]
     fn parse_empty_slots() {
-        let blob = build_blob(
-            42,
-            &[1], // need at least one unit for hull
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            0,
-            0,
-            true,
-        );
+        let blob = ShipConfigBlobBuilder::new(42).units([1]).with_v13_2_field().build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert!(config.modernization().is_empty());
         assert!(config.exteriors().is_empty());
@@ -393,27 +445,18 @@ mod tests {
     #[test]
     fn parse_config_with_many_modules() {
         // Realistic slot counts: 14 units, 6 modernizations, 8 exteriors
-        let units: Vec<u32> = (100..114).collect();
-        let mods: Vec<u32> = (200..206).collect();
-        let exteriors: Vec<u32> = (300..308).collect();
-        let abilities: Vec<u32> = (400..404).collect();
-        let ensigns: Vec<u32> = vec![500, 501];
-        let ecoboosts: Vec<u32> = vec![600, 601, 602, 603];
-        let color_schemes: Vec<(u32, u32)> = vec![(0, 10), (1, 11), (2, 12)];
-
-        let blob = build_blob(
-            5000,
-            &units,
-            &mods,
-            &exteriors,
-            &color_schemes,
-            &abilities,
-            &ensigns,
-            &ecoboosts,
-            15,
-            7777,
-            true,
-        );
+        let blob = ShipConfigBlobBuilder::new(5000)
+            .units(100..114)
+            .modernization(200..206)
+            .exteriors(300..308)
+            .color_schemes([(0, 10), (1, 11), (2, 12)])
+            .abilities(400..404)
+            .ensigns([500, 501])
+            .ecoboosts([600, 601, 602, 603])
+            .naval_flag(15)
+            .last_boarded_crew(7777)
+            .with_v13_2_field()
+            .build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 5000);
         assert_eq!(config.hull().map(|h| h.raw()), Some(100)); // first unit
@@ -439,7 +482,12 @@ mod tests {
         // section, naval flag, or crew tail. Simulate by building a full blob with
         // empty ecoboosts and lopping off the trailing four u32s (ecoboost count +
         // naval flag + isOwned + lastBoardedCrew).
-        let mut blob = build_blob(2000, &[10, 20, 30], &[200, 201], &[300], &[], &[400, 401], &[], &[], 0, 0, false);
+        let mut blob = ShipConfigBlobBuilder::new(2000)
+            .units([10, 20, 30])
+            .modernization([200, 201])
+            .exteriors([300])
+            .abilities([400, 401])
+            .build();
         blob.truncate(blob.len() - 16);
 
         let config = parse_ship_config(&blob, &version_12_3()).unwrap();
@@ -460,6 +508,7 @@ mod tests {
         assert_eq!(config.ship_params_id().raw(), 0);
         assert_eq!(config.hull(), None);
         assert!(config.units().is_empty());
+        assert_eq!(config.exterior_kill_tags(), None);
         assert!(config.modernization().is_empty());
         assert!(config.exteriors().is_empty());
         assert!(config.abilities().is_empty());
@@ -467,6 +516,73 @@ mod tests {
         assert!(config.ecoboosts().is_empty());
         assert_eq!(config.naval_flag(), None);
         assert_eq!(config.last_boarded_crew(), None);
+    }
+
+    #[test]
+    fn parse_v15_9_exterior_kill_tag_state() {
+        let blob = ShipConfigBlobBuilder::new(1000)
+            .units([10])
+            .exteriors([300, 301])
+            .exterior_kill_tags([
+                ExteriorKillTagState::new(GameParamId::from(300u32), false),
+                ExteriorKillTagState::new(GameParamId::from(301u32), true),
+            ])
+            .abilities([400])
+            .naval_flag(7)
+            .last_boarded_crew(9999)
+            .with_v13_2_field()
+            .build();
+
+        let config = parse_ship_config(&blob, &Version::base(15, 9, 0)).unwrap();
+        let states = config.exterior_kill_tags().unwrap();
+        assert_eq!(
+            states,
+            [
+                ExteriorKillTagState { exterior_id: GameParamId::from(300u32), enabled: false },
+                ExteriorKillTagState { exterior_id: GameParamId::from(301u32), enabled: true },
+            ]
+        );
+        assert_eq!(config.abilities(), [GameParamId::from(400u32)].as_slice());
+    }
+
+    #[test]
+    fn parse_v15_8_layout_does_not_read_exterior_kill_tag_state() {
+        let blob = ShipConfigBlobBuilder::new(1000)
+            .units([10])
+            .exteriors([300, 301])
+            .abilities([400, 401])
+            .ensigns([500])
+            .ecoboosts([600])
+            .naval_flag(7)
+            .last_boarded_crew(9999)
+            .with_v13_2_field()
+            .build();
+
+        let config = parse_ship_config(&blob, &Version::base(15, 8, 0)).unwrap();
+        assert_eq!(config.exterior_kill_tags(), None);
+        assert_eq!(config.abilities(), [GameParamId::from(400u32), GameParamId::from(401u32)].as_slice());
+        assert_eq!(config.ensigns(), [GameParamId::from(500u32)].as_slice());
+        assert_eq!(config.ecoboosts(), [GameParamId::from(600u32)].as_slice());
+        assert_eq!(config.naval_flag(), Some(7));
+        assert_eq!(config.last_boarded_crew(), Some(9999));
+    }
+
+    #[test]
+    fn parse_v15_9_incomplete_exterior_kill_tag_state_is_absent() {
+        const AFTER_KILL_TAG_COUNT: usize = 44;
+        const AFTER_KILL_TAG_EXTERIOR_ID: usize = 48;
+
+        let complete_blob = ShipConfigBlobBuilder::new(1000)
+            .units([10])
+            .exterior_kill_tags([ExteriorKillTagState::new(GameParamId::from(300u32), false)])
+            .with_v13_2_field()
+            .build();
+
+        for end in [AFTER_KILL_TAG_COUNT, AFTER_KILL_TAG_EXTERIOR_ID] {
+            let config = parse_ship_config(&complete_blob[..end], &Version::base(15, 9, 0)).unwrap();
+            assert_eq!(config.exterior_kill_tags(), None);
+            assert!(config.abilities().is_empty());
+        }
     }
 
     #[test]
