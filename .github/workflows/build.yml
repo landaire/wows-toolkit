@@ -101,6 +101,11 @@ jobs:
         working-directory: C:\w
     steps:
       - uses: actions/checkout@v4
+      - name: Cache the offline Buck toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\bo
+          key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
 
       - name: Copy the checkout to a short path
         shell: pwsh

@@ -21,19 +21,63 @@ permissions:
   actions: read
 
 jobs:
-  # Three phases of the same graph, run as separate jobs so their wall clock
-  # overlaps instead of adding up. Each pays its own provisioning and starts
-  # from a cold buck-out, which is still cheaper in wall clock than the serial
-  # run it replaces.
+  select:
+    name: Select affected targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Select the affected targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            nix develop --command buck2 run //ci:affected -- --full --out affected.json
+            exit 0
+          fi
+          # No answer means no base, which checks everything.
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""') || base=""
+          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: affected-targets
+          path: affected.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Build-graph tests
+        run: |
+          if ! jq -e .graph_tests affected.json >/dev/null; then echo "No BUCK file or manifest changed."; exit 0; fi
+          nix develop --command buck2 run //ci:graph_tests
+
+  # The two phases overlap instead of adding their wall clock. Each starts from
+  # a cold buck-out, which is still cheaper in wall clock than a serial run.
   linux:
     name: Linux x86_64 (${{ matrix.phase }})
+    needs: select
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        phase: [checks, release, graph-tests]
+        phase: [checks, release]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
 
       # The wt-web site's release link runs ThinLTO over the whole wasm graph
       # in one rustc, which outgrows the runner's 16 GB on its own.
@@ -55,19 +99,6 @@ jobs:
       # bin/buck2 first on PATH, so the scripts behind //ci run the same Buck2.
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
-
-      - name: Select the affected targets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            nix develop --command buck2 run //ci:affected -- --full --out affected.json
-            exit 0
-          fi
-          # No answer means no base, which checks everything.
-          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
-            --jq '.workflow_runs[0].head_sha // ""') || base=""
-          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
 
       - name: Build the affected aliases
         if: matrix.phase == 'checks'
@@ -111,17 +142,15 @@ jobs:
         if: matrix.phase == 'checks'
         run: nix develop --command buck2 test $(jq -r '.tests | join(" ")' affected.json)
 
-      - name: Build-graph tests
-        if: matrix.phase == 'graph-tests'
-        run: |
-          if ! jq -e .graph_tests affected.json >/dev/null; then echo "No BUCK file or manifest changed."; exit 0; fi
-          nix develop --command buck2 run //ci:graph_tests
-
   macos:
     name: macOS arm64
+    needs: select
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
       - uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
@@ -133,18 +162,6 @@ jobs:
 
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
-
-      - name: Select the affected targets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            nix develop --command buck2 run //ci:affected -- --full --out affected.json
-            exit 0
-          fi
-          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
-            --jq '.workflow_runs[0].head_sha // ""') || base=""
-          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
       # graph itself is already covered there in both modes. The tactics site is
@@ -160,6 +177,66 @@ jobs:
             buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $targets
           ' "$aliases"
 
-# Windows is absent as a CI job. It builds and releases from the graph, but
-# provisioning mirrors a multi-GB Visual Studio layout on every run because
-# nothing is cached, so it is left to the release workflow until then.
+  windows:
+    name: Windows x86_64
+    needs: select
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: C:\w
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the offline Buck toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\bo
+          key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
+
+      - name: Copy the checkout to a short path
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
+          path: C:\w
+
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        run: |
+          try {
+            ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+          } catch {
+            $msg = (($_ | Out-String) -replace "`r?`n", " | ")
+            Write-Host "::error::PROVISION: $msg"
+            Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+                $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
+                if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
+                Write-Host "::error::$($_.Name): $tail"
+              }
+            exit 1
+          }
+
+      - name: Build the affected aliases
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $aliases = @((Get-Content -Raw affected.json | ConvertFrom-Json).aliases)
+          if ($aliases.Count -eq 0) {
+            Write-Host "No alias is affected."
+            exit 0
+          }
+          $query = "set(" + ($aliases -join " ") + ") - root//:wt_web_site"
+          $targets = @(& $buck2 uquery $query)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($targets.Count -eq 0) {
+            Write-Host "No Windows alias is affected."
+            exit 0
+          }
+          & $buck2 build -m release --target-platforms toolchains//windows:windows_x86_64_msvc @targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
