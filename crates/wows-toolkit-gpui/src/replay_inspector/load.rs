@@ -1536,9 +1536,11 @@ dumped_at = "2026-01-01T00:00:00Z"
     /// works against a real install. Run with:
     ///
     /// ```text
-    /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored parse_replay_against_a_real_current_version_install_produces_a_sane_model
+    /// bin/buck2 test //crates/wows-toolkit-gpui:gpui_test -- \
+    ///   --env WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    ///   --env WOWS_REPLAY_INSPECTOR_LOAD_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay" \
+    ///   --test-arg=--ignored --test-arg=--nocapture \
+    ///   --test-arg=parse_replay_against_a_real_current_version_install_produces_a_sane_model
     /// ```
     #[test]
     #[ignore = "needs a local game install + a replay recorded on an installed build; see the doc comment for the run command"]
@@ -1570,13 +1572,32 @@ dumped_at = "2026-01-01T00:00:00Z"
             model.rows.iter().any(|r| r.observed_damage > 0 || r.actual_damage.is_some_and(|d| d > 0));
         assert!(any_nonzero_damage, "expected at least one row with nonzero damage");
 
-        // A replay with no battle-results packet carries no actual damage,
-        // which is what a rating needs; the egui app leaves those unrated
-        // too, so only a replay with results is expected to rate.
-        if personal_rating.is_some() && parsed.raw_results_json.is_some() {
+        if parsed.raw_results_json.is_some() {
+            assert!(
+                model.rows.iter().any(|row| row.actual_damage.is_some()),
+                "battle results should map damage onto at least one row"
+            );
+        }
+
+        // The expected-values table does not cover event and test ships.
+        // Exercise ratings only when this replay has a ship the table can rate.
+        if let Some(personal_rating) = &personal_rating {
+            let rateable = model
+                .rows
+                .iter()
+                .filter(|row| {
+                    row.actual_damage.is_some()
+                        && row
+                            .ship_id
+                            .and_then(|ship_id| personal_rating.get_ship_expected(ship_id))
+                            .is_some_and(|expected| expected.average_damage_dealt != 0.0)
+                })
+                .count();
             let rated = model.rows.iter().filter(|row| row.personal_rating.is_some()).count();
-            println!("{rated} of {} rows carry a personal rating", model.rows.len());
-            assert!(rated > 0, "a replay with results should rate at least one row");
+            println!("{rated} of {rateable} rateable rows carry a personal rating");
+            if parsed.raw_results_json.is_some() && rateable > 0 {
+                assert!(rated > 0, "a rateable replay with results should rate at least one row");
+            }
         }
     }
 
