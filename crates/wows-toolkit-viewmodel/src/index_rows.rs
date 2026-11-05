@@ -75,9 +75,9 @@ pub fn constants_fit(
 ///
 /// Preference order is what both apps read from disk: the build's dump-local
 /// copy, then the versioned storage cache, then the copy embedded in this
-/// executable. The chosen value is returned whatever its fit, because it is what
-/// the rest of the build decodes with; the fit says how far the results decoded
-/// from it can be trusted.
+/// executable. Approximate constants still decode stable result fields, but
+/// their positional roster maps are removed so the replay parser uses its
+/// version-specific layout instead.
 pub fn resolve_replay_constants(
     dump_constants: Option<serde_json::Value>,
     cached_constants: Option<serde_json::Value>,
@@ -85,8 +85,14 @@ pub fn resolve_replay_constants(
     build: u32,
     version: Option<wowsunpack::data::Version>,
 ) -> (serde_json::Value, ConstantsFit) {
-    let chosen = dump_constants.or(cached_constants).unwrap_or_else(|| fallback.clone());
+    let mut chosen = dump_constants.or(cached_constants).unwrap_or_else(|| fallback.clone());
     let fit = constants_fit(&chosen, build, version);
+    if fit == ConstantsFit::Mismatched
+        && let Some(constants) = chosen.as_object_mut()
+    {
+        constants.remove("PLAYER_NUM_MEMBER_MAP");
+        constants.remove("BOT_NUM_MEMBER_MAP");
+    }
     (chosen, fit)
 }
 
@@ -290,5 +296,26 @@ mod constants_fit_tests {
     fn a_mapping_that_names_no_version_does_not_fit() {
         assert_eq!(constants_fit(&json!({}), 1, None), ConstantsFit::Mismatched);
         assert_eq!(constants_fit(&json!({ "VERSION": {} }), 1, None), ConstantsFit::Mismatched);
+    }
+
+    /// A positional roster map from another release shifts fields such as the
+    /// ship id. Removing it lets the parser's replay-version map decode the
+    /// roster while unrelated approximate constants remain available.
+    #[test]
+    fn mismatched_constants_do_not_override_the_replay_roster_layout() {
+        let fallback = json!({
+            "VERSION": { "VERSION": "15.2", "PATCH": 0, "BUILD": 9_876_543 },
+            "PLAYER_NUM_MEMBER_MAP": { "33": "shipId" },
+            "BOT_NUM_MEMBER_MAP": { "23": "shipId" },
+            "CONSUMABLE_IDS": { "DAMAGE_CONTROL": 1 }
+        });
+        let replay_version = Version::from_client_exe("15,9,0,13357625");
+
+        let (chosen, fit) = super::resolve_replay_constants(None, None, &fallback, 13_357_625, Some(replay_version));
+
+        assert_eq!(fit, ConstantsFit::Mismatched);
+        assert!(chosen.get("PLAYER_NUM_MEMBER_MAP").is_none());
+        assert!(chosen.get("BOT_NUM_MEMBER_MAP").is_none());
+        assert_eq!(chosen["CONSUMABLE_IDS"]["DAMAGE_CONTROL"], 1);
     }
 }
