@@ -255,6 +255,7 @@ fn handle_interactive_zone_create(
     use wows_replays::analyzer::battle_controller::state::CapturePointState;
     use wows_replays::analyzer::battle_controller::state::ControlPointType;
     use wows_replays::analyzer::battle_controller::state::InteractiveZoneType;
+    use wows_replays::analyzer::battle_controller::state::InteractiveZoneVisualState;
     use wows_replays::analyzer::decoder::Recognized;
 
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
@@ -398,7 +399,9 @@ fn handle_interactive_zone_create(
             .and_then(as_dict)
             .and_then(|d| d.get("forOwner"))
             .and_then(|v| v.as_i64())
-            .unwrap_or(0) as u8;
+            .and_then(|raw| u8::try_from(raw).ok())
+            .map(InteractiveZoneVisualState::from_raw)
+            .unwrap_or_else(|| InteractiveZoneVisualState::from_raw(0));
         let bz_state = BuffZoneState {
             entity_id: packet.entity_id,
             position,

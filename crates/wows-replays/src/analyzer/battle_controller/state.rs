@@ -69,6 +69,76 @@ pub struct CapturePointState {
     pub is_enabled: bool,
 }
 
+/// Packed visual state used by `InteractiveZone.visualState`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum InteractiveZoneVisualState {
+    #[default]
+    NoState = 0x00,
+    Neutral = 0x01,
+    Unfriendly = 0x02,
+    Friendly = 0x03,
+    Cyan = 0x04,
+    Yellow = 0x05,
+    Purple = 0x06,
+    Blue = 0x07,
+    Orange = 0x08,
+    InversedNoState = 0x10,
+    InversedNeutral = 0x11,
+    InversedUnfriendly = 0x12,
+    InversedFriendly = 0x13,
+    InversedCyan = 0x14,
+    InversedYellow = 0x15,
+    InversedPurple = 0x16,
+    InversedBlue = 0x17,
+    InversedOrange = 0x18,
+}
+
+impl InteractiveZoneVisualState {
+    pub const fn raw(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_raw(raw: u8) -> Recognized<Self, u8> {
+        let state = match raw {
+            0x00 => Self::NoState,
+            0x01 => Self::Neutral,
+            0x02 => Self::Unfriendly,
+            0x03 => Self::Friendly,
+            0x04 => Self::Cyan,
+            0x05 => Self::Yellow,
+            0x06 => Self::Purple,
+            0x07 => Self::Blue,
+            0x08 => Self::Orange,
+            0x10 => Self::InversedNoState,
+            0x11 => Self::InversedNeutral,
+            0x12 => Self::InversedUnfriendly,
+            0x13 => Self::InversedFriendly,
+            0x14 => Self::InversedCyan,
+            0x15 => Self::InversedYellow,
+            0x16 => Self::InversedPurple,
+            0x17 => Self::InversedBlue,
+            0x18 => Self::InversedOrange,
+            _ => return Recognized::Unknown(raw),
+        };
+        Recognized::Known(state)
+    }
+}
+
+fn serialize_interactive_zone_visual_state<S>(
+    value: &Recognized<InteractiveZoneVisualState, u8>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let raw = match value {
+        Recognized::Known(state) => state.raw(),
+        Recognized::Unknown(raw) => *raw,
+    };
+    serializer.serialize_u8(raw)
+}
+
 /// State of a buff zone (arms race powerup drop).
 ///
 /// InteractiveZone entities with `controlPoint: null` in `componentsState`.
@@ -84,8 +154,9 @@ pub struct BuffZoneState {
     pub team_id: i64,
     /// Whether this zone is currently active and visible
     pub is_active: bool,
-    /// 1 = charging, 3 = ready, 0 = picked up
-    pub visual_state: u8,
+    /// Packed color and inversion state from `InteractiveZone.visualState.forOwner`.
+    #[serde(serialize_with = "serialize_interactive_zone_visual_state")]
+    pub visual_state: Recognized<InteractiveZoneVisualState, u8>,
     /// GameParam ID of the associated Drop (powerup type)
     pub drop_params_id: Option<GameParamId>,
 }
@@ -328,4 +399,34 @@ pub struct VictimPose {
     pub pitch: f32,
     /// Roll in radians.
     pub roll: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interactive_zone_visual_state_preserves_known_and_unknown_values() {
+        assert_eq!(InteractiveZoneVisualState::from_raw(0x03), Recognized::Known(InteractiveZoneVisualState::Friendly));
+        assert_eq!(
+            InteractiveZoneVisualState::from_raw(0x15),
+            Recognized::Known(InteractiveZoneVisualState::InversedYellow)
+        );
+        assert_eq!(InteractiveZoneVisualState::from_raw(0xff), Recognized::Unknown(0xff));
+    }
+
+    #[test]
+    fn interactive_zone_visual_state_serializes_as_its_wire_value() {
+        #[derive(Serialize)]
+        struct State {
+            #[serde(serialize_with = "serialize_interactive_zone_visual_state")]
+            visual_state: Recognized<InteractiveZoneVisualState, u8>,
+        }
+
+        let state = State { visual_state: Recognized::Known(InteractiveZoneVisualState::Friendly) };
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"visual_state":3}"#);
+
+        let state = State { visual_state: Recognized::Unknown(0xff) };
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"visual_state":255}"#);
+    }
 }
