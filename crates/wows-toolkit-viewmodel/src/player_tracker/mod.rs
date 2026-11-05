@@ -47,7 +47,28 @@ use wows_toolkit_config::index::rows::PlayerFacet;
 
 /// A player's wows-numbers page.
 pub fn wows_numbers_player_url(region: Region, account_id: AccountId, name: &str) -> String {
-    format!("https://{}.wows-numbers.com/player/{},{}", region.as_wire(), account_id.0, name)
+    let host = match region {
+        Region::Eu => "wows-numbers.com",
+        Region::Na => "na.wows-numbers.com",
+        Region::Asia => "asia.wows-numbers.com",
+    };
+    format!("https://{host}/player/{},{}", account_id.0, name)
+}
+
+/// A player's wows-numbers page, if the replay realm is recognized.
+pub fn wows_numbers_player_url_for_realm(realm: &str, account_id: AccountId, name: &str) -> Option<String> {
+    let host = if realm.eq_ignore_ascii_case("eu") {
+        "wows-numbers.com"
+    } else if realm.eq_ignore_ascii_case("na") {
+        "na.wows-numbers.com"
+    } else if realm.eq_ignore_ascii_case("asia") {
+        "asia.wows-numbers.com"
+    } else if realm.eq_ignore_ascii_case("ru") {
+        "ru.wows-numbers.com"
+    } else {
+        return None;
+    };
+    Some(format!("https://{host}/player/{},{}", account_id.0, name))
 }
 
 /// A player's shipbuilds page.
@@ -592,17 +613,28 @@ mod clan_tests {
 mod player_link_tests {
     use super::shipbuilds_player_url;
     use super::wows_numbers_player_url;
+    use super::wows_numbers_player_url_for_realm;
     use crate::match_stats::Region;
     use wows_replays::types::AccountId;
 
-    /// Both links carry the region, the account and the name, because the
-    /// sites key on the id and show the name.
     #[test]
-    fn a_player_links_to_both_sites_by_region_and_id() {
+    fn player_links_use_each_sites_region_format() {
         let id = AccountId(123456789);
         assert_eq!(
             wows_numbers_player_url(Region::Eu, id, "gapedd"),
-            "https://eu.wows-numbers.com/player/123456789,gapedd"
+            "https://wows-numbers.com/player/123456789,gapedd"
+        );
+        assert_eq!(
+            wows_numbers_player_url(Region::Na, id, "gapedd"),
+            "https://na.wows-numbers.com/player/123456789,gapedd"
+        );
+        assert_eq!(
+            wows_numbers_player_url_for_realm("eu", id, "gapedd"),
+            Some("https://wows-numbers.com/player/123456789,gapedd".to_owned())
+        );
+        assert_eq!(
+            wows_numbers_player_url_for_realm("RU", id, "gapedd"),
+            Some("https://ru.wows-numbers.com/player/123456789,gapedd".to_owned())
         );
         assert_eq!(
             shipbuilds_player_url(Region::Eu, id, "gapedd"),

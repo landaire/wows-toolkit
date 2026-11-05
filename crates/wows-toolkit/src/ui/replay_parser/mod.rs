@@ -144,6 +144,7 @@ use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
 use crate::util;
 use crate::util::build_ship_config_url;
+use crate::util::build_shiptool_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::error::ToolkitError;
@@ -1910,6 +1911,20 @@ impl UiReport {
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
                             if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::SHARE,
+                                        &t!("ui.replay.build.open_shiptool"),
+                                    ))
+                                    .clicked()
+                                {
+                                    let metadata_provider = self.metadata_provider();
+                                    if let Some(url) = build_shiptool_url(report.player(), &metadata_provider) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
+                                    ui.close_kind(UiKind::Menu);
+                                }
+
                                 if ui
                                     .small_button(wt_translations::icon_t(
                                         icons::SHARE,

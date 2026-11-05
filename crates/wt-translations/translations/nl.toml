@@ -444,6 +444,7 @@ hidden_profile = "Speler heeft een verborgen profiel"
 never_connected = "Speler heeft nooit verbinding gemaakt met de wedstrijd"
 
 [ui.replay.build]
+open_shiptool = "Build openen in ShipTool"
 open_in_browser = "Build openen in browser"
 copy_link = "Buildlink kopiëren"
 copy_short_link = "Korte buildlink kopiëren"

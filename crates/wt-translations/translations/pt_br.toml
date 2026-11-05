@@ -418,6 +418,7 @@ hidden_profile = "O jogador tem um perfil oculto"
 never_connected = "O jogador nunca se conectou à partida"
 
 [ui.replay.build]
+open_shiptool = "Abrir build no ShipTool"
 open_in_browser = "Abrir build no navegador"
 copy_link = "Copiar link da build"
 copy_short_link = "Copiar link curto da build"

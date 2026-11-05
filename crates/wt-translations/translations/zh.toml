@@ -444,6 +444,7 @@ hidden_profile = "该玩家隐藏了个人资料"
 never_connected = "玩家从未连接到比赛"
 
 [ui.replay.build]
+open_shiptool = "在 ShipTool 中打开配置"
 open_in_browser = "在浏览器中打开配置"
 copy_link = "复制配置链接"
 copy_short_link = "复制短配置链接"

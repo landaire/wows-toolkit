@@ -444,6 +444,7 @@ hidden_profile = "비공개 프로필 플레이어"
 never_connected = "플레이어가 전투에 접속하지 않았습니다"
 
 [ui.replay.build]
+open_shiptool = "ShipTool에서 빌드 열기"
 open_in_browser = "브라우저에서 빌드 열기"
 copy_link = "빌드 링크 복사"
 copy_short_link = "짧은 빌드 링크 복사"

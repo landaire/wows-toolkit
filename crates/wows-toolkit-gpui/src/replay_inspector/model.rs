@@ -214,6 +214,9 @@ pub struct PlayerRow {
     /// from `util::build_short_ship_config_url`. Same `None`-until-populated
     /// lifecycle as `ship_config_url`.
     pub short_ship_config_url: Option<String>,
+    /// The Actions column's ShipTool menu item's target URL. Same
+    /// `None`-until-populated lifecycle as `ship_config_url`.
+    pub shiptool_url: Option<String>,
     /// The Actions column's WoWS-numbers menu item's target URL, ported from
     /// `util::build_wows_numbers_url`. Same `None`-until-populated lifecycle
     /// as `ship_config_url`, though this one only needs a resolvable realm
@@ -440,6 +443,7 @@ impl ReplayReportModel {
             };
             row.ship_config_url = links::build_ship_config_url(player, metadata_provider);
             row.short_ship_config_url = links::build_short_ship_config_url(player, metadata_provider);
+            row.shiptool_url = links::build_shiptool_url(player, metadata_provider);
             row.wows_numbers_url = links::build_wows_numbers_url(player);
             row.raw_metadata_json = serde_json::to_string_pretty(player.as_ref()).ok();
         }
@@ -866,6 +870,7 @@ impl PlayerRow {
             // carry; see the field docs and `populate_action_links`.
             ship_config_url: None,
             short_ship_config_url: None,
+            shiptool_url: None,
             wows_numbers_url: None,
             raw_metadata_json: None,
             fire_chance: None,

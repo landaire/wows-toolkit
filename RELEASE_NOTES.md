@@ -10,6 +10,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 - Replay parsing follows the 15.9 roster layout while retaining the older layout for earlier replays. Player teams and ship identities resolve correctly, and roster data links to vehicle packets so captain skills and ship configurations are retained.
 - Normalized replay reports include stable player ordering, battle outcome, and ship identity. Replay analysis can resolve effective fire chance and track damage, spotting, and consumable use over battle time.
+- Player action menus in both applications can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
 - `replayshark` can inspect rosters, battle results, and constants mappings.
 
 ### Game data and compatibility

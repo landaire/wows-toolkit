@@ -444,6 +444,7 @@ hidden_profile = "プレイヤーのプロフィールは非公開です"
 never_connected = "プレイヤーは試合に接続しませんでした"
 
 [ui.replay.build]
+open_shiptool = "ShipToolでビルドを開く"
 open_in_browser = "ブラウザでビルドを開く"
 copy_link = "ビルドリンクをコピー"
 copy_short_link = "短縮ビルドリンクをコピー"

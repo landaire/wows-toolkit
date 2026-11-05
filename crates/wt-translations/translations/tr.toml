@@ -418,6 +418,7 @@ hidden_profile = "Oyuncunun profili gizli"
 never_connected = "Oyuncu maça hiç bağlanmadı"
 
 [ui.replay.build]
+open_shiptool = "Build'i ShipTool'da Aç"
 open_in_browser = "Build'i Tarayıcıda Aç"
 copy_link = "Build Bağlantısını Kopyala"
 copy_short_link = "Kısa Build Bağlantısını Kopyala"

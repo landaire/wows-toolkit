@@ -1231,6 +1231,7 @@ struct ActionsMenuData {
     has_vehicle_entity: bool,
     ship_config_url: Option<String>,
     short_ship_config_url: Option<String>,
+    shiptool_url: Option<String>,
     wows_numbers_url: Option<String>,
     raw_metadata_json: Option<String>,
 }
@@ -1338,6 +1339,7 @@ impl ActionsMenuData {
             has_vehicle_entity: row.has_vehicle_entity,
             ship_config_url: row.ship_config_url.clone(),
             short_ship_config_url: row.short_ship_config_url.clone(),
+            shiptool_url: row.shiptool_url.clone(),
             wows_numbers_url: row.wows_numbers_url.clone(),
             raw_metadata_json: row.raw_metadata_json.clone(),
         }
@@ -1396,6 +1398,10 @@ fn build_actions_menu(
 
     if show_ship_config {
         let mut added_any = false;
+        if let Some(url) = row.shiptool_url.clone() {
+            menu = menu.item(PopupMenuItem::link(t!("ui.replay.build.open_shiptool").into_owned(), url));
+            added_any = true;
+        }
         if let Some(url) = row.ship_config_url.clone() {
             menu = menu.item(PopupMenuItem::link(t!("ui.replay.build.open_in_browser").into_owned(), url.clone()));
             let copy_url = url;

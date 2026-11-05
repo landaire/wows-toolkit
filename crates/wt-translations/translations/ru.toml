@@ -418,6 +418,7 @@ hidden_profile = "У игрока скрытый профиль"
 never_connected = "Игрок не подключился к бою"
 
 [ui.replay.build]
+open_shiptool = "Открыть сборку в ShipTool"
 open_in_browser = "Открыть сборку в браузере"
 copy_link = "Копировать ссылку на сборку"
 copy_short_link = "Копировать короткую ссылку на сборку"

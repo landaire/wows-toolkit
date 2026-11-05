@@ -444,6 +444,7 @@ hidden_profile = "ผู้เล่นซ่อนโปรไฟล์"
 never_connected = "ผู้เล่นไม่ได้เชื่อมต่อเข้าร่วมการแข่งขัน"
 
 [ui.replay.build]
+open_shiptool = "เปิดบิลด์ใน ShipTool"
 open_in_browser = "เปิดบิลด์ในเบราว์เซอร์"
 copy_link = "คัดลอกลิงก์บิลด์"
 copy_short_link = "คัดลอกลิงก์บิลด์แบบสั้น"

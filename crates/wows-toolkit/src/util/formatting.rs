@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::Command;
 use tracing::debug;
 use wows_replay_insights::ResolvedBuild;
+use wows_replay_insights::build::shiptool;
 use wows_replay_insights::build::wowssb;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::Player;
@@ -32,15 +33,14 @@ pub fn player_color_for_team_relation(relation: Relation, visuals: &egui::Visual
 
 pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
     let state = player.initial_state();
-    let realm = state.realm()?;
-    Some(format!("https://{}.wows-numbers.com/player/{},{}", realm, state.db_id(), state.username()))
+    wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url_for_realm(
+        state.realm()?,
+        state.db_id(),
+        state.username(),
+    )
 }
 
-/// A player's wows-numbers page. The realm is a subdomain there, so a region
-/// this client does not support has no page and cannot be linked.
-pub fn wows_numbers_player_url(region: Region, account_id: AccountId, name: &str) -> String {
-    format!("https://{}.wows-numbers.com/player/{},{}", region.as_wire(), account_id.0, name)
-}
+pub use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 
 /// A player's shipbuilds page. Only the `EU` form of the region segment is
 /// confirmed against the live site; `NA` and `ASIA` follow the same shape.
@@ -53,6 +53,11 @@ pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataPr
     let build_name = format!("replay_{}", player.initial_state().username());
     let url = wowssb::build_url(&build, &build_name, Some(TOOLKIT_REFERRER));
     Some(url)
+}
+
+pub fn build_shiptool_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
+    let build = ResolvedBuild::from_player(player, metadata_provider, Version::default())?;
+    Some(shiptool::build_url(&build))
 }
 
 pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {

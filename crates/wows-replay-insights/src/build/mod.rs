@@ -5,6 +5,8 @@ mod modifiers;
 mod resolver;
 mod seed;
 
+pub mod shiptool;
+
 #[cfg(feature = "wowssb")]
 pub mod wowssb;
 

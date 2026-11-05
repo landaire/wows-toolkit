@@ -418,6 +418,7 @@ hidden_profile = "Hráč má skrytý profil"
 never_connected = "Hráč se nikdy nepřipojil k zápasu"
 
 [ui.replay.build]
+open_shiptool = "Otevřít build v ShipTool"
 open_in_browser = "Otevřít build v prohlížeči"
 copy_link = "Kopírovat odkaz na build"
 copy_short_link = "Kopírovat krátký odkaz na build"

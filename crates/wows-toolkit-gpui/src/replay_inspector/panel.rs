@@ -1717,6 +1717,9 @@ mod tests {
         // empty for reasons that have nothing to do with where its trigger sits.
         let mut model = model_at_expected_values();
         model.rows[0].wows_numbers_url = Some("https://wows-numbers.com/player/1,Someone/".to_owned());
+        model.rows[0].has_vehicle_entity = true;
+        model.rows[0].shiptool_url = Some("https://shiptool.st/link?ship=PASC020&utm_source=wows_toolkit".to_owned());
+        model.rows[0].ship_config_url = Some("https://app.wowssb.com/ship?shipIndexes=PASC020".to_owned());
         model.rows[0].display_name = "Harvey635".to_owned();
         model.rows[0].clan_tag = Some("[RAIN]".to_owned());
         model.rows[0].ship_name = "Fletcher".to_owned();
@@ -1780,6 +1783,15 @@ mod tests {
                 labels.iter().any(|label| label.contains("WoWs Numbers")),
                 "including the lookup every row has, got {labels:?}"
             );
+            let shiptool = offered
+                .iter()
+                .find_map(|(row, item)| item.label().is_some_and(|label| label.contains("ShipTool")).then_some(*row))
+                .expect("ShipTool link is offered");
+            let wowssb = offered
+                .iter()
+                .find_map(|(row, item)| (item.label() == Some("Open Build in Browser")).then_some(*row))
+                .expect("WoWS Builds link is offered");
+            assert!(shiptool < wowssb, "ShipTool must precede WoWS Builds, got {labels:?}");
         })
         .expect("the window is open");
     }

@@ -444,6 +444,7 @@ hidden_profile = "Spieler hat ein verstecktes Profil"
 never_connected = "Spieler hat sich nie mit dem Gefecht verbunden"
 
 [ui.replay.build]
+open_shiptool = "Build in ShipTool öffnen"
 open_in_browser = "Build im Browser öffnen"
 copy_link = "Build-Link kopieren"
 copy_short_link = "Kurzen Build-Link kopieren"
