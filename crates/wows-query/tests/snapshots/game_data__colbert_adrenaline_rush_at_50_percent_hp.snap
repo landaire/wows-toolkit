@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 436
 expression: at(50.0)
 ---
 ship:
@@ -10,6 +9,7 @@ ship:
   class: cruiser
   nation: France
   group: ultimate
+  category: premium
   status: released
 skills:
   - name: Adrenaline Rush

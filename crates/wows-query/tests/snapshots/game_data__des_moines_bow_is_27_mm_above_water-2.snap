@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 77
 expression: search
 ---
 thickness_mm: 27
@@ -45,24 +44,16 @@ groups:
       - "T11 Ushakov (battleship, Russia): main battery 457 mm AP"
       - "T10 Aki (battleship, Japan) [replicas: Aki G]: main battery 460 mm AP"
       - "T10 Bungo (battleship, Japan): main battery 457 mm AP"
-      - "T10 Comodoro (battleship, Pan_America, test): main battery 419 mm AP"
       - "T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR]: main battery 419 mm AP"
-      - "T10 Cumberland (battleship, United_Kingdom, test): main battery 406 mm AP"
       - "T10 G. Kurfürst (battleship, Germany): main battery 420 mm AP"
       - "T10 Incomparable (battleship, United_Kingdom): main battery 508 mm AP"
-      - "T10 Jiuhua (battleship, Pan_Asia, test): main battery 406 mm AP"
       - "T10 Kremlin (battleship, Russia): main battery 457 mm AP"
       - "T10 Libertad (battleship, Pan_America): main battery 419 mm AP"
       - "T10 Louisiana (battleship, USA): main battery 406 mm AP"
       - "T10 Montana (battleship, USA) [replicas: BA Montana]: main battery 406 mm AP"
-      - "T10 Montana 2 (battleship, USA, test): main battery 406 mm AP"
-      - "T10 Neptunus (battleship, Netherlands, test): main battery 420 mm AP"
-      - "T10 New Jersey (battleship, USA, test): main battery 406 mm AP"
       - "T10 Ohio (battleship, USA): main battery 457 mm AP"
       - "T10 Preussen (battleship, Germany): main battery 457 mm AP"
-      - "T10 Pérez Gacitúa (battleship, Pan_America, test): main battery 406 mm AP"
       - "T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]: main battery 457 mm AP"
-      - "T10 Rodina (battleship, Russia, test): main battery 406 mm AP"
       - "T10 République (battleship, France): main battery 431 mm AP"
       - "T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]: main battery 420 mm AP"
       - "T10 Sete de Setembro (battleship, Pan_America): main battery 406 mm AP"
@@ -72,8 +63,16 @@ groups:
       - "T10 St. Vincent (battleship, United_Kingdom): main battery 457 mm AP"
       - "T10 Thor (battleship, Europe): main battery 406 mm AP"
       - "T10 Thunderer (battleship, United_Kingdom): main battery 457 mm AP"
-      - "T10 Utah (battleship, USA, test): main battery 457 mm AP"
       - "T10 Vermont (battleship, USA): main battery 457 mm AP"
       - "T10 Willem de Eerste (battleship, Netherlands): main battery 419 mm AP"
       - "T10 Wisconsin (battleship, USA) [replicas: Wisconsin G]: main battery 406 mm AP"
+      - "T10 Yamato (battleship, Japan) [replicas: ARP Yamato, Yamato Kai]: main battery 460 mm AP"
+      - "T9 AL Sov. Rossiya (battleship, Russia): main battery 406 mm AP"
+      - "T9 Adatara (battleship, Japan): main battery 457 mm AP"
+      - "T9 Bajie (battleship, Pan_Asia): main battery 410 mm AP"
+      - "T9 Daisen (battleship, Japan): main battery 410 mm AP"
+      - "T9 Delaware (battleship, USA) [replicas: Bird Cry]: main battery 406 mm AP"
+      - "T9 Duncan (battleship, United_Kingdom): main battery 419 mm AP"
+      - "T9 F. der Grosse (battleship, Germany): main battery 420 mm AP"
+      - "T9 Friedrich Carl (battleship, Germany): main battery 406 mm AP"
     omitted: 56

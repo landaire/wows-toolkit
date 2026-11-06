@@ -20,7 +20,7 @@ const IN_SMOKE_RULE: &str = "Detectability after firing the main battery from sm
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipConcealment {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 

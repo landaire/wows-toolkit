@@ -27,6 +27,7 @@ replica:
   class: battleship
   nation: USA
   group: ultimate
+  category: premium
   status: released
   replica_of:
     ship: Montana

@@ -9,6 +9,7 @@ ship:
   class: destroyer
   nation: Europe
   group: ultimate
+  category: premium
   status: released
   replicas:
     - Oväsen

@@ -21,6 +21,8 @@ expression: found
       resolved: G. Kurfürst
       kind: ship
       method: exact-alias
+      alternatives:
+        - "[G. Kurfürst] (clan battle rental): T10 battleship, PGSB910"
   ships:
     - ship: G. Kurfürst
       name_match: named

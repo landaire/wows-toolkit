@@ -9,6 +9,7 @@ ship:
   class: battleship
   nation: USA
   group: demoWithoutStatsPrem
+  category: test
   status: test
   status_note: "test ship, values from the current client may change before release"
 abilities:

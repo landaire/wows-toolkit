@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 489
 expression: aircraft
 ---
 ship:
@@ -10,6 +9,7 @@ ship:
   class: cruiser
   nation: Netherlands
   group: upgradeable
+  category: tech_tree
   status: released
 squadron_count: 1
 squadrons:

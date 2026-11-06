@@ -90,7 +90,7 @@ pub struct ArmorAssessmentArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArmorAssessmentOutput {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -934,7 +934,7 @@ impl GameData {
         let ships_with_caliber = ranked.len();
         ranked.sort_by(|left, right| {
             same_shell_order(left, right)
-                .then_with(|| left.0.ship.group_order().cmp(&right.0.ship.group_order()))
+                .then_with(|| left.0.ship.rank().cmp(&right.0.ship.rank()))
                 .then_with(|| left.0.ship.name.cmp(&right.0.ship.name))
         });
         let middle = ranked.len() / 2;
@@ -1013,9 +1013,7 @@ impl GameData {
             include_replicas: false,
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
-        ships.sort_by(|left, right| {
-            left.group_order().cmp(&right.group_order()).then_with(|| left.name.cmp(&right.name))
-        });
+        ships.sort_by(|left, right| left.rank().cmp(&right.rank()).then_with(|| left.name.cmp(&right.name)));
 
         let fingerprints = parallel_map(&ships, |ship| {
             self.stock_meshes(ship).map(|meshes| meshes.as_deref().map(ArmorFingerprint::from_meshes))

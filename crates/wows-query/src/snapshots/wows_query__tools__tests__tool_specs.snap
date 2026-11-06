@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/src/tools.rs
-assertion_line: 383
 expression: specs()
 ---
 - name: find_ships
@@ -11,7 +10,7 @@ expression: specs()
     properties:
       name:
         type: string
-        description: "Ship name or part of it, e.g. \"moines\". A name that names one ship exactly, by an alias such as \"DM\", by its initials or by a former name lists that ship first. A leading tier, as in \"T10 Fuyutsuki\", lists only ships of that tier. Omit to list by the other filters."
+        description: "Ship name or part of it, e.g. \"moines\". A name that names one ship exactly, by an alias such as \"DM\", by its initials or by a former name lists that ship first, followed by the ships sharing its name that the other filters admit. A leading tier, as in \"T10 Fuyutsuki\", lists only ships of that tier. A qualifier such as \"old Essex\", \"[Zao]\", \"clan\", \"test\" or \"co-op\" lists that variant first. Omit to list by the other filters."
       min_tier:
         type: integer
         description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
@@ -36,7 +35,7 @@ expression: specs()
         description: "Nation as GameParams spells it, e.g. \"USA\", \"Germany\", \"Japan\", \"Russia\", \"United_Kingdom\"."
       include_event_variants:
         type: boolean
-        description: "Include event, clan-battle and retired variants. Defaults to false."
+        description: "Include ships players do not own: old versions, clan and event rentals, co-op bot copies, event battle ships, removed and unavailable copies. Defaults to false. They are listed after owned and test ships."
       exclude_test_ships:
         type: boolean
         description: "Leave out ships in closed testing. Defaults to false: they are listed with status \"test\". A test copy of a released ship is listed only with event variants."
@@ -51,7 +50,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
       modules:
         type: array
         items:
@@ -108,7 +107,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
 - name: ship_aircraft
@@ -133,7 +132,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
 - name: ship_concealment
@@ -144,7 +143,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
 - name: penetration_search
@@ -366,7 +365,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
 - name: special_ability_search
@@ -541,7 +540,7 @@ expression: specs()
         description: "Nation as GameParams spells it, e.g. \"USA\"."
       include_event_variants:
         type: boolean
-        description: "Include event, clan-battle and retired variants. Defaults to false."
+        description: "Include ships players do not own: old versions, clan and event rentals, co-op bot copies, event battle ships, removed and unavailable copies. Defaults to false."
       exclude_test_ships:
         type: boolean
         description: "Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is searched only with event variants."
@@ -610,7 +609,7 @@ expression: specs()
     properties:
       ship:
         type: string
-        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
 - name: ship_consumables

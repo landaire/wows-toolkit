@@ -9,7 +9,7 @@ considered:
   total: 124
   by_class:
     battleship: 124
-  test: 22
+  test: 12
 considered_by_nation:
   Commonwealth: 1
   Europe: 6
@@ -28,7 +28,7 @@ qualifying:
   total: 42
   by_class:
     battleship: 42
-  test: 6
+  test: 3
 qualifying_by_nation:
   Europe: 1
   France: 10
@@ -43,25 +43,23 @@ share_pct: 33.9
 share_pct_by_class:
   battleship: 33.9
 ships:
-  - "T10 A. Vespucci (battleship, Italy, test): 25 mm deck sloped 70.4 deg behind a 375 mm belt"
   - "T10 Bourgogne (battleship, France): 50 mm deck sloped 38.4 deg behind a 350 mm belt"
   - "T10 Bungo (battleship, Japan): 102 mm deck sloped 39.9 deg behind a 343 mm belt"
+  - "T10 C. Colombo (battleship, Italy): 25 mm deck sloped 70.4 deg behind a 375 mm belt"
   - "T10 G. Kurfürst (battleship, Germany): 150 mm deck sloped 60.3 deg behind a 380 mm belt"
   - "T10 Incomparable (battleship, United_Kingdom): 51 mm deck sloped 40.4 deg behind a 279 mm belt"
-  - "T10 Jiuhua (battleship, Pan_Asia, test): 120 mm deck sloped 67.5 deg behind a 300 mm belt"
   - "T10 Mecklenburg (battleship, Germany): 110 mm deck sloped 64.2 deg behind a 350 mm belt"
   - "T10 Preussen (battleship, Germany): 150 mm deck sloped 60.3 deg behind a 380 mm belt"
   - "T10 République (battleship, France): 70 mm deck sloped 34.6 deg behind a 400 mm belt"
   - "T10 Sicilia (battleship, Italy): 25 mm deck sloped 70.4 deg behind a 375 mm belt"
   - "T10 St. Vincent (battleship, United_Kingdom): 32 mm deck sloped 39.3 deg behind a 356 mm belt"
-  - "T10 Tōgasa (battleship, Japan, test): 38 mm deck sloped 31.6 deg behind a 292 mm belt"
   - "T9 Adatara (battleship, Japan): 89 mm deck sloped 39.9 deg behind a 305 mm belt"
   - "T9 Alsace (battleship, France): 50 mm deck sloped 38.4 deg behind a 350 mm belt"
   - "T9 Daisen (battleship, Japan): 76 mm deck sloped 52.9 deg behind a 305 mm belt"
-  - "T9 Dark Corsair (battleship, France, test): 50 mm deck sloped 36.5 deg behind a 330 mm belt"
   - "T9 F. der Grosse (battleship, Germany): 120 mm deck sloped 67.2 deg behind a 300 mm belt"
   - "T9 Friedrich Carl (battleship, Germany): 50 mm deck sloped 35.8 deg behind a 330 mm belt"
   - "T9 Giuseppe Verdi (battleship, Italy): 25 mm deck sloped 67.8 deg behind a 320 mm belt"
+  - "T9 Jean Bart (battleship, France): 50 mm deck sloped 36.5 deg behind a 330 mm belt"
   - "T9 Karl XIV Johan (battleship, Europe): 50 mm deck sloped 58.8 deg behind a 330 mm belt"
   - "T9 Lepanto (battleship, Italy): 25 mm deck sloped 70.9 deg behind a 350 mm belt"
   - "T9 Marco Polo (battleship, Italy): 25 mm deck sloped 67.8 deg behind a 320 mm belt"
@@ -73,16 +71,18 @@ ships:
   - "T8 Atlântico (battleship, Pan_America): 51 mm deck sloped 58.6 deg behind a 356 mm belt"
   - "T8 Bismarck (battleship, Germany): 110 mm deck sloped 66.2 deg behind a 320 mm belt"
   - "T8 Bismarck '41 (battleship, Germany): 110 mm deck sloped 66.2 deg behind a 320 mm belt"
+  - "T8 Brandenburg (battleship, Germany): 110 mm deck sloped 66.1 deg behind a 350 mm belt"
   - "T8 Champagne (battleship, France): 30 mm deck sloped 35.8 deg behind a 240 mm belt"
   - "T8 Flandre (battleship, France): 50 mm deck sloped 38.4 deg behind a 350 mm belt"
   - "T8 Gascogne (battleship, France): 50 mm deck sloped 35.8 deg behind a 320 mm belt"
   - "T8 Ignis Purgatio (battleship, Japan): 95 mm deck sloped 30.7 deg behind a 254 mm belt"
   - "T8 Kii (battleship, Japan): 38 mm deck sloped 31.6 deg behind a 292 mm belt"
   - "T8 Odin (battleship, Germany): 105 mm deck sloped 63.3 deg behind a 320 mm belt"
-  - "T8 Odin TE (battleship, Germany, test): 105 mm deck sloped 63.3 deg behind a 320 mm belt"
   - "T8 Picardie (battleship, France): 70 mm deck sloped 60.8 deg behind a 300 mm belt"
   - "T8 Richelieu (battleship, France): 50 mm deck sloped 35.8 deg behind a 330 mm belt"
-  - "T8 Sea Howl (battleship, Germany, test): 110 mm deck sloped 66.1 deg behind a 350 mm belt"
+  - "T8 Tirpitz (battleship, Germany): 110 mm deck sloped 65.9 deg behind a 315 mm belt"
+  - "T8 Yumihari (battleship, Japan): 102 mm deck sloped 39.9 deg behind a 229 mm belt"
+  - "T10 Jiuhua (battleship, Pan_Asia, test): 120 mm deck sloped 67.5 deg behind a 300 mm belt"
 omitted: 2
 copies: 13
 rule: "A turtleback is an armored deck sloped 25 to 75 deg from vertical behind a near-vertical belt at least 1.5 times as thick, crossed by most horizontal rays meeting the citadel within 2 m of the waterline, with the deck's foot no higher than 1 m above the waterline. Read from the stock hull's armor model."

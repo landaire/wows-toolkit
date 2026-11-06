@@ -4,6 +4,12 @@ assertion_line: 178
 expression: stats
 ---
 interpretations:
+  - input: Schlieffen
+    resolved: Schlieffen
+    kind: ship
+    method: variant
+    alternatives:
+      - "Schlieffen (co-op bot copy): T10 battleship, PGSB920"
   - input: IFHE
     resolved: Inertia Fuse for HE Shells
     kind: skill
@@ -15,6 +21,7 @@ ship:
   class: battleship
   nation: Germany
   group: upgradeable
+  category: tech_tree
   status: released
   replicas:
     - Von Zuckerhoff

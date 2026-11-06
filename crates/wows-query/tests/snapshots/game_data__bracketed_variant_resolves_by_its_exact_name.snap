@@ -10,7 +10,8 @@ copy:
     class: battleship
     nation: United_Kingdom
     group: clan
+    category: clan_rental
     status: released
 variants_of_conqueror:
-  - "[Conqueror]"
   - Conqueror CLR
+  - "[Conqueror]"

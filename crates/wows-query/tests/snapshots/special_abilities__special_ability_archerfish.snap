@@ -9,6 +9,7 @@ ship:
   class: submarine
   nation: USA
   group: ultimate
+  category: premium
   status: released
 abilities:
   - kind: combat_instructions

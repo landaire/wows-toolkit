@@ -58,6 +58,7 @@ use crate::shells::Battery;
 use crate::shells::RicochetAngles;
 use crate::shells::ricochet_angles;
 use crate::shells::shell_ammo;
+use crate::ship_variants::listing_order;
 use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -160,7 +161,7 @@ pub struct StatSearchArgs {
     /// Nation as GameParams spells it, e.g. "USA".
     pub nation: Option<String>,
 
-    /// Include event, clan-battle and retired variants. Defaults to false.
+    /// Include ships players do not own: old versions, clan and event rentals, co-op bot copies, event battle ships, removed and unavailable copies. Defaults to false.
     pub include_event_variants: Option<bool>,
 
     /// Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is searched only with event variants.
@@ -230,7 +231,7 @@ pub struct StatSearchOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking: Option<Ranking>,
 
-    /// Without rank: fewest requirements first, then highest tier.
+    /// Without rank: fewest requirements first, then owned ships before test ships and variants, highest tier first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ships: Option<Vec<StatSearchHit>>,
 
@@ -822,7 +823,7 @@ impl GameData {
             include_replicas: args.include_replicas.unwrap_or(false),
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
-        ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        ships.sort_by(|left, right| listing_order(left, right));
         let considered = ShipCounts::from_ships(ships.iter().copied());
 
         let mut undetermined = Vec::new();
@@ -872,8 +873,8 @@ impl GameData {
         })
     }
 
-    /// Ships that meet every condition, fewest requirements first, then
-    /// highest tier.
+    /// Ships that meet every condition, fewest requirements first, then in
+    /// [`listing_order`].
     fn condition_search<'s>(
         &'s self,
         ships: &[&'s Ship],
@@ -924,15 +925,14 @@ impl GameData {
             left.requires
                 .len()
                 .cmp(&right.requires.len())
-                .then_with(|| right_ship.tier.cmp(&left_ship.tier))
-                .then_with(|| left_ship.name.cmp(&right_ship.name))
+                .then_with(|| listing_order(left_ship, right_ship))
         });
 
         ConditionSearch { hits, searched_without_skills, unmatched_qualifiers }
     }
 
     /// `candidates` in rank order, each on its best-fit build for the rank
-    /// stat, then highest tier first.
+    /// stat, then in [`listing_order`].
     fn rank_ships(
         &self,
         candidates: Vec<(&Ship, Option<ConditionMatch>)>,
@@ -960,7 +960,7 @@ impl GameData {
                 RankOrder::Asc => left_value.total_cmp(&right_value),
                 RankOrder::Desc => right_value.total_cmp(&left_value),
             };
-            order.then_with(|| right.ship.tier.cmp(&left.ship.tier)).then_with(|| left.ship.name.cmp(&right.ship.name))
+            order.then_with(|| listing_order(left.ship, right.ship))
         });
 
         let limit = rank.limit.0;

@@ -128,7 +128,7 @@ pub struct UpgradeArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpgradeOutput {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -181,7 +181,7 @@ pub struct UpgradeClassEffects {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipUpgrades {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 

@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
-assertion_line: 86
 expression: stats
 ---
 ship:
@@ -10,6 +9,7 @@ ship:
   class: battleship
   nation: Pan_America
   group: upgradeable
+  category: tech_tree
   status: released
 special_ability:
   - "Combat Instructions: Modified Secondary Munitions"

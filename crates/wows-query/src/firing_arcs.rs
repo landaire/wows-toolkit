@@ -335,7 +335,7 @@ pub struct FireTarget {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ShipFiringArcs {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 

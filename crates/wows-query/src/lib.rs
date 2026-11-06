@@ -33,6 +33,7 @@ pub mod rates;
 pub mod replay;
 pub mod replay_worker;
 pub mod shells;
+pub mod ship_variants;
 pub mod ships;
 pub mod skills;
 pub mod special_abilities;

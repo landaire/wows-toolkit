@@ -9,6 +9,7 @@ ship:
   class: battleship
   nation: Pan_America
   group: upgradeable
+  category: tech_tree
   status: released
 abilities:
   - kind: combat_instructions

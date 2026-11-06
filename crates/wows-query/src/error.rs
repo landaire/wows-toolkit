@@ -71,6 +71,9 @@ pub enum QueryError {
     #[error("{query:?} names {ship}, which is tier {}, not tier {}", actual.0, tier.0)]
     TierMismatch { query: String, ship: String, tier: Tier, actual: Tier },
 
+    #[error("{query:?} names {ship}, which has no {variant}; leave out the qualifier or name the ship by its index")]
+    NoShipVariant { query: String, ship: String, variant: &'static str },
+
     #[error("{ship} has no armor zone or plate named {zone:?}; zones: {}", zones.join(", "))]
     ZoneNotFound { ship: String, zone: String, zones: Vec<&'static str> },
 

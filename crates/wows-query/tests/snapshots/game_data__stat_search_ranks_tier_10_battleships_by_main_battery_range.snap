@@ -63,14 +63,14 @@ ranking:
       build:
         - Gun Fire Control System Modification 2
     - rank: 9
-      ship: "T10 Utah (battleship, USA, test)"
+      ship: "T10 Vermont (battleship, USA)"
       value: 28.42 km
       base: 24.5 km
       build:
         - Artillery Plotting Room Modification 1
       tied: true
     - rank: 9
-      ship: "T10 Vermont (battleship, USA)"
+      ship: "T10 Utah (battleship, USA, test)"
       value: 28.42 km
       base: 24.5 km
       build:

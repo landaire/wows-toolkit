@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 235
 expression: "json!({\n    \"resolved\": resolved, \"tier_11_cruisers\":\n    names(json!({ \"min_tier\": \"supership\", \"class\": \"CA\" })),\n    \"find_super_colombo\": names(json!({ \"name\": \"Super Colombo\" })),\n    \"find_super_colombo_up_to_tier_10\":\n    names(json!({ \"name\": \"Super Colombo\", \"max_tier\": 10 })),\n})"
 ---
 resolved:

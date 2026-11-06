@@ -9,6 +9,7 @@ ship:
   class: cruiser
   nation: France
   group: special
+  category: premium
   status: released
   replicas:
     - BA Utnapishtim...

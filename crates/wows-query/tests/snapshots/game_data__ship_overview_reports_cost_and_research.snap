@@ -9,6 +9,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: upgradeable
+    category: tech_tree
     status: released
   purchase_credits: 19800000
   research_xp: 237500
@@ -64,6 +65,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: superShip
+    category: tech_tree
     status: released
   purchase_credits: 47500000
   acquisition_note: "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships."
@@ -116,6 +118,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: ultimate
+    category: premium
     status: released
   acquisition_note: "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price."
   upgrade_slots: 6

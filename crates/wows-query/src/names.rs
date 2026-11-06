@@ -30,7 +30,8 @@ pub enum NameKind {
     Consumable,
 }
 
-/// How a name that is not an exact English name was resolved.
+/// How a name was read when it is not an exact English name, or when several
+/// ships share it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ResolutionMethod {
@@ -52,9 +53,15 @@ pub enum ResolutionMethod {
     /// "Super <ship>": the tier 11 ship researched from a tier 10 ship, e.g.
     /// "Super Colombo".
     Supership,
+
+    /// One of several ships sharing a name, the one players most likely mean
+    /// or the one a qualifier such as "old", "clan", "test" or a tier asks
+    /// for, e.g. "old Essex" for "Essex (old)".
+    Variant,
 }
 
-/// One name read as something it does not spell exactly.
+/// One name read as something it does not spell exactly, or as one of
+/// several ships that share it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interpretation {
     /// The name as given.
@@ -65,6 +72,12 @@ pub struct Interpretation {
 
     pub kind: NameKind,
     pub method: ResolutionMethod,
+
+    /// Other ships the name may mean, in the order of
+    /// [`crate::ship_variants::ShipCategory`], e.g. "Schlieffen (co-op bot
+    /// copy): T10 battleship, PGSB920". Name one by its index to use it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<String>,
 }
 
 /// The interpretations made while answering one query, in the order made.
@@ -95,7 +108,13 @@ impl Interpretations {
 
     pub(crate) fn note(&mut self, input: &str, resolved: &Resolved<'_>, kind: NameKind) {
         if let Some(method) = resolved.method {
-            self.push(Interpretation { input: input.to_owned(), resolved: resolved.name.to_owned(), kind, method });
+            self.push(Interpretation {
+                input: input.to_owned(),
+                resolved: resolved.name.to_owned(),
+                kind,
+                method,
+                alternatives: Vec::new(),
+            });
         }
     }
 }

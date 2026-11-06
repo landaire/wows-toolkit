@@ -9,6 +9,7 @@ ship:
   class: cruiser
   nation: Russia
   group: experimental
+  category: experimental
   status: released
 abilities:
   - kind: alternative_fire_mode

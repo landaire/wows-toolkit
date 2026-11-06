@@ -518,6 +518,81 @@ fn tier_prefixes_must_match_the_ship() {
     assert!(found("T9 Fuyutsuki").is_empty());
 }
 
+/// Names several ships share read as the ship players own; qualifiers, tiers
+/// and indexes pick the others, which the interpretation lists.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn shared_names_rank_the_owned_ship_first() {
+    let resolved: Vec<serde_json::Value> = [
+        "Schlieffen",
+        "Schlieffen co-op",
+        "PGSB920",
+        "Essex",
+        "Essex (old)",
+        "old Essex",
+        "T9 Essex",
+        "Zao",
+        "[Zao]",
+        "clan Zao",
+        "Vrijheid",
+        "test Vrijheid",
+        "Kitakami",
+        "old Kitakami",
+        "BA Montana",
+        "Satsuma +",
+        "Test Sub 1",
+        "test sub",
+        "old Montana",
+        "T8 old Baltimore",
+    ]
+    .into_iter()
+    .map(|query| match game().ship_summary(query) {
+        Ok(resolved) => json!({
+            "query": query,
+            "ship": format!("T{} {} ({}, {:?})", resolved.ship.tier.0, resolved.ship.name, resolved.ship.index, resolved.ship.category),
+            "interpretations": resolved.interpretations,
+        }),
+        Err(error) => json!({ "query": query, "error": error.to_string() }),
+    })
+    .collect();
+
+    insta::assert_yaml_snapshot!(resolved);
+}
+
+/// find_ships lists the named ship, then the ships sharing its name that the
+/// filters admit.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn find_ships_lists_variants_after_the_named_ship() {
+    let found = |name: &str, include_event_variants: bool| -> Vec<String> {
+        let found = game().find_ships(&wows_query::ships::FindShipsArgs {
+            name: Some(name.to_owned()),
+            include_event_variants: Some(include_event_variants),
+            ..Default::default()
+        });
+        found
+            .ships
+            .into_iter()
+            .map(|found| {
+                format!(
+                    "{name} {include_event_variants}: T{} {} ({}, {:?}, {:?})",
+                    found.ship.tier.0,
+                    found.ship.name,
+                    found.ship.index,
+                    found.ship.category,
+                    found.name_match
+                )
+            })
+            .collect()
+    };
+    let listed: Vec<String> = [("Essex", false), ("Essex", true), ("old Essex", false), ("Zao", true), ("[Zao]", false)]
+        .into_iter()
+        .flat_map(|(name, include)| found(name, include))
+        .collect();
+
+    insta::assert_yaml_snapshot!(listed);
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn full_names_resolve_to_abbreviated_ships() {

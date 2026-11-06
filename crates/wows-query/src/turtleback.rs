@@ -14,6 +14,7 @@ use crate::armor_assessment::side_geometry;
 use crate::citadel::Turtleback;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::ship_variants::listing_order;
 use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -54,7 +55,8 @@ pub struct TurtlebackSearchOutput {
     pub shares: Shares,
 
     /// "T9 F. der Grosse (battleship, Germany): 120 mm deck sloped 67.2 deg
-    /// behind a 300 mm belt", highest tier first.
+    /// behind a 300 mm belt", owned ships first, then test ships, each
+    /// highest tier first.
     pub ships: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,9 +104,7 @@ impl GameData {
         // Of ships sharing one armor model, the first by group (tech tree
         // first) and name stands for them.
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
-        ships.sort_by(|left, right| {
-            left.group_order().cmp(&right.group_order()).then_with(|| left.name.cmp(&right.name))
-        });
+        ships.sort_by(|left, right| left.rank().cmp(&right.rank()).then_with(|| left.name.cmp(&right.name)));
         let findings = parallel_map(&ships, |ship| self.citadel_finding(ship));
 
         let mut seen: HashSet<ArmorFingerprint> = HashSet::new();
@@ -126,7 +126,7 @@ impl GameData {
                 }
             }
         }
-        qualifying.sort_by(|left, right| right.0.tier.cmp(&left.0.tier).then_with(|| left.0.name.cmp(&right.0.name)));
+        qualifying.sort_by(|left, right| listing_order(left.0, right.0));
 
         let considered_counts = ShipCounts::from_ships(considered.iter().copied());
         let qualifying_counts = ShipCounts::from_ships(qualifying.iter().map(|(ship, _)| *ship));

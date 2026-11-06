@@ -9,6 +9,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  category: tech_tree
   status: released
 shells:
   - label: main battery 203 mm HE

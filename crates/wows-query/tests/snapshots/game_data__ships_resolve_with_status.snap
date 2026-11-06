@@ -9,6 +9,7 @@ ship:
   class: battleship
   nation: Netherlands
   group: demoWithoutStats
+  category: test
   status: test
   status_note: "test ship, values from the current client may change before release"
 purchase_credits: 21000000

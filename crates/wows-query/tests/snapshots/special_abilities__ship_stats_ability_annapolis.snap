@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
-assertion_line: 86
 expression: stats
 ---
 ship:
@@ -10,6 +9,7 @@ ship:
   class: cruiser
   nation: USA
   group: superShip
+  category: tech_tree
   status: released
 special_ability:
   - Burst Fire

@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 291
 expression: arcs
 ---
 ship:
@@ -10,6 +9,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  category: tech_tree
   status: released
 notes:
   - "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie."

@@ -14,6 +14,7 @@ ship:
   class: cruiser
   nation: Russia
   group: ultimate
+  category: premium
   status: released
 slots:
   - slot: 3

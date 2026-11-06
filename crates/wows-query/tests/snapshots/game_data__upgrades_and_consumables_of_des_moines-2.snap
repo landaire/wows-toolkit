@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 161
 expression: consumables
 ---
 interpretations:
@@ -15,6 +14,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  category: tech_tree
   status: released
 skills:
   - name: Superintendent

@@ -9,6 +9,7 @@ ship:
   class: cruiser
   nation: USA
   group: superShip
+  category: tech_tree
   status: released
 abilities:
   - kind: alternative_fire_mode

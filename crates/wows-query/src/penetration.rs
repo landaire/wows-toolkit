@@ -13,6 +13,7 @@ use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
+use crate::ship_variants::listing_order;
 use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -112,7 +113,7 @@ pub enum TierSource {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PenetrationSearchOutput {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -209,7 +210,7 @@ impl GameData {
         let mut considered: BTreeMap<DefeatMethod, Vec<&Ship>> = BTreeMap::new();
         let mut hits: BTreeMap<DefeatMethod, Vec<(&Ship, Shell)>> = BTreeMap::new();
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
-        ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        ships.sort_by(|left, right| listing_order(left, right));
         for ship in ships {
             let shells: Vec<Shell> =
                 self.shells(ship).into_iter().filter(|shell| battery.includes(shell.battery)).collect();

@@ -88,7 +88,7 @@ ranking:
         values:
           - "artillery.reload_time: 5.28 s"
     - rank: 5
-      ship: "T10 Fearmaw (cruiser, United_Kingdom, test)"
+      ship: "T10 Plymouth (cruiser, United_Kingdom)"
       value: 9.19 km
       base: 11.35 km
       build:
@@ -106,5 +106,5 @@ ranking:
         values:
           - "artillery.reload_time: 5.72 s"
   tied_beyond_limit:
-    - "T10 Plymouth (cruiser, United_Kingdom)"
+    - "T10 Fearmaw (cruiser, United_Kingdom, test)"
   omitted: 17

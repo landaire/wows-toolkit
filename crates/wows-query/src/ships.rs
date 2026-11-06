@@ -21,11 +21,14 @@ use crate::error::QueryError;
 use crate::firing_arcs::round_to;
 use crate::names::Interpretation;
 use crate::names::Interpretations;
-use crate::names::Lookup;
 use crate::names::NameIndex;
 use crate::names::NameKind;
 use crate::names::ResolutionMethod;
 use crate::names::search_key;
+use crate::ship_variants::ShipCategory;
+use crate::ship_variants::ShipRank;
+use crate::ship_variants::family_key;
+use crate::ship_variants::listing_order;
 use crate::text::clean;
 
 const FIND_SHIPS_LIMIT: usize = 40;
@@ -47,21 +50,6 @@ pub(crate) const SHIP_ALIASES: &[(&str, &str)] = &[
     ("Francesco Ferruccio", "F. Ferruccio"),
     ("Forrest Sherman", "F. Sherman"),
     ("Prinz Eitel Friedrich", "P. E. Friedrich"),
-];
-
-/// Groups of ships players can own. Event, clan-battle, test and retired
-/// variants share display names with these and are listed only on request.
-const REGULAR_GROUPS: &[&str] = &[
-    "start",
-    "upgradeable",
-    "upgradeableExclusive",
-    "upgradeableUltimate",
-    "premium",
-    "special",
-    "specialUnsellable",
-    "ultimate",
-    "earlyAccess",
-    "superShip",
 ];
 
 /// A ship tier, 1 to 11. Arguments also accept "supership" for tier 11.
@@ -223,6 +211,10 @@ pub(crate) struct Ship {
     pub(crate) search_key: String,
     pub(crate) class: ShipClass,
     pub(crate) tier: Tier,
+    pub(crate) category: ShipCategory,
+
+    /// Search key the ship shares with its variants; see [`family_key`].
+    pub(crate) family_key: String,
 
     /// A released ship has the same name: this is a test copy of it, listed
     /// only with event variants.
@@ -244,6 +236,8 @@ impl Ship {
         Some(Self {
             param: Rc::clone(param),
             search_key: search_key(&name),
+            family_key: family_key(&name),
+            category: ShipCategory::classify(vehicle, param.nation(), &name),
             name,
             class,
             tier: Tier(vehicle.level()),
@@ -262,6 +256,8 @@ impl Ship {
             search_key: self.search_key.clone(),
             class: self.class,
             tier: self.tier,
+            category: self.category,
+            family_key: self.family_key.clone(),
             copies_released: self.copies_released,
             replica_of: self.replica_of.clone(),
             replicas: self.replicas.clone(),
@@ -315,19 +311,17 @@ impl Ship {
         self.param.vehicle().map_or("", |vehicle| vehicle.group())
     }
 
-    /// Position of the ship's group among the groups players can own, tech
-    /// tree groups first; `None` for other groups.
-    pub(crate) fn group_order(&self) -> Option<usize> {
-        REGULAR_GROUPS.iter().position(|group| *group == self.group())
+    /// Where the ship stands among ships sharing its name.
+    pub(crate) fn rank(&self) -> ShipRank {
+        ShipRank::new(self.category, self.is_replica())
     }
 
     pub(crate) fn is_regular(&self) -> bool {
-        REGULAR_GROUPS.contains(&self.group())
+        self.category.is_owned()
     }
 
     pub(crate) fn status(&self) -> ShipStatus {
-        let test = self.group() == TEST_GROUP || self.param.vehicle().is_some_and(|vehicle| vehicle.is_test_ship());
-        if test { ShipStatus::Test } else { ShipStatus::Released }
+        if self.category == ShipCategory::Test { ShipStatus::Test } else { ShipStatus::Released }
     }
 
     pub(crate) fn summary(&self) -> ShipSummary {
@@ -339,6 +333,7 @@ impl Ship {
             class: self.class,
             nation: self.param.nation().to_owned(),
             group: self.group().to_owned(),
+            category: self.category,
             status,
             status_note: (status == ShipStatus::Test).then_some(TEST_SHIP_NOTE),
             replica_of: self.replica_of.clone(),
@@ -352,6 +347,17 @@ impl Ship {
         let test = if self.status() == ShipStatus::Test { ", test" } else { "" };
         let replica = self.replica_of.as_ref().map(|of| format!(", replica of {}", of.ship)).unwrap_or_default();
         format!("T{} {} ({}, {}{test}{replica})", self.tier.0, self.name, self.class.label(), self.param.nation())
+    }
+
+    /// "Schlieffen (co-op bot copy): T10 battleship, PGSB920", naming one of
+    /// the ships that share a name.
+    pub(crate) fn variant_label(&self) -> String {
+        let category = match &self.replica_of {
+            Some(of) => format!("{}, replica of {}", self.category.label(), of.ship),
+            None => self.category.label().to_owned(),
+        };
+
+        format!("{} ({category}): T{} {}, {}", self.name, self.tier.0, self.class.label(), self.param.index())
     }
 
     /// [`Self::label`] followed by the replicas that lists leave out, e.g.
@@ -411,9 +417,6 @@ impl ReplicaOf {
     }
 }
 
-/// GameParams group of ships in closed testing.
-const TEST_GROUP: &str = "demoWithoutStats";
-
 const TEST_SHIP_NOTE: &str = "test ship, values from the current client may change before release";
 
 /// Whether a ship is released or in closed testing.
@@ -441,6 +444,12 @@ pub struct ShipSummary {
     /// "ultimate", "superShip", "start"; event and retired variants use others.
     pub group: String,
 
+    /// What the ship is to a player. A name several ships share reads as the
+    /// first category: "tech_tree", "premium", "test", "experimental", "old",
+    /// "clan_rental", "event_rental", "coop_bot", "event_battle", "removed",
+    /// "unavailable", "unclassified".
+    pub category: ShipCategory,
+
     pub status: ShipStatus,
 
     /// Present for test ships.
@@ -460,7 +469,7 @@ pub struct ShipSummary {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindShipsArgs {
-    /// Ship name or part of it, e.g. "moines". A name that names one ship exactly, by an alias such as "DM", by its initials or by a former name lists that ship first. A leading tier, as in "T10 Fuyutsuki", lists only ships of that tier. Omit to list by the other filters.
+    /// Ship name or part of it, e.g. "moines". A name that names one ship exactly, by an alias such as "DM", by its initials or by a former name lists that ship first, followed by the ships sharing its name that the other filters admit. A leading tier, as in "T10 Fuyutsuki", lists only ships of that tier. A qualifier such as "old Essex", "[Zao]", "clan", "test" or "co-op" lists that variant first. Omit to list by the other filters.
     pub name: Option<String>,
 
     pub min_tier: Option<Tier>,
@@ -470,7 +479,7 @@ pub struct FindShipsArgs {
     /// Nation as GameParams spells it, e.g. "USA", "Germany", "Japan", "Russia", "United_Kingdom".
     pub nation: Option<String>,
 
-    /// Include event, clan-battle and retired variants. Defaults to false.
+    /// Include ships players do not own: old versions, clan and event rentals, co-op bot copies, event battle ships, removed and unavailable copies. Defaults to false. They are listed after owned and test ships.
     pub include_event_variants: Option<bool>,
 
     /// Leave out ships in closed testing. Defaults to false: they are listed with status "test". A test copy of a released ship is listed only with event variants.
@@ -482,7 +491,7 @@ pub struct FindShipsArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FindShipsOutput {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -514,6 +523,9 @@ pub struct FoundShip {
 pub enum NameMatch {
     /// The name names this ship, as single-ship tools read it.
     Named,
+    /// The ship shares the name of the named ship: an old version, a rental,
+    /// a test or bot copy.
+    Variant,
     /// The ship's name contains the name.
     Partial,
 }
@@ -522,7 +534,7 @@ pub enum NameMatch {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShipArgs {
-    /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020".
+    /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020". A name several ships share reads as the tech tree or premium ship; a qualifier, as in "old Essex", "[Zao]", "clan Zao", "test Vrijheid" or "Schlieffen co-op", or a leading tier, as in "T9 Essex", picks another.
     pub ship: String,
 }
 
@@ -530,7 +542,7 @@ pub struct ShipArgs {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShipOverviewArgs {
-    /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020".
+    /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020". A name several ships share reads as the tech tree or premium ship; a qualifier, as in "old Essex", "[Zao]", "clan Zao", "test Vrijheid" or "Schlieffen co-op", or a leading tier, as in "T9 Essex", picks another.
     pub ship: String,
 
     /// Modules whose armament to report instead of stock, e.g. ["Hull B"]. Omit for stock.
@@ -540,7 +552,7 @@ pub struct ShipOverviewArgs {
 /// A ship resolved from a player-written name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedShip {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -550,7 +562,7 @@ pub struct ResolvedShip {
 /// Price, research position, availability and armament of one ship.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipOverview {
-    /// Names read as something they do not spell exactly.
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
     #[serde(skip_serializing_if = "Interpretations::is_empty")]
     pub interpretations: Interpretations,
 
@@ -688,12 +700,8 @@ impl GameData {
         // A name single-ship tools resolve without guessing leads the list,
         // so "DM" lists Des Moines before Dm. Donskoi.
         let mut interpretations = Interpretations::default();
-        // A replica named exactly is listed even when replicas are left out.
         let named = match name {
-            Some(name) => {
-                let named_filter = ShipFilter { include_replicas: true, ..filter.clone() };
-                self.named_ships(name, &named_filter, &mut interpretations)
-            }
+            Some(name) => self.named_ships(name, name_tier, &filter, &mut interpretations),
             None => Vec::new(),
         };
 
@@ -707,14 +715,14 @@ impl GameData {
                 })
             })
             .filter(|ship| filter.matches(ship))
-            .filter(|ship| !named.iter().any(|named| named.param.id() == ship.param.id()))
+            .filter(|ship| !named.iter().any(|(named, _)| named.param.id() == ship.param.id()))
             .collect();
-        partial.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        partial.sort_by(|left, right| listing_order(left, right));
 
         let partial_match = needle.as_ref().map(|_| NameMatch::Partial);
         let ships: Vec<(&Ship, Option<NameMatch>)> = named
             .iter()
-            .map(|ship| (*ship, Some(NameMatch::Named)))
+            .map(|(ship, name_match)| (*ship, Some(*name_match)))
             .chain(partial.iter().map(|ship| (*ship, partial_match)))
             .collect();
 
@@ -739,7 +747,7 @@ impl GameData {
     /// and name.
     pub fn replicas(&self) -> Vec<ShipSummary> {
         let mut replicas: Vec<&Ship> = self.ships.iter().filter(|ship| ship.is_replica()).collect();
-        replicas.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        replicas.sort_by(|left, right| listing_order(left, right));
 
         replicas.into_iter().map(Ship::summary).collect()
     }
@@ -786,15 +794,15 @@ impl GameData {
 
         let is_replica_of_ship =
             |other: &Ship| other.replica_of.as_ref().is_some_and(|of| of.index == ship.param.index());
-        let variants = self
+        let mut variants: Vec<&Ship> = self
             .ships
             .iter()
             .filter(|other| {
-                (other.search_key == ship.search_key || is_replica_of_ship(other))
-                    && other.param.id() != ship.param.id()
+                (other.family_key == ship.family_key || is_replica_of_ship(other)) && other.param.id() != ship.param.id()
             })
-            .map(Ship::summary)
             .collect();
+        variants.sort_by_key(|other| other.rank());
+        let variants = variants.into_iter().map(Ship::summary).collect();
 
         Ok(ShipOverview {
             interpretations,
@@ -814,48 +822,42 @@ impl GameData {
         })
     }
 
-    /// The ship `query` names. A ship name shared by event or retired copies
-    /// resolves to the regular variant. "Super <ship>" names the tier 11 ship
-    /// a tier 10 ship leads to. A leading tier, as in "T10 Fuyutsuki" or
-    /// "Tier 9 ZH-1", must be the ship's.
+    /// The ship `query` names. A name several ships share reads as the one
+    /// [`GameData::choose_ship`] ranks first, and `interpretations` lists the
+    /// others. "Super <ship>" names the tier 11 ship a tier 10 ship leads to.
+    /// A leading tier, as in "T10 Fuyutsuki" or "Tier 9 ZH-1", must be the
+    /// ship's.
     pub(crate) fn resolve_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
-        let Some((tier, name)) = tier_prefix(query) else {
-            return self.resolve_untiered_ship(query, interpretations);
+        let (tier, name) = match tier_prefix(query) {
+            Some((tier, name)) => (Some(tier), name),
+            None => (None, query),
         };
 
-        let ship = self.resolve_untiered_ship(name, interpretations)?;
-        if ship.tier != tier {
-            return Err(QueryError::TierMismatch {
-                query: query.to_owned(),
-                ship: ship.name.clone(),
-                tier,
-                actual: ship.tier,
-            });
-        }
-
-        Ok(ship)
-    }
-
-    fn resolve_untiered_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
-        if let Some(supership) = self.resolve_supership(query, interpretations) {
-            return supership;
-        }
-
-        self.resolve_named_ship(query, interpretations)
-    }
-
-    fn resolve_named_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
-        match self.ship_names.lookup(query) {
-            Lookup::Found(resolved, targets) => {
-                let ships: Vec<&Ship> = targets.iter().map(|index| &self.ships[*index]).collect();
-                let ship = preferred(&ships)
-                    .ok_or_else(|| QueryError::ShipNotFound { query: query.to_owned(), suggestions: Vec::new() })?;
-                interpretations.note(query, &resolved, NameKind::Ship);
-                Ok(ship)
+        if let Some(supership) = self.resolve_supership(name, interpretations) {
+            let ship = supership?;
+            if let Some(tier) = tier
+                && ship.tier != tier
+            {
+                return Err(QueryError::TierMismatch {
+                    query: query.to_owned(),
+                    ship: ship.name.clone(),
+                    tier,
+                    actual: ship.tier,
+                });
             }
-            Lookup::Ambiguous(candidates) => Err(QueryError::AmbiguousShip { query: query.to_owned(), candidates }),
-            Lookup::NotFound(suggestions) => Err(QueryError::ShipNotFound { query: query.to_owned(), suggestions }),
+
+            return Ok(ship);
         }
+
+        let choice = self.choose_ship(name, tier).map_err(|error| match error {
+            QueryError::TierMismatch { ship, tier, actual, .. } => {
+                QueryError::TierMismatch { query: query.to_owned(), ship, tier, actual }
+            }
+            other => other,
+        })?;
+        choice.note(query, interpretations);
+
+        Ok(choice.ship())
     }
 
     /// The tier 11 research successor of the tier 10 ship a "super <ship>"
@@ -867,32 +869,32 @@ impl GameData {
         interpretations: &mut Interpretations,
     ) -> Option<Result<&Ship, QueryError>> {
         let base_query = supership_base(query)?;
-        let mut base_interpretations = Interpretations::default();
-        let base = match self.resolve_named_ship(base_query, &mut base_interpretations) {
+        let base = match self.choose_ship(base_query, None) {
             Ok(base) => base,
             Err(error @ QueryError::AmbiguousShip { .. }) => return Some(Err(error)),
             Err(_) => return None,
         };
-        if base.tier != Tier(10) {
+        if base.ship().tier != Tier(10) {
             return None;
         }
 
-        let next = base.param.vehicle().map(|vehicle| vehicle.research().next_ships()).unwrap_or_default();
-        let successors: Vec<&Ship> = self
+        let next = base.ship().param.vehicle().map(|vehicle| vehicle.research().next_ships()).unwrap_or_default();
+        let Some(successor) = self
             .ships
             .iter()
             .filter(|ship| ship.tier == Tier(11) && next.iter().any(|name| name == ship.param.name()))
-            .collect();
-        let Some(successor) = preferred(&successors) else {
-            return Some(Err(QueryError::NoSupership { query: query.to_owned(), ship: base.name.clone() }));
+            .min_by_key(|ship| ship.rank())
+        else {
+            return Some(Err(QueryError::NoSupership { query: query.to_owned(), ship: base.ship().name.clone() }));
         };
 
-        interpretations.append(base_interpretations);
+        base.note_reading(base_query, interpretations);
         interpretations.push(Interpretation {
             input: query.to_owned(),
             resolved: successor.name.clone(),
             kind: NameKind::Ship,
             method: ResolutionMethod::Supership,
+            alternatives: Vec::new(),
         });
 
         Some(Ok(successor))
@@ -900,31 +902,41 @@ impl GameData {
 
     /// The ships `name` names as the single-ship tools read it, without
     /// partial names or misspellings except in the ship a "super <ship>" name
-    /// leads from, that pass `filter`.
-    fn named_ships(&self, name: &str, filter: &ShipFilter, interpretations: &mut Interpretations) -> Vec<&Ship> {
+    /// leads from: that ship, then the ships sharing its name that pass
+    /// `filter`. The named ship passes as a replica or variant, since the name
+    /// asks for it.
+    fn named_ships(
+        &self,
+        name: &str,
+        tier: Option<Tier>,
+        filter: &ShipFilter,
+        interpretations: &mut Interpretations,
+    ) -> Vec<(&Ship, NameMatch)> {
+        let named_filter = ShipFilter { include_irregular: true, include_replicas: true, ..filter.clone() };
+
         let mut supership_interpretations = Interpretations::default();
         if let Some(Ok(ship)) = self.resolve_supership(name, &mut supership_interpretations) {
-            if !filter.matches(ship) {
+            if !named_filter.matches(ship) {
                 return Vec::new();
             }
 
             interpretations.append(supership_interpretations);
-            return vec![ship];
+            return vec![(ship, NameMatch::Named)];
         }
 
-        match self.ship_names.lookup(name) {
-            Lookup::Found(resolved, targets)
-                if !matches!(resolved.method, Some(ResolutionMethod::Partial | ResolutionMethod::Fuzzy)) =>
-            {
-                let named: Vec<&Ship> =
-                    targets.iter().map(|index| &self.ships[*index]).filter(|ship| filter.matches(ship)).collect();
-                if !named.is_empty() {
-                    interpretations.note(name, &resolved, NameKind::Ship);
-                }
-                named
-            }
-            _ => Vec::new(),
+        let Ok(choice) = self.choose_ship(name, tier) else {
+            return Vec::new();
+        };
+        if !choice.is_exact() || !named_filter.matches(choice.ship()) {
+            return Vec::new();
         }
+
+        choice.note(name, interpretations);
+        let variants = choice.alternatives().iter().filter(|ship| filter.matches(ship));
+
+        std::iter::once((choice.ship(), NameMatch::Named))
+            .chain(variants.map(|ship| (*ship, NameMatch::Variant)))
+            .collect()
     }
 
     /// English name of a ship param, or the param name when it has none.
@@ -972,17 +984,6 @@ fn tier_prefix(query: &str) -> Option<(Tier, &str)> {
     let name = name.trim();
 
     ((1..=11).contains(&tier) && !name.is_empty()).then_some((Tier(tier), name))
-}
-
-/// The regular variant when one exists, preferring an original to a
-/// replica sharing its name, else the first.
-fn preferred<'a>(ships: &[&'a Ship]) -> Option<&'a Ship> {
-    ships
-        .iter()
-        .find(|ship| ship.is_regular() && !ship.is_replica())
-        .or_else(|| ships.iter().find(|ship| ship.is_regular()))
-        .or_else(|| ships.first())
-        .copied()
 }
 
 /// Groups of ships obtained in ways the price and research fields do not
