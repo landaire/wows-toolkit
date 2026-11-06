@@ -219,7 +219,7 @@ impl GpuPipeline {
         let vertex_state = wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[Vertex::LAYOUT],
+            buffers: &[Some(Vertex::LAYOUT)],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         };
 
@@ -1340,7 +1340,9 @@ impl Viewport3D {
         slice.map_async(wgpu::MapMode::Read, |_| {});
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
 
-        let mapped = slice.get_mapped_range();
+        let Ok(mapped) = slice.get_mapped_range() else {
+            return None;
+        };
         let mut rgba = vec![0u8; (unpadded_bpr * size.1) as usize];
         for row in 0..size.1 as usize {
             let src = row * padded_bpr as usize;

@@ -91,6 +91,7 @@ impl GpuContext {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: None,
+                apply_limit_buckets: false,
             }))
             .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?,
         };
@@ -227,7 +228,7 @@ mod tests {
         assert_eq!(swapped[3], rgba[3]);
     }
 
-    /// The risk gate: an owned wgpu-29 device renders a green cube offscreen, the
+    /// The risk gate: an owned wgpu device renders a green cube offscreen, the
     /// pixels read back, and the center pixel is the mesh color (not the clear
     /// color), with an sRGB-plausible value.
     ///

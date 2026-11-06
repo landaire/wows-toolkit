@@ -944,7 +944,7 @@ impl WebApp {
             let menu_pos = self.annotation_state.context_menu_pos;
             let mut menu_did_undo = false;
             let mut menu_did_clear = false;
-            let menu_resp = egui::Area::new(ui.id().with("web_paint_menu"))
+            let menu_resp = egui::Area::new(ui.scope_id().with("web_paint_menu"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(menu_pos)
                 .interactable(true)
@@ -1131,6 +1131,10 @@ impl TabViewer for WebTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         tab.title(&self.app.session).into()
+    }
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::unique(self.title(tab).text())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {

@@ -212,7 +212,9 @@ fn main() -> eframe::Result<()> {
         apply_render_config(&render_config, setup);
     }
 
-    let native_options = eframe::NativeOptions { viewport, wgpu_options, ..Default::default() };
+    // The app installs its own fallback fonts, so eframe's system font provider stays off.
+    let native_options =
+        eframe::NativeOptions { viewport, wgpu_options, system_font_fallback: false, ..Default::default() };
     let result = eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,

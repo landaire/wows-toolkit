@@ -17,7 +17,7 @@ wows_minimap_renderer = { workspace = true, features = ["rkyv"] }
 web-time = { workspace = true }
 
 # Optional: egui conversion helpers
-egui = { version = "0.35", optional = true }
+egui = { version = "0.37", optional = true }
 
 [dev-dependencies]
 rand = "0.10"

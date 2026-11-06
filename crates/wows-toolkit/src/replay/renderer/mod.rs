@@ -590,7 +590,7 @@ pub use wt_collab_client::PlaybackFrame;
 /// egui memory. `check_encoder()` enumerates Vulkan devices and is too
 /// expensive to call every frame from the settings popover.
 fn cached_encoder_status(ctx: &egui::Context) -> Arc<wows_minimap_renderer::encoder::EncoderStatus> {
-    let id = egui::Id::new("wt::encoder_status");
+    let id = egui::Id::unique("wt::encoder_status");
     if let Some(cached) = ctx.data(|d| d.get_temp::<Arc<wows_minimap_renderer::encoder::EncoderStatus>>(id)) {
         return cached;
     }
@@ -1852,7 +1852,7 @@ impl ReplayRendererViewer {
                         let debug_mode = state.is_debug_mode;
 
                         for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
-                            let id = egui::Id::new(("roster_consumable_hover", idx));
+                            let id = egui::Id::unique(("roster_consumable_hover", idx));
                             let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
                             let tex = textures.icons.consumable_icons.get(&region.consumable.icon_key);
                             hover_resp.on_hover_ui(|ui| {
@@ -1867,7 +1867,7 @@ impl ReplayRendererViewer {
                             if !debug_mode && !teams_with_replays.contains(&region.team_id) {
                                 continue;
                             }
-                            let id = egui::Id::new(("roster_player_build", region.entity_id));
+                            let id = egui::Id::unique(("roster_player_build", region.entity_id));
                             let resp = ui.interact(region.rect, id, egui::Sense::click());
                             let snapshot = build_snapshots[idx].clone();
                             egui::Popup::from_toggle_button_response(&resp)
@@ -1950,7 +1950,7 @@ impl ReplayRendererViewer {
                                 let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
                                 let resp = ui.interact(
                                     label_rect,
-                                    egui::Id::new("advantage_tooltip"),
+                                    egui::Id::unique("advantage_tooltip"),
                                     egui::Sense::hover(),
                                 );
                                 resp.on_hover_ui(|ui| {
@@ -2131,7 +2131,7 @@ impl ReplayRendererViewer {
                         handle_tool_shortcuts(&ctx, &mut ann);
 
                         // Show shortcut overlay while Ctrl is held
-                        draw_shortcut_overlay(&ctx, egui::Id::new("replay_shortcut_overlay"));
+                        draw_shortcut_overlay(&ctx, egui::Id::unique("replay_shortcut_overlay"));
 
                         // Escape key: cancel tool or deselect
                         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -2315,7 +2315,7 @@ impl ReplayRendererViewer {
                         let show_menu = annotation_arc.lock().show_context_menu;
                         if show_menu {
                             let menu_pos = annotation_arc.lock().context_menu_pos;
-                            let menu_resp = egui::Area::new(ui.id().with("paint_context_menu"))
+                            let menu_resp = egui::Area::new(ui.scope_id().with("paint_context_menu"))
                                 .order(egui::Order::Foreground)
                                 .fixed_pos(menu_pos)
                                 .interactable(true)
@@ -2546,7 +2546,7 @@ impl ReplayRendererViewer {
                             let map_space = shared_state.lock().map_space_size;
                             draw_annotation_edit_popup(
                                 &ctx,
-                                ui.id().with("annotation_edit_popup"),
+                                ui.scope_id().with("annotation_edit_popup"),
                                 &annotation_arc,
                                 sel_idx,
                                 bounds,
@@ -2572,7 +2572,7 @@ impl ReplayRendererViewer {
                             None
                         };
 
-                        egui::Area::new(ui.id().with("video_export_progress"))
+                        egui::Area::new(ui.scope_id().with("video_export_progress"))
                             .order(egui::Order::Foreground)
                             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
                             .interactable(false)
@@ -2612,7 +2612,7 @@ impl ReplayRendererViewer {
 
                     // Compute overlay opacity
                     let elapsed = now - overlay_state_arc.lock().last_activity;
-                    let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.id().with("controls_overlay")));
+                    let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.scope_id().with("controls_overlay")));
                     let hover_pos = ctx.input(|i| i.pointer.hover_pos());
                     let overlay_hovered = overlay_rect.is_some_and(|r| hover_pos.is_some_and(|p| r.contains(p)));
                     let opacity = if overlay_hovered || any_popup_open || elapsed < 2.0 {
@@ -2633,7 +2633,7 @@ impl ReplayRendererViewer {
                         let bg_alpha = (180.0 * opacity) as u8;
                         let text_alpha = (255.0 * opacity) as u8;
 
-                        egui::Area::new(ui.id().with("controls_overlay"))
+                        egui::Area::new(ui.scope_id().with("controls_overlay"))
                             .order(egui::Order::Foreground)
                             .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
                             .interactable(true)
@@ -2660,7 +2660,7 @@ impl ReplayRendererViewer {
                                     let row_style = taffy::Style {
                                         display: taffy::Display::Flex,
                                         flex_direction: taffy::FlexDirection::Row,
-                                        align_items: Some(taffy::AlignItems::Center),
+                                        align_items: taffy::AlignItems::CENTER,
                                         gap: length(4.0_f32),
                                         size: taffy::Size { width: taffy::prelude::percent(1.0_f32), height: auto() },
                                         ..Default::default()
@@ -2676,7 +2676,7 @@ impl ReplayRendererViewer {
                                     let mut settings_btn_opt: Option<egui::Response> = None;
                                     let mut timeline_btn_opt: Option<egui::Response> = None;
 
-                                    egui_taffy::tui(ui, ui.id().with("overlay_tui"))
+                                    egui_taffy::tui(ui, ui.scope_id().with("overlay_tui"))
                                         .reserve_available_width()
                                         .style(row_style)
                                         .show(|tui| {
@@ -3217,7 +3217,7 @@ impl ReplayRendererViewer {
 
                                             let mut filter = ui.ctx().data_mut(|d| {
                                                 d.get_temp_mut_or_default::<TimelineFilter>(
-                                                    egui::Id::new("renderer_timeline_filter"),
+                                                    egui::Id::unique("renderer_timeline_filter"),
                                                 )
                                                 .clone()
                                             });
@@ -3251,7 +3251,7 @@ impl ReplayRendererViewer {
 
                                             timeline_filter_bar(ui, &mut filter);
                                             ui.ctx().data_mut(|d| {
-                                                d.insert_temp(egui::Id::new("renderer_timeline_filter"), filter.clone());
+                                                d.insert_temp(egui::Id::unique("renderer_timeline_filter"), filter.clone());
                                             });
                                             ui.separator();
 

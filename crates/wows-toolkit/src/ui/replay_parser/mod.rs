@@ -262,12 +262,12 @@ fn show_leaf_context_menu(ui: &mut egui::Ui, path: &std::path::PathBuf, wows_dir
             if alt_held {
                 ui.ctx().data_mut(|data| {
                     // App-wide: opens the single reference window regardless of workspace.
-                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                    data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
                 });
             } else {
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
-                        egui::Id::new("pending_confirmation_request"),
+                        egui::Id::unique("pending_confirmation_request"),
                         Some(crate::tab_state::ConfirmableAction::OpenInGame { replay_path: path.clone() }),
                     );
                 });
@@ -297,7 +297,7 @@ fn show_leaf_context_menu(ui: &mut egui::Ui, path: &std::path::PathBuf, wows_dir
     if ui.button(t!("ui.replay.context.set_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(
-                egui::Id::new("pending_confirmation_request"),
+                egui::Id::unique("pending_confirmation_request"),
                 Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: vec![path.clone()] }),
             );
         });
@@ -306,7 +306,7 @@ fn show_leaf_context_menu(ui: &mut egui::Ui, path: &std::path::PathBuf, wows_dir
     if ui.button(t!("ui.replay.context.add_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
             // App-wide: feeds the one global session-stats total, not a per-workspace one.
-            data.insert_temp(egui::Id::new("add_to_session_stats_request"), vec![path.clone()]);
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), vec![path.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -357,7 +357,7 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], ws_i
     if ui.button(session_label).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(
-                egui::Id::new("pending_confirmation_request"),
+                egui::Id::unique("pending_confirmation_request"),
                 Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: paths.to_vec() }),
             );
         });
@@ -371,7 +371,7 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], ws_i
     if ui.button(add_label).clicked() {
         ui.ctx().data_mut(|data| {
             // App-wide: feeds the one global session-stats total, not a per-workspace one.
-            data.insert_temp(egui::Id::new("add_to_session_stats_request"), paths.to_vec());
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), paths.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -430,7 +430,7 @@ fn show_multi_selection_context_menu(
     if ui.button(set_label).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(
-                egui::Id::new("pending_confirmation_request"),
+                egui::Id::unique("pending_confirmation_request"),
                 Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: selected_paths.clone() }),
             );
         });
@@ -444,7 +444,7 @@ fn show_multi_selection_context_menu(
     if ui.button(add_label).clicked() {
         ui.ctx().data_mut(|data| {
             // App-wide: feeds the one global session-stats total, not a per-workspace one.
-            data.insert_temp(egui::Id::new("add_to_session_stats_request"), selected_paths);
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), selected_paths);
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -1564,7 +1564,7 @@ impl UiReport {
                 // Two rows per ship: the name and its rate on one, the counts
                 // indented beneath. One line carrying all four would set the
                 // width of the name column, which clips rather than wraps.
-                egui::Grid::new(ui.id().with("fire_chance_per_ship"))
+                egui::Grid::new(ui.scope_id().with("fire_chance_per_ship"))
                     .num_columns(3)
                     .spacing([12.0, 2.0])
                     .striped(true)
@@ -1670,7 +1670,7 @@ impl UiReport {
 
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
         let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
-        let expandedness = ui.ctx().animate_bool(Id::new(("replay_row", self.report_salt, row_nr)), is_expanded);
+        let expandedness = ui.ctx().animate_bool(Id::unique(("replay_row", self.report_salt, row_nr)), is_expanded);
 
         let Some(report) = self.player_reports.get(row_nr as usize) else {
             return;
@@ -2760,7 +2760,7 @@ impl egui_table::TableDelegate for UiReport {
             .range(0..row_nr)
             .map(|(expanded_row_nr, expanded)| {
                 let how_expanded =
-                    ctx.animate_bool(Id::new(("replay_row", self.report_salt, *expanded_row_nr)), *expanded);
+                    ctx.animate_bool(Id::unique(("replay_row", self.report_salt, *expanded_row_nr)), *expanded);
                 how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
             })
             .sum::<f32>()
@@ -3310,7 +3310,7 @@ impl ToolkitTabViewer<'_> {
 
                     if ui.button(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline"))).clicked() {
                         ui.ctx().data_mut(|data| {
-                            data.insert_temp(egui::Id::new("show_timeline"), true);
+                            data.insert_temp(egui::Id::unique("show_timeline"), true);
                         });
                         ui.close_kind(UiKind::Menu);
                     }
@@ -3327,7 +3327,7 @@ impl ToolkitTabViewer<'_> {
                         {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(
-                                    egui::Id::new("pending_confirmation_request"),
+                                    egui::Id::unique("pending_confirmation_request"),
                                     Some(crate::tab_state::ConfirmableAction::OpenInGame {
                                         replay_path: replay_file.source_path.clone().unwrap(),
                                     }),
@@ -3344,7 +3344,7 @@ impl ToolkitTabViewer<'_> {
                         {
                             ui.ctx().data_mut(|data| {
                                 // App-wide: opens the single reference window regardless of workspace.
-                                data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                                data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
                             });
                             ui.close_kind(UiKind::Menu);
                         }
@@ -3523,7 +3523,7 @@ impl ToolkitTabViewer<'_> {
                 {
                     let has_chat = !report.game_chat().is_empty();
                     let show_chat: bool =
-                        ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+                        ui.ctx().data(|d| d.get_temp(egui::Id::unique("show_game_chat"))).unwrap_or(false);
                     let response = ui.add_enabled(
                         has_chat,
                         egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat")))
@@ -3533,7 +3533,7 @@ impl ToolkitTabViewer<'_> {
                         response.on_disabled_hover_text(t!("ui.replay.no_chat"));
                     } else if response.clicked() {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(egui::Id::new("show_game_chat"), !show_chat);
+                            d.insert_temp(egui::Id::unique("show_game_chat"), !show_chat);
                         });
                     }
                 }
@@ -4994,7 +4994,7 @@ impl ToolkitTabViewer<'_> {
                 self.build_replay_header(ui);
 
                 {
-                    let panel_id = workspace_salt(ws_id, "replay_listing_panel");
+                    let panel_salt = workspace_salt(ws_id, "replay_listing_panel");
                     let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
                     // `show_collapsible` tracks the expanded state, and flips it itself when the
                     // user drags or double-clicks the resize edge.
@@ -5057,13 +5057,15 @@ impl ToolkitTabViewer<'_> {
                             workspace.replay_listing_auto_sized = true;
                         }
 
-                        // Clear stored panel state so default_width takes effect
+                        // Clear stored panel state so default_width takes effect. The panel
+                        // keys its state under the parent's scope, as `make_persistent_id` does.
+                        let panel_id = ui.make_persistent_id(panel_salt);
                         ui.ctx().data_mut(|d| {
                             d.remove::<egui::containers::panel::PanelState>(panel_id);
                         });
                     }
 
-                    egui::Panel::left(panel_id)
+                    egui::Panel::left(panel_salt)
                         .default_size(default_width)
                         .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
                         // Left margin is zero so labels sit flush; the right margin keeps them
@@ -5108,7 +5110,8 @@ impl ToolkitTabViewer<'_> {
                             let mut rect = ui.max_rect();
                             rect.min.x += ui.style().interaction.resize_grab_radius_side;
 
-                            let response = ui.interact(rect, ui.id().with("listing_rail_toggle"), egui::Sense::click());
+                            let response =
+                                ui.interact(rect, ui.scope_id().with("listing_rail_toggle"), egui::Sense::click());
                             if response.hovered() {
                                 ui.painter().rect_filled(
                                     rect,
@@ -5289,7 +5292,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn show_game_chat_window(&self, ctx: &egui::Context) {
-        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::unique("show_game_chat"))).unwrap_or(false);
         if !open {
             return;
         }
@@ -5374,7 +5377,7 @@ impl ToolkitTabViewer<'_> {
 
         // Write back the open state (user may have closed the window via X)
         ctx.data_mut(|d| {
-            d.insert_temp(egui::Id::new("show_game_chat"), open);
+            d.insert_temp(egui::Id::unique("show_game_chat"), open);
         });
     }
 
@@ -5435,7 +5438,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn show_timeline_window(&self, ctx: &egui::Context) {
-        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::new("show_timeline"))).unwrap_or(false);
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::unique("show_timeline"))).unwrap_or(false);
         if !open {
             return;
         }
@@ -5446,7 +5449,7 @@ impl ToolkitTabViewer<'_> {
 
         self.start_timeline_extraction_if_needed(&replay_arc);
 
-        let filter_id = egui::Id::new("timeline_window_filter");
+        let filter_id = egui::Id::unique("timeline_window_filter");
         let mut filter = ctx.data_mut(|d| d.get_temp_mut_or_default::<TimelineFilter>(filter_id).clone());
         let mut retry_requested = false;
 
@@ -5544,7 +5547,7 @@ impl ToolkitTabViewer<'_> {
 
         ctx.data_mut(|d| {
             d.insert_temp(filter_id, filter);
-            d.insert_temp(egui::Id::new("show_timeline"), open);
+            d.insert_temp(egui::Id::unique("show_timeline"), open);
         });
     }
 
@@ -5758,7 +5761,8 @@ impl ToolkitTabViewer<'_> {
     /// Pick up the temp data flag set from context menu closures.
     fn pick_up_replay_controls_request(&mut self, ctx: &egui::Context) {
         // App-wide: opens the single reference window regardless of workspace.
-        let request: Option<bool> = ctx.data_mut(|data| data.remove_temp(egui::Id::new("open_replay_controls_window")));
+        let request: Option<bool> =
+            ctx.data_mut(|data| data.remove_temp(egui::Id::unique("open_replay_controls_window")));
         if request == Some(true) {
             self.open_replay_controls_window();
         }
@@ -5863,7 +5867,7 @@ fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], loc
 /// column, labels indented by depth. A grid rather than padded text, so the
 /// columns line up in the proportional font the rest of the row uses.
 fn fire_chance_rows_ui(ui: &mut egui::Ui, id: &str, rows: &[TallyRow]) {
-    egui::Grid::new(ui.id().with(id)).num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+    egui::Grid::new(ui.scope_id().with(id)).num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
         for row in rows {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(row.count.to_string());

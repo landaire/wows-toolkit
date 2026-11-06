@@ -155,7 +155,6 @@ fn dark_visuals() -> Visuals {
             preview: false,
             ..Default::default()
         },
-        clip_rect_margin: 3.0,
         button_frame: true,
         collapsing_header_frame: false,
         indent_has_left_vline: true,
@@ -243,7 +242,6 @@ fn light_visuals() -> Visuals {
             preview: false,
             ..Default::default()
         },
-        clip_rect_margin: 3.0,
         button_frame: true,
         collapsing_header_frame: false,
         indent_has_left_vline: true,

@@ -39,8 +39,8 @@ MINIMAP_CPU_DEPS = [
 ]
 
 MINIMAP_DEPS = MINIMAP_CPU_DEPS + os_select(
-    # VideoToolbox on macOS, wgpu-backed GPU encode everywhere else, matching the
-    # cfg-gated dependency sections of Cargo.toml.
+    # VideoToolbox on macOS, Vulkan Video GPU encode everywhere else, matching
+    # the cfg-gated dependency sections of Cargo.toml.
     macos = [
         "//third-party/rust:objc2",
         "//third-party/rust:objc2-core-foundation",
@@ -51,11 +51,9 @@ MINIMAP_DEPS = MINIMAP_CPU_DEPS + os_select(
     ],
     linux = [
         "//third-party/rust:gpu-video",
-        "//third-party/rust:wgpu",
     ],
     windows = [
         "//third-party/rust:gpu-video",
-        "//third-party/rust:wgpu",
     ],
 )
 
@@ -103,7 +101,7 @@ workspace_binary(
 
 # Ships alongside the default binary for hosts with no usable GPU encoder.
 # It needs its own library: the default one is compiled with vulkan, and the
-# feature is what gates the wgpu and gpu-video code paths. Both carry the same
+# feature is what gates the gpu-video code path. Both carry the same
 # crate name, so main.rs resolves `wows_minimap_renderer` either way.
 workspace_library(
     name = "wows_minimap_renderer_cpu",

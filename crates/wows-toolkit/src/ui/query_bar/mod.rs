@@ -394,7 +394,7 @@ impl QueryBar {
     pub fn show(&mut self, ui: &mut Ui, deps: &Deps<'_>) -> QueryBarOutput {
         // The frame's undo baseline, taken before anything can rewrite the tree.
         let mut settled_before = self.settled().clone();
-        let id = ui.id().with("query_bar");
+        let id = ui.scope_id().with("query_bar");
         let caret_id = id.with("caret");
         let focused = ui.memory(|m| m.has_focus(caret_id));
         let escaped = ui.input(|i| i.key_pressed(Key::Escape));
@@ -810,9 +810,12 @@ impl QueryBar {
             .scope_builder(
                 UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 |ui| {
+                    // The theme floors a text edit at `interact_size.y`, taller than one line,
+                    // so the galley is centred in the widget as the widget is in the row.
                     egui::TextEdit::singleline(&mut self.pending)
                         .id(caret_id)
                         .frame(egui::Frame::NONE)
+                        .align(egui::Align2::LEFT_CENTER)
                         .desired_width(width)
                         .hint_text(hint)
                         .show(ui)
@@ -2457,7 +2460,7 @@ mod tests {
         let mut out = None;
         egui::__run_test_ui(|ui| {
             if let Some(f) = once.take() {
-                let caret_id = ui.id().with("query_bar").with("caret");
+                let caret_id = ui.scope_id().with("query_bar").with("caret");
                 out = Some(f(ui, caret_id));
             }
         });
@@ -2931,7 +2934,7 @@ mod tests {
         let mut applied = false;
         egui::__run_test_ui(|ui| {
             if !applied {
-                applied = bar.commit_typed(&rows, ui, ui.id().with("caret"));
+                applied = bar.commit_typed(&rows, ui, ui.scope_id().with("caret"));
             }
         });
         assert!(applied, "Enter must apply something rather than failing silently");
@@ -3180,10 +3183,11 @@ mod tests {
             let bar = &mut self.bar;
             let deps = Deps { history: &[] };
             let mut id = None;
-            let output = self.ctx.run_ui(input, |ui| {
-                id = Some(ui.id().with("query_bar"));
+            let mut output = self.ctx.run_ui(input, |ui| {
+                id = Some(ui.scope_id().with("query_bar"));
                 bar.show(ui, &deps);
             });
+            output.textures_delta.clear();
             self.shapes = output.shapes;
             if let Some(id) = id {
                 self.id = id;

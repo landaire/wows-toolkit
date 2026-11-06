@@ -41,7 +41,7 @@ rendering = [
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wows-core/rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
-vulkan = ["dep:gpu-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
+vulkan = ["dep:gpu-video", "dep:yuvutils-rs", "rendering"]
 videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
 cpu = ["dep:openh264", "rendering"]
 cpu-av1 = ["dep:rav1e", "dep:yuvutils-rs", "rendering"]
@@ -82,8 +82,9 @@ rav1e = { version = "0.8.1", default-features = false, features = ["threading"],
 muxide = { version = "0.2.5", optional = true }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-gpu-video = { version = "0.4.0", default-features = false, features = ["wgpu"], optional = true }
-wgpu = { version = "29", optional = true }
+# The encoder uploads CPU frames, so gpu-video's wgpu interop stays off and its
+# wgpu version does not constrain the workspace's.
+gpu-video = { version = "0.4.0", default-features = false, optional = true }
 
 # VideoToolbox encoder (macOS only)
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -54,11 +54,7 @@ fn open_device() -> Result<(Arc<VulkanInstance>, Arc<VulkanDevice>, String), Vul
     }
     let name = adapter.info().name.clone();
     let device = adapter
-        .create_device(&VulkanDeviceDescriptor {
-            wgpu_features: wgpu::Features::empty(),
-            wgpu_experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            wgpu_limits: wgpu::Limits { max_immediate_size: 128, ..Default::default() },
-        })
+        .create_device(&VulkanDeviceDescriptor::default())
         .map_err(|e| VulkanInitError::Device(format!("{e:?}")))?;
     Ok((instance, device, name))
 }

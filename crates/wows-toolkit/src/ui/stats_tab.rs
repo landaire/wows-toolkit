@@ -19,6 +19,7 @@ use crate::data::wows_data::GameAsset;
 use crate::icons;
 use crate::tab_state::ChartMode;
 use crate::tab_state::ChartableStat;
+use crate::tab_state::PendingScreenshot;
 use crate::tab_state::SessionStatsChartConfig;
 use crate::tab_state::StatsSubTab;
 use crate::tab_state::TabState;
@@ -224,7 +225,7 @@ impl TabViewer for StatsTabViewer<'_> {
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         // The scope keeps two panes' sub-tabs, and every chart plot inside
         // them, from sharing egui state when both are on screen.
-        egui::Id::new(("stats_sub_tab", self.scope, *tab))
+        egui::Id::unique(("stats_sub_tab", self.scope, *tab))
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
@@ -445,7 +446,7 @@ impl ToolkitTabViewer<'_> {
         let mut viewer = StatsTabViewer { tab_state: self.tab_state, scope, chart_tab_count, pending_adds: Vec::new() };
 
         DockArea::new(&mut dock_state)
-            .id(egui::Id::new(("stats_dock", scope)))
+            .id(egui::Id::unique(("stats_dock", scope)))
             .style(egui_dock::Style::from_egui(ui.style().as_ref()))
             .show_add_buttons(true)
             .show_close_buttons(true)
@@ -794,34 +795,23 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
 
     // Handle screenshot capture if one was requested
     tab_state.edit_scoped_chart_config(scope, chart_id, |cfg| {
-        if !cfg.screenshot_requested {
+        let Some(screenshot) = cfg.pending_screenshot.as_ref().and_then(PendingScreenshot::take) else {
             return;
-        }
-        let screenshot = ctx.input(|i| {
-            for event in &i.raw.events {
-                if let egui::Event::Screenshot { image, .. } = event {
-                    return Some(image.clone());
-                }
-            }
-            None
-        });
+        };
+        cfg.pending_screenshot = None;
 
-        if let Some(screenshot) = screenshot {
-            cfg.screenshot_requested = false;
+        if let Some(plot_rect) = cfg.plot_rect {
+            let pixels_per_point = ctx.pixels_per_point();
+            let plot_image = screenshot.region(&plot_rect, Some(pixels_per_point));
 
-            if let Some(plot_rect) = cfg.plot_rect {
-                let pixels_per_point = ctx.pixels_per_point();
-                let plot_image = screenshot.region(&plot_rect, Some(pixels_per_point));
-
-                // Copy to clipboard using arboard
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let image_data = arboard::ImageData {
-                        width: plot_image.width(),
-                        height: plot_image.height(),
-                        bytes: std::borrow::Cow::from(plot_image.as_raw().to_vec()),
-                    };
-                    let _ = clipboard.set_image(image_data);
-                }
+            // Copy to clipboard using arboard
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                let image_data = arboard::ImageData {
+                    width: plot_image.width(),
+                    height: plot_image.height(),
+                    bytes: std::borrow::Cow::from(plot_image.as_raw().to_vec()),
+                };
+                let _ = clipboard.set_image(image_data);
             }
         }
     });
@@ -941,8 +931,8 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
                 .read_scoped_chart_config(scope, chart_id, |cfg| cfg.and_then(|cfg| cfg.plot_rect).is_some())
                 == Some(true);
             if has_plot && ui.button(wt_translations::icon_t(icons::CAMERA, &t!("ui.stats.copy_as_image"))).clicked() {
-                tab_state.edit_scoped_chart_config(scope, chart_id, |cfg| cfg.screenshot_requested = true);
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+                let pending = PendingScreenshot::request(ui.ctx());
+                tab_state.edit_scoped_chart_config(scope, chart_id, |cfg| cfg.pending_screenshot = Some(pending));
             }
         });
     }); // push_id(chart_id)

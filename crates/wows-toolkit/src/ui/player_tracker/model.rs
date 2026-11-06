@@ -56,7 +56,7 @@ where
         .enumerate()
         .filter_map(|(index, key)| {
             let row_nr = index as u64;
-            let factor = ctx.animate_bool(egui::Id::new((salt, row_nr)), expanded.contains(key));
+            let factor = ctx.animate_bool(egui::Id::unique((salt, row_nr)), expanded.contains(key));
             (0.0 < factor).then_some((row_nr, factor))
         })
         .collect()
@@ -111,7 +111,7 @@ impl ExpandingColumn {
             (self.collapsed_width, self.min_width, self.collapsed_id)
         };
 
-        egui_table::Column::new(current).range(min..=self.max_width).id(egui::Id::new(id)).resizable(true)
+        egui_table::Column::new(current).range(min..=self.max_width).id(egui::Id::unique(id)).resizable(true)
     }
 }
 

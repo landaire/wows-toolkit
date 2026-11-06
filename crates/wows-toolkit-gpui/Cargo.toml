@@ -18,10 +18,9 @@ anyhow = "1"
 # ship-class icons as PNG, and that is the only format `icons.rs` decodes.
 image = { version = "0.25", default-features = false, features = ["png"] }
 # The armor viewport owns its own wgpu device (offscreen render + CPU readback
-# into a gpui image), so no wgpu type crosses into GPUI Kit, which resolves its
-# own wgpu 30. This stays on the workspace's wgpu 29: Buck's third-party graph
-# exposes one `wgpu` alias, and the egui app and minimap renderer use 29.
-wgpu = "29"
+# into a gpui image), so no wgpu type crosses into GPUI Kit. Same major as GPUI
+# Kit's and the workspace's, so the build carries one wgpu.
+wgpu = { workspace = true }
 nalgebra = "0.34"
 bytemuck = "1"
 pollster = "0.4"

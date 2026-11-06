@@ -15,7 +15,8 @@ wt-collab-egui = { workspace = true }
 wt-translations = { workspace = true }
 rust-i18n = { workspace = true }
 wows_minimap_renderer = { workspace = true, default-features = false, features = ["rkyv"] }
-egui = { workspace = true }
+# egui 0.37 moved the emoji fonts out of `default_fonts`.
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
 egui-phosphor = { workspace = true }
 egui_dock = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu"] }

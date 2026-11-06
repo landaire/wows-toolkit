@@ -1320,7 +1320,7 @@ impl TacticsBoardViewer {
         handle_tool_shortcuts(ui.ctx(), &mut annotation_state_arc.lock());
 
         // Show shortcut overlay while Ctrl is held
-        draw_shortcut_overlay(ui.ctx(), ui.id().with("tactics_shortcut_overlay"));
+        draw_shortcut_overlay(ui.ctx(), ui.scope_id().with("tactics_shortcut_overlay"));
 
         // Stroke width shortcuts
         {
@@ -1371,7 +1371,7 @@ impl TacticsBoardViewer {
                 let map_space = state.map_info.as_ref().map(|m| m.space_size as f32);
                 draw_annotation_edit_popup(
                     ui.ctx(),
-                    ui.id().with("tactics_annotation_edit_popup"),
+                    ui.scope_id().with("tactics_annotation_edit_popup"),
                     annotation_state_arc,
                     sel_idx,
                     bounds,
@@ -1394,7 +1394,7 @@ impl TacticsBoardViewer {
                 Rect::from_center_size(screen_center, egui::vec2(screen_radius * 2.0, screen_radius * 2.0));
             let popup_pos = Pos2::new(cap_bounds.right() + 8.0, cap_bounds.center().y);
 
-            egui::Area::new(ui.id().with("tactics_cap_edit_popup"))
+            egui::Area::new(ui.scope_id().with("tactics_cap_edit_popup"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(popup_pos)
                 .interactable(true)
@@ -1695,7 +1695,7 @@ impl TacticsBoardViewer {
         }
 
         let menu_pos = annotation_state_arc.lock().context_menu_pos;
-        let menu_resp = egui::Area::new(ui.id().with("tactics_paint_menu"))
+        let menu_resp = egui::Area::new(ui.scope_id().with("tactics_paint_menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(menu_pos)
             .interactable(true)

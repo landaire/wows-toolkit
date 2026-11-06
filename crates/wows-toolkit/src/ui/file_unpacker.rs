@@ -295,10 +295,10 @@ impl TabViewer for UnpackerPaneViewer<'_> {
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         match tab {
             UnpackerPane::Browser(b) => match b.source {
-                BrowserSource::Pkg => egui::Id::new("unpacker_pkg_browser"),
-                BrowserSource::AssetsBin => egui::Id::new("unpacker_assetsbin_browser"),
+                BrowserSource::Pkg => egui::Id::unique("unpacker_pkg_browser"),
+                BrowserSource::AssetsBin => egui::Id::unique("unpacker_assetsbin_browser"),
             },
-            UnpackerPane::Search(s) => egui::Id::new(("unpacker_search_pane", s.id)),
+            UnpackerPane::Search(s) => egui::Id::unique(("unpacker_search_pane", s.id)),
         }
     }
 
@@ -437,7 +437,7 @@ impl UnpackerPaneViewer<'_> {
                         let mut id_to_path: std::collections::HashMap<egui::Id, String> =
                             std::collections::HashMap::new();
 
-                        let root_id = egui::Id::new(("browser_dir", source_id, "/"));
+                        let root_id = egui::Id::unique(("browser_dir", source_id, "/"));
                         id_to_path.insert(root_id, "/".to_string());
 
                         let tree = egui_ltreeview::TreeView::new(tree_id);
@@ -791,7 +791,7 @@ struct ExtractJsonRequest {
 }
 
 fn extract_json_request_id() -> egui::Id {
-    egui::Id::new("unpacker_extract_json_request")
+    egui::Id::unique("unpacker_extract_json_request")
 }
 
 /// Decode a single Assets.bin file and write it as JSON to `path`.
@@ -1202,7 +1202,7 @@ fn render_folder_tree(
     source_id: &str,
 ) {
     for node in nodes {
-        let dir_id = egui::Id::new(("browser_dir", source_id, &node.path));
+        let dir_id = egui::Id::unique(("browser_dir", source_id, &node.path));
         id_to_path.insert(dir_id, node.path.clone());
 
         if node.children.is_empty() {
@@ -1859,7 +1859,7 @@ impl ToolkitTabViewer<'_> {
 
                     // Queue popover
                     if self.tab_state.browser_state.show_queue_popover && queue_count > 0 {
-                        egui::Area::new(egui::Id::new("extract_queue_popover"))
+                        egui::Area::new(egui::Id::unique("extract_queue_popover"))
                             .order(egui::Order::Foreground)
                             .fixed_pos(queue_btn.rect.left_top() - egui::vec2(0.0, 8.0))
                             .pivot(egui::Align2::LEFT_BOTTOM)
@@ -1961,7 +1961,7 @@ impl ToolkitTabViewer<'_> {
             };
 
             DockArea::new(&mut self.tab_state.browser_state.dock_state)
-                .id(egui::Id::new("unpacker_dock"))
+                .id(egui::Id::unique("unpacker_dock"))
                 .style(egui_dock::Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::All)
                 .show_close_buttons(true)

@@ -97,7 +97,7 @@ impl TabViewer for AnalysisPaneViewer<'_> {
     type Tab = AnalysisTab;
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(("analysis_tab", *tab))
+        egui::Id::unique(("analysis_tab", *tab))
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
@@ -171,14 +171,14 @@ pub fn show_analysis_window(
 
     let mut open = state.show_comparison_panel;
     egui::Window::new("Analysis")
-        .id(egui::Id::new("analysis_panel"))
+        .id(egui::Id::unique("analysis_panel"))
         .open(&mut open)
         .collapsible(true)
         .resizable(true)
         .default_width(400.0)
         .show(ctx, |ui| {
             DockArea::new(&mut analysis_dock)
-                .id(egui::Id::new("analysis_dock"))
+                .id(egui::Id::unique("analysis_dock"))
                 .style(egui_dock::Style::from_egui(ui.style().as_ref()))
                 .show_close_buttons(false)
                 .show_leaf_collapse_buttons(false)

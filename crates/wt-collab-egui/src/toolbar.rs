@@ -84,7 +84,7 @@ fn toolbar_group(
     id_salt: impl std::hash::Hash + std::fmt::Debug,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    let id = ui.id().with(id_salt);
+    let id = ui.scope_id().with(id_salt);
     let prev_width = ui.data(|d| d.get_temp::<f32>(id));
     let height = ui.spacing().interact_size.y;
     // Use cached width (with a small margin) so the outer wrapping layout

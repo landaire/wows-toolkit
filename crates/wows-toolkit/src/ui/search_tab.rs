@@ -594,8 +594,8 @@ fn column_at(col_nr: usize) -> Option<ResultColumn> {
 /// index.
 fn column_id(column: Option<ResultColumn>) -> egui::Id {
     match column {
-        Some(column) => egui::Id::new(column_label_key(column)),
-        None => egui::Id::new("search_results.actions"),
+        Some(column) => egui::Id::unique(column_label_key(column)),
+        None => egui::Id::unique("search_results.actions"),
     }
 }
 
@@ -1738,17 +1738,20 @@ mod tests {
             let sort = self.sort;
             let mut cells = Vec::new();
             let mut clicked = None;
-            let _ = self.ctx.run_ui(input, |ui| {
-                ui.horizontal(|ui| {
-                    for column in RESULT_COLUMNS {
-                        let cell = ui.scope(|ui| header_cell(ui, column, sort));
-                        cells.push((column, cell.response.rect));
-                        if let Some(picked) = cell.inner {
-                            clicked = Some(picked);
+            self.ctx
+                .run_ui(input, |ui| {
+                    ui.horizontal(|ui| {
+                        for column in RESULT_COLUMNS {
+                            let cell = ui.scope(|ui| header_cell(ui, column, sort));
+                            cells.push((column, cell.response.rect));
+                            if let Some(picked) = cell.inner {
+                                clicked = Some(picked);
+                            }
                         }
-                    }
-                });
-            });
+                    });
+                })
+                .textures_delta
+                .clear();
             self.cells = cells;
             self.clicked = clicked;
         }
@@ -1802,13 +1805,14 @@ mod tests {
     /// than rebuilt from the same expressions the code under test uses.
     fn painted_header_texts(sort: SortSpec) -> Vec<String> {
         let ctx = egui::Context::default();
-        let output = ctx.run_ui(frame_input(), |ui| {
+        let mut output = ctx.run_ui(frame_input(), |ui| {
             ui.horizontal(|ui| {
                 for column in RESULT_COLUMNS {
                     header_cell(ui, column, sort);
                 }
             });
         });
+        output.textures_delta.clear();
         output
             .shapes
             .iter()
@@ -1951,7 +1955,7 @@ mod tests {
             let no_previews: &dyn Fn(&egui::Ui) -> Option<Arc<preview_popup::PreviewDeps>> = &|_ui| None;
             let mut table_id = None;
             let mut asked = TablePass::default();
-            let output = self.ctx.run_ui(input, |ui| {
+            let mut output = self.ctx.run_ui(input, |ui| {
                 let mut delegate = ResultsTable {
                     hits,
                     ship_names,
@@ -1977,6 +1981,7 @@ mod tests {
                     render_clipboard_path: delegate.render_clipboard_path,
                 };
             });
+            output.textures_delta.clear();
             if let Some(id) = table_id {
                 self.table_id = id;
             }

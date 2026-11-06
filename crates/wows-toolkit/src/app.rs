@@ -269,6 +269,10 @@ impl TabViewer for ToolkitTabViewer<'_> {
         self.tab_title(tab).into()
     }
 
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::unique(self.title(tab).text())
+    }
+
     // Defines the contents of a given `tab`.
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         // egui_dock has no style field for the active tab's marker bar, and this
@@ -3119,7 +3123,7 @@ impl WowsToolkitApp {
             });
 
             if let Some(text) = text {
-                let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("file_drop_target")));
+                let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("file_drop_target")));
 
                 let screen_rect = ctx.content_rect();
                 painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
@@ -3142,13 +3146,13 @@ impl WowsToolkitApp {
         });
 
         if dropped_files.len() == 1
-            && let Some(path) = &dropped_files[0].path
             && let Some(deps) = self.tab_state.replay_dependencies()
         {
+            let path = dropped_files[0].path().to_path_buf();
             self.tab_state.persisted.write().settings.game.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                deps.parse_replay_from_path(path.clone(), crate::task::ReplaySource::ManualOpen)
+                deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
             );
         }
     }
@@ -3241,7 +3245,7 @@ impl WowsToolkitApp {
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
         if let Some(replays) =
-            ctx.data_mut(|data| data.remove_temp::<Vec<PathBuf>>(egui::Id::new("add_to_session_stats_request")))
+            ctx.data_mut(|data| data.remove_temp::<Vec<PathBuf>>(egui::Id::unique("add_to_session_stats_request")))
         {
             self.tab_state.clear_before_session_reset = false;
             self.tab_state.replays_for_session_reset = Some(replays);
@@ -4078,7 +4082,7 @@ impl WowsToolkitApp {
     fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
         if self.tab_state.pending_confirmation.is_none() {
             let request: Option<Option<crate::tab_state::ConfirmableAction>> =
-                ctx.data_mut(|data| data.remove_temp(egui::Id::new("pending_confirmation_request")));
+                ctx.data_mut(|data| data.remove_temp(egui::Id::unique("pending_confirmation_request")));
             if let Some(Some(action)) = request {
                 self.tab_state.pending_confirmation = Some(action);
             }
@@ -4140,7 +4144,7 @@ impl WowsToolkitApp {
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {
-                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                    data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
                 });
             }
             #[cfg(not(feature = "launcher"))]
@@ -4153,7 +4157,7 @@ impl WowsToolkitApp {
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {
-                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                    data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
                 });
             }
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
@@ -5821,14 +5825,16 @@ mod download_prompt_tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
                 ..Default::default()
             };
-            let _ = ctx.run_ui(input, |root| {
+            ctx.run_ui(input, |root| {
                 let ctx = root.ctx().clone();
                 let size = DownloadDialogSize::for_screen(ctx.content_rect().size());
                 let shown = download_prompt_window().show(&ctx, |ui| draw_download_prompt(ui, &mut prompt, size));
                 if let Some(response) = shown {
                     rect = response.response.rect;
                 }
-            });
+            })
+            .textures_delta
+            .clear();
         }
         rect
     }

@@ -13,7 +13,7 @@ sevenz-rust2 = { version = "0.21", default-features = false, features = ["compre
 tar = "0.4"
 # Dev-dependencies of workspace crates. Reindeer generates rules only for
 # normal dependencies, so the Buck test targets reach these through here.
-egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
+egui_kittest = { version = "0.37.0", features = ["snapshot", "wgpu"] }
 filetime = "0.2"
 insta = { workspace = true }
 # gpui's test-support dependencies. The gpui-pre fixup adds the features only

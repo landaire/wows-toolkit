@@ -244,7 +244,7 @@ pub fn render_line_chart(
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        let mut plot = Plot::new(egui::Id::new(("line_chart", chart_id)))
+        let mut plot = Plot::new(egui::Id::unique(("line_chart", chart_id)))
             .legend(Legend::default())
             .x_axis_label(t!("chart.game_number"))
             .y_axis_label(y_label)
@@ -343,7 +343,7 @@ pub fn render_bar_chart(
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        let mut plot = Plot::new(egui::Id::new(("bar_chart", chart_id)))
+        let mut plot = Plot::new(egui::Id::unique(("bar_chart", chart_id)))
             .legend(Legend::default())
             .y_axis_label(y_label)
             .show_axes([false, true])

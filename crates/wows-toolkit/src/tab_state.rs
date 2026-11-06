@@ -352,15 +352,39 @@ pub struct SessionStatsChartConfig {
     pub combined: bool,
     /// Whether to show value labels on data points
     pub show_labels: bool,
-    /// Whether a screenshot has been requested (waiting for the event)
+    /// The requested screenshot, filled by the viewport's screenshot callback.
     #[serde(skip)]
-    pub screenshot_requested: bool,
+    pub pending_screenshot: Option<PendingScreenshot>,
     /// The plot rectangle from the last frame (used to crop the screenshot)
     #[serde(skip)]
     pub plot_rect: Option<egui::Rect>,
     /// Whether the plot should be reset (e.g. after stat/mode change)
     #[serde(skip)]
     pub reset_plot: bool,
+}
+
+/// A screenshot requested with `ViewportCommand::Screenshot`. The integration
+/// completes the request from its paint path, outside the UI pass.
+#[derive(Clone, Default)]
+pub struct PendingScreenshot(Arc<Mutex<Option<Arc<egui::ColorImage>>>>);
+
+impl PendingScreenshot {
+    /// Sends the screenshot request for the current viewport.
+    pub fn request(ctx: &egui::Context) -> Self {
+        let pending = Self::default();
+        let slot = Arc::clone(&pending.0);
+        let repaint_ctx = ctx.clone();
+        ctx.request_screenshot(move |image| {
+            *slot.lock() = Some(image);
+            repaint_ctx.request_repaint();
+        });
+        pending
+    }
+
+    /// Takes the screenshot once it has arrived.
+    pub fn take(&self) -> Option<Arc<egui::ColorImage>> {
+        self.0.lock().take()
+    }
 }
 
 /// Default stats dock: Overview on the left, Charts(0) on the right, 50/50 split.
@@ -859,7 +883,7 @@ impl TabState {
     /// and that would go stale once the tab stops drawing (see the arming
     /// check in app.rs).
     pub(crate) fn wows_dir_field_id() -> egui::Id {
-        egui::Id::new("settings.wows_dir_field")
+        egui::Id::unique("settings.wows_dir_field")
     }
 
     /// Notify the background save task that state has changed and should be
@@ -2497,16 +2521,18 @@ mod tests {
         let ctx = egui::Context::default();
         let id = TabState::wows_dir_field_id();
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ctx.run_ui(egui::RawInput::default(), |ui| {
             let mut text = String::new();
             let response = ui.add(egui::TextEdit::singleline(&mut text).id(id));
             response.request_focus();
-        });
+        })
+        .textures_delta
+        .clear();
         assert_eq!(ctx.memory(|m| m.focused()), Some(id), "the field must hold focus right after requesting it");
 
         // A later frame in which the Settings tab (and so this field) never draws,
         // e.g. because the user clicked another dock tab.
-        let _ = ctx.run_ui(egui::RawInput::default(), |_ui| {});
+        ctx.run_ui(egui::RawInput::default(), |_ui| {}).textures_delta.clear();
 
         assert_eq!(
             ctx.memory(|m| m.focused()),

@@ -250,7 +250,7 @@ impl ToolkitTabViewer<'_> {
             .then_with(|| a.1.cmp(&b.1))
         });
 
-        let id = egui::Id::new("current_match_debug_replay");
+        let id = egui::Id::unique("current_match_debug_replay");
         let selected: Option<PathBuf> = ui.data(|d| d.get_temp(id));
         let label = selected
             .as_ref()
@@ -477,7 +477,7 @@ fn render_team(
                 let response = egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(ROW_EDGE_PADDING_X, ROW_EDGE_PADDING_Y))
                     .show(ui, |ui| {
-                        egui_taffy::tui(ui, ui.id().with(index))
+                        egui_taffy::tui(ui, ui.scope_id().with(index))
                             .reserve_width(grid_width)
                             .style(roster_row_style(ctx.view_mode))
                             .show(|tui| {
@@ -533,7 +533,7 @@ fn render_team(
 
 fn render_team_header(ui: &mut egui::Ui, id_salt: &'static str, grid_width: f32, view_mode: CurrentMatchViewMode) {
     egui::Frame::new().inner_margin(egui::Margin::symmetric(ROW_EDGE_PADDING_X, 0)).show(ui, |ui| {
-        egui_taffy::tui(ui, ui.id().with((id_salt, "header")))
+        egui_taffy::tui(ui, ui.scope_id().with((id_salt, "header")))
             .reserve_width(grid_width)
             .style(roster_row_style(view_mode))
             .show(|tui| {
@@ -569,10 +569,10 @@ fn render_team_header(ui: &mut egui::Ui, id_salt: &'static str, grid_width: f32,
 fn roster_row_style(view_mode: CurrentMatchViewMode) -> taffy::Style {
     taffy::Style {
         display: taffy::Display::Grid,
-        align_items: Some(match view_mode {
-            CurrentMatchViewMode::Compact => taffy::AlignItems::Center,
-            CurrentMatchViewMode::Detailed => taffy::AlignItems::Start,
-        }),
+        align_items: match view_mode {
+            CurrentMatchViewMode::Compact => taffy::AlignItems::CENTER,
+            CurrentMatchViewMode::Detailed => taffy::AlignItems::START,
+        },
         gap: length(ROW_COLUMN_GAP),
         size: taffy::Size { width: percent(1.0_f32), height: auto() },
         grid_template_columns: vec![
@@ -923,6 +923,14 @@ mod tests {
 
     use super::*;
 
+    /// Icons are laid out on the harness's first pass, so the font has to be in
+    /// place before it.
+    fn install_phosphor_fonts(ctx: &egui::Context) {
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        ctx.set_fonts(fonts);
+    }
+
     /// Snapshot comparison renders through wgpu, and a headless runner with no
     /// GPU or software Vulkan driver has no adapter to render with. Skipping
     /// only the image comparison keeps the accesskit/layout assertions in
@@ -1212,23 +1220,24 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1240.0, 150.0)).with_options(options).build_ui(|ui| {
-            render_rosters(
-                ui,
-                "Your Team (3)".to_string(),
-                "Enemy Team (3)".to_string(),
-                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
-                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
-                &friendly,
-                &enemy,
-                &ctx,
-                &mut actions,
-            );
-        });
+        let mut harness = Harness::builder()
+            .with_size((1240.0, 150.0))
+            .with_options(options)
+            .with_context_setup(install_phosphor_fonts)
+            .build_ui(|ui| {
+                render_rosters(
+                    ui,
+                    "Your Team (3)".to_string(),
+                    "Enemy Team (3)".to_string(),
+                    Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    &friendly,
+                    &enemy,
+                    &ctx,
+                    &mut actions,
+                );
+            });
         harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        harness.ctx.set_fonts(fonts);
 
         harness.run();
 
@@ -1331,23 +1340,24 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1240.0, 115.0)).with_options(options).build_ui(|ui| {
-            render_rosters(
-                ui,
-                "Your Team (1)".to_string(),
-                "Enemy Team (1)".to_string(),
-                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
-                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
-                &friendly,
-                &enemy,
-                &ctx,
-                &mut actions,
-            );
-        });
+        let mut harness = Harness::builder()
+            .with_size((1240.0, 115.0))
+            .with_options(options)
+            .with_context_setup(install_phosphor_fonts)
+            .build_ui(|ui| {
+                render_rosters(
+                    ui,
+                    "Your Team (1)".to_string(),
+                    "Enemy Team (1)".to_string(),
+                    Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    &friendly,
+                    &enemy,
+                    &ctx,
+                    &mut actions,
+                );
+            });
         harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        harness.ctx.set_fonts(fonts);
 
         harness.run();
 
@@ -1426,23 +1436,24 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1240.0, 115.0)).with_options(options).build_ui(|ui| {
-            render_rosters(
-                ui,
-                "Your Team (1)".to_string(),
-                "Enemy Team (1)".to_string(),
-                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
-                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
-                &friendly,
-                &enemy,
-                &ctx,
-                &mut actions,
-            );
-        });
+        let mut harness = Harness::builder()
+            .with_size((1240.0, 115.0))
+            .with_options(options)
+            .with_context_setup(install_phosphor_fonts)
+            .build_ui(|ui| {
+                render_rosters(
+                    ui,
+                    "Your Team (1)".to_string(),
+                    "Enemy Team (1)".to_string(),
+                    Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    &friendly,
+                    &enemy,
+                    &ctx,
+                    &mut actions,
+                );
+            });
         harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        harness.ctx.set_fonts(fonts);
 
         harness.run();
 
@@ -1490,23 +1501,21 @@ mod tests {
             locale: "en",
         };
         let mut actions = TeamActions::default();
-        let mut harness = Harness::builder().with_size((1180.0, 420.0)).build_ui(|ui| {
-            render_rosters(
-                ui,
-                "Your Team (12)".to_string(),
-                "Enemy Team (12)".to_string(),
-                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
-                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
-                &friendly,
-                &enemy,
-                &ctx,
-                &mut actions,
-            );
-        });
+        let mut harness =
+            Harness::builder().with_size((1180.0, 420.0)).with_context_setup(install_phosphor_fonts).build_ui(|ui| {
+                render_rosters(
+                    ui,
+                    "Your Team (12)".to_string(),
+                    "Enemy Team (12)".to_string(),
+                    Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
+                    &friendly,
+                    &enemy,
+                    &ctx,
+                    &mut actions,
+                );
+            });
         harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        harness.ctx.set_fonts(fonts);
 
         harness.run();
 
@@ -1533,12 +1542,11 @@ mod tests {
     #[test]
     fn fixed_columns_keep_their_requested_width() {
         let style = fixed_column_style(48.0);
-        let width = length(48.0_f32);
 
         assert_eq!(style.flex_shrink, 0.0);
-        assert_eq!(style.size.width, width);
-        assert_eq!(style.min_size.width, width);
-        assert_eq!(style.max_size.width, width);
+        assert_eq!(style.size.width, length(48.0_f32));
+        assert_eq!(style.min_size.width, length(48.0_f32));
+        assert_eq!(style.max_size.width, length(48.0_f32));
     }
 
     #[test]

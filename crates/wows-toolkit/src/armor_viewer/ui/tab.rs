@@ -96,7 +96,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
     type Tab = ArmorPane;
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(("armor_pane", tab.id))
+        egui::Id::unique(("armor_pane", tab.id))
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
@@ -471,7 +471,7 @@ impl ToolkitTabViewer<'_> {
                         let tree_state =
                             data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
                         for nation in &sorted_nations {
-                            let nation_id = egui::Id::new(("armor_nation", &nation.nation));
+                            let nation_id = egui::Id::unique(("armor_nation", &nation.nation));
                             let nation_has_match = searching
                                 && nation
                                     .classes
@@ -480,7 +480,7 @@ impl ToolkitTabViewer<'_> {
                             tree_state.set_openness(nation_id, searching && nation_has_match);
                             for class in &nation.classes {
                                 let class_id =
-                                    egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
+                                    egui::Id::unique(("armor_class", &nation.nation, species_name(&class.species)));
                                 let class_has_match =
                                     searching && class.ships.iter().any(|s| s.search_name.contains(&search));
                                 tree_state.set_openness(class_id, searching && class_has_match);
@@ -504,7 +504,7 @@ impl ToolkitTabViewer<'_> {
                                 continue;
                             }
 
-                            let nation_id = egui::Id::new(("armor_nation", &nation.nation));
+                            let nation_id = egui::Id::unique(("armor_nation", &nation.nation));
                             let flag_asset = nation_flags.get(&nation.nation).cloned();
                             let nation_display = translate_part_ref(&nation.nation);
                             let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
@@ -532,7 +532,7 @@ impl ToolkitTabViewer<'_> {
                                     }
 
                                     let class_id =
-                                        egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
+                                        egui::Id::unique(("armor_class", &nation.nation, species_name(&class.species)));
                                     let icon_asset = ship_icons.get(&class.species).cloned();
                                     let class_dir = egui_ltreeview::NodeBuilder::dir(class_id)
                                         .default_open(searching)
@@ -557,7 +557,7 @@ impl ToolkitTabViewer<'_> {
                                                 continue;
                                             }
 
-                                            let ship_id = egui::Id::new(("armor_ship", &ship.param_index));
+                                            let ship_id = egui::Id::unique(("armor_ship", &ship.param_index));
                                             id_to_ship
                                                 .insert(ship_id, (ship.param_index.clone(), ship.display_name.clone()));
 
@@ -606,7 +606,7 @@ impl ToolkitTabViewer<'_> {
 
                 // Set selection to match the active pane's currently loaded ship.
                 if let Some(ref param) = selected_param {
-                    let selected_id = egui::Id::new(("armor_ship", param));
+                    let selected_id = egui::Id::unique(("armor_ship", param));
                     sidebar_ui.ctx().data_mut(|data| {
                         let tree_state =
                             data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
@@ -741,7 +741,7 @@ impl ToolkitTabViewer<'_> {
             };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
             DockArea::new(&mut state.dock_state)
-                .id(egui::Id::new("armor_dock"))
+                .id(egui::Id::unique("armor_dock"))
                 .style(egui_dock::Style::from_egui(content_ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::All)
                 .show_close_buttons(true)
@@ -761,7 +761,7 @@ impl ToolkitTabViewer<'_> {
         if any_ship_loaded {
             let defaults = self.tab_state.persisted.read().armor_viewer_defaults.clone();
             let mut open = defaults.show_legend;
-            let window_id = egui::Id::new("armor_legend_global");
+            let window_id = egui::Id::unique("armor_legend_global");
 
             let window = egui::Window::new(t!("ui.armor.armor_thickness").as_ref())
                 .id(window_id)
@@ -2042,7 +2042,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 let title = format!("{} - {}", t!("ui.armor.display"), armor.display_name);
                 let mut open = pane.display_window_open;
                 egui::Window::new(title)
-                    .id(egui::Id::new(("armor_display_window", pane_id)))
+                    .id(egui::Id::unique(("armor_display_window", pane_id)))
                     .open(&mut open)
                     .resizable(true)
                     .collapsible(true)

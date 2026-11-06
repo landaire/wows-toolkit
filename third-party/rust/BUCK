@@ -4,9 +4,16 @@
 load("//build-support/buck:third_party_rules.bzl", "buildscript_run", "cargo")
 
 git_fetch(
-    name = "egui-notify-a30aa1e0f6f3db57.git",
-    repo = "https://github.com/ItsEthra/egui-notify",
-    rev = "3dfaa2473e385b69e22656b8ea7a13bb74ff7576",
+    name = "egui-phosphor-8b838cde1bdb8b2b.git",
+    repo = "https://github.com/landaire-contrib/egui-phosphor",
+    rev = "9b98fa3e49ed6c7d0fd9c3ddde5257065c9ca5e8",
+    visibility = [],
+)
+
+git_fetch(
+    name = "egui_dock-69416f9f4b883608.git",
+    repo = "https://github.com/landaire-contrib/egui_dock",
+    rev = "fdb395d4fbe91f39c0166651bc69c31824bc6ffb",
     visibility = [],
 )
 
@@ -128,6 +135,42 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["enumn"],
+    visibility = [],
+    deps = [
+        ":enumn-0.1",
+        ":uuid-1",
+    ],
+)
+
+http_archive(
+    name = "accesskit-0.25.2.crate",
+    sha256 = "4e883d1d28c5fd5568c79ed2d2bd48d9f2fd3945c8974ed0f53690ceddb051be",
+    size_bytes = 41312,
+    strip_prefix = "accesskit-0.25.2",
+    urls = ["https://static.crates.io/crates/accesskit/0.25.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "accesskit-0.25",
+    srcs = [":accesskit-0.25.2.crate"],
+    crate = "accesskit",
+    crate_root = "accesskit-0.25.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "accesskit",
+        "CARGO_MANIFEST_DIR": "accesskit-0.25.2.crate",
+        "CARGO_PKG_AUTHORS": "The AccessKit contributors",
+        "CARGO_PKG_DESCRIPTION": "UI accessibility infrastructure across platforms",
+        "CARGO_PKG_NAME": "accesskit",
+        "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
+        "CARGO_PKG_VERSION": "0.25.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "25",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
     features = [
         "enumn",
         "serde",
@@ -137,45 +180,6 @@ cargo.rust_library(
         ":enumn-0.1",
         ":serde-1",
         ":uuid-1",
-    ],
-)
-
-http_archive(
-    name = "accesskit_atspi_common-0.18.1.crate",
-    sha256 = "1e8c61bee90b42a772d39d06a740207dc71a4e780004ace1db8d99fb1baaa954",
-    size_bytes = 28924,
-    strip_prefix = "accesskit_atspi_common-0.18.1",
-    urls = ["https://static.crates.io/crates/accesskit_atspi_common/0.18.1/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "accesskit_atspi_common-0.18",
-    srcs = [":accesskit_atspi_common-0.18.1.crate"],
-    crate = "accesskit_atspi_common",
-    crate_root = "accesskit_atspi_common-0.18.1.crate/src/lib.rs",
-    edition = "2024",
-    env = {
-        "CARGO_CRATE_NAME": "accesskit_atspi_common",
-        "CARGO_MANIFEST_DIR": "accesskit_atspi_common-0.18.1.crate",
-        "CARGO_PKG_AUTHORS": "The AccessKit contributors",
-        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: core AT-SPI translation layer",
-        "CARGO_PKG_NAME": "accesskit_atspi_common",
-        "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.18.1",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "18",
-        "CARGO_PKG_VERSION_PATCH": "1",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":accesskit-0.24",
-        ":accesskit_consumer-0.36",
-        ":atspi-common-0.13",
-        ":phf-0.13",
-        ":serde-1",
-        ":zvariant-5",
     ],
 )
 
@@ -219,72 +223,41 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "accesskit_consumer-0.35.0.crate",
-    sha256 = "53cf47daed85312e763fbf85ceca136e0d7abc68e0a7e12abe11f48172bc3b10",
-    size_bytes = 46230,
-    strip_prefix = "accesskit_consumer-0.35.0",
-    urls = ["https://static.crates.io/crates/accesskit_consumer/0.35.0/download"],
+    name = "accesskit_atspi_common-0.21.1.crate",
+    sha256 = "24f5baf62e34a4a6c30e3d697e4782f821a7337049c44c3b40576a27dfbb580d",
+    size_bytes = 34199,
+    strip_prefix = "accesskit_atspi_common-0.21.1",
+    urls = ["https://static.crates.io/crates/accesskit_atspi_common/0.21.1/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "accesskit_consumer-0.35",
-    srcs = [":accesskit_consumer-0.35.0.crate"],
-    crate = "accesskit_consumer",
-    crate_root = "accesskit_consumer-0.35.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "accesskit_consumer",
-        "CARGO_MANIFEST_DIR": "accesskit_consumer-0.35.0.crate",
-        "CARGO_PKG_AUTHORS": "The AccessKit contributors",
-        "CARGO_PKG_DESCRIPTION": "AccessKit consumer library (internal)",
-        "CARGO_PKG_NAME": "accesskit_consumer",
-        "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.35.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":accesskit-0.24",
-        ":hashbrown-0.16",
-    ],
-)
-
-http_archive(
-    name = "accesskit_consumer-0.36.0.crate",
-    sha256 = "25e0d7e25d06f4dc21d1774d67146e9e80d6789216cbd4d1e88185b0095dba60",
-    size_bytes = 47194,
-    strip_prefix = "accesskit_consumer-0.36.0",
-    urls = ["https://static.crates.io/crates/accesskit_consumer/0.36.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "accesskit_consumer-0.36",
-    srcs = [":accesskit_consumer-0.36.0.crate"],
-    crate = "accesskit_consumer",
-    crate_root = "accesskit_consumer-0.36.0.crate/src/lib.rs",
+    name = "accesskit_atspi_common-0.21",
+    srcs = [":accesskit_atspi_common-0.21.1.crate"],
+    crate = "accesskit_atspi_common",
+    crate_root = "accesskit_atspi_common-0.21.1.crate/src/lib.rs",
     edition = "2024",
     env = {
-        "CARGO_CRATE_NAME": "accesskit_consumer",
-        "CARGO_MANIFEST_DIR": "accesskit_consumer-0.36.0.crate",
+        "CARGO_CRATE_NAME": "accesskit_atspi_common",
+        "CARGO_MANIFEST_DIR": "accesskit_atspi_common-0.21.1.crate",
         "CARGO_PKG_AUTHORS": "The AccessKit contributors",
-        "CARGO_PKG_DESCRIPTION": "AccessKit consumer library (internal)",
-        "CARGO_PKG_NAME": "accesskit_consumer",
+        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: core AT-SPI translation layer",
+        "CARGO_PKG_NAME": "accesskit_atspi_common",
         "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.36.0",
+        "CARGO_PKG_VERSION": "0.21.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "36",
-        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_MINOR": "21",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
     deps = [
-        ":accesskit-0.24",
-        ":hashbrown-0.16",
+        ":accesskit-0.25",
+        ":accesskit_consumer-0.39",
+        ":atspi-common-0.13",
+        ":phf-0.14",
+        ":serde-1",
+        ":zvariant-5",
     ],
 )
 
@@ -320,6 +293,41 @@ cargo.rust_library(
     deps = [
         ":accesskit-0.24",
         ":hashbrown-0.16",
+    ],
+)
+
+http_archive(
+    name = "accesskit_consumer-0.39.2.crate",
+    sha256 = "f3da8f27636015191b2264ee1df681503170a632cafd832fdc1edfdd4e3a2fd3",
+    size_bytes = 51135,
+    strip_prefix = "accesskit_consumer-0.39.2",
+    urls = ["https://static.crates.io/crates/accesskit_consumer/0.39.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "accesskit_consumer-0.39",
+    srcs = [":accesskit_consumer-0.39.2.crate"],
+    crate = "accesskit_consumer",
+    crate_root = "accesskit_consumer-0.39.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "accesskit_consumer",
+        "CARGO_MANIFEST_DIR": "accesskit_consumer-0.39.2.crate",
+        "CARGO_PKG_AUTHORS": "The AccessKit contributors",
+        "CARGO_PKG_DESCRIPTION": "AccessKit consumer library (internal)",
+        "CARGO_PKG_NAME": "accesskit_consumer",
+        "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
+        "CARGO_PKG_VERSION": "0.39.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "39",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":accesskit-0.25",
+        ":hashbrown-0.17",
     ],
 )
 
@@ -363,46 +371,41 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "accesskit_unix-0.21.1.crate",
-    sha256 = "b016ca8db0ea0ea2ceff29a9d6240391492d960716aa471967c00e8cc8cb197c",
-    size_bytes = 27270,
-    strip_prefix = "accesskit_unix-0.21.1",
-    urls = ["https://static.crates.io/crates/accesskit_unix/0.21.1/download"],
+    name = "accesskit_macos-0.27.2.crate",
+    sha256 = "123828ceeec755b05255e3976cb0852993202de98a0626c97dd8d34246991f84",
+    size_bytes = 32529,
+    strip_prefix = "accesskit_macos-0.27.2",
+    urls = ["https://static.crates.io/crates/accesskit_macos/0.27.2/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "accesskit_unix-0.21",
-    srcs = [":accesskit_unix-0.21.1.crate"],
-    crate = "accesskit_unix",
-    crate_root = "accesskit_unix-0.21.1.crate/src/lib.rs",
+    name = "accesskit_macos-0.27",
+    srcs = [":accesskit_macos-0.27.2.crate"],
+    crate = "accesskit_macos",
+    crate_root = "accesskit_macos-0.27.2.crate/src/lib.rs",
     edition = "2024",
     env = {
-        "CARGO_CRATE_NAME": "accesskit_unix",
-        "CARGO_MANIFEST_DIR": "accesskit_unix-0.21.1.crate",
+        "CARGO_CRATE_NAME": "accesskit_macos",
+        "CARGO_MANIFEST_DIR": "accesskit_macos-0.27.2.crate",
         "CARGO_PKG_AUTHORS": "The AccessKit contributors",
-        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: Linux adapter",
-        "CARGO_PKG_NAME": "accesskit_unix",
+        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: macOS adapter",
+        "CARGO_PKG_NAME": "accesskit_macos",
         "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.21.1",
+        "CARGO_PKG_VERSION": "0.27.2",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "21",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_MINOR": "27",
+        "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["async-io"],
     visibility = [],
     deps = [
-        ":accesskit-0.24",
-        ":accesskit_atspi_common-0.18",
-        ":async-channel-2",
-        ":async-executor-1",
-        ":async-task-4",
-        ":atspi-0.29",
-        ":futures-lite-2",
-        ":futures-util-0.3",
-        ":serde-1",
-        ":zbus-5",
+        ":accesskit-0.25",
+        ":accesskit_consumer-0.39",
+        ":hashbrown-0.17",
+        ":objc2-0.5",
+        ":objc2-app-kit-0.2",
+        ":objc2-foundation-0.2",
     ],
 )
 
@@ -454,41 +457,46 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "accesskit_windows-0.32.1.crate",
-    sha256 = "eff7009f1a532e917d66970a1e80c965140c6cfbbabbdde3d64e5431e6c78e21",
-    size_bytes = 57411,
-    strip_prefix = "accesskit_windows-0.32.1",
-    urls = ["https://static.crates.io/crates/accesskit_windows/0.32.1/download"],
+    name = "accesskit_unix-0.24.1.crate",
+    sha256 = "30d5192871228c54f1b0fb4a85cef000e11a3804f25d2165f14afa0daa67f3f6",
+    size_bytes = 31594,
+    strip_prefix = "accesskit_unix-0.24.1",
+    urls = ["https://static.crates.io/crates/accesskit_unix/0.24.1/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "accesskit_windows-0.32",
-    srcs = [":accesskit_windows-0.32.1.crate"],
-    crate = "accesskit_windows",
-    crate_root = "accesskit_windows-0.32.1.crate/src/lib.rs",
-    edition = "2021",
+    name = "accesskit_unix-0.24",
+    srcs = [":accesskit_unix-0.24.1.crate"],
+    crate = "accesskit_unix",
+    crate_root = "accesskit_unix-0.24.1.crate/src/lib.rs",
+    edition = "2024",
     env = {
-        "CARGO_CRATE_NAME": "accesskit_windows",
-        "CARGO_MANIFEST_DIR": "accesskit_windows-0.32.1.crate",
+        "CARGO_CRATE_NAME": "accesskit_unix",
+        "CARGO_MANIFEST_DIR": "accesskit_unix-0.24.1.crate",
         "CARGO_PKG_AUTHORS": "The AccessKit contributors",
-        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: Windows adapter",
-        "CARGO_PKG_NAME": "accesskit_windows",
+        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: Linux adapter",
+        "CARGO_PKG_NAME": "accesskit_unix",
         "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.32.1",
+        "CARGO_PKG_VERSION": "0.24.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "32",
+        "CARGO_PKG_VERSION_MINOR": "24",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["async-io"],
     visibility = [],
     deps = [
-        ":accesskit-0.24",
-        ":accesskit_consumer-0.35",
-        ":hashbrown-0.16",
-        ":static_assertions-1",
-        ":windows-0.62",
-        ":windows-core-0.62",
+        ":accesskit-0.25",
+        ":accesskit_atspi_common-0.21",
+        ":async-channel-2",
+        ":async-executor-1",
+        ":async-task-4",
+        ":atspi-0.29",
+        ":futures-lite-2",
+        ":futures-util-0.3",
+        ":serde-1",
+        ":zbus-5",
     ],
 )
 
@@ -532,30 +540,69 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "accesskit_winit-0.32.2.crate",
-    sha256 = "1fe9a94394896352cc4660ca2288bd4ef883d83238853c038b44070c8f134313",
-    size_bytes = 34557,
-    strip_prefix = "accesskit_winit-0.32.2",
-    urls = ["https://static.crates.io/crates/accesskit_winit/0.32.2/download"],
+    name = "accesskit_windows-0.35.2.crate",
+    sha256 = "498668b90da9995302a0055aaecad4756932333da2ddef6baee1c00844c430fc",
+    size_bytes = 57191,
+    strip_prefix = "accesskit_windows-0.35.2",
+    urls = ["https://static.crates.io/crates/accesskit_windows/0.35.2/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "accesskit_winit-0.32",
-    srcs = [":accesskit_winit-0.32.2.crate"],
+    name = "accesskit_windows-0.35",
+    srcs = [":accesskit_windows-0.35.2.crate"],
+    crate = "accesskit_windows",
+    crate_root = "accesskit_windows-0.35.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "accesskit_windows",
+        "CARGO_MANIFEST_DIR": "accesskit_windows-0.35.2.crate",
+        "CARGO_PKG_AUTHORS": "The AccessKit contributors",
+        "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: Windows adapter",
+        "CARGO_PKG_NAME": "accesskit_windows",
+        "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
+        "CARGO_PKG_VERSION": "0.35.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":accesskit-0.25",
+        ":accesskit_consumer-0.39",
+        ":hashbrown-0.17",
+        ":static_assertions-1",
+        ":windows-0.62",
+        ":windows-core-0.62",
+    ],
+)
+
+http_archive(
+    name = "accesskit_winit-0.34.2.crate",
+    sha256 = "cd4ab4437b520ff03088fbe48676a11e7d44a929535e64b31432c1073e48dbcc",
+    size_bytes = 31055,
+    strip_prefix = "accesskit_winit-0.34.2",
+    urls = ["https://static.crates.io/crates/accesskit_winit/0.34.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "accesskit_winit-0.34",
+    srcs = [":accesskit_winit-0.34.2.crate"],
     crate = "accesskit_winit",
-    crate_root = "accesskit_winit-0.32.2.crate/src/lib.rs",
-    edition = "2021",
+    crate_root = "accesskit_winit-0.34.2.crate/src/lib.rs",
+    edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "accesskit_winit",
-        "CARGO_MANIFEST_DIR": "accesskit_winit-0.32.2.crate",
+        "CARGO_MANIFEST_DIR": "accesskit_winit-0.34.2.crate",
         "CARGO_PKG_AUTHORS": "The AccessKit contributors",
         "CARGO_PKG_DESCRIPTION": "AccessKit UI accessibility infrastructure: winit adapter",
         "CARGO_PKG_NAME": "accesskit_winit",
         "CARGO_PKG_REPOSITORY": "https://github.com/AccessKit/accesskit",
-        "CARGO_PKG_VERSION": "0.32.2",
+        "CARGO_PKG_VERSION": "0.34.2",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "32",
+        "CARGO_PKG_VERSION_MINOR": "34",
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -570,18 +617,18 @@ cargo.rust_library(
     },
     platform = {
         "linux-x86_64": dict(
-            deps = [":accesskit_unix-0.21"],
+            deps = [":accesskit_unix-0.24"],
         ),
         "macos-arm64": dict(
-            deps = [":accesskit_macos-0.26"],
+            deps = [":accesskit_macos-0.27"],
         ),
         "windows-msvc": dict(
-            deps = [":accesskit_windows-0.32"],
+            deps = [":accesskit_windows-0.35"],
         ),
     },
     visibility = [],
     deps = [
-        ":accesskit-0.24",
+        ":accesskit-0.25",
         ":winit-0.30",
     ],
 )
@@ -1470,15 +1517,24 @@ cargo.rust_library(
     ],
     platform = {
         "linux-x86_64": dict(
+            features = [
+                "wayland-data-control",
+                "wl-clipboard-rs",
+            ],
             deps = [
                 ":image-0.25",
                 ":log-0.4",
                 ":parking_lot-0.12",
                 ":percent-encoding-2",
+                ":wl-clipboard-rs-0.9",
                 ":x11rb-0.13",
             ],
         ),
         "macos-arm64": dict(
+            features = [
+                "wayland-data-control",
+                "wl-clipboard-rs",
+            ],
             deps = [
                 ":image-0.25",
                 ":objc2-0.6",
@@ -1489,6 +1545,10 @@ cargo.rust_library(
             ],
         ),
         "windows-msvc": dict(
+            features = [
+                "wayland-data-control",
+                "wl-clipboard-rs",
+            ],
             deps = [
                 ":clipboard-win-5",
                 ":image-0.25",
@@ -3752,38 +3812,6 @@ cargo.rust_library(
     features = ["std"],
     visibility = [],
     deps = [":bit-vec-0.8"],
-)
-
-http_archive(
-    name = "bit-set-0.9.1.crate",
-    sha256 = "34ddef2995421ab6a5c779542c81ee77c115206f4ad9d5a8e05f4ff49716a3dd",
-    size_bytes = 20389,
-    strip_prefix = "bit-set-0.9.1",
-    urls = ["https://static.crates.io/crates/bit-set/0.9.1/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "bit-set-0.9",
-    srcs = [":bit-set-0.9.1.crate"],
-    crate = "bit_set",
-    crate_root = "bit-set-0.9.1.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "bit_set",
-        "CARGO_MANIFEST_DIR": "bit-set-0.9.1.crate",
-        "CARGO_PKG_AUTHORS": "Alexis Beingessner <a.beingessner@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "A set of bits",
-        "CARGO_PKG_NAME": "bit-set",
-        "CARGO_PKG_REPOSITORY": "https://github.com/contain-rs/bit-set",
-        "CARGO_PKG_VERSION": "0.9.1",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "1",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [":bit-vec-0.9"],
 )
 
 http_archive(
@@ -9849,30 +9877,30 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "ecolor-0.35.0.crate",
-    sha256 = "6758be723a3f298bbfda4db75748bc2ba0abafe096b6383c7c32da264764fbc3",
-    size_bytes = 16946,
-    strip_prefix = "ecolor-0.35.0",
-    urls = ["https://static.crates.io/crates/ecolor/0.35.0/download"],
+    name = "ecolor-0.37.0.crate",
+    sha256 = "31bcbef0d4263a63eb32c4834e5d711613035ce1333468e107d928923e21e6e2",
+    size_bytes = 16234,
+    strip_prefix = "ecolor-0.37.0",
+    urls = ["https://static.crates.io/crates/ecolor/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "ecolor-0.35",
-    srcs = [":ecolor-0.35.0.crate"],
+    name = "ecolor-0.37",
+    srcs = [":ecolor-0.37.0.crate"],
     crate = "ecolor",
-    crate_root = "ecolor-0.35.0.crate/src/lib.rs",
+    crate_root = "ecolor-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "ecolor",
-        "CARGO_MANIFEST_DIR": "ecolor-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "ecolor-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>:Andreas Reich <reichandreas@gmx.de>",
         "CARGO_PKG_DESCRIPTION": "Color structs and color conversion utilities",
         "CARGO_PKG_NAME": "ecolor",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -9883,7 +9911,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":bytemuck-1",
-        ":emath-0.35",
+        ":emath-0.37",
         ":serde-1",
     ],
 )
@@ -10070,40 +10098,41 @@ cargo.rust_library(
 
 alias(
     name = "eframe",
-    actual = ":eframe-0.35",
+    actual = ":eframe-0.37",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "eframe-0.35.0.crate",
-    sha256 = "8dc8234e2f681b2afd2b2e8c332fa614de2fddbdcb28d0acf5c420449682ea90",
-    size_bytes = 135856,
-    strip_prefix = "eframe-0.35.0",
-    urls = ["https://static.crates.io/crates/eframe/0.35.0/download"],
+    name = "eframe-0.37.0.crate",
+    sha256 = "9c5642501a65ca657d05f00c643a5c14ff2346cb3818032bfe23d58e1f8e5f84",
+    size_bytes = 152925,
+    strip_prefix = "eframe-0.37.0",
+    urls = ["https://static.crates.io/crates/eframe/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "eframe-0.35",
-    srcs = [":eframe-0.35.0.crate"],
+    name = "eframe-0.37",
+    srcs = [":eframe-0.37.0.crate"],
     crate = "eframe",
-    crate_root = "eframe-0.35.0.crate/src/lib.rs",
+    crate_root = "eframe-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "eframe",
-        "CARGO_MANIFEST_DIR": "eframe-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "eframe-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "egui framework - write GUI apps that compiles to web and/or natively",
         "CARGO_PKG_NAME": "eframe",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/eframe",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
         "accesskit",
+        "clipboard",
         "default_fonts",
         "wayland",
         "wgpu",
@@ -10112,18 +10141,18 @@ cargo.rust_library(
     platform = {
         "linux-x86_64": dict(
             deps = [
-                ":egui-winit-0.35",
-                ":pollster-0.4",
+                ":egui-winit-0.37",
+                ":pollster-1",
                 ":winit-0.30",
             ],
         ),
         "macos-arm64": dict(
             deps = [
-                ":egui-winit-0.35",
+                ":egui-winit-0.37",
                 ":objc2-0.6",
                 ":objc2-app-kit-0.3",
                 ":objc2-foundation-0.3",
-                ":pollster-0.4",
+                ":pollster-1",
                 ":winit-0.30",
             ],
         ),
@@ -10132,16 +10161,16 @@ cargo.rust_library(
                 ":bytemuck-1",
                 ":js-sys-0.3",
                 ":percent-encoding-2",
+                ":send_wrapper-0.6",
                 ":wasm-bindgen-0.2",
-                ":wasm-bindgen-futures-0.4",
                 ":web-sys-0.3",
-                ":wgpu-29",
+                ":wgpu-30",
             ],
         ),
         "windows-msvc": dict(
             deps = [
-                ":egui-winit-0.35",
-                ":pollster-0.4",
+                ":egui-winit-0.37",
+                ":pollster-1",
                 ":windows-sys-0.61",
                 ":winit-0.30",
             ],
@@ -10151,8 +10180,8 @@ cargo.rust_library(
     deps = [
         ":ahash-0.8",
         ":document-features-0.2",
-        ":egui-0.35",
-        ":egui-wgpu-0.35",
+        ":egui-0.37",
+        ":egui-wgpu-0.37",
         ":image-0.25",
         ":log-0.4",
         ":parking_lot-0.12",
@@ -10165,35 +10194,35 @@ cargo.rust_library(
 
 alias(
     name = "egui",
-    actual = ":egui-0.35",
+    actual = ":egui-0.37",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui-0.35.0.crate",
-    sha256 = "2796c98d50b79631281d516343a6f6e93c0666462ca36e2c93b39f25d7793325",
-    size_bytes = 424466,
-    strip_prefix = "egui-0.35.0",
-    urls = ["https://static.crates.io/crates/egui/0.35.0/download"],
+    name = "egui-0.37.0.crate",
+    sha256 = "bec9144f49b7a28b5f395d3147e325b4fe3e77ba686eac11d1bdf0a7da3f375f",
+    size_bytes = 508733,
+    strip_prefix = "egui-0.37.0",
+    urls = ["https://static.crates.io/crates/egui/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui-0.35",
-    srcs = [":egui-0.35.0.crate"],
+    name = "egui-0.37",
+    srcs = [":egui-0.37.0.crate"],
     crate = "egui",
-    crate_root = "egui-0.35.0.crate/src/lib.rs",
+    crate_root = "egui-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui",
-        "CARGO_MANIFEST_DIR": "egui-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "egui-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An easy-to-use immediate mode GUI that runs on both web and native",
         "CARGO_PKG_NAME": "egui",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10201,18 +10230,25 @@ cargo.rust_library(
         "bytemuck",
         "default",
         "default_fonts",
+        "monochrome_emoji_fonts",
         "persistence",
         "ron",
         "serde",
     ],
+    platform = {
+        "wasm32": dict(
+            features = ["web_file"],
+            deps = [":web-sys-0.3"],
+        ),
+    },
     visibility = [],
     deps = [
-        ":accesskit-0.24",
+        ":accesskit-0.25",
         ":ahash-0.8",
         ":bitflags-2",
-        ":emath-0.35",
-        ":epaint-0.35",
-        ":itertools-0.14",
+        ":emath-0.37",
+        ":epaint-0.37",
+        ":itertools-0.15",
         ":log-0.4",
         ":nohash-hasher-0.2",
         ":profiling-1",
@@ -10225,105 +10261,105 @@ cargo.rust_library(
 
 alias(
     name = "egui-notify",
-    actual = ":egui-notify-0.22",
-    visibility = ["PUBLIC"],
-)
-
-cargo.rust_library(
-    name = "egui-notify-0.22",
-    srcs = [":egui-notify-a30aa1e0f6f3db57.git"],
-    crate = "egui_notify",
-    crate_root = "egui-notify-a30aa1e0f6f3db57/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "egui_notify",
-        "CARGO_MANIFEST_DIR": "egui-notify-a30aa1e0f6f3db57",
-        "CARGO_PKG_AUTHORS": "ItsEthra",
-        "CARGO_PKG_DESCRIPTION": "Simple notifications library for egui",
-        "CARGO_PKG_NAME": "egui-notify",
-        "CARGO_PKG_REPOSITORY": "https://github.com/ItsEthra/egui-notify",
-        "CARGO_PKG_VERSION": "0.22.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "22",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [":egui-0.35"],
-)
-
-alias(
-    name = "egui-palette",
-    actual = ":egui-palette-0.6",
+    actual = ":egui-notify-0.24",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui-palette-0.6.0.crate",
-    sha256 = "40b5cca0d198563663070a5e87efcbbaff06b3cd5158628bf78ca14d7d468e67",
-    size_bytes = 22920,
-    strip_prefix = "egui-palette-0.6.0",
-    urls = ["https://static.crates.io/crates/egui-palette/0.6.0/download"],
+    name = "egui-notify-0.24.0.crate",
+    sha256 = "f022e19ac3be5e1798892426d9aa2ab55fe5acf346c476589601a0df46bf89dc",
+    size_bytes = 112084,
+    strip_prefix = "egui-notify-0.24.0",
+    urls = ["https://static.crates.io/crates/egui-notify/0.24.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui-palette-0.6",
-    srcs = [":egui-palette-0.6.0.crate"],
+    name = "egui-notify-0.24",
+    srcs = [":egui-notify-0.24.0.crate"],
+    crate = "egui_notify",
+    crate_root = "egui-notify-0.24.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "egui_notify",
+        "CARGO_MANIFEST_DIR": "egui-notify-0.24.0.crate",
+        "CARGO_PKG_AUTHORS": "ItsEthra",
+        "CARGO_PKG_DESCRIPTION": "Simple notifications library for egui",
+        "CARGO_PKG_NAME": "egui-notify",
+        "CARGO_PKG_REPOSITORY": "https://github.com/ItsEthra/egui-notify",
+        "CARGO_PKG_VERSION": "0.24.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "24",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [":egui-0.37"],
+)
+
+alias(
+    name = "egui-palette",
+    actual = ":egui-palette-0.7",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "egui-palette-0.7.0.crate",
+    sha256 = "13e2ccc6adf40204a3df56399390a8510b0787a6c6ed2efa18c9793137649b1c",
+    size_bytes = 23297,
+    strip_prefix = "egui-palette-0.7.0",
+    urls = ["https://static.crates.io/crates/egui-palette/0.7.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "egui-palette-0.7",
+    srcs = [":egui-palette-0.7.0.crate"],
     crate = "egui_palette",
-    crate_root = "egui-palette-0.6.0.crate/src/lib.rs",
+    crate_root = "egui-palette-0.7.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_palette",
-        "CARGO_MANIFEST_DIR": "egui-palette-0.6.0.crate",
+        "CARGO_MANIFEST_DIR": "egui-palette-0.7.0.crate",
         "CARGO_PKG_AUTHORS": "Lander Brandt",
         "CARGO_PKG_DESCRIPTION": "A Cmd+P-style command palette widget for egui: fuzzy filter, keyboard nav, modal popup.",
         "CARGO_PKG_NAME": "egui-palette",
         "CARGO_PKG_REPOSITORY": "https://github.com/landaire/hxy",
-        "CARGO_PKG_VERSION": "0.6.0",
+        "CARGO_PKG_VERSION": "0.7.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "6",
+        "CARGO_PKG_VERSION_MINOR": "7",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
     deps = [
-        ":egui-0.35",
+        ":egui-0.37",
         ":nucleo-matcher-0.3",
     ],
 )
 
 alias(
     name = "egui-phosphor",
-    actual = ":egui-phosphor-0.13",
+    actual = ":egui-phosphor-0.14",
     visibility = ["PUBLIC"],
 )
 
-http_archive(
-    name = "egui-phosphor-0.13.0.crate",
-    sha256 = "249826f9529c1757d71dbbb3a22ec101b21110ab663c45fb771c2b86121379e4",
-    size_bytes = 1153059,
-    strip_prefix = "egui-phosphor-0.13.0",
-    urls = ["https://static.crates.io/crates/egui-phosphor/0.13.0/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
-    name = "egui-phosphor-0.13",
-    srcs = [":egui-phosphor-0.13.0.crate"],
+    name = "egui-phosphor-0.14",
+    srcs = [":egui-phosphor-8b838cde1bdb8b2b.git"],
     crate = "egui_phosphor",
-    crate_root = "egui-phosphor-0.13.0.crate/src/lib.rs",
+    crate_root = "egui-phosphor-8b838cde1bdb8b2b/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "egui_phosphor",
-        "CARGO_MANIFEST_DIR": "egui-phosphor-0.13.0.crate",
+        "CARGO_MANIFEST_DIR": "egui-phosphor-8b838cde1bdb8b2b",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Phosphor icons for egui",
         "CARGO_PKG_NAME": "egui-phosphor",
         "CARGO_PKG_REPOSITORY": "https://github.com/amPerl/egui-phosphor",
-        "CARGO_PKG_VERSION": "0.13.0",
+        "CARGO_PKG_VERSION": "0.14.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_MINOR": "14",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10332,34 +10368,34 @@ cargo.rust_library(
         "regular",
     ],
     visibility = [],
-    deps = [":egui-0.35"],
+    deps = [":egui-0.37"],
 )
 
 http_archive(
-    name = "egui-wgpu-0.35.0.crate",
-    sha256 = "d2e6cfac0725563555fa4f91e9f799b9d7c6c5dd831fca6abc8234afc64b7a34",
-    size_bytes = 54697,
-    strip_prefix = "egui-wgpu-0.35.0",
-    urls = ["https://static.crates.io/crates/egui-wgpu/0.35.0/download"],
+    name = "egui-wgpu-0.37.0.crate",
+    sha256 = "0309cbe1febed48af5b974e4bcc424b35e9664863a4d402697147b57a488c864",
+    size_bytes = 55568,
+    strip_prefix = "egui-wgpu-0.37.0",
+    urls = ["https://static.crates.io/crates/egui-wgpu/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui-wgpu-0.35",
-    srcs = [":egui-wgpu-0.35.0.crate"],
+    name = "egui-wgpu-0.37",
+    srcs = [":egui-wgpu-0.37.0.crate"],
     crate = "egui_wgpu",
-    crate_root = "egui-wgpu-0.35.0.crate/src/lib.rs",
+    crate_root = "egui-wgpu-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_wgpu",
-        "CARGO_MANIFEST_DIR": "egui-wgpu-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "egui-wgpu-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Nils Hasenbanck <nils@hasenbanck.de>:embotech <opensource@embotech.com>:Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Bindings for using egui natively using the wgpu library",
         "CARGO_PKG_NAME": "egui-wgpu",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/egui-wgpu",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10389,42 +10425,42 @@ cargo.rust_library(
         ":ahash-0.8",
         ":bytemuck-1",
         ":document-features-0.2",
-        ":egui-0.35",
-        ":epaint-0.35",
+        ":egui-0.37",
+        ":epaint-0.37",
         ":log-0.4",
         ":profiling-1",
         ":thiserror-2",
         ":type-map-0.5",
         ":web-time-1",
-        ":wgpu-29",
+        ":wgpu-30",
     ],
 )
 
 http_archive(
-    name = "egui-winit-0.35.0.crate",
-    sha256 = "9ea6bf3608db949588b95b8b341ee358d0c3f95cf4dc3f53d8d76717edee87db",
-    size_bytes = 51367,
-    strip_prefix = "egui-winit-0.35.0",
-    urls = ["https://static.crates.io/crates/egui-winit/0.35.0/download"],
+    name = "egui-winit-0.37.0.crate",
+    sha256 = "e4e449f4c4a2a60c7ccb4ba7fa4078417bfe1f9ddc03b5e05ce75748e33a70de",
+    size_bytes = 60852,
+    strip_prefix = "egui-winit-0.37.0",
+    urls = ["https://static.crates.io/crates/egui-winit/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui-winit-0.35",
-    srcs = [":egui-winit-0.35.0.crate"],
+    name = "egui-winit-0.37",
+    srcs = [":egui-winit-0.37.0.crate"],
     crate = "egui_winit",
-    crate_root = "egui-winit-0.35.0.crate/src/lib.rs",
+    crate_root = "egui-winit-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_winit",
-        "CARGO_MANIFEST_DIR": "egui-winit-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "egui-winit-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Bindings for using egui with winit",
         "CARGO_PKG_NAME": "egui-winit",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/egui-winit",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10433,62 +10469,69 @@ cargo.rust_library(
         "arboard",
         "bytemuck",
         "clipboard",
-        "links",
         "smithay-clipboard",
         "wayland",
-        "webbrowser",
     ],
     platform = {
         "linux-x86_64": dict(
             deps = [":smithay-clipboard-0.7"],
         ),
+        "macos-arm64": dict(
+            deps = [
+                ":block2-0.6",
+                ":objc2-0.6",
+                ":objc2-app-kit-0.3",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [":windows-sys-0.61"],
+        ),
     },
     visibility = [],
     deps = [
-        ":accesskit_winit-0.32",
+        ":accesskit_winit-0.34",
         ":arboard-3",
         ":bytemuck-1",
-        ":egui-0.35",
+        ":egui-0.37",
         ":log-0.4",
         ":profiling-1",
         ":raw-window-handle-0.6",
         ":web-time-1",
-        ":webbrowser-1",
         ":winit-0.30",
     ],
 )
 
 alias(
     name = "egui_commonmark",
-    actual = ":egui_commonmark-0.24",
+    actual = ":egui_commonmark-0.26",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_commonmark-0.24.0.crate",
-    sha256 = "c833127228cc61cef806166adadc23572431fe2ea4cf753e60f654f82a2b3270",
-    size_bytes = 41368,
-    strip_prefix = "egui_commonmark-0.24.0",
-    urls = ["https://static.crates.io/crates/egui_commonmark/0.24.0/download"],
+    name = "egui_commonmark-0.26.0.crate",
+    sha256 = "00ca4b3dcc0ad039593452f7fbb46684246bf30d1920f8e7f06ee3b410ec1d9b",
+    size_bytes = 51009,
+    strip_prefix = "egui_commonmark-0.26.0",
+    urls = ["https://static.crates.io/crates/egui_commonmark/0.26.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_commonmark-0.24",
-    srcs = [":egui_commonmark-0.24.0.crate"],
+    name = "egui_commonmark-0.26",
+    srcs = [":egui_commonmark-0.26.0.crate"],
     crate = "egui_commonmark",
-    crate_root = "egui_commonmark-0.24.0.crate/src/lib.rs",
+    crate_root = "egui_commonmark-0.26.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_commonmark",
-        "CARGO_MANIFEST_DIR": "egui_commonmark-0.24.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_commonmark-0.26.0.crate",
         "CARGO_PKG_AUTHORS": "Erlend Walstad",
         "CARGO_PKG_DESCRIPTION": "Commonmark viewer for egui",
         "CARGO_PKG_NAME": "egui_commonmark",
         "CARGO_PKG_REPOSITORY": "https://github.com/lampsitter/egui_commonmark",
-        "CARGO_PKG_VERSION": "0.24.0",
+        "CARGO_PKG_VERSION": "0.26.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "24",
+        "CARGO_PKG_VERSION_MINOR": "26",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10496,83 +10539,78 @@ cargo.rust_library(
         "default",
         "load-images",
         "pulldown_cmark",
+        "regex",
     ],
     visibility = [],
     deps = [
-        ":egui-0.35",
-        ":egui_commonmark_backend-0.24",
-        ":egui_extras-0.35",
+        ":egui-0.37",
+        ":egui_commonmark_backend-0.26",
+        ":egui_extras-0.37",
         ":pulldown-cmark-0.13",
     ],
 )
 
 http_archive(
-    name = "egui_commonmark_backend-0.24.0.crate",
-    sha256 = "5758a1110eb8259743c9b220241c30ff014b2dec53c1a2b861d464e41fa3483e",
-    size_bytes = 24123,
-    strip_prefix = "egui_commonmark_backend-0.24.0",
-    urls = ["https://static.crates.io/crates/egui_commonmark_backend/0.24.0/download"],
+    name = "egui_commonmark_backend-0.26.0.crate",
+    sha256 = "c7ea83d05053e960b4756c0d550ca9ad23632e3d2e811f7822eb9b6b76dcd02f",
+    size_bytes = 43895,
+    strip_prefix = "egui_commonmark_backend-0.26.0",
+    urls = ["https://static.crates.io/crates/egui_commonmark_backend/0.26.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_commonmark_backend-0.24",
-    srcs = [":egui_commonmark_backend-0.24.0.crate"],
+    name = "egui_commonmark_backend-0.26",
+    srcs = [":egui_commonmark_backend-0.26.0.crate"],
     crate = "egui_commonmark_backend",
-    crate_root = "egui_commonmark_backend-0.24.0.crate/src/lib.rs",
+    crate_root = "egui_commonmark_backend-0.26.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_commonmark_backend",
-        "CARGO_MANIFEST_DIR": "egui_commonmark_backend-0.24.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_commonmark_backend-0.26.0.crate",
         "CARGO_PKG_AUTHORS": "Erlend Walstad",
         "CARGO_PKG_DESCRIPTION": "Shared code for egui_commonmark and egui_commonmark_macros",
         "CARGO_PKG_NAME": "egui_commonmark_backend",
         "CARGO_PKG_REPOSITORY": "https://github.com/lampsitter/egui_commonmark",
-        "CARGO_PKG_VERSION": "0.24.0",
+        "CARGO_PKG_VERSION": "0.26.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "24",
+        "CARGO_PKG_VERSION_MINOR": "26",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = ["regex"],
     visibility = [],
     deps = [
-        ":egui-0.35",
-        ":egui_extras-0.35",
+        ":bitflags-2",
+        ":egui-0.37",
+        ":egui_extras-0.37",
+        ":fancy-regex-0.16",
         ":pulldown-cmark-0.13",
     ],
 )
 
 alias(
     name = "egui_dock",
-    actual = ":egui_dock-0.20",
+    actual = ":egui_dock-0.21",
     visibility = ["PUBLIC"],
 )
 
-http_archive(
-    name = "egui_dock-0.20.1.crate",
-    sha256 = "340d58d0932c472cba78b4ecb6050d86bddf3ba509e1320ac4c0d29af3383c5c",
-    size_bytes = 83570,
-    strip_prefix = "egui_dock-0.20.1",
-    urls = ["https://static.crates.io/crates/egui_dock/0.20.1/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
-    name = "egui_dock-0.20",
-    srcs = [":egui_dock-0.20.1.crate"],
+    name = "egui_dock-0.21",
+    srcs = [":egui_dock-69416f9f4b883608.git"],
     crate = "egui_dock",
-    crate_root = "egui_dock-0.20.1.crate/src/lib.rs",
+    crate_root = "egui_dock-69416f9f4b883608/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_dock",
-        "CARGO_MANIFEST_DIR": "egui_dock-0.20.1.crate",
+        "CARGO_MANIFEST_DIR": "egui_dock-69416f9f4b883608",
         "CARGO_PKG_AUTHORS": "lain-dono:Adam Gąsior (Adanos020)",
         "CARGO_PKG_DESCRIPTION": "Docking system for egui - an immediate-mode GUI library for Rust",
         "CARGO_PKG_NAME": "egui_dock",
-        "CARGO_PKG_REPOSITORY": "https://github.com/Adanos020/egui_dock",
-        "CARGO_PKG_VERSION": "0.20.1",
+        "CARGO_PKG_REPOSITORY": "https://github.com/anhosh/egui_dock",
+        "CARGO_PKG_VERSION": "0.21.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "20",
+        "CARGO_PKG_VERSION_MINOR": "21",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10583,7 +10621,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":duplicate-2",
-        ":egui-0.35",
+        ":egui-0.37",
         ":paste-1",
         ":serde-1",
         ":thiserror-2",
@@ -10592,35 +10630,35 @@ cargo.rust_library(
 
 alias(
     name = "egui_extras",
-    actual = ":egui_extras-0.35",
+    actual = ":egui_extras-0.37",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_extras-0.35.0.crate",
-    sha256 = "e2bd33be7338367bf21f54d62e069d58a5fb3ae033fa8bc6df7a77b9ef4cf957",
-    size_bytes = 54947,
-    strip_prefix = "egui_extras-0.35.0",
-    urls = ["https://static.crates.io/crates/egui_extras/0.35.0/download"],
+    name = "egui_extras-0.37.0.crate",
+    sha256 = "def286cf47194f3fe45b8e37c503ada7a20a64b59a903b4bc704baec943b1827",
+    size_bytes = 67759,
+    strip_prefix = "egui_extras-0.37.0",
+    urls = ["https://static.crates.io/crates/egui_extras/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_extras-0.35",
-    srcs = [":egui_extras-0.35.0.crate"],
+    name = "egui_extras-0.37",
+    srcs = [":egui_extras-0.37.0.crate"],
     crate = "egui_extras",
-    crate_root = "egui_extras-0.35.0.crate/src/lib.rs",
+    crate_root = "egui_extras-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_extras",
-        "CARGO_MANIFEST_DIR": "egui_extras-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_extras-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Dominik Rössler <dominik@freshx.de>:Emil Ernerfeldt <emil.ernerfeldt@gmail.com>:René Rössler <rene@freshx.de>",
         "CARGO_PKG_DESCRIPTION": "Extra functionality and widgets for the egui GUI library",
         "CARGO_PKG_NAME": "egui_extras",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10638,10 +10676,10 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":ahash-0.8",
-        ":egui-0.35",
-        ":enum-map-2",
+        ":egui-0.37",
+        ":enum-map-3",
         ":image-0.25",
-        ":itertools-0.14",
+        ":itertools-0.15",
         ":jiff-0.2",
         ":log-0.4",
         ":mime_guess2-2",
@@ -10654,35 +10692,35 @@ cargo.rust_library(
 
 alias(
     name = "egui_inbox",
-    actual = ":egui_inbox-0.12",
+    actual = ":egui_inbox-0.14",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_inbox-0.12.0.crate",
-    sha256 = "d54210f0cc976d07410f5084d5a76e77f4c5c154f2d363893c3e44fc8158196b",
-    size_bytes = 42350,
-    strip_prefix = "egui_inbox-0.12.0",
-    urls = ["https://static.crates.io/crates/egui_inbox/0.12.0/download"],
+    name = "egui_inbox-0.14.0.crate",
+    sha256 = "ac2e9c3022b869df9bd3caddf16c4c0b8d14a3ca7faec34cde54a370bbf8d27b",
+    size_bytes = 43610,
+    strip_prefix = "egui_inbox-0.14.0",
+    urls = ["https://static.crates.io/crates/egui_inbox/0.14.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_inbox-0.12",
-    srcs = [":egui_inbox-0.12.0.crate"],
+    name = "egui_inbox-0.14",
+    srcs = [":egui_inbox-0.14.0.crate"],
     crate = "egui_inbox",
-    crate_root = "egui_inbox-0.12.0.crate/src/lib.rs",
+    crate_root = "egui_inbox-0.14.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "egui_inbox",
-        "CARGO_MANIFEST_DIR": "egui_inbox-0.12.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_inbox-0.14.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Utility to send messages to egui views from async functions, callbacks, etc. without having to use interior mutability.",
         "CARGO_PKG_NAME": "egui_inbox",
         "CARGO_PKG_REPOSITORY": "https://github.com/lucasmerlin/hello_egui/tree/main/crates/egui_inbox",
-        "CARGO_PKG_VERSION": "0.12.0",
+        "CARGO_PKG_VERSION": "0.14.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "12",
+        "CARGO_PKG_VERSION_MINOR": "14",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10692,42 +10730,42 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":egui-0.35",
+        ":egui-0.37",
         ":parking_lot-0.12",
     ],
 )
 
 alias(
     name = "egui_kittest",
-    actual = ":egui_kittest-0.35",
+    actual = ":egui_kittest-0.37",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_kittest-0.35.0.crate",
-    sha256 = "002c31e1f41461ce206333ffbd2e07563b79e87eb71c27e026151d12ee7b78e0",
-    size_bytes = 67157,
-    strip_prefix = "egui_kittest-0.35.0",
-    urls = ["https://static.crates.io/crates/egui_kittest/0.35.0/download"],
+    name = "egui_kittest-0.37.0.crate",
+    sha256 = "0979c2e37860fcf13a2bea77508607f067a9a6a84ba9bd47b5e298582fb59b86",
+    size_bytes = 93224,
+    strip_prefix = "egui_kittest-0.37.0",
+    urls = ["https://static.crates.io/crates/egui_kittest/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_kittest-0.35",
-    srcs = [":egui_kittest-0.35.0.crate"],
+    name = "egui_kittest-0.37",
+    srcs = [":egui_kittest-0.37.0.crate"],
     crate = "egui_kittest",
-    crate_root = "egui_kittest-0.35.0.crate/src/lib.rs",
+    crate_root = "egui_kittest-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_kittest",
-        "CARGO_MANIFEST_DIR": "egui_kittest-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_kittest-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Lucas Meurer <hi@lucasmerlin.me>:Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Testing library for egui based on kittest and AccessKit",
         "CARGO_PKG_NAME": "egui_kittest",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10758,49 +10796,49 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":dify-0.8",
-        ":egui-0.35",
-        ":egui-wgpu-0.35",
+        ":egui-0.37",
+        ":egui-wgpu-0.37",
         ":image-0.25",
-        ":kittest-0.4",
+        ":kittest-0.5",
         ":log-0.4",
-        ":pollster-0.4",
+        ":pollster-1",
         ":serde-1",
         ":toml-1",
-        ":wgpu-29",
+        ":wgpu-30",
     ],
 )
 
 alias(
     name = "egui_ltreeview",
-    actual = ":egui_ltreeview-0.8",
+    actual = ":egui_ltreeview-0.10",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_ltreeview-0.8.0.crate",
-    sha256 = "ac61e806d7926406d92cc34b755b8589cad658c0662d7a457499eeb2cfa3d8aa",
-    size_bytes = 58708,
-    strip_prefix = "egui_ltreeview-0.8.0",
-    urls = ["https://static.crates.io/crates/egui_ltreeview/0.8.0/download"],
+    name = "egui_ltreeview-0.10.0.crate",
+    sha256 = "3000337dc789042362153ca4f986336f7d9846a22c7199a9da601fdd319595c6",
+    size_bytes = 61140,
+    strip_prefix = "egui_ltreeview-0.10.0",
+    urls = ["https://static.crates.io/crates/egui_ltreeview/0.10.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_ltreeview-0.8",
-    srcs = [":egui_ltreeview-0.8.0.crate"],
+    name = "egui_ltreeview-0.10",
+    srcs = [":egui_ltreeview-0.10.0.crate"],
     crate = "egui_ltreeview",
-    crate_root = "egui_ltreeview-0.8.0.crate/src/lib.rs",
+    crate_root = "egui_ltreeview-0.10.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "egui_ltreeview",
-        "CARGO_MANIFEST_DIR": "egui_ltreeview-0.8.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_ltreeview-0.10.0.crate",
         "CARGO_PKG_AUTHORS": "Leonard Schüngel <schuengel.leonard@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A tree view widget for egui",
         "CARGO_PKG_NAME": "egui_ltreeview",
         "CARGO_PKG_REPOSITORY": "https://github.com/LennysLounge/egui_ltreeview",
-        "CARGO_PKG_VERSION": "0.8.0",
+        "CARGO_PKG_VERSION": "0.10.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "8",
+        "CARGO_PKG_VERSION_MINOR": "10",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10810,42 +10848,42 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":egui-0.35",
+        ":egui-0.37",
         ":serde-1",
     ],
 )
 
 alias(
     name = "egui_plot",
-    actual = ":egui_plot-0.36",
+    actual = ":egui_plot-0.38",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_plot-0.36.0.crate",
-    sha256 = "302515219c63e7f380058ecc899c5a6b2c5fe9f140ef1d91c3b685c9f0355fa3",
-    size_bytes = 69039,
-    strip_prefix = "egui_plot-0.36.0",
-    urls = ["https://static.crates.io/crates/egui_plot/0.36.0/download"],
+    name = "egui_plot-0.38.0.crate",
+    sha256 = "3c34f8fe086d7e69ce558dcc85f7c7be593092525d01cb30caa560044bc2bbaa",
+    size_bytes = 73708,
+    strip_prefix = "egui_plot-0.38.0",
+    urls = ["https://static.crates.io/crates/egui_plot/0.38.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_plot-0.36",
-    srcs = [":egui_plot-0.36.0.crate"],
+    name = "egui_plot-0.38",
+    srcs = [":egui_plot-0.38.0.crate"],
     crate = "egui_plot",
-    crate_root = "egui_plot-0.36.0.crate/src/lib.rs",
+    crate_root = "egui_plot-0.38.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_plot",
-        "CARGO_MANIFEST_DIR": "egui_plot-0.36.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_plot-0.38.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>:Jan Haller <bromeon@gmail.com>:Sven Niederberger <s-niederberger@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Immediate mode plotting for the egui GUI library",
         "CARGO_PKG_NAME": "egui_plot",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui_plot",
-        "CARGO_PKG_VERSION": "0.36.0",
+        "CARGO_PKG_VERSION": "0.38.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "36",
+        "CARGO_PKG_VERSION_MINOR": "38",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10853,49 +10891,50 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":ahash-0.8",
-        ":egui-0.35",
-        ":emath-0.35",
+        ":egui-0.37",
+        ":emath-0.37",
+        ":nohash-hasher-0.2",
     ],
 )
 
 alias(
     name = "egui_table",
-    actual = ":egui_table-0.9",
+    actual = ":egui_table-0.11",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_table-0.9.0.crate",
-    sha256 = "243d2531d1008c778a5b78d5b46858f70e78229d518885824af40fa673e44a63",
-    size_bytes = 19357,
-    strip_prefix = "egui_table-0.9.0",
-    urls = ["https://static.crates.io/crates/egui_table/0.9.0/download"],
+    name = "egui_table-0.11.0.crate",
+    sha256 = "cee9045e7e294133009949a0ea7977968f05b614daff88d92230393f420621f1",
+    size_bytes = 19749,
+    strip_prefix = "egui_table-0.11.0",
+    urls = ["https://static.crates.io/crates/egui_table/0.11.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_table-0.9",
-    srcs = [":egui_table-0.9.0.crate"],
+    name = "egui_table-0.11",
+    srcs = [":egui_table-0.11.0.crate"],
     crate = "egui_table",
-    crate_root = "egui_table-0.9.0.crate/src/lib.rs",
+    crate_root = "egui_table-0.11.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_table",
-        "CARGO_MANIFEST_DIR": "egui_table-0.9.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_table-0.11.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>:rerun.io <opensource@rerun.io>",
         "CARGO_PKG_DESCRIPTION": "Table viewer for egui",
         "CARGO_PKG_NAME": "egui_table",
-        "CARGO_PKG_REPOSITORY": "https://github.com/rerun-io/egui_table",
-        "CARGO_PKG_VERSION": "0.9.0",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rerun-io/egui_crates",
+        "CARGO_PKG_VERSION": "0.11.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_MINOR": "11",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
     visibility = [],
     deps = [
-        ":egui-0.35",
+        ":egui-0.37",
         ":serde-1",
         ":vec1-1",
     ],
@@ -10903,35 +10942,35 @@ cargo.rust_library(
 
 alias(
     name = "egui_taffy",
-    actual = ":egui_taffy-0.13",
+    actual = ":egui_taffy-0.16",
     visibility = ["PUBLIC"],
 )
 
 http_archive(
-    name = "egui_taffy-0.13.0.crate",
-    sha256 = "b99f11e3e407a1fa2f7d19c69d6260b5a5b9629bce35b05f3a921c7c42462261",
-    size_bytes = 59469,
-    strip_prefix = "egui_taffy-0.13.0",
-    urls = ["https://static.crates.io/crates/egui_taffy/0.13.0/download"],
+    name = "egui_taffy-0.16.0.crate",
+    sha256 = "4562fd4d3f37268901368dbc9170d098ba3af3239b13b33867af7118e007690e",
+    size_bytes = 57671,
+    strip_prefix = "egui_taffy-0.16.0",
+    urls = ["https://static.crates.io/crates/egui_taffy/0.16.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "egui_taffy-0.13",
-    srcs = [":egui_taffy-0.13.0.crate"],
+    name = "egui_taffy-0.16",
+    srcs = [":egui_taffy-0.16.0.crate"],
     crate = "egui_taffy",
-    crate_root = "egui_taffy-0.13.0.crate/src/lib.rs",
+    crate_root = "egui_taffy-0.16.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "egui_taffy",
-        "CARGO_MANIFEST_DIR": "egui_taffy-0.13.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_taffy-0.16.0.crate",
         "CARGO_PKG_AUTHORS": "Pēteris Pakalns",
         "CARGO_PKG_DESCRIPTION": "Grid, Flexbox, Block layout support for egui using taffy",
         "CARGO_PKG_NAME": "egui_taffy",
         "CARGO_PKG_REPOSITORY": "https://github.com/PPakalns/egui_taffy/",
-        "CARGO_PKG_VERSION": "0.13.0",
+        "CARGO_PKG_VERSION": "0.16.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_MINOR": "16",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -10941,11 +10980,11 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":egui-0.35",
+        ":egui-0.37",
         ":log-0.4",
         ":parking_lot-0.12",
         ":stackbox-0.2",
-        ":taffy-0.9",
+        ":taffy-0.15",
     ],
 )
 
@@ -11047,30 +11086,30 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "emath-0.35.0.crate",
-    sha256 = "cd4ec073c9898516584d8c6cfdcee95b530b3d941cd5031ef4050aa36812308b",
-    size_bytes = 34041,
-    strip_prefix = "emath-0.35.0",
-    urls = ["https://static.crates.io/crates/emath/0.35.0/download"],
+    name = "emath-0.37.0.crate",
+    sha256 = "e73ce90f54750be8672c02be0743fe47530e6f251e066f0ee2869b59eb297af5",
+    size_bytes = 34285,
+    strip_prefix = "emath-0.37.0",
+    urls = ["https://static.crates.io/crates/emath/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "emath-0.35",
-    srcs = [":emath-0.35.0.crate"],
+    name = "emath-0.37",
+    srcs = [":emath-0.37.0.crate"],
     crate = "emath",
-    crate_root = "emath-0.35.0.crate/src/lib.rs",
+    crate_root = "emath-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "emath",
-        "CARGO_MANIFEST_DIR": "emath-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "emath-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Minimal 2D math library for GUI work",
         "CARGO_PKG_NAME": "emath",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/emath",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -11662,67 +11701,71 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "enum-map-2.7.3.crate",
-    sha256 = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9",
-    size_bytes = 21792,
-    strip_prefix = "enum-map-2.7.3",
-    urls = ["https://static.crates.io/crates/enum-map/2.7.3/download"],
+    name = "enum-map-3.1.0.crate",
+    sha256 = "d4532960034c15ba2f55e9eee631040ecc473c32e6c4b200828c759840f13a06",
+    size_bytes = 24731,
+    strip_prefix = "enum-map-3.1.0",
+    urls = ["https://static.crates.io/crates/enum-map/3.1.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "enum-map-2",
-    srcs = [":enum-map-2.7.3.crate"],
+    name = "enum-map-3",
+    srcs = [":enum-map-3.1.0.crate"],
     crate = "enum_map",
-    crate_root = "enum-map-2.7.3.crate/src/lib.rs",
-    edition = "2021",
+    crate_root = "enum-map-3.1.0.crate/src/lib.rs",
+    edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "enum_map",
-        "CARGO_MANIFEST_DIR": "enum-map-2.7.3.crate",
-        "CARGO_PKG_AUTHORS": "Kamila Borowska <kamila@borowska.pw>",
+        "CARGO_MANIFEST_DIR": "enum-map-3.1.0.crate",
+        "CARGO_PKG_AUTHORS": "Luna Borowska <luna@borowska.pw>",
         "CARGO_PKG_DESCRIPTION": "A map with C-like enum keys represented internally as an array",
         "CARGO_PKG_NAME": "enum-map",
-        "CARGO_PKG_REPOSITORY": "https://codeberg.org/xfix/enum-map",
-        "CARGO_PKG_VERSION": "2.7.3",
-        "CARGO_PKG_VERSION_MAJOR": "2",
-        "CARGO_PKG_VERSION_MINOR": "7",
-        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_REPOSITORY": "https://codeberg.org/sugar700/enum-map",
+        "CARGO_PKG_VERSION": "3.1.0",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["serde"],
+    features = [
+        "default",
+        "derive",
+        "serde",
+    ],
     visibility = [],
     deps = [
-        ":enum-map-derive-0.17",
+        ":enum-map-derive-1",
         ":serde-1",
     ],
 )
 
 http_archive(
-    name = "enum-map-derive-0.17.0.crate",
-    sha256 = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb",
-    size_bytes = 10781,
-    strip_prefix = "enum-map-derive-0.17.0",
-    urls = ["https://static.crates.io/crates/enum-map-derive/0.17.0/download"],
+    name = "enum-map-derive-1.0.1.crate",
+    sha256 = "7127272f64b3e098f7d81f350d672081b879bff896d219c42370dc858b1af9ff",
+    size_bytes = 11351,
+    strip_prefix = "enum-map-derive-1.0.1",
+    urls = ["https://static.crates.io/crates/enum-map-derive/1.0.1/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "enum-map-derive-0.17",
-    srcs = [":enum-map-derive-0.17.0.crate"],
+    name = "enum-map-derive-1",
+    srcs = [":enum-map-derive-1.0.1.crate"],
     crate = "enum_map_derive",
-    crate_root = "enum-map-derive-0.17.0.crate/src/lib.rs",
-    edition = "2021",
+    crate_root = "enum-map-derive-1.0.1.crate/src/lib.rs",
+    edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "enum_map_derive",
-        "CARGO_MANIFEST_DIR": "enum-map-derive-0.17.0.crate",
-        "CARGO_PKG_AUTHORS": "Kamila Borowska <kamila@borowska.pw>",
+        "CARGO_MANIFEST_DIR": "enum-map-derive-1.0.1.crate",
+        "CARGO_PKG_AUTHORS": "Luna Borowska <luna@borowska.pw>",
         "CARGO_PKG_DESCRIPTION": "Macros 1.1 implementation of #[derive(Enum)]",
         "CARGO_PKG_NAME": "enum-map-derive",
-        "CARGO_PKG_REPOSITORY": "https://codeberg.org/xfix/enum-map",
-        "CARGO_PKG_VERSION": "0.17.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "17",
-        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_REPOSITORY": "https://codeberg.org/sugar700/enum-map",
+        "CARGO_PKG_VERSION": "1.0.1",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
@@ -11730,7 +11773,7 @@ cargo.rust_library(
     deps = [
         ":proc-macro2-1",
         ":quote-1",
-        ":syn-2",
+        ":syn-3",
     ],
 )
 
@@ -11882,30 +11925,30 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "epaint-0.35.0.crate",
-    sha256 = "4e60a8888b51da911df23918fd7301359b1d43a406a0ff3b8863af093dd7fc6c",
-    size_bytes = 123341,
-    strip_prefix = "epaint-0.35.0",
-    urls = ["https://static.crates.io/crates/epaint/0.35.0/download"],
+    name = "epaint-0.37.0.crate",
+    sha256 = "97bac86ae3dde93fc3951e790951caea739ff39a6c89d909cdaf1d9278dbb1bd",
+    size_bytes = 155411,
+    strip_prefix = "epaint-0.37.0",
+    urls = ["https://static.crates.io/crates/epaint/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "epaint-0.35",
-    srcs = [":epaint-0.35.0.crate"],
+    name = "epaint-0.37",
+    srcs = [":epaint-0.37.0.crate"],
     crate = "epaint",
-    crate_root = "epaint-0.35.0.crate/src/lib.rs",
+    crate_root = "epaint-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "epaint",
-        "CARGO_MANIFEST_DIR": "epaint-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "epaint-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Minimal 2D graphics library for GUI work",
         "CARGO_PKG_NAME": "epaint",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/epaint",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -11913,59 +11956,65 @@ cargo.rust_library(
         "bytemuck",
         "default_fonts",
         "epaint_default_fonts",
+        "monochrome_emoji_fonts",
         "serde",
     ],
     visibility = [],
     deps = [
         ":ahash-0.8",
         ":bytemuck-1",
-        ":ecolor-0.35",
-        ":emath-0.35",
-        ":epaint_default_fonts-0.35",
-        ":font-types-0.11",
-        ":harfrust-0.7",
+        ":ecolor-0.37",
+        ":emath-0.37",
+        ":epaint_default_fonts-0.37",
+        ":font-types-0.12",
+        ":harfrust-0.12",
         ":log-0.4",
         ":nohash-hasher-0.2",
         ":parking_lot-0.12",
         ":profiling-1",
         ":self_cell-1",
         ":serde-1",
-        ":skrifa-0.42",
+        ":skrifa-0.44",
         ":smallvec-1",
         ":unicode-general-category-1",
+        ":unicode-properties-0.1",
         ":unicode-segmentation-1",
-        ":vello_cpu-0.0.9",
+        ":vello_cpu-0.2",
     ],
 )
 
 http_archive(
-    name = "epaint_default_fonts-0.35.0.crate",
-    sha256 = "13ee4e1f553a3584c301f3a56ff1a775f1384781396cea301c8d952e9b93f560",
-    size_bytes = 790153,
-    strip_prefix = "epaint_default_fonts-0.35.0",
-    urls = ["https://static.crates.io/crates/epaint_default_fonts/0.35.0/download"],
+    name = "epaint_default_fonts-0.37.0.crate",
+    sha256 = "cfc1cc505827f4c23eedc297975a0fd038268d41293f389dd8ff3b574aefab19",
+    size_bytes = 793050,
+    strip_prefix = "epaint_default_fonts-0.37.0",
+    urls = ["https://static.crates.io/crates/epaint_default_fonts/0.37.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "epaint_default_fonts-0.35",
-    srcs = [":epaint_default_fonts-0.35.0.crate"],
+    name = "epaint_default_fonts-0.37",
+    srcs = [":epaint_default_fonts-0.37.0.crate"],
     crate = "epaint_default_fonts",
-    crate_root = "epaint_default_fonts-0.35.0.crate/src/lib.rs",
+    crate_root = "epaint_default_fonts-0.37.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "epaint_default_fonts",
-        "CARGO_MANIFEST_DIR": "epaint_default_fonts-0.35.0.crate",
+        "CARGO_MANIFEST_DIR": "epaint_default_fonts-0.37.0.crate",
         "CARGO_PKG_AUTHORS": "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Default fonts for use in epaint / egui",
         "CARGO_PKG_NAME": "epaint_default_fonts",
         "CARGO_PKG_REPOSITORY": "https://github.com/emilk/egui/tree/main/crates/epaint_default_fonts",
-        "CARGO_PKG_VERSION": "0.35.0",
+        "CARGO_PKG_VERSION": "0.37.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "35",
+        "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "default",
+        "monochrome_emoji_fonts",
+    ],
     visibility = [],
 )
 
@@ -13175,6 +13224,42 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "11",
         "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "bytemuck",
+        "std",
+    ],
+    visibility = [],
+    deps = [":bytemuck-1"],
+)
+
+http_archive(
+    name = "font-types-0.12.7.crate",
+    sha256 = "835ae9d781464a79026cde387f9cbc650c9a4909d7cf7e658b127e3c35d2f35d",
+    size_bytes = 33312,
+    strip_prefix = "font-types-0.12.7",
+    urls = ["https://static.crates.io/crates/font-types/0.12.7/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "font-types-0.12",
+    srcs = [":font-types-0.12.7.crate"],
+    crate = "font_types",
+    crate_root = "font-types-0.12.7.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "font_types",
+        "CARGO_MANIFEST_DIR": "font-types-0.12.7.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Scalar types used in fonts.",
+        "CARGO_PKG_NAME": "font-types",
+        "CARGO_PKG_REPOSITORY": "https://github.com/googlefonts/fontations",
+        "CARGO_PKG_VERSION": "0.12.7",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "12",
+        "CARGO_PKG_VERSION_PATCH": "7",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15091,78 +15176,6 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpu-descriptor-0.3.2.crate",
-    sha256 = "b89c83349105e3732062a895becfc71a8f921bb71ecbbdd8ff99263e3b53a0ca",
-    size_bytes = 7943,
-    strip_prefix = "gpu-descriptor-0.3.2",
-    urls = ["https://static.crates.io/crates/gpu-descriptor/0.3.2/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "gpu-descriptor-0.3",
-    srcs = [":gpu-descriptor-0.3.2.crate"],
-    crate = "gpu_descriptor",
-    crate_root = "gpu-descriptor-0.3.2.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "gpu_descriptor",
-        "CARGO_MANIFEST_DIR": "gpu-descriptor-0.3.2.crate",
-        "CARGO_PKG_AUTHORS": "Zakarum <zakarumych@ya.ru>",
-        "CARGO_PKG_DESCRIPTION": "Implementation agnostic descriptor allocator for Vulkan like APIs",
-        "CARGO_PKG_NAME": "gpu-descriptor",
-        "CARGO_PKG_REPOSITORY": "https://github.com/zakarumych/gpu-descriptor",
-        "CARGO_PKG_VERSION": "0.3.2",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "3",
-        "CARGO_PKG_VERSION_PATCH": "2",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "std",
-    ],
-    visibility = [],
-    deps = [
-        ":bitflags-2",
-        ":gpu-descriptor-types-0.2",
-        ":hashbrown-0.15",
-    ],
-)
-
-http_archive(
-    name = "gpu-descriptor-types-0.2.0.crate",
-    sha256 = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91",
-    size_bytes = 2169,
-    strip_prefix = "gpu-descriptor-types-0.2.0",
-    urls = ["https://static.crates.io/crates/gpu-descriptor-types/0.2.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "gpu-descriptor-types-0.2",
-    srcs = [":gpu-descriptor-types-0.2.0.crate"],
-    crate = "gpu_descriptor_types",
-    crate_root = "gpu-descriptor-types-0.2.0.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "gpu_descriptor_types",
-        "CARGO_MANIFEST_DIR": "gpu-descriptor-types-0.2.0.crate",
-        "CARGO_PKG_AUTHORS": "Zakarum <zakarumych@ya.ru>",
-        "CARGO_PKG_DESCRIPTION": "Core types of gpu-descriptor crate",
-        "CARGO_PKG_NAME": "gpu-descriptor-types",
-        "CARGO_PKG_REPOSITORY": "https://github.com/zakarumych/gpu-descriptor",
-        "CARGO_PKG_VERSION": "0.2.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [":bitflags-2"],
-)
-
 alias(
     name = "gpu-video",
     actual = ":gpu-video-0.4",
@@ -15198,7 +15211,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :gpu-video-0.4-build-script-run[out_dir])",
     },
-    features = ["wgpu"],
     platform = {
         "linux-x86_64": dict(
             deps = [
@@ -15224,7 +15236,6 @@ cargo.rust_library(
         ":rustc-hash-2",
         ":thiserror-1",
         ":tracing-0.1",
-        ":wgpu-29",
     ],
 )
 
@@ -15247,7 +15258,6 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["wgpu"],
     visibility = [],
     deps = [":cfg_aliases-0.2"],
 )
@@ -15265,7 +15275,6 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["wgpu"],
     version = "0.4.0",
 )
 
@@ -16837,38 +16846,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "grid-1.0.1.crate",
-    sha256 = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5",
-    size_bytes = 28149,
-    strip_prefix = "grid-1.0.1",
-    urls = ["https://static.crates.io/crates/grid/1.0.1/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "grid-1",
-    srcs = [":grid-1.0.1.crate"],
-    crate = "grid",
-    crate_root = "grid-1.0.1.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "grid",
-        "CARGO_MANIFEST_DIR": "grid-1.0.1.crate",
-        "CARGO_PKG_AUTHORS": "Armin Becher <armin.becher@gmai.com>",
-        "CARGO_PKG_DESCRIPTION": "Dynamic generic 2D data structure.",
-        "CARGO_PKG_NAME": "grid",
-        "CARGO_PKG_REPOSITORY": "https://github.com/becheran/grid",
-        "CARGO_PKG_VERSION": "1.0.1",
-        "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "1",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["std"],
-    visibility = [],
-)
-
-http_archive(
     name = "group-0.13.0.crate",
     sha256 = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63",
     size_bytes = 16526,
@@ -17109,30 +17086,30 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "harfrust-0.7.0.crate",
-    sha256 = "0431e8e389aa0f1e72bb9d1c2db8957a1a7a3580e8ed97db819c14837aac9b3e",
-    size_bytes = 279283,
-    strip_prefix = "harfrust-0.7.0",
-    urls = ["https://static.crates.io/crates/harfrust/0.7.0/download"],
+    name = "harfrust-0.12.0.crate",
+    sha256 = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9",
+    size_bytes = 291579,
+    strip_prefix = "harfrust-0.12.0",
+    urls = ["https://static.crates.io/crates/harfrust/0.12.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "harfrust-0.7",
-    srcs = [":harfrust-0.7.0.crate"],
+    name = "harfrust-0.12",
+    srcs = [":harfrust-0.12.0.crate"],
     crate = "harfrust",
-    crate_root = "harfrust-0.7.0.crate/src/lib.rs",
+    crate_root = "harfrust-0.12.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "harfrust",
-        "CARGO_MANIFEST_DIR": "harfrust-0.7.0.crate",
+        "CARGO_MANIFEST_DIR": "harfrust-0.12.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A complete HarfBuzz shaping algorithm port to Rust.",
         "CARGO_PKG_NAME": "harfrust",
         "CARGO_PKG_REPOSITORY": "https://github.com/harfbuzz/harfrust",
-        "CARGO_PKG_VERSION": "0.7.0",
+        "CARGO_PKG_VERSION": "0.12.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "7",
+        "CARGO_PKG_VERSION_MINOR": "12",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
@@ -17144,7 +17121,7 @@ cargo.rust_library(
     deps = [
         ":bitflags-2",
         ":bytemuck-1",
-        ":read-fonts-0.39",
+        ":read-fonts-0.41",
         ":smallvec-1",
     ],
 )
@@ -17285,9 +17262,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "default-hasher",
         "equivalent",
-        "inline-more",
         "raw-entry",
         "serde",
     ],
@@ -17296,21 +17271,34 @@ cargo.rust_library(
             features = [
                 "allocator-api2",
                 "default",
+                "default-hasher",
+                "inline-more",
             ],
-            deps = [":allocator-api2-0.2"],
+            deps = [
+                ":allocator-api2-0.2",
+                ":foldhash-0.2",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = ["default-hasher"],
+            deps = [":foldhash-0.2"],
         ),
         "windows-msvc": dict(
             features = [
                 "allocator-api2",
                 "default",
+                "default-hasher",
+                "inline-more",
             ],
-            deps = [":allocator-api2-0.2"],
+            deps = [
+                ":allocator-api2-0.2",
+                ":foldhash-0.2",
+            ],
         ),
     },
     visibility = [],
     deps = [
         ":equivalent-1",
-        ":foldhash-0.2",
         ":serde_core-1",
     ],
 )
@@ -17669,37 +17657,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
         "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-)
-
-http_archive(
-    name = "hexf-parse-0.2.1.crate",
-    sha256 = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df",
-    size_bytes = 4662,
-    strip_prefix = "hexf-parse-0.2.1",
-    urls = ["https://static.crates.io/crates/hexf-parse/0.2.1/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "hexf-parse-0.2",
-    srcs = [":hexf-parse-0.2.1.crate"],
-    crate = "hexf_parse",
-    crate_root = "hexf-parse-0.2.1.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "hexf_parse",
-        "CARGO_MANIFEST_DIR": "hexf-parse-0.2.1.crate",
-        "CARGO_PKG_AUTHORS": "Kang Seonghoon <public+rust@mearie.org>",
-        "CARGO_PKG_DESCRIPTION": "Parses hexadecimal floats (see also hexf)",
-        "CARGO_PKG_NAME": "hexf-parse",
-        "CARGO_PKG_REPOSITORY": "https://github.com/lifthrasiir/hexf",
-        "CARGO_PKG_VERSION": "0.2.1",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -20994,6 +20951,43 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "itertools-0.15.0.crate",
+    sha256 = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc",
+    size_bytes = 164131,
+    strip_prefix = "itertools-0.15.0",
+    urls = ["https://static.crates.io/crates/itertools/0.15.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "itertools-0.15",
+    srcs = [":itertools-0.15.0.crate"],
+    crate = "itertools",
+    crate_root = "itertools-0.15.0.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "itertools",
+        "CARGO_MANIFEST_DIR": "itertools-0.15.0.crate",
+        "CARGO_PKG_AUTHORS": "bluss",
+        "CARGO_PKG_DESCRIPTION": "Extra iterator adaptors, iterator methods, free functions, and macros.",
+        "CARGO_PKG_NAME": "itertools",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-itertools/itertools",
+        "CARGO_PKG_VERSION": "0.15.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "15",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "use_alloc",
+        "use_std",
+    ],
+    visibility = [],
+    deps = [":either-1"],
+)
+
+http_archive(
     name = "itoa-1.0.18.crate",
     sha256 = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
     size_bytes = 15935,
@@ -21638,38 +21632,38 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "kittest-0.4.0.crate",
-    sha256 = "90ceaa75eb0036a32b6b9833962eb18137449e9817e2e586006471925b727fd5",
-    size_bytes = 13413,
-    strip_prefix = "kittest-0.4.0",
-    urls = ["https://static.crates.io/crates/kittest/0.4.0/download"],
+    name = "kittest-0.5.0.crate",
+    sha256 = "0bb81a721ba76aa095b7f45deb180504f786904e56ca4b8e141f66eb89a78b75",
+    size_bytes = 13637,
+    strip_prefix = "kittest-0.5.0",
+    urls = ["https://static.crates.io/crates/kittest/0.5.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "kittest-0.4",
-    srcs = [":kittest-0.4.0.crate"],
+    name = "kittest-0.5",
+    srcs = [":kittest-0.5.0.crate"],
     crate = "kittest",
-    crate_root = "kittest-0.4.0.crate/src/lib.rs",
+    crate_root = "kittest-0.5.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "kittest",
-        "CARGO_MANIFEST_DIR": "kittest-0.4.0.crate",
+        "CARGO_MANIFEST_DIR": "kittest-0.5.0.crate",
         "CARGO_PKG_AUTHORS": "Lucas Meurer:rerun.io <opensource@rerun.io>",
         "CARGO_PKG_DESCRIPTION": "Automated GUI testing using AccessKit",
         "CARGO_PKG_NAME": "kittest",
         "CARGO_PKG_REPOSITORY": "https://github.com/rerun-io/kittest",
-        "CARGO_PKG_VERSION": "0.4.0",
+        "CARGO_PKG_VERSION": "0.5.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_MINOR": "5",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
     visibility = [],
     deps = [
-        ":accesskit-0.24",
-        ":accesskit_consumer-0.35",
+        ":accesskit-0.25",
+        ":accesskit_consumer-0.39",
     ],
 )
 
@@ -25003,179 +24997,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "naga-29.0.4.crate",
-    sha256 = "b2bf919621e7975acb27d881bae2fb993e0d45c8e0446e85e6272971e00dc8df",
-    size_bytes = 842943,
-    strip_prefix = "naga-29.0.4",
-    urls = ["https://static.crates.io/crates/naga/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "naga-29",
-    srcs = [":naga-29.0.4.crate"],
-    crate = "naga",
-    crate_root = "naga-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "naga",
-        "CARGO_MANIFEST_DIR": "naga-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Shader translator and validator. Part of the wgpu project",
-        "CARGO_PKG_NAME": "naga",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :naga-29-build-script-run[out_dir])",
-    },
-    features = [
-        "default",
-        "wgsl-in",
-        "wgsl-out",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-            deps = [":spirv-0.4"],
-        ),
-        "macos-arm64": dict(
-            features = ["msl-out"],
-        ),
-        "wasm32": dict(
-            features = ["glsl-out"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-            deps = [":spirv-0.4"],
-        ),
-    },
-    rustc_flags = ["@$(location :naga-29-build-script-run[rustc_flags])"],
-    visibility = [],
-    deps = [
-        ":arrayvec-0.7",
-        ":bit-set-0.9",
-        ":bitflags-2",
-        ":cfg-if-1",
-        ":codespan-reporting-0.13",
-        ":half-2",
-        ":hashbrown-0.16",
-        ":hexf-parse-0.2",
-        ":indexmap-2",
-        ":libm-0.2",
-        ":log-0.4",
-        ":num-traits-0.2",
-        ":once_cell-1",
-        ":rustc-hash-1",
-        ":thiserror-2",
-        ":unicode-ident-1",
-    ],
-)
-
-cargo.rust_binary(
-    name = "naga-29-build-script-build",
-    srcs = [":naga-29.0.4.crate"],
-    crate = "build_script_build",
-    crate_root = "naga-29.0.4.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "naga-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Shader translator and validator. Part of the wgpu project",
-        "CARGO_PKG_NAME": "naga",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "wgsl-in",
-        "wgsl-out",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = ["msl-out"],
-        ),
-        "wasm32": dict(
-            features = ["glsl-out"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-        ),
-    },
-    visibility = [],
-    deps = [":cfg_aliases-0.2"],
-)
-
-buildscript_run(
-    name = "naga-29-build-script-run",
-    package_name = "naga",
-    buildscript_rule = ":naga-29-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Shader translator and validator. Part of the wgpu project",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "wgsl-in",
-        "wgsl-out",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = ["msl-out"],
-        ),
-        "wasm32": dict(
-            features = ["glsl-out"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "glsl-out",
-                "hlsl-out",
-                "spv-out",
-            ],
-        ),
-    },
-    version = "29.0.4",
-)
-
-http_archive(
     name = "naga-30.0.1.crate",
     sha256 = "a616d2fb8c89516ac2723a581f69d6c18576046bed761bd6b305e5618e6ae130",
     size_bytes = 871520,
@@ -25206,13 +25027,30 @@ cargo.rust_library(
     },
     features = [
         "default",
-        "glsl-out",
         "wgsl-in",
         "wgsl-out",
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["spv-out"],
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
+            deps = [":spirv-0.4"],
+        ),
+        "macos-arm64": dict(
+            features = ["msl-out"],
+        ),
+        "wasm32": dict(
+            features = ["glsl-out"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
             deps = [":spirv-0.4"],
         ),
     },
@@ -25259,13 +25097,29 @@ cargo.rust_binary(
     },
     features = [
         "default",
-        "glsl-out",
         "wgsl-in",
         "wgsl-out",
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["spv-out"],
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = ["msl-out"],
+        ),
+        "wasm32": dict(
+            features = ["glsl-out"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
         ),
     },
     visibility = [],
@@ -25287,13 +25141,29 @@ buildscript_run(
     },
     features = [
         "default",
-        "glsl-out",
         "wgsl-in",
         "wgsl-out",
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["spv-out"],
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = ["msl-out"],
+        ),
+        "wasm32": dict(
+            features = ["glsl-out"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "glsl-out",
+                "hlsl-out",
+                "spv-out",
+            ],
         ),
     },
     version = "30.0.1",
@@ -30332,6 +30202,39 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "os_pipe-1.2.3.crate",
+    sha256 = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967",
+    size_bytes = 10467,
+    strip_prefix = "os_pipe-1.2.3",
+    urls = ["https://static.crates.io/crates/os_pipe/1.2.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "os_pipe-1",
+    srcs = [":os_pipe-1.2.3.crate"],
+    crate = "os_pipe",
+    crate_root = "os_pipe-1.2.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "os_pipe",
+        "CARGO_MANIFEST_DIR": "os_pipe-1.2.3.crate",
+        "CARGO_PKG_AUTHORS": "Jack O'Connor",
+        "CARGO_PKG_DESCRIPTION": "a cross-platform library for opening OS pipes",
+        "CARGO_PKG_NAME": "os_pipe",
+        "CARGO_PKG_REPOSITORY": "https://github.com/oconnor663/os_pipe.rs",
+        "CARGO_PKG_VERSION": "1.2.3",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["io_safety"],
+    visibility = [],
+    deps = [":libc-0.2"],
+)
+
+http_archive(
     name = "owned_ttf_parser-0.25.1.crate",
     sha256 = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b",
     size_bytes = 8989,
@@ -31236,6 +31139,47 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "phf-0.14.0.crate",
+    sha256 = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6",
+    size_bytes = 27393,
+    strip_prefix = "phf-0.14.0",
+    urls = ["https://static.crates.io/crates/phf/0.14.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "phf-0.14",
+    srcs = [":phf-0.14.0.crate"],
+    crate = "phf",
+    crate_root = "phf-0.14.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "phf",
+        "CARGO_MANIFEST_DIR": "phf-0.14.0.crate",
+        "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Runtime support for perfect hash function data structures",
+        "CARGO_PKG_NAME": "phf",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-phf/rust-phf",
+        "CARGO_PKG_VERSION": "0.14.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "14",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "macros",
+        "phf_macros",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":phf_macros-0.14",
+        ":phf_shared-0.14",
+    ],
+)
+
+http_archive(
     name = "phf_codegen-0.11.3.crate",
     sha256 = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a",
     size_bytes = 13741,
@@ -31341,6 +31285,41 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "phf_generator-0.14.0.crate",
+    sha256 = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100",
+    size_bytes = 20446,
+    strip_prefix = "phf_generator-0.14.0",
+    urls = ["https://static.crates.io/crates/phf_generator/0.14.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "phf_generator-0.14",
+    srcs = [":phf_generator-0.14.0.crate"],
+    crate = "phf_generator",
+    crate_root = "phf_generator-0.14.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "phf_generator",
+        "CARGO_MANIFEST_DIR": "phf_generator-0.14.0.crate",
+        "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "PHF generation logic",
+        "CARGO_PKG_NAME": "phf_generator",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-phf/rust-phf",
+        "CARGO_PKG_VERSION": "0.14.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "14",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":fastrand-2",
+        ":phf_shared-0.14",
+    ],
+)
+
+http_archive(
     name = "phf_macros-0.13.1.crate",
     sha256 = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef",
     size_bytes = 21732,
@@ -31373,6 +31352,45 @@ cargo.rust_library(
     deps = [
         ":phf_generator-0.13",
         ":phf_shared-0.13",
+        ":proc-macro2-1",
+        ":quote-1",
+        ":syn-2",
+    ],
+)
+
+http_archive(
+    name = "phf_macros-0.14.0.crate",
+    sha256 = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085",
+    size_bytes = 23963,
+    strip_prefix = "phf_macros-0.14.0",
+    urls = ["https://static.crates.io/crates/phf_macros/0.14.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "phf_macros-0.14",
+    srcs = [":phf_macros-0.14.0.crate"],
+    crate = "phf_macros",
+    crate_root = "phf_macros-0.14.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "phf_macros",
+        "CARGO_MANIFEST_DIR": "phf_macros-0.14.0.crate",
+        "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Macros to generate types in the phf crate",
+        "CARGO_PKG_NAME": "phf_macros",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-phf/rust-phf",
+        "CARGO_PKG_VERSION": "0.14.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "14",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":phf_generator-0.14",
+        ":phf_shared-0.14",
         ":proc-macro2-1",
         ":quote-1",
         ":syn-2",
@@ -31445,6 +31463,39 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "13",
         "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["std"],
+    visibility = [],
+    deps = [":siphasher-1"],
+)
+
+http_archive(
+    name = "phf_shared-0.14.0.crate",
+    sha256 = "c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89",
+    size_bytes = 20291,
+    strip_prefix = "phf_shared-0.14.0",
+    urls = ["https://static.crates.io/crates/phf_shared/0.14.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "phf_shared-0.14",
+    srcs = [":phf_shared-0.14.0.crate"],
+    crate = "phf_shared",
+    crate_root = "phf_shared-0.14.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "phf_shared",
+        "CARGO_MANIFEST_DIR": "phf_shared-0.14.0.crate",
+        "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Support code shared by PHF libraries",
+        "CARGO_PKG_NAME": "phf_shared",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-phf/rust-phf",
+        "CARGO_PKG_VERSION": "0.14.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "14",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
@@ -32110,6 +32161,37 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "4",
         "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+)
+
+http_archive(
+    name = "pollster-1.0.1.crate",
+    sha256 = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336",
+    size_bytes = 10102,
+    strip_prefix = "pollster-1.0.1",
+    urls = ["https://static.crates.io/crates/pollster/1.0.1/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "pollster-1",
+    srcs = [":pollster-1.0.1.crate"],
+    crate = "pollster",
+    crate_root = "pollster-1.0.1.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "pollster",
+        "CARGO_MANIFEST_DIR": "pollster-1.0.1.crate",
+        "CARGO_PKG_AUTHORS": "Joshua Barretto <joshua@jsbarretto.com>",
+        "CARGO_PKG_DESCRIPTION": "Synchronously block the thread until a future completes",
+        "CARGO_PKG_NAME": "pollster",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zesterer/pollster",
+        "CARGO_PKG_VERSION": "1.0.1",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -34961,38 +35043,42 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "read-fonts-0.39.2.crate",
-    sha256 = "c4ed38b89c2c77ff968c524145ad65fb010f38af5c7a224b53b81d47ac2daa81",
-    size_bytes = 540506,
-    strip_prefix = "read-fonts-0.39.2",
-    urls = ["https://static.crates.io/crates/read-fonts/0.39.2/download"],
+    name = "read-fonts-0.41.0.crate",
+    sha256 = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709",
+    size_bytes = 567271,
+    strip_prefix = "read-fonts-0.41.0",
+    urls = ["https://static.crates.io/crates/read-fonts/0.41.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "read-fonts-0.39",
-    srcs = [":read-fonts-0.39.2.crate"],
+    name = "read-fonts-0.41",
+    srcs = [":read-fonts-0.41.0.crate"],
     crate = "read_fonts",
-    crate_root = "read-fonts-0.39.2.crate/src/lib.rs",
+    crate_root = "read-fonts-0.41.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "read_fonts",
-        "CARGO_MANIFEST_DIR": "read-fonts-0.39.2.crate",
+        "CARGO_MANIFEST_DIR": "read-fonts-0.41.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Reading OpenType font files.",
         "CARGO_PKG_NAME": "read-fonts",
         "CARGO_PKG_REPOSITORY": "https://github.com/googlefonts/fontations",
-        "CARGO_PKG_VERSION": "0.39.2",
+        "CARGO_PKG_VERSION": "0.41.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "39",
-        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_MINOR": "41",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["std"],
+    features = [
+        "experimental_font_api",
+        "std",
+    ],
     visibility = [],
     deps = [
         ":bytemuck-1",
-        ":font-types-0.11",
+        ":font-types-0.12",
+        ":once_cell-1",
     ],
 )
 
@@ -40680,31 +40766,31 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "skrifa-0.42.1.crate",
-    sha256 = "0c34617370ae968efb7161bb2beb517d9084659aae19e24b89e3db25b46e4564",
-    size_bytes = 292014,
-    strip_prefix = "skrifa-0.42.1",
-    urls = ["https://static.crates.io/crates/skrifa/0.42.1/download"],
+    name = "skrifa-0.44.0.crate",
+    sha256 = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68",
+    size_bytes = 299025,
+    strip_prefix = "skrifa-0.44.0",
+    urls = ["https://static.crates.io/crates/skrifa/0.44.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "skrifa-0.42",
-    srcs = [":skrifa-0.42.1.crate"],
+    name = "skrifa-0.44",
+    srcs = [":skrifa-0.44.0.crate"],
     crate = "skrifa",
-    crate_root = "skrifa-0.42.1.crate/src/lib.rs",
+    crate_root = "skrifa-0.44.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "skrifa",
-        "CARGO_MANIFEST_DIR": "skrifa-0.42.1.crate",
+        "CARGO_MANIFEST_DIR": "skrifa-0.44.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Metadata reader and glyph scaler for OpenType fonts.",
         "CARGO_PKG_NAME": "skrifa",
         "CARGO_PKG_REPOSITORY": "https://github.com/googlefonts/fontations",
-        "CARGO_PKG_VERSION": "0.42.1",
+        "CARGO_PKG_VERSION": "0.44.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "42",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_MINOR": "44",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -40714,7 +40800,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":bytemuck-1",
-        ":read-fonts-0.39",
+        ":read-fonts-0.41",
     ],
 )
 
@@ -42470,7 +42556,7 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":skrifa-0.42",
+        ":skrifa-0.40",
         ":yazi-0.2",
         ":zeno-0.3",
     ],
@@ -43008,52 +43094,6 @@ buildscript_run(
 )
 
 http_archive(
-    name = "taffy-0.9.2.crate",
-    sha256 = "41ba83ebaf2954d31d05d67340fd46cebe99da2b7133b0dd68d70c65473a437b",
-    size_bytes = 157538,
-    strip_prefix = "taffy-0.9.2",
-    urls = ["https://static.crates.io/crates/taffy/0.9.2/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "taffy-0.9",
-    srcs = [":taffy-0.9.2.crate"],
-    crate = "taffy",
-    crate_root = "taffy-0.9.2.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "taffy",
-        "CARGO_MANIFEST_DIR": "taffy-0.9.2.crate",
-        "CARGO_PKG_AUTHORS": "Alice Cecile <alice.i.cecile@gmail.com>:Johnathan Kelley <jkelleyrtp@gmail.com>:Nico Burns <nico@nicoburns.com>",
-        "CARGO_PKG_DESCRIPTION": "A flexible UI layout library ",
-        "CARGO_PKG_NAME": "taffy",
-        "CARGO_PKG_REPOSITORY": "https://github.com/DioxusLabs/taffy",
-        "CARGO_PKG_VERSION": "0.9.2",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "2",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "alloc",
-        "block_layout",
-        "content_size",
-        "detailed_layout_info",
-        "flexbox",
-        "grid",
-        "std",
-        "taffy_tree",
-    ],
-    visibility = [],
-    deps = [
-        ":arrayvec-0.7",
-        ":grid-1",
-        ":slotmap-1",
-    ],
-)
-
-http_archive(
     name = "taffy-0.15.0.crate",
     sha256 = "3c8480887e8803986d96a7173729565520d4bbb721ad6b7ad6941a22897207aa",
     size_bytes = 268676,
@@ -43084,6 +43124,7 @@ cargo.rust_library(
     features = [
         "block_layout",
         "content_size",
+        "detailed_layout_info",
         "flexbox",
         "float_layout",
         "grid",
@@ -45433,6 +45474,42 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "tree_magic_mini-3.2.2.crate",
+    sha256 = "b8765b90061cba6c22b5831f675da109ae5561588290f9fa2317adab2714d5a6",
+    size_bytes = 16074,
+    strip_prefix = "tree_magic_mini-3.2.2",
+    urls = ["https://static.crates.io/crates/tree_magic_mini/3.2.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "tree_magic_mini-3",
+    srcs = [":tree_magic_mini-3.2.2.crate"],
+    crate = "tree_magic_mini",
+    crate_root = "tree_magic_mini-3.2.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "tree_magic_mini",
+        "CARGO_MANIFEST_DIR": "tree_magic_mini-3.2.2.crate",
+        "CARGO_PKG_AUTHORS": "Matt Brubeck <mbrubeck@limpet.net>:Allison Hancock <aahancoc@umich.edu>",
+        "CARGO_PKG_DESCRIPTION": "Determines the MIME type of a file by traversing a filetype tree.",
+        "CARGO_PKG_NAME": "tree_magic_mini",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mbrubeck/tree_magic/",
+        "CARGO_PKG_VERSION": "3.2.2",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":memchr-2",
+        ":nom-8",
+        ":petgraph-0.8",
+    ],
+)
+
+http_archive(
     name = "triomphe-0.1.16.crate",
     sha256 = "b40688ea6389c8171614b25491f71d4a27946e0c7ce2da1c6de27e25abf1a0ae",
     size_bytes = 37467,
@@ -46258,40 +46335,40 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "unicode-properties-0.1.3.crate",
-    sha256 = "e70f2a8b45122e719eb623c01822704c4e0907e7e426a05927e1a1cfff5b75d0",
-    size_bytes = 42252,
-    strip_prefix = "unicode-properties-0.1.3",
-    urls = ["https://static.crates.io/crates/unicode-properties/0.1.3/download"],
+    name = "unicode-properties-0.1.5.crate",
+    sha256 = "993ad287eb20e8ba755312801cfe1413e0f25d604075863acaddca10b04c1833",
+    size_bytes = 40636,
+    strip_prefix = "unicode-properties-0.1.5",
+    urls = ["https://static.crates.io/crates/unicode-properties/0.1.5/download"],
     visibility = [],
 )
 
 cargo.rust_library(
     name = "unicode-properties-0.1",
-    srcs = [":unicode-properties-0.1.3.crate"],
+    srcs = [":unicode-properties-0.1.5.crate"],
     crate = "unicode_properties",
-    crate_root = "unicode-properties-0.1.3.crate/src/lib.rs",
+    crate_root = "unicode-properties-0.1.5.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "unicode_properties",
-        "CARGO_MANIFEST_DIR": "unicode-properties-0.1.3.crate",
+        "CARGO_MANIFEST_DIR": "unicode-properties-0.1.5.crate",
         "CARGO_PKG_AUTHORS": "Charles Lew <crlf0710@gmail.com>:Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Query character Unicode properties according to UAX #44 and UTR #51. ",
         "CARGO_PKG_NAME": "unicode-properties",
         "CARGO_PKG_REPOSITORY": "https://github.com/unicode-rs/unicode-properties",
-        "CARGO_PKG_VERSION": "0.1.3",
+        "CARGO_PKG_VERSION": "0.1.5",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["general-category"],
+    features = [
+        "emoji",
+        "general-category",
+    ],
     platform = {
         "wasm32": dict(
-            features = [
-                "default",
-                "emoji",
-            ],
+            features = ["default"],
         ),
     },
     visibility = [],
@@ -47241,31 +47318,31 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "vello_common-0.0.9.crate",
-    sha256 = "19d672facaa2d697285a786cd9d44d614cd2ce54cdc022504bf339f8fff3b750",
-    size_bytes = 138020,
-    strip_prefix = "vello_common-0.0.9",
-    urls = ["https://static.crates.io/crates/vello_common/0.0.9/download"],
+    name = "vello_common-0.2.0.crate",
+    sha256 = "bbb2141a2bca6e6d598e471fd4d1d7eed8e020aad6a28187edda07f091a325dd",
+    size_bytes = 132078,
+    strip_prefix = "vello_common-0.2.0",
+    urls = ["https://static.crates.io/crates/vello_common/0.2.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "vello_common-0.0.9",
-    srcs = [":vello_common-0.0.9.crate"],
+    name = "vello_common-0.2",
+    srcs = [":vello_common-0.2.0.crate"],
     crate = "vello_common",
-    crate_root = "vello_common-0.0.9.crate/src/lib.rs",
+    crate_root = "vello_common-0.2.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "vello_common",
-        "CARGO_MANIFEST_DIR": "vello_common-0.0.9.crate",
+        "CARGO_MANIFEST_DIR": "vello_common-0.2.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Core data structures and utilities shared across the Vello rendering, including geometry processing and tiling logic.",
         "CARGO_PKG_NAME": "vello_common",
         "CARGO_PKG_REPOSITORY": "https://github.com/linebender/vello",
-        "CARGO_PKG_VERSION": "0.0.9",
+        "CARGO_PKG_VERSION": "0.2.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "9",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
@@ -47274,7 +47351,6 @@ cargo.rust_library(
         ":bytemuck-1",
         ":fearless_simd-0.4",
         ":guillotiere-0.7",
-        ":hashbrown-0.17",
         ":log-0.4",
         ":peniko-0.6",
         ":smallvec-1",
@@ -47283,31 +47359,31 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "vello_cpu-0.0.9.crate",
-    sha256 = "588691169aed86b5c8fb487266afee01323234e6fd0a3f2aaec0eaa8e4007f23",
-    size_bytes = 110118,
-    strip_prefix = "vello_cpu-0.0.9",
-    urls = ["https://static.crates.io/crates/vello_cpu/0.0.9/download"],
+    name = "vello_cpu-0.2.0.crate",
+    sha256 = "ace506ca414548966fcf3c283be94eb1cad8254de488791ee698bf438b0890a9",
+    size_bytes = 126331,
+    strip_prefix = "vello_cpu-0.2.0",
+    urls = ["https://static.crates.io/crates/vello_cpu/0.2.0/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "vello_cpu-0.0.9",
-    srcs = [":vello_cpu-0.0.9.crate"],
+    name = "vello_cpu-0.2",
+    srcs = [":vello_cpu-0.2.0.crate"],
     crate = "vello_cpu",
-    crate_root = "vello_cpu-0.0.9.crate/src/lib.rs",
+    crate_root = "vello_cpu-0.2.0.crate/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "vello_cpu",
-        "CARGO_MANIFEST_DIR": "vello_cpu-0.0.9.crate",
+        "CARGO_MANIFEST_DIR": "vello_cpu-0.2.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A CPU-based renderer for Vello, optimized for SIMD and multithreaded execution.",
         "CARGO_PKG_NAME": "vello_cpu",
         "CARGO_PKG_REPOSITORY": "https://github.com/linebender/vello",
-        "CARGO_PKG_VERSION": "0.0.9",
+        "CARGO_PKG_VERSION": "0.2.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "9",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -47319,7 +47395,7 @@ cargo.rust_library(
     deps = [
         ":bytemuck-1",
         ":hashbrown-0.17",
-        ":vello_common-0.0.9",
+        ":vello_common-0.2",
     ],
 )
 
@@ -48673,6 +48749,7 @@ cargo.rust_library(
         "BinaryType",
         "Blob",
         "BlobPropertyBag",
+        "CanvasRenderingContext2d",
         "Clipboard",
         "ClipboardEvent",
         "ClipboardItem",
@@ -48886,50 +48963,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "webbrowser-1.2.4.crate",
-    sha256 = "62c35be770821a214dbc362fc26908c853e776c0004294d0b10b8a6bad582f94",
-    size_bytes = 60809,
-    strip_prefix = "webbrowser-1.2.4",
-    urls = ["https://static.crates.io/crates/webbrowser/1.2.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "webbrowser-1",
-    srcs = [":webbrowser-1.2.4.crate"],
-    crate = "webbrowser",
-    crate_root = "webbrowser-1.2.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "webbrowser",
-        "CARGO_MANIFEST_DIR": "webbrowser-1.2.4.crate",
-        "CARGO_PKG_AUTHORS": "Amod Malviya @amodm",
-        "CARGO_PKG_DESCRIPTION": "Open URLs in web browsers available on a platform",
-        "CARGO_PKG_NAME": "webbrowser",
-        "CARGO_PKG_REPOSITORY": "https://github.com/amodm/webbrowser-rs",
-        "CARGO_PKG_VERSION": "1.2.4",
-        "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "macos-arm64": dict(
-            deps = [
-                ":objc2-0.6",
-                ":objc2-app-kit-0.3",
-                ":objc2-foundation-0.3",
-            ],
-        ),
-    },
-    visibility = [],
-    deps = [
-        ":log-0.4",
-        ":url-2",
-    ],
-)
-
-http_archive(
     name = "webpki-roots-1.0.9.crate",
     sha256 = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a",
     size_bytes = 217462,
@@ -49001,152 +49034,8 @@ cargo.rust_library(
 
 alias(
     name = "wgpu",
-    actual = ":wgpu-29",
+    actual = ":wgpu-30",
     visibility = ["PUBLIC"],
-)
-
-http_archive(
-    name = "wgpu-29.0.4.crate",
-    sha256 = "76e8840e1ba2881d4cbb18d2147627a56af426ff064c0401eb0c8410c6325d07",
-    size_bytes = 209333,
-    strip_prefix = "wgpu-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-29",
-    srcs = [":wgpu-29.0.4.crate"],
-    crate = "wgpu",
-    crate_root = "wgpu-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu",
-        "CARGO_MANIFEST_DIR": "wgpu-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :wgpu-29-build-script-run[out_dir])",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "parking_lot",
-        "std",
-        "vulkan",
-        "web",
-        "webgl",
-        "webgpu",
-        "wgpu-core",
-        "wgsl",
-    ],
-    platform = {
-        "wasm32": dict(
-            deps = [
-                ":js-sys-0.3",
-                ":wasm-bindgen-0.2",
-                ":wasm-bindgen-futures-0.4",
-                ":web-sys-0.3",
-            ],
-        ),
-    },
-    rustc_flags = ["@$(location :wgpu-29-build-script-run[rustc_flags])"],
-    visibility = [],
-    deps = [
-        ":arrayvec-0.7",
-        ":bitflags-2",
-        ":bytemuck-1",
-        ":cfg-if-1",
-        ":document-features-0.2",
-        ":hashbrown-0.16",
-        ":log-0.4",
-        ":parking_lot-0.12",
-        ":profiling-1",
-        ":raw-window-handle-0.6",
-        ":smallvec-1",
-        ":static_assertions-1",
-        ":wgpu-core-29",
-        ":wgpu-hal-29",
-        ":wgpu-types-29",
-    ],
-)
-
-cargo.rust_binary(
-    name = "wgpu-29-build-script-build",
-    srcs = [":wgpu-29.0.4.crate"],
-    crate = "build_script_build",
-    crate_root = "wgpu-29.0.4.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "wgpu-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "parking_lot",
-        "std",
-        "vulkan",
-        "web",
-        "webgl",
-        "webgpu",
-        "wgpu-core",
-        "wgsl",
-    ],
-    visibility = [],
-    deps = [":cfg_aliases-0.2"],
-)
-
-buildscript_run(
-    name = "wgpu-29-build-script-run",
-    package_name = "wgpu",
-    buildscript_rule = ":wgpu-29-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "parking_lot",
-        "std",
-        "vulkan",
-        "web",
-        "webgl",
-        "webgpu",
-        "wgpu-core",
-        "wgsl",
-    ],
-    version = "29.0.4",
 )
 
 http_archive(
@@ -49179,26 +49068,24 @@ cargo.rust_library(
         "OUT_DIR": "$(location :wgpu-30-build-script-run[out_dir])",
     },
     features = [
+        "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
+        "parking_lot",
         "std",
         "vulkan",
         "web",
+        "webgl",
         "webgpu",
+        "wgpu-core",
         "wgsl",
     ],
     platform = {
         "wasm32": dict(
-            features = [
-                "default",
-                "dx12",
-                "parking_lot",
-                "webgl",
-                "wgpu-core",
-            ],
             deps = [
                 ":js-sys-0.3",
-                ":parking_lot-0.12",
                 ":wasm-bindgen-0.2",
                 ":wasm-bindgen-futures-0.4",
                 ":web-sys-0.3",
@@ -49215,6 +49102,7 @@ cargo.rust_library(
         ":document-features-0.2",
         ":hashbrown-0.17",
         ":log-0.4",
+        ":parking_lot-0.12",
         ":profiling-1",
         ":raw-window-handle-0.6",
         ":smallvec-1",
@@ -49245,25 +49133,20 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
+        "parking_lot",
         "std",
         "vulkan",
         "web",
+        "webgl",
         "webgpu",
+        "wgpu-core",
         "wgsl",
     ],
-    platform = {
-        "wasm32": dict(
-            features = [
-                "default",
-                "dx12",
-                "parking_lot",
-                "webgl",
-                "wgpu-core",
-            ],
-        ),
-    },
     visibility = [],
     deps = [":cfg_aliases-0.2"],
 )
@@ -49282,235 +49165,21 @@ buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
+        "parking_lot",
         "std",
         "vulkan",
         "web",
+        "webgl",
         "webgpu",
+        "wgpu-core",
         "wgsl",
     ],
-    platform = {
-        "wasm32": dict(
-            features = [
-                "default",
-                "dx12",
-                "parking_lot",
-                "webgl",
-                "wgpu-core",
-            ],
-        ),
-    },
     version = "30.0.1",
-)
-
-http_archive(
-    name = "wgpu-core-29.0.4.crate",
-    sha256 = "2f519832254e56965a9940c4af57dcb75f702b6f6fa4a0b172f685395843a4d7",
-    size_bytes = 345969,
-    strip_prefix = "wgpu-core-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-core/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-core-29",
-    srcs = [":wgpu-core-29.0.4.crate"],
-    crate = "wgpu_core",
-    crate_root = "wgpu-core-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_core",
-        "CARGO_MANIFEST_DIR": "wgpu-core-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Core implementation logic of wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu-core",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :wgpu-core-29-build-script-run[out_dir])",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "std",
-        "vulkan",
-        "webgl",
-        "wgsl",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-            deps = [":wgpu-core-deps-windows-linux-android-29"],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-apple",
-            ],
-            deps = [":wgpu-core-deps-apple-29"],
-        ),
-        "wasm32": dict(
-            features = ["wgpu-core-deps-wasm"],
-            deps = [":wgpu-core-deps-wasm-29"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-            deps = [":wgpu-core-deps-windows-linux-android-29"],
-        ),
-    },
-    rustc_flags = ["@$(location :wgpu-core-29-build-script-run[rustc_flags])"],
-    visibility = [],
-    deps = [
-        ":arrayvec-0.7",
-        ":bit-set-0.9",
-        ":bit-vec-0.9",
-        ":bitflags-2",
-        ":bytemuck-1",
-        ":document-features-0.2",
-        ":hashbrown-0.16",
-        ":indexmap-2",
-        ":log-0.4",
-        ":naga-29",
-        ":once_cell-1",
-        ":parking_lot-0.12",
-        ":profiling-1",
-        ":raw-window-handle-0.6",
-        ":rustc-hash-1",
-        ":smallvec-1",
-        ":thiserror-2",
-        ":wgpu-hal-29",
-        ":wgpu-naga-bridge-29",
-        ":wgpu-types-29",
-    ],
-)
-
-cargo.rust_binary(
-    name = "wgpu-core-29-build-script-build",
-    srcs = [":wgpu-core-29.0.4.crate"],
-    crate = "build_script_build",
-    crate_root = "wgpu-core-29.0.4.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "wgpu-core-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Core implementation logic of wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu-core",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "std",
-        "vulkan",
-        "webgl",
-        "wgsl",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-apple",
-            ],
-        ),
-        "wasm32": dict(
-            features = ["wgpu-core-deps-wasm"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-        ),
-    },
-    visibility = [],
-    deps = [":cfg_aliases-0.2"],
-)
-
-buildscript_run(
-    name = "wgpu-core-29-build-script-run",
-    package_name = "wgpu-core",
-    buildscript_rule = ":wgpu-core-29-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Core implementation logic of wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "dx12",
-        "fragile-send-sync-non-atomic-wasm",
-        "gles",
-        "metal",
-        "std",
-        "vulkan",
-        "webgl",
-        "wgsl",
-    ],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-apple",
-            ],
-        ),
-        "wasm32": dict(
-            features = ["wgpu-core-deps-wasm"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "portable-atomic",
-                "renderdoc",
-                "wgpu-core-deps-windows-linux-android",
-            ],
-        ),
-    },
-    version = "29.0.4",
 )
 
 http_archive(
@@ -49544,10 +49213,13 @@ cargo.rust_library(
     },
     features = [
         "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
         "std",
         "vulkan",
+        "webgl",
         "wgsl",
     ],
     platform = {
@@ -49559,13 +49231,25 @@ cargo.rust_library(
             ],
             deps = [":wgpu-core-deps-windows-linux-android-30"],
         ),
-        "wasm32": dict(
+        "macos-arm64": dict(
             features = [
-                "dx12",
-                "webgl",
-                "wgpu-core-deps-wasm",
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
             ],
+            deps = [":wgpu-core-deps-apple-30"],
+        ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
             deps = [":wgpu-core-deps-wasm-30"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
+            ],
+            deps = [":wgpu-core-deps-windows-linux-android-30"],
         ),
     },
     rustc_flags = ["@$(location :wgpu-core-30-build-script-run[rustc_flags])"],
@@ -49616,10 +49300,13 @@ cargo.rust_binary(
     },
     features = [
         "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
         "std",
         "vulkan",
+        "webgl",
         "wgsl",
     ],
     platform = {
@@ -49630,11 +49317,21 @@ cargo.rust_binary(
                 "wgpu-core-deps-windows-linux-android",
             ],
         ),
-        "wasm32": dict(
+        "macos-arm64": dict(
             features = [
-                "dx12",
-                "webgl",
-                "wgpu-core-deps-wasm",
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
             ],
         ),
     },
@@ -49657,10 +49354,13 @@ buildscript_run(
     },
     features = [
         "default",
+        "dx12",
+        "fragile-send-sync-non-atomic-wasm",
         "gles",
         "metal",
         "std",
         "vulkan",
+        "webgl",
         "wgsl",
     ],
     platform = {
@@ -49671,11 +49371,21 @@ buildscript_run(
                 "wgpu-core-deps-windows-linux-android",
             ],
         ),
-        "wasm32": dict(
+        "macos-arm64": dict(
             features = [
-                "dx12",
-                "webgl",
-                "wgpu-core-deps-wasm",
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-apple",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["wgpu-core-deps-wasm"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "portable-atomic",
+                "renderdoc",
+                "wgpu-core-deps-windows-linux-android",
             ],
         ),
     },
@@ -49683,69 +49393,36 @@ buildscript_run(
 )
 
 http_archive(
-    name = "wgpu-core-deps-apple-29.0.4.crate",
-    sha256 = "f5e39e26c4c0e07589e67d18546cf79ff45383659fc72fca4dd293358a0347f3",
-    size_bytes = 11985,
-    strip_prefix = "wgpu-core-deps-apple-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-core-deps-apple/29.0.4/download"],
+    name = "wgpu-core-deps-apple-30.0.1.crate",
+    sha256 = "061f3d319a40d39d00b1ecc2c33b89fe21d4e6fe01859df3500a3a8ecccd6b68",
+    size_bytes = 12523,
+    strip_prefix = "wgpu-core-deps-apple-30.0.1",
+    urls = ["https://static.crates.io/crates/wgpu-core-deps-apple/30.0.1/download"],
     visibility = [],
 )
 
 cargo.rust_library(
-    name = "wgpu-core-deps-apple-29",
-    srcs = [":wgpu-core-deps-apple-29.0.4.crate"],
+    name = "wgpu-core-deps-apple-30",
+    srcs = [":wgpu-core-deps-apple-30.0.1.crate"],
     crate = "wgpu_core_deps_apple",
-    crate_root = "wgpu-core-deps-apple-29.0.4.crate/src/lib.rs",
+    crate_root = "wgpu-core-deps-apple-30.0.1.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "wgpu_core_deps_apple",
-        "CARGO_MANIFEST_DIR": "wgpu-core-deps-apple-29.0.4.crate",
+        "CARGO_MANIFEST_DIR": "wgpu-core-deps-apple-30.0.1.crate",
         "CARGO_PKG_AUTHORS": "gfx-rs developers",
         "CARGO_PKG_DESCRIPTION": "Feature unification helper crate for Apple platforms",
         "CARGO_PKG_NAME": "wgpu-core-deps-apple",
         "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
+        "CARGO_PKG_VERSION": "30.0.1",
+        "CARGO_PKG_VERSION_MAJOR": "30",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["metal"],
     visibility = [],
-    deps = [":wgpu-hal-29"],
-)
-
-http_archive(
-    name = "wgpu-core-deps-wasm-29.0.4.crate",
-    sha256 = "af1fb1798be2a912497d4c224f72d39bb0cb34af50e8bcc29865bc339c943059",
-    size_bytes = 10719,
-    strip_prefix = "wgpu-core-deps-wasm-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-core-deps-wasm/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-core-deps-wasm-29",
-    srcs = [":wgpu-core-deps-wasm-29.0.4.crate"],
-    crate = "wgpu_core_deps_wasm",
-    crate_root = "wgpu-core-deps-wasm-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_core_deps_wasm",
-        "CARGO_MANIFEST_DIR": "wgpu-core-deps-wasm-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Feature unification helper crate for the WebAssembly platform",
-        "CARGO_PKG_NAME": "wgpu-core-deps-wasm",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["webgl"],
-    visibility = [],
-    deps = [":wgpu-hal-29"],
+    deps = [":wgpu-hal-30"],
 )
 
 http_archive(
@@ -49782,44 +49459,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "wgpu-core-deps-windows-linux-android-29.0.4.crate",
-    sha256 = "4e592c1bbef6ad047647ae6e666ebd8cee7a32bb4544d9700ec96cbf73230257",
-    size_bytes = 12049,
-    strip_prefix = "wgpu-core-deps-windows-linux-android-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-core-deps-windows-linux-android/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-core-deps-windows-linux-android-29",
-    srcs = [":wgpu-core-deps-windows-linux-android-29.0.4.crate"],
-    crate = "wgpu_core_deps_windows_linux_android",
-    crate_root = "wgpu-core-deps-windows-linux-android-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_core_deps_windows_linux_android",
-        "CARGO_MANIFEST_DIR": "wgpu-core-deps-windows-linux-android-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Feature unification helper crate for the Windows/Linux/Android platforms",
-        "CARGO_PKG_NAME": "wgpu-core-deps-windows-linux-android",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "dx12",
-        "gles",
-        "renderdoc",
-        "vulkan",
-    ],
-    visibility = [],
-    deps = [":wgpu-hal-29"],
-)
-
-http_archive(
     name = "wgpu-core-deps-windows-linux-android-30.0.1.crate",
     sha256 = "7586165fd5f6d881cb9ce4bb71f40d6caab2c0f1837e3fc1d9788a197fb6004f",
     size_bytes = 13070,
@@ -49848,237 +49487,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "dx12",
         "gles",
         "renderdoc",
         "vulkan",
     ],
     visibility = [],
     deps = [":wgpu-hal-30"],
-)
-
-http_archive(
-    name = "wgpu-hal-29.0.4.crate",
-    sha256 = "97ace1c17727311c22a46e4e3faf56ea6de81af99dcc839bdfb54857b94d448d",
-    size_bytes = 427805,
-    strip_prefix = "wgpu-hal-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-hal/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-hal-29",
-    srcs = [":wgpu-hal-29.0.4.crate"],
-    crate = "wgpu_hal",
-    crate_root = "wgpu-hal-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_hal",
-        "CARGO_MANIFEST_DIR": "wgpu-hal-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Hardware abstraction layer for wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu-hal",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :wgpu-hal-29-build-script-run[out_dir])",
-    },
-    features = ["fragile-send-sync-non-atomic-wasm"],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-            deps = [
-                ":ash-0.38",
-                ":glow-0.17",
-                ":gpu-allocator-0.28",
-                ":gpu-descriptor-0.3",
-                ":khronos-egl-6",
-                ":libc-0.2",
-                ":libloading-0.8",
-                ":ordered-float-5",
-                ":renderdoc-sys-1",
-                ":smallvec-1",
-                ":wayland-sys-0.31",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "metal",
-                "portable-atomic",
-            ],
-            deps = [
-                ":block2-0.6",
-                ":libc-0.2",
-                ":objc2-0.6",
-                ":objc2-core-foundation-0.3",
-                ":objc2-foundation-0.3",
-                ":objc2-metal-0.3",
-                ":objc2-quartz-core-0.3",
-                ":raw-window-metal-1",
-                ":smallvec-1",
-            ],
-        ),
-        "wasm32": dict(
-            features = ["gles"],
-            deps = [
-                ":glow-0.17",
-                ":js-sys-0.3",
-                ":wasm-bindgen-0.2",
-                ":web-sys-0.3",
-            ],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-            deps = [
-                ":ash-0.38",
-                ":bit-set-0.9",
-                ":glow-0.17",
-                ":glutin_wgl_sys-0.6",
-                ":gpu-allocator-0.28",
-                ":gpu-descriptor-0.3",
-                ":khronos-egl-6",
-                ":libloading-0.8",
-                ":once_cell-1",
-                ":ordered-float-5",
-                ":range-alloc-0.1",
-                ":renderdoc-sys-1",
-                ":smallvec-1",
-                ":windows-0.62",
-                ":windows-core-0.62",
-                ":windows-result-0.4",
-            ],
-        ),
-    },
-    rustc_flags = ["@$(location :wgpu-hal-29-build-script-run[rustc_flags])"],
-    visibility = [],
-    deps = [
-        ":arrayvec-0.7",
-        ":bitflags-2",
-        ":bytemuck-1",
-        ":cfg-if-1",
-        ":hashbrown-0.16",
-        ":log-0.4",
-        ":naga-29",
-        ":parking_lot-0.12",
-        ":profiling-1",
-        ":raw-window-handle-0.6",
-        ":thiserror-2",
-        ":wgpu-naga-bridge-29",
-        ":wgpu-types-29",
-    ],
-)
-
-cargo.rust_binary(
-    name = "wgpu-hal-29-build-script-build",
-    srcs = [":wgpu-hal-29.0.4.crate"],
-    crate = "build_script_build",
-    crate_root = "wgpu-hal-29.0.4.crate/build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "wgpu-hal-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Hardware abstraction layer for wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu-hal",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["fragile-send-sync-non-atomic-wasm"],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "metal",
-                "portable-atomic",
-            ],
-        ),
-        "wasm32": dict(
-            features = ["gles"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-        ),
-    },
-    visibility = [],
-    deps = [":cfg_aliases-0.2"],
-)
-
-buildscript_run(
-    name = "wgpu-hal-29-build-script-run",
-    package_name = "wgpu-hal",
-    buildscript_rule = ":wgpu-hal-29-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Hardware abstraction layer for wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["fragile-send-sync-non-atomic-wasm"],
-    platform = {
-        "linux-x86_64": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "metal",
-                "portable-atomic",
-            ],
-        ),
-        "wasm32": dict(
-            features = ["gles"],
-        ),
-        "windows-msvc": dict(
-            features = [
-                "dx12",
-                "gles",
-                "portable-atomic",
-                "renderdoc",
-                "vulkan",
-            ],
-        ),
-    },
-    version = "29.0.4",
 )
 
 http_archive(
@@ -50110,16 +49525,19 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :wgpu-hal-30-build-script-run[out_dir])",
     },
-    features = ["gles"],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
+                "dx12",
+                "gles",
                 "portable-atomic",
                 "renderdoc",
                 "vulkan",
             ],
             deps = [
                 ":ash-0.38",
+                ":glow-0.17",
                 ":gpu-allocator-0.28",
                 ":khronos-egl-6",
                 ":libc-0.2",
@@ -50130,11 +49548,57 @@ cargo.rust_library(
                 ":wayland-sys-0.31",
             ],
         ),
-        "wasm32": dict(
+        "macos-arm64": dict(
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
             deps = [
+                ":block2-0.6",
+                ":libloading-0.8",
+                ":objc2-0.6",
+                ":objc2-core-foundation-0.3",
+                ":objc2-core-graphics-0.3",
+                ":objc2-foundation-0.3",
+                ":objc2-metal-0.3",
+                ":objc2-quartz-core-0.3",
+                ":raw-window-metal-1",
+                ":smallvec-1",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
+            deps = [
+                ":glow-0.17",
                 ":js-sys-0.3",
                 ":wasm-bindgen-0.2",
                 ":web-sys-0.3",
+            ],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "dx12",
+                "gles",
+                "portable-atomic",
+                "renderdoc",
+                "vulkan",
+            ],
+            deps = [
+                ":ash-0.38",
+                ":bit-set-0.10",
+                ":glow-0.17",
+                ":glutin_wgl_sys-0.6",
+                ":gpu-allocator-0.28",
+                ":khronos-egl-6",
+                ":libloading-0.8",
+                ":once_cell-1",
+                ":ordered-float-5",
+                ":range-alloc-0.1",
+                ":renderdoc-sys-1",
+                ":smallvec-1",
+                ":windows-0.62",
+                ":windows-core-0.62",
+                ":windows-result-0.4",
             ],
         ),
     },
@@ -50145,7 +49609,6 @@ cargo.rust_library(
         ":bitflags-2",
         ":bytemuck-1",
         ":cfg-if-1",
-        ":glow-0.17",
         ":hashbrown-0.17",
         ":log-0.4",
         ":naga-30",
@@ -50179,10 +49642,30 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["gles"],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
+                "dx12",
+                "gles",
+                "portable-atomic",
+                "renderdoc",
+                "vulkan",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "dx12",
+                "gles",
                 "portable-atomic",
                 "renderdoc",
                 "vulkan",
@@ -50206,10 +49689,30 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["gles"],
+    features = ["fragile-send-sync-non-atomic-wasm"],
     platform = {
         "linux-x86_64": dict(
             features = [
+                "dx12",
+                "gles",
+                "portable-atomic",
+                "renderdoc",
+                "vulkan",
+            ],
+        ),
+        "macos-arm64": dict(
+            features = [
+                "metal",
+                "portable-atomic",
+            ],
+        ),
+        "wasm32": dict(
+            features = ["gles"],
+        ),
+        "windows-msvc": dict(
+            features = [
+                "dx12",
+                "gles",
                 "portable-atomic",
                 "renderdoc",
                 "vulkan",
@@ -50217,41 +49720,6 @@ buildscript_run(
         ),
     },
     version = "30.0.1",
-)
-
-http_archive(
-    name = "wgpu-naga-bridge-29.0.4.crate",
-    sha256 = "95226013f547544b223281cd16a4fb549aa9dcb562adbda0faae4c73ffbbc161",
-    size_bytes = 9417,
-    strip_prefix = "wgpu-naga-bridge-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-naga-bridge/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-naga-bridge-29",
-    srcs = [":wgpu-naga-bridge-29.0.4.crate"],
-    crate = "wgpu_naga_bridge",
-    crate_root = "wgpu-naga-bridge-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_naga_bridge",
-        "CARGO_MANIFEST_DIR": "wgpu-naga-bridge-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Conversions between naga and wgpu-types. Part of the wgpu project",
-        "CARGO_PKG_NAME": "wgpu-naga-bridge",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":naga-29",
-        ":wgpu-types-29",
-    ],
 )
 
 http_archive(
@@ -50290,56 +49758,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "wgpu-types-29.0.4.crate",
-    sha256 = "84bf84cd9ca8ca45e2b223a3868f1adf9bfc0c66aeac212e76ee7e40fdadf8f5",
-    size_bytes = 127824,
-    strip_prefix = "wgpu-types-29.0.4",
-    urls = ["https://static.crates.io/crates/wgpu-types/29.0.4/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "wgpu-types-29",
-    srcs = [":wgpu-types-29.0.4.crate"],
-    crate = "wgpu_types",
-    crate_root = "wgpu-types-29.0.4.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wgpu_types",
-        "CARGO_MANIFEST_DIR": "wgpu-types-29.0.4.crate",
-        "CARGO_PKG_AUTHORS": "gfx-rs developers",
-        "CARGO_PKG_DESCRIPTION": "Common types and utilities for wgpu, the cross-platform, safe, pure-rust graphics API",
-        "CARGO_PKG_NAME": "wgpu-types",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gfx-rs/wgpu",
-        "CARGO_PKG_VERSION": "29.0.4",
-        "CARGO_PKG_VERSION_MAJOR": "29",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "4",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "fragile-send-sync-non-atomic-wasm",
-        "std",
-        "web",
-    ],
-    platform = {
-        "wasm32": dict(
-            deps = [
-                ":js-sys-0.3",
-                ":web-sys-0.3",
-            ],
-        ),
-    },
-    visibility = [],
-    deps = [
-        ":bitflags-2",
-        ":bytemuck-1",
-        ":log-0.4",
-        ":raw-window-handle-0.6",
-    ],
-)
-
-http_archive(
     name = "wgpu-types-30.0.1.crate",
     sha256 = "99dad6f1fbdbbdb4c278a6508b059d44688f5cebddf78d005a46a31340269286",
     size_bytes = 144370,
@@ -50368,6 +49786,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "fragile-send-sync-non-atomic-wasm",
         "std",
         "web",
     ],
@@ -50790,6 +50209,7 @@ cargo.rust_library(
         "Win32",
         "Win32_Devices",
         "Win32_Devices_DeviceAndDriverInstallation",
+        "Win32_Devices_Display",
         "Win32_Foundation",
         "Win32_Globalization",
         "Win32_Graphics",
@@ -51638,6 +51058,8 @@ cargo.rust_library(
         "Win32",
         "Win32_Foundation",
         "Win32_Globalization",
+        "Win32_Graphics",
+        "Win32_Graphics_Dwm",
         "Win32_NetworkManagement",
         "Win32_NetworkManagement_IpHelper",
         "Win32_NetworkManagement_Ndis",
@@ -52023,6 +51445,49 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
+)
+
+http_archive(
+    name = "wl-clipboard-rs-0.9.5.crate",
+    sha256 = "959c7ac3b8afde864f7a7448ac16f29b2b83350b7eccbf77fb781c3999aa6848",
+    size_bytes = 48862,
+    strip_prefix = "wl-clipboard-rs-0.9.5",
+    urls = ["https://static.crates.io/crates/wl-clipboard-rs/0.9.5/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "wl-clipboard-rs-0.9",
+    srcs = [":wl-clipboard-rs-0.9.5.crate"],
+    crate = "wl_clipboard_rs",
+    crate_root = "wl-clipboard-rs-0.9.5.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wl_clipboard_rs",
+        "CARGO_MANIFEST_DIR": "wl-clipboard-rs-0.9.5.crate",
+        "CARGO_PKG_AUTHORS": "Ivan Molodetskikh <yalterz@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Access to the Wayland clipboard for terminal and other window-less applications.",
+        "CARGO_PKG_NAME": "wl-clipboard-rs",
+        "CARGO_PKG_REPOSITORY": "https://github.com/YaLTeR/wl-clipboard-rs",
+        "CARGO_PKG_VERSION": "0.9.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":libc-0.2",
+        ":log-0.4",
+        ":os_pipe-1",
+        ":rustix-1",
+        ":thiserror-2",
+        ":tree_magic_mini-3",
+        ":wayland-backend-0.3",
+        ":wayland-client-0.31",
+        ":wayland-protocols-0.32",
+        ":wayland-protocols-wlr-0.3",
+    ],
 )
 
 http_archive(

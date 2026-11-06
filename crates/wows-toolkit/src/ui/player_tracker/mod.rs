@@ -471,7 +471,7 @@ impl egui_dock::TabViewer for PlayerTrackerSubTabViewer<'_, '_> {
     type Tab = PlayerTrackerSubTab;
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(("player_tracker_sub_tab", *tab))
+        egui::Id::unique(("player_tracker_sub_tab", *tab))
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
@@ -526,7 +526,7 @@ impl ToolkitTabViewer<'_> {
         let mut viewer = PlayerTrackerSubTabViewer { tab_viewer: self };
 
         egui_dock::DockArea::new(&mut dock_state)
-            .id(egui::Id::new("player_tracker_dock"))
+            .id(egui::Id::unique("player_tracker_dock"))
             .style(egui_dock::Style::from_egui(ui.style().as_ref()))
             .show_close_buttons(false)
             .show_leaf_collapse_buttons(false)

@@ -244,19 +244,19 @@ impl ReplayWorkspace {
 /// replay listing needs this: egui keys state by id, so two listings sharing an
 /// id share scroll offsets, tree selection and open/closed state.
 pub(crate) fn workspace_salt(id: WorkspaceId, name: &str) -> egui::Id {
-    egui::Id::new((id.0, name))
+    egui::Id::unique((id.0, name))
 }
 
 /// A tree group node's id. `kind` separates the Date and Ship groupings, whose
 /// labels can otherwise coincide.
 pub(crate) fn workspace_group_salt(id: WorkspaceId, kind: &str, group: &str) -> egui::Id {
-    egui::Id::new((id.0, kind, group))
+    egui::Id::unique((id.0, kind, group))
 }
 
 /// A leaf node's id. Takes the path directly: two workspaces can list the same
 /// file, and a `PathBuf -> &str` conversion for `workspace_salt` is lossy.
 pub(crate) fn workspace_leaf_salt(id: WorkspaceId, path: &std::path::Path) -> egui::Id {
-    egui::Id::new((id.0, path))
+    egui::Id::unique((id.0, path))
 }
 
 /// Fish-style shorthand for a workspace root, used as a directory tab's
@@ -383,7 +383,7 @@ pub(crate) fn request_slot_id(workspace: WorkspaceId, slot: ReplayRequestSlot) -
 /// and the whole `ReplayFile` it owns -- parked under an id nobody reads. The
 /// workspace that raised it travels inside the value instead.
 pub(crate) fn alt_perspective_slot_id() -> egui::Id {
-    egui::Id::new("alt_perspective_pending")
+    egui::Id::unique("alt_perspective_pending")
 }
 
 #[cfg(test)]

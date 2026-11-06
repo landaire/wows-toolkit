@@ -64,12 +64,14 @@ mod tests {
         apply(&ctx, ThemeChoice::Light);
 
         let mut observed = None;
-        let _ = ctx.run_ui(egui::RawInput::default(), |root| {
+        ctx.run_ui(egui::RawInput::default(), |root| {
             let _guard = DarkPass::force(root);
             let nested = root.new_child(egui::UiBuilder::new());
             observed =
                 Some((root.visuals().dark_mode, nested.visuals().dark_mode, ctx.global_style().visuals.dark_mode));
-        });
+        })
+        .textures_delta
+        .clear();
 
         assert_eq!(observed, Some((true, true, true)));
     }
@@ -81,9 +83,11 @@ mod tests {
             install(&ctx);
             apply(&ctx, choice);
 
-            let _ = ctx.run_ui(egui::RawInput::default(), |root| {
+            ctx.run_ui(egui::RawInput::default(), |root| {
                 let _guard = DarkPass::force(root);
-            });
+            })
+            .textures_delta
+            .clear();
 
             assert_eq!(ctx.options(|opt| opt.theme_preference), crate::data::settings::egui_theme_preference(choice));
         }
