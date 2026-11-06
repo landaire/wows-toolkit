@@ -1536,6 +1536,7 @@ mod tests {
             battery_capacity: None,
             battery_regen_rate: None,
             burn_nodes: Vec::new(),
+            flood_nodes: Vec::new(),
         }
     }
 

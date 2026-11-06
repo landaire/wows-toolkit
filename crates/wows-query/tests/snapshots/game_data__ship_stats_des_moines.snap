@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1694
 expression: stats.stats
 ---
 - "Hit Points: 50600"
@@ -107,4 +106,12 @@ expression: stats.stats
 - "Main battery fire starts per minute, every shell hitting (HE): 13.75 fires/min"
 - "Secondary fire starts per minute, every shell hitting (127 mm): 6.00 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAD908_ASW_T10): 10.08 fires/min"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD908_ASW_T10): 28.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD908_ASW_T10): 28.00%"
+- "Fire chance reduction against shells hitting the ship: 49.95%"
+- "Fires that can burn at once: 4"
+- "Fire duration: 30.0 s"
+- "Fire damage per second, percent of maximum health: 0.30%"
+- "Damage of one fire over its whole duration: 4554"
+- "Flooding duration: 40.0 s"
+- "Flooding damage per second, percent of maximum health: 0.25%"
+- "Damage of one flood over its whole duration: 5060"

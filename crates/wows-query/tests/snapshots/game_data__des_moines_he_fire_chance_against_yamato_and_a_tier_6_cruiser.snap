@@ -1,0 +1,91 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "[against(\"Yamato\", &[]), against(\"Yamato\", &[\"Fire Prevention Expert\"]),\nagainst(\"Leander\", &[]),]"
+---
+- - ship:
+      name: Yamato
+      index: PJSB018
+      tier: 10
+      class: battleship
+      nation: Japan
+      group: upgradeable
+      category: tech_tree
+      status: released
+      replicas:
+        - ARP Yamato
+        - Yamato Kai
+    hull_fire_coefficient: 0.5005
+    build_fire_coefficient: 1
+    fire_chance_factor: 0.5005
+    fire_zones: 4
+  - - name: 203 mm HE/HC Mk25
+      param: PAPA002_Shell_203mm_HE_HC_Mk_25
+      caliber_mm: 203
+      damage: 2800
+      reload_s: 5.5
+      fire_chance_pct: 14
+      fire_chance_on_target_pct: 7.01
+  - barrels: 9
+    damage: 25200
+    fire:
+      fires_per_minute: 6.88
+      salvo_at_least_one_fire_pct: 48
+      salvo_expected_fires: 0.63
+- - ship:
+      name: Yamato
+      index: PJSB018
+      tier: 10
+      class: battleship
+      nation: Japan
+      group: upgradeable
+      category: tech_tree
+      status: released
+      replicas:
+        - ARP Yamato
+        - Yamato Kai
+    skills:
+      - name: Fire Prevention Expert
+        points: 4
+    hull_fire_coefficient: 0.5005
+    build_fire_coefficient: 0.9
+    fire_chance_factor: 0.4505
+    fire_zones: 3
+  - - name: 203 mm HE/HC Mk25
+      param: PAPA002_Shell_203mm_HE_HC_Mk_25
+      caliber_mm: 203
+      damage: 2800
+      reload_s: 5.5
+      fire_chance_pct: 14
+      fire_chance_on_target_pct: 6.31
+  - barrels: 9
+    damage: 25200
+    fire:
+      fires_per_minute: 6.19
+      salvo_at_least_one_fire_pct: 44.4
+      salvo_expected_fires: 0.57
+- - ship:
+      name: Leander
+      index: PBSC106
+      tier: 6
+      class: cruiser
+      nation: United_Kingdom
+      group: upgradeable
+      category: tech_tree
+      status: released
+    hull_fire_coefficient: 0.8002
+    build_fire_coefficient: 1
+    fire_chance_factor: 0.8002
+    fire_zones: 4
+  - - name: 203 mm HE/HC Mk25
+      param: PAPA002_Shell_203mm_HE_HC_Mk_25
+      caliber_mm: 203
+      damage: 2800
+      reload_s: 5.5
+      fire_chance_pct: 14
+      fire_chance_on_target_pct: 11.2
+  - barrels: 9
+    damage: 25200
+    fire:
+      fires_per_minute: 11
+      salvo_at_least_one_fire_pct: 65.7
+      salvo_expected_fires: 1.01

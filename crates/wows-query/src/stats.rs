@@ -10,6 +10,7 @@ use wows_ship_stats::Derivation;
 use wows_ship_stats::DerivedRow;
 use wows_ship_stats::DerivedStat;
 use wows_ship_stats::StockRanges;
+use wows_ship_stats::resistance::merges_fire_zones;
 use wowsunpack::game_params::ttx::AttributionLine;
 use wowsunpack::game_params::ttx::ContributorLine;
 use wowsunpack::game_params::ttx::HEALTH_SCALED_RELOAD_STEP;
@@ -217,7 +218,7 @@ impl GameData {
             let baseline = self.card(stock_ship, &self.stock_loadout())?;
             let attributions = render_attributions(&card.provenance, &rows, self.provider(), self.provider());
             let mut changes = changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true);
-            changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout, self));
+            changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout, self, ship));
             changes
         } else {
             Vec::new()
@@ -320,6 +321,7 @@ impl GameData {
             selection,
             stats: &card.stats,
             modifiers: effects.build.modifiers.bundle(),
+            merges_fire_zones: effects.build.merges_fire_zones,
             stock_ranges: self.stock_ranges(ship)?,
             provider: self.provider(),
         }
@@ -401,13 +403,14 @@ pub(crate) fn changes(
 }
 
 /// Derived stats that differ between the cards, with the loadout inputs that
-/// moved the card stats they are computed from.
+/// moved the card stats and build modifiers they are computed from.
 fn derived_changes(
     baseline: &[DerivedRow],
     candidate: &[DerivedRow],
     attributions: &[AttributionLine],
     loadout: &ResolvedLoadout,
     game: &GameData,
+    ship: &Ship,
 ) -> Vec<StatChange> {
     let mut keys: Vec<(DerivedStat, Option<&str>)> = Vec::new();
     for row in baseline.iter().chain(candidate) {
@@ -442,10 +445,51 @@ fn derived_changes(
                     }
                 }
             }
+            for cause in modifier_causes(stat, loadout, ship) {
+                if !because.contains(&cause) {
+                    because.push(cause);
+                }
+            }
 
             Some(StatChange { stat: stat_label(stat.label(), qualifier, game), from, to, because })
         })
         .collect()
+}
+
+/// Chosen skills and upgrades that carry a modifier `stat` reads, with its
+/// value, e.g. "Fire Prevention Expert x0.9".
+fn modifier_causes(stat: DerivedStat, loadout: &ResolvedLoadout, ship: &Ship) -> Vec<String> {
+    let Some(species) = ship.param.species().and_then(|species| species.known()).copied() else {
+        return Vec::new();
+    };
+    let skills = loadout.skills.iter().map(|skill| {
+        (skill.internal_name().as_str(), skill.modifiers().map_or(&[][..], |modifiers| modifiers.as_slice()))
+    });
+    let upgrades = loadout.modernizations.iter().map(|(name, modifiers)| (name.as_str(), modifiers.as_slice()));
+
+    let mut causes = Vec::new();
+    for (id, modifiers) in skills.chain(upgrades) {
+        let Some(name) = loadout.labels.get(id) else {
+            continue;
+        };
+        for modifier in modifiers.iter().filter(|modifier| stat.modifiers().contains(&modifier.name())) {
+            causes.push(format!("{name} x{}", modifier.get_for_species(&species)));
+        }
+    }
+
+    // Fire Prevention Expert's zone merge is a flag, not a numeric modifier.
+    if stat == DerivedStat::FireZones {
+        causes.extend(
+            loadout
+                .skills
+                .iter()
+                .filter(|skill| merges_fire_zones(skill))
+                .filter_map(|skill| loadout.labels.get(skill.internal_name().as_str()))
+                .map(|name| format!("{name} merges two fire zones")),
+        );
+    }
+
+    causes
 }
 
 /// The loadout inputs behind one stat, direct ones first, then those that act

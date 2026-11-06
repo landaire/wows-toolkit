@@ -20,6 +20,7 @@ pub mod data;
 #[cfg(feature = "download")]
 pub mod download;
 pub mod error;
+pub mod fire_target;
 pub mod fires;
 pub mod firing_arcs;
 pub mod gameparams;

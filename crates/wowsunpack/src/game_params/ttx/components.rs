@@ -16,6 +16,7 @@ use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::model::DegreesPerSecond;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
+use crate::game_params::ttx::model::Percent;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::special_abilities::AlternativeFireMode;
 use crate::game_params::ttx::special_abilities::CombatInstructions;
@@ -25,15 +26,31 @@ use crate::game_params::types::Meters;
 /// One hull burn node: a fire section's resistance, damage rate and duration.
 ///
 /// `probability` is the ship's hidden fire-resistance coefficient, multiplied
-/// into the attacker's burn chance server side. `damage_fraction_per_sec` is a
-/// fraction of max HP. Live values run 0.2 to 1.0 for `probability`.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// into the attacker's burn chance server side. Player ships carry 0.4339 to
+/// 1.0 by tier; a few bot hulls carry 9.0.
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct BurnNode {
     pub probability: f32,
-    pub damage_fraction_per_sec: f32,
-    pub duration_secs: f32,
+
+    /// Maximum health lost per second, e.g. 0.3%.
+    pub damage_per_sec: Percent,
+    pub duration: Seconds,
+}
+
+/// One hull flood node, the bow or stern end.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct FloodNode {
+    /// Torpedo damage coefficient the hull's torpedo protection derives from
+    /// (`flood_prob`).
+    pub torpedo_damage_coeff: f32,
+
+    /// Maximum health lost per second, e.g. 0.5%.
+    pub damage_per_sec: Percent,
+    pub duration: Seconds,
 }
 
 /// Base hull-component stats, raw from the `*_Hull` component sub-object.
@@ -93,6 +110,9 @@ pub struct HullComponentStats {
     /// count and is per-hull: surface combatants carry four, most submarines one,
     /// some auxiliaries two. Empty when the hull has no `burnNodes` key.
     pub burn_nodes: Vec<BurnNode>,
+    /// Hull `floodNodes`, one entry per flooding section. Empty when the hull
+    /// has no `floodNodes` key.
+    pub flood_nodes: Vec<FloodNode>,
 }
 
 /// Base engine-component stats, raw from the `*_Engine` component sub-object.

@@ -11,7 +11,10 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
     group: ultimate
     category: premium
     status: released
-  fire_node_probability: 0.5005
+  hull_fire_coefficient: 0.5005
+  build_fire_coefficient: 1
+  fire_chance_factor: 0.5005
+  fire_zones: 4
 - ammo: HE
   projectiles:
     - name: 127 mm HE Mk.41

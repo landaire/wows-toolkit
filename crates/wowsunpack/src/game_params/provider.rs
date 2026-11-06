@@ -1017,38 +1017,62 @@ fn read_flood_prob(hull_data: &pickled::Dict) -> Option<f32> {
 /// triples, one per fire section. Returns empty when the key is absent so callers
 /// can tell "no sections known" from "four sections"; there is no correct default.
 fn read_burn_nodes(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::BurnNode> {
-    let Some(value) = hull_data.get(&pk(keys::BURN_NODES)) else {
+    read_node_triples(hull_data, keys::BURN_NODES)
+        .into_iter()
+        .map(|t| crate::game_params::ttx::components::BurnNode {
+            probability: t[0],
+            damage_per_sec: crate::game_params::ttx::model::Percent::from(t[1]),
+            duration: crate::game_params::ttx::model::Seconds::from(t[2]),
+        })
+        .collect()
+}
+
+/// Read hull `floodNodes`: `(torpedo damage coefficient, damage, duration)`
+/// triples, one per flooding section.
+fn read_flood_nodes(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::FloodNode> {
+    read_node_triples(hull_data, keys::FLOOD_NODES)
+        .into_iter()
+        .map(|t| crate::game_params::ttx::components::FloodNode {
+            torpedo_damage_coeff: t[0],
+            damage_per_sec: crate::game_params::ttx::model::Percent::from(t[1]),
+            duration: crate::game_params::ttx::model::Seconds::from(t[2]),
+        })
+        .collect()
+}
+
+/// The float triples of a hull node list. Returns empty when the key is absent.
+fn read_node_triples(hull_data: &pickled::Dict, key: &str) -> Vec<[f32; 3]> {
+    let Some(value) = hull_data.get(&pk(key)) else {
         return Vec::new();
     };
+
     if let Some(l) = value.list_ref() {
-        burn_nodes_from_entries(l.inner().as_slice())
+        node_triples(l.inner().as_slice(), key)
     } else if let Some(t) = value.tuple_ref() {
-        burn_nodes_from_entries(t.inner().as_slice())
+        node_triples(t.inner().as_slice(), key)
     } else {
-        tracing::warn!("burnNodes is neither a list nor a tuple");
+        tracing::warn!(key, "hull node list is neither a list nor a tuple");
         Vec::new()
     }
 }
 
-/// All or nothing: the length of the result is the hull's fire-section count, so
+/// All or nothing: the length of the result is the hull's section count, so
 /// dropping one unreadable triple would silently turn a four-section hull into a
 /// three-section one for every consumer downstream.
-fn burn_nodes_from_entries(entries: &[Value]) -> Vec<crate::game_params::ttx::components::BurnNode> {
+fn node_triples(entries: &[Value], key: &str) -> Vec<[f32; 3]> {
     let mut nodes = Vec::with_capacity(entries.len());
     for entry in entries {
         let Some(t) = read_vec3_value(entry) else {
             tracing::warn!(
+                key,
                 entries = entries.len(),
-                "burnNodes entry is not a float triple; treating the hull as having none"
+                "hull node is not a float triple; treating the hull as having none"
             );
             return Vec::new();
         };
-        nodes.push(crate::game_params::ttx::components::BurnNode {
-            probability: t[0],
-            damage_fraction_per_sec: t[1],
-            duration_secs: t[2],
-        });
+        nodes.push(t);
     }
+
     nodes
 }
 
@@ -1825,6 +1849,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     battery_capacity,
                     battery_regen_rate,
                     burn_nodes: read_burn_nodes(&hull_data),
+                    flood_nodes: read_flood_nodes(&hull_data),
                 },
             );
         }
@@ -3011,6 +3036,14 @@ mod camera_tests {
         assert!((flood - (0.333 - 0.15) / 0.333).abs() < 1e-6, "got {flood}");
         assert_eq!(hull.battery_capacity, Some(240.0));
         assert_eq!(hull.battery_regen_rate, Some(1.2));
+        assert_eq!(
+            hull.flood_nodes,
+            vec![crate::game_params::ttx::components::FloodNode {
+                torpedo_damage_coeff: 0.15,
+                damage_per_sec: crate::game_params::ttx::model::Percent::from(0.5),
+                duration: crate::game_params::ttx::model::Seconds::from(40.0),
+            }]
+        );
 
         let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
         assert_eq!(engine.speed_coef, Some(0.0));
@@ -3055,8 +3088,8 @@ mod camera_tests {
 
         assert_eq!(hull.burn_nodes.len(), 4);
         assert!((hull.burn_nodes[0].probability - 0.6004).abs() < 1e-6);
-        assert!((hull.burn_nodes[0].damage_fraction_per_sec - 0.3).abs() < 1e-6);
-        assert!((hull.burn_nodes[0].duration_secs - 60.0).abs() < 1e-6);
+        assert!((hull.burn_nodes[0].damage_per_sec.value() - 0.3).abs() < 1e-6);
+        assert!((hull.burn_nodes[0].duration.value() - 60.0).abs() < 1e-6);
     }
 
     /// One unreadable triple must not shrink the section count. The length of
@@ -3095,7 +3128,7 @@ mod camera_tests {
         let hull = ttx.hull("PAUH911_Iowa_1944").expect("hull stats present");
 
         assert_eq!(hull.burn_nodes.len(), 4);
-        assert!((hull.burn_nodes[3].duration_secs - 60.0).abs() < 1e-6);
+        assert!((hull.burn_nodes[3].duration.value() - 60.0).abs() < 1e-6);
     }
 
     /// A hull with no burnNodes key yields an empty list, never a fabricated

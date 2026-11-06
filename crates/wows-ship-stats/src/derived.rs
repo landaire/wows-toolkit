@@ -27,6 +27,8 @@ use crate::fires::FireArmament;
 use crate::fires::FireInputs;
 use crate::fires::total_fires;
 use crate::mounts::aiming_mounts;
+use crate::resistance::FireResistance;
+use crate::resistance::Flooding;
 use crate::stat::Direction;
 use crate::stat::Unit;
 
@@ -80,6 +82,29 @@ pub enum DerivedStat {
 
     /// Chance one bomb, rocket or depth charge starts a fire, per aircraft.
     AircraftFireChance,
+
+    /// How much less likely shells are to set the ship on fire: 100 minus
+    /// the hull's fire-node probability times the build's `burnProb`, in
+    /// percent.
+    FireChanceReduction,
+
+    /// Fires that can burn at once.
+    FireZones,
+    FireDuration,
+
+    /// Percent of maximum health one fire burns per second.
+    FireDamagePerSecond,
+
+    /// Health one fire burns over its whole duration.
+    FireDamage,
+
+    FloodDuration,
+
+    /// Percent of maximum health one flood takes per second.
+    FloodDamagePerSecond,
+
+    /// Health one flood takes over its whole duration.
+    FloodDamage,
 }
 
 impl DerivedStat {
@@ -98,6 +123,14 @@ impl DerivedStat {
         DerivedStat::FiresPerMinuteSecondary,
         DerivedStat::FiresPerMinuteAircraft,
         DerivedStat::AircraftFireChance,
+        DerivedStat::FireChanceReduction,
+        DerivedStat::FireZones,
+        DerivedStat::FireDuration,
+        DerivedStat::FireDamagePerSecond,
+        DerivedStat::FireDamage,
+        DerivedStat::FloodDuration,
+        DerivedStat::FloodDamagePerSecond,
+        DerivedStat::FloodDamage,
     ];
 
     /// Dotted name in the namespace of `TtxStat::field_key`.
@@ -117,6 +150,14 @@ impl DerivedStat {
             Self::FiresPerMinuteSecondary => "fires_per_minute.secondary",
             Self::FiresPerMinuteAircraft => "fires_per_minute.aircraft",
             Self::AircraftFireChance => "aircraft.fire_chance",
+            Self::FireChanceReduction => "durability.fire_chance_reduction",
+            Self::FireZones => "durability.fire_zones",
+            Self::FireDuration => "durability.fire_duration",
+            Self::FireDamagePerSecond => "durability.fire_damage_per_second",
+            Self::FireDamage => "durability.fire_damage",
+            Self::FloodDuration => "durability.flood_duration",
+            Self::FloodDamagePerSecond => "durability.flood_damage_per_second",
+            Self::FloodDamage => "durability.flood_damage",
         }
     }
 
@@ -136,24 +177,35 @@ impl DerivedStat {
             Self::FiresPerMinuteSecondary => "Secondary fire starts per minute, every shell hitting",
             Self::FiresPerMinuteAircraft => "Aircraft fire starts per minute, all ordnance hitting",
             Self::AircraftFireChance => "Fire chance of one aircraft bomb, rocket or depth charge",
+            Self::FireChanceReduction => "Fire chance reduction against shells hitting the ship",
+            Self::FireZones => "Fires that can burn at once",
+            Self::FireDuration => "Fire duration",
+            Self::FireDamagePerSecond => "Fire damage per second, percent of maximum health",
+            Self::FireDamage => "Damage of one fire over its whole duration",
+            Self::FloodDuration => "Flooding duration",
+            Self::FloodDamagePerSecond => "Flooding damage per second, percent of maximum health",
+            Self::FloodDamage => "Damage of one flood over its whole duration",
         }
     }
 
     pub fn unit(self) -> Unit {
         match self {
-            Self::MainBatteryBarrels | Self::TorpedoTubes => Unit::Count,
-            Self::MainBatterySalvoDamage => Unit::Hp,
+            Self::MainBatteryBarrels | Self::TorpedoTubes | Self::FireZones => Unit::Count,
+            Self::MainBatterySalvoDamage | Self::FireDamage | Self::FloodDamage => Unit::Hp,
             Self::MainBatteryDamagePerMinute => Unit::HpPerMinute,
             Self::MainBatteryDispersionAtStockRange
             | Self::MainBatteryVerticalDispersionAtStockRange
             | Self::SecondaryDispersionAtStockRange
             | Self::SecondaryVerticalDispersionAtStockRange => Unit::Meters,
-            Self::ConsumableAllChargesTime => Unit::Seconds,
+            Self::ConsumableAllChargesTime | Self::FireDuration | Self::FloodDuration => Unit::Seconds,
             Self::FiresPerMinuteTotal
             | Self::FiresPerMinuteMainBattery
             | Self::FiresPerMinuteSecondary
             | Self::FiresPerMinuteAircraft => Unit::FiresPerMinute,
-            Self::AircraftFireChance => Unit::Percent,
+            Self::AircraftFireChance
+            | Self::FireChanceReduction
+            | Self::FireDamagePerSecond
+            | Self::FloodDamagePerSecond => Unit::Percent,
         }
     }
 
@@ -162,11 +214,19 @@ impl DerivedStat {
             Self::MainBatteryBarrels
             | Self::MainBatterySalvoDamage
             | Self::MainBatteryDamagePerMinute
-            | Self::TorpedoTubes => Some(Direction::Higher),
+            | Self::TorpedoTubes
+            | Self::FireChanceReduction => Some(Direction::Higher),
             Self::MainBatteryDispersionAtStockRange
             | Self::MainBatteryVerticalDispersionAtStockRange
             | Self::SecondaryDispersionAtStockRange
-            | Self::SecondaryVerticalDispersionAtStockRange => Some(Direction::Lower),
+            | Self::SecondaryVerticalDispersionAtStockRange
+            | Self::FireZones
+            | Self::FireDuration
+            | Self::FireDamagePerSecond
+            | Self::FireDamage
+            | Self::FloodDuration
+            | Self::FloodDamagePerSecond
+            | Self::FloodDamage => Some(Direction::Lower),
 
             // More charges and longer action raise it, and so does a longer reload.
             Self::ConsumableAllChargesTime => None,
@@ -206,6 +266,42 @@ impl DerivedStat {
 
             // The card lists no aircraft stat.
             Self::FiresPerMinuteAircraft | Self::AircraftFireChance => &[],
+            Self::FireDamage | Self::FloodDamage => &[TtxStat::Health],
+            Self::FireChanceReduction
+            | Self::FireZones
+            | Self::FireDuration
+            | Self::FireDamagePerSecond
+            | Self::FloodDuration
+            | Self::FloodDamagePerSecond => &[],
+        }
+    }
+
+    /// Modifiers it reads from the build besides the card stats, so the
+    /// skills and upgrades carrying them move it.
+    pub fn modifiers(self) -> &'static [&'static str] {
+        match self {
+            Self::FireChanceReduction => &["burnProb"],
+            Self::FireDuration => &["hlCritTimeCoeff", "burnTime"],
+            Self::FireDamagePerSecond => &["vulnerabilityBurn"],
+            Self::FireDamage => &["hlCritTimeCoeff", "burnTime", "vulnerabilityBurn"],
+            Self::FloodDuration => &["hlCritTimeCoeff", "floodTime"],
+            Self::FloodDamagePerSecond => &["vulnerabilityFlood"],
+            Self::FloodDamage => &["hlCritTimeCoeff", "floodTime", "vulnerabilityFlood"],
+            Self::MainBatteryBarrels
+            | Self::MainBatterySalvoDamage
+            | Self::MainBatteryDamagePerMinute
+            | Self::MainBatteryDispersionAtStockRange
+            | Self::MainBatteryVerticalDispersionAtStockRange
+            | Self::SecondaryDispersionAtStockRange
+            | Self::SecondaryVerticalDispersionAtStockRange
+            | Self::TorpedoTubes
+            | Self::ConsumableAllChargesTime
+            | Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteMainBattery
+            | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteAircraft
+            | Self::AircraftFireChance
+            | Self::FireZones => &[],
         }
     }
 
@@ -252,7 +348,7 @@ impl fmt::Display for DerivedValue {
             Self::Meters(meters) => write!(f, "{:.0} m", meters.value()),
             Self::Seconds(seconds) => write!(f, "{seconds}"),
             Self::FiresPerMinute(rate) => write!(f, "{:.2} fires/min", rate.value()),
-            Self::Percent(percent) => write!(f, "{:.1}%", percent.value()),
+            Self::Percent(percent) => write!(f, "{:.2}%", percent.value()),
         }
     }
 }
@@ -292,6 +388,9 @@ pub struct Derivation<'a> {
 
     /// The modifiers the card was computed with.
     pub modifiers: &'a ModifierBundle,
+
+    /// Fire Prevention Expert is learned (`BuildEffects::merges_fire_zones`).
+    pub merges_fire_zones: bool,
     pub stock_ranges: StockRanges,
     pub provider: &'a dyn GameParamProvider,
 }
@@ -423,6 +522,47 @@ impl Derivation<'_> {
                 qualifier: Some(source.qualifier.clone()),
                 value: DerivedValue::Percent(source.fire_chance),
             });
+        }
+
+        rows.extend(self.fire_and_flood_rows());
+
+        rows
+    }
+
+    /// Fire resistance, fire and flooding of the selected hull with the build
+    /// applied.
+    fn fire_and_flood_rows(&self) -> Vec<DerivedRow> {
+        let Some(hull) = self
+            .ship
+            .vehicle()
+            .and_then(|vehicle| vehicle.ttx_components())
+            .and_then(|components| components.hull(self.selection.hull.as_deref()?))
+        else {
+            return Vec::new();
+        };
+        let health = self.stats.durability.as_ref().and_then(|durability| durability.health);
+        let row = |stat, value| DerivedRow { stat, qualifier: None, value };
+        let percent = |value: f32| DerivedValue::Percent(units::Percent::new((value * 100.0).round() / 100.0));
+        let damage = |percent_per_sec: f32, duration: Seconds| {
+            health.map(|health| Hp::from(health.value() * percent_per_sec / 100.0 * duration.value()))
+        };
+
+        let mut rows = Vec::new();
+        if let Some(fire) = FireResistance::new(hull, self.modifiers, self.merges_fire_zones) {
+            rows.push(row(DerivedStat::FireChanceReduction, percent(100.0 * (1.0 - fire.chance_factor()))));
+            rows.push(row(DerivedStat::FireZones, DerivedValue::Count(fire.zones)));
+            rows.push(row(DerivedStat::FireDuration, DerivedValue::Seconds(fire.duration)));
+            rows.push(row(DerivedStat::FireDamagePerSecond, percent(fire.damage_per_sec.value())));
+            if let Some(damage) = damage(fire.damage_per_sec.value(), fire.duration) {
+                rows.push(row(DerivedStat::FireDamage, DerivedValue::Hp(damage)));
+            }
+        }
+        if let Some(flooding) = Flooding::new(hull, self.modifiers) {
+            rows.push(row(DerivedStat::FloodDuration, DerivedValue::Seconds(flooding.duration)));
+            rows.push(row(DerivedStat::FloodDamagePerSecond, percent(flooding.damage_per_sec.value())));
+            if let Some(damage) = damage(flooding.damage_per_sec.value(), flooding.duration) {
+                rows.push(row(DerivedStat::FloodDamage, DerivedValue::Hp(damage)));
+            }
         }
 
         rows

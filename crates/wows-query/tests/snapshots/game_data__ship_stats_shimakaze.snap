@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1694
 expression: stats.stats
 ---
 - "Hit Points: 17900"
@@ -79,3 +78,11 @@ expression: stats.stats
 - "Time to use every charge (speedBoosters): 720.0 s"
 - "Fire starts per minute, all armament, every projectile hitting: 5.64 fires/min"
 - "Main battery fire starts per minute, every shell hitting (HE): 5.64 fires/min"
+- "Fire chance reduction against shells hitting the ship: 49.95%"
+- "Fires that can burn at once: 4"
+- "Fire duration: 30.0 s"
+- "Fire damage per second, percent of maximum health: 0.30%"
+- "Damage of one fire over its whole duration: 1611"
+- "Flooding duration: 40.0 s"
+- "Flooding damage per second, percent of maximum health: 0.25%"
+- "Damage of one flood over its whole duration: 1790"

@@ -255,15 +255,44 @@ The length is the ship's fire-section count and is **not** always four, despite
 Anything reading this must take the count from `burnNodes.len()`. Most submarines
 have a single fire section.
 
-- `probability` is the ship's hidden fire-resistance coefficient. Observed live range
-  is `0.2` to `1.0` (plus `9.0` on some non-combat / bot hulls). It varies per ship
-  and per hull, correlates loosely with tier, and is not exposed anywhere in the
-  client UI.
-- `damage` is fire damage as a fraction of max HP per second (`0.3` on Iowa reads as
+- `probability` is the ship's hidden fire-resistance coefficient. It is not exposed
+  anywhere in the client UI. On released ships it is set by tier, the same for
+  battleships, cruisers, destroyers and submarines, with a handful of exceptions: a
+  tier's top hull carries `1.1665 - 0.0666 * tier`, capped at `1.0`, and a stock
+  hull one half step more (`+0.0333`). Aircraft carriers carry `0.5005` at every
+  tier. Some non-combat and bot hulls carry `9.0`.
+- `damage` is fire damage in percent of max HP per second (`0.3` on Iowa reads as
   0.3 %/s, the documented battleship fire DPS).
 - `duration` is the base burn time in seconds (`60.0` on Iowa).
 
 All entries are identical within a hull on every hull inspected.
+
+| Tier | Top hull | Fire chance reduction | Stock hull |
+| --- | --- | --- | --- |
+| 2 | 1.0 | 0% | 1.0 |
+| 3 | 0.9667 | 3.33% | 1.0 |
+| 4 | 0.9001 | 9.99% | 0.9334 |
+| 5 | 0.8335 | 16.65% | 0.8668 |
+| 6 | 0.7669 | 23.31% | 0.8002 |
+| 7 | 0.7003 | 29.97% | 0.7336 |
+| 8 | 0.6337 | 36.63% | 0.667 |
+| 9 | 0.5671 | 43.29% | 0.6004 |
+| 10 | 0.5005 | 49.95% | |
+| 11 | 0.4339 | 56.61% | |
+
+Burn time by class: battleships 60 s, cruisers and destroyers 30 s, large cruisers
+(Alaska, Azuma, Kronshtadt and others) 60 s, aircraft carriers 45 s, submarines one
+node of 30 s at 1 %/s. The 0.6.14 update notes (2017-11-28) list the same top hull
+values, `0.9001` at tier IV to `0.5005` at tier X, as carriers' standard coefficient
+and set carriers' top hulls to `0.8`. From at least 0.9.0 to 14.6 carriers carried
+`0.8002` with 5 s fires at 1 %/s; 14.7 gave them `0.5005` and 45 s fires at 0.3 %/s,
+announced in the dev blog of 2025-07-21 as fire resistance on par with high-tier
+battleships.
+
+`floodNodes` has the same shape, `(torpedo damage coefficient, damage, duration)`,
+one per end of the ship: 40 s at 0.5 %/s on battleships and large cruisers, 0.25 %/s
+on cruisers and destroyers, 30 s at 0.25 %/s on carriers, one 30 s node on
+submarines. These match the 0.8.1 flooding rework (update notes 2019-02-12).
 
 ### 3.2 Node construction
 

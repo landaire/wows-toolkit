@@ -19,6 +19,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
 use crate::error::BuildError;
+use crate::resistance::merges_fire_zones;
 
 /// Conditional skill triggers counted as met.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +53,10 @@ pub struct BuildEffects {
 
     /// One entry per conditional skill effect counted as triggered.
     pub active_conditions: Vec<CrewSkillName>,
+
+    /// Fire Prevention Expert is learned. Its `fireResistanceEnabled` flag is
+    /// not a numeric modifier, so it is read off the skill.
+    pub merges_fire_zones: bool,
 }
 
 /// The port stat card of a build, with the inputs behind each stat.
@@ -115,7 +120,9 @@ impl Build<'_> {
             .resolve(&state, species, version)
             .map_err(|source| BuildError::Modifiers { ship: self.ship.name().to_owned(), source })?;
 
-        Ok(BuildEffects { modifiers, active_conditions })
+        let merges_fire_zones = self.skills.iter().any(merges_fire_zones);
+
+        Ok(BuildEffects { modifiers, active_conditions, merges_fire_zones })
     }
 }
 

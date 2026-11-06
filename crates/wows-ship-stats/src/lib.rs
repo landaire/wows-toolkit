@@ -7,6 +7,7 @@ pub mod derived;
 pub mod error;
 pub mod fires;
 pub mod mounts;
+pub mod resistance;
 pub mod stat;
 
 pub use build::Build;
@@ -24,5 +25,7 @@ pub use fires::FireArmament;
 pub use fires::FireInputs;
 pub use fires::FireSource;
 pub use fires::total_fires;
+pub use resistance::FireResistance;
+pub use resistance::Flooding;
 pub use stat::Direction;
 pub use stat::Unit;

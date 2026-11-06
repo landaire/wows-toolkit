@@ -1,6 +1,8 @@
 //! Queries over a real 15.10.0 dump. Run with
 //! `WOWS_GAME_DATA=<wows-replay-data root> cargo test -p wows-query`.
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -38,6 +40,7 @@ use wows_query::stats::ShipStatsArgs;
 use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::TechTreeLinesArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
+use wowsunpack::game_params::types::GameParamProvider;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
@@ -1899,4 +1902,103 @@ fn derived_stats_change_with_skills_and_upgrades() {
         })
         .expect("Des Moines takes both upgrades");
     insta::assert_yaml_snapshot!(stats.changes);
+}
+
+/// Every fire and flooding value released ships' hulls carry, by class and
+/// tier: fire chance reduction, fire duration and damage per second.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn fire_resistance_by_class_and_tier() {
+    const RELEASED: &[&str] =
+        &["upgradeable", "premium", "special", "specialUnsellable", "ultimate", "superShip", "start"];
+
+    let mut table: BTreeMap<String, BTreeMap<_, BTreeSet<String>>> = BTreeMap::new();
+    for param in game().provider().params().iter() {
+        let (Some(vehicle), Some(species)) = (param.vehicle(), param.species().and_then(|species| species.known()))
+        else {
+            continue;
+        };
+        if !RELEASED.contains(&vehicle.group()) {
+            continue;
+        }
+        let Some(components) = vehicle.ttx_components() else {
+            continue;
+        };
+
+        for hull in components.hulls.values() {
+            let (Some(fire), Some(flood)) = (hull.burn_nodes.first(), hull.flood_nodes.first()) else {
+                continue;
+            };
+            let entry = format!(
+                "fire chance reduction {:.2}%, {} fires of {} s at {}%/s; {} floods of {} s at {}%/s",
+                100.0 * (1.0 - fire.probability),
+                hull.burn_nodes.len(),
+                fire.duration.value(),
+                fire.damage_per_sec.value(),
+                hull.flood_nodes.len(),
+                flood.duration.value(),
+                flood.damage_per_sec.value(),
+            );
+            table.entry(format!("{species:?}")).or_default().entry(vehicle.level()).or_default().insert(entry);
+        }
+    }
+    insta::assert_yaml_snapshot!(table);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn fire_and_flooding_of_yamato_and_kongo() {
+    let fire_lines = |ship: &str, skills: &[&str], upgrades: &[&str]| {
+        let to_strings =
+            |names: &[&str]| (!names.is_empty()).then(|| names.iter().map(|name| (*name).to_owned()).collect());
+        let stats = game()
+            .ship_stats(&ShipStatsArgs {
+                ship: ship.to_owned(),
+                skills: to_strings(skills),
+                upgrades: to_strings(upgrades),
+                full_card: Some(true),
+                ..Default::default()
+            })
+            .expect("ship and loadout resolve");
+        let lines: Vec<String> = stats
+            .stats
+            .into_iter()
+            .filter(|line| line.starts_with("Fire") || line.starts_with("Flood") || line.starts_with("Damage of one"))
+            .collect();
+        json!({ "ship": ship, "lines": lines, "changes": stats.changes })
+    };
+
+    insta::assert_yaml_snapshot!([
+        fire_lines("Yamato", &[], &[]),
+        fire_lines("Kongo", &[], &[]),
+        fire_lines(
+            "Yamato",
+            &["Fire Prevention Expert", "Basics of Survivability"],
+            &["Damage Control System Modification 1", "Damage Control System Modification 2"],
+        ),
+    ]);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_he_fire_chance_against_yamato_and_a_tier_6_cruiser() {
+    let against = |target: &str, skills: &[&str]| {
+        let arcs = game()
+            .ship_firing_arcs(&FiringArcsArgs {
+                ship: "Des Moines".to_owned(),
+                target_ship: Some(target.to_owned()),
+                target_skills: (!skills.is_empty()).then(|| skills.iter().map(|skill| (*skill).to_owned()).collect()),
+                ..Default::default()
+            })
+            .expect("firing arcs resolve");
+        let main = battery(&arcs, Weapon::MainBattery);
+        let he = main.ammo.iter().find(|ammo| ammo.ammo == "HE").expect("Des Moines fires HE").clone();
+        (arcs.target, he.projectiles, he.all_barrels)
+    };
+
+    insta::assert_yaml_snapshot!([
+        against("Yamato", &[]),
+        against("Yamato", &["Fire Prevention Expert"]),
+        against("Leander", &[]),
+    ]);
 }

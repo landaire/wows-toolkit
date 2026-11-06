@@ -18,6 +18,7 @@ use wows_ship_stats::Direction;
 use wows_ship_stats::StockRanges;
 use wows_ship_stats::Triggers;
 use wows_ship_stats::Unit;
+use wows_ship_stats::resistance::merges_fire_zones;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::skill_grid_data::skill_grid;
 use wowsunpack::game_params::ttx::InputId;
@@ -1029,6 +1030,7 @@ impl GameData {
                         selection: selections[outcome.selection],
                         stats: &outcome.stats,
                         modifiers: &outcome.bundle,
+                        merges_fire_zones: outcome.merges_fire_zones,
                         stock_ranges,
                         provider: self.provider(),
                     }
@@ -1194,6 +1196,13 @@ impl<'a> ShipSearch<'a> {
             everything.extend(loadout_items.iter().copied());
             if let Some(provenance) = self.recorded(self.explain(&everything)) {
                 relevant.extend(relevant_inputs(&provenance, self.conditions.iter()));
+            }
+        }
+        // Stats read straight from build modifiers have no card provenance;
+        // the items carrying those modifiers move them.
+        for item in &loadout_items {
+            if self.conditions.iter().any(|condition| carries_modifier(item, &condition.stat)) {
+                relevant.insert(input_id(item));
             }
         }
 
@@ -1479,6 +1488,7 @@ impl<'a> ShipSearch<'a> {
             selection: &selection,
             stats: &stats,
             modifiers: effects.build.modifiers.bundle(),
+            merges_fire_zones: effects.build.merges_fire_zones,
             stock_ranges: self.stock_ranges()?,
             provider: self.game.provider(),
         }
@@ -1783,6 +1793,26 @@ fn input_id(item: &Item<'_>) -> InputId {
         Item::Upgrade(upgrade) => InputId::Upgrade { name: upgrade.param.name().to_owned() },
         Item::Skill { skill, .. } => InputId::Skill { name: skill.internal_name().clone() },
     }
+}
+
+/// Whether `item` carries a build modifier the derived `stat` reads, or is
+/// Fire Prevention Expert for the fire zone count.
+fn carries_modifier(item: &Item<'_>, stat: &SearchStat) -> bool {
+    let SearchStat::Derived(stat) = *stat else {
+        return false;
+    };
+    let modifiers = match item {
+        Item::Module(_) => return false,
+        Item::Upgrade(upgrade) => upgrade.modernization().modifiers(),
+        Item::Skill { skill, .. } => {
+            if stat == DerivedStat::FireZones && merges_fire_zones(skill) {
+                return true;
+            }
+            skill.modifiers().map_or(&[][..], Vec::as_slice)
+        }
+    };
+
+    modifiers.iter().any(|modifier| stat.modifiers().contains(&modifier.name()))
 }
 
 /// Ammo type and ricochet angles of each main battery shell of the selected guns.

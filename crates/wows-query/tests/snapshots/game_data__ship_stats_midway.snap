@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1694
 expression: stats.stats
 ---
 - "Hit Points: 67600"
@@ -52,9 +51,17 @@ expression: stats.stats
 - "Aircraft fire starts per minute, all ordnance hitting (PAAF210_Midway_top): 25.20 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAF310_Midway_top): 35.64 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAD913_ASW_T10_CV): 6.05 fires/min"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD110_Midway_stock): 64.0%"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF110_Midway_stock): 7.0%"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD210_Midway_top): 64.0%"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF210_Midway_top): 7.0%"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF310_Midway_top): 33.0%"
-- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD913_ASW_T10_CV): 28.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD110_Midway_stock): 64.00%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF110_Midway_stock): 7.00%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD210_Midway_top): 64.00%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF210_Midway_top): 7.00%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF310_Midway_top): 33.00%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD913_ASW_T10_CV): 28.00%"
+- "Fire chance reduction against shells hitting the ship: 49.95%"
+- "Fires that can burn at once: 4"
+- "Fire duration: 45.0 s"
+- "Fire damage per second, percent of maximum health: 0.30%"
+- "Damage of one fire over its whole duration: 9126"
+- "Flooding duration: 30.0 s"
+- "Flooding damage per second, percent of maximum health: 0.25%"
+- "Damage of one flood over its whole duration: 5070"

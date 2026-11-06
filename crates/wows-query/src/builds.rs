@@ -247,6 +247,7 @@ pub(crate) enum Item {
 pub(crate) struct Outcome {
     pub(crate) stats: ShipStats,
     pub(crate) bundle: ModifierBundle,
+    pub(crate) merges_fire_zones: bool,
 
     /// Index into [`Planner::selections`] of the module combination.
     pub(crate) selection: usize,
@@ -484,7 +485,12 @@ impl<'a> Planner<'a> {
             .build
             .stats(&self.ship.param, &self.selections[selection].0, self.game.provider())
             .map_err(build_failed(self.ship))?;
-        let outcome = Rc::new(Outcome { stats, bundle: effects.build.modifiers.bundle().clone(), selection });
+        let outcome = Rc::new(Outcome {
+            stats,
+            bundle: effects.build.modifiers.bundle().clone(),
+            merges_fire_zones: effects.build.merges_fire_zones,
+            selection,
+        });
         self.outcomes.borrow_mut().insert(key, Rc::clone(&outcome));
         Ok(outcome)
     }

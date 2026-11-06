@@ -32,6 +32,8 @@ use wowsunpack::game_params::types::MountPoint;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::fire_target::FireTarget;
+use crate::fire_target::TargetRequest;
 use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::LoadoutRequest;
@@ -48,9 +50,9 @@ use crate::stats::changes;
 
 const BEARING_NOTE: &str = "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie.";
 
-const FIRE_NOTE: &str = "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. p is the shell's fire chance, times the fire-node probability of the target's stock hull when a target is given. Not applied: the target's Fire Prevention Expert (p x0.9) and Damage Control System Modification 1 (p x0.95), the fire limit (4 fires, 3 with Fire Prevention Expert), fire duration and the Damage Control Party consumable.";
+const FIRE_NOTE: &str = "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. With a target, p is the shell's fire chance times the target's fire_chance_factor (its hull's fire-node probability, lower at higher tiers, times its build's burnProb, e.g. x0.9 with Fire Prevention Expert), capped at 100%. Not applied: the fire limit (target fire_zones fires at once), fire duration and the Damage Control Party consumable.";
 
-const NO_TARGET_NOTE: &str = "No target ship: p is the shell's fire chance alone. The target hull's fire-node probability (0.2 to 1.0 by ship) lowers it; give target_ship to apply it.";
+const NO_TARGET_NOTE: &str = "No target ship: p is the shell's fire chance alone. The target's hull and build lower it (x0.5005 on a tier 10 hull); give target_ship to apply them.";
 
 const SUBMARINE_NOTE: &str =
     "Submarine torpedo tubes aim by firing sectors this tool does not model; torpedoes are left out.";
@@ -73,8 +75,17 @@ pub struct FiringArcsArgs {
     /// Upgrades by name, e.g. ["Main Battery Modification 3"]. One per slot.
     pub upgrades: Option<Vec<String>>,
 
-    /// Ship being fired at, e.g. "Colbert". Its hull's fire-node probability scales the fire chance. Omit to use the shell's fire chance alone.
+    /// Ship being fired at, e.g. "Colbert". Its hull's fire resistance and its build scale the fire chance. Omit to use the shell's fire chance alone.
     pub target_ship: Option<String>,
+
+    /// The target's modules, e.g. ["Hull B"]. Omit for stock; an upgraded hull usually resists fire more.
+    pub target_modules: Option<Vec<String>>,
+
+    /// The target's captain skills, e.g. ["Fire Prevention Expert"].
+    pub target_skills: Option<Vec<String>>,
+
+    /// The target's upgrades, e.g. ["Damage Control System Modification 1"].
+    pub target_upgrades: Option<Vec<String>>,
 
     /// Firing range in km for the dispersion ellipse, 0 or more; 0 gives the ellipse at the muzzle and ranges past the main battery's maximum use the maximum. Defaults to the maximum range.
     pub range_km: Option<Km>,
@@ -326,13 +337,6 @@ pub struct Dispersion {
     pub vertical_m: Meters,
 }
 
-/// The target ship and the fire-node probability its hull carries.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct FireTarget {
-    pub ship: ShipSummary,
-    pub fire_node_probability: f32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ShipFiringArcs {
     /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
@@ -428,8 +432,23 @@ impl GameData {
         };
         let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let target = match args.target_ship.as_deref() {
-            Some(name) => Some(self.fire_target(self.resolve_ship(name, &mut interpretations)?)?),
-            None => None,
+            Some(name) => {
+                let request = TargetRequest {
+                    ship: name,
+                    modules: args.target_modules.as_deref().unwrap_or_default(),
+                    skills: args.target_skills.as_deref().unwrap_or_default(),
+                    upgrades: args.target_upgrades.as_deref().unwrap_or_default(),
+                };
+                Some(self.fire_target(request, &mut interpretations)?)
+            }
+            None => {
+                if args.target_modules.is_some() || args.target_skills.is_some() || args.target_upgrades.is_some() {
+                    return Err(QueryError::InvalidArguments {
+                        reason: "target_modules, target_skills and target_upgrades need target_ship",
+                    });
+                }
+                None
+            }
         };
 
         let facings = self.hardpoint_facings(ship, selection)?;
@@ -440,7 +459,6 @@ impl GameData {
             self.reload_and_fire_changes(ship, &loadout, selection, &card)?
         };
 
-        let node_probability = target.as_ref().map(|target| target.fire_node_probability);
         let submarine = ship.class == ShipClass::Submarine;
         let mut batteries = Vec::new();
         for weapon in [Weapon::MainBattery, Weapon::Secondaries, Weapon::Torpedoes] {
@@ -452,7 +470,7 @@ impl GameData {
                 continue;
             }
 
-            let ordnance = self.ordnance(&oriented, &card.stats, weapon, node_probability);
+            let ordnance = self.ordnance(&oriented, &card.stats, weapon, target.as_ref());
             batteries.push(battery_arcs(weapon, &oriented, &ordnance));
         }
 
@@ -568,22 +586,6 @@ impl GameData {
         Ok(model.hardpoints.iter().map(|hardpoint| (hardpoint.name.clone(), hardpoint.yaw())).collect())
     }
 
-    /// The target's stock hull fire-node probability. Every node of a hull
-    /// carries the same probability.
-    fn fire_target(&self, ship: &Ship) -> Result<FireTarget, QueryError> {
-        let probability = ship
-            .param
-            .vehicle()
-            .and_then(|vehicle| vehicle.ttx_components())
-            .and_then(|components| {
-                let hull = components.stock_selection().hull.as_deref()?;
-                components.hull(hull)?.burn_nodes.first().map(|node| node.probability)
-            })
-            .ok_or_else(|| QueryError::FireNodesMissing { ship: ship.name.clone() })?;
-
-        Ok(FireTarget { ship: ship.summary(), fire_node_probability: probability })
-    }
-
     fn reload_and_fire_changes(
         &self,
         ship: &Ship,
@@ -612,7 +614,7 @@ impl GameData {
         mounts: &[OrientedMount<'_>],
         stats: &ShipStats,
         weapon: Weapon,
-        node_probability: Option<f32>,
+        target: Option<&FireTarget>,
     ) -> Ordnance {
         // Damage, reload and fire chance per projectile name, from the card.
         struct CardEntry {
@@ -699,8 +701,7 @@ impl GameData {
                 };
 
                 let fire_chance = entry.fire_chance.filter(|chance| chance.value() > 0.0);
-                let on_target =
-                    fire_chance.zip(node_probability).map(|(chance, node)| Percent::new(chance.value() * node));
+                let on_target = fire_chance.zip(target).map(|(chance, target)| target.chance_against(chance));
                 let fired = Fired {
                     projectile: Projectile {
                         name: projectile_name,

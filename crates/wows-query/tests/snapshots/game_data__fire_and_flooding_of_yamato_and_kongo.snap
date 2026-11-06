@@ -1,0 +1,78 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),\nfire_lines(\"Yamato\", &[\"Fire Prevention Expert\", \"Basics of Survivability\"],\n&[\"Damage Control System Modification 1\",\n\"Damage Control System Modification 2\"],),]"
+---
+- ship: Yamato
+  lines:
+    - "Fire starts per minute, all armament, every projectile hitting: 39.38 fires/min"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD903_ASW_T10): 28.00%"
+    - "Fire chance reduction against shells hitting the ship: 49.95%"
+    - "Fires that can burn at once: 4"
+    - "Fire duration: 60.0 s"
+    - "Fire damage per second, percent of maximum health: 0.30%"
+    - "Damage of one fire over its whole duration: 17496"
+    - "Flooding duration: 40.0 s"
+    - "Flooding damage per second, percent of maximum health: 0.50%"
+    - "Damage of one flood over its whole duration: 19440"
+  changes: []
+- ship: Kongo
+  lines:
+    - "Fire starts per minute, all armament, every projectile hitting: 22.95 fires/min"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD904_ASW_T5): 16.00%"
+    - "Fire chance reduction against shells hitting the ship: 13.32%"
+    - "Fires that can burn at once: 4"
+    - "Fire duration: 60.0 s"
+    - "Fire damage per second, percent of maximum health: 0.30%"
+    - "Damage of one fire over its whole duration: 8910"
+    - "Flooding duration: 40.0 s"
+    - "Flooding damage per second, percent of maximum health: 0.50%"
+    - "Damage of one flood over its whole duration: 9900"
+  changes: []
+- ship: Yamato
+  lines:
+    - "Fire starts per minute, all armament, every projectile hitting: 39.38 fires/min"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD903_ASW_T10): 28.00%"
+    - "Fire chance reduction against shells hitting the ship: 57.21%"
+    - "Fires that can burn at once: 3"
+    - "Fire duration: 43.4 s"
+    - "Fire damage per second, percent of maximum health: 0.30%"
+    - "Damage of one fire over its whole duration: 12641"
+    - "Flooding duration: 28.9 s"
+    - "Flooding damage per second, percent of maximum health: 0.50%"
+    - "Damage of one flood over its whole duration: 14045"
+  changes:
+    - stat: Fire chance reduction against shells hitting the ship
+      from: 49.95%
+      to: 57.21%
+      because:
+        - Fire Prevention Expert x0.9
+        - Damage Control System Modification 1 x0.95
+    - stat: Fires that can burn at once
+      from: "4"
+      to: "3"
+      because:
+        - Fire Prevention Expert merges two fire zones
+    - stat: Fire duration
+      from: 60.0 s
+      to: 43.4 s
+      because:
+        - Basics of Survivability x0.85
+        - Damage Control System Modification 2 x0.85
+    - stat: Damage of one fire over its whole duration
+      from: "17496"
+      to: "12641"
+      because:
+        - Basics of Survivability x0.85
+        - Damage Control System Modification 2 x0.85
+    - stat: Flooding duration
+      from: 40.0 s
+      to: 28.9 s
+      because:
+        - Basics of Survivability x0.85
+        - Damage Control System Modification 2 x0.85
+    - stat: Damage of one flood over its whole duration
+      from: "19440"
+      to: "14045"
+      because:
+        - Basics of Survivability x0.85
+        - Damage Control System Modification 2 x0.85
