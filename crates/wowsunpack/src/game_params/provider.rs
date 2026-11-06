@@ -2396,6 +2396,18 @@ impl GameMetadataProvider {
                 let read_count = |key: &str| -> Option<u32> {
                     param_data.get(&pk(key)).and_then(|v| v.i64_ref()).and_then(|count| u32::try_from(*count).ok())
                 };
+                let hangar_restore =
+                    param_data.get(&pk("hangarSettings")).and_then(|v| v.dict_or_object_dict()).and_then(|hangar| {
+                        let hangar = hangar.inner();
+                        let planes = hangar.get(&pk("restoreAmount")).and_then(|v| v.i64_ref())?;
+                        let time = hangar
+                            .get(&pk("timeToRestore"))
+                            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))?;
+                        Some(crate::game_params::types::HangarRestore {
+                            planes: u32::try_from(*planes).ok()?,
+                            time: crate::game_params::types::Seconds::new(time),
+                        })
+                    });
                 Some(ParamData::Aircraft(
                     Aircraft::builder()
                         .category(category)
@@ -2410,6 +2422,10 @@ impl GameMetadataProvider {
                         .maybe_speed_with_ordnance(
                             read_opt_f32("speedMoveWithBomb").map(crate::game_params::ttx::model::Knots::from),
                         )
+                        .maybe_attack_cooldown(
+                            read_opt_f32("attackCooldown").map(crate::game_params::types::Seconds::new),
+                        )
+                        .maybe_hangar_restore(hangar_restore)
                         .build(),
                 ))
             }

@@ -69,9 +69,10 @@ This is already transcribed in the toolkit:
 `wowsunpack/src/game_params/ttx/weapon_tables.rs::calculate_burn_chance`, which also
 returns an ordered `Vec<AppliedModifier>` describing every step. That provenance list
 is what a per-ship formula breakdown should render. The transcription covers the
-`ARTILLERY` branch only, and returns the pre-clamp value by contract: it has no
-`ROCKET` or `PLANE_BOMBS` branch and does not apply the trailing `max(x, 0)`, which
-is the caller's to apply.
+`ARTILLERY`, `ROCKET` and `PLANE_BOMBS` branches (`BurnSpecies`; plane bombs are
+taken to be the `Bomb` and `SkipBomb` projectile species) and returns the pre-clamp
+value by contract: it does not apply the trailing `max(x, 0)`, which is the
+caller's to apply.
 
 ### 2.1 Constants
 

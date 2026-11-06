@@ -45,6 +45,7 @@ use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
 use crate::game_params::ttx::provenance::Op;
 use crate::game_params::ttx::provenance::Recorder;
+use crate::game_params::ttx::weapon_tables::BurnSpecies;
 use crate::game_params::ttx::weapon_tables::StatWeaponType;
 use crate::game_params::ttx::weapon_tables::alpha_damage_coeff;
 use crate::game_params::ttx::weapon_tables::ammo_to_stat_weapon_table;
@@ -769,11 +770,12 @@ pub fn shell_stats<R: Recorder>(
     // burnChance: calculateBurnChance(level, burnProb) for HE (line 171) and AP (line 188);
     // CS sets no burnChance. burnProb -0.5 (AP "N/A") clamps to 0.
     // Stored as a percent (burnProb 0.12 -> 12%).
-    let is_small = is_small_projectile(caliber_m, SMALL_PROJECTILE_MAX_DIAMETER_M);
+    let is_small = is_small_projectile(BurnSpecies::Artillery, caliber_m, SMALL_PROJECTILE_MAX_DIAMETER_M);
     let burn_chance = match weapon {
         StatWeaponType::MainHe | StatWeaponType::MainAp | StatWeaponType::AtbaHe | StatWeaponType::AtbaAp => {
             projectile.burn_prob().map(|bp| {
-                let (pre_clamp, burn_applied) = calculate_burn_chance(level, bp, modifiers, is_small);
+                let (pre_clamp, burn_applied) =
+                    calculate_burn_chance(BurnSpecies::Artillery, level, bp, modifiers, is_small);
                 let chance_val = pre_clamp.max(0.0) * 100.0;
                 if R::ON {
                     let base_pct = bp.max(0.0) * 100.0;
@@ -3692,19 +3694,23 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
 
-        let small =
-            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(Some(0.127), SMALL_PROJECTILE_MAX_DIAMETER_M));
-        assert!((small.0 - 0.055).abs() < 1e-6, "127mm should take +0.005, got {}", small.0);
+        let burn = |caliber_m: f32| {
+            let is_small =
+                is_small_projectile(BurnSpecies::Artillery, Some(caliber_m), SMALL_PROJECTILE_MAX_DIAMETER_M);
+            calculate_burn_chance(BurnSpecies::Artillery, 10, 0.05, &bundle, is_small).0
+        };
 
-        let big =
-            calculate_burn_chance(10, 0.05, &bundle, is_small_projectile(Some(0.203), SMALL_PROJECTILE_MAX_DIAMETER_M));
-        assert!((big.0 - 0.06).abs() < 1e-6, "203mm should take +0.01, got {}", big.0);
+        let small = burn(0.127);
+        assert!((small - 0.055).abs() < 1e-6, "127mm should take +0.005, got {small}");
+
+        let big = burn(0.203);
+        assert!((big - 0.06).abs() < 1e-6, "203mm should take +0.01, got {big}");
     }
 
     /// The exact threshold is inclusive: 160 mm is small, 161 mm is not.
     #[test]
     fn small_projectile_threshold_is_inclusive_at_160mm() {
-        assert!(is_small_projectile(Some(0.160), SMALL_PROJECTILE_MAX_DIAMETER_M));
-        assert!(!is_small_projectile(Some(0.161), SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!(is_small_projectile(BurnSpecies::Artillery, Some(0.160), SMALL_PROJECTILE_MAX_DIAMETER_M));
+        assert!(!is_small_projectile(BurnSpecies::Artillery, Some(0.161), SMALL_PROJECTILE_MAX_DIAMETER_M));
     }
 }

@@ -2791,6 +2791,12 @@ pub struct Aircraft {
     /// (AirplaneUtils.py:442 converts it from knots).
     #[cfg_attr(feature = "serde", serde(default))]
     speed_with_ordnance: Option<crate::game_params::ttx::model::Knots>,
+    /// `attackCooldown`: the shortest time between two attacks of one squadron.
+    #[cfg_attr(feature = "serde", serde(default))]
+    attack_cooldown: Option<Seconds>,
+    /// `hangarSettings`: how the hangar restores planes.
+    #[cfg_attr(feature = "serde", serde(default))]
+    hangar_restore: Option<HangarRestore>,
 }
 
 impl Aircraft {
@@ -2832,6 +2838,26 @@ impl Aircraft {
         self.speed_with_ordnance
     }
 
+    pub fn attack_cooldown(&self) -> Option<Seconds> {
+        self.attack_cooldown
+    }
+
+    /// Ordnance one attack of the squadron releases: `attackerSize` planes
+    /// times each plane's payload.
+    pub fn payload_per_attack(&self) -> Option<u32> {
+        Some(self.attack_flight_size? * self.payload_per_plane()?)
+    }
+
+    /// Attacks one squadron makes per sortie: `numPlanesInSquadron /
+    /// attackerSize`.
+    pub fn attacks_per_sortie(&self) -> Option<u32> {
+        self.squadron_size?.checked_div(self.attack_flight_size?)
+    }
+
+    pub fn hangar_restore(&self) -> Option<HangarRestore> {
+        self.hangar_restore
+    }
+
     /// Determine the effective plane category for display/icon purposes.
     ///
     /// The raw `category` from `planeSubtype` isn't always sufficient:
@@ -2849,6 +2875,16 @@ impl Aircraft {
         }
         self.category.clone()
     }
+}
+
+/// Planes a hangar restores at a time, and how long each restore takes
+/// (`hangarSettings.restoreAmount`, `timeToRestore`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct HangarRestore {
+    pub planes: u32,
+    pub time: Seconds,
 }
 
 /// Strongly-typed ammunition type for projectiles.

@@ -16,6 +16,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::ttx::factories::SMALL_PROJECTILE_MAX_DIAMETER_M;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::provenance::Op;
+use wowsunpack::game_params::ttx::weapon_tables::BurnSpecies;
 use wowsunpack::game_params::ttx::weapon_tables::calculate_burn_chance;
 use wowsunpack::game_params::ttx::weapon_tables::is_small_projectile;
 use wowsunpack::game_params::types::CrewSkillType;
@@ -1145,8 +1146,9 @@ fn burnable_main_battery_chance(
     let Some(burn_prob) = projectile.burn_prob() else {
         return Err(HitEligibility::ShellCannotBurn);
     };
-    let is_small = is_small_projectile(projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
-    let (pre_clamp, _) = calculate_burn_chance(tier, burn_prob, bundle, is_small);
+    let is_small =
+        is_small_projectile(BurnSpecies::Artillery, projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
+    let (pre_clamp, _) = calculate_burn_chance(BurnSpecies::Artillery, tier, burn_prob, bundle, is_small);
     // `calculate_burn_chance` returns the pre-clamp value; ttx's contract is
     // that the caller applies `max(0)`. The upper bound is the probability's own
     // definition: additive bonuses can in principle sum past 1, and a chance
@@ -1639,8 +1641,9 @@ fn formula_steps(
     let Some(burn_prob) = projectile.burn_prob() else {
         return (None, Vec::new());
     };
-    let is_small = is_small_projectile(projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
-    let (_, applied) = calculate_burn_chance(tier, burn_prob, bundle, is_small);
+    let is_small =
+        is_small_projectile(BurnSpecies::Artillery, projectile.bullet_diametr(), SMALL_PROJECTILE_MAX_DIAMETER_M);
+    let (_, applied) = calculate_burn_chance(BurnSpecies::Artillery, tier, burn_prob, bundle, is_small);
 
     let mut running = burn_prob;
     let mut steps = Vec::new();

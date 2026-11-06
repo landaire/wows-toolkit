@@ -16,6 +16,7 @@
 
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::provenance::Op;
+use crate::game_params::types::Species;
 
 /// One modifier a weapon-coefficient helper applied, in application order.
 pub struct AppliedModifier {
@@ -212,29 +213,60 @@ pub fn artillery_damage_coeff(
     (1.0, applied)
 }
 
+/// The projectile families `calculateBurnChance` branches on
+/// (`ammoParams.typeinfo.species`, ModifiersApply.py:41-52).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BurnSpecies {
+    Artillery,
+    Rocket,
+
+    /// `ProjectileTypes.PLANE_BOMBS`: bombs and skip bombs.
+    PlaneBomb,
+
+    /// Torpedoes, depth charges and the rest: only the shared tail applies.
+    Other,
+}
+
+impl BurnSpecies {
+    pub fn from_species(species: Option<&Species>) -> Self {
+        match species {
+            Some(Species::Artillery) => Self::Artillery,
+            Some(Species::Rocket) => Self::Rocket,
+            Some(Species::Bomb | Species::SkipBomb) => Self::PlaneBomb,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Whether a projectile counts as "small" for the burn-chance factor split
-/// (`isSmallProjectile`, Modifiers/__init__.py:5-12). Artillery shells take the
+/// (`isSmallProjectile`, Modifiers/__init__.py:5-12). Plane bombs are never small
+/// (line 7). Other projectiles take the
 /// `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER` test (line 10); a projectile
 /// carrying no `bulletDiametr` at all falls through to `return True` (line 12),
 /// so `None` is small. The threshold is `0.0` in the decompiled source (a zeroed
 /// compiled-module float); the real value, `0.16` m, is recovered from stage4
 /// bytecode and supplied by the caller. See `docs/FIRE_CHANCE.md` section 2.1.
-pub fn is_small_projectile(bullet_diametr_m: Option<f32>, small_projectile_max_diameter_m: f32) -> bool {
-    bullet_diametr_m.is_none_or(|d| d <= small_projectile_max_diameter_m)
+pub fn is_small_projectile(
+    species: BurnSpecies,
+    bullet_diametr_m: Option<f32>,
+    small_projectile_max_diameter_m: f32,
+) -> bool {
+    species != BurnSpecies::PlaneBomb && bullet_diametr_m.is_none_or(|d| d <= small_projectile_max_diameter_m)
 }
 
-/// `calculateBurnChance(ammoOwnerLevel, ammoParams, modifier, initialBurnProb)` for the
-/// artillery path (ModifiersApply.py:39-66).
+/// `calculateBurnChance(ammoOwnerLevel, ammoParams, modifier, initialBurnProb)`
+/// (ModifiersApply.py:39-66, transcribed in `docs/FIRE_CHANCE.md` section 2).
 ///
-/// `ammo_owner_level` is the ship tier; tiers above [`MAX_SMALL_CATEGORY_LEVEL`] take
-/// `burnChanceFactorHighLevel`, the rest `burnChanceFactorLowLevel` (lines 43-46). The
-/// ARTILLERY species tail then applies `burnChanceGMGSMultiplier` (line 48) and adds
-/// `artilleryBurnChanceBonus` (line 49). The species-agnostic tail multiplies
-/// `burnChanceMultiplier`, adds `burnChanceBonus` (lines 57-58), and adds the
-/// small/big factor (lines 60-65). `max(result, 0)` clamps (line 66).
+/// For artillery, `ammo_owner_level` is the ship tier; tiers above
+/// [`MAX_SMALL_CATEGORY_LEVEL`] take `burnChanceFactorHighLevel`, the rest
+/// `burnChanceFactorLowLevel`. The ARTILLERY species branch then applies
+/// `burnChanceGMGSMultiplier` and adds `artilleryBurnChanceBonus`. Rockets add
+/// `rocketBurnChanceBonus` and plane bombs `bombBurnChanceBonus` instead. The
+/// species-agnostic tail multiplies `burnChanceMultiplier`, adds `burnChanceBonus`,
+/// and adds the small/big factor. The client returns `max(result, 0)`.
 ///
-/// `is_small` is [`is_small_projectile`]'s answer for this shell. Every coefficient
-/// here reads its `MODIFIER_SETTINGS` identity from the stock bundle
+/// `is_small` is [`is_small_projectile`]'s answer for this projectile. Every
+/// coefficient here reads its `MODIFIER_SETTINGS` identity from the stock bundle
 /// (`*HighLevel`/`*LowLevel`/`GMGSMultiplier`/`Multiplier` -> 1.0,
 /// `*Bonus`/`*Small`/`*Big` -> 0.0), so the stock burn chance is exactly
 /// `max(initialBurnProb, 0)`.
@@ -245,6 +277,7 @@ pub fn is_small_projectile(bullet_diametr_m: Option<f32>, small_projectile_max_d
 /// as `final_value` so replay is exact even when clamping would otherwise hide the
 /// recorded step sum.
 pub fn calculate_burn_chance(
+    species: BurnSpecies,
     ammo_owner_level: u32,
     initial_burn_prob: f32,
     modifier: &ModifierBundle,
@@ -252,17 +285,31 @@ pub fn calculate_burn_chance(
 ) -> (f32, Vec<AppliedModifier>) {
     let mut applied = Vec::new();
     let mut prob = initial_burn_prob;
-    if ammo_owner_level > MAX_SMALL_CATEGORY_LEVEL {
-        prob *= modifier.coef("burnChanceFactorHighLevel");
-        applied.push(AppliedModifier { name: "burnChanceFactorHighLevel", op: Op::Mul });
-    } else {
-        prob *= modifier.coef("burnChanceFactorLowLevel");
-        applied.push(AppliedModifier { name: "burnChanceFactorLowLevel", op: Op::Mul });
+    match species {
+        BurnSpecies::Artillery => {
+            if ammo_owner_level > MAX_SMALL_CATEGORY_LEVEL {
+                prob *= modifier.coef("burnChanceFactorHighLevel");
+                applied.push(AppliedModifier { name: "burnChanceFactorHighLevel", op: Op::Mul });
+            } else {
+                prob *= modifier.coef("burnChanceFactorLowLevel");
+                applied.push(AppliedModifier { name: "burnChanceFactorLowLevel", op: Op::Mul });
+            }
+            prob *= modifier.coef("burnChanceGMGSMultiplier");
+            applied.push(AppliedModifier { name: "burnChanceGMGSMultiplier", op: Op::Mul });
+            prob += modifier.bonus("artilleryBurnChanceBonus");
+            applied.push(AppliedModifier { name: "artilleryBurnChanceBonus", op: Op::Add });
+        }
+        BurnSpecies::Rocket => {
+            prob += modifier.bonus("rocketBurnChanceBonus");
+            applied.push(AppliedModifier { name: "rocketBurnChanceBonus", op: Op::Add });
+        }
+        BurnSpecies::PlaneBomb => {
+            prob += modifier.bonus("bombBurnChanceBonus");
+            applied.push(AppliedModifier { name: "bombBurnChanceBonus", op: Op::Add });
+        }
+        // Only the shared tail applies.
+        BurnSpecies::Other => {}
     }
-    prob *= modifier.coef("burnChanceGMGSMultiplier");
-    applied.push(AppliedModifier { name: "burnChanceGMGSMultiplier", op: Op::Mul });
-    prob += modifier.bonus("artilleryBurnChanceBonus");
-    applied.push(AppliedModifier { name: "artilleryBurnChanceBonus", op: Op::Add });
 
     prob *= modifier.coef("burnChanceMultiplier");
     applied.push(AppliedModifier { name: "burnChanceMultiplier", op: Op::Mul });
@@ -410,14 +457,14 @@ mod tests {
     /// every burn modifier reads its identity (factors 1.0, bonuses 0.0).
     #[test]
     fn stock_burn_chance_high_level_is_burn_prob() {
-        let (got, _) = calculate_burn_chance(10, 0.12, &stock(), false);
+        let (got, _) = calculate_burn_chance(BurnSpecies::Artillery, 10, 0.12, &stock(), false);
         assert!((got.max(0.0) - 0.12).abs() < 1e-6, "got {got}");
     }
 
     /// Stock burn chance for a low-tier shell is likewise its burnProb.
     #[test]
     fn stock_burn_chance_low_level_is_burn_prob() {
-        let (got, _) = calculate_burn_chance(5, 0.08, &stock(), true);
+        let (got, _) = calculate_burn_chance(BurnSpecies::Artillery, 5, 0.08, &stock(), true);
         assert!((got.max(0.0) - 0.08).abs() < 1e-6, "got {got}");
     }
 
@@ -436,7 +483,7 @@ mod tests {
         ];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let (got, applied) = calculate_burn_chance(10, 0.12, &bundle, false);
+        let (got, applied) = calculate_burn_chance(BurnSpecies::Artillery, 10, 0.12, &bundle, false);
         // ((0.12*0.9)*0.95 + 0.02)*1.1 + 0.01 - 0.03 (pre-clamp)
         let expected = ((0.12f32 * 0.9 * 0.95) + 0.02) * 1.1 + 0.01 - 0.03;
         assert!((got - expected).abs() < 1e-6, "got {got} expected {expected}");
@@ -462,22 +509,43 @@ mod tests {
         let mods = [modifier("burnChanceBonus", -1.0)];
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("test modifiers are all known");
-        let (got, _) = calculate_burn_chance(10, 0.12, &bundle, false);
+        let (got, _) = calculate_burn_chance(BurnSpecies::Artillery, 10, 0.12, &bundle, false);
         assert_eq!(got.max(0.0), 0.0);
     }
 
     /// AP shells carry burnProb -0.5 (the "N/A" sentinel); clamped to 0 by caller.
     #[test]
     fn burn_chance_ap_na_clamps_to_zero() {
-        let (got, _) = calculate_burn_chance(10, -0.5, &stock(), false);
+        let (got, _) = calculate_burn_chance(BurnSpecies::Artillery, 10, -0.5, &stock(), false);
         assert_eq!(got.max(0.0), 0.0);
     }
 
     #[test]
     fn small_projectile_threshold() {
         // Threshold 0.149 is the wowsdeob-recovered SMALL_SHELL_MAX_DIAMETER.
-        assert!(is_small_projectile(Some(0.1), 0.149));
-        assert!(!is_small_projectile(Some(0.152), 0.149));
+        assert!(is_small_projectile(BurnSpecies::Artillery, Some(0.1), 0.149));
+        assert!(!is_small_projectile(BurnSpecies::Artillery, Some(0.152), 0.149));
+    }
+
+    /// Plane bombs take `bombBurnChanceBonus`, the big-projectile factor and
+    /// neither tier factor nor `artilleryBurnChanceBonus`.
+    #[test]
+    fn plane_bombs_take_the_bomb_bonus_and_the_big_factor() {
+        let mods = [
+            modifier("burnChanceFactorHighLevel", 0.5),
+            modifier("artilleryBurnChanceBonus", 0.01),
+            modifier("bombBurnChanceBonus", 0.05),
+            modifier("burnChanceFactorSmall", 0.005),
+            modifier("burnChanceFactorBig", 0.01),
+        ];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::AirCarrier, VERSION).expect("test modifiers are all known");
+        let is_small = is_small_projectile(BurnSpecies::PlaneBomb, Some(0.04), 0.16);
+
+        let (got, _) = calculate_burn_chance(BurnSpecies::PlaneBomb, 10, 0.64, &bundle, is_small);
+
+        assert!(!is_small);
+        assert!((got - (0.64 + 0.05 + 0.01)).abs() < 1e-6, "got {got}");
     }
 
     /// `isSmallProjectile` returns True when the projectile has no `bulletDiametr`
@@ -485,6 +553,6 @@ mod tests {
     /// small, not big.
     #[test]
     fn a_projectile_without_a_caliber_is_small() {
-        assert!(is_small_projectile(None, 0.149));
+        assert!(is_small_projectile(BurnSpecies::Artillery, None, 0.149));
     }
 }
