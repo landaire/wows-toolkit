@@ -15,6 +15,7 @@ workspace_library(
             "default",
             "parsing",
             "rkyv",
+            "schemars",
             "serde",
         ],
     ),
@@ -26,6 +27,7 @@ workspace_library(
         native = [
             "//third-party/rust:rkyv",
             "//third-party/rust:roxmltree",
+            "//third-party/rust:schemars",
             "//third-party/rust:serde",
             "//third-party/rust:serde_json",
         ],

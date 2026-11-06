@@ -1,0 +1,172 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: upgrades
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+slots:
+  - slot: 1
+    options:
+      - name: Main Armaments Modification 1
+        kind: regular
+        cost_credits: 125000
+        effects:
+          - "-20% Risk of main battery becoming incapacitated"
+          - +50% Main battery survivability
+          - "-20% Main battery repair time"
+          - "-20% Risk of torpedo tubes becoming incapacitated"
+          - +50% Torpedo tubes survivability
+          - "-20% Torpedo tubes repair time"
+      - name: Auxiliary Armaments Modification 1
+        kind: regular
+        cost_credits: 125000
+        effects:
+          - +100% AA mount survivability
+          - +100% Secondary battery survivability
+      - name: Spotting Aircraft Modification 1
+        kind: consumable_modification
+        cost_credits: 1250000
+        effects:
+          - +5% Consumable total usage time
+          - +30% Consumable action time
+      - name: Damage Control Party Modification 1
+        kind: consumable_modification
+        cost_credits: 1250000
+        effects:
+          - +40% Consumable action time
+  - slot: 2
+    options:
+      - name: Damage Control System Modification 1
+        kind: regular
+        cost_credits: 250000
+        effects:
+          - "-5% Risk of catching fire"
+          - "-3% Risk of flooding"
+      - name: Hydroacoustic Search Modification 1
+        kind: consumable_modification
+        cost_credits: 1250000
+        effects:
+          - +20% Consumable action time
+      - name: Surveillance Radar Modification 1
+        kind: consumable_modification
+        cost_credits: 1250000
+        effects:
+          - +20% Consumable action time
+      - name: Engine Room Protection
+        kind: regular
+        cost_credits: 250000
+        effects:
+          - "-20% Risk of steering gears becoming incapacitated"
+          - "-20% Steering gears repair time"
+          - "-20% Risk of engine becoming incapacitated"
+          - "-20% Engine repair time"
+  - slot: 3
+    options:
+      - name: Main Battery Modification 2
+        kind: regular
+        cost_credits: 500000
+        effects:
+          - +15% Main battery traverse speed
+      - name: Secondary Battery Modification 1
+        kind: regular
+        cost_credits: 500000
+        effects:
+          - "-20% Maximum secondary battery shell dispersion"
+          - +20% Secondary battery firing range
+      - name: AA Guns Modification 1
+        kind: regular
+        cost_credits: 500000
+        effects:
+          - "-20% AA Defense Priority cooldown time"
+      - name: Aiming Systems Modification 1
+        kind: regular
+        cost_credits: 500000
+        effects:
+          - "-7% Maximum main battery shell dispersion"
+          - "-5% Maximum secondary battery shell dispersion"
+          - +5% Secondary battery firing range
+          - +20% Torpedo tubes traverse speed
+  - slot: 4
+    options:
+      - name: Damage Control System Modification 2
+        kind: regular
+        cost_credits: 1000000
+        effects:
+          - "-15% Fire extinguishing time"
+          - "-15% Flooding recovery time"
+      - name: Propulsion Modification 1
+        kind: regular
+        cost_credits: 1000000
+        effects:
+          - "-50% Time to reach full engine power when accelerating"
+      - name: Steering Gears Modification 1
+        kind: regular
+        cost_credits: 1000000
+        effects:
+          - "-20% Rudder shift time"
+      - name: Airstrike Modification 1
+        kind: regular
+        cost_credits: 1000000
+        effects:
+          - +25% Airstrike aircraft HP
+          - "-20% Airstrike armament reload time"
+          - +15% Depth charge damage
+  - slot: 5
+    options:
+      - name: Torpedo Lookout System
+        kind: regular
+        cost_credits: 2000000
+        effects:
+          - 0 km Assured acquisition range of torpedoes
+      - name: Concealment System Modification 1
+        kind: regular
+        cost_credits: 2000000
+        effects:
+          - "-10% Squadron detectability range"
+          - +5% Dispersion of shells fired by enemies attacking your ship
+          - "-10% Ship's detectability range"
+          - "-10% Ship detectability for submarines when underwater"
+      - name: Steering Gears Modification 2
+        kind: regular
+        cost_credits: 2000000
+        effects:
+          - "-80% Steering gears repair time"
+          - "-40% Rudder shift time"
+      - name: "Ship Consumable\nModification 1"
+        kind: regular
+        cost_credits: 2000000
+        effects:
+          - +10% Ship consumable action time
+          - +2.5% Ship consumable total usage time
+  - slot: 6
+    options:
+      - name: Main Battery Modification 3
+        kind: regular
+        cost_credits: 3000000
+        effects:
+          - "-13% Main battery traverse speed"
+          - "-12% Main battery reload time"
+      - name: Gun Fire Control System Modification 2
+        kind: regular
+        cost_credits: 3000000
+        effects:
+          - +16% Main battery firing range
+      - name: Enhanced Propulsion Plant
+        kind: unique
+        cost_credits: 5000000
+        effects:
+          - "-20% Rudder shift time"
+          - "-50% Time to reach full engine power when accelerating"
+      - name: Auxiliary Armaments Modification 2
+        kind: regular
+        cost_credits: 3000000
+        effects:
+          - +15% Continuous AA damage
+          - +15% Damage from AA shell explosions
+          - +1 Number of Shell Explosions
+          - "-20% Secondary battery reload time"

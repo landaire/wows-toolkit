@@ -2724,6 +2724,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "deunicode"
+version = "1.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
+
+[[package]]
 name = "dhat"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15599,6 +15605,7 @@ version = "0.14.0"
 dependencies = [
  "rkyv",
  "roxmltree 0.21.1",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -15627,6 +15634,27 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "wowsunpack",
+]
+
+[[package]]
+name = "wows-query"
+version = "0.1.0"
+dependencies = [
+ "deunicode",
+ "gettext",
+ "insta",
+ "reqwest 0.12.28",
+ "rootcause",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "toml 1.1.6+spec-1.1.0",
+ "tracing",
+ "wows-core",
+ "wows-data-mgr",
+ "wows_replays",
  "wowsunpack",
 ]
 

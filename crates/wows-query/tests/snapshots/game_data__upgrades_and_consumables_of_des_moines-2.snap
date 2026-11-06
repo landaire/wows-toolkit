@@ -1,0 +1,63 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: consumables
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+skills:
+  - name: Superintendent
+    points: 3
+slots:
+  - slot: 1
+    options:
+      - name: Damage Control Party
+        type: crashCrew
+        charges: unlimited
+        reload_s: 60
+        action_time_s: 5
+  - slot: 2
+    options:
+      - name: Auxiliary and Torpedo Weaponry Coordination
+        type: auxTorpBooster
+        charges: 4
+        reload_s: 120
+        action_time_s: 30
+      - name: Hydroacoustic Search
+        type: sonar
+        charges: 4
+        reload_s: 120
+        action_time_s: 100
+        ship_detection_m: 5000
+        torpedo_detection_m: 3500
+  - slot: 3
+    options:
+      - name: Surveillance Radar
+        type: rls
+        charges: 4
+        reload_s: 120
+        action_time_s: 35
+        ship_detection_m: 10000
+      - name: Fighters
+        type: fighter
+        charges: 4
+        reload_s: 90
+        action_time_s: 60
+        fighters: 4
+      - name: Spotting Aircraft
+        type: scout
+        charges: 5
+        reload_s: 240
+        action_time_s: 100
+  - slot: 4
+    options:
+      - name: Repair Party
+        type: regenCrew
+        charges: 4
+        reload_s: 80
+        action_time_s: 28
+        heal_percent_per_s: 0.5

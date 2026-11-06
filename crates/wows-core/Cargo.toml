@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
 roxmltree = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -25,5 +26,7 @@ serde_json = { workspace = true }
 arc = []
 serde = ["dep:serde"]
 rkyv = ["dep:rkyv"]
+# JSON Schema for tool arguments that take unit values.
+schemars = ["dep:schemars"]
 # XML-derived constructors (e.g. Version::from_account_def). Pulls roxmltree.
 parsing = ["dep:roxmltree"]

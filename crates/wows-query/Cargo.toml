@@ -1,0 +1,36 @@
+[package]
+name = "wows-query"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Query World of Warships game data: ships, armor, shells, stat cards, captain skills, upgrades and consumables"
+
+[dependencies]
+wowsunpack = { workspace = true, features = ["arc", "models", "rkyv", "serde", "vfs"] }
+wows-core = { workspace = true, features = ["arc", "schemars", "serde"] }
+wows-data-mgr = { workspace = true }
+wows_replays = { workspace = true, features = ["arc", "parsing"] }
+deunicode = "1"
+gettext = { workspace = true }
+reqwest = { version = "0.12", default-features = false, optional = true }
+rootcause = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+default = []
+# Downloads the newest published game data build. The caller installs a rustls
+# crypto provider before building the `reqwest::Client` it passes in.
+download = ["wows-data-mgr/download", "dep:reqwest"]
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+serde_json = { workspace = true }

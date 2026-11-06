@@ -27,6 +27,7 @@ members = [
     "crates/wgc-launch",
     "crates/wgc-auth",
     "crates/wows-battle-world",
+    "crates/wows-query",
     "build-support/buck/reindeer-features",
 ]
 exclude = ["third-party/rust/vendor"]
@@ -49,6 +50,7 @@ wows_minimap_renderer = { version = "0.40.0", path = "crates/minimap-renderer", 
 wows-battle-world = { version = "0.14.0", path = "crates/wows-battle-world", default-features = false }
 wows-data-mgr = { version = "0.22.0", path = "crates/wows-data-mgr", default-features = false }
 wows-replay-insights = { version = "0.14.0", path = "crates/wows-replay-insights", default-features = false }
+wows-query = { path = "crates/wows-query" }
 wt-collab-client = { path = "crates/wt-collab-client" }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
@@ -90,6 +92,7 @@ iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
 rkyv = "0.8.18"
 rootcause = "0.12"
 roxmltree = "0.21"
+schemars = "1.2"
 serde = { version = "1", features = ["derive"] }
 ciborium = "0.2"
 serde_json = "1.0"

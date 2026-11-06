@@ -1,0 +1,29 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: ifhe
+---
+skills:
+  - name: Inertia Fuse for HE Shells
+    internal_name: HePenetration
+    classes:
+      - classes:
+          - destroyer
+        points: 3
+        effects:
+          - +25% Main battery HE shell armor penetration capability
+          - +25% Secondary battery HE shell armor penetration capability
+          - Chances of causing a fire by HE shells without modifiers applied are reduced by half.
+      - classes:
+          - cruiser
+        points: 4
+        effects:
+          - +25% Main battery HE shell armor penetration capability
+          - +25% Secondary battery HE shell armor penetration capability
+          - Chances of causing a fire by HE shells without modifiers applied are reduced by half.
+      - classes:
+          - battleship
+        points: 2
+        effects:
+          - +25% Main battery HE shell armor penetration capability
+          - +25% Secondary battery HE shell armor penetration capability
+          - Chances of causing a fire by HE shells without modifiers applied are reduced by half.

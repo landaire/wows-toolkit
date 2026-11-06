@@ -1,0 +1,10 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: groups
+---
+- - he_penetration
+  - 246
+- - sap_penetration
+  - 15
+- - ap_overmatch
+  - 0

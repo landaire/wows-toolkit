@@ -1,0 +1,91 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: stats
+---
+ship:
+  name: Schlieffen
+  index: PGSB210
+  tier: 10
+  class: battleship
+  nation: Germany
+  group: upgradeable
+skills:
+  - name: Inertia Fuse for HE Shells
+    points: 2
+  - name: Concealment Expert
+    points: 4
+skill_points: 6
+upgrades:
+  - name: Main Battery Modification 2
+    slot: 3
+changes:
+  - stat: Main Turret Traverse Speed
+    from: 6.0 deg/s
+    to: 6.9 deg/s
+    because:
+      - Main Battery Modification 2 x1.15 (+0.9)
+  - stat: 180° Turn Time
+    from: 30.0 s
+    to: 26.1 s
+    because:
+      - Main Battery Modification 2 x1.15 (+0.9) via Main Turret Traverse Speed
+  - stat: Armor Penetration Capacity (HE)
+    from: 105 mm
+    to: 131 mm
+    because:
+      - Inertia Fuse for HE Shells x1.25 (+26.25)
+  - stat: Chances of Causing a Fire on Target (HE)
+    from: 27%
+    to: 14%
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-13.5)
+  - stat: Secondary Shells Penetration (150 mm)
+    from: 38 mm
+    to: 47 mm
+    because:
+      - Inertia Fuse for HE Shells x1.25 (+9.5)
+  - stat: Secondary Shells Burn Chance (150 mm)
+    from: 8%
+    to: 4%
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-4)
+  - stat: Secondary Shells Penetration (105 mm)
+    from: 26 mm
+    to: 32 mm
+    because:
+      - Inertia Fuse for HE Shells x1.25 (+6.5)
+  - stat: Secondary Shells Burn Chance (105 mm)
+    from: 5%
+    to: 2%
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-2.5)
+  - stat: Detectability Range by Sea
+    from: 15.6 km
+    to: 14.0 km
+    because:
+      - Concealment Expert x0.9 (-1.556)
+  - stat: Detectability When Ship Is on Fire
+    from: 17.6 km
+    to: 16.0 km
+    because:
+      - Concealment Expert x0.9 (-1.556) via Detectability Range by Sea
+  - stat: Detectability Range by Air
+    from: 10.0 km
+    to: 9.0 km
+    because:
+      - Concealment Expert x0.9 (-1)
+  - stat: Visibility Air Detection On Fire
+    from: 12.0 km
+    to: 11.0 km
+    because:
+      - Concealment Expert x0.9 (-1) via Detectability Range by Air
+  - stat: Detectability after firing a secondary gun shell
+    from: 15.6 km
+    to: 14.0 km
+    because:
+      - Concealment Expert x0.9 (-1.556) via Detectability Range by Sea
+  - stat: At periscope depth
+    from: 10.0 km
+    to: 9.0 km
+    because:
+      - Concealment Expert x0.9 (-1)

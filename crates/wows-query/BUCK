@@ -1,0 +1,63 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "wows-query-buildscript",
+    crate = "wows_query",
+    package = "wows-query",
+    version = "0.1.0",
+    deps = [
+        "//third-party/rust:serde",
+        "//third-party/rust:toml",
+    ],
+)
+
+WOWS_QUERY_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:deunicode",
+    "//third-party/rust:gettext",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:schemars",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+WOWS_QUERY_TEST_DEPS = [
+    "//third-party/rust:insta",
+    "//third-party/rust:serde_json",
+]
+
+workspace_library(
+    name = "wows_query",
+    crate = "wows_query",
+    package = "wows-query",
+    version = "0.1.0",
+    features = ["download"],
+    deps = WOWS_QUERY_DEPS,
+    buildscript = buildscript,
+)
+
+workspace_test(
+    name = "wows_query_test",
+    crate = "wows_query",
+    crate_root = "src/lib.rs",
+    package = "wows-query",
+    version = "0.1.0",
+    features = ["download"],
+    deps = WOWS_QUERY_DEPS,
+    test_deps = WOWS_QUERY_TEST_DEPS,
+    buildscript = buildscript,
+)
+
+workspace_integration_tests(
+    package = "wows-query",
+    version = "0.1.0",
+    library = ":wows_query",
+    features = ["download"],
+    deps = WOWS_QUERY_DEPS,
+    test_deps = WOWS_QUERY_TEST_DEPS,
+)
