@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -147,6 +148,9 @@ pub enum SearchEvent {
     OpenReplay(std::path::PathBuf),
     /// Play this replay's battle back on its minimap.
     RenderReplay(std::path::PathBuf),
+    /// Render this replay's battle to a video in the background and put the
+    /// file on the clipboard.
+    RenderReplayToClipboard(std::path::PathBuf),
 }
 
 impl EventEmitter<SearchEvent> for SearchView {}
@@ -183,7 +187,7 @@ const LIST_OVERDRAW: Pixels = px(200.);
 /// The dots at the end of each row, which is what the row reserves in place of
 /// the three buttons it used to carry: only the row being pointed at can have
 /// its actions used, so only it shows them.
-const ACTIONS_COLUMN_WIDTH: Pixels = px(28.);
+const ACTIONS_COLUMN_WIDTH: Pixels = px(52.);
 
 /// Queries the bar remembers. Older ones fall off the end rather than the
 /// row growing without bound.
@@ -1738,6 +1742,8 @@ fn build_row_menu(menu: PopupMenu, path: &std::path::Path, exists: bool, search:
     let open_search = search.clone();
     let render_path = path.to_path_buf();
     let render_search = search.clone();
+    let clipboard_path = path.to_path_buf();
+    let clipboard_search = search.clone();
     let copy_file = path.to_path_buf();
     let copy_path = path.to_path_buf();
     let reveal_path = path.to_path_buf();
@@ -1753,6 +1759,12 @@ fn build_row_menu(menu: PopupMenu, path: &std::path::Path, exists: bool, search:
             move |_event, _window, cx| {
                 let path = render_path.clone();
                 render_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplay(path)));
+            },
+        ))
+        .item(PopupMenuItem::new(t!("ui.replay.context.render_to_clipboard").into_owned()).disabled(!exists).on_click(
+            move |_event, _window, cx| {
+                let path = clipboard_path.clone();
+                clipboard_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplayToClipboard(path)));
             },
         ))
         .separator()
@@ -1784,12 +1796,26 @@ fn row_actions(ix: usize, path: PathBuf, exists: bool, search: Entity<SearchView
         .icon(IconName::Ellipsis)
         .tooltip(t!("ui.search.row_actions_hint").to_string());
 
+    let clipboard_search = search.clone();
+    let clipboard_path = path.clone();
+    let clipboard = Button::new(("search-row-render-clipboard", ix))
+        .ghost()
+        .xsmall()
+        .icon(IconName::Copy)
+        .disabled(!exists)
+        .tooltip(t!("ui.replay.context.render_to_clipboard").to_string())
+        .on_click(move |_event, _window, cx| {
+            let path = clipboard_path.clone();
+            clipboard_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplayToClipboard(path)));
+        });
+
     h_flex()
         .flex_none()
         .w(ACTIONS_COLUMN_WIDTH)
         .items_center()
         .invisible()
         .group_hover(group, |this| this.visible())
+        .child(clipboard)
         .child(trigger.dropdown_menu(move |menu, _window, _cx| build_row_menu(menu, &path, exists, &search)))
         .into_any_element()
 }
@@ -2635,6 +2661,29 @@ mod tests {
         assert!(
             matches!(seen.first(), Some(SearchEvent::OpenReplay(path)) if path.ends_with("one.wowsreplay")),
             "a double-click opens the replay, got {seen:?}"
+        );
+        drop(subscription);
+    }
+
+    /// The clipboard button asks for that row's replay and does not also open
+    /// it, since the row under it opens on a click of its own.
+    #[gpui_kit::test]
+    fn the_clipboard_button_asks_to_render_that_rows_replay(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+        let (seen, subscription) = record_events(window, cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.hover(0usize, cx);
+            window.render_frame(cx);
+            window.click(("search-row-render-clipboard", 0usize), cx);
+        })
+        .expect("the window is open");
+
+        let seen = seen.borrow();
+        assert!(
+            matches!(seen.as_slice(), [SearchEvent::RenderReplayToClipboard(path)] if path.ends_with("one.wowsreplay")),
+            "the button asks for a clipboard render of the row's replay, got {seen:?}"
         );
         drop(subscription);
     }

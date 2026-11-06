@@ -857,7 +857,7 @@ impl ReplayInspectorView {
     /// The egui app's own batch to clipboard (`video_export.rs:488`): the videos
     /// go to a temporary directory this process does not clean up, because the
     /// clipboard holds paths into it until the reader pastes them.
-    fn render_many_to_clipboard(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn render_many_to_clipboard(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         if paths.is_empty() {
             return;
         }

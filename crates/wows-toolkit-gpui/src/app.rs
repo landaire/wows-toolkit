@@ -2507,6 +2507,12 @@ impl App {
                 self.replay_inspector.update(cx, |view, cx| view.render_replay(path, window, cx));
                 cx.notify();
             }
+            // Stays on the Search tab: the render runs in the background and
+            // reports through toasts.
+            SearchEvent::RenderReplayToClipboard(path) => {
+                let paths = vec![path.clone()];
+                self.replay_inspector.update(cx, |view, cx| view.render_many_to_clipboard(paths, window, cx));
+            }
         }
     }
 
