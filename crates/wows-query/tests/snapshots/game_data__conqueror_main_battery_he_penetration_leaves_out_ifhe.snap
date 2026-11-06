@@ -5,7 +5,7 @@ expression: "he_penetration(\"Conqueror\")"
 - battery: main
   caliber_mm: 419
   penetration:
-    stat: HE penetration (main battery 419 mm PBPA050_419MM_MII_HE)
+    stat: HE penetration (main battery 419 mm HE Mk I)
     unit: mm
     builds:
       base: 105
@@ -23,7 +23,7 @@ expression: "he_penetration(\"Conqueror\")"
 - battery: secondary
   caliber_mm: 133
   penetration:
-    stat: HE penetration (secondary battery 133 mm PBPA041_134MM_MI_HE)
+    stat: HE penetration (secondary battery 133 mm HE Mk IC)
     unit: mm
     builds:
       base: 22

@@ -9,7 +9,8 @@ target_angle_deg: 0
 traces:
   - weapon:
       source: J5N Tenrai
-      projectile: PJPB120_SEKIRYU_STOCK
+      projectile: Type 99 No. 80 Mk. 5
+      param: PJPB120_SEKIRYU_STOCK
       ammo: AP
       caliber_mm: 404
     arrival:

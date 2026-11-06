@@ -457,7 +457,7 @@ impl GameData {
                 continue;
             };
 
-            let ammo = self.unit_name(&name);
+            let ammo = self.projectile_name(&name);
             let label = format!("{ammo} damage rate");
             let extract = |outcome: &Outcome| torpedo_damage_rate(outcome, &layouts, &name);
             let plan = StatPlan::new(label, Better::Higher, &extract).on_selection(selection);

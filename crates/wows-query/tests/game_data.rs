@@ -1123,6 +1123,29 @@ fn des_moines_shells_report_ricochet_angles() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn projectiles_show_english_names() {
+    let shells = |ship: &str, label: &str| -> Vec<serde_json::Value> {
+        let found = game().call_tool("ship_shells", json!({ "ship": ship })).expect("ship exists");
+        found["shells"]
+            .as_array()
+            .expect("shells is a list")
+            .iter()
+            .filter(|shell| shell["label"] == label)
+            .map(|shell| json!({ "name": shell["name"], "param": shell["param"] }))
+            .collect()
+    };
+    let overview = game().call_tool("ship_overview", json!({ "ship": "Shimakaze" })).expect("Shimakaze exists");
+
+    let names = json!({
+        "Conqueror main battery 457 mm HE": shells("Conqueror", "main battery 457 mm HE"),
+        "Des Moines main battery 203 mm AP": shells("Des Moines", "main battery 203 mm AP"),
+        "Shimakaze torpedoes": overview["armament"]["torpedoes"]["torpedoes"],
+    });
+    insta::assert_yaml_snapshot!(names);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn stat_search_finds_ap_ricocheting_later_than_standard() {
     let search = game()
         .call_tool(

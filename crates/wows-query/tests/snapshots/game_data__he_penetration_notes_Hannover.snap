@@ -5,7 +5,7 @@ expression: he_penetration(name)
 - battery: main
   caliber_mm: 483
   penetration:
-    stat: HE penetration (main battery 483 mm PGPA115_483MM_HE_HANNOVER)
+    stat: HE penetration (main battery 483 mm Spr.Gr. L/4.4)
     unit: mm
     builds:
       base: 121
@@ -23,7 +23,7 @@ expression: he_penetration(name)
 - battery: secondary
   caliber_mm: 128
   penetration:
-    stat: HE penetration (secondary battery 128 mm PGPA059_128MM_HE_SPR_GR_KZ)
+    stat: HE penetration (secondary battery 128 mm Spr.Gr. Kz.)
     unit: mm
     builds:
       base: 32

@@ -23,7 +23,8 @@ squadrons:
     ordnance:
       kind: bomb
       ammo: HE
-      projectile: PHPB024_PuW_160kg_AS_HE
+      name: P.u.W. 160 kg
+      param: PHPB024_PuW_160kg_AS_HE
       damage: 6800
       fall_time_coef: 1
       he_penetration_mm: 37

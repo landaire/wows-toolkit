@@ -23,7 +23,8 @@ squadrons:
     ordnance:
       kind: rocket
       ammo: HE
-      projectile: PJPR120_SEKIRYU_STOCK
+      name: Type 5 No. 6 Mk. 9
+      param: PJPR120_SEKIRYU_STOCK
       damage: 3150
       fall_time_coef: 0.1
       he_penetration_mm: 30
@@ -41,7 +42,8 @@ squadrons:
     ordnance:
       kind: rocket
       ammo: HE
-      projectile: PJPR121_SEKIRYU_JET
+      name: Type 5 No. 6 Mk. 11
+      param: PJPR121_SEKIRYU_JET
       damage: 2850
       fall_time_coef: 0.1
       he_penetration_mm: 30
@@ -58,7 +60,8 @@ squadrons:
     ordnance:
       kind: bomb
       ammo: AP
-      projectile: PJPB120_SEKIRYU_STOCK
+      name: Type 99 No. 80 Mk. 5
+      param: PJPB120_SEKIRYU_STOCK
       damage: 6800
       fall_time_coef: 1.15
       ap:
@@ -84,7 +87,8 @@ squadrons:
     speed_with_ordnance_knots: 145
     ordnance:
       kind: torpedo
-      projectile: PJPT121_SEKIRYU_STOCK
+      name: Type 91 mod. 7
+      param: PJPT121_SEKIRYU_STOCK
       damage: 9333
       fall_time_coef: 1
     vs_plate:
@@ -100,7 +104,8 @@ squadrons:
     speed_with_ordnance_knots: 148
     ordnance:
       kind: torpedo
-      projectile: PJPT122_SEKIRYU_JET
+      name: Type 91 mod. 8
+      param: PJPT122_SEKIRYU_JET
       damage: 7500
       fall_time_coef: 1
     vs_plate:
@@ -115,7 +120,8 @@ squadrons:
     speed_with_ordnance_knots: 245
     ordnance:
       kind: depth_charge
-      projectile: PJPD108_depth_CV_10
+      name: Type 1 No. 25 Mk 2 mod. 1
+      param: PJPD108_depth_CV_10
       damage: 4900
       fall_time_coef: 1.5
     air_strike:

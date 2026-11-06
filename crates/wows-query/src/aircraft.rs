@@ -189,8 +189,11 @@ pub struct Ordnance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ammo: Option<Ammo>,
 
+    /// English name of the projectile.
+    pub name: String,
+
     /// GameParams name of the projectile.
-    pub projectile: String,
+    pub param: String,
 
     /// Damage per projectile as the port shows it, rounded to a whole
     /// number. For torpedoes this is `alphaDamage / TORPEDO_DAMAGE_CONSTANT
@@ -383,7 +386,7 @@ impl GameData {
         let ordnance = aircraft
             .ordnance()
             .and_then(|name| self.provider().game_param_by_name(name))
-            .and_then(|projectile| ordnance(&projectile, aircraft));
+            .and_then(|projectile| ordnance(&projectile, self.projectile_name(projectile.name()), aircraft));
 
         Some(Squadron {
             role,
@@ -440,7 +443,7 @@ pub fn ordnance_vs_plate(ordnance: &Ordnance, thickness: Millimeters) -> PlateVe
     }
 }
 
-fn ordnance(param: &Param, aircraft: &Aircraft) -> Option<Ordnance> {
+fn ordnance(param: &Param, name: String, aircraft: &Aircraft) -> Option<Ordnance> {
     let projectile = param.projectile()?;
     let kind = OrdnanceKind::from_plane_ammo_type(projectile.plane_ammo_type()?);
     let ammo = match kind {
@@ -468,7 +471,8 @@ fn ordnance(param: &Param, aircraft: &Aircraft) -> Option<Ordnance> {
     Some(Ordnance {
         kind,
         ammo,
-        projectile: param.name().to_owned(),
+        name,
+        param: param.name().to_owned(),
         damage: damage.map(Hp::from),
         fall_time_coef: projectile.falling_time_coef(),
         he_penetration_mm,
@@ -502,7 +506,8 @@ mod tests {
         Ordnance {
             kind,
             ammo,
-            projectile: "PAPB110_Midway_stock".to_owned(),
+            name: "Mk. 1".to_owned(),
+            param: "PAPB110_Midway_stock".to_owned(),
             damage: Some(Hp::from(11200.0)),
             fall_time_coef: None,
             he_penetration_mm: he,

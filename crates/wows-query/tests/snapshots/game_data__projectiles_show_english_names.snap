@@ -1,0 +1,12 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: names
+---
+Conqueror main battery 457 mm HE: []
+Des Moines main battery 203 mm AP:
+  - name: 203 mm AP Mk21
+    param: PAPA012_Shell_203mm_AP_AP_Mk_21
+Shimakaze torpedoes:
+  - name: Type 93
+    param: PJPT001_Sea_Torpedo_Type93
+    caliber_mm: 610

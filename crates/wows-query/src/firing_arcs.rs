@@ -231,6 +231,9 @@ impl Serialize for AllBarrels {
 /// One projectile type of a battery.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Projectile {
+    /// English name, e.g. "203 mm AP Mk21".
+    pub name: String,
+
     /// GameParams projectile name.
     pub param: String,
 
@@ -286,7 +289,7 @@ pub struct ArcSalvo {
 /// never added together.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AmmoSalvo {
-    /// "HE", "AP", "SAP", or a torpedo's GameParams name.
+    /// "HE", "AP", "SAP", or a torpedo's English name.
     pub ammo: String,
 
     pub projectiles: Vec<Projectile>,
@@ -678,8 +681,9 @@ impl GameData {
                     continue;
                 };
 
+                let projectile_name = self.projectile_name(name);
                 let (label, caliber) = match weapon {
-                    Weapon::Torpedoes => (name.clone(), None),
+                    Weapon::Torpedoes => (projectile_name.clone(), None),
                     Weapon::MainBattery | Weapon::Secondaries => {
                         let label = match AmmoType::from_game_str(projectile.ammo_type()) {
                             AmmoType::AP => "AP",
@@ -699,6 +703,7 @@ impl GameData {
                     fire_chance.zip(node_probability).map(|(chance, node)| Percent::new(chance.value() * node));
                 let fired = Fired {
                     projectile: Projectile {
+                        name: projectile_name,
                         param: name.clone(),
                         caliber_mm: caliber,
                         damage: entry.damage,

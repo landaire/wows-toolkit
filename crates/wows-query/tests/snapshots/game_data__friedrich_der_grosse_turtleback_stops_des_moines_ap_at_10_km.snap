@@ -14,7 +14,8 @@ target_angle_deg: 0
 traces:
   - weapon:
       source: main battery
-      projectile: PAPA012_Shell_203mm_AP_AP_Mk_21
+      projectile: 203 mm AP Mk21
+      param: PAPA012_Shell_203mm_AP_AP_Mk_21
       ammo: AP
       caliber_mm: 203
     arrival:

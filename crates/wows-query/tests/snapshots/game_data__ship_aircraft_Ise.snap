@@ -22,7 +22,8 @@ squadrons:
     speed_with_ordnance_knots: 122
     ordnance:
       kind: torpedo
-      projectile: PJPT606_ISE_STOCK
+      name: Type 5
+      param: PJPT606_ISE_STOCK
       damage: 2767
       fall_time_coef: 1
     vs_plate:
@@ -37,7 +38,8 @@ squadrons:
     speed_with_ordnance_knots: 176
     ordnance:
       kind: depth_charge
-      projectile: PJPD103_depth_T5
+      name: Type 99 No. 6 Mk 2 mod. 1
+      param: PJPD103_depth_T5
       damage: 2900
       fall_time_coef: 1.5
     air_strike:

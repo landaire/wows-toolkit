@@ -10,7 +10,8 @@ target_angle_deg: 0
 traces:
   - weapon:
       source: Aichi M6A2 Seiran
-      projectile: PJPB750_AKI_STOCK
+      projectile: Type 99 No. 80 Mk. 11
+      param: PJPB750_AKI_STOCK
       ammo: HE
       caliber_mm: 40
       penetration_mm: 61

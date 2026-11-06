@@ -118,6 +118,9 @@ impl RicochetStandards {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Shell {
+    /// English name, e.g. "203 mm AP Mk21".
+    pub name: String,
+
     /// GameParams name of the projectile.
     pub param: String,
     pub battery: Battery,
@@ -245,7 +248,7 @@ impl GameData {
                 let Some(param) = self.provider().game_param_by_name(name) else {
                     continue;
                 };
-                let Some(shell) = shell_from_param(&param, battery, ifhe) else {
+                let Some(shell) = shell_from_param(&param, self.projectile_name(name), battery, ifhe) else {
                     continue;
                 };
                 shells.push(shell);
@@ -366,13 +369,7 @@ fn main_armor_threshold(tier: Tier) -> Millimeters {
 /// note states both values and the reason.
 fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Option<BuildStat<Millimeters>> {
     let base = shell.penetration_mm?;
-    let stat = format!(
-        "{} penetration ({} {} mm {})",
-        shell.ammo.label(),
-        shell.battery.label(),
-        shell.caliber_mm.value(),
-        shell.param
-    );
+    let stat = format!("{} penetration ({} {})", shell.ammo.label(), shell.battery.label(), shell.name);
     let unchanged = |alternatives| BuildStat {
         stat: stat.clone(),
         unit: Millimeters::UNIT,
@@ -447,7 +444,7 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
     }]))
 }
 
-fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficients>) -> Option<Shell> {
+fn shell_from_param(param: &Param, name: String, battery: Battery, ifhe: Option<IfheCoefficients>) -> Option<Shell> {
     let projectile = param.projectile()?;
     let ammo = shell_ammo(projectile)?;
     let caliber_mm = Millimeters::new(round_tenth(projectile.bullet_diametr()? * 1000.0));
@@ -468,6 +465,7 @@ fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficien
     };
 
     Some(Shell {
+        name,
         param: param.name().to_owned(),
         battery,
         ammo,
@@ -548,32 +546,64 @@ mod tests {
         main_battery: Vec<String>,
     }
 
-    #[test]
-    #[cfg_attr(not(has_build_13533378), ignore)]
-    fn released_ships_with_nonstandard_main_battery_ricochet_angles() {
+    fn test_game() -> GameData {
         let root =
             std::path::PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
         let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
-        let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
 
-        let standards = game.ricochet_standards();
+        GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads")
+    }
+
+    fn released_ships(game: &GameData) -> Vec<&Ship> {
         let filter = ShipFilter { exclude_test: true, ..ShipFilter::default() };
         let mut ships: Vec<&Ship> = game.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
 
+        ships
+    }
+
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn released_ships_with_nonstandard_main_battery_ricochet_angles() {
+        let game = test_game();
+        let standards = game.ricochet_standards();
+
         let mut main_battery = Vec::new();
-        for ship in ships {
+        for ship in released_ships(&game) {
             for shell in game.shells(ship).iter().filter(|shell| shell.battery == Battery::Main) {
                 if let Some(note) = standards.note(shell) {
-                    main_battery.push(format!("{}: {}: {note}", ship.label(), shell.param));
+                    main_battery.push(format!("{}: {}: {note}", ship.label(), shell.name));
                 }
             }
         }
 
-        let des_moines = "T10 Des Moines (cruiser, USA): PAPA012_Shell_203mm_AP_AP_Mk_21";
+        let des_moines = "T10 Des Moines (cruiser, USA): 203 mm AP Mk21";
         assert!(main_battery.iter().any(|line| line.starts_with(des_moines)), "{main_battery:#?}");
         insta::assert_yaml_snapshot!(NonstandardRicochet { standards: &standards.0, main_battery });
+    }
+
+    /// A GameParams name such as "PBPA124_457MM_MII_HE_BC" starts with a
+    /// six-character index and holds underscores; an English name does not.
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn released_ships_show_no_shell_by_its_gameparams_name() {
+        let game = test_game();
+
+        let mut checked = 0;
+        for ship in released_ships(&game) {
+            for shell in game.shells(ship) {
+                assert!(
+                    shell.name != shell.param && !shell.name.contains('_'),
+                    "{} shows {} as {:?}",
+                    ship.label(),
+                    shell.param,
+                    shell.name
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 1_000, "only {checked} shells checked");
     }
 }

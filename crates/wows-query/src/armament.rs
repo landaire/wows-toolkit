@@ -23,6 +23,7 @@ use crate::data::GameData;
 use crate::firing_arcs::round_to;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
+use crate::shells::shell_ammo;
 use crate::ships::Ship;
 use crate::text::clean;
 
@@ -285,7 +286,7 @@ impl GameData {
         let torpedoes = names
             .into_iter()
             .map(|param| Torpedo {
-                name: self.unit_name(param),
+                name: self.projectile_name(param),
                 param: param.clone(),
                 caliber_mm: self.projectile_caliber(param),
             })
@@ -361,9 +362,42 @@ impl GameData {
         Some(Millimeters::new(round_to(Meters::new(meters).to_mm().value(), 10.0)))
     }
 
-    /// English name of a projectile, or its GameParams name when it has none.
+    /// English name of a unit such as a hull or module, or its GameParams
+    /// name when it has none.
     pub(crate) fn unit_name(&self, param: &str) -> String {
         translate_unit(param, self.provider()).map_or_else(|| param.to_owned(), |name| clean(&name))
+    }
+
+    /// English name of a projectile from the translation catalog. When the
+    /// catalog has none, a name built from its data, e.g. "457 mm HE", so a
+    /// GameParams name never reaches a reader.
+    pub(crate) fn projectile_name(&self, param: &str) -> String {
+        if let Some(name) = translate_unit(param, self.provider()) {
+            return clean(&name);
+        }
+
+        let kind = self.provider().game_param_by_name(param).and_then(|entry| {
+            let projectile = entry.projectile()?;
+            let kind = match shell_ammo(projectile) {
+                Some(ammo) => ammo.label().to_owned(),
+                None => projectile.ammo_type().to_ascii_lowercase().replace('_', " "),
+            };
+            Some(kind)
+        });
+        let kind = kind.filter(|kind| !kind.is_empty()).unwrap_or_else(|| "projectile".to_owned());
+
+        match self.projectile_caliber(param) {
+            Some(caliber) => format!("{caliber} {kind}"),
+            None => kind,
+        }
+    }
+
+    /// A stat row qualifier as players read it: a projectile's English name in
+    /// place of its GameParams name, any other qualifier unchanged.
+    pub(crate) fn qualifier_name(&self, qualifier: &str) -> String {
+        let is_projectile =
+            self.provider().game_param_by_name(qualifier).is_some_and(|entry| entry.projectile().is_some());
+        if is_projectile { self.projectile_name(qualifier) } else { qualifier.to_owned() }
     }
 }
 

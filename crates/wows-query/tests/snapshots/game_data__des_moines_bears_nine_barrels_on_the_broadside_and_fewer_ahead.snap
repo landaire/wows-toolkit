@@ -47,7 +47,8 @@ batteries:
     ammo:
       - ammo: AP
         projectiles:
-          - param: PAPA012_Shell_203mm_AP_AP_Mk_21
+          - name: 203 mm AP Mk21
+            param: PAPA012_Shell_203mm_AP_AP_Mk_21
             caliber_mm: 203
             damage: 5000
             reload_s: 5.5
@@ -73,7 +74,8 @@ batteries:
           damage: 45000
       - ammo: HE
         projectiles:
-          - param: PAPA002_Shell_203mm_HE_HC_Mk_25
+          - name: 203 mm HE/HC Mk25
+            param: PAPA002_Shell_203mm_HE_HC_Mk_25
             caliber_mm: 203
             damage: 2800
             reload_s: 5.5
@@ -146,7 +148,8 @@ batteries:
     ammo:
       - ammo: HE
         projectiles:
-          - param: PAPA018_Main_127mm_HE_C_Mk_32
+          - name: 127 mm HE Mk32
+            param: PAPA018_Main_127mm_HE_C_Mk_32
             caliber_mm: 127
             damage: 1800
             reload_s: 6

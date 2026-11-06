@@ -16,7 +16,8 @@ shooters:
     ships_with_caliber: 31
     ships_in_role: 98
     ship: "T8 Benson (destroyer, USA)"
-    projectile: PAPA004_Shell_127mm_AP_SC_Mk_38
+    projectile: 127 mm AP/SC Mk38
+    param: PAPA004_Shell_127mm_AP_SC_Mk_38
     max_range_km: 10.54
     fuse_threshold_mm: 21
   - group: light cruiser AP 152 mm
@@ -26,7 +27,8 @@ shooters:
     ships_with_caliber: 33
     ships_in_role: 54
     ship: "T8 Edinburgh (cruiser, United_Kingdom)"
-    projectile: PBPA016_152MM_AP_6CRH_MK4
+    projectile: 152 mm AP 6crh Mk IV
+    param: PBPA016_152MM_AP_6CRH_MK4
     max_range_km: 14.02
     fuse_threshold_mm: 12
   - group: heavy cruiser AP 203 mm
@@ -36,7 +38,8 @@ shooters:
     ships_with_caliber: 44
     ships_in_role: 99
     ship: "T10 Hindenburg (cruiser, Germany)"
-    projectile: PGPA023_203MM_AP_PZ_SPR_GGR_L4_4
+    projectile: 203 mm P.Spr.Gr. L/4.4
+    param: PGPA023_203MM_AP_PZ_SPR_GGR_L4_4
     max_range_km: 17.83
     fuse_threshold_mm: 34
   - group: battleship AP 406 mm
@@ -46,7 +49,8 @@ shooters:
     ships_with_caliber: 38
     ships_in_role: 122
     ship: "T9 Minnesota (battleship, USA)"
-    projectile: PAPA128_Shell_406mm_AP_AP_Mk_8_Mod1
+    projectile: 406 mm AP Mk8 mod. 1
+    param: PAPA128_Shell_406mm_AP_AP_Mk_8_Mod1
     max_range_km: 21.18
     fuse_threshold_mm: 68
   - group: battleship AP 457 mm
@@ -56,7 +60,8 @@ shooters:
     ships_with_caliber: 14
     ships_in_role: 122
     ship: "T9 Georgia (battleship, USA)"
-    projectile: PAPA105_457MM_AP_GEORGIA_SH
+    projectile: 457 mm AP Type B
+    param: PAPA105_457MM_AP_GEORGIA_SH
     max_range_km: 20.04
     fuse_threshold_mm: 76
   - group: cruiser HE 203 mm
@@ -66,7 +71,8 @@ shooters:
     ships_with_caliber: 39
     ships_in_role: 135
     ship: "T9 Ibuki (cruiser, Japan)"
-    projectile: PJPA009_Shell_203mm_HE_C_Type_0
+    projectile: 203 mm HE Type0
+    param: PJPA009_Shell_203mm_HE_C_Type_0
     max_range_km: 15.04
     penetration_mm: 34
   - group: SAP 203 mm
@@ -76,7 +82,8 @@ shooters:
     ships_with_caliber: 5
     ships_in_role: 36
     ship: "T8 Amalfi (cruiser, Italy)"
-    projectile: PIPA031_203MM_55_1924_CS
+    projectile: 203 mm proiettili CS 1924 mod.2
+    param: PIPA031_203MM_55_1924_CS
     max_range_km: 14.68
     penetration_mm: 54
 bands:

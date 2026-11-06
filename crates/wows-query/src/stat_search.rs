@@ -138,7 +138,7 @@ pub struct StatCondition {
     /// Threshold in the unit stat_names lists for the stat.
     pub value: f32,
 
-    /// Only the row with this qualifier: ammo type for shells ("HE", "AP", "CS"), torpedo, secondary mount or consumable name. Omit to accept any row.
+    /// Only the row with this qualifier: ammo type for shells ("HE", "AP", "CS"), torpedo name as values show it, secondary mount or consumable name. Omit to accept any row.
     pub qualifier: Option<String>,
 }
 
@@ -646,15 +646,20 @@ struct View {
 }
 
 impl View {
-    fn readings(&self, condition: &Condition, armor: &BTreeMap<&'static str, ThicknessSpan>) -> Vec<Reading> {
+    fn readings(
+        &self,
+        condition: &Condition,
+        armor: &BTreeMap<&'static str, ThicknessSpan>,
+        game: &GameData,
+    ) -> Vec<Reading> {
         match condition.stat {
-            SearchStat::Card(stat) => card_values(&self.rows, stat, condition.qualifier.as_deref())
+            SearchStat::Card(stat) => card_values(game, &self.rows, stat, condition.qualifier.as_deref())
                 .map(|(row, value)| Reading { qualifier: row.qualifier.clone(), value })
                 .collect(),
             SearchStat::Armor { zone, bound } => {
                 armor_value(armor, zone, bound).map(|value| Reading { qualifier: None, value }).into_iter().collect()
             }
-            SearchStat::Derived(stat) => derived_rows(&self.derived, stat, condition.qualifier.as_deref())
+            SearchStat::Derived(stat) => derived_rows(game, &self.derived, stat, condition.qualifier.as_deref())
                 .map(|row| Reading { qualifier: row.qualifier.clone(), value: row.value.as_f32() })
                 .collect(),
             SearchStat::Ricochet { ammo, bound } => {
@@ -1006,7 +1011,10 @@ impl GameData {
                 let planner = Planner::new(self, ship);
                 let extract = |outcome: &builds::Outcome| {
                     let rows = outcome.stats.rows();
-                    extreme(rank.order, card_values(&rows, stat, rank.qualifier.as_deref()).map(|(_, value)| value))
+                    extreme(
+                        rank.order,
+                        card_values(self, &rows, stat, rank.qualifier.as_deref()).map(|(_, value)| value),
+                    )
                 };
 
                 planned_builds(&planner, rank, &extract)
@@ -1025,7 +1033,8 @@ impl GameData {
                         provider: self.provider(),
                     }
                     .rows();
-                    let values = derived_rows(&rows, stat, rank.qualifier.as_deref()).map(|row| row.value.as_f32());
+                    let values =
+                        derived_rows(self, &rows, stat, rank.qualifier.as_deref()).map(|row| row.value.as_f32());
                     extreme(rank.order, values)
                 };
 
@@ -1260,7 +1269,7 @@ impl<'a> ShipSearch<'a> {
             let Some(view) = self.recorded(self.view(&items)) else {
                 continue;
             };
-            if condition.holds(&view.readings(condition, &self.armor)) {
+            if condition.holds(&view.readings(condition, &self.armor, self.game)) {
                 return true;
             }
         }
@@ -1417,7 +1426,7 @@ impl<'a> ShipSearch<'a> {
 
     fn readings(&self, view: &View) -> Vec<Vec<Reading>> {
         let readings: Vec<Vec<Reading>> =
-            self.conditions.iter().map(|condition| view.readings(condition, &self.armor)).collect();
+            self.conditions.iter().map(|condition| view.readings(condition, &self.armor, self.game)).collect();
         for (seen, readings) in self.rows_seen.borrow_mut().iter_mut().zip(&readings) {
             *seen |= !readings.is_empty();
         }
@@ -1431,8 +1440,9 @@ impl<'a> ShipSearch<'a> {
             .zip(readings)
             .filter_map(|(condition, readings)| {
                 let reading = condition.best(readings)?;
-                let battery = condition.stat.shell_battery().map(Battery::label);
-                let qualifier: Vec<&str> = battery.into_iter().chain(reading.qualifier.as_deref()).collect();
+                let battery = condition.stat.shell_battery().map(Battery::label).map(str::to_owned);
+                let row = reading.qualifier.as_deref().map(|qualifier| self.game.qualifier_name(qualifier));
+                let qualifier: Vec<String> = battery.into_iter().chain(row).collect();
                 let qualifier =
                     if qualifier.is_empty() { String::new() } else { format!(" ({})", qualifier.join(" ")) };
                 Some(format!(
@@ -1862,12 +1872,13 @@ fn is_zero(count: &usize) -> bool {
 /// The rows of `stat` with their values, only the row named `qualifier`
 /// when given.
 fn card_values<'r>(
+    game: &'r GameData,
     rows: &'r [StatRow],
     stat: TtxStat,
     qualifier: Option<&'r str>,
 ) -> impl Iterator<Item = (&'r StatRow, f32)> + 'r {
     rows.iter()
-        .filter(move |row| row.stat == stat && qualifier_matches(row.qualifier.as_deref(), qualifier))
+        .filter(move |row| row.stat == stat && qualifier_matches(game, row.qualifier.as_deref(), qualifier))
         .filter_map(|row| {
             let value = match row.value {
                 StatValue::Ammo(AmmoCount::Infinite) => f32::INFINITY,
@@ -1879,15 +1890,23 @@ fn card_values<'r>(
 
 /// The derived rows of `stat`, only the row named `qualifier` when given.
 fn derived_rows<'r>(
+    game: &'r GameData,
     rows: &'r [DerivedRow],
     stat: DerivedStat,
     qualifier: Option<&'r str>,
 ) -> impl Iterator<Item = &'r DerivedRow> + 'r {
-    rows.iter().filter(move |row| row.stat == stat && qualifier_matches(row.qualifier.as_deref(), qualifier))
+    rows.iter()
+        .filter(move |row| row.stat == stat && qualifier_matches(game, row.qualifier.as_deref(), qualifier))
 }
 
-fn qualifier_matches(row: Option<&str>, wanted: Option<&str>) -> bool {
-    wanted.is_none_or(|wanted| row.is_some_and(|row| row.eq_ignore_ascii_case(wanted.trim())))
+/// Whether `row` is the row `wanted` names, a projectile by GameParams name
+/// or English name. No wanted qualifier accepts any row.
+fn qualifier_matches(game: &GameData, row: Option<&str>, wanted: Option<&str>) -> bool {
+    let Some(wanted) = wanted.map(str::trim) else {
+        return true;
+    };
+
+    row.is_some_and(|row| row.eq_ignore_ascii_case(wanted) || game.qualifier_name(row).eq_ignore_ascii_case(wanted))
 }
 
 fn armor_value(armor: &BTreeMap<&'static str, ThicknessSpan>, zone: ArmorZone, bound: Bound) -> Option<f32> {

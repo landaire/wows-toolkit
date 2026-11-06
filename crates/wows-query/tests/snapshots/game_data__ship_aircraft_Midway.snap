@@ -23,7 +23,8 @@ squadrons:
     ordnance:
       kind: rocket
       ammo: HE
-      projectile: PAPR110_Midway_stock
+      name: HVAR 127 mm
+      param: PAPR110_Midway_stock
       damage: 2000
       fall_time_coef: 0.1
       he_penetration_mm: 33
@@ -38,7 +39,8 @@ squadrons:
     ordnance:
       kind: rocket
       ammo: HE
-      projectile: PAPR210_Midway_top
+      name: HVAR 127 mm
+      param: PAPR210_Midway_top
       damage: 2000
       fall_time_coef: 0.1
       he_penetration_mm: 33
@@ -53,7 +55,8 @@ squadrons:
     ordnance:
       kind: rocket
       ammo: HE
-      projectile: PAPR310_Midway_top
+      name: Tiny Tim
+      param: PAPR310_Midway_top
       damage: 5400
       fall_time_coef: 0.2
       he_penetration_mm: 68
@@ -67,7 +70,8 @@ squadrons:
     ordnance:
       kind: bomb
       ammo: HE
-      projectile: PAPB110_Midway_stock
+      name: AN-M66
+      param: PAPB110_Midway_stock
       damage: 11200
       fall_time_coef: 1
       he_penetration_mm: 67
@@ -82,7 +86,8 @@ squadrons:
     ordnance:
       kind: bomb
       ammo: HE
-      projectile: PAPB210_Midway_top
+      name: AN-M66
+      param: PAPB210_Midway_top
       damage: 11200
       fall_time_coef: 1
       he_penetration_mm: 67
@@ -95,7 +100,8 @@ squadrons:
     speed_with_ordnance_knots: 128
     ordnance:
       kind: torpedo
-      projectile: PAPT110_Midway_stock
+      name: Torpedo Mk.7 mod. 1
+      param: PAPT110_Midway_stock
       damage: 5067
       fall_time_coef: 1
   - role: torpedo_bombers
@@ -108,7 +114,8 @@ squadrons:
     speed_with_ordnance_knots: 131
     ordnance:
       kind: torpedo
-      projectile: PAPT210_Midway_top
+      name: Torpedo Mk.7 mod. 1
+      param: PAPT210_Midway_top
       damage: 5067
       fall_time_coef: 1
   - role: air_strike
@@ -120,7 +127,8 @@ squadrons:
     speed_with_ordnance_knots: 256
     ordnance:
       kind: depth_charge
-      projectile: PAPD110_depth_CV_10
+      name: 650 lb Depth Bomb Mk 38
+      param: PAPD110_depth_CV_10
       damage: 4900
       fall_time_coef: 1.5
     air_strike:

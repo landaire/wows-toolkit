@@ -203,8 +203,11 @@ pub struct TracedWeapon {
     /// "main battery", "secondary battery" or the aircraft name.
     pub source: String,
 
-    /// GameParams name of the projectile.
+    /// English name of the projectile.
     pub projectile: String,
+
+    /// GameParams name of the projectile.
+    pub param: String,
     pub ammo: Ammo,
     pub caliber_mm: Millimeters,
 
@@ -621,10 +624,10 @@ impl GameData {
         )];
 
         let Some(params) = ShellParams::from_shell_info(&projectile.to_shell_info(shell.param.clone())) else {
-            return Err(QueryError::ProjectileIncomplete { projectile: shell.param.clone() });
+            return Err(QueryError::ProjectileIncomplete { projectile: shell.name.clone() });
         };
         let Some(impact) = solve_for_range(&params, range.to_meters()) else {
-            return Err(QueryError::OutOfRange { projectile: shell.param.clone(), range });
+            return Err(QueryError::OutOfRange { projectile: shell.name.clone(), range });
         };
 
         let (model, penetration) = match ammo {
@@ -636,7 +639,7 @@ impl GameData {
                     _ => shell.penetration_mm,
                 };
                 let Some(penetration) = penetration else {
-                    return Err(QueryError::WeaponNotFound { ship: shooter.name.clone(), weapon: shell.param.clone() });
+                    return Err(QueryError::WeaponNotFound { ship: shooter.name.clone(), weapon: shell.name.clone() });
                 };
                 if ifhe && ammo == Ammo::He {
                     assumptions.push("Inertia Fuse for HE Shells is applied to the HE penetration.".to_owned());
@@ -652,7 +655,8 @@ impl GameData {
         Ok(Weapon {
             traced: TracedWeapon {
                 source: source.to_owned(),
-                projectile: shell.param.clone(),
+                projectile: shell.name.clone(),
+                param: shell.param.clone(),
                 ammo,
                 caliber_mm: shell.caliber_mm,
                 penetration_mm: penetration,
@@ -690,7 +694,7 @@ impl GameData {
 
         let not_traceable =
             |reason: &'static str| QueryError::OrdnanceNotTraceable { aircraft: squadron.aircraft.clone(), reason };
-        let projectile = self.projectile(&ordnance.projectile)?;
+        let projectile = self.projectile(&ordnance.param)?;
         let dive = self
             .provider()
             .game_param_by_name(&squadron.aircraft_param)
@@ -718,7 +722,7 @@ impl GameData {
 
         let (model, penetration, raw_penetration) = match ammo {
             Ammo::Ap => {
-                let params = ShellParams::from_shell_info(&projectile.to_shell_info(ordnance.projectile.clone()))
+                let params = ShellParams::from_shell_info(&projectile.to_shell_info(ordnance.param.clone()))
                     .ok_or_else(|| not_traceable("the bomb lacks a normalization angle or fuse threshold"))?;
                 let raw = round_mm(params.raw_penetration(speed));
                 assumptions.push(
@@ -741,7 +745,8 @@ impl GameData {
         Ok(Weapon {
             traced: TracedWeapon {
                 source: squadron.aircraft.clone(),
-                projectile: ordnance.projectile.clone(),
+                projectile: ordnance.name.clone(),
+                param: ordnance.param.clone(),
                 ammo,
                 caliber_mm: caliber,
                 penetration_mm: penetration,

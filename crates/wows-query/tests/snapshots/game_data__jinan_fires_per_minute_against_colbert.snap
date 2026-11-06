@@ -14,7 +14,8 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
   fire_node_probability: 0.5005
 - ammo: HE
   projectiles:
-    - param: PZPA039_127MM_HE_MK41
+    - name: 127 mm HE Mk.41
+      param: PZPA039_127MM_HE_MK41
       caliber_mm: 127
       damage: 1900
       reload_s: 3
@@ -67,7 +68,8 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       - Demolition Expert +1 (+1)
 - ammo: HE
   projectiles:
-    - param: PZPA039_127MM_HE_MK41
+    - name: 127 mm HE Mk.41
+      param: PZPA039_127MM_HE_MK41
       caliber_mm: 127
       damage: 1900
       reload_s: 3

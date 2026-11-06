@@ -217,7 +217,7 @@ impl GameData {
             let baseline = self.card(stock_ship, &self.stock_loadout())?;
             let attributions = render_attributions(&card.provenance, &rows, self.provider(), self.provider());
             let mut changes = changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true);
-            changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout));
+            changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout, self));
             changes
         } else {
             Vec::new()
@@ -346,9 +346,10 @@ impl GameData {
     }
 }
 
-pub(crate) fn stat_label(label: &str, qualifier: Option<&str>) -> String {
+/// "Label (qualifier)", with a projectile qualifier by its English name.
+fn stat_label(label: &str, qualifier: Option<&str>, game: &GameData) -> String {
     match qualifier {
-        Some(qualifier) => format!("{} ({qualifier})", clean(label)),
+        Some(qualifier) => format!("{} ({})", clean(label), game.qualifier_name(qualifier)),
         None => clean(label),
     }
 }
@@ -356,12 +357,12 @@ pub(crate) fn stat_label(label: &str, qualifier: Option<&str>) -> String {
 fn stat_lines(card: &Card, game: &GameData) -> Vec<String> {
     let mut lines: Vec<String> = render_stat_rows(&card.stats.rows(), game.provider())
         .into_iter()
-        .map(|line| format!("{}: {}", stat_label(&line.label, line.qualifier.as_deref()), line.value))
+        .map(|line| format!("{}: {}", stat_label(&line.label, line.qualifier.as_deref(), game), line.value))
         .collect();
     lines.extend(
         card.derived
             .iter()
-            .map(|row| format!("{}: {}", stat_label(row.stat.label(), row.qualifier.as_deref()), row.value)),
+            .map(|row| format!("{}: {}", stat_label(row.stat.label(), row.qualifier.as_deref(), game), row.value)),
     );
 
     lines
@@ -386,11 +387,11 @@ pub(crate) fn changes(
         .map(|delta| {
             let because = by_key
                 .get(&(delta.stat, delta.qualifier.as_deref()))
-                .map(|line| causes(line, loadout))
+                .map(|line| causes(line, loadout, game))
                 .unwrap_or_default();
 
             StatChange {
-                stat: stat_label(&delta.label, delta.qualifier.as_deref()),
+                stat: stat_label(&delta.label, delta.qualifier.as_deref(), game),
                 from: delta.from,
                 to: delta.to,
                 because,
@@ -406,6 +407,7 @@ fn derived_changes(
     candidate: &[DerivedRow],
     attributions: &[AttributionLine],
     loadout: &ResolvedLoadout,
+    game: &GameData,
 ) -> Vec<StatChange> {
     let mut keys: Vec<(DerivedStat, Option<&str>)> = Vec::new();
     for row in baseline.iter().chain(candidate) {
@@ -434,21 +436,21 @@ fn derived_changes(
                 stat.sources().contains(&line.stat)
                     && (line.qualifier.is_none() || qualifier.is_none() || line.qualifier.as_deref() == qualifier)
             }) {
-                for cause in causes(line, loadout) {
+                for cause in causes(line, loadout, game) {
                     if !because.contains(&cause) {
                         because.push(cause);
                     }
                 }
             }
 
-            Some(StatChange { stat: stat_label(stat.label(), qualifier), from, to, because })
+            Some(StatChange { stat: stat_label(stat.label(), qualifier, game), from, to, because })
         })
         .collect()
 }
 
 /// The loadout inputs behind one stat, direct ones first, then those that act
 /// through an upstream stat.
-fn causes(line: &AttributionLine, loadout: &ResolvedLoadout) -> Vec<String> {
+fn causes(line: &AttributionLine, loadout: &ResolvedLoadout, game: &GameData) -> Vec<String> {
     let mut causes: Vec<String> = line
         .contributors
         .iter()
@@ -459,7 +461,7 @@ fn causes(line: &AttributionLine, loadout: &ResolvedLoadout) -> Vec<String> {
         let Some(name) = loadout_label(&inherited.line, loadout) else {
             continue;
         };
-        let via = stat_label(&inherited.via_stat, inherited.via_qualifier.as_deref());
+        let via = stat_label(&inherited.via_stat, inherited.via_qualifier.as_deref(), game);
         let cause = format!("{} via {via}", describe(&name, &inherited.line, loadout));
         if !causes.contains(&cause) {
             causes.push(cause);

@@ -484,7 +484,7 @@ expression: specs()
               description: Threshold in the unit stat_names lists for the stat.
               type: number
             qualifier:
-              description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"CS\"), torpedo, secondary mount or consumable name. Omit to accept any row."
+              description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"CS\"), torpedo name as values show it, secondary mount or consumable name. Omit to accept any row."
               type: string
           additionalProperties: false
           required:

@@ -6,7 +6,8 @@ expression: "json!({\n    \"venezia\": { \"weapon\": venezia.weapon, \"zones\": 
 venezia:
   weapon:
     source: main battery
-    projectile: PIPA041_203MM_55_1924_CS
+    projectile: 203 mm proiettili CS 1924 mod.2
+    param: PIPA041_203MM_55_1924_CS
     ammo: SAP
     caliber_mm: 203
     penetration_mm: 54
@@ -43,7 +44,8 @@ venezia:
 marco_polo:
   weapon:
     source: main battery
-    projectile: PIPA053_406MM_1940_CS_M_POLO
+    projectile: 406 mm proiettili CS 1940
+    param: PIPA053_406MM_1940_CS_M_POLO
     ammo: SAP
     caliber_mm: 406
     penetration_mm: 102

@@ -128,7 +128,12 @@ pub struct ShooterReport {
     /// The ship whose shell stands for the group, the median of the caliber
     /// by penetration.
     pub ship: String,
+
+    /// English name of the shell.
     pub projectile: String,
+
+    /// GameParams name of the shell.
+    pub param: String,
 
     /// Main battery firing range with stock modules, no skills or upgrades.
     pub max_range_km: Km,
@@ -476,7 +481,7 @@ impl ShooterSet {
         let rules =
             format!("revision {TABLE_REVISION}, rays {} m, sides {} m", TRACE_SPACING.value(), SIDE_SPACING.value());
         let samples = self.shooters.iter().flat_map(|shooter| {
-            shooter.samples.iter().map(|sample| format!("{} {}", shooter.report.projectile, sample.range))
+            shooter.samples.iter().map(|sample| format!("{} {}", shooter.report.param, sample.range))
         });
 
         std::iter::once(rules).chain(samples).collect()
@@ -980,7 +985,8 @@ impl GameData {
             ships_with_caliber,
             ships_in_role: candidates.len(),
             ship: ship.label(),
-            projectile: chosen.shell.param.clone(),
+            projectile: chosen.shell.name.clone(),
+            param: chosen.shell.param.clone(),
             // Two decimals, so a range just short of a sample does not read
             // as reaching it.
             max_range_km: Km::new((max_range.value() * 100.0).round() / 100.0),
