@@ -1,0 +1,42 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: counts
+---
+- include_replicas: false
+  considered:
+    total: 412
+    by_class:
+      destroyer: 102
+      cruiser: 165
+      battleship: 144
+      submarine: 1
+    test: 38
+  qualifying:
+    total: 96
+    by_class:
+      battleship: 96
+    test: 14
+  share_pct_by_class:
+    destroyer: 0
+    cruiser: 0
+    battleship: 66.7
+    submarine: 0
+- include_replicas: true
+  considered:
+    total: 516
+    by_class:
+      destroyer: 120
+      cruiser: 206
+      battleship: 189
+      submarine: 1
+    test: 38
+  qualifying:
+    total: 124
+    by_class:
+      battleship: 124
+    test: 14
+  share_pct_by_class:
+    destroyer: 0
+    cruiser: 0
+    battleship: 65.6
+    submarine: 0

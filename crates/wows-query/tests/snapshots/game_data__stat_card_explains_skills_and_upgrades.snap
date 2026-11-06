@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 134
 expression: stats
 ---
 interpretations:
@@ -16,6 +15,8 @@ ship:
   nation: Germany
   group: upgradeable
   status: released
+  replicas:
+    - Von Zuckerhoff
 skills:
   - name: Inertia Fuse for HE Shells
     points: 2

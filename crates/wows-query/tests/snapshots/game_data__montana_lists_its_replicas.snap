@@ -1,0 +1,36 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({ \"find_ships\": listed, \"variants\": variants, \"replica\": replica })"
+---
+find_ships:
+  - ship: Montana
+    replicas:
+      - BA Montana
+  - ship: Montana 2
+    replicas: []
+variants:
+  - ship: BA Montana
+    group: ultimate
+    replica_of:
+      ship: Montana
+      index: PASB017
+      nation: USA
+      series: ba
+      note: "replica of Montana; premium: more credits, free commander transfer"
+  - ship: "[Montana]"
+    group: clan
+    replica_of: ~
+replica:
+  name: BA Montana
+  index: PASB820
+  tier: 10
+  class: battleship
+  nation: USA
+  group: ultimate
+  status: released
+  replica_of:
+    ship: Montana
+    index: PASB017
+    nation: USA
+    series: ba
+    note: "replica of Montana; premium: more credits, free commander transfer"

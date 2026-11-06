@@ -1638,6 +1638,15 @@ pub struct Vehicle {
     #[cfg_attr(feature = "serde", serde(default))]
     #[builder(default)]
     research: ShipResearch,
+    /// Param name of the ship this one replicates (GameParams `originShipName`),
+    /// e.g. a collaboration or recolored premium version. The client shows the
+    /// origin's name when the player turns the replica's series off.
+    #[cfg_attr(feature = "serde", serde(default))]
+    origin_ship: Option<String>,
+    /// Cosmetic series (GameParams `peculiarity`), e.g. "azurlane" or
+    /// "arpeggio". `None` for ships outside any series.
+    #[cfg_attr(feature = "serde", serde(default))]
+    peculiarity: Option<String>,
 }
 
 impl Vehicle {
@@ -1700,6 +1709,16 @@ impl Vehicle {
     /// Port price and research-tree links.
     pub fn research(&self) -> &ShipResearch {
         &self.research
+    }
+
+    /// Param name of the ship this one replicates, when it is a replica.
+    pub fn origin_ship(&self) -> Option<&str> {
+        self.origin_ship.as_deref()
+    }
+
+    /// Cosmetic series, e.g. "azurlane". `None` outside any series.
+    pub fn peculiarity(&self) -> Option<&str> {
+        self.peculiarity.as_deref()
     }
 
     /// Look up a specific hull upgrade config by name.
@@ -3691,6 +3710,8 @@ mod tests {
             ttx_components: None,
             innate_skills: Vec::new(),
             research: ShipResearch::default(),
+            origin_ship: None,
+            peculiarity: None,
         };
         let ship = Param {
             id: ship_id,

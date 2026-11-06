@@ -96,6 +96,7 @@ impl GameData {
             nation: args.nation.clone(),
             include_irregular: false,
             exclude_test: args.exclude_test_ships.unwrap_or(false),
+            include_replicas: false,
         };
 
         // Of ships sharing one armor model, the first by group (tech tree

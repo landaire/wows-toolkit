@@ -1,0 +1,24 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: ships
+---
+- ship: Xuan Wu
+  nation: Pan_Asia
+  replica_of:
+    ship: Iowa
+    index: PASB018
+    nation: USA
+    note: "replica of Iowa (USA) in the Pan_Asia tree; premium: more credits, free commander transfer"
+  main_battery:
+    - layout: 3 x 3 406 mm
+      mounts: 3
+      barrels_per_mount: 3
+      caliber_mm: 406
+- ship: Iowa
+  nation: USA
+  replica_of: ~
+  main_battery:
+    - layout: 3 x 3 406 mm
+      mounts: 3
+      barrels_per_mount: 3
+      caliber_mm: 406

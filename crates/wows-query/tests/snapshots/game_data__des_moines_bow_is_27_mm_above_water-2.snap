@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 66
 expression: search
 ---
 thickness_mm: 27
@@ -17,23 +16,23 @@ rule: AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SA
 groups:
   - method: ap_overmatch
     considered:
-      total: 516
+      total: 412
       by_class:
-        destroyer: 120
-        cruiser: 206
-        battleship: 189
+        destroyer: 102
+        cruiser: 165
+        battleship: 144
         submarine: 1
       test: 38
     qualifying:
-      total: 124
+      total: 96
       by_class:
-        battleship: 124
+        battleship: 96
       test: 14
-    share_pct: 24
+    share_pct: 23.3
     share_pct_by_class:
       destroyer: 0
       cruiser: 0
-      battleship: 65.6
+      battleship: 66.7
       submarine: 0
     ships:
       - "T11 Affondatore (battleship, Italy): main 406 mm AP"
@@ -43,14 +42,10 @@ groups:
       - "T11 Patrie (battleship, France): main 431 mm AP"
       - "T11 Satsuma (battleship, Japan): main 510 mm AP"
       - "T11 Ushakov (battleship, Russia): main 457 mm AP"
-      - "T10 ARP Yamato (battleship, Japan): main 460 mm AP"
-      - "T10 Aki (battleship, Japan): main 460 mm AP"
-      - "T10 Aki G (battleship, Japan): main 460 mm AP"
-      - "T10 BA Montana (battleship, USA): main 406 mm AP"
+      - "T10 Aki (battleship, Japan) [replicas: Aki G]: main 460 mm AP"
       - "T10 Bungo (battleship, Japan): main 457 mm AP"
       - "T10 Comodoro (battleship, Pan_America, test): main 419 mm AP"
-      - "T10 Conqueror (battleship, United_Kingdom): main 419 mm AP"
-      - "T10 Conqueror CLR (battleship, United_Kingdom): main 419 mm AP"
+      - "T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR]: main 419 mm AP"
       - "T10 Cumberland (battleship, United_Kingdom, test): main 406 mm AP"
       - "T10 G. Kurfürst (battleship, Germany): main 420 mm AP"
       - "T10 Incomparable (battleship, United_Kingdom): main 508 mm AP"
@@ -58,22 +53,26 @@ groups:
       - "T10 Kremlin (battleship, Russia): main 457 mm AP"
       - "T10 Libertad (battleship, Pan_America): main 419 mm AP"
       - "T10 Louisiana (battleship, USA): main 406 mm AP"
-      - "T10 Montana (battleship, USA): main 406 mm AP"
+      - "T10 Montana (battleship, USA) [replicas: BA Montana]: main 406 mm AP"
       - "T10 Montana 2 (battleship, USA, test): main 406 mm AP"
       - "T10 Neptunus (battleship, Netherlands, test): main 420 mm AP"
       - "T10 New Jersey (battleship, USA, test): main 406 mm AP"
       - "T10 Ohio (battleship, USA): main 457 mm AP"
       - "T10 Preussen (battleship, Germany): main 457 mm AP"
       - "T10 Pérez Gacitúa (battleship, Pan_America, test): main 406 mm AP"
-      - "T10 R. Lauria (battleship, Italy): main 457 mm AP"
+      - "T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]: main 457 mm AP"
       - "T10 Rodina (battleship, Russia, test): main 406 mm AP"
       - "T10 République (battleship, France): main 431 mm AP"
-      - "T10 Schlieffen (battleship, Germany): main 420 mm AP"
+      - "T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]: main 420 mm AP"
       - "T10 Sete de Setembro (battleship, Pan_America): main 406 mm AP"
       - "T10 Shikishima (battleship, Japan): main 510 mm AP"
       - "T10 Sibir (battleship, Russia): main 457 mm AP"
       - "T10 Slava (battleship, Russia): main 406 mm AP"
       - "T10 St. Vincent (battleship, United_Kingdom): main 457 mm AP"
-      - "T10 Tempesta Nera (battleship, Italy): main 457 mm AP"
       - "T10 Thor (battleship, Europe): main 406 mm AP"
-    omitted: 84
+      - "T10 Thunderer (battleship, United_Kingdom): main 457 mm AP"
+      - "T10 Utah (battleship, USA, test): main 457 mm AP"
+      - "T10 Vermont (battleship, USA): main 457 mm AP"
+      - "T10 Willem de Eerste (battleship, Netherlands): main 419 mm AP"
+      - "T10 Wisconsin (battleship, USA) [replicas: Wisconsin G]: main 406 mm AP"
+    omitted: 56

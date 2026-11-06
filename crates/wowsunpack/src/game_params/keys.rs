@@ -7,6 +7,12 @@
 pub const SHIP_UPGRADE_INFO: &str = "ShipUpgradeInfo";
 pub const SHIP_ABILITIES: &str = "ShipAbilities";
 pub const A_HULL: &str = "A_Hull";
+/// Ship param name of the ship this one is a replica of; empty on originals.
+pub const ORIGIN_SHIP_NAME: &str = "originShipName";
+/// Cosmetic series of a ship, e.g. "azurlane" or "arpeggio".
+pub const PECULIARITY: &str = "peculiarity";
+/// `peculiarity` of ships outside any series.
+pub const PECULIARITY_DEFAULT: &str = "default";
 
 // Upgrade dict keys
 pub const UC_TYPE: &str = "ucType";

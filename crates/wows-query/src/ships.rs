@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -226,6 +227,12 @@ pub(crate) struct Ship {
     /// A released ship has the same name: this is a test copy of it, listed
     /// only with event variants.
     pub(crate) copies_released: bool,
+
+    /// The owned ship this one replicates; listed only on request.
+    pub(crate) replica_of: Option<ReplicaOf>,
+
+    /// English names of the replicas of this ship, sorted.
+    pub(crate) replicas: Vec<String>,
 }
 
 impl Ship {
@@ -241,6 +248,8 @@ impl Ship {
             class,
             tier: Tier(vehicle.level()),
             copies_released: false,
+            replica_of: None,
+            replicas: Vec::new(),
         })
     }
 
@@ -252,6 +261,39 @@ impl Ship {
         for ship in ships.iter_mut() {
             ship.copies_released = ship.status() == ShipStatus::Test && released.contains(&ship.search_key);
         }
+    }
+
+    /// Links owned ships that GameParams marks as replicas (`originShipName`)
+    /// to their owned original, such as "BA Montana" to Montana or Xuan Wu
+    /// to Iowa. Clan, event and test replicas stay event variants.
+    pub(crate) fn mark_replicas(ships: &mut [Ship]) {
+        let by_param: HashMap<&str, usize> =
+            ships.iter().enumerate().map(|(index, ship)| (ship.param.name(), index)).collect();
+        let owned = |ship: &Ship| ship.is_regular() && ship.status() == ShipStatus::Released;
+        let links: Vec<(usize, usize)> = ships
+            .iter()
+            .enumerate()
+            .filter(|(_, ship)| owned(ship))
+            .filter_map(|(index, ship)| {
+                let origin = *by_param.get(ship.param.vehicle()?.origin_ship()?)?;
+
+                (origin != index && owned(&ships[origin])).then_some((index, origin))
+            })
+            .collect();
+
+        for (replica, origin) in links {
+            let replica_of = ReplicaOf::new(&ships[replica], &ships[origin]);
+            let name = ships[replica].name.clone();
+            ships[replica].replica_of = Some(replica_of);
+            ships[origin].replicas.push(name);
+        }
+        for ship in ships.iter_mut() {
+            ship.replicas.sort();
+        }
+    }
+
+    pub(crate) fn is_replica(&self) -> bool {
+        self.replica_of.is_some()
     }
 
     pub(crate) fn group(&self) -> &str {
@@ -284,14 +326,73 @@ impl Ship {
             group: self.group().to_owned(),
             status,
             status_note: (status == ShipStatus::Test).then_some(TEST_SHIP_NOTE),
+            replica_of: self.replica_of.clone(),
+            replicas: self.replicas.clone(),
         }
     }
 
     /// "T10 Des Moines (cruiser, USA)", for compact lists; test ships end in
-    /// ", test".
+    /// ", test" and replicas name their original.
     pub(crate) fn label(&self) -> String {
         let test = if self.status() == ShipStatus::Test { ", test" } else { "" };
-        format!("T{} {} ({}, {}{test})", self.tier.0, self.name, self.class.label(), self.param.nation())
+        let replica = self.replica_of.as_ref().map(|of| format!(", replica of {}", of.ship)).unwrap_or_default();
+        format!("T{} {} ({}, {}{test}{replica})", self.tier.0, self.name, self.class.label(), self.param.nation())
+    }
+
+    /// [`Self::label`] followed by the replicas that lists leave out, e.g.
+    /// "T10 Montana (battleship, USA) [replicas: BA Montana]".
+    pub(crate) fn listing_label(&self) -> String {
+        if self.replicas.is_empty() {
+            return self.label();
+        }
+
+        format!("{} [replicas: {}]", self.label(), self.replicas.join(", "))
+    }
+}
+
+const REPLICA_BENEFITS: &str = "premium: more credits, free commander transfer";
+
+/// The original of a premium replica.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReplicaOf {
+    /// English name of the original.
+    pub ship: String,
+
+    /// GameParams index of the original.
+    pub index: String,
+
+    /// Nation of the original as GameParams spells it.
+    pub nation: String,
+
+    /// Cosmetic series as GameParams spells it, e.g. "azurlane", "arpeggio", "ba", "decorative". Absent on many replicas, collaboration ones included.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
+
+    /// "replica of Montana; premium: more credits, free commander transfer". The replica's own stats apply; they can differ from the original's.
+    pub note: String,
+}
+
+impl ReplicaOf {
+    fn new(replica: &Ship, origin: &Ship) -> Self {
+        let series = replica.param.vehicle().and_then(|vehicle| vehicle.peculiarity()).map(str::to_owned);
+        let note = if replica.param.nation() == origin.param.nation() {
+            format!("replica of {}; {REPLICA_BENEFITS}", origin.name)
+        } else {
+            format!(
+                "replica of {} ({}) in the {} tree; {REPLICA_BENEFITS}",
+                origin.name,
+                origin.param.nation(),
+                replica.param.nation()
+            )
+        };
+
+        Self {
+            ship: origin.name.clone(),
+            index: origin.param.index().to_owned(),
+            nation: origin.param.nation().to_owned(),
+            series,
+            note,
+        }
     }
 }
 
@@ -330,6 +431,14 @@ pub struct ShipSummary {
     /// Present for test ships.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_note: Option<&'static str>,
+
+    /// Present for a premium replica of another ship; its own stats apply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replica_of: Option<ReplicaOf>,
+
+    /// Premium replicas of this ship, e.g. "BA Montana" for Montana. Lists leave them out unless asked.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replicas: Vec<String>,
 }
 
 /// Arguments for `find_ships`. Every filter is optional.
@@ -351,6 +460,9 @@ pub struct FindShipsArgs {
 
     /// Leave out ships in closed testing. Defaults to false: they are listed with status "test". A test copy of a released ship is listed only with event variants.
     pub exclude_test_ships: Option<bool>,
+
+    /// List premium replicas of other ships as separate ships: collaboration and recolored versions such as "BA Montana" of Montana, and ports to another nation such as Xuan Wu of Iowa. Defaults to false: each is named in its original's `replicas`, and listed on its own only when a nation filter leaves out the original. A name that names a replica exactly lists it either way.
+    pub include_replicas: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -457,7 +569,7 @@ pub struct ShipOverview {
     /// Number of upgrade slots.
     pub upgrade_slots: usize,
 
-    /// Other variants with the same name (event, clan, retired copies).
+    /// Other variants with the same name (event, clan, retired copies) and premium replicas of this ship.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<ShipSummary>,
 
@@ -497,7 +609,9 @@ impl TierRange {
 }
 
 /// Ship filters shared by the list queries. Test ships are included unless
-/// excluded; a test copy of a released ship counts as a variant.
+/// excluded; a test copy of a released ship counts as a variant. Premium
+/// replicas are left out unless included or their original's nation is
+/// filtered out.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ShipFilter {
     pub(crate) tiers: Option<TierRange>,
@@ -505,6 +619,7 @@ pub(crate) struct ShipFilter {
     pub(crate) nation: Option<String>,
     pub(crate) include_irregular: bool,
     pub(crate) exclude_test: bool,
+    pub(crate) include_replicas: bool,
 }
 
 impl ShipFilter {
@@ -515,9 +630,17 @@ impl ShipFilter {
         };
 
         listed
+            && (self.include_replicas || ship.replica_of.as_ref().is_none_or(|of| !self.lists_original(of)))
             && self.tiers.is_none_or(|range| range.contains(ship.tier))
             && self.class.is_none_or(|class| class == ship.class)
             && self.nation.as_deref().is_none_or(|nation| ship.param.nation().eq_ignore_ascii_case(nation))
+    }
+
+    /// Whether `of`, the original of a replica, passes the nation filter, so
+    /// lists name the replica with it. A replica shares its original's tier
+    /// and class, so nation is the only filter that can split them.
+    fn lists_original(&self, of: &ReplicaOf) -> bool {
+        self.nation.as_deref().is_none_or(|nation| of.nation.eq_ignore_ascii_case(nation))
     }
 }
 
@@ -531,20 +654,30 @@ impl GameData {
             nation: args.nation.clone(),
             include_irregular: args.include_event_variants.unwrap_or(false),
             exclude_test: args.exclude_test_ships.unwrap_or(false),
+            include_replicas: args.include_replicas.unwrap_or(false),
         };
 
         // A name single-ship tools resolve without guessing leads the list,
         // so "DM" lists Des Moines before Dm. Donskoi.
         let mut interpretations = Interpretations::default();
+        // A replica named exactly is listed even when replicas are left out.
         let named = match args.name.as_deref() {
-            Some(name) => self.named_ships(name, &filter, &mut interpretations),
+            Some(name) => {
+                let named_filter = ShipFilter { include_replicas: true, ..filter.clone() };
+                self.named_ships(name, &named_filter, &mut interpretations)
+            }
             None => Vec::new(),
         };
 
         let mut partial: Vec<&Ship> = self
             .ships
             .iter()
-            .filter(|ship| needle.as_ref().is_none_or(|needle| ship.search_key.contains(needle.as_str())))
+            .filter(|ship| {
+                needle.as_ref().is_none_or(|needle| {
+                    ship.search_key.contains(needle.as_str())
+                        || ship.replicas.iter().any(|replica| search_key(replica).contains(needle.as_str()))
+                })
+            })
             .filter(|ship| filter.matches(ship))
             .filter(|ship| !named.iter().any(|named| named.param.id() == ship.param.id()))
             .collect();
@@ -572,6 +705,15 @@ impl GameData {
     /// The playable ship with this GameParams id, e.g. from a replay.
     pub fn ship_by_id(&self, id: GameParamId) -> Option<ShipSummary> {
         self.ships.iter().find(|ship| ship.param.id() == id).map(Ship::summary)
+    }
+
+    /// Premium replicas of owned ships, each naming its original, by tier
+    /// and name.
+    pub fn replicas(&self) -> Vec<ShipSummary> {
+        let mut replicas: Vec<&Ship> = self.ships.iter().filter(|ship| ship.is_replica()).collect();
+        replicas.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+
+        replicas.into_iter().map(Ship::summary).collect()
     }
 
     /// Resolves a player-written ship name or GameParams index to one ship.
@@ -614,10 +756,15 @@ impl GameData {
         let researched_from =
             self.research_predecessors.get(ship.param.name()).map(|from| names(from)).unwrap_or_default();
 
+        let is_replica_of_ship =
+            |other: &Ship| other.replica_of.as_ref().is_some_and(|of| of.index == ship.param.index());
         let variants = self
             .ships
             .iter()
-            .filter(|other| other.search_key == ship.search_key && other.param.id() != ship.param.id())
+            .filter(|other| {
+                (other.search_key == ship.search_key || is_replica_of_ship(other))
+                    && other.param.id() != ship.param.id()
+            })
             .map(Ship::summary)
             .collect();
 
@@ -751,9 +898,15 @@ fn supership_base(query: &str) -> Option<&str> {
     (word.eq_ignore_ascii_case("super") && !base.is_empty()).then_some(base)
 }
 
-/// The regular variant when one exists, else the first.
+/// The regular variant when one exists, preferring an original to a
+/// replica sharing its name, else the first.
 fn preferred<'a>(ships: &[&'a Ship]) -> Option<&'a Ship> {
-    ships.iter().find(|ship| ship.is_regular()).or_else(|| ships.first()).copied()
+    ships
+        .iter()
+        .find(|ship| ship.is_regular() && !ship.is_replica())
+        .or_else(|| ships.iter().find(|ship| ship.is_regular()))
+        .or_else(|| ships.first())
+        .copied()
 }
 
 /// Groups of ships obtained in ways the price and research fields do not
@@ -778,7 +931,7 @@ fn acquisition_note(group: &str) -> Option<&'static str> {
 pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
     let mut names = NameIndex::default();
     for (index, ship) in ships.iter().enumerate() {
-        names.add_name(&ship.name, index, !ship.is_regular());
+        names.add_name(&ship.name, index, !ship.is_regular() || ship.is_replica());
         names.add_id(ship.param.index(), &ship.name, index);
         names.add_id(ship.param.name(), &ship.name, index);
     }

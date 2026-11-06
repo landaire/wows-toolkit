@@ -77,6 +77,9 @@ pub struct PenetrationSearchArgs {
 
     /// Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is never searched.
     pub exclude_test_ships: Option<bool>,
+
+    /// Search premium replicas of other ships (e.g. "BA Montana" of Montana, Xuan Wu of Iowa) as separate ships. Defaults to false: they are left out of the lists, counts and shares and named in their original's entry, unless a nation filter leaves out the original.
+    pub include_replicas: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -191,6 +194,7 @@ impl GameData {
             nation: args.nation.clone(),
             include_irregular: false,
             exclude_test: args.exclude_test_ships.unwrap_or(false),
+            include_replicas: args.include_replicas.unwrap_or(false),
         };
 
         let ifhe = args.ifhe.unwrap_or(false);
@@ -305,5 +309,5 @@ fn describe_hit(ship: &Ship, shell: &Shell, ifhe: bool) -> String {
     };
     let penetration = penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
 
-    format!("{}: {battery} {} mm {}{penetration}", ship.label(), shell.caliber_mm.value(), shell.ammo.label())
+    format!("{}: {battery} {} mm {}{penetration}", ship.listing_label(), shell.caliber_mm.value(), shell.ammo.label())
 }

@@ -145,6 +145,9 @@ pub struct StatSearchArgs {
 
     /// Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is searched only with event variants.
     pub exclude_test_ships: Option<bool>,
+
+    /// Search premium replicas of other ships (e.g. "BA Montana" of Montana, Xuan Wu of Iowa) as separate ships. Defaults to false: they are left out of the results and counts and named in their original's entry, unless a nation filter leaves out the original.
+    pub include_replicas: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -751,6 +754,7 @@ impl GameData {
             nation: args.nation.clone(),
             include_irregular: args.include_event_variants.unwrap_or(false),
             exclude_test: args.exclude_test_ships.unwrap_or(false),
+            include_replicas: args.include_replicas.unwrap_or(false),
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
@@ -769,18 +773,27 @@ impl GameData {
                 *matched |= seen;
             }
             if !search.has_skill_grid && !matches!(outcome, Outcome::Stock { .. }) {
-                searched_without_skills.push(ship.label());
+                searched_without_skills.push(ship.listing_label());
             }
             match outcome {
                 Outcome::Stock { values } => hits.push((
                     ship,
-                    StatSearchHit { ship: ship.label(), stock: true, requires: Vec::new(), values, unchecked: None },
+                    StatSearchHit {
+                        ship: ship.listing_label(),
+                        stock: true,
+                        requires: Vec::new(),
+                        values,
+                        unchecked: None,
+                    },
                 )),
-                Outcome::Requires { requires, values, unchecked } => {
-                    hits.push((ship, StatSearchHit { ship: ship.label(), stock: false, requires, values, unchecked }))
-                }
+                Outcome::Requires { requires, values, unchecked } => hits.push((
+                    ship,
+                    StatSearchHit { ship: ship.listing_label(), stock: false, requires, values, unchecked },
+                )),
                 Outcome::Impossible => {}
-                Outcome::Undetermined { reason } => undetermined.push(UndeterminedShip { ship: ship.label(), reason }),
+                Outcome::Undetermined { reason } => {
+                    undetermined.push(UndeterminedShip { ship: ship.listing_label(), reason })
+                }
             }
         }
         let unmatched_qualifiers = if ships.is_empty() {

@@ -427,14 +427,14 @@ fn misspelled_names_resolve_or_suggest() {
 
     assert_eq!(resolved("Kitakazee").expect("whole name beats a word of a longer name"), "Kitakaze");
 
-    let far = resolved("Smolensker").expect_err("two names are equally near");
+    assert_eq!(resolved("Smolensker").expect("an original beats its replica Smolensk B"), "Smolensk");
     let skill = game()
         .captain_skill(&CaptainSkillArgs { skill: "Concealment Expertt".to_owned(), ..Default::default() })
         .map(|output| output.skills.into_iter().map(|skill| skill.name).collect::<Vec<_>>());
     let upgrade = game()
         .upgrade(&wows_query::upgrades::UpgradeArgs { upgrade: "Main Batery Modification 2".to_owned(), ship: None })
         .map(|output| output.upgrades.into_iter().map(|upgrade| upgrade.name).collect::<Vec<_>>());
-    insta::assert_yaml_snapshot!((far.to_string(), skill.expect("one typo"), upgrade.expect("one typo")));
+    insta::assert_yaml_snapshot!((skill.expect("one typo"), upgrade.expect("one typo")));
 }
 
 #[test]
@@ -1214,4 +1214,114 @@ fn turtleback_search_lists_tier_8_to_10_battleships() {
         .expect("armor models are readable");
     assert!(search.ships.iter().any(|ship| ship.contains("F. der Grosse")), "{:?}", search.ships);
     insta::assert_yaml_snapshot!(search);
+}
+
+/// Owned ships GameParams marks as replicas (`originShipName`), counted per
+/// series with a few examples each.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn replicas_follow_the_origin_field() {
+    const EXAMPLES: usize = 4;
+
+    let replicas = game().replicas();
+    let mut by_series: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for replica in &replicas {
+        let of = replica.replica_of.as_ref().expect("replicas name their original");
+        let series = of.series.clone().unwrap_or_else(|| "none".to_owned());
+        by_series.entry(series).or_default().push(format!("{} -> {}", replica.name, of.ship));
+    }
+    let series: serde_json::Map<String, serde_json::Value> = by_series
+        .into_iter()
+        .map(|(series, names)| {
+            let examples: Vec<&String> = names.iter().take(EXAMPLES).collect();
+            (series, json!({ "count": names.len(), "examples": examples }))
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(json!({ "total": replicas.len(), "series": series }));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn montana_lists_its_replicas() {
+    let found =
+        game().find_ships(&wows_query::ships::FindShipsArgs { name: Some("Montana".to_owned()), ..Default::default() });
+    let listed: Vec<_> =
+        found.ships.iter().map(|found| json!({ "ship": found.ship.name, "replicas": found.ship.replicas })).collect();
+    let overview = game().ship_overview(&overview("Montana")).expect("Montana resolves");
+    let variants: Vec<_> = overview
+        .variants
+        .iter()
+        .map(|variant| json!({ "ship": variant.name, "group": variant.group, "replica_of": variant.replica_of }))
+        .collect();
+    let replica = game().ship_summary("BA Montana").expect("BA Montana resolves to itself").ship;
+
+    insta::assert_yaml_snapshot!(json!({ "find_ships": listed, "variants": variants, "replica": replica }));
+}
+
+/// Des Moines bow AP overmatch counts with replicas left out and counted.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn penetration_search_leaves_out_replicas() {
+    let counts: Vec<_> = [false, true]
+        .into_iter()
+        .map(|include| {
+            let search = game()
+                .call_tool(
+                    "penetration_search",
+                    json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "include_replicas": include }),
+                )
+                .expect("zone resolves");
+            let group = &search["groups"][0];
+            json!({
+                "include_replicas": include,
+                "considered": group["considered"],
+                "qualifying": group["qualifying"],
+                "share_pct_by_class": group["share_pct_by_class"],
+            })
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(counts);
+}
+
+/// A replica ported to another nation resolves to itself, names its original
+/// and its nation, and reports its own armament.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn replicas_resolve_to_themselves() {
+    let ships: Vec<_> = ["Xuan Wu", "Iowa"]
+        .into_iter()
+        .map(|name| {
+            let overview = game().ship_overview(&overview(name)).expect("ship resolves");
+            json!({
+                "ship": overview.ship.name,
+                "nation": overview.ship.nation,
+                "replica_of": overview.ship.replica_of,
+                "main_battery": overview.armament.main_battery,
+            })
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(ships);
+}
+
+/// A fragment of a replica's name lists its original, and a nation filter
+/// that leaves out the original lists the replica itself.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn find_ships_reaches_replicas() {
+    let names = |args: wows_query::ships::FindShipsArgs| -> Vec<String> {
+        game().find_ships(&args).ships.into_iter().map(|found| found.ship.name).collect()
+    };
+
+    let by_fragment = names(wows_query::ships::FindShipsArgs { name: Some("ARP".to_owned()), ..Default::default() });
+    assert!(by_fragment.iter().any(|name| name == "Yamato"), "{by_fragment:?}");
+
+    let pan_asia = names(wows_query::ships::FindShipsArgs {
+        nation: Some("Pan_Asia".to_owned()),
+        class: Some(ShipClass::Battleship),
+        ..Default::default()
+    });
+    assert!(pan_asia.iter().any(|name| name == "Xuan Wu"), "{pan_asia:?}");
 }

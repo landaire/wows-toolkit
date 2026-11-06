@@ -68,7 +68,7 @@ pub const ARMOR_COMPARISONS_KIND: &str = "armor-comparisons-v1";
 
 /// Revision of the tracing and outcome rules behind a peer table. Bump it
 /// whenever a change alters traced rates, so stored tables are traced again.
-const TABLE_REVISION: u32 = 1;
+const TABLE_REVISION: u32 = 2;
 
 /// Distance between neighbouring rays of every assessment trace. Peers are
 /// traced with the same spacing so their rates compare.
@@ -865,8 +865,14 @@ impl GameData {
 
     fn shooter_set(&self, tier: Tier) -> Result<ShooterSet, QueryError> {
         let tiers = TierRange::around(tier);
-        let filter =
-            ShipFilter { tiers: Some(tiers), class: None, nation: None, include_irregular: false, exclude_test: true };
+        let filter = ShipFilter {
+            tiers: Some(tiers),
+            class: None,
+            nation: None,
+            include_irregular: false,
+            exclude_test: true,
+            include_replicas: false,
+        };
 
         let mut candidates: BTreeMap<ShooterRole, Vec<Candidate>> = BTreeMap::new();
         for ship in self.ships.iter().filter(|ship| filter.matches(ship)) {
@@ -998,6 +1004,7 @@ impl GameData {
             nation: None,
             include_irregular: false,
             exclude_test: true,
+            include_replicas: false,
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| {

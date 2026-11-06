@@ -10,6 +10,8 @@ ship:
   nation: Europe
   group: ultimate
   status: released
+  replicas:
+    - Oväsen
 surface:
   stat: detectability by ships
   unit: km

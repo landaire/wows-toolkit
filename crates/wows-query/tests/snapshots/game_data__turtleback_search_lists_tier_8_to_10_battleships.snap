@@ -6,9 +6,9 @@ tiers:
   min: 8
   max: 10
 considered:
-  total: 127
+  total: 124
   by_class:
-    battleship: 127
+    battleship: 124
   test: 22
 considered_by_nation:
   Commonwealth: 1
@@ -19,10 +19,10 @@ considered_by_nation:
   Japan: 16
   Netherlands: 4
   Pan_America: 7
-  Pan_Asia: 6
+  Pan_Asia: 4
   Russia: 12
   Spain: 2
-  USA: 24
+  USA: 23
   United_Kingdom: 12
 qualifying:
   total: 42
@@ -39,9 +39,9 @@ qualifying_by_nation:
   Pan_Asia: 1
   Spain: 1
   United_Kingdom: 2
-share_pct: 33.1
+share_pct: 33.9
 share_pct_by_class:
-  battleship: 33.1
+  battleship: 33.9
 ships:
   - "T10 A. Vespucci (battleship, Italy, test): 25 mm deck sloped 70.4 deg behind a 375 mm belt"
   - "T10 Bourgogne (battleship, France): 50 mm deck sloped 38.4 deg behind a 350 mm belt"
@@ -84,5 +84,5 @@ ships:
   - "T8 Richelieu (battleship, France): 50 mm deck sloped 35.8 deg behind a 330 mm belt"
   - "T8 Sea Howl (battleship, Germany, test): 110 mm deck sloped 66.1 deg behind a 350 mm belt"
 omitted: 2
-copies: 55
+copies: 13
 rule: "A turtleback is an armored deck sloped 25 to 75 deg from vertical behind a near-vertical belt at least 1.5 times as thick, crossed by most horizontal rays meeting the citadel within 2 m of the waterline, with the deck's foot no higher than 1 m above the waterline. Read from the stock hull's armor model."

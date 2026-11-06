@@ -169,6 +169,7 @@ impl GameData {
             nation: args.nation.clone(),
             include_irregular: false,
             exclude_test: true,
+            include_replicas: false,
         };
         let mut lines: Vec<TechTreeLine> = paths
             .iter()

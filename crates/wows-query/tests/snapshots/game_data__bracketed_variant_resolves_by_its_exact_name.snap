@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 366
 expression: "json!({ \"copy\": copy, \"variants_of_conqueror\": variants })"
 ---
 copy:
@@ -14,3 +13,4 @@ copy:
     status: released
 variants_of_conqueror:
   - "[Conqueror]"
+  - Conqueror CLR

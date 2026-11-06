@@ -1187,6 +1187,9 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
 
     let level = game_param_to_type!(ship_data, "level", u32);
     let group = game_param_to_type!(ship_data, "group", String);
+    let origin_ship = read_string(ship_data, keys::ORIGIN_SHIP_NAME).filter(|name| !name.is_empty());
+    let peculiarity = read_string(ship_data, keys::PECULIARITY)
+        .filter(|peculiarity| !peculiarity.is_empty() && peculiarity != keys::PECULIARITY_DEFAULT);
 
     // Extract hull config data using ShipUpgradeInfo for proper type identification.
     // Each _Hull upgrade in ShipUpgradeInfo maps to specific hull, artillery, and ATBA
@@ -1920,6 +1923,8 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
         .maybe_ttx_components((!ttx_components.is_empty()).then_some(ttx_components))
         .innate_skills(innate_skills)
         .research(research)
+        .maybe_origin_ship(origin_ship)
+        .maybe_peculiarity(peculiarity)
         .build()
 }
 
