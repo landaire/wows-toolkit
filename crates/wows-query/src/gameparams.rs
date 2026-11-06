@@ -469,6 +469,16 @@ fn hint(output: &GameParamsQueryOutput, budget: &Budget, limit: usize) -> Option
     if output.results.is_empty() && output.failed == 0 {
         return Some("the filter produced no output; check field names with `keys`".to_owned());
     }
+    // A missing field reads as null.
+    if !output.results.is_empty()
+        && output.results.iter().flat_map(|result| &result.values).all(serde_json::Value::is_null)
+    {
+        return Some(
+            "every value is null: the filter may name fields these entries lack; `keys` lists an entry's fields, \
+             while `.keys` reads a field named keys"
+                .to_owned(),
+        );
+    }
 
     None
 }

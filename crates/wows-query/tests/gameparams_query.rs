@@ -52,6 +52,18 @@ fn keys_list_the_fields_of_an_entry() {
     insta::assert_yaml_snapshot!(by_index);
 }
 
+/// `.keys` reads a field named keys, which no entry has; the hint names `keys`.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn kurama_keys_are_listed_and_dot_keys_is_explained() {
+    let keys = query(json!({ "select": { "param": "PJSC021_Kurama" }, "filter": "keys" }));
+    let fields = keys["results"][0]["values"][0].as_array().expect("keys gives an array");
+    assert!(fields.iter().any(|field| field == "ShipUpgradeInfo"), "{keys}");
+
+    let field = query(json!({ "select": { "param": "PJSC021_Kurama" }, "filter": ".keys" }));
+    insta::assert_yaml_snapshot!(field);
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn sets_are_capped_and_output_is_cut_to_the_budget() {
