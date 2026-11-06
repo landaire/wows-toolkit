@@ -24,6 +24,11 @@ use crate::error::GameDataError;
 use crate::game_params::convert::ValueDictExt;
 use crate::game_params::convert::base_params_dict;
 use crate::game_params::convert::game_params_to_pickle;
+use crate::game_params::ttx::components::LauncherDirection;
+use crate::game_params::ttx::components::LauncherDirectionGroup;
+use crate::game_params::ttx::components::LoaderCount;
+use crate::game_params::ttx::components::TorpedoLoaderGroup;
+use crate::game_params::ttx::components::TorpedoLoading;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
 use crate::game_types::Vec3;
@@ -638,6 +643,65 @@ fn read_string_sequence(val: &Value) -> Vec<String> {
     } else {
         Vec::new()
     }
+}
+
+/// Helper: the items of a pickled list or tuple value.
+fn read_sequence(val: &Value) -> Vec<Value> {
+    if let Some(list) = val.list_ref() {
+        list.inner().to_vec()
+    } else if let Some(tuple) = val.tuple_ref() {
+        tuple.inner().to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Launcher groups of a torpedo component (`groups`, `loaders`,
+/// `groupsDirection`), `None` when it groups no launchers. The client picks
+/// its loader-limited reload by `groups` alone (`TorpedoesReloadManagers`).
+fn read_torpedo_loading(component: &pickled::Dict) -> Option<TorpedoLoading> {
+    // `[[groupId, [hardpoint, ...]], ...]`, `[[count, [groupId, ...]], ...]`
+    // and `[[direction, [groupId, ...]], ...]`.
+    let pairs = |key: &str| -> Vec<(Value, Value)> {
+        component
+            .get(&pk(key))
+            .map(read_sequence)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|entry| {
+                let pair = read_sequence(entry);
+                Some((pair.first()?.clone(), pair.get(1)?.clone()))
+            })
+            .collect()
+    };
+
+    let groups: HashMap<i64, Vec<String>> = pairs("groups")
+        .iter()
+        .filter_map(|(id, hardpoints)| Some((*id.i64_ref()?, read_string_sequence(hardpoints))))
+        .collect();
+    if groups.is_empty() {
+        return None;
+    }
+
+    let hardpoints = |ids: &Value| -> Vec<String> {
+        read_sequence(ids).iter().filter_map(|id| groups.get(id.i64_ref()?)).flatten().cloned().collect()
+    };
+    let loader_groups = pairs("loaders")
+        .iter()
+        .filter_map(|(count, ids)| {
+            let loaders = LoaderCount(u32::try_from(*count.i64_ref()?).ok()?);
+            Some(TorpedoLoaderGroup { loaders, hardpoints: hardpoints(ids) })
+        })
+        .collect();
+    let directions = pairs("groupsDirection")
+        .iter()
+        .filter_map(|(direction, ids)| {
+            let direction = LauncherDirection::from_game_str(direction.string_ref()?.inner());
+            Some(LauncherDirectionGroup { direction, hardpoints: hardpoints(ids) })
+        })
+        .collect();
+
+    Some(TorpedoLoading { loader_groups, directions })
 }
 
 /// Port price and research links from a ship's `ShipUpgradeInfo` dict.
@@ -1255,6 +1319,25 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             if !launchers.is_empty() {
                 ttx_components.torpedoes.insert(upgrade_name.clone(), launchers);
             }
+
+            // Every component the upgrade lists, one per hull it fits.
+            let components = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_TORPEDOES)).map(read_all_strings))
+                .unwrap_or_default();
+            for component in components {
+                if ttx_components.torpedo_loading.contains_key(&component) {
+                    continue;
+                }
+                let Some(data) = ship_data.get(&pk(&component)).and_then(|v| v.dict_or_object_dict()) else {
+                    continue;
+                };
+
+                if let Some(loading) = read_torpedo_loading(&data.inner()) {
+                    ttx_components.torpedo_loading.insert(component, loading);
+                }
+            }
         }
 
         // Main battery is a standalone _Artillery upgrade naming an artillery
@@ -1330,10 +1413,11 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             let atba_data = atba_data.inner();
             let mut guns = Vec::new();
             for (key, val) in atba_data.iter() {
-                let is_gun = key.string_ref().is_some_and(|s| keys::is_secondary_gun_hardpoint(s.inner()));
-                if !is_gun {
+                let Some(hardpoint) =
+                    key.string_ref().map(|s| s.inner()).filter(|name| keys::is_secondary_gun_hardpoint(name))
+                else {
                     continue;
-                }
+                };
                 let Some(gun) = val.dict_or_object_dict() else {
                     continue;
                 };
@@ -1346,7 +1430,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     Some(val) => read_all_strings(val),
                     None => Vec::new(),
                 };
-                guns.push(crate::game_params::ttx::components::ArtilleryGunStats {
+                let stats = crate::game_params::ttx::components::ArtilleryGunStats {
                     shot_delay: read_float(&gun, keys::SHOT_DELAY).map(crate::game_params::ttx::model::Seconds::from),
                     rotation_speed: gun
                         .get(&pk(keys::ROTATION_SPEED))
@@ -1363,7 +1447,8 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     radius_on_max: read_float(&gun, keys::RADIUS_ON_MAX),
                     delim: read_float(&gun, keys::DISPERSION_DELIM),
                     ammo,
-                });
+                };
+                guns.push(crate::game_params::ttx::components::SecondaryGun { hardpoint: hardpoint.clone(), stats });
             }
             if !guns.is_empty() {
                 ttx_components.secondaries.insert(
@@ -2861,6 +2946,81 @@ mod camera_tests {
         // A ship without torpedoes yields no torpedo entry.
         assert!(ttx.torpedoes("PAUT901_D10_TORP_STOCK").is_some());
         assert!(ttx.torpedoes("NoSuchUpgrade").is_none());
+    }
+
+    /// Orzel's (`PWSS508_Orzel`) `A_Torpedoes` grouping: bow and stern groups
+    /// with two loaders each and a rotating launcher with its own loader
+    /// (real values, fewer launchers).
+    #[test]
+    fn build_ship_extracts_torpedo_loader_groups() {
+        let pair = |head: Value, ids: &[i64]| list(vec![head, list(ids.iter().map(|id| Value::I64(*id)).collect())]);
+        let group = |id: i64, hardpoints: &[&str]| {
+            list(vec![Value::I64(id), list(hardpoints.iter().map(|name| sv(name)).collect())])
+        };
+        let launcher = || dict(vec![(pk("numBarrels"), fv(1.0)), (pk("shotDelay"), fv(62.0))]);
+        let a_torpedoes = dict(vec![
+            (pk("HP_WGT_1"), launcher()),
+            (pk("HP_WGT_2"), launcher()),
+            (pk("HP_WGT_5"), launcher()),
+            (pk("HP_WGT_9"), launcher()),
+            (
+                pk("groups"),
+                list(vec![group(0, &["HP_WGT_1", "HP_WGT_2"]), group(1, &["HP_WGT_9"]), group(3, &["HP_WGT_5"])]),
+            ),
+            (
+                pk("groupsDirection"),
+                list(vec![pair(sv("forward"), &[0]), pair(sv("rear"), &[3]), pair(sv("rotating"), &[1])]),
+            ),
+            (
+                pk("loaders"),
+                list(vec![pair(Value::I64(2), &[0]), pair(Value::I64(1), &[1]), pair(Value::I64(2), &[3])]),
+            ),
+        ]);
+
+        let torp_components = dict(vec![(pk("torpedoes"), list(vec![sv("A_Torpedoes")]))]);
+        let torp_upgrade = dict(vec![(pk("ucType"), sv("_Torpedoes")), (pk("components"), torp_components)]);
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
+        let upgrade_info = dict(vec![(pk("PWUH508_Orzel"), hull_upgrade), (pk("PWUT508_Orzel"), torp_upgrade)]);
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(8)),
+            (pk("group"), sv("upgradeable")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_Torpedoes"), a_torpedoes),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let hardpoints = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+
+        assert_eq!(
+            ttx.torpedo_loading("A_Torpedoes"),
+            Some(&TorpedoLoading {
+                loader_groups: vec![
+                    TorpedoLoaderGroup { loaders: LoaderCount(2), hardpoints: hardpoints(&["HP_WGT_1", "HP_WGT_2"]) },
+                    TorpedoLoaderGroup { loaders: LoaderCount(1), hardpoints: hardpoints(&["HP_WGT_9"]) },
+                    TorpedoLoaderGroup { loaders: LoaderCount(2), hardpoints: hardpoints(&["HP_WGT_5"]) },
+                ],
+                directions: vec![
+                    LauncherDirectionGroup {
+                        direction: LauncherDirection::Forward,
+                        hardpoints: hardpoints(&["HP_WGT_1", "HP_WGT_2"]),
+                    },
+                    LauncherDirectionGroup {
+                        direction: LauncherDirection::Rear,
+                        hardpoints: hardpoints(&["HP_WGT_5"])
+                    },
+                    LauncherDirectionGroup {
+                        direction: LauncherDirection::Rotating,
+                        hardpoints: hardpoints(&["HP_WGT_9"]),
+                    },
+                ],
+            })
+        );
     }
 
     /// A ship with no `_Torpedoes` upgrade extracts no torpedo entries.

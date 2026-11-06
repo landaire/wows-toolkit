@@ -408,7 +408,7 @@ fn secondary_ammo_list(
     hull: &str,
 ) -> Result<Vec<String>, FireChanceResolveError> {
     if let Some(component) = ttx.secondaries.get(hull) {
-        return ammo_list(Some(component.guns.as_slice()), ship, BatterySlot::Hull, hull);
+        return ammo_list(Some(component.guns.iter().map(|gun| &gun.stats)), ship, BatterySlot::Hull, hull);
     }
     if config.is_some_and(|config| config.secondary_battery_ammo.is_empty()) {
         return Ok(Vec::new());
@@ -420,8 +420,8 @@ fn secondary_ammo_list(
 ///
 /// A mount can carry mixed calibers, each with its own ammo list, and a shell
 /// from any of them is that battery's shell.
-fn ammo_list(
-    guns: Option<&[ArtilleryGunStats]>,
+fn ammo_list<'a>(
+    guns: Option<impl IntoIterator<Item = &'a ArtilleryGunStats>>,
     ship: &str,
     slot: BatterySlot,
     upgrade: &str,
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn an_unresolvable_ammo_list_is_an_error_not_an_empty_list() {
         assert_eq!(
-            ammo_list(None, "SHIP", BatterySlot::MainBattery, "A_Artillery"),
+            ammo_list(None::<&[ArtilleryGunStats]>, "SHIP", BatterySlot::MainBattery, "A_Artillery"),
             Err(FireChanceResolveError::UnknownUpgrade {
                 ship: "SHIP".to_owned(),
                 slot: BatterySlot::MainBattery,
@@ -544,7 +544,10 @@ mod tests {
             hull.to_owned(),
             wowsunpack::game_params::ttx::components::SecondaryComponentStats {
                 max_dist: None,
-                guns: vec![gun_with_ammo(ammo)],
+                guns: vec![wowsunpack::game_params::ttx::components::SecondaryGun {
+                    hardpoint: "HP_GGS_1".to_owned(),
+                    stats: gun_with_ammo(ammo),
+                }],
             },
         );
         ttx

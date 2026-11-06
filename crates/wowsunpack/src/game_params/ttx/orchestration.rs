@@ -1208,7 +1208,14 @@ mod tests {
             hull_name.to_string(),
             SecondaryComponentStats {
                 max_dist: Some(Meters::from(7600.0)),
-                guns: vec![g150(), g150(), g105(), g105()],
+                guns: [g150(), g150(), g105(), g105()]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, stats)| crate::game_params::ttx::components::SecondaryGun {
+                        hardpoint: format!("HP_GGS_{}", index + 1),
+                        stats,
+                    })
+                    .collect(),
             },
         );
         components.stock_selection =

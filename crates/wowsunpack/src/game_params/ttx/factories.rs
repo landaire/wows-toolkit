@@ -13,6 +13,7 @@ use crate::game_params::ttx::components::ArtilleryGunStats;
 use crate::game_params::ttx::components::EngineComponentStats;
 use crate::game_params::ttx::components::HullComponentStats;
 use crate::game_params::ttx::components::SecondaryComponentStats;
+use crate::game_params::ttx::components::SecondaryGun;
 use crate::game_params::ttx::components::TorpedoLauncherStats;
 use crate::game_params::ttx::constants;
 use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
@@ -1068,17 +1069,21 @@ pub fn artillery<R: Recorder>(
     Some(Artillery { reload_time, range, dispersion, dispersion_vertical, ammo_switch_time, gun, shells })
 }
 
+/// Secondary gun mounts with identical gun stats.
+struct SecondaryGroup<'a> {
+    gun: &'a ArtilleryGunStats,
+    hardpoints: Vec<String>,
+}
+
 /// Group secondary gun mounts by identical gun stats (`ArtilleryGunStats`
 /// `PartialEq` covers caliber, reload, rotation, barrels, ammo, and the
-/// dispersion curve), preserving first-seen order. Returns each group's
-/// representative gun and its mount count.
-fn group_secondary_guns(guns: &[ArtilleryGunStats]) -> Vec<(&ArtilleryGunStats, u32)> {
-    let mut groups: Vec<(&ArtilleryGunStats, u32)> = Vec::new();
+/// dispersion curve), preserving first-seen order.
+fn group_secondary_guns(guns: &[SecondaryGun]) -> Vec<SecondaryGroup<'_>> {
+    let mut groups: Vec<SecondaryGroup<'_>> = Vec::new();
     for gun in guns {
-        if let Some(entry) = groups.iter_mut().find(|(rep, _)| *rep == gun) {
-            entry.1 += 1;
-        } else {
-            groups.push((gun, 1));
+        match groups.iter_mut().find(|group| *group.gun == gun.stats) {
+            Some(group) => group.hardpoints.push(gun.hardpoint.clone()),
+            None => groups.push(SecondaryGroup { gun: &gun.stats, hardpoints: vec![gun.hardpoint.clone()] }),
         }
     }
     groups
@@ -1150,19 +1155,19 @@ pub fn secondaries<R: Recorder>(
     // Keep only groups whose caliber resolves (needed to label them); a caliber-less
     // group is anomalous data -> warn and skip, never a sentinel. Caliber drives the
     // label, so it is resolved before labeling.
-    let mut kept: Vec<(&ArtilleryGunStats, u32, Millimeters)> = Vec::new();
-    for (gun, count) in group_secondary_guns(&atba.guns) {
-        match gun.barrel_diameter {
-            Some(d) => kept.push((gun, count, d.to_mm())),
-            None => warn_unresolved_ammo(gun.ammo.first().map(String::as_str).unwrap_or("<secondary mount>")),
+    let mut kept: Vec<(SecondaryGroup<'_>, Millimeters)> = Vec::new();
+    for group in group_secondary_guns(&atba.guns) {
+        match group.gun.barrel_diameter {
+            Some(d) => kept.push((group, d.to_mm())),
+            None => warn_unresolved_ammo(group.gun.ammo.first().map(String::as_str).unwrap_or("<secondary mount>")),
         }
     }
-    let labels = secondary_labels(&kept.iter().map(|(_, _, caliber)| *caliber).collect::<Vec<_>>());
+    let labels = secondary_labels(&kept.iter().map(|(_, caliber)| *caliber).collect::<Vec<_>>());
 
     let mut mounts = Vec::new();
-    for (idx, (gun, num_mounts, caliber)) in kept.iter().enumerate() {
+    for (idx, (SecondaryGroup { gun, hardpoints }, caliber)) in kept.iter().enumerate() {
         let caliber = *caliber;
-        let num_mounts = *num_mounts;
+        let num_mounts = hardpoints.len() as u32;
         let label = labels[idx].clone();
         let q = label.as_str();
 
@@ -1281,6 +1286,7 @@ pub fn secondaries<R: Recorder>(
             dispersion: h_m,
             dispersion_vertical: vertical_m,
             shell,
+            hardpoints: hardpoints.clone(),
         });
     }
 
@@ -2752,7 +2758,12 @@ mod tests {
         SecondaryComponentStats {
             max_dist: Some(Meters::from(7600.0)),
             // 4 mounts total: 2 x 150mm groups + 2 x 105mm groups.
-            guns: vec![gun_150.clone(), gun_150, gun_105.clone(), gun_105],
+            guns: vec![
+                SecondaryGun { hardpoint: "HP_GGS_1".to_string(), stats: gun_150.clone() },
+                SecondaryGun { hardpoint: "HP_GGS_2".to_string(), stats: gun_150 },
+                SecondaryGun { hardpoint: "HP_GGS_3".to_string(), stats: gun_105.clone() },
+                SecondaryGun { hardpoint: "HP_GGS_4".to_string(), stats: gun_105 },
+            ],
         }
     }
 
@@ -3442,7 +3453,10 @@ mod tests {
             delim: Some(0.5),
             ammo: vec!["PGPA003_150mm_HE_HE_N_F".to_string()],
         };
-        SecondaryComponentStats { max_dist: Some(Meters::from(7600.0)), guns: vec![gun_150] }
+        SecondaryComponentStats {
+            max_dist: Some(Meters::from(7600.0)),
+            guns: vec![SecondaryGun { hardpoint: "HP_GGS_1".to_string(), stats: gun_150 }],
+        }
     }
 
     /// `SecondaryRange` records a Hull-module base + `GSMaxDist` Mul step; replay reproduces
@@ -3549,7 +3563,7 @@ mod tests {
     }
 
     #[test]
-    fn group_secondary_guns_groups_by_identity_and_counts() {
+    fn group_secondary_guns_groups_by_identity_with_hardpoints() {
         use crate::game_params::ttx::components::ArtilleryGunStats;
         let g150 = || ArtilleryGunStats {
             barrel_diameter: Some(Meters::from(0.15)),
@@ -3563,11 +3577,15 @@ mod tests {
             ammo: vec!["A105".into()],
             ..Default::default()
         };
-        let guns = vec![g150(), g105(), g150(), g105(), g105()];
+        let guns: Vec<SecondaryGun> = [g150(), g105(), g150(), g105(), g105()]
+            .into_iter()
+            .enumerate()
+            .map(|(index, stats)| SecondaryGun { hardpoint: format!("HP_GGS_{}", index + 1), stats })
+            .collect();
         let groups = group_secondary_guns(&guns);
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].1, 2); // two 150mm
-        assert_eq!(groups[1].1, 3); // three 105mm
+        assert_eq!(groups[0].hardpoints, ["HP_GGS_1", "HP_GGS_3"]);
+        assert_eq!(groups[1].hardpoints, ["HP_GGS_2", "HP_GGS_4", "HP_GGS_5"]);
     }
 
     #[test]

@@ -747,6 +747,8 @@ pub struct SecondaryMount {
     pub dispersion: Meters,
     pub dispersion_vertical: Meters,
     pub shell: ShellStats,
+    /// Hardpoints of the group's mounts, e.g. `HP_JGS_2`.
+    pub hardpoints: Vec<String>,
 }
 
 /// Torpedo launcher + ammo stats (`FactoryTorpedoes.py` `createTorpedoesTTX`).
@@ -1069,6 +1071,7 @@ mod tests {
                     dispersion: Meters::from(1.0),
                     dispersion_vertical: Meters::from(1.0),
                     shell: shell(),
+                    hardpoints: vec!["HP_1".to_string()],
                 }],
             }),
             torpedoes: Some(Torpedoes {

@@ -175,9 +175,8 @@ pub struct ArtilleryComponentStats {
 /// Base stats for one secondary-battery (ATBA) component, raw from the ship's
 /// `*_ATBA` component sub-object. `max_dist` is the component-level base secondary
 /// range (meters, before `/ KM_TO_M`); `guns` are its `HP_GGS_*` gun
-/// sub-objects. Reuses [`ArtilleryGunStats`] for the gun fields. Unlike the main
-/// battery, ATBA mounts can carry mixed calibers (e.g. 150mm + 105mm), so `guns`
-/// may hold several distinct gun groups.
+/// sub-objects. Unlike the main battery, ATBA mounts can carry mixed calibers
+/// (e.g. 150mm + 105mm), so `guns` may hold several distinct gun groups.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -186,7 +185,17 @@ pub struct SecondaryComponentStats {
     /// factory divides by KM_TO_M to get km).
     pub max_dist: Option<Meters>,
     /// Secondary guns (`HP_GGS_*`) on this component.
-    pub guns: Vec<ArtilleryGunStats>,
+    pub guns: Vec<SecondaryGun>,
+}
+
+/// One secondary gun mount.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct SecondaryGun {
+    /// Hardpoint name, e.g. `HP_JGS_2`.
+    pub hardpoint: String,
+    pub stats: ArtilleryGunStats,
 }
 
 /// The carrier plane slot a `ShipUpgradeInfo` upgrade fills.
@@ -255,6 +264,65 @@ pub struct AirSupportStats {
     pub max_dist: Option<Meters>,
 }
 
+/// Number of launchers of a group that reload at the same time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct LoaderCount(pub u32);
+
+/// Launchers that share loaders: at most `loaders` of `hardpoints` reload at
+/// once (`loaders` and `groups` of a torpedo component; the client queues the
+/// rest, `TorpedoesReloadManagers.RevolverCylinder`).
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TorpedoLoaderGroup {
+    pub loaders: LoaderCount,
+    pub hardpoints: Vec<String>,
+}
+
+/// Where a group of submarine launchers points (`groupsDirection`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum LauncherDirection {
+    Forward,
+    Rear,
+    Rotating,
+    /// A direction this crate does not recognize.
+    Other(String),
+}
+
+impl LauncherDirection {
+    pub fn from_game_str(direction: &str) -> Self {
+        match direction {
+            "forward" => Self::Forward,
+            "rear" => Self::Rear,
+            "rotating" => Self::Rotating,
+            other => Self::Other(other.to_owned()),
+        }
+    }
+}
+
+/// Launchers of one direction.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct LauncherDirectionGroup {
+    pub direction: LauncherDirection,
+    pub hardpoints: Vec<String>,
+}
+
+/// How the launchers of one torpedo component are grouped. Launchers outside
+/// every loader group reload all at once.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TorpedoLoading {
+    pub loader_groups: Vec<TorpedoLoaderGroup>,
+    pub directions: Vec<LauncherDirectionGroup>,
+}
+
 /// Per-ship TTX component base stats, keyed by upgrade selection.
 ///
 /// Hull stats are keyed by the `_Hull` upgrade name (mirroring
@@ -276,6 +344,10 @@ pub struct ShipTtxComponents {
     /// the launchers (`HP_AGT_*` guns) on that mount.
     #[cfg_attr(feature = "serde", serde(default))]
     pub torpedoes: HashMap<String, Vec<TorpedoLauncherStats>>,
+    /// Launcher grouping per torpedo component name, e.g. `A_Torpedoes`, for
+    /// components that group their launchers.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub torpedo_loading: HashMap<String, TorpedoLoading>,
     /// Main-battery base stats per `_Artillery` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub artillery: HashMap<String, ArtilleryComponentStats>,
@@ -336,6 +408,12 @@ impl ShipTtxComponents {
     /// Look up torpedo launcher stats for a given `_Torpedoes` upgrade name.
     pub fn torpedoes(&self, upgrade_name: &str) -> Option<&[TorpedoLauncherStats]> {
         self.torpedoes.get(upgrade_name).map(|v| v.as_slice())
+    }
+
+    /// Launcher grouping of a torpedo component, `None` when it does not group
+    /// its launchers.
+    pub fn torpedo_loading(&self, component: &str) -> Option<&TorpedoLoading> {
+        self.torpedo_loading.get(component)
     }
 
     /// Look up artillery (main battery) stats for a given `_Artillery` upgrade name.
