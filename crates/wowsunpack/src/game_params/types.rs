@@ -2239,6 +2239,19 @@ impl CrewSkillLogicTrigger {
     pub fn duration(&self) -> Option<f32> {
         self.duration
     }
+
+    /// Translation key of the trigger condition sentence: `triggerDescIds`,
+    /// or `IDS_SKILL_TRIGGER_<TRIGGERTYPE>` when that is empty. Several skills
+    /// share a trigger type, so only `triggerDescIds` names the skill's own
+    /// sentence (`StateSystem.__updateAttributesForCrewPerk`).
+    pub fn trigger_desc_key(&self) -> Option<TranslationKey> {
+        if let Some(ids) = self.trigger_desc_ids.as_deref().filter(|ids| !ids.is_empty()) {
+            return Some(TranslationKey::new(ids.to_owned()));
+        }
+        let kind = self.trigger_type.as_deref().filter(|kind| !kind.is_empty())?;
+
+        Some(TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", kind.to_uppercase())))
+    }
 }
 
 /// One HP-fraction breakpoint from a ship's innate adrenaline component.
@@ -2554,14 +2567,10 @@ impl CrewSkill {
             ));
         }
         if let Some(trig) = self.logic_trigger() {
-            // The trigger condition sentence is keyed by trigger TYPE (e.g.
-            // activationOnDetectTrigger -> IDS_SKILL_TRIGGER_ACTIVATIONONDETECTTRIGGER);
-            // triggerDescIds is often empty.
-            let sentence = trig.trigger_type().and_then(|tt| {
-                metadata
-                    .localized_name_from_id(&TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", tt.to_uppercase())))
-                    .filter(|s| !(s.is_empty() || s == " "))
-            });
+            let sentence = trig
+                .trigger_desc_key()
+                .and_then(|key| metadata.localized_name_from_id(&key))
+                .filter(|s| !(s.is_empty() || s == " "));
             let has_sentence = sentence.is_some();
             if let Some(sentence) = sentence {
                 lines.push(sentence);

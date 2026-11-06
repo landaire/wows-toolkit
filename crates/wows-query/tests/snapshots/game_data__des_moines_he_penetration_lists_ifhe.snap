@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 290
 expression: "he_penetration(\"DM\")"
 ---
 - battery: main
@@ -18,7 +17,7 @@ expression: "he_penetration(\"DM\")"
           value: 42
           assumed:
             - Inertia Fuse for HE Shells
-          prerequisites:
+          tier_fillers:
             - Consumable Specialist
             - Focus Fire Training
             - Heavy AP Shells
@@ -38,7 +37,7 @@ expression: "he_penetration(\"DM\")"
           value: 26
           assumed:
             - Inertia Fuse for HE Shells
-          prerequisites:
+          tier_fillers:
             - Consumable Specialist
             - Focus Fire Training
             - Heavy AP Shells

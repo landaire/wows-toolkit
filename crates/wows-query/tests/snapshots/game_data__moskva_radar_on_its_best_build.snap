@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 310
 expression: consumables
 ---
 interpretations:
@@ -37,7 +36,7 @@ slots:
                   - Consumable Enhancements
                   - Surveillance Radar Modification 1
                   - Ship Consumable Modification 1
-                prerequisites:
+                tier_fillers:
                   - Consumable Specialist
               alternatives:
                 - label: without Consumable Enhancements
@@ -50,14 +49,14 @@ slots:
                   assumed:
                     - Consumable Enhancements
                     - Ship Consumable Modification 1
-                  prerequisites:
+                  tier_fillers:
                     - Consumable Specialist
                 - label: without Ship Consumable Modification 1
                   value: 39.6
                   assumed:
                     - Consumable Enhancements
                     - Surveillance Radar Modification 1
-                  prerequisites:
+                  tier_fillers:
                     - Consumable Specialist
           charges:
             stat: Surveillance Radar charges
@@ -68,7 +67,7 @@ slots:
                 value: 4
                 assumed:
                   - Superintendent
-                prerequisites:
+                tier_fillers:
                   - Consumable Specialist
                   - Focus Fire Training
               alternatives:

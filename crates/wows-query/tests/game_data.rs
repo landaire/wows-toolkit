@@ -24,6 +24,7 @@ use wows_query::ships::ShipArgs;
 use wows_query::ships::ShipClass;
 use wows_query::ships::ShipOverviewArgs;
 use wows_query::skills::CaptainSkillArgs;
+use wows_query::skills::SkillTreeArgs;
 use wows_query::stats::ShipStatsArgs;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
@@ -501,6 +502,80 @@ fn des_moines_weapon_stats_on_their_best_builds() {
         .ship_stats(&ShipStatsArgs { ship: "Des Moines".to_owned(), ..Default::default() })
         .expect("Des Moines exists");
     insta::assert_yaml_snapshot!(stats.build_stats);
+}
+
+/// Torpedo Crew Training shares its trigger type with Fearless Brawler; its
+/// alternative must carry its own torpedo sentence.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn triggered_alternatives_carry_their_own_skill_condition() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs { ship: "Orzel".to_owned(), ..Default::default() })
+        .expect("Orzel exists");
+    let torpedo_reload = stats.build_stats.and_then(|builds| builds.torpedo_reload).expect("Orzel has torpedoes");
+    let triggered: Vec<_> =
+        torpedo_reload.builds.alternatives.iter().filter(|alternative| alternative.label.ends_with(" active")).collect();
+    assert!(!triggered.is_empty(), "{torpedo_reload:?}");
+
+    for alternative in triggered {
+        let skill = alternative.label.trim_start_matches("with ").trim_end_matches(" active");
+        let details = game()
+            .captain_skill(&CaptainSkillArgs {
+                skill: skill.to_owned(),
+                ship: Some("Orzel".to_owned()),
+                ..Default::default()
+            })
+            .expect("the alternative names a skill");
+        assert_eq!(alternative.note, details.skills[0].trigger, "{}", alternative.label);
+        let note = alternative.note.as_deref().expect("a triggered alternative states its condition");
+        assert!(note.contains("torpedo"), "{}: {note}", alternative.label);
+    }
+}
+
+/// A trigger sentence that names armament names the armament its skill's
+/// triggered effects change.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn skill_trigger_sentences_match_their_effects() {
+    const ARMAMENT: [&str; 3] = ["main battery", "torpedo", "secondary"];
+
+    let mut checked = 0;
+    for class in ShipClass::ALL {
+        for row in game().skill_tree(&SkillTreeArgs { class }).rows {
+            for name in row.skills {
+                let output = game()
+                    .captain_skill(&CaptainSkillArgs { skill: name.clone(), class: Some(class), ..Default::default() })
+                    .expect("a skill tree skill resolves");
+                for details in output.skills {
+                    let Some(trigger) = details.trigger.as_deref().map(str::to_lowercase) else {
+                        continue;
+                    };
+                    let effects = details
+                        .classes
+                        .iter()
+                        .flat_map(|group| &group.triggered_effects)
+                        .map(|line| line.to_lowercase())
+                        .collect::<Vec<_>>();
+                    let named = |text: &str, armament: &str| text.contains(armament);
+                    if effects.is_empty() || !ARMAMENT.iter().any(|armament| named(&trigger, armament)) {
+                        continue;
+                    }
+
+                    for armament in ARMAMENT {
+                        if effects.iter().any(|line| named(line, armament)) {
+                            assert!(
+                                named(&trigger, armament),
+                                "{name}: effects {effects:?} change {armament}, trigger {trigger:?} does not name it"
+                            );
+                        }
+                    }
+                    checked += 1;
+                }
+            }
+        }
+    }
+
+    assert!(checked > 5, "only {checked} triggered skills checked");
 }
 
 #[test]

@@ -134,7 +134,7 @@ struct IfheBuild {
     /// The first skill in skill order of each cheaper tier, as
     /// [`crate::builds`] takes when every skill of a tier leaves the stat as
     /// it is.
-    prerequisites: Vec<String>,
+    tier_fillers: Vec<String>,
 }
 
 impl GameData {
@@ -204,12 +204,12 @@ impl GameData {
     fn ifhe_build(&self, class: ShipClass) -> Option<IfheBuild> {
         let skill = self.skills.iter().find(|skill| skill.internal_name().as_str() == IFHE_SKILL)?;
         let points = self.skill_points(skill, class)?;
-        let prerequisites = (1..points)
+        let tier_fillers = (1..points)
             .filter_map(|tier| self.skills.iter().find(|other| self.skill_points(other, class) == Some(tier)))
             .map(|other| self.skill_name(other))
             .collect();
 
-        Some(IfheBuild { name: self.skill_name(skill), prerequisites })
+        Some(IfheBuild { name: self.skill_name(skill), tier_fillers })
     }
 }
 
@@ -241,7 +241,7 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
         unit: Millimeters::UNIT,
         builds: Builds {
             base,
-            best: BuildValue { value: base, assumed: Vec::new(), prerequisites: Vec::new() },
+            best: BuildValue { value: base, assumed: Vec::new(), tier_fillers: Vec::new() },
             alternatives,
         },
     };
@@ -267,7 +267,7 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
                 best: BuildValue {
                     value: with_ifhe,
                     assumed: vec![name.clone()],
-                    prerequisites: ifhe.prerequisites.clone(),
+                    tier_fillers: ifhe.tier_fillers.clone(),
                 },
                 alternatives: Vec::new(),
             },
@@ -283,7 +283,7 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
         label: format!("with {name}"),
         value: with_ifhe,
         assumed: vec![name.clone()],
-        prerequisites: ifhe.prerequisites.clone(),
+        tier_fillers: ifhe.tier_fillers.clone(),
         note: Some(format!(
             "{name} raises this {battery} HE penetration in game data, but best-fit builds skip it: {reason}"
         )),

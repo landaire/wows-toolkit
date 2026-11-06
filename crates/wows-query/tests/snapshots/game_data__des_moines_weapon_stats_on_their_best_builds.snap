@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 319
 expression: stats.build_stats
 ---
 main_battery_reload:
@@ -21,7 +20,7 @@ main_battery_reload:
         assumed:
           - Main Battery Modification 3
           - Top Grade Gunner
-        prerequisites:
+        tier_fillers:
           - Consumable Specialist
           - Focus Fire Training
           - Heavy AP Shells
@@ -49,7 +48,7 @@ secondary_range:
       assumed:
         - Pack a Punch
         - Secondary Battery Modification 1
-      prerequisites:
+      tier_fillers:
         - Consumable Specialist
         - Focus Fire Training
     alternatives:
@@ -61,6 +60,6 @@ secondary_range:
         value: 8.76
         assumed:
           - Pack a Punch
-        prerequisites:
+        tier_fillers:
           - Consumable Specialist
           - Focus Fire Training

@@ -131,13 +131,13 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_shells",
-        description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance. Each HE/SAP shell's penetration carries builds: base, best (the best-fit build, which takes Inertia Fuse for HE Shells only when it lifts the shell over its tier's armor threshold) and alternatives such as \"with Inertia Fuse for HE Shells\" with a note.",
+        description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance. Each HE/SAP shell's penetration carries builds: base, best (the best-fit build, which takes Inertia Fuse for HE Shells only when it lifts the shell over its tier's armor threshold) and alternatives such as \"with Inertia Fuse for HE Shells\" with a note. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions.",
         schema: input_schema::<ShipArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_shells(args)),
     },
     Tool {
         name: "ship_concealment",
-        description: "Detectability of one ship by ships, by aircraft, after firing the main battery, and after firing the main battery from smoke, each with builds: base (stock), best (best-fit modules, skills such as Concealment Expert and upgrades, listed in assumed) and alternatives (e.g. without Concealment Expert). in_smoke_evidence explains, with values per skill and upgrade, why concealment skills and upgrades do not change the in-smoke value.",
+        description: "Detectability of one ship by ships, by aircraft, after firing the main battery, and after firing the main battery from smoke, each with builds: base (stock), best (best-fit modules, skills such as Concealment Expert and upgrades, listed in assumed) and alternatives (e.g. without Concealment Expert). tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. in_smoke_evidence explains, with values per skill and upgrade, why concealment skills and upgrades do not change the in-smoke value.",
         schema: input_schema::<ShipArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_concealment(args)),
     },
@@ -161,7 +161,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_stats",
-        description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range and torpedo reload with builds: base, best-fit build (assumed) and alternatives. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
+        description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range and torpedo reload with builds: base, best-fit build (assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
         schema: input_schema::<ShipStatsArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_stats(args)),
     },
@@ -209,7 +209,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_consumables",
-        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead.",
+        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead.",
         schema: input_schema::<ShipConsumablesArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_consumables(args)),
     },

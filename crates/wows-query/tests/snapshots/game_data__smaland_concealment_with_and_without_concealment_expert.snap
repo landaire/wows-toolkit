@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 297
 expression: concealment
 ---
 ship:
@@ -21,7 +20,7 @@ surface:
       assumed:
         - Concealment Expert
         - Concealment System Modification 1
-      prerequisites:
+      tier_fillers:
         - Consumable Specialist
         - Extra-Heavy Ammunition
         - Adrenaline Rush
@@ -34,7 +33,7 @@ surface:
         value: 6.83
         assumed:
           - Concealment Expert
-        prerequisites:
+        tier_fillers:
           - Consumable Specialist
           - Extra-Heavy Ammunition
           - Adrenaline Rush
@@ -48,7 +47,7 @@ air:
       assumed:
         - Concealment Expert
         - Concealment System Modification 1
-      prerequisites:
+      tier_fillers:
         - Consumable Specialist
         - Extra-Heavy Ammunition
         - Adrenaline Rush
@@ -61,7 +60,7 @@ air:
         value: 3.12
         assumed:
           - Concealment Expert
-        prerequisites:
+        tier_fillers:
           - Consumable Specialist
           - Extra-Heavy Ammunition
           - Adrenaline Rush

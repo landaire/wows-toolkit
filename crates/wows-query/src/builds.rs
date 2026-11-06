@@ -20,7 +20,7 @@
 //! The client lets a captain learn a skill only with one learned on every
 //! cheaper tier (`CommonCrew.hasLearnedSkillOnTier`), so a build that takes a
 //! skill also takes, for each cheaper tier it leaves empty, the skill of that
-//! tier that leaves the stat best, listed under `prerequisites`.
+//! tier that leaves the stat best, listed under `tier_fillers`.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -158,9 +158,9 @@ pub struct BuildValue<V> {
 
     /// Captain skills taken only because a skill in `assumed` needs one on
     /// every cheaper tier, each the skill of its tier that leaves the stat
-    /// best.
+    /// best. They fill tiers; they are not conditions of the build.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub prerequisites: Vec<String>,
+    pub tier_fillers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -171,7 +171,7 @@ pub struct BuildAlternative<V> {
     pub assumed: Vec<String>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub prerequisites: Vec<String>,
+    pub tier_fillers: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -229,12 +229,12 @@ struct OutcomeKey {
 /// tiers need.
 struct Build {
     items: Vec<Item>,
-    prerequisites: Vec<Item>,
+    tier_fillers: Vec<Item>,
 }
 
 impl Build {
     fn all(&self) -> Vec<Item> {
-        self.items.iter().chain(&self.prerequisites).copied().collect()
+        self.items.iter().chain(&self.tier_fillers).copied().collect()
     }
 }
 
@@ -455,7 +455,7 @@ impl<'a> Planner<'a> {
             label,
             value,
             assumed: assumed(build),
-            prerequisites: names(&build.prerequisites),
+            tier_fillers: names(&build.tier_fillers),
             note,
         };
 
@@ -505,7 +505,7 @@ impl<'a> Planner<'a> {
         }
 
         let best =
-            BuildValue { value: best_value, assumed: assumed(&chosen), prerequisites: names(&chosen.prerequisites) };
+            BuildValue { value: best_value, assumed: assumed(&chosen), tier_fillers: names(&chosen.tier_fillers) };
         Ok(Some(BuildStat { stat: plan.label.clone(), unit: V::UNIT, builds: Builds { base, best, alternatives } }))
     }
 
@@ -552,7 +552,7 @@ impl<'a> Planner<'a> {
         plan: &StatPlan<'_, V>,
         avoid: &[Item],
     ) -> Result<Build, QueryError> {
-        let mut build = Build { items, prerequisites: Vec::new() };
+        let mut build = Build { items, tier_fillers: Vec::new() };
         let costs = skill_costs(&build.items);
         let Some(highest) = costs.iter().max().copied() else {
             return Ok(build);
@@ -584,7 +584,7 @@ impl<'a> Planner<'a> {
                 }
             }
             if let Some((skill, _)) = best {
-                build.prerequisites.push(skill);
+                build.tier_fillers.push(skill);
             }
         }
 

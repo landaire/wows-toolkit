@@ -5,7 +5,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_core::Version;
 use wowsunpack::data::ResourceLoader;
-use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::modifier_settings_data::describe_modifiers;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::skill_grid_data::skill_grid;
@@ -225,12 +224,8 @@ impl GameData {
     pub(crate) fn skill_trigger_sentence(&self, skill: &CrewSkill) -> Option<String> {
         skill
             .logic_trigger()
-            .and_then(|trigger| trigger.trigger_type())
-            .filter(|kind| !kind.is_empty())
-            .and_then(|kind| {
-                self.provider()
-                    .localized_name_from_id(&TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", kind.to_uppercase())))
-            })
+            .and_then(|trigger| trigger.trigger_desc_key())
+            .and_then(|key| self.provider().localized_name_from_id(&key))
             .map(|sentence| clean(&sentence))
             .filter(|sentence| !sentence.is_empty())
     }
