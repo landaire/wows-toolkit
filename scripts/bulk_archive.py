@@ -9,7 +9,7 @@ Bulk download and archive all World of Warships game versions.
 Usage:
     uv run scripts/bulk_archive.py [--dry-run] [--start-from N] [--no-skip] [-y]
     uv run scripts/bulk_archive.py --armor-only [--install-dir <install>] [--no-skip] [-y]
-    uv run scripts/bulk_archive.py --scripts-only [--scripts-from <dir>] [--install-dir <install>] [--no-skip] [-y]
+    uv run scripts/bulk_archive.py --scripts-only [--install-dir <install>] [--no-skip] [-y]
 
 Requires:
     - steamroom built and on PATH (or pointed at by $STEAMROOM_BIN, or built in a
@@ -18,8 +18,8 @@ Requires:
     - Steam credentials (steamroom prompts interactively on first run) and a
       `.steam-user` file in the repo root containing your Steam username.
     - `gh` logged in with permission to upload release assets to
-      landaire/wows-replay-data. Each archived build's client scripts.zip is
-      published there as an asset of the `scripts` release.
+      landaire/wows-replay-data. wows-data-mgr publishes each archived build's
+      client scripts.zip there as an asset of the `scripts` release.
 
 The archive directory defaults to `wows_builds` beside this repo; override it
 with $WOWS_BUILDS_DIR.
@@ -42,7 +42,6 @@ manifest, saving bandwidth.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -52,7 +51,8 @@ import sys
 import tempfile
 import time
 import tomllib
-import zipfile
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -553,12 +553,10 @@ def armor_pending_dumps(progress: dict) -> list[str]:
     ]
 
 
-# Client scripts.zip files do not deduplicate between builds, so they are
-# published as assets of one release on the data repository instead of being
-# committed. The release holds `<build>.zip` per build and an index.
-SCRIPTS_REPO = "landaire/wows-replay-data"
-SCRIPTS_RELEASE = "scripts"
-SCRIPTS_INDEX = "index.toml"
+# wows-data-mgr stores each dumped build's client scripts.zip beside the dump
+# and publishes it as `<build>.zip` of the `scripts` release of the data
+# repository, whose index.toml lists the published builds.
+SCRIPTS_INDEX_URL = "https://github.com/landaire/wows-replay-data/releases/download/scripts/index.toml"
 # Downloads for --scripts-only, apart from TEMP_DIR so a concurrent run's
 # cleanup cannot remove them.
 SCRIPTS_TEMP_DIR = ARCHIVE_DIR / "temp_scripts"
@@ -566,93 +564,36 @@ SCRIPTS_TEMP_DIR = ARCHIVE_DIR / "temp_scripts"
 SCRIPTS_ZIP_PATTERN = "bin[/\\\\]{build}[/\\\\]res[/\\\\]scripts\\.zip$"
 
 
-def gh(*args: str, timeout: int = 1800) -> subprocess.CompletedProcess:
-    """Run a `gh` command against the scripts release repository."""
-    return subprocess.run(["gh", *args, "--repo", SCRIPTS_REPO], capture_output=True, text=True, timeout=timeout)
+def published_scripts() -> set[int]:
+    """Builds the published scripts index lists."""
+    try:
+        with urllib.request.urlopen(SCRIPTS_INDEX_URL, timeout=60) as response:
+            text = response.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return set()
+        raise
+    return {int(build) for build in tomllib.loads(text).get("builds", {})}
 
 
-def gh_checked(*args: str, timeout: int = 1800) -> str:
-    res = gh(*args, timeout=timeout)
-    if res.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)} failed (exit {res.returncode}): {res.stderr.strip()[:500]}")
-    return res.stdout
-
-
-def load_scripts_index(create: bool = True) -> dict[int, dict]:
-    """The published scripts index as {build: {version, sha256, size}}. With
-    `create`, creates the release when it does not exist."""
-    releases = json.loads(gh_checked("release", "list", "--limit", "1000", "--json", "tagName"))
-    if not any(release["tagName"] == SCRIPTS_RELEASE for release in releases):
-        if create:
-            gh_checked("release", "create", SCRIPTS_RELEASE, "--title", "Client scripts",
-                       "--notes", f"Client scripts.zip per game build, from Steam depot {CLIENT_DEPOT}. "
-                                  f"{SCRIPTS_INDEX} lists each build's version, sha256 and size.")
-        return {}
-    assets = json.loads(gh_checked("release", "view", SCRIPTS_RELEASE, "--json", "assets"))["assets"]
-    if not any(asset["name"] == SCRIPTS_INDEX for asset in assets):
-        # `--clobber` deletes the old index before uploading the new one, so a
-        # failed upload leaves zips that only the lost index described.
-        if any(asset["name"].removesuffix(".zip").isdigit() for asset in assets):
-            raise RuntimeError(f"release {SCRIPTS_RELEASE} has build zips but no {SCRIPTS_INDEX}; restore it first")
-        return {}
-    text = gh_checked("release", "download", SCRIPTS_RELEASE, "--pattern", SCRIPTS_INDEX, "--output", "-")
-    return {int(build): entry for build, entry in tomllib.loads(text)["builds"].items()}
-
-
-def render_scripts_index(index: dict[int, dict]) -> str:
-    lines = [f"# Client scripts.zip per game build, from Steam depot {CLIENT_DEPOT}.",
-             f"# Release asset <build>.zip of release `{SCRIPTS_RELEASE}`.", ""]
-    for build in sorted(index):
-        entry = index[build]
-        lines += [f"[builds.{build}]", f'version = "{entry["version"]}"', f'sha256 = "{entry["sha256"]}"',
-                  f"size = {entry['size']}", ""]
-    return "\n".join(lines)
-
-
-def dump_version(build: int) -> str | None:
-    """Game version of an archived build, from its dump directory name."""
-    dump = find_dump_dir(build)
-    return dump.name.rsplit("_", 1)[0] if dump else None
-
-
-def scripts_pending(index: dict[int, dict]) -> list[int]:
-    """Archived builds without a published scripts.zip, newest first."""
+def scripts_pending(published: set[int]) -> list[int]:
+    """Archived builds whose scripts.zip is not published, newest first."""
     if not ARCHIVE_DIR.exists():
         return []
     builds = [int(entry.name.rsplit("_", 1)[-1]) for entry in ARCHIVE_DIR.iterdir()
               if entry.is_dir() and entry.name.rsplit("_", 1)[-1].isdigit()]
-    return sorted((b for b in builds if b not in index and already_archived(b)), reverse=True)
+    return sorted((b for b in builds if b not in published and already_archived(b)), reverse=True)
 
 
-def publish_scripts(build: int, source: Path, index: dict[int, dict]) -> bool:
-    """Upload `source` as the release asset `<build>.zip` and record it in the
-    published index. Returns False when `source` is not a zip archive or the
-    build has no dump to name its version."""
-    version = dump_version(build)
-    if version is None:
-        print(f"    Build {build}: no archived dump, scripts.zip not published")
+def publish_scripts(build: int, game_dir: Path) -> bool:
+    """Store `game_dir`'s scripts.zip for an archived build and publish it."""
+    result = run_tool([WOWS_DATA_MGR, "extract-scripts", "--build", str(build), "--game-dir", game_dir,
+                       "--output", ARCHIVE_DIR, "--publish-scripts"], timeout=1800)
+    if result.returncode != 0:
+        print(f"    SCRIPTS PUBLISH FAILED for build {build} (exit {result.returncode}): "
+              f"{(result.stderr or result.stdout).strip()[:800]}")
         return False
-    if not zipfile.is_zipfile(source):
-        print(f"    Build {build}: {source} is not a zip archive")
-        return False
-
-    SCRIPTS_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    staged = SCRIPTS_TEMP_DIR / f"{build}.zip"
-    if source.resolve() != staged.resolve():
-        shutil.copyfile(source, staged)
-    digest = hashlib.sha256()
-    with open(staged, "rb") as f:
-        while chunk := f.read(1 << 20):
-            digest.update(chunk)
-    size = staged.stat().st_size
-
-    gh_checked("release", "upload", SCRIPTS_RELEASE, str(staged), "--clobber")
-    index[build] = {"version": version, "sha256": digest.hexdigest(), "size": size}
-    index_path = SCRIPTS_TEMP_DIR / SCRIPTS_INDEX
-    index_path.write_text(render_scripts_index(index), encoding="utf-8")
-    gh_checked("release", "upload", SCRIPTS_RELEASE, str(index_path), "--clobber")
-    staged.unlink()
-    print(f"    Build {build} ({version}): published scripts.zip, {size} bytes")
+    print(f"    Build {build}: {result.stdout.strip().splitlines()[-1]}")
     return True
 
 
@@ -674,23 +615,17 @@ def scripts_manifest_candidates(download_list: list[tuple[str, str]]) -> list[tu
     return candidates
 
 
-def backfill_scripts(download_list: list[tuple[str, str]], scripts_from: Path | None, install: Path | None,
-                     steam_user: str):
-    """Publish scripts.zip for every archived build that lacks it: from
-    `scripts_from/<build>.zip`, then from `install`, then from the client depot
-    manifests, downloading only the pending builds' scripts.zip."""
-    index = load_scripts_index()
-    pending = scripts_pending(index)
-    print(f"{len(index)} build(s) published, {len(pending)} pending")
+def backfill_scripts(download_list: list[tuple[str, str]], install: Path | None, steam_user: str):
+    """Publish scripts.zip for every archived build the release lacks: from
+    `install`, then from the client depot manifests, downloading only the
+    pending builds' scripts.zip."""
+    pending = scripts_pending(published_scripts())
+    print(f"{len(pending)} archived build(s) without published scripts")
 
     for build in list(pending):
-        for source in ((scripts_from / f"{build}.zip") if scripts_from else None,
-                       (install / "bin" / str(build) / "res" / "scripts.zip") if install else None):
-            if source is not None and source.is_file() and publish_scripts(build, source, index):
-                pending.remove(build)
-                break
+        if install and (install / "bin" / str(build) / "res" / "scripts.zip").is_file() and publish_scripts(build, install):
+            pending.remove(build)
     if not pending:
-        shutil.rmtree(SCRIPTS_TEMP_DIR, ignore_errors=True)
         return
 
     ensure_daemon(steam_user)
@@ -709,14 +644,22 @@ def backfill_scripts(download_list: list[tuple[str, str]], scripts_from: Path | 
                 continue
             for build in list(pending):
                 source = SCRIPTS_TEMP_DIR / "bin" / str(build) / "res" / "scripts.zip"
-                if source.is_file() and publish_scripts(build, source, index):
+                if source.is_file() and publish_scripts(build, SCRIPTS_TEMP_DIR):
                     pending.remove(build)
     finally:
         shutil.rmtree(filelist_dir, ignore_errors=True)
         shutil.rmtree(SCRIPTS_TEMP_DIR, ignore_errors=True)
 
     print(f"\n{'=' * 60}")
-    print(f"Builds without a published scripts.zip: {pending or 'none'}")
+    print(f"Builds without published scripts: {pending or 'none'}")
+
+
+def get_depot_file_regexes() -> list[str]:
+    """Steam filelist regexes of the loose client depot files the dump reads."""
+    res = run_tool([WOWS_DATA_MGR, "required-paths", "--depot-files"], timeout=300)
+    if res.returncode != 0:
+        raise RuntimeError(f"required-paths --depot-files failed: {res.stderr.strip()}")
+    return [s for line in res.stdout.splitlines() if (s := line.strip())]
 
 
 def write_pkg_filelist(pkgs: list[str], path: Path):
@@ -748,18 +691,13 @@ def main():
                         help="With --armor-only or --scripts-only: a game install whose builds are used first, "
                              "without downloading")
     parser.add_argument("--scripts-only", action="store_true",
-                        help="Publish the client scripts.zip of archived builds that lack it, downloading only "
+                        help="Publish the client scripts.zip of archived builds the release lacks, downloading only "
                              "scripts.zip from the client depot")
-    parser.add_argument("--scripts-from", type=Path,
-                        help="With --scripts-only: a directory of <build>.zip files used before the install and "
-                             "the depot")
     args = parser.parse_args()
     if args.armor_only and args.scripts_only:
         parser.error("--armor-only and --scripts-only are exclusive")
     if args.install_dir and not (args.armor_only or args.scripts_only):
         parser.error("--install-dir requires --armor-only or --scripts-only")
-    if args.scripts_from and not args.scripts_only:
-        parser.error("--scripts-from requires --scripts-only")
 
     client_manifests = parse_manifests(CLIENT_MANIFESTS_FILE)
     major = filter_major_manifests(client_manifests)
@@ -791,8 +729,8 @@ def main():
             pending = armor_pending_dumps(load_armor_progress())
             print(f"\n--dry-run: {len(pending)} archived build(s) lack armor: {pending}")
         elif args.scripts_only:
-            pending = scripts_pending(load_scripts_index(create=False))
-            print(f"\n--dry-run: {len(pending)} archived build(s) lack a published scripts.zip: {pending}")
+            pending = scripts_pending(published_scripts())
+            print(f"\n--dry-run: {len(pending)} archived build(s) lack published scripts: {pending}")
         else:
             print("\n--dry-run: would download the above manifests")
         return
@@ -826,26 +764,23 @@ def main():
             shutil.rmtree(filelist_dir, ignore_errors=True)
         return
     if args.scripts_only:
-        backfill_scripts(download_list, args.scripts_from, args.install_dir, steam_user)
+        backfill_scripts(download_list, args.install_dir, steam_user)
         return
 
     ensure_daemon(steam_user)
-    scripts_index = load_scripts_index()
+    published = published_scripts()
     discovered = {}
 
     # idx files are small and index every packed file, so we fetch all of them from
     # both depots first, resolve the minimal pkg set, then download only those pkgs.
-    # The idx filelist also pulls the per-build per-locale gettext catalogs (loose
-    # files in the client depot under bin/<build>/res/texts) and each build's
-    # scripts.zip. Filelists are scratch files, so keep them in a temp dir rather
-    # than the repo.
+    # The idx filelist also pulls the loose files the dump reads (the per-build
+    # per-locale gettext catalogs and scripts.zip under bin/<build>/res).
+    # Filelists are scratch files, so keep them in a temp dir rather than the repo.
     filelist_dir = Path(tempfile.mkdtemp(prefix="bulk_archive_"))
     try:
         idx_filelist = filelist_dir / "idx.txt"
         idx_filelist.write_bytes(
-            b"regex:\\.idx$\n"
-            b"regex:bin[/\\\\]\\d+[/\\\\]res[/\\\\]texts[/\\\\].*[/\\\\]LC_MESSAGES[/\\\\]global\\.mo$\n"
-            + ("regex:" + SCRIPTS_ZIP_PATTERN.format(build="\\d+") + "\n").encode()
+            "".join(f"regex:{regex}\n" for regex in ["\\.idx$", *get_depot_file_regexes()]).encode()
         )
         pkg_filelist = filelist_dir / "pkgs.txt"
 
@@ -941,16 +876,16 @@ def main():
 
             for build in builds:
                 source = TEMP_DIR / "bin" / str(build) / "res" / "scripts.zip"
-                if build not in scripts_index and source.is_file():
+                if build not in published and already_archived(build) and source.is_file():
                     # A failed upload must not end the archive run; --scripts-only
                     # publishes the build later.
                     try:
-                        publish_scripts(build, source, scripts_index)
-                    except (RuntimeError, subprocess.TimeoutExpired) as e:
+                        if publish_scripts(build, TEMP_DIR):
+                            published.add(build)
+                    except subprocess.TimeoutExpired as e:
                         print(f"    SCRIPTS PUBLISH FAILED for build {build}: {e}")
     finally:
         shutil.rmtree(filelist_dir, ignore_errors=True)
-        shutil.rmtree(SCRIPTS_TEMP_DIR, ignore_errors=True)
         if TEMP_DIR.exists():
             shutil.rmtree(TEMP_DIR, ignore_errors=True)
 

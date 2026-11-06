@@ -341,6 +341,16 @@ The depot manifest IDs come from public app info, but reading the build number b
 
 Failing that, entries can still be written by hand from [SteamDB](https://steamdb.info/app/552990/depots/).
 
+#### Client scripts
+
+`dump-renderer-data` also stores the build's client `scripts.zip` (`bin/<build>/res/scripts.zip` in the install) at `<output>/scripts/<build>.zip`. Nothing is uploaded unless you ask. `--publish-scripts` uploads it as `<build>.zip` of the [`scripts` release](https://github.com/landaire/wows-replay-data/releases/tag/scripts) of wows-replay-data with [`gh`](https://cli.github.com/) and updates the release's `index.toml`. `publish-scripts --output <dir>` uploads every stored build the release does not already hold unchanged. `extract-scripts` stores the scripts of a build that is already dumped:
+
+```bash
+cargo run -p wows-data-mgr -- extract-scripts --build 13533378 --game-dir /path/to/World_of_Warships --output /path/to/dumps --publish-scripts
+```
+
+The client obfuscates its bytecode differently in every build, so no file is shared between builds and each zip is kept whole. Programs that need scripts fetch them per build with `wows_data_mgr::scripts::fetch`. Downloading a dump does not fetch them.
+
 #### Environment variable
 
 Set `WOWS_GAME_DATA` to override the default `game_data/` directory:

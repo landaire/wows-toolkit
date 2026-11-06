@@ -86,6 +86,16 @@ pub fn required_path_globs() -> Vec<String> {
     globs
 }
 
+/// Steam filelist regexes for the loose files of the client depot the dump
+/// reads besides the packages: the per-locale message catalogs and the client
+/// scripts. Depot paths use either separator.
+pub fn depot_file_regexes() -> Vec<String> {
+    vec![
+        r"bin[/\\]\d+[/\\]res[/\\]texts[/\\].*[/\\]LC_MESSAGES[/\\]global\.mo$".to_string(),
+        crate::scripts::DEPOT_FILE_REGEX.to_string(),
+    ]
+}
+
 /// Whether a dump extracts ship armor ([`armor`]). Extraction reads every
 /// vehicle package and takes a minute or more, which only a dump that will
 /// answer armor queries needs.
@@ -346,6 +356,17 @@ pub fn dump_renderer_data(
     });
     index.save(&builds_path)?;
 
+    // Stored once the build is registered, so a failed dump leaves no zip for
+    // a build builds.toml does not list. Builds before the client shipped
+    // scripts.zip, and installs downloaded without it, dump without scripts.
+    match crate::scripts::store_from_install(game_dir, build, output_base)? {
+        Some(path) => tracing::info!("dump for build {build}: stored client scripts at {}", path.display()),
+        None => tracing::warn!(
+            "dump for build {build}: no {}, so no client scripts are stored",
+            crate::scripts::install_zip_path(game_dir, build).display()
+        ),
+    }
+
     Ok(())
 }
 
@@ -443,6 +464,20 @@ pub fn extract_build_armor(
     Ok(summary)
 }
 
+/// Store the client scripts of `game_dir` for an existing build, replacing
+/// any it held. Reads only `bin/<build>/res/scripts.zip`. The build must
+/// already exist in `builds.toml`.
+pub fn extract_build_scripts(game_dir: &Path, build: u32, output_base: &Path) -> Result<std::path::PathBuf, Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    if index.find_by_build(build).is_none() {
+        bail!("build {build} is not in builds.toml; dump it normally first");
+    }
+
+    let stored = crate::scripts::store_from_install(game_dir, build, output_base)?;
+
+    stored.ok_or_else(|| report!("{} does not exist", crate::scripts::install_zip_path(game_dir, build).display()))
+}
+
 fn log_armor_summary(build: u32, summary: &armor::ExtractSummary) {
     tracing::info!(
         build,
@@ -523,6 +558,7 @@ pub fn remove_build(output_base: &Path, target_build: u32) -> Result<(), Report>
     // Update builds index
     index.remove_build(target_build);
     index.save(&builds_path)?;
+    crate::scripts::remove(output_base, target_build)?;
 
     Ok(())
 }
@@ -2035,6 +2071,46 @@ mod maintenance_tests {
             dumped_at: String::new(),
         });
         index.save(&path).unwrap();
+    }
+
+    /// An empty zip archive: only the end-of-central-directory record.
+    const EMPTY_ZIP: [u8; 22] = [b'P', b'K', 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    fn install_with_scripts(build: u32) -> tempfile::TempDir {
+        let install = tempfile::tempdir().unwrap();
+        let zip = crate::scripts::install_zip_path(install.path(), build);
+        std::fs::create_dir_all(zip.parent().unwrap()).unwrap();
+        std::fs::write(zip, EMPTY_ZIP).unwrap();
+        install
+    }
+
+    #[test]
+    fn extracting_scripts_stores_them_for_a_dumped_build_only() {
+        let base = tempfile::tempdir().unwrap();
+        let install = install_with_scripts(100);
+
+        let unregistered = extract_build_scripts(install.path(), 100, base.path());
+        assert!(unregistered.is_err(), "a build absent from builds.toml has no version to publish under");
+
+        register(base.path(), "1.2.3", 100);
+        let stored = extract_build_scripts(install.path(), 100, base.path()).unwrap();
+
+        assert_eq!(std::fs::read(stored).unwrap(), EMPTY_ZIP);
+        assert!(extract_build_scripts(install.path(), 200, base.path()).is_err(), "no such build");
+    }
+
+    #[test]
+    fn removing_a_build_removes_its_scripts_only() {
+        let base = tempfile::tempdir().unwrap();
+        for build in [100, 200] {
+            write_build_metadata(&base.path().join(format!("1.2.3_{build}")), "1.2.3", build, &[]);
+            register(base.path(), "1.2.3", build);
+            extract_build_scripts(install_with_scripts(build).path(), build, base.path()).unwrap();
+        }
+
+        remove_build(base.path(), 100).unwrap();
+
+        assert_eq!(crate::scripts::local_builds(base.path()).unwrap(), [200]);
     }
 
     #[test]

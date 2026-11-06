@@ -14,6 +14,8 @@ use wows_data_mgr::detect;
 use wows_data_mgr::dump;
 use wows_data_mgr::manifest;
 use wows_data_mgr::registry;
+use wows_data_mgr::scripts;
+use wows_data_mgr::scripts::publish::PublishOutcome;
 
 /// Problem paths described in full per build before the rest are summarised.
 /// A build can hit hundreds of them and each message names files.
@@ -111,6 +113,12 @@ enum Commands {
         /// parallelism.
         #[arg(long)]
         armor_workers: Option<NonZeroUsize>,
+
+        /// Upload the build's client scripts to the `scripts` release of
+        /// wows-replay-data with `gh` after the dump. Without it they are only
+        /// stored in <output>/scripts/.
+        #[arg(long)]
+        publish_scripts: bool,
     },
 
     /// Remove a previously dumped build, cleaning up deduplicated storage
@@ -195,8 +203,13 @@ enum Commands {
     /// `wowsunpack pkgs` to resolve the minimal set of .pkg files to download.
     RequiredPaths {
         /// Print only the globs `extract-armor` reads.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "depot_files")]
         armor: bool,
+
+        /// Print the Steam filelist regexes of the loose depot files the dump
+        /// reads beside the packages (message catalogs, client scripts).
+        #[arg(long)]
+        depot_files: bool,
     },
 
     /// Add missing assets (maps, and with --with-gui the gui/ dirs) to an
@@ -238,6 +251,40 @@ enum Commands {
         /// Extraction threads. Defaults to half the available parallelism.
         #[arg(long)]
         workers: Option<NonZeroUsize>,
+    },
+
+    /// Store a game install's client scripts (bin/<build>/res/scripts.zip) for
+    /// an existing build, replacing any it held.
+    ExtractScripts {
+        /// Build number (must already exist in builds.toml)
+        #[arg(long)]
+        build: u32,
+
+        /// Game install directory holding bin/<build>/res/scripts.zip
+        #[arg(long)]
+        game_dir: PathBuf,
+
+        /// Output directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Also upload them to the `scripts` release of wows-replay-data with
+        /// `gh`.
+        #[arg(long)]
+        publish_scripts: bool,
+    },
+
+    /// Upload stored client scripts to the `scripts` release of
+    /// wows-replay-data with `gh`, skipping builds the release already holds
+    /// unchanged.
+    PublishScripts {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Publish only this build (default: every build with stored scripts)
+        #[arg(long)]
+        build: Option<u32>,
     },
 
     /// Fold a legacy `vfs_common/` store into `common/` and relink every build.
@@ -731,6 +778,30 @@ fn refresh_manifest_entry(
     Ok(RefreshOutcome::Pinned { build, version })
 }
 
+/// Upload `builds`' stored client scripts and print what each one needed.
+fn publish_scripts_and_report(output: &Path, builds: &[u32]) -> Result<(), Report> {
+    println!("Publishing client scripts for {} build(s)...", builds.len());
+    let outcomes = scripts::publish::publish(output, builds)?;
+    let mut not_dumped = 0;
+    for (build, outcome) in &outcomes {
+        match outcome {
+            PublishOutcome::Uploaded(entry) => {
+                println!("  {build} ({}) - uploaded, {} bytes", entry.version, entry.size)
+            }
+            PublishOutcome::AlreadyPublished => println!("  {build} - already published"),
+            PublishOutcome::NotDumped => {
+                not_dumped += 1;
+                println!("  {build} - skipped, builds.toml does not list it");
+            }
+        }
+    }
+    if not_dumped > 0 {
+        bail!("{not_dumped} build(s) not published: their game version is unknown");
+    }
+
+    Ok(())
+}
+
 fn unknown_build_manifest_entry(build: u32, version: &str) -> String {
     format!(
         "[versions.{build}]\nversion = \"{version}\"\nclient_depot_id = 552993\nclient_manifest_id = \"<look up on SteamDB>\""
@@ -751,11 +822,18 @@ fn main() -> Result<(), Report> {
     let created = run(&args, &repo_root, &data_dir)?;
 
     if !args.no_link
-        && let Some(target) = created
+        && let Some(target) = &created
     {
         let repointed = dump::relink_builds(&target.output, Some(target.build), dump::TreeSync::AddAndRepoint)?;
         let total: usize = repointed.values().map(Vec::len).sum();
         println!("Materialized {total} link(s) across {} build(s).", repointed.len());
+    }
+
+    // After the link step, so a failed upload leaves the dump complete.
+    if let Commands::DumpRendererData { publish_scripts: true, .. } = &args.command
+        && let Some(target) = &created
+    {
+        publish_scripts_and_report(&target.output, &[target.build])?;
     }
     Ok(())
 }
@@ -837,15 +915,16 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             dump::gc_cas(output)?;
             return Ok(None);
         }
-        Commands::RequiredPaths { armor } => {
-            if *armor {
-                for glob in armor::SOURCE_GLOBS {
-                    println!("{glob}");
-                }
+        Commands::RequiredPaths { armor, depot_files } => {
+            let lines = if *armor {
+                armor::SOURCE_GLOBS.iter().map(|glob| (*glob).to_string()).collect()
+            } else if *depot_files {
+                dump::depot_file_regexes()
             } else {
-                for glob in dump::required_path_globs() {
-                    println!("{glob}");
-                }
+                dump::required_path_globs()
+            };
+            for line in lines {
+                println!("{line}");
             }
             return Ok(None);
         }
@@ -868,6 +947,26 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             for (param_index, error) in summary.failures.iter().take(NAMED_PROBLEM_PATHS) {
                 println!("  skipped {param_index}: {error}");
             }
+            return Ok(None);
+        }
+        Commands::ExtractScripts { build, game_dir, output, publish_scripts } => {
+            let stored = dump::extract_build_scripts(game_dir, *build, output)?;
+            println!("Stored client scripts for build {build} at {}", stored.display());
+            if *publish_scripts {
+                publish_scripts_and_report(output, &[*build])?;
+            }
+            return Ok(None);
+        }
+        Commands::PublishScripts { output, build } => {
+            let builds = match build {
+                Some(build) => vec![*build],
+                None => scripts::local_builds(output)?,
+            };
+            if builds.is_empty() {
+                println!("No client scripts stored in {}", scripts::scripts_dir(output).display());
+                return Ok(None);
+            }
+            publish_scripts_and_report(output, &builds)?;
             return Ok(None);
         }
         Commands::MigrateCas { output } => {
@@ -980,6 +1079,8 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         no_manifest_update,
         no_armor,
         armor_workers,
+        // Published by `main` once the link step has run.
+        publish_scripts: _,
     } = &args.command
     {
         let local_builds = local_builds_for_dump(game_dir.as_deref(), data_dir)?;
@@ -1166,7 +1267,9 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         | Commands::Verify { .. }
         | Commands::MigrateCas { .. }
         | Commands::CompleteBuild { .. }
-        | Commands::ExtractArmor { .. } => {
+        | Commands::ExtractArmor { .. }
+        | Commands::ExtractScripts { .. }
+        | Commands::PublishScripts { .. } => {
             unreachable!("handled before manifest load")
         }
 

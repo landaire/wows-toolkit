@@ -39,9 +39,11 @@ pub mod detect;
 #[cfg(feature = "download")]
 pub mod download_repo;
 pub mod dump;
+pub mod error;
 pub mod manifest;
 pub mod overrides;
 pub mod registry;
+pub mod scripts;
 
 use std::path::Path;
 use std::path::PathBuf;

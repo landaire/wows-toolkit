@@ -178,9 +178,13 @@ fn resolve_username(override_username: Option<&str>, repo_root: &Path) -> Result
     Ok(username)
 }
 
+/// The packages and indexes, plus the loose files the dump reads beside them.
 fn write_filelist(data_dir: &Path) -> Result<std::path::PathBuf, Report> {
     let filelist_path = data_dir.join(".filelist.tmp");
-    let content = "regex:bin/\\d+/idx/.*\\.idx$\nregex:res_packages/.*\\.pkg$\n";
+    let mut content = String::from("regex:bin/\\d+/idx/.*\\.idx$\nregex:res_packages/.*\\.pkg$\n");
+    for regex in crate::dump::depot_file_regexes() {
+        content.push_str(&format!("regex:{regex}\n"));
+    }
     std::fs::create_dir_all(data_dir)?;
     std::fs::write(&filelist_path, content)
         .attach_with(|| format!("Failed to write filelist to {}", filelist_path.display()))?;
