@@ -8,7 +8,9 @@ use crate::data::Version;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::modifiers::ModifierError;
+use crate::game_params::ttx::modifiers::RELOAD_FACTOR;
 use crate::game_params::ttx::modifiers::modifier_identity;
+use crate::game_params::ttx::modifiers::reload_factor_targets;
 use crate::game_params::ttx::provenance::InputId;
 use crate::game_params::ttx::provenance::ModifierSources;
 use crate::game_params::ttx::provenance::Recorder;
@@ -46,6 +48,26 @@ fn stacks(activation: EffectActivation) -> u32 {
 /// 1% quantization. `ratio` is in `[0, 1]` (clamped by `eval`), so `floor` matches `int`.
 fn quantize_heat_ratio(ratio: f32) -> f32 {
     (ratio * 100.0).floor() / 100.0
+}
+
+/// Records `modifier` as a contribution of `input`. A `reloadFactor` is also
+/// recorded under every reload coefficient it sets, so those coefficients name
+/// their source.
+fn record_source(
+    sources: &mut ModifierSources,
+    modifier: &CrewSkillModifier,
+    input: InputId,
+    species: Species,
+    version: Version,
+) {
+    let value = modifier.get_for_species(&species);
+    if modifier.name() == RELOAD_FACTOR {
+        for name in reload_factor_targets(version, modifier.excluded_consumables()) {
+            sources.record(&name, input.clone(), value);
+        }
+    }
+
+    sources.record(modifier.name(), input, value);
 }
 
 /// The active innate-adrenaline modifier set at health fraction `hf`: the bounding breakpoint
@@ -636,13 +658,13 @@ impl Effects {
             match (&effect.kind, activation) {
                 (EffectKind::AlwaysOn, _) => {
                     for m in &effect.modifiers {
-                        sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                        record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                         contributed.push(m.clone());
                     }
                 }
                 (EffectKind::Binary { .. }, EffectActivation::On) => {
                     for m in &effect.modifiers {
-                        sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                        record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                         contributed.push(m.clone());
                     }
                 }
@@ -681,7 +703,7 @@ impl Effects {
                 }
                 (EffectKind::Consumable { artillery_dist_coeff }, EffectActivation::On) => {
                     for m in &effect.modifiers {
-                        sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                        record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                         contributed.push(m.clone());
                     }
                     if *artillery_dist_coeff != 1.0 {
@@ -694,7 +716,7 @@ impl Effects {
                     for (count, block) in blocks {
                         if *count <= n {
                             for m in block {
-                                sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                                record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                                 contributed.push(m.clone());
                             }
                         }
@@ -704,7 +726,7 @@ impl Effects {
                     let n = stacks(activation).min(STACK_LIMIT);
                     for _ in 0..n {
                         for m in &effect.modifiers {
-                            sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                            record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                             contributed.push(m.clone());
                         }
                     }
@@ -719,11 +741,7 @@ impl Effects {
                         let identity = modifier_identity(version, m.name())?;
                         let effective = identity + (m.get_for_species(&species) - identity) * ratio;
                         let synthesized = CrewSkillModifier::uniform(m.name(), effective);
-                        sources.record(
-                            synthesized.name(),
-                            input_id_for(effect.id()),
-                            synthesized.get_for_species(&species),
-                        );
+                        record_source(&mut sources, &synthesized, input_id_for(effect.id()), species, version);
                         contributed.push(synthesized);
                     }
                 }
@@ -734,7 +752,7 @@ impl Effects {
                     };
                     let innate_mods = active_innate_modifiers(breakpoints, hf, species);
                     for m in &innate_mods {
-                        sources.record(m.name(), input_id_for(effect.id()), m.get_for_species(&species));
+                        record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                     }
                     contributed.extend(innate_mods);
                 }
@@ -1955,5 +1973,32 @@ mod tests {
         assert!((srcs[0].1 - 0.9).abs() < 1e-6);
         // Bundle value is unchanged by the side-channel.
         assert!((em.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6);
+    }
+
+    /// A `reloadFactor` names its source on every reload coefficient it sets.
+    #[test]
+    fn resolve_attributes_reload_factor_targets() {
+        use crate::game_params::ttx::provenance::InputId;
+        let ship = ship_no_abilities();
+        let specialist = CrewSkillModifier::builder()
+            .name("reloadFactor".to_string())
+            .aircraft_carrier(0.925)
+            .auxiliary(0.925)
+            .battleship(0.925)
+            .cruiser(0.925)
+            .destroyer(0.925)
+            .submarine(0.925)
+            .excluded_consumables(vec!["crashCrew".to_string()])
+            .build();
+        let mods = vec![("Specialist".to_string(), vec![specialist])];
+        let loadout = Loadout { skills: &[], modernizations: &mods, ship: &ship };
+        let effects = loadout.effects(&EmptyProvider, test_version());
+        let em = effects.resolve(&EffectsState::default(), Species::Cruiser, test_version()).unwrap();
+
+        let radar = em.sources().get("rlsReloadCoeff");
+        assert_eq!(radar.len(), 1);
+        assert_eq!(radar[0].0, InputId::Upgrade { name: "Specialist".to_string() });
+        assert!((radar[0].1 - 0.925).abs() < 1e-6);
+        assert!(em.sources().get("crashCrewReloadCoeff").is_empty());
     }
 }

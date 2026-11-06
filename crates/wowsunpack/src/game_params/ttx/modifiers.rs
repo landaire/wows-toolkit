@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 use crate::data::Version;
 use crate::game_params::modifier_settings_data::modifier_setting;
+use crate::game_params::ttx::consumables::CONSUMABLES_WITH_RELOAD_COEFFICIENTS;
 use crate::game_params::types::CrewSkillModifier;
 use crate::game_params::types::Species;
 
@@ -191,22 +192,30 @@ impl ModifierBundle {
         let mut unknown: Vec<String> = Vec::new();
 
         for m in mods {
-            let name = m.name();
-            let combine = match rules.get(name) {
-                Some(c) => *c,
-                None => match Combine::classify(version, name) {
-                    Ok(c) => {
-                        rules.insert(name.to_string(), c);
-                        c
-                    }
-                    Err(e) => {
-                        unknown.push(e.name);
-                        continue;
-                    }
-                },
+            let value = m.get_for_species(&species);
+            let mut fold = |name: &str| {
+                let combine = match rules.get(name) {
+                    Some(c) => *c,
+                    None => match Combine::classify(version, name) {
+                        Ok(c) => {
+                            rules.insert(name.to_string(), c);
+                            c
+                        }
+                        Err(e) => {
+                            unknown.push(e.name);
+                            return;
+                        }
+                    },
+                };
+                let entry = values.entry(name.to_string()).or_insert_with(|| combine.identity());
+                *entry = combine.fold(*entry, value);
             };
-            let entry = values.entry(name.to_string()).or_insert_with(|| combine.identity());
-            *entry = combine.fold(*entry, m.get_for_species(&species));
+            fold(m.name());
+            if m.name() == RELOAD_FACTOR {
+                for name in reload_factor_targets(version, m.excluded_consumables()) {
+                    fold(&name);
+                }
+            }
         }
 
         if !unknown.is_empty() {
@@ -287,6 +296,26 @@ impl ModifierBundle {
     pub fn apply_all(&self, base: f32, names: &[&str]) -> f32 {
         names.iter().fold(base, |b, n| self.apply(b, n))
     }
+}
+
+/// The skill modifier the client spreads over consumable reload coefficients.
+pub(crate) const RELOAD_FACTOR: &str = "reloadFactor";
+
+/// Modifier names a `reloadFactor` sets, per `createConsumablesReloadParams`
+/// (`CommonConsumables/ConsumableUtils.py:11-24`): `otherConsumablesReloadTime` and
+/// `<type>ReloadCoeff` for every reload-factor consumable type outside `excluded` whose
+/// name the client knows. Names this build's `MODIFIER_SETTINGS` lacks are skipped,
+/// as the client skips names `ModifierValueType` lacks.
+pub(crate) fn reload_factor_targets(version: Version, excluded: &[String]) -> Vec<String> {
+    std::iter::once("otherConsumablesReloadTime".to_owned())
+        .chain(
+            CONSUMABLES_WITH_RELOAD_COEFFICIENTS
+                .iter()
+                .filter(|kind| !excluded.iter().any(|excluded| excluded == *kind))
+                .map(|kind| format!("{kind}ReloadCoeff")),
+        )
+        .filter(|name| Combine::classify(version, name).is_ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -393,6 +422,29 @@ mod tests {
         assert!((bundle.coef("engineForwardForsagePower") - 1.2).abs() < 1e-6);
         assert!((bundle.coef("planeEmptyReturnSpeed") - 0.5).abs() < 1e-6);
         assert!((bundle.bonus("healthRegenPercent") - 0.05).abs() < 1e-6);
+    }
+
+    /// Consumable Specialist's `reloadFactor` reaches every reload-factor type but
+    /// the ones it excludes (`createConsumablesReloadParams`).
+    #[test]
+    fn reload_factor_spares_excluded_consumables() {
+        let specialist = CrewSkillModifier::builder()
+            .name("reloadFactor".to_string())
+            .aircraft_carrier(0.925)
+            .auxiliary(0.925)
+            .battleship(0.925)
+            .cruiser(0.925)
+            .destroyer(0.925)
+            .submarine(0.925)
+            .excluded_consumables(vec!["crashCrew".to_string(), "regenCrew".to_string()])
+            .build();
+        let bundle = ModifierBundle::from_modifiers(&[specialist], Species::Cruiser, VERSION)
+            .expect("reload coefficients are known modifiers");
+
+        assert!((bundle.coef("rlsReloadCoeff") - 0.925).abs() < 1e-6);
+        assert!((bundle.coef("sonarReloadCoeff") - 0.925).abs() < 1e-6);
+        assert_eq!(bundle.coef("crashCrewReloadCoeff"), 1.0);
+        assert_eq!(bundle.coef("regenCrewReloadCoeff"), 1.0);
     }
 
     /// The stock bundle is all identities.

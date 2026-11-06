@@ -82,7 +82,7 @@ const CALL_FIGHTERS_CONSUMABLES: &[&str] = &["callFighters", "planeTacticalFight
 /// `ConsumablesWithReloadCoefficients` (`ConsumableConstants.py`). Membership gates
 /// the per-type `<typeName>ReloadCoeff` multiplier in `getConsumableReloadTime`
 /// (ModifiersApply.py:200-201, 209-210).
-const CONSUMABLES_WITH_RELOAD_COEFFICIENTS: &[&str] = &[
+pub(crate) const CONSUMABLES_WITH_RELOAD_COEFFICIENTS: &[&str] = &[
     "artilleryBoosters",
     "torpedoReloader",
     "crashCrew",
