@@ -25,6 +25,194 @@ pub struct ArmorRayHit {
     pub normal: [f32; 3],
 }
 
+/// A point on the plane perpendicular to a [`ParallelRays`] direction, which
+/// names one ray of the set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayOffset {
+    /// Along the axis perpendicular to both the direction and up.
+    pub across: ShipModelDistance,
+
+    /// Along the plane's axis closest to world up.
+    pub up: ShipModelDistance,
+}
+
+/// The rectangle of [`RayOffset`]s whose rays can strike the meshes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayFootprint {
+    pub min: RayOffset,
+    pub max: RayOffset,
+}
+
+/// Rays sharing one direction, cast through a fixed set of meshes.
+///
+/// Triangles are binned by their projection onto the plane perpendicular to
+/// the direction, so a ray tests only the triangles whose projection covers
+/// its bin. The hits are the ones [`cast_ray`] returns for the same ray.
+pub struct ParallelRays {
+    direction: [f32; 3],
+    across_axis: [f32; 3],
+    up_axis: [f32; 3],
+
+    /// Position along `direction` of every ray origin, ahead of every triangle.
+    start: ShipModelDistance,
+
+    footprint: RayFootprint,
+    bin_size: ShipModelDistance,
+    columns: usize,
+    rows: usize,
+
+    /// Per bin, row-major, indices into `triangles`.
+    bins: Vec<Vec<usize>>,
+    triangles: Vec<PlacedTriangle>,
+}
+
+impl ParallelRays {
+    /// Bins the triangles of `meshes` for rays along `direction`, which need
+    /// not be a unit vector.
+    pub fn new(meshes: &[InteractiveArmorMesh], direction: [f32; 3]) -> Self {
+        const BINS_ALONG_LONGER_SIDE: f32 = 256.0;
+        // Origins sit this far ahead of the nearest triangle, in model units.
+        const START_CLEARANCE: f32 = 1.0;
+
+        let direction = normalize(direction);
+        let in_plane = |axis: [f32; 3]| sub(axis, scale(direction, dot(axis, direction)));
+        let up_in_plane = in_plane([0.0, 1.0, 0.0]);
+        // A near-vertical ray has no usable up in its plane; the bow axis stands in.
+        let up_axis = if dot(up_in_plane, up_in_plane) < 1e-6 {
+            normalize(in_plane([0.0, 0.0, -1.0]))
+        } else {
+            normalize(up_in_plane)
+        };
+        let across_axis = cross(up_axis, direction);
+
+        let mut triangles = Vec::new();
+        for (mesh_index, mesh) in meshes.iter().enumerate() {
+            for triangle_index in 0..mesh.triangle_info.len() {
+                if let Some(corners) = mesh_triangle(mesh, triangle_index) {
+                    triangles.push(PlacedTriangle { corners, mesh_index, triangle_index });
+                }
+            }
+        }
+
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for corner in triangles.iter().flat_map(|triangle| triangle.corners) {
+            let projected = [dot(corner, across_axis), dot(corner, up_axis), dot(corner, direction)];
+            for axis in 0..3 {
+                min[axis] = min[axis].min(projected[axis]);
+                max[axis] = max[axis].max(projected[axis]);
+            }
+        }
+
+        let footprint = RayFootprint {
+            min: RayOffset { across: ShipModelDistance::new(min[0]), up: ShipModelDistance::new(min[1]) },
+            max: RayOffset { across: ShipModelDistance::new(max[0]), up: ShipModelDistance::new(max[1]) },
+        };
+        let mut rays = Self {
+            direction,
+            across_axis,
+            up_axis,
+            start: ShipModelDistance::new(min[2] - START_CLEARANCE),
+            footprint,
+            bin_size: ShipModelDistance::new(1.0),
+            columns: 0,
+            rows: 0,
+            bins: Vec::new(),
+            triangles: Vec::new(),
+        };
+        if triangles.is_empty() {
+            return rays;
+        }
+
+        let longer_side = (max[0] - min[0]).max(max[1] - min[1]);
+        rays.bin_size = ShipModelDistance::new((longer_side / BINS_ALONG_LONGER_SIDE).max(f32::EPSILON));
+        rays.columns = rays.bin_of(max[0] - min[0]) + 1;
+        rays.rows = rays.bin_of(max[1] - min[1]) + 1;
+        rays.bins = vec![Vec::new(); rays.columns * rays.rows];
+
+        for (index, triangle) in triangles.iter().enumerate() {
+            let across = triangle.corners.map(|corner| dot(corner, across_axis) - min[0]);
+            let up = triangle.corners.map(|corner| dot(corner, up_axis) - min[1]);
+            let first_column = rays.bin_of(across.into_iter().fold(f32::INFINITY, f32::min));
+            let last_column = rays.bin_of(across.into_iter().fold(f32::NEG_INFINITY, f32::max)).min(rays.columns - 1);
+            let first_row = rays.bin_of(up.into_iter().fold(f32::INFINITY, f32::min));
+            let last_row = rays.bin_of(up.into_iter().fold(f32::NEG_INFINITY, f32::max)).min(rays.rows - 1);
+
+            for row in first_row..=last_row {
+                for column in first_column..=last_column {
+                    rays.bins[row * rays.columns + column].push(index);
+                }
+            }
+        }
+        rays.triangles = triangles;
+
+        rays
+    }
+
+    /// The unit direction every ray travels.
+    pub fn direction(&self) -> [f32; 3] {
+        self.direction
+    }
+
+    pub fn footprint(&self) -> RayFootprint {
+        self.footprint
+    }
+
+    /// Where the ray at `offset` starts, ahead of every triangle.
+    pub fn origin(&self, offset: RayOffset) -> [f32; 3] {
+        add(
+            add(scale(self.across_axis, offset.across.value()), scale(self.up_axis, offset.up.value())),
+            scale(self.direction, self.start.value()),
+        )
+    }
+
+    /// Every triangle the ray at `offset` crosses, nearest first, with
+    /// distances measured from [`Self::origin`].
+    pub fn cast(&self, offset: RayOffset) -> Vec<ArmorRayHit> {
+        let across = offset.across.value() - self.footprint.min.across.value();
+        let up = offset.up.value() - self.footprint.min.up.value();
+        if across < 0.0 || up < 0.0 {
+            return Vec::new();
+        }
+        let (column, row) = (self.bin_of(across), self.bin_of(up));
+        if column >= self.columns || row >= self.rows {
+            return Vec::new();
+        }
+
+        let origin = self.origin(offset);
+        let mut hits: Vec<ArmorRayHit> = self.bins[row * self.columns + column]
+            .iter()
+            .filter_map(|&index| {
+                let triangle = &self.triangles[index];
+                let distance = ray_triangle_intersect(origin, self.direction, &triangle.corners)?;
+                let [p0, p1, p2] = triangle.corners;
+
+                Some(ArmorRayHit {
+                    mesh_index: triangle.mesh_index,
+                    triangle_index: triangle.triangle_index,
+                    distance: ShipModelDistance::new(distance),
+                    position: add(origin, scale(self.direction, distance)),
+                    normal: normalize(cross(sub(p1, p0), sub(p2, p0))),
+                })
+            })
+            .collect();
+        hits.sort_by(|a, b| a.distance.value().total_cmp(&b.distance.value()));
+
+        hits
+    }
+
+    fn bin_of(&self, offset: f32) -> usize {
+        (offset / self.bin_size.value()) as usize
+    }
+}
+
+/// A triangle with its mesh transform applied.
+struct PlacedTriangle {
+    corners: [[f32; 3]; 3],
+    mesh_index: usize,
+    triangle_index: usize,
+}
+
 /// Moller-Trumbore ray-triangle intersection, double-sided. The distance along
 /// `direction` to the hit, when the triangle is ahead of `origin`.
 pub fn ray_triangle_intersect(origin: [f32; 3], direction: [f32; 3], triangle: &[[f32; 3]; 3]) -> Option<f32> {
@@ -198,6 +386,77 @@ mod tests {
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].distance.value(), 3.0);
+    }
+
+    #[test]
+    fn parallel_rays_find_the_hits_a_single_cast_finds() {
+        let tilted = [[-2.0, -1.0, 4.0], [3.0, -1.5, 6.0], [0.5, 2.0, 5.0]];
+        let meshes = [mesh(&[plate(5.0), plate(2.0), tilted], None), mesh(&[plate(8.0)], None)];
+        let rays = ParallelRays::new(&meshes, [0.3, -0.2, 1.0]);
+        let direction = rays.direction();
+        let footprint = rays.footprint();
+
+        let mut compared = 0;
+        for step_across in 0..=20 {
+            for step_up in 0..=20 {
+                let fraction = |step: i32| step as f32 / 20.0;
+                let lerp = |min: ShipModelDistance, max: ShipModelDistance, step: i32| {
+                    ShipModelDistance::new(min.value() + (max.value() - min.value()) * fraction(step))
+                };
+                let offset = RayOffset {
+                    across: lerp(footprint.min.across, footprint.max.across, step_across),
+                    up: lerp(footprint.min.up, footprint.max.up, step_up),
+                };
+
+                let parallel = rays.cast(offset);
+                let single = cast_ray(&meshes, rays.origin(offset), direction);
+
+                assert_eq!(parallel, single, "ray at {offset:?}");
+                compared += parallel.len();
+            }
+        }
+        assert!(compared > 100, "the grid crossed only {compared} triangles");
+    }
+
+    /// A ray less than 0.057 degrees from vertical bins on the bow axis. A
+    /// small deck far along the ray must still sit in the bin it is cast through.
+    #[test]
+    fn near_vertical_parallel_rays_find_the_hits_a_single_cast_finds() {
+        let deck = |height: f32, half: f32| [[-half, height, -half], [half, height, -half], [0.0, height, half]];
+        let meshes = [mesh(&[deck(0.0, 3.0), deck(-2000.0, 0.5)], None)];
+        let rays = ParallelRays::new(&meshes, [0.0, -1.0, 5e-4]);
+        let direction = rays.direction();
+        let footprint = rays.footprint();
+
+        let mut deep_hits = 0;
+        for step_across in 0..=40 {
+            for step_up in 0..=40 {
+                let lerp = |min: ShipModelDistance, max: ShipModelDistance, step: i32| {
+                    ShipModelDistance::new(min.value() + (max.value() - min.value()) * step as f32 / 40.0)
+                };
+                let offset = RayOffset {
+                    across: lerp(footprint.min.across, footprint.max.across, step_across),
+                    up: lerp(footprint.min.up, footprint.max.up, step_up),
+                };
+
+                let parallel = rays.cast(offset);
+                let single = cast_ray(&meshes, rays.origin(offset), direction);
+
+                assert_eq!(parallel, single, "ray at {offset:?}");
+                deep_hits += parallel.iter().filter(|hit| hit.triangle_index == 1).count();
+            }
+        }
+        assert!(deep_hits > 10, "the grid crossed the deep deck only {deep_hits} times");
+    }
+
+    #[test]
+    fn parallel_rays_through_an_empty_mesh_hit_nothing() {
+        let meshes = [mesh(&[], None)];
+        let rays = ParallelRays::new(&meshes, [0.0, 0.0, 1.0]);
+        let offset = RayOffset { across: ShipModelDistance::new(0.0), up: ShipModelDistance::new(0.0) };
+
+        assert!(rays.cast(offset).is_empty());
+        assert!(ParallelRays::new(&[], [0.0, 0.0, 1.0]).cast(offset).is_empty());
     }
 
     #[test]
