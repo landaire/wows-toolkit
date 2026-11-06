@@ -13,10 +13,6 @@ buildscript = workspace_buildscript(
 # Without the two crates whose test-support variants the tests link instead.
 TOOLKIT_COMMON_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
-    "//crates/wgc-auth:wgc-auth",
-    "//crates/wgc-catalog:wgc-catalog",
-    "//crates/wgc-download:wgc-download",
-    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
@@ -106,6 +102,13 @@ TOOLKIT_COMMON_DEPS = [
     "//third-party/rust:zip",
 ]
 
+TOOLKIT_LAUNCHER_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+]
+
 TOOLKIT_PLATFORM_DEPS = os_select(
     macos = [],
     linux = [],
@@ -121,7 +124,7 @@ TOOLKIT_DEPS = TOOLKIT_COMMON_DEPS + [
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
 ] + TOOLKIT_PLATFORM_DEPS
 
-TOOLKIT_FEATURES = ["logging", "launcher"]
+TOOLKIT_FEATURES = ["logging"]
 
 workspace_library(
     name = "wows_toolkit",
@@ -214,6 +217,8 @@ TOOLKIT_TEST_SUPPORT_DEPS = TOOLKIT_COMMON_DEPS + [
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 ] + TOOLKIT_PLATFORM_DEPS
 
+TOOLKIT_LAUNCHER_TEST_DEPS = TOOLKIT_TEST_SUPPORT_DEPS + TOOLKIT_LAUNCHER_DEPS
+
 TOOLKIT_TEST_DEPS = [
     "//third-party/rust:egui_kittest",
     "//third-party/rust:insta",
@@ -237,8 +242,8 @@ workspace_test(
     crate_root = "src/lib.rs",
     package = "wows_toolkit",
     version = "1.0.3",
-    features = TOOLKIT_FEATURES,
-    deps = TOOLKIT_TEST_SUPPORT_DEPS,
+    features = TOOLKIT_FEATURES + ["launcher"],
+    deps = TOOLKIT_LAUNCHER_TEST_DEPS,
     test_deps = TOOLKIT_TEST_DEPS,
     buildscript = buildscript,
     resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],

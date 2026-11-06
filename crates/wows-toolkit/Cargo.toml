@@ -184,7 +184,7 @@ path = "src/bin/profile_memory.rs"
 required-features = ["profile-bins"]
 
 [features]
-default = ["logging", "launcher"]
+default = ["logging"]
 shipbuilds_debugging = []
 mod_manager = ["dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
