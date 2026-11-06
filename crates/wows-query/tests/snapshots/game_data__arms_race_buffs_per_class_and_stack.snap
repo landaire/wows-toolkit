@@ -1,0 +1,80 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: buffs
+---
+modes:
+  - mode: Arms Race
+    rules: "Buffs are delivered by aircraft and dropped in designated map areas. Enter those areas to collect them.\n\nAny ship that enters the buff area first receives the buff for all ships on her team.\n\nBuff effects remain active for the entire battle."
+    buffs:
+      - name: HP Regeneration
+        max_stacks: 3
+        stacks:
+          - stacks: 1
+            effects:
+              - "destroyer: HP regeneration: restores 0.04% of max HP per second for the rest of the battle"
+              - "cruiser: HP regeneration: restores 0.03% of max HP per second for the rest of the battle"
+              - "battleship: HP regeneration: restores 0.02% of max HP per second for the rest of the battle"
+              - "aircraft_carrier: +0.13% Squadron HP per second"
+              - "submarine: HP regeneration: restores 0.04% of max HP per second for the rest of the battle"
+          - stacks: 2
+            effects:
+              - "destroyer: HP regeneration: restores 0.08% of max HP per second for the rest of the battle"
+              - "cruiser: HP regeneration: restores 0.06% of max HP per second for the rest of the battle"
+              - "battleship: HP regeneration: restores 0.04% of max HP per second for the rest of the battle"
+              - "aircraft_carrier: +0.25% Squadron HP per second"
+              - "submarine: HP regeneration: restores 0.08% of max HP per second for the rest of the battle"
+          - stacks: 3
+            effects:
+              - "destroyer: HP regeneration: restores 0.12% of max HP per second for the rest of the battle"
+              - "cruiser: HP regeneration: restores 0.09% of max HP per second for the rest of the battle"
+              - "battleship: HP regeneration: restores 0.06% of max HP per second for the rest of the battle"
+              - "aircraft_carrier: +0.38% Squadron HP per second"
+              - "submarine: HP regeneration: restores 0.12% of max HP per second for the rest of the battle"
+      - name: Increased HP
+        max_stacks: 3
+        stacks:
+          - stacks: 1
+            effects:
+              - "destroyer: +10% Ship HP"
+              - "cruiser: +7.5% Ship HP"
+              - "battleship: +5% Ship HP"
+              - "aircraft_carrier: +17% Squadron HP"
+              - "submarine: +10% Ship HP"
+          - stacks: 2
+            effects:
+              - "destroyer: +20% Ship HP"
+              - "cruiser: +15% Ship HP"
+              - "battleship: +10% Ship HP"
+              - "aircraft_carrier: +34% Squadron HP"
+              - "submarine: +20% Ship HP"
+          - stacks: 3
+            effects:
+              - "destroyer: +30% Ship HP"
+              - "cruiser: +22.5% Ship HP"
+              - "battleship: +15% Ship HP"
+              - "aircraft_carrier: +51% Squadron HP"
+              - "submarine: +30% Ship HP"
+      - name: Increased Reload Speed
+        max_stacks: 3
+        stacks:
+          - stacks: 1
+            effects:
+              - "-10% All armament reload time"
+          - stacks: 2
+            effects:
+              - "-20% All armament reload time"
+          - stacks: 3
+            effects:
+              - "-30% All armament reload time"
+      - name: Increased Damage
+        max_stacks: 3
+        stacks:
+          - stacks: 1
+            effects:
+              - +10% Damage from ship armament
+          - stacks: 2
+            effects:
+              - +20% Damage from ship armament
+          - stacks: 3
+            effects:
+              - +30% Damage from ship armament

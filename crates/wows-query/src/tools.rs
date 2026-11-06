@@ -23,7 +23,9 @@ use crate::commanders::CommanderArgs;
 use crate::commanders::CommanderSearchArgs;
 use crate::consumables::ShipConsumablesArgs;
 use crate::firing_arcs::FiringArcsArgs;
+use crate::game_modes::GameModeBuffsArgs;
 use crate::gameparams::GameParamsQueryArgs;
+use crate::healing::HealingSourcesArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::ships::FindShipsArgs;
 use crate::ships::ShipArgs;
@@ -245,9 +247,15 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_consumables",
-        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead.",
+        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. A consumable that is used on an allied ship (e.g. Engineering Crew Assistance) or applies a buff carries buff: who it can be used on, range, and its effects on the ally and on your own ship. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead.",
         schema: input_schema::<ShipConsumablesArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_consumables(args)),
+    },
+    Tool {
+        name: "healing_sources",
+        description: "Every way one ship can restore HP, for questions such as \"how can Akizuki heal without a Repair Party\": its own consumables that heal it (Repair Party, and heals its squadrons drop on it), consumables that allied ships and carrier squadrons use on it (e.g. Engineering Crew Assistance, Repair Assistance) with the ships that carry them and their values, talents of unique commanders who can command it with what activates them, and game mode buffs such as Arms Race HP regeneration. Without ship, lists the consumables that heal allied ships and the ships that carry them.",
+        schema: input_schema::<HealingSourcesArgs>,
+        call: |game, arguments| run(arguments, |args| game.healing_sources(args)),
     },
     Tool {
         name: "commander",
@@ -260,6 +268,12 @@ const TOOLS: &[Tool] = &[
         description: "Find unique commanders by what their improved skills or talents do, e.g. effect \"restores HP\", \"reload\", \"fires\", by nation, or by a ship they can command. Each commander lists only the improved skills and talents that match. Omit effect to list every unique commander with improved skills or talents.",
         schema: input_schema::<CommanderSearchArgs>,
         call: |game, arguments| run(arguments, |args| game.commander_search(args)),
+    },
+    Tool {
+        name: "game_mode_buffs",
+        description: "Buffs a game mode hands out in battle, e.g. Arms Race: each buff with its effects per number of stacks, per ship class or for one ship's class. Picking up a buff applies it to every ship of the team; picking up the same buff again adds a stack, up to max_stacks.",
+        schema: input_schema::<GameModeBuffsArgs>,
+        call: |game, arguments| run(arguments, |args| game.game_mode_buffs(args)),
     },
     Tool {
         name: "gameparams_query",

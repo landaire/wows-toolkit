@@ -405,7 +405,7 @@ impl GameData {
     }
 
     /// Aircraft localize as units, `IDS_<NAME>`.
-    fn aircraft_name(&self, param: &Param) -> String {
+    pub(crate) fn aircraft_name(&self, param: &Param) -> String {
         translate_unit(param.name(), self.provider())
             .map(|name| clean(&name))
             .unwrap_or_else(|| param.name().to_owned())

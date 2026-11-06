@@ -34,6 +34,12 @@ slots:
         charges: 4
         reload_s: 120
         action_time_s: 30
+        buff:
+          target: your own ship
+          on_self:
+            - +10% Secondary battery damage
+            - "-20% Torpedo tube reload time"
+            - "-20% Airstrike armament reload time"
       - name: Hydroacoustic Search
         type: sonar
         charges: 4

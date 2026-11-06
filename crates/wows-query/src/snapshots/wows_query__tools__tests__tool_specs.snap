@@ -631,7 +631,7 @@ expression: specs()
     required:
       - ship
 - name: ship_consumables
-  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead."
+  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. A consumable that is used on an allied ship (e.g. Engineering Crew Assistance) or applies a buff carries buff: who it can be used on, range, and its effects on the ally and on your own ship. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead."
   input_schema:
     type: object
     additionalProperties: false
@@ -654,6 +654,15 @@ expression: specs()
         description: "Upgrades by name, e.g. [\"Engine Boost Modification 1\"], applied to the consumable stats."
     required:
       - ship
+- name: healing_sources
+  description: "Every way one ship can restore HP, for questions such as \"how can Akizuki heal without a Repair Party\": its own consumables that heal it (Repair Party, and heals its squadrons drop on it), consumables that allied ships and carrier squadrons use on it (e.g. Engineering Crew Assistance, Repair Assistance) with the ships that carry them and their values, talents of unique commanders who can command it with what activates them, and game mode buffs such as Arms Race HP regeneration. Without ship, lists the consumables that heal allied ships and the ships that carry them."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship to list every way it can restore HP, e.g. \"Akizuki\". Omit to list the consumables that heal allied ships and the ships that carry them."
 - name: commander
   description: "One unique (legendary) commander by name, e.g. \"Yamamoto Isoroku\", \"Halsey\", \"Jean-Jacques Honore\", \"John Doe\": the nations and ships they serve on, their improved captain skills with the standard and improved effects per class, and their talents: battle types, what activates them, effects per activation, activations per battle and the effects after every activation. With ship, only that ship's class. Pass the commander to ship_stats to apply the improved skills to a ship."
   input_schema:
@@ -683,6 +692,18 @@ expression: specs()
       ship:
         type: string
         description: "Only commanders who serve on this ship, with effects for its class."
+- name: game_mode_buffs
+  description: "Buffs a game mode hands out in battle, e.g. Arms Race: each buff with its effects per number of stacks, per ship class or for one ship's class. Picking up a buff applies it to every ship of the team; picking up the same buff again adds a stack, up to max_stacks."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      mode:
+        type: string
+        description: "Game mode, e.g. \"Arms Race\". Omit for every mode with buffs."
+      ship:
+        type: string
+        description: "Only the effects for this ship's class, e.g. \"Akizuki\"."
 - name: gameparams_query
   description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys` (no leading dot; `.keys` reads a field named keys), then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available. A ship's costGold is a nominal value, not what the ship sells for; never quote it as a price."
   input_schema:

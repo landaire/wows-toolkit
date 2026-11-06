@@ -1,0 +1,377 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: consumables
+---
+ship:
+  name: New Jersey
+  index: PASB740
+  tier: 10
+  class: battleship
+  nation: USA
+  group: demoWithoutStatsPrem
+  category: test
+  status: test
+  status_note: "test ship, values from the current client may change before release"
+slots:
+  - slot: 1
+    options:
+      - name: Damage Control Party
+        type: crashCrew
+        charges: unlimited
+        reload_s: 80
+        action_time_s: 20
+        builds:
+          action_time:
+            stat: Damage Control Party action time
+            unit: s
+            builds:
+              base: 20
+              best:
+                value: 33.88
+                assumed:
+                  - Emergency Repair Expert
+                  - Damage Control Party Modification 1
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value: 30.8
+                  assumed:
+                    - Damage Control Party Modification 1
+                    - Ship Consumable Modification 1
+                - label: without Damage Control Party Modification 1
+                  value: 24.2
+                  assumed:
+                    - Emergency Repair Expert
+                    - Ship Consumable Modification 1
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+                - label: without Ship Consumable Modification 1
+                  value: 30.8
+                  assumed:
+                    - Emergency Repair Expert
+                    - Damage Control Party Modification 1
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+          charges:
+            stat: Damage Control Party charges
+            unit: charges
+            builds:
+              base: unlimited
+              best:
+                value: unlimited
+                assumed: []
+          reload:
+            stat: Damage Control Party reload
+            unit: s
+            builds:
+              base: 80
+              best:
+                value: 77.6
+                assumed:
+                  - Emergency Repair Specialist
+              alternatives:
+                - label: without Emergency Repair Specialist
+                  value: 80
+                  assumed: []
+  - slot: 2
+    options:
+      - name: Repair Party
+        type: regenCrew
+        charges: 4
+        reload_s: 80
+        action_time_s: 28
+        heal_percent_per_s: 0.66
+        builds:
+          action_time:
+            stat: Repair Party action time
+            unit: s
+            builds:
+              base: 28
+              best:
+                value: 33.88
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value: 30.8
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value: 30.8
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+          charges:
+            stat: Repair Party charges
+            unit: charges
+            builds:
+              base: 4
+              best:
+                value: 5
+                assumed:
+                  - Emergency Repair Expert
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value: 4
+                  assumed: []
+          reload:
+            stat: Repair Party reload
+            unit: s
+            builds:
+              base: 80
+              best:
+                value: 77.6
+                assumed:
+                  - Emergency Repair Specialist
+              alternatives:
+                - label: without Emergency Repair Specialist
+                  value: 80
+                  assumed: []
+  - slot: 3
+    options:
+      - name: Gun Crew Assistance
+        type: tacticalBuffGunBoost
+        charges: 3
+        reload_s: 180
+        action_time_s: 50
+        preparation_s: 90
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "-20% Main battery reload time"
+          on_self:
+            - "-10% Main battery reload time"
+        builds:
+          action_time:
+            stat: Gun Crew Assistance action time
+            unit: s
+            builds:
+              base: 50
+              best:
+                value: 55
+                assumed:
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Ship Consumable Modification 1
+                  value: 50
+                  assumed: []
+          charges:
+            stat: Gun Crew Assistance charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 3
+                assumed: []
+          reload:
+            stat: Gun Crew Assistance reload
+            unit: s
+            builds:
+              base: 180
+              best:
+                value: 180
+                assumed: []
+  - slot: 4
+    options:
+      - name: Auxiliary and Torpedo Armament Assistance
+        type: tacticalBuffAuxBoost
+        charges: 3
+        reload_s: 180
+        action_time_s: 50
+        preparation_s: 90
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - +15% Continuous AA damage
+            - "-15% Secondary battery reload time"
+            - "-25% Torpedo tube reload time"
+          on_self:
+            - +7.5% Continuous AA damage
+            - "-7.5% Secondary battery reload time"
+            - "-12.5% Torpedo tube reload time"
+        builds:
+          action_time:
+            stat: Auxiliary and Torpedo Armament Assistance action time
+            unit: s
+            builds:
+              base: 50
+              best:
+                value: 55
+                assumed:
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Ship Consumable Modification 1
+                  value: 50
+                  assumed: []
+          charges:
+            stat: Auxiliary and Torpedo Armament Assistance charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 3
+                assumed: []
+          reload:
+            stat: Auxiliary and Torpedo Armament Assistance reload
+            unit: s
+            builds:
+              base: 180
+              best:
+                value: 180
+                assumed: []
+      - name: Spotting Aircraft
+        type: scout
+        charges: 4
+        reload_s: 100
+        action_time_s: 70
+        builds:
+          action_time:
+            stat: Spotting Aircraft action time
+            unit: s
+            builds:
+              base: 70
+              best:
+                value: 100.1
+                assumed:
+                  - Spotting Aircraft Modification 1
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Spotting Aircraft Modification 1
+                  value: 77
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value: 91
+                  assumed:
+                    - Spotting Aircraft Modification 1
+          charges:
+            stat: Spotting Aircraft charges
+            unit: charges
+            builds:
+              base: 4
+              best:
+                value: 4
+                assumed: []
+          reload:
+            stat: Spotting Aircraft reload
+            unit: s
+            builds:
+              base: 100
+              best:
+                value: 92.5
+                assumed:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Specialist
+                  value: 100
+                  assumed: []
+      - name: Fighters
+        type: fighter
+        charges: 3
+        reload_s: 90
+        action_time_s: 60
+        fighters: 4
+        builds:
+          action_time:
+            stat: Fighters action time
+            unit: s
+            builds:
+              base: 60
+              best:
+                value: 66
+                assumed:
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Ship Consumable Modification 1
+                  value: 60
+                  assumed: []
+          charges:
+            stat: Fighters charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 3
+                assumed: []
+          reload:
+            stat: Fighters reload
+            unit: s
+            builds:
+              base: 90
+              best:
+                value: 83.25
+                assumed:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Specialist
+                  value: 90
+                  assumed: []
+  - slot: 5
+    options:
+      - name: Engineering Crew Assistance
+        type: tacticalBuffHealConsumableReload
+        charges: 2
+        reload_s: 180
+        action_time_s: 30
+        preparation_s: 90
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "HP regeneration: restores 0.46% of max HP per second for 30 s, 13.8% of max HP in total"
+            - "-15% Consumable preparation and cooldown time"
+          on_self:
+            - "HP regeneration: restores 0.23% of max HP per second for 30 s, 6.9% of max HP in total"
+            - "-7.5% Consumable preparation and cooldown time"
+        builds:
+          action_time:
+            stat: Engineering Crew Assistance action time
+            unit: s
+            builds:
+              base: 30
+              best:
+                value: 33
+                assumed:
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Ship Consumable Modification 1
+                  value: 30
+                  assumed: []
+          charges:
+            stat: Engineering Crew Assistance charges
+            unit: charges
+            builds:
+              base: 2
+              best:
+                value: 2
+                assumed: []
+          reload:
+            stat: Engineering Crew Assistance reload
+            unit: s
+            builds:
+              base: 180
+              best:
+                value: 180
+                assumed: []

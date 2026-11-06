@@ -28,6 +28,8 @@ use wows_query::firing_arcs::BatteryArcs;
 use wows_query::firing_arcs::FiringArcsArgs;
 use wows_query::firing_arcs::ShipFiringArcs;
 use wows_query::firing_arcs::Weapon;
+use wows_query::game_modes::GameModeBuffsArgs;
+use wows_query::healing::HealingSourcesArgs;
 use wows_query::penetration::PenetrationSearchArgs;
 use wows_query::shells::Ammo;
 use wows_query::shells::Battery;
@@ -2075,4 +2077,37 @@ fn commander_search_finds_hp_restoration() {
         .commander_search(&CommanderSearchArgs { effect: Some("restores HP".to_owned()), ..Default::default() })
         .expect("search runs");
     insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn arms_race_buffs_per_class_and_stack() {
+    let buffs = game()
+        .game_mode_buffs(&GameModeBuffsArgs { mode: Some("Arms Race".to_owned()), ship: None })
+        .expect("Arms Race has buffs");
+    insta::assert_yaml_snapshot!(buffs);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn akizuki_healing_sources() {
+    let sources =
+        game().healing_sources(&HealingSourcesArgs { ship: Some("Akizuki".to_owned()) }).expect("Akizuki exists");
+    insta::assert_yaml_snapshot!(sources);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ships_that_heal_allies() {
+    let sources = game().healing_sources(&HealingSourcesArgs { ship: None }).expect("search runs");
+    insta::assert_yaml_snapshot!(sources);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn new_jersey_consumables_heal_allies() {
+    let consumables = game()
+        .ship_consumables(&ShipConsumablesArgs { ship: "New Jersey".to_owned(), ..Default::default() })
+        .expect("New Jersey exists");
+    insta::assert_yaml_snapshot!(consumables);
 }

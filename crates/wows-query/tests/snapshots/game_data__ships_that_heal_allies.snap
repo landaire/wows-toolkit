@@ -1,0 +1,91 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: sources
+---
+ally_heals:
+  - consumable: Engineering Crew Assistance
+    carriers:
+      - ships:
+          - "T10 New Jersey (battleship, USA, test)"
+          - "T10 Pérez Gacitúa (battleship, Pan_America, test)"
+        delivered_by: ship
+        name: Engineering Crew Assistance
+        type: tacticalBuffHealConsumableReload
+        charges: 2
+        reload_s: 180
+        action_time_s: 30
+        preparation_s: 90
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "HP regeneration: restores 0.46% of max HP per second for 30 s, 13.8% of max HP in total"
+            - "-15% Consumable preparation and cooldown time"
+          on_self:
+            - "HP regeneration: restores 0.23% of max HP per second for 30 s, 6.9% of max HP in total"
+            - "-7.5% Consumable preparation and cooldown time"
+      - ships:
+          - "T10 Comodoro (battleship, Pan_America, test)"
+        delivered_by: ship
+        name: Engineering Crew Assistance
+        type: tacticalBuffHealConsumableReload
+        charges: 2
+        reload_s: 180
+        action_time_s: 30
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 20
+          on_ally:
+            - "HP regeneration: restores 0.46% of max HP per second for 30 s, 13.8% of max HP in total"
+            - "-15% Consumable preparation and cooldown time"
+          on_self:
+            - "HP regeneration: restores 0.23% of max HP per second for 30 s, 6.9% of max HP in total"
+            - "-7.5% Consumable preparation and cooldown time"
+  - consumable: Repair Assistance
+    carriers:
+      - ships:
+          - "T6 Furious (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 1
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"
+      - ships:
+          - "T8 Implacable (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 2
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 17.5
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"
+      - ships:
+          - "T11 Eagle (aircraft_carrier, United_Kingdom)"
+          - "T10 Audacious (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 2
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 20
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"

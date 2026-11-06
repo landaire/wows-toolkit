@@ -14,6 +14,7 @@ use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::AbilityCategory;
 use wowsunpack::game_params::types::GameParamProvider;
 
+use crate::buffs::ConsumableBuff;
 use crate::builds::Better;
 use crate::builds::BuildStat;
 use crate::builds::Charges;
@@ -139,6 +140,10 @@ pub struct ConsumableStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity_s: Option<Seconds>,
 
+    /// The buff it applies, for consumables used on an allied ship or that buff your own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buff: Option<ConsumableBuff>,
+
     /// Base and best-fit build values, given when no skills or upgrades are.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builds: Option<ConsumableBuilds>,
@@ -199,6 +204,8 @@ impl GameData {
                 }
                 let name = self.consumable_name(ability, category);
                 let mut stats = consumable_stats(name, category, bundle);
+                stats.buff =
+                    self.consumable_buff(category, ship.class.species(), stats.action_time_s.map(|time| time.value()));
                 if let Some(planner) = &planner {
                     stats.builds = Some(consumable_builds(planner, &stats.name, category)?);
                 }
@@ -331,7 +338,7 @@ fn charges(count: AmmoCount) -> Charges {
     }
 }
 
-fn consumable_stats(name: String, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {
+pub(crate) fn consumable_stats(name: String, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {
     let (stats, _) = effective_consumable(category, bundle);
     let kind = category.consumable_type_raw().to_owned();
 
@@ -352,6 +359,7 @@ fn consumable_stats(name: String, category: &AbilityCategory, bundle: &ModifierB
         smoke_lifetime_s: stats.smoke_lifetime.map(|time| Seconds::new(round(time.value()))),
         fighters: stats.fighters_count,
         capacity_s: stats.max_capacity.map(|capacity| Seconds::new(round(capacity))),
+        buff: None,
         builds: None,
     }
 }

@@ -117,6 +117,12 @@ pub enum QueryError {
     )]
     CommanderNotForShip { commander: String, ship: String, nations: Vec<String>, ships: Vec<String> },
 
+    #[error("no game mode with buffs matches {query:?}; modes: {}", modes.join(", "))]
+    GameModeNotFound { query: String, modes: Vec<String> },
+
+    #[error("buff drop {drop} has no maxBuffLevel")]
+    BuffDropWithoutStackLimit { drop: String },
+
     #[error("upgrade {upgrade} does not fit {ship}")]
     UpgradeNotApplicable { upgrade: String, ship: String },
 
