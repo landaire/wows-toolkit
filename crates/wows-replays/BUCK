@@ -4,7 +4,7 @@ buildscript = workspace_buildscript(
     name = "wows-replays-buildscript",
     crate = "wows_replays",
     package = "wows_replays",
-    version = "0.47.0",
+    version = "0.48.0",
     deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
 )
 
@@ -47,7 +47,7 @@ workspace_library(
     name = "wows_replays",
     crate = "wows_replays",
     package = "wows_replays",
-    version = "0.47.0",
+    version = "0.48.0",
     features = wasm_select(wasm = [], native = REPLAYS_FEATURES),
     buildscript = buildscript,
     deps = wasm_select(wasm = REPLAYS_WASM_DEPS, native = REPLAYS_DEPS),
@@ -58,7 +58,7 @@ workspace_test(
     crate = "wows_replays",
     crate_root = "src/lib.rs",
     package = "wows_replays",
-    version = "0.47.0",
+    version = "0.48.0",
     features = REPLAYS_FEATURES,
     buildscript = buildscript,
     deps = REPLAYS_DEPS,
@@ -67,7 +67,7 @@ workspace_test(
 
 workspace_integration_tests(
     package = "wows_replays",
-    version = "0.47.0",
+    version = "0.48.0",
     library = ":wows_replays",
     deps = REPLAYS_DEPS,
     features = REPLAYS_FEATURES,

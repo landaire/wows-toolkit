@@ -23,7 +23,7 @@ workspace_library(
     name = "wows_replay_insights",
     crate = "wows_replay_insights",
     package = "wows-replay-insights",
-    version = "0.14.0",
+    version = "0.15.0",
     features = INSIGHTS_FEATURES,
     deps = INSIGHTS_DEPS,
 )
@@ -33,7 +33,7 @@ workspace_test(
     crate = "wows_replay_insights",
     crate_root = "src/lib.rs",
     package = "wows-replay-insights",
-    version = "0.14.0",
+    version = "0.15.0",
     features = INSIGHTS_FEATURES,
     deps = INSIGHTS_DEPS,
     test_deps = ["//crates/wows-data-mgr:wows_data_mgr"],
@@ -41,7 +41,7 @@ workspace_test(
 
 workspace_integration_tests(
     package = "wows-replay-insights",
-    version = "0.14.0",
+    version = "0.15.0",
     library = ":wows_replay_insights",
     features = INSIGHTS_FEATURES,
     deps = INSIGHTS_DEPS,
