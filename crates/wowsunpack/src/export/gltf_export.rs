@@ -1520,8 +1520,8 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
 
         // Parse indices as u32.
         let indices: Vec<u32> = match index_size {
-            2 => idx_slice.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect(),
-            4 => idx_slice.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+            2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
+            4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
                 eprintln!("Warning: primitive {i}: unsupported index size {index_size}, skipping");
                 continue;
@@ -1742,8 +1742,8 @@ fn collect_primitives(
 
         // Parse indices as u32.
         let indices: Vec<u32> = match index_size {
-            2 => idx_slice.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect(),
-            4 => idx_slice.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+            2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
+            4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
                 return Err(Report::new(ExportError::IndexDecode(format!("unsupported index size: {index_size}"))));
             }
@@ -3062,8 +3062,8 @@ pub fn collect_hull_meshes(
         let idx_slice = &decoded_indices[idx_start..idx_end];
 
         let indices: Vec<u32> = match index_size {
-            2 => idx_slice.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect(),
-            4 => idx_slice.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+            2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
+            4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
                 return Err(Report::new(ExportError::IndexDecode(format!("unsupported index size: {index_size}"))));
             }

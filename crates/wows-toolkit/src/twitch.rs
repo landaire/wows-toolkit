@@ -287,8 +287,8 @@ pub async fn fetch_chatters(
     client: &HelixClient<'static, reqwest::Client>,
     user_id: &UserId,
     token: &UserToken,
-) -> Result<Vec<String>, twitch_api::helix::ClientRequestError<reqwest::Error>> {
+) -> Result<Vec<String>, Box<twitch_api::helix::ClientRequestError<reqwest::Error>>> {
     let request = get_chatters::GetChattersRequest::new(user_id, &token.user_id);
-    let response: Vec<helix::chat::Chatter> = client.req_get(request, token).await?.data;
+    let response: Vec<helix::chat::Chatter> = client.req_get(request, token).await.map_err(Box::new)?.data;
     Ok(response.iter().map(|chatter| chatter.user_login.to_string()).collect())
 }

@@ -43,7 +43,7 @@ fn near_white_fraction(rgba: &[u8]) -> f32 {
     if total == 0 {
         return 0.0;
     }
-    let blown = rgba.chunks_exact(4).filter(|px| px[0] >= 250 && px[1] >= 250 && px[2] >= 250).count();
+    let blown = rgba.as_chunks::<4>().0.iter().filter(|px| px[0] >= 250 && px[1] >= 250 && px[2] >= 250).count();
     blown as f32 / total as f32
 }
 

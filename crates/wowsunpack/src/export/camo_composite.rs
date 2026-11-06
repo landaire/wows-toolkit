@@ -219,7 +219,7 @@ pub fn apply_scheme(
             // Opaque replacement camo (uniform painted, e.g. Steel; or no base to
             // composite): force alpha opaque, keep tiling for the caller's sampler.
             let mut rgba = camo.into_raw();
-            for px in rgba.chunks_exact_mut(4) {
+            for px in rgba.as_chunks_mut::<4>().0 {
                 px[3] = 255;
             }
             (rgba, t)
@@ -309,7 +309,7 @@ mod tests {
         let Some(CamoApplication::Replace { texture, .. }) = out.get("HULL") else {
             panic!("with no base to show through there is nothing to composite over");
         };
-        assert!(texture.pixels.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(texture.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     }
 
     #[test]
@@ -336,7 +336,7 @@ mod tests {
         let flat = flatten_over_base(&camo, &UvTransform::default(), &base);
 
         assert_eq!((flat.width, flat.height), (8, 8), "the base sets the resolution");
-        assert!(flat.pixels.chunks_exact(4).all(|p| p[3] == 255), "a flattened camo is opaque");
+        assert!(flat.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255), "a flattened camo is opaque");
         assert_eq!(&flat.pixels[0..3], &[10, 20, 30], "a fully opaque camo covers the base");
     }
 

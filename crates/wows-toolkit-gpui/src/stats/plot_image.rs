@@ -347,7 +347,7 @@ mod tests {
 
         assert_eq!((width, height), (400, 300));
         assert_eq!(pixels.len(), 400 * 300 * 4);
-        let drawn = pixels.chunks_exact(4).filter(|px| px[..3] != BACKGROUND[..3]).count();
+        let drawn = pixels.as_chunks::<4>().0.iter().filter(|px| px[..3] != BACKGROUND[..3]).count();
         assert!(drawn > 0, "the plot left nothing on the image");
     }
 

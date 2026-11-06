@@ -107,7 +107,7 @@ impl Blowfish {
         debug_assert_eq!(output.len(), LANES * 8);
         let mut l = [0u32; LANES];
         let mut r = [0u32; LANES];
-        for (k, block) in input.chunks_exact(8).enumerate() {
+        for (k, block) in input.as_chunks::<8>().0.iter().enumerate() {
             l[k] = u32::from_be_bytes(block[0..4].try_into().unwrap());
             r[k] = u32::from_be_bytes(block[4..8].try_into().unwrap());
         }
@@ -127,7 +127,7 @@ impl Blowfish {
             l[k] ^= self.p[1];
             r[k] ^= self.p[0];
         }
-        for (k, block) in output.chunks_exact_mut(8).enumerate() {
+        for (k, block) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
             block[0..4].copy_from_slice(&r[k].to_be_bytes());
             block[4..8].copy_from_slice(&l[k].to_be_bytes());
         }
@@ -313,17 +313,17 @@ mod test {
         // Lane decrypt must agree with block decrypt across lane counts.
         let flat: Vec<u8> = blocks.iter().flatten().copied().collect();
         let mut expected = vec![0u8; flat.len()];
-        for (src, dst) in flat.chunks_exact(8).zip(expected.chunks_exact_mut(8)) {
+        for (src, dst) in flat.as_chunks::<8>().0.iter().zip(expected.as_chunks_mut::<8>().0) {
             theirs.decrypt_block(src, dst);
         }
         let mut got = vec![0u8; flat.len()];
-        for (src, dst) in flat.chunks_exact(32).zip(got.chunks_exact_mut(32)) {
+        for (src, dst) in flat.as_chunks::<32>().0.iter().zip(got.as_chunks_mut::<32>().0) {
             ours.decrypt_lanes::<4>(src, dst);
         }
         assert_eq!(got, expected);
 
         let mut got = vec![0u8; flat.len()];
-        for (src, dst) in flat.chunks_exact(64).zip(got.chunks_exact_mut(64)) {
+        for (src, dst) in flat.as_chunks::<64>().0.iter().zip(got.as_chunks_mut::<64>().0) {
             ours.decrypt_lanes::<8>(src, dst);
         }
         assert_eq!(got, expected);

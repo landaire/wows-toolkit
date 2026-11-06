@@ -244,7 +244,7 @@ pub(crate) fn build_active_camo(
             // Opaque replacement camo (uniform painted, e.g. Steel; or no stock to composite):
             // force alpha opaque, keep GPU tiling.
             let mut rgba = camo.into_raw();
-            for px in rgba.chunks_exact_mut(4) {
+            for px in rgba.as_chunks_mut::<4>().0 {
                 px[3] = 255;
             }
             rgba
@@ -316,7 +316,7 @@ mod tests {
         let (out_tex, out_uv) = build_active_camo(&textures, &uv_transforms, false, &hull_textures);
 
         let rgba = &out_tex.get("Hull_A").expect("expected an output texture for Hull_A").pixels;
-        assert!(rgba.chunks_exact(4).all(|px| px[3] == 255));
+        assert!(rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 255));
         assert!(out_uv.contains_key("Hull_A"), "opaque replacement must keep its UV transform");
     }
 
@@ -344,7 +344,7 @@ mod tests {
         let (out_tex, out_uv) = build_active_camo(&textures, &uv_transforms, false, &hull_textures);
 
         let rgba = &out_tex.get("Hull_A").expect("expected an output texture for Hull_A").pixels;
-        assert!(rgba.chunks_exact(4).all(|px| px[3] == 255), "zone-mask output must be fully opaque");
+        assert!(rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 255), "zone-mask output must be fully opaque");
         assert!(!out_uv.contains_key("Hull_A"), "zone-mask output must have its UV baked (no tiling transform left)");
     }
 }

@@ -77,7 +77,7 @@ mod enabled {
         let settle = env_var("DHAT_RUN_SECS").unwrap_or(DEFAULT_SETTLE_SECS);
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(settle));
-            for round in 0.. {
+            for round in 0..=u64::MAX {
                 let stats = dhat::HeapStats::get();
                 write_line(&format!(
                     "heapstats round={round} at_ms={} curr_bytes={} curr_blocks={} max_bytes={} max_blocks={} total_bytes={} total_blocks={}",

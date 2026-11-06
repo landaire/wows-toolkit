@@ -148,7 +148,7 @@ fn pick_adapter(instance: &wgpu::Instance, choice: &AdapterChoice) -> Option<wgp
 /// gpui_kit stores images as BGRA, so the R and B bytes are swapped in place before
 /// the buffer is wrapped in an `image::Frame`.
 pub fn readback_to_render_image(width: u32, height: u32, mut rgba: Vec<u8>) -> Arc<RenderImage> {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
     let buffer =

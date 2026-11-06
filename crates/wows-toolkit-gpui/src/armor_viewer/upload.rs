@@ -789,7 +789,7 @@ mod tests {
             [(clear.r * 255.0).round() as i32, (clear.g * 255.0).round() as i32, (clear.b * 255.0).round() as i32];
         let mut non_clear_pixels = 0usize;
         let mut black_pixels = 0usize;
-        for px in rgba.chunks_exact(4) {
+        for px in rgba.as_chunks::<4>().0 {
             let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
             let dist = (r - clear_rgb[0]).abs() + (g - clear_rgb[1]).abs() + (b - clear_rgb[2]).abs();
             if dist > 20 {
@@ -824,7 +824,7 @@ mod tests {
             .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
             .expect("offscreen render produced no pixels");
         let black_pixels_no_edges =
-            rgba_no_edges.chunks_exact(4).filter(|px| px[0] < 20 && px[1] < 20 && px[2] < 20).count();
+            rgba_no_edges.as_chunks::<4>().0.iter().filter(|px| px[0] < 20 && px[1] < 20 && px[2] < 20).count();
         assert!(
             black_pixels_no_edges < black_pixels,
             "expected show_plate_edges = false to reduce near-black (edge) pixels: before={black_pixels} after={black_pixels_no_edges}"
@@ -848,7 +848,7 @@ mod tests {
         let avg_clear_distance = |rgba: &[u8]| -> f64 {
             let mut total = 0i64;
             let mut n = 0i64;
-            for px in rgba.chunks_exact(4) {
+            for px in rgba.as_chunks::<4>().0 {
                 let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
                 total +=
                     (r - clear_rgb[0]).abs() as i64 + (g - clear_rgb[1]).abs() as i64 + (b - clear_rgb[2]).abs() as i64;

@@ -1527,7 +1527,7 @@ fn sampled_p95_luminance(albedo: Option<&(u32, u32, Vec<u8>)>, camo: Option<&Act
         }
         None => {
             let Some((_, _, rgba)) = albedo else { return NO_TEXTURE_BRIGHTNESS };
-            for px in rgba.chunks_exact(4).step_by(STRIDE) {
+            for px in rgba.as_chunks::<4>().0.iter().step_by(STRIDE) {
                 lumas.push(luma([px[0] as f32, px[1] as f32, px[2] as f32]));
             }
         }

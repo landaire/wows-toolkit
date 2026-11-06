@@ -26,11 +26,11 @@
     },
     {
       "name": "rust_msvc",
-      "url": "https://static.rust-lang.org/dist/rust-1.97.1-x86_64-pc-windows-msvc.msi",
-      "sha256": "58ec069612df27fd21c58c3d438258b2161ceedfc343e23387d5a4811c5cd539",
-      "path": "archives/rust-1.97.1-x86_64-pc-windows-msvc.msi",
-      "version": "1.97.1",
-      "install_path": "Rust/1.97.1"
+      "url": "https://static.rust-lang.org/dist/rust-1.98.1-x86_64-pc-windows-msvc.msi",
+      "sha256": "346bea0c3076a33e291624b3d7e71bb3cf661422fadaf643612de641b3e7599a",
+      "path": "archives/rust-1.98.1-x86_64-pc-windows-msvc.msi",
+      "version": "1.98.1",
+      "install_path": "Rust/1.98.1"
     },
     {
       "name": "nasm",
@@ -116,19 +116,19 @@
       "version": "10.0.26100.9457 (WinBuild.160101.0800)"
     },
     "rustc": {
-      "path": "Rust/1.97.1/Rust/bin/rustc.exe",
-      "version_output": "rustc 1.97.1"
+      "path": "Rust/1.98.1/Rust/bin/rustc.exe",
+      "version_output": "rustc 1.98.1"
     },
     "rustdoc": {
-      "path": "Rust/1.97.1/Rust/bin/rustdoc.exe",
-      "version_output": "rustdoc 1.97.1"
+      "path": "Rust/1.98.1/Rust/bin/rustdoc.exe",
+      "version_output": "rustdoc 1.98.1"
     },
     "clippy_driver": {
-      "path": "Rust/1.97.1/Rust/bin/clippy-driver.exe",
-      "version_output": "clippy 0.1.97"
+      "path": "Rust/1.98.1/Rust/bin/clippy-driver.exe",
+      "version_output": "clippy 0.1.98"
     },
     "rustfmt": {
-      "path": "Rust/1.97.1/Rust/bin/rustfmt.exe",
+      "path": "Rust/1.98.1/Rust/bin/rustfmt.exe",
       "version_output": "rustfmt 1.9.0-stable"
     },
     "nasm": {

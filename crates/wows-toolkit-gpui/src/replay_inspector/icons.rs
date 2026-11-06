@@ -47,7 +47,7 @@ use super::model::PlayerRow;
 /// (`gpui_kit::platform`).
 pub fn decode_icon(bytes: &[u8]) -> anyhow::Result<RenderImage> {
     let mut buffer = image::load_from_memory(bytes)?.into_rgba8();
-    for pixel in buffer.chunks_exact_mut(4) {
+    for pixel in buffer.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(RenderImage::new(vec![Frame::new(buffer)]))
@@ -86,7 +86,7 @@ fn tint_bgra_pixels(buffer: &mut image::RgbaImage, tint: u32) {
     let tint_r = ((tint >> 16) & 0xff) as f32 / 255.0;
     let tint_g = ((tint >> 8) & 0xff) as f32 / 255.0;
     let tint_b = (tint & 0xff) as f32 / 255.0;
-    for pixel in buffer.chunks_exact_mut(4) {
+    for pixel in buffer.as_chunks_mut::<4>().0 {
         pixel[0] = (pixel[0] as f32 * tint_b).round() as u8;
         pixel[1] = (pixel[1] as f32 * tint_g).round() as u8;
         pixel[2] = (pixel[2] as f32 * tint_r).round() as u8;

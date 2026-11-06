@@ -3018,8 +3018,7 @@ impl WowsToolkitApp {
         let replay_renderers = self.tab_state.replay_renderers.lock();
         for renderer in replay_renderers.iter() {
             let mut state = renderer.shared_state().lock();
-            let requests: Vec<crate::replay::renderer::ArmorViewerRequest> =
-                state.pending_armor_viewers.drain(..).collect();
+            let requests = std::mem::take(&mut state.pending_armor_viewers);
             drop(state);
 
             for request in requests {

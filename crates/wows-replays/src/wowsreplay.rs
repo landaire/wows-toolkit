@@ -274,17 +274,20 @@ impl Read for BlowfishXorReader<'_> {
         {
             self.blowfish.decrypt_lanes::<DECRYPT_LANES>(src, dst);
         }
-        for (src, dst) in
-            self.encrypted[full..n].chunks_exact(BLOWFISH_BLOCK).zip(buf[full..n].chunks_exact_mut(BLOWFISH_BLOCK))
+        for (src, dst) in self.encrypted[full..n]
+            .as_chunks::<BLOWFISH_BLOCK>()
+            .0
+            .iter()
+            .zip(buf[full..n].as_chunks_mut::<BLOWFISH_BLOCK>().0)
         {
-            self.blowfish.decrypt_block(src.try_into().unwrap(), dst.try_into().unwrap());
+            self.blowfish.decrypt_block(src, dst);
         }
 
         // XOR chain over the decrypted blocks; cheap relative to the cipher.
         let mut previous = self.previous;
-        for dst in buf[..n].chunks_exact_mut(BLOWFISH_BLOCK) {
-            let plain = u64::from_ne_bytes(dst.try_into().unwrap()) ^ previous;
-            dst.copy_from_slice(&plain.to_ne_bytes());
+        for dst in buf[..n].as_chunks_mut::<BLOWFISH_BLOCK>().0 {
+            let plain = u64::from_ne_bytes(*dst) ^ previous;
+            *dst = plain.to_ne_bytes();
             previous = plain;
         }
         self.previous = previous;

@@ -73,7 +73,9 @@ pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
 /// saturate to white while dark textures still get boosted.
 pub(crate) fn tex_brightness(rgba: &[u8]) -> f32 {
     let mut lumas: Vec<f32> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .step_by(LUMA_SAMPLE_STRIDE)
         .map(|px| (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) / 255.0)
         .collect();

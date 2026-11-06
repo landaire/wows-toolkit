@@ -6,7 +6,7 @@
 
 Everything runs natively; Nix and WSL are not needed. You need:
 
-- [Rust](https://rustup.rs/) (1.97+, from `rust-toolchain.toml`)
+- [Rust](https://rustup.rs/) (1.98+, from `rust-toolchain.toml`)
 - Visual Studio 2022 with the **C++ Clang Compiler for Windows** component.
   `ring` hardcodes clang when targeting wasm32 and `cc` has no MSVC fallback
   there, so `cargo check -p wt-web --target wasm32-unknown-unknown` cannot run
@@ -44,7 +44,7 @@ cargo build -p wows_toolkit --release
 
 If you prefer not to use Nix on Linux or macOS:
 
-- [Rust](https://rustup.rs/) (1.97+)
+- [Rust](https://rustup.rs/) (1.98+)
 - [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (only needed for downloading game data; requires .NET)
 - `openssl` and `pkg-config` development headers
 - On Linux: X11/Wayland/Vulkan/fontconfig development libraries

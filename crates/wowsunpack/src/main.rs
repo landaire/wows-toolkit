@@ -2523,8 +2523,8 @@ fn run_dump_uvs(
             let idx_size = ibuf.index_size as usize;
             let total_indices = decoded_i.len() / idx_size;
             let max_idx: u32 = match idx_size {
-                2 => decoded_i.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).max().unwrap_or(0),
-                4 => decoded_i.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).max().unwrap_or(0),
+                2 => decoded_i.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).max().unwrap_or(0),
+                4 => decoded_i.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).max().unwrap_or(0),
                 _ => continue,
             };
             println!("    Index buf {}: {} indices, max_idx={}", bi, total_indices, max_idx);
@@ -2537,21 +2537,13 @@ fn run_dump_uvs(
                 }
                 let idx_slice = &decoded_i[idx_start..idx_end];
                 let max_i: u32 = match idx_size {
-                    2 => idx_slice.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).max().unwrap_or(0),
-                    4 => idx_slice
-                        .chunks_exact(4)
-                        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                        .max()
-                        .unwrap_or(0),
+                    2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).max().unwrap_or(0),
+                    4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).max().unwrap_or(0),
                     _ => continue,
                 };
                 let min_i: u32 = match idx_size {
-                    2 => idx_slice.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).min().unwrap_or(0),
-                    4 => idx_slice
-                        .chunks_exact(4)
-                        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                        .min()
-                        .unwrap_or(0),
+                    2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).min().unwrap_or(0),
+                    4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).min().unwrap_or(0),
                     _ => continue,
                 };
                 println!(
