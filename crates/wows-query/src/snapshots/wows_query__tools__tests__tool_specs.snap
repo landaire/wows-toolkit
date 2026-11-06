@@ -288,6 +288,37 @@ expression: specs()
         description: "Hull module, e.g. \"Hull B\". Defaults to the stock hull. Peers are compared on their stock hulls."
     required:
       - ship
+- name: turtleback_search
+  description: "Which ships have a turtleback: an armored deck sloping down behind a thicker belt to meet it near or below the waterline, read from each ship's 3D armor model. Filter by tier, class and nation. Returns considered and qualifying counts per class and per nation with shares, and the qualifying ships with deck thickness, slope and belt thickness. Ships sharing one armor model, such as collaboration copies, count once."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      min_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"Germany\", \"USA\", \"Russia\"."
+      exclude_test_ships:
+        type: boolean
+        description: Leave out ships in closed testing. Defaults to false.
 - name: ship_stats
   description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, and the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
   input_schema:

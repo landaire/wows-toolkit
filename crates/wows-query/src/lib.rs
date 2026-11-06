@@ -38,6 +38,7 @@ pub mod stat_search;
 pub mod stats;
 pub mod tech_tree;
 pub mod tools;
+pub mod turtleback;
 pub mod upgrades;
 
 mod fuzzy;

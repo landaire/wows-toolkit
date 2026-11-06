@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: detected
+---
+- - "T8 Bismarck (battleship, Germany)"
+  - slope_deg: 66.2
+    median_deck_mm: 110
+    median_belt_mm: 320
+    share_pct: 100
+- - "T8 Tirpitz (battleship, Germany)"
+  - slope_deg: 65.9
+    median_deck_mm: 110
+    median_belt_mm: 315
+    share_pct: 77.3
+- - "T9 F. der Grosse (battleship, Germany)"
+  - slope_deg: 67.2
+    median_deck_mm: 120
+    median_belt_mm: 300
+    share_pct: 57.1
+- - "T10 G. Kurfürst (battleship, Germany)"
+  - slope_deg: 60.3
+    median_deck_mm: 150
+    median_belt_mm: 380
+    share_pct: 86.7
+- - "T10 Schlieffen (battleship, Germany)"
+  - ~
+- - "T10 Kremlin (battleship, Russia)"
+  - ~
+- - "T9 Sov. Soyuz (battleship, Russia)"
+  - ~
+- - "T8 Roma (battleship, Italy)"
+  - ~
+- - "T9 Iowa (battleship, USA)"
+  - ~
+- - "T10 Montana (battleship, USA)"
+  - ~
+- - "T10 Yamato (battleship, Japan)"
+  - ~
+- - "T10 Conqueror (battleship, United_Kingdom)"
+  - ~

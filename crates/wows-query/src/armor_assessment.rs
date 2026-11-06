@@ -545,10 +545,10 @@ impl TenthsMm {
 /// compare with fingerprints computed later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-struct ArmorFingerprint(u64);
+pub(crate) struct ArmorFingerprint(u64);
 
 impl ArmorFingerprint {
-    fn from_meshes(meshes: &[InteractiveArmorMesh]) -> Self {
+    pub(crate) fn from_meshes(meshes: &[InteractiveArmorMesh]) -> Self {
         const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
         const PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -1028,7 +1028,7 @@ impl GameData {
 
     /// The armor of `ship`'s stock hull; `None` when the game data holds no
     /// armor model for it.
-    fn stock_meshes(&self, ship: &Ship) -> Result<Option<Vec<InteractiveArmorMesh>>, QueryError> {
+    pub(crate) fn stock_meshes(&self, ship: &Ship) -> Result<Option<Vec<InteractiveArmorMesh>>, QueryError> {
         match self.target_hull(ship, None).and_then(|hull| self.target_meshes(ship, &hull.param)) {
             Ok(meshes) => Ok(Some(meshes)),
             Err(QueryError::ArmorMissing { .. }) => Ok(None),
@@ -1082,7 +1082,7 @@ impl GameData {
 
 /// `map` over `items` on half the processors, as a chat host also serves
 /// other requests, in item order.
-fn parallel_map<T, R>(items: &[T], map: impl Fn(&T) -> R + Sync) -> Vec<R>
+pub(crate) fn parallel_map<T, R>(items: &[T], map: impl Fn(&T) -> R + Sync) -> Vec<R>
 where
     T: Sync,
     R: Send,
@@ -1219,7 +1219,7 @@ fn arming_plate(model: &WeaponModel, ray: &TracedRay) -> Option<ArmingPlate> {
 
 /// The citadel seen by horizontal rays from either side. `None` without
 /// citadel plates.
-fn side_geometry(meshes: &[InteractiveArmorMesh]) -> Result<Option<CitadelGeometry>, QueryError> {
+pub(crate) fn side_geometry(meshes: &[InteractiveArmorMesh]) -> Result<Option<CitadelGeometry>, QueryError> {
     if !has_citadel_plates(meshes) {
         return Ok(None);
     }

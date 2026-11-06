@@ -32,6 +32,7 @@ use crate::stat_search::StatNamesArgs;
 use crate::stat_search::StatSearchArgs;
 use crate::stats::ShipStatsArgs;
 use crate::tech_tree::TechTreeLinesArgs;
+use crate::turtleback::TurtlebackSearchArgs;
 use crate::upgrades::UpgradeArgs;
 
 /// A query tool as presented to a model.
@@ -172,6 +173,12 @@ const TOOLS: &[Tool] = &[
         description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers.",
         schema: input_schema::<ArmorAssessmentArgs>,
         call: |game, arguments| run(arguments, |args| game.armor_assessment(args)),
+    },
+    Tool {
+        name: "turtleback_search",
+        description: "Which ships have a turtleback: an armored deck sloping down behind a thicker belt to meet it near or below the waterline, read from each ship's 3D armor model. Filter by tier, class and nation. Returns considered and qualifying counts per class and per nation with shares, and the qualifying ships with deck thickness, slope and belt thickness. Ships sharing one armor model, such as collaboration copies, count once.",
+        schema: input_schema::<TurtlebackSearchArgs>,
+        call: |game, arguments| run(arguments, |args| game.turtleback_search(args)),
     },
     Tool {
         name: "ship_stats",

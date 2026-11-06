@@ -14,6 +14,7 @@ use wows_query::armor_assessment::ArmorAssessmentOutput;
 use wows_query::armor_trace::ArmorTraceArgs;
 use wows_query::armor_trace::TraceWeapon;
 use wows_query::citadel::CitadelProfileArgs;
+use wows_query::citadel::Turtleback;
 use wows_query::consumables::ShipConsumablesArgs;
 use wows_query::firing_arcs::BatteryArcs;
 use wows_query::firing_arcs::FiringArcsArgs;
@@ -31,6 +32,7 @@ use wows_query::skills::SkillTreeArgs;
 use wows_query::stats::ShipStatsArgs;
 use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::TechTreeLinesArgs;
+use wows_query::turtleback::TurtlebackSearchArgs;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
@@ -1166,4 +1168,50 @@ fn armor_assessment_of_cruisers() {
     for (ship, snapshot) in [("Des Moines", "armor_assessment_des_moines"), ("Zao", "armor_assessment_zao")] {
         insta::assert_yaml_snapshot!(snapshot, armor_assessment(ship));
     }
+}
+
+/// Ships known for a turtleback and ships known without one, as the armor
+/// model reads them.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn turtleback_detection_on_known_ships() {
+    let ships = [
+        "Bismarck",
+        "Tirpitz",
+        "Friedrich der Grosse",
+        "Grosser Kurfurst",
+        "Schlieffen",
+        "Kremlin",
+        "Sov. Soyuz",
+        "Roma",
+        "Iowa",
+        "Montana",
+        "Yamato",
+        "Conqueror",
+    ];
+    let detected: Vec<(String, Option<Turtleback>)> = ships
+        .into_iter()
+        .map(|ship| {
+            let profile = game()
+                .citadel_profile(&CitadelProfileArgs { ship: ship.to_owned(), ..Default::default() })
+                .expect("the ship has an armor model");
+            (profile.ship, profile.shape.turtleback)
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(detected);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn turtleback_search_lists_tier_8_to_10_battleships() {
+    let search = game()
+        .turtleback_search(&TurtlebackSearchArgs {
+            min_tier: Some(Tier(8)),
+            max_tier: Some(Tier(10)),
+            class: Some(ShipClass::Battleship),
+            ..Default::default()
+        })
+        .expect("armor models are readable");
+    assert!(search.ships.iter().any(|ship| ship.contains("F. der Grosse")), "{:?}", search.ships);
+    insta::assert_yaml_snapshot!(search);
 }
