@@ -2692,6 +2692,31 @@ pub struct Aircraft {
     category: PlaneCategory,
     #[cfg_attr(feature = "serde", serde(default))]
     ammo_type: String,
+    /// Raw `planeSubtype` entries, e.g. "airsupport", "turboprop", "jet".
+    #[cfg_attr(feature = "serde", serde(default))]
+    subtypes: Vec<String>,
+    /// `numPlanesInSquadron`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    squadron_size: Option<u32>,
+    /// `attackerSize`: planes that attack together.
+    #[cfg_attr(feature = "serde", serde(default))]
+    attack_flight_size: Option<u32>,
+    /// `attackCount`: attacks each attacking plane makes.
+    #[cfg_attr(feature = "serde", serde(default))]
+    attack_count: Option<u32>,
+    /// `projectilesPerAttack`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    projectiles_per_attack: Option<u32>,
+    /// `bombName`: the ordnance projectile param.
+    #[cfg_attr(feature = "serde", serde(default))]
+    ordnance: Option<String>,
+    /// `angleOfDive`, negative when diving.
+    #[cfg_attr(feature = "serde", serde(default))]
+    angle_of_dive: Option<Degrees>,
+    /// `speedMoveWithBomb`, the cruise speed while carrying ordnance
+    /// (AirplaneUtils.py:442 converts it from knots).
+    #[cfg_attr(feature = "serde", serde(default))]
+    speed_with_ordnance: Option<crate::game_params::ttx::model::Knots>,
 }
 
 impl Aircraft {
@@ -2701,6 +2726,36 @@ impl Aircraft {
 
     pub fn ammo_type(&self) -> &str {
         &self.ammo_type
+    }
+
+    pub fn subtypes(&self) -> &[String] {
+        &self.subtypes
+    }
+
+    pub fn squadron_size(&self) -> Option<u32> {
+        self.squadron_size
+    }
+
+    pub fn attack_flight_size(&self) -> Option<u32> {
+        self.attack_flight_size
+    }
+
+    /// Ordnance one attacking plane drops or fires per sortie:
+    /// `attackCount * projectilesPerAttack` (PreprocessedPlanes.py:36).
+    pub fn payload_per_plane(&self) -> Option<u32> {
+        Some(self.attack_count? * self.projectiles_per_attack?)
+    }
+
+    pub fn ordnance(&self) -> Option<&str> {
+        self.ordnance.as_deref()
+    }
+
+    pub fn angle_of_dive(&self) -> Option<Degrees> {
+        self.angle_of_dive
+    }
+
+    pub fn speed_with_ordnance(&self) -> Option<crate::game_params::ttx::model::Knots> {
+        self.speed_with_ordnance
     }
 
     /// Determine the effective plane category for display/icon purposes.
@@ -2885,6 +2940,14 @@ pub struct Projectile {
     /// Ship classes this torpedo passes under (deep-water torpedoes).
     #[cfg_attr(feature = "serde", serde(default))]
     ignore_classes: Option<Vec<String>>,
+    /// Aircraft ordnance kind (`planeAmmoType`): "bomb", "skip", "rocket",
+    /// "torpedo", "depthcharge" or "mine". `None` for ship ammunition.
+    #[cfg_attr(feature = "serde", serde(default))]
+    plane_ammo_type: Option<String>,
+    /// Aircraft ordnance fall time multiplier (`fallingTimeCoef`,
+    /// AirplaneUtils.py:338-357).
+    #[cfg_attr(feature = "serde", serde(default))]
+    falling_time_coef: Option<f32>,
 }
 
 impl Projectile {
@@ -2990,6 +3053,14 @@ impl Projectile {
 
     pub fn ignore_classes(&self) -> Option<&[String]> {
         self.ignore_classes.as_deref()
+    }
+
+    pub fn plane_ammo_type(&self) -> Option<&str> {
+        self.plane_ammo_type.as_deref()
+    }
+
+    pub fn falling_time_coef(&self) -> Option<f32> {
+        self.falling_time_coef
     }
 
     /// Convert this projectile to a [`ShellInfo`] with the given name.

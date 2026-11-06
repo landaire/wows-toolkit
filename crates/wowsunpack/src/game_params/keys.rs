@@ -28,6 +28,10 @@ pub const UC_TYPE_DIRECTORS: &str = "_Directors";
 pub const UC_TYPE_FINDERS: &str = "_Finders";
 pub const UC_TYPE_RADARS: &str = "_Radars";
 pub const UC_TYPE_SUO: &str = "_Suo";
+pub const UC_TYPE_FIGHTER: &str = "_Fighter";
+pub const UC_TYPE_DIVE_BOMBER: &str = "_DiveBomber";
+pub const UC_TYPE_TORPEDO_BOMBER: &str = "_TorpedoBomber";
+pub const UC_TYPE_SKIP_BOMBER: &str = "_SkipBomber";
 
 // Component type keys (inside "components" dict)
 pub const COMP_HULL: &str = "hull";
@@ -43,6 +47,17 @@ pub const COMP_AIR_ARMAMENT: &str = "airArmament";
 pub const COMP_ENGINE: &str = "engine";
 pub const COMP_FIRE_CONTROL: &str = "fireControl";
 pub const COMP_INNATE_SKILLS: &str = "innateSkills";
+pub const COMP_FIGHTER: &str = "fighter";
+pub const COMP_DIVE_BOMBER: &str = "diveBomber";
+pub const COMP_TORPEDO_BOMBER: &str = "torpedoBomber";
+pub const COMP_SKIP_BOMBER: &str = "skipBomber";
+pub const COMP_AIR_SUPPORT: &str = "airSupport";
+
+/// Aircraft params of a plane-slot component.
+pub const PLANES: &str = "planes";
+/// Air strike charges and reload of an `airSupport` component.
+pub const CHARGES_NUM: &str = "chargesNum";
+pub const RELOAD_TIME: &str = "reloadTime";
 
 /// Typed representation of component type keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

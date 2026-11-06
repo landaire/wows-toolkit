@@ -1378,6 +1378,50 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             }
         }
 
+        // Carrier and hybrid squadrons: each plane-slot upgrade names a component
+        // whose `planes` list holds the aircraft params.
+        if let Some(slot) =
+            crate::game_params::ttx::components::PlaneSlot::ALL.into_iter().find(|slot| slot.uc_type() == uc_type)
+            && let Some(plane_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(slot.component_key())).and_then(read_first_string))
+            && let Some(plane_data) = ship_data.get(&pk(&plane_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let planes = plane_data.inner().get(&pk(keys::PLANES)).map(read_string_sequence).unwrap_or_default();
+            if !planes.is_empty() {
+                ttx_components.squadrons.insert(
+                    upgrade_name.clone(),
+                    crate::game_params::ttx::components::SquadronUpgrade { slot, planes, stock: is_stock },
+                );
+            }
+        }
+
+        // Air strikes hang off the hull: its `airSupport` component names the
+        // aircraft in `ammoList`.
+        if uc_type == keys::UC_TYPE_HULL
+            && let Some(support_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_AIR_SUPPORT)).and_then(read_first_string))
+            && let Some(support_data) = ship_data.get(&pk(&support_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let support_data = support_data.inner();
+            let planes = support_data.get(&pk(keys::AMMO_LIST)).map(read_string_sequence).unwrap_or_default();
+            if !planes.is_empty() {
+                ttx_components.air_supports.insert(
+                    upgrade_name.clone(),
+                    crate::game_params::ttx::components::AirSupportStats {
+                        planes,
+                        charges: read_float(&support_data, keys::CHARGES_NUM).map(|charges| charges as u32),
+                        reload_time: read_float(&support_data, keys::RELOAD_TIME)
+                            .map(crate::game_params::ttx::model::Seconds::from),
+                        max_dist: read_float(&support_data, keys::MAX_DIST).map(Meters::from),
+                    },
+                );
+            }
+        }
+
         // Fire control is a standalone _Suo upgrade naming an FC component whose
         // only displayed stat is maxDistCoef (PreprocessedFireControl.py:7); store
         // the coef keyed by upgrade name. The artillery factory multiplies it into
@@ -2035,15 +2079,18 @@ impl GameMetadataProvider {
                 } else {
                     PlaneCategory::Controllable
                 };
-                // Resolve ammo type: bombName -> projectile dict -> ammoType
-                let ammo_type = param_data
+                let ordnance = param_data
                     .get(&pk("bombName"))
                     .and_then(|v| v.string_ref())
-                    .filter(|s| !s.inner().is_empty())
+                    .map(|s| s.inner().to_string())
+                    .filter(|name| !name.is_empty());
+                // Resolve ammo type: bombName -> projectile dict -> ammoType
+                let ammo_type = ordnance
+                    .as_deref()
                     .and_then(|bomb_name| {
                         params_dict
                             .inner()
-                            .get(&HashableValue::String(bomb_name.clone()))
+                            .get(&HashableValue::String(bomb_name.to_owned().into()))
                             .and_then(|proj| proj.dict_or_object_dict())
                             .and_then(|proj_dict| {
                                 proj_dict
@@ -2054,7 +2101,30 @@ impl GameMetadataProvider {
                             })
                     })
                     .unwrap_or_default();
-                Some(ParamData::Aircraft(Aircraft::builder().category(category).ammo_type(ammo_type).build()))
+                let read_opt_f32 = |key: &str| -> Option<f32> {
+                    param_data
+                        .get(&pk(key))
+                        .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
+                };
+                let read_count = |key: &str| -> Option<u32> {
+                    param_data.get(&pk(key)).and_then(|v| v.i64_ref()).and_then(|count| u32::try_from(*count).ok())
+                };
+                Some(ParamData::Aircraft(
+                    Aircraft::builder()
+                        .category(category)
+                        .ammo_type(ammo_type)
+                        .subtypes(subtypes)
+                        .maybe_squadron_size(read_count("numPlanesInSquadron"))
+                        .maybe_attack_flight_size(read_count("attackerSize"))
+                        .maybe_attack_count(read_count("attackCount"))
+                        .maybe_projectiles_per_attack(read_count("projectilesPerAttack"))
+                        .maybe_ordnance(ordnance)
+                        .maybe_angle_of_dive(read_opt_f32("angleOfDive").map(Degrees::from))
+                        .maybe_speed_with_ordnance(
+                            read_opt_f32("speedMoveWithBomb").map(crate::game_params::ttx::model::Knots::from),
+                        )
+                        .build(),
+                ))
             }
             ParamType::Projectile => {
                 let ammo_type = param_data
@@ -2142,6 +2212,14 @@ impl GameMetadataProvider {
                         .maybe_distance_of_damage(distance_of_damage)
                         .maybe_torpedo_type(torpedo_type)
                         .maybe_ignore_classes(ignore_classes)
+                        .maybe_plane_ammo_type(
+                            param_data
+                                .get(&pk("planeAmmoType"))
+                                .and_then(|v| v.string_ref())
+                                .map(|s| s.inner().to_string())
+                                .filter(|kind| !kind.is_empty()),
+                        )
+                        .maybe_falling_time_coef(read_opt_f32("fallingTimeCoef"))
                         .build(),
                 ))
             }
@@ -2806,6 +2884,57 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         assert!(ttx.torpedoes.is_empty());
         assert!(ttx.torpedoes("PAUH001_Hull").is_none());
+    }
+
+    /// Ise (`PJSB526_Ise`) shape: a `_TorpedoBomber` upgrade naming a component
+    /// with `planes`, and a hull whose `airSupport` component lists the air
+    /// strike aircraft in `ammoList` (real values).
+    #[test]
+    fn build_ship_extracts_squadrons_and_air_strikes() {
+        let bomber_components = dict(vec![(pk("torpedoBomber"), list(vec![sv("A_TorpedoBomber")]))]);
+        let bomber_upgrade = dict(vec![
+            (pk("ucType"), sv("_TorpedoBomber")),
+            (pk("components"), bomber_components),
+            (pk("prev"), sv("")),
+        ]);
+        let a_torpedo_bomber = dict(vec![(pk("planes"), list(vec![sv("PJAB606_ISE_STOCK")]))]);
+
+        let hull_components =
+            dict(vec![(pk("hull"), list(vec![sv("A_Hull")])), (pk("airSupport"), list(vec![sv("A_AirSupport")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(68300.0)), (pk("model"), sv("A_Hull.model"))]);
+        let a_air_support = dict(vec![
+            (pk("ammoList"), list(vec![sv("PJAD904_ASW_T5")])),
+            (pk("chargesNum"), Value::I64(1)),
+            (pk("reloadTime"), fv(20.0)),
+            (pk("maxDist"), Value::I64(8000)),
+        ]);
+
+        let upgrade_info = dict(vec![(pk("PJUH550_ISE"), hull_upgrade), (pk("PJUB550_TB_ISE"), bomber_upgrade)]);
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(6)),
+            (pk("group"), sv("special")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_TorpedoBomber"), a_torpedo_bomber),
+            (pk("A_AirSupport"), a_air_support),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+
+        let squadron = ttx.squadrons.get("PJUB550_TB_ISE").expect("torpedo bomber upgrade parsed");
+        assert_eq!(squadron.slot, crate::game_params::ttx::components::PlaneSlot::TorpedoBomber);
+        assert_eq!(squadron.planes, vec!["PJAB606_ISE_STOCK".to_string()]);
+        assert!(squadron.stock);
+
+        let strike = ttx.air_supports.get("PJUH550_ISE").expect("air strike parsed");
+        assert_eq!(strike.planes, vec!["PJAD904_ASW_T5".to_string()]);
+        assert_eq!(strike.charges, Some(1));
+        assert_eq!(strike.reload_time, Some(crate::game_params::ttx::model::Seconds::from(20.0)));
+        assert_eq!(strike.max_dist, Some(Meters::from(8000.0)));
     }
 
     /// Build a ship dict mirroring Worcester's (`PASC016_Worcester_1948`) real

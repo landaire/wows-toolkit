@@ -189,6 +189,72 @@ pub struct SecondaryComponentStats {
     pub guns: Vec<ArtilleryGunStats>,
 }
 
+/// The carrier plane slot a `ShipUpgradeInfo` upgrade fills.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum PlaneSlot {
+    /// Rocket planes; GameParams calls the slot `fighter`.
+    Fighter,
+    DiveBomber,
+    TorpedoBomber,
+    SkipBomber,
+}
+
+impl PlaneSlot {
+    pub const ALL: [PlaneSlot; 4] = [Self::Fighter, Self::DiveBomber, Self::TorpedoBomber, Self::SkipBomber];
+
+    /// The `ucType` of upgrades in this slot.
+    pub fn uc_type(self) -> &'static str {
+        match self {
+            Self::Fighter => crate::game_params::keys::UC_TYPE_FIGHTER,
+            Self::DiveBomber => crate::game_params::keys::UC_TYPE_DIVE_BOMBER,
+            Self::TorpedoBomber => crate::game_params::keys::UC_TYPE_TORPEDO_BOMBER,
+            Self::SkipBomber => crate::game_params::keys::UC_TYPE_SKIP_BOMBER,
+        }
+    }
+
+    /// The key of this slot's component in an upgrade's `components`.
+    pub fn component_key(self) -> &'static str {
+        match self {
+            Self::Fighter => crate::game_params::keys::COMP_FIGHTER,
+            Self::DiveBomber => crate::game_params::keys::COMP_DIVE_BOMBER,
+            Self::TorpedoBomber => crate::game_params::keys::COMP_TORPEDO_BOMBER,
+            Self::SkipBomber => crate::game_params::keys::COMP_SKIP_BOMBER,
+        }
+    }
+}
+
+/// The aircraft one plane-slot upgrade carries.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct SquadronUpgrade {
+    pub slot: PlaneSlot,
+
+    /// Aircraft param names from the component's `planes`: the regular
+    /// squadron, then a tactical squadron when the slot has one
+    /// (PreprocessedPlanes.py:12-20).
+    pub planes: Vec<String>,
+
+    /// The chain root of its slot, mounted on the stock ship.
+    pub stock: bool,
+}
+
+/// An air strike, raw from the hull's `airSupport` component
+/// (ShipParams.py:265-278).
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct AirSupportStats {
+    /// Aircraft param names from `ammoList`.
+    pub planes: Vec<String>,
+    pub charges: Option<u32>,
+    pub reload_time: Option<Seconds>,
+    /// Raw `maxDist`, meters.
+    pub max_dist: Option<Meters>,
+}
+
 /// Per-ship TTX component base stats, keyed by upgrade selection.
 ///
 /// Hull stats are keyed by the `_Hull` upgrade name (mirroring
@@ -230,6 +296,12 @@ pub struct ShipTtxComponents {
     /// its default or as an alternative.
     #[cfg_attr(feature = "serde", serde(default))]
     pub upgrade_components: HashMap<String, Vec<String>>,
+    /// Carrier and hybrid squadrons per plane-slot upgrade name.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub squadrons: HashMap<String, SquadronUpgrade>,
+    /// Air strike per `_Hull` upgrade name.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub air_supports: HashMap<String, AirSupportStats>,
     /// Stock (base) upgrade selection per slot: the empty-`prev` upgrade in each
     /// `ShipUpgradeInfo` chain, captured during the same walk that fills the maps
     /// above (the raw `ShipUpgradeInfo` pickle is dropped after parsing).
@@ -238,7 +310,8 @@ pub struct ShipTtxComponents {
 }
 
 impl ShipTtxComponents {
-    /// True when no hull, engine, torpedo, artillery, secondary, or fire-control stats were extracted.
+    /// True when no hull, engine, torpedo, artillery, secondary, fire-control,
+    /// squadron or air strike stats were extracted.
     pub fn is_empty(&self) -> bool {
         self.hulls.is_empty()
             && self.engines.is_empty()
@@ -246,6 +319,8 @@ impl ShipTtxComponents {
             && self.artillery.is_empty()
             && self.secondaries.is_empty()
             && self.fire_controls.is_empty()
+            && self.squadrons.is_empty()
+            && self.air_supports.is_empty()
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.
