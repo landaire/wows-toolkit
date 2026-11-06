@@ -2566,3 +2566,46 @@ fn the_palette_opens_any_ship_in_the_armor_viewer(cx: &mut TestAppContext) {
         assert!(window.try_find(PALETTE_BACK).is_none(), "Backspace in an empty ship search returns to the root list");
     });
 }
+
+/// A directory's stats open as one tab beside the session's. Asking again for
+/// the same directory, under another spelling of its path, goes back to that
+/// tab rather than opening a second read of the same replays.
+#[gpui_kit::test]
+fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    let replays = tempfile::tempdir().expect("a temporary directory can be made");
+    std::fs::create_dir(replays.path().join("sub")).expect("a subdirectory can be made");
+    let alias = replays.path().join("sub").join("..");
+    let directory_tab = tab_index(AppTab::Stats) + 1;
+
+    window
+        .update(cx, |app, window, cx| {
+            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            app.open_directory_stats_reading(replays.path().to_path_buf(), game_data, window, cx);
+        })
+        .expect("the test window stays open");
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let tabs = window.within(TAB_BAR);
+        assert_eq!(tabs.find(directory_tab).selected(), Some(true), "the new tab opens beside Stats, selected");
+        window.within(TAB_BAR).click(tab_index(AppTab::Stats), cx);
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, window, cx| {
+            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            app.open_directory_stats_reading(alias.clone(), game_data, window, cx);
+        })
+        .expect("the test window stays open");
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let tabs = window.within(TAB_BAR);
+        assert_eq!(tabs.find(directory_tab).selected(), Some(true), "the existing tab is selected again");
+        assert!(
+            tabs.try_find(AppTab::ALL.len() + 1).is_none(),
+            "one tab for the directory, however its path is spelled"
+        );
+    })
+    .expect("the test window stays open");
+}

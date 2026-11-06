@@ -47,6 +47,7 @@ pub const ANCHOR: &str = "\u{E514}";
 pub const ARCHIVE: &str = "\u{E00C}";
 pub const ARROWS_OUT_SIMPLE: &str = "\u{E0A6}";
 pub const ARROW_BEND_UP_RIGHT: &str = "\u{E026}";
+pub const ARROW_CLOCKWISE: &str = "\u{E036}";
 pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{E038}";
 pub const ARROW_SQUARE_OUT: &str = "\u{E5DE}";
 pub const BOMB: &str = "\u{EE0A}";

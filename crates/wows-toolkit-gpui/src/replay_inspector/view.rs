@@ -55,6 +55,7 @@ use super::panel::RenderRequested;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
+use crate::stats::directory::DirectoryStatsRequested;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 
@@ -1620,13 +1621,6 @@ impl ReplayInspectorView {
         cx.notify();
     }
 
-    /// The expected-values table this tab rates replays against. Test-only:
-    /// production code reaches the field directly.
-    #[cfg(test)]
-    pub(crate) fn personal_rating(&self) -> Option<&Arc<PersonalRatingData>> {
-        self.personal_rating.as_ref()
-    }
-
     /// The per-build game-data cache this tab loads replays through, once
     /// the WoWs directory is known. Shared rather than cloned fresh so a
     /// build another tab needs is loaded once for the whole app.
@@ -1641,6 +1635,11 @@ impl ReplayInspectorView {
 
     pub(crate) fn game_data(&self) -> Option<GameDataCache> {
         self.game_data.clone()
+    }
+
+    /// The session's expected-values table, once it has loaded.
+    pub(crate) fn personal_rating(&self) -> Option<&Arc<PersonalRatingData>> {
+        self.personal_rating.as_ref()
     }
 
     /// Adopts the session's expected-values table and pushes it into every
@@ -2020,12 +2019,14 @@ impl Render for ReplayInspectorView {
         self.share_session_with_renderers(cx);
         cx.defer_in(window, Self::open_what_the_host_asked_for);
         let session = crate::collab_popover::render(self, &entity, cx);
+        let chosen_directory = self.browser.read(cx).chosen_directory().map(std::path::Path::to_path_buf);
+        let game_data_ready = matches!(self.game_data_status, GameDataStatus::Ready(_));
         let replay_header = crate::ui::toolbar(cx)
             .flex_wrap()
             .child(session)
             // Which directory is being listed, when it is not the install's: the
             // rows otherwise look like the game's own and are not.
-            .children(self.browser.read(cx).chosen_directory().map(|directory| {
+            .children(chosen_directory.as_deref().map(|directory| {
                 let shown = directory.display().to_string();
                 h_flex()
                     .id("replay-header-directory")
@@ -2042,17 +2043,33 @@ impl Render for ReplayInspectorView {
                     .tooltip(move |window, cx| Tooltip::new(shown.clone()).build(window, cx))
                     .into_any_element()
             }))
-            .when(self.browser.read(cx).chosen_directory().is_some(), |header| {
-                header.child(
-                    Button::new("directory-game-data")
-                        .label(t!("ui.replay.check_game_data").to_string())
-                        .compact()
-                        .tooltip(t!("ui.replay.check_game_data_tooltip").to_string())
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            let missing = this.browser.read(cx).missing_builds();
-                            cx.emit(CheckGameDataRequested(missing));
-                        })),
-                )
+            .when_some(chosen_directory, |header, directory| {
+                header
+                    .child(
+                        Button::new("directory-game-data")
+                            .label(t!("ui.replay.check_game_data").to_string())
+                            .compact()
+                            .tooltip(t!("ui.replay.check_game_data_tooltip").to_string())
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                let missing = this.browser.read(cx).missing_builds();
+                                cx.emit(CheckGameDataRequested(missing));
+                            })),
+                    )
+                    .child(
+                        Button::new("directory-stats")
+                            .icon(IconName::ChartPie)
+                            .label(t!("ui.stats.open_directory_stats").to_string())
+                            .compact()
+                            .disabled(!game_data_ready)
+                            .tooltip(if game_data_ready {
+                                t!("ui.stats.open_directory_stats_tooltip").to_string()
+                            } else {
+                                t!("ui.stats.directory_stats_unavailable").to_string()
+                            })
+                            .on_click(cx.listener(move |_this, _event, _window, cx| {
+                                cx.emit(DirectoryStatsRequested(directory.clone()));
+                            })),
+                    )
             });
 
         v_flex()

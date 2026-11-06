@@ -98,6 +98,7 @@ pub struct StatsShipsPanel {
     /// The ship whose clear button has been pressed once and is waiting to be
     /// confirmed.
     clear_armed: Option<GameParamId>,
+    clearable: bool,
     /// The games the filter bar selected, kept so the sections can be rebuilt
     /// when the expected-values table arrives after them.
     games: Vec<PerGameStat>,
@@ -131,6 +132,7 @@ impl StatsShipsPanel {
             sections: Vec::new(),
             expanded: HashSet::new(),
             clear_armed: None,
+            clearable: true,
             games: Vec::new(),
             personal_rating: None,
             provider: None,
@@ -154,6 +156,14 @@ impl StatsShipsPanel {
         }
         self.clear_armed = None;
         cx.emit(ShipsPanelEvent::ClearShip(ship));
+    }
+
+    /// Whether each ship offers to forget its games. Only recorded games can
+    /// be forgotten; a directory's replays are only read.
+    pub fn set_clearable(&mut self, clearable: bool, cx: &mut Context<Self>) {
+        self.clearable = clearable;
+        self.clear_armed = None;
+        cx.notify();
     }
 
     /// The expected-values table can arrive after the session, so the
@@ -434,7 +444,7 @@ impl Render for StatsShipsPanel {
                 .child(copy_menu(section))
                 // Two presses, or one with ctrl held, matching what the egui
                 // section's trash button does with the same modifier.
-                .child({
+                .children(self.clearable.then(|| {
                     let armed = self.clear_armed == Some(ship_id);
                     let panel = entity.clone();
                     let label = if armed {
@@ -458,7 +468,7 @@ impl Render for StatsShipsPanel {
                             let skip_confirmation = event.modifiers().secondary(cx);
                             panel.update(cx, |this, cx| this.clear_ship(ship_id, skip_confirmation, cx));
                         })
-                });
+                }));
 
             let table = open.then(|| {
                 let heading = h_flex().w_full().gap_2().px_2().py_1().child(div().w(LABEL_COLUMN_WIDTH)).children(

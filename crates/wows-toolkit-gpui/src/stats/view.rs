@@ -59,6 +59,7 @@ use super::chart_panel::ChartId;
 use super::chart_panel::ChartSettings;
 use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
+use super::directory::DirectoryScope;
 use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
 use super::ships::ShipsPanelEvent;
@@ -72,9 +73,17 @@ const MAX_GAME_LIMIT: usize = 999;
 const MIN_STATS_PANEL_WIDTH: Pixels = px(280.);
 const MIN_CHART_PANEL_WIDTH: Pixels = px(200.);
 
+/// Which games a [`StatsView`] shows.
+pub enum StatsScope {
+    /// The recorded session, oldest first.
+    Session { games: Vec<PerGameStat> },
+    /// Every replay in one directory.
+    Directory(Box<DirectoryScope>),
+}
+
 pub struct StatsView {
-    /// Every recorded game, oldest first. The filters narrow this per render.
-    games: Vec<PerGameStat>,
+    /// The filters narrow this scope's games per render.
+    scope: StatsScope,
     filters: StatsFilters,
     last_game_limit_count: usize,
     /// Match groups present in `games`, so the bar only offers modes that
@@ -150,7 +159,7 @@ impl StatsView {
     }
 
     fn save_charts(&mut self, cx: &mut Context<Self>) {
-        if !self.charts_persistence_enabled {
+        if !self.persists() || !self.charts_persistence_enabled {
             return;
         }
         let settings: Vec<ChartSettings> = self.charts.iter().map(|chart| chart.read(cx).settings()).collect();
@@ -202,6 +211,9 @@ impl StatsView {
     }
 
     fn keep_current_chart_layout(&mut self, cx: &mut Context<Self>) {
+        if !self.persists() {
+            return;
+        }
         let Some(pool) = crate::settings_store::pool(cx) else {
             self.charts_load_error = Some("The settings database is not available".into());
             self.charts_error_is_save = true;
@@ -263,6 +275,9 @@ impl StatsView {
     }
 
     fn schedule_dock_layout_save(&mut self, dock: Entity<DockArea>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.persists() {
+            return;
+        }
         let Some(pool) = crate::settings_store::pool(cx) else {
             self.charts_load_error = Some("The settings database is not available".into());
             self.charts_error_is_save = true;
@@ -518,6 +533,10 @@ impl StatsView {
         })
         .detach();
     }
+    /// The Stats tab over the recorded session.
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_scope(StatsScope::Session { games: Vec::new() }, window, cx)
+    }
 
     /// Restores `state` as a saved layout would be. Test-only.
     #[cfg(test)]
@@ -531,10 +550,14 @@ impl StatsView {
         &self.dock_area
     }
 
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn with_scope(scope: StatsScope, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
-        let (dock_area, skin) = DockSkin::dock_area("stats-dock", None, window, cx);
+        let dock_id = match scope {
+            StatsScope::Session { .. } => "stats-dock",
+            StatsScope::Directory(_) => "directory-stats-dock",
+        };
+        let (dock_area, skin) = DockSkin::dock_area(dock_id, None, window, cx);
         // Each panel's own header carries the collapse control
         // (`ui::dock_collapse_button`), and render adds the expand rails.
         skin.set_toggle_button_visible(false, cx);
@@ -581,8 +604,11 @@ impl StatsView {
         ];
         let chart_subscriptions = vec![cx.subscribe(&first_chart, Self::on_chart_settings_changed)];
 
+        let persists = matches!(scope, StatsScope::Session { .. });
+        ships.update(cx, |panel, cx| panel.set_clearable(persists, cx));
+
         Self {
-            games: Vec::new(),
+            scope,
             filters: StatsFilters::default(),
             last_game_limit_count: DEFAULT_GAME_LIMIT,
             available_modes: Vec::new(),
@@ -597,14 +623,15 @@ impl StatsView {
             personal_rating: None,
             focus_handle: cx.focus_handle(),
             charts_load_started: false,
-            charts_load_finished: false,
+            // Nothing is read back for a view that is not saved.
+            charts_load_finished: !persists,
             charts_restoring: false,
             charts_load_error: None,
             charts_error_is_save: false,
             chart_save_failed: false,
             dock_save_failed: false,
             charts_user_modified: false,
-            charts_persistence_enabled: false,
+            charts_persistence_enabled: !persists,
             settings_write_lock: Arc::new(futures::lock::Mutex::new(())),
             _chart_subscriptions: chart_subscriptions,
             _chart_save_task: None,
@@ -617,12 +644,14 @@ impl StatsView {
         }
     }
 
-    /// Adopts the session read from the config database.
-    pub fn apply_session(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
-        self.available_modes = all_match_groups(&data.games).into_iter().collect();
-        self.games = data.games;
-        self.filters = data.filters;
-        self.personal_rating = data.personal_rating;
+    /// Hands every panel the expected-values table the ratings are computed
+    /// against.
+    pub fn set_personal_rating(
+        &mut self,
+        table: Option<Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.personal_rating = table;
 
         let table = self.personal_rating.clone();
         self.overview.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
@@ -630,6 +659,49 @@ impl StatsView {
         for chart in &self.charts {
             chart.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
         }
+    }
+
+    /// The games the filters narrow, oldest first.
+    fn games(&self) -> &[PerGameStat] {
+        match &self.scope {
+            StatsScope::Session { games } => games,
+            StatsScope::Directory(scope) => scope.games(),
+        }
+    }
+
+    /// Whether the filters, charts and layout are saved and the games can be
+    /// cleared. Only the session's are: a directory view is not kept.
+    fn persists(&self) -> bool {
+        matches!(self.scope, StatsScope::Session { .. })
+    }
+
+    pub(super) fn directory_scope(&self) -> Option<&DirectoryScope> {
+        match &self.scope {
+            StatsScope::Session { .. } => None,
+            StatsScope::Directory(scope) => Some(scope),
+        }
+    }
+
+    pub(super) fn directory_scope_mut(&mut self) -> Option<&mut DirectoryScope> {
+        match &mut self.scope {
+            StatsScope::Session { .. } => None,
+            StatsScope::Directory(scope) => Some(scope),
+        }
+    }
+
+    /// Refreshes the mode list and every panel after a directory read folded
+    /// in more games.
+    pub(super) fn directory_games_changed(&mut self, cx: &mut Context<Self>) {
+        self.available_modes = all_match_groups(self.games()).into_iter().collect();
+        self.push_filtered(cx);
+    }
+
+    /// Adopts the session read from the config database.
+    pub fn apply_session(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
+        self.available_modes = all_match_groups(&data.games).into_iter().collect();
+        self.scope = StatsScope::Session { games: data.games };
+        self.filters = data.filters;
+        self.set_personal_rating(data.personal_rating, cx);
 
         if let GameLimit::Recent(count) = self.filters.limit {
             self.last_game_limit_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
@@ -653,14 +725,14 @@ impl StatsView {
         // The summary counts the session's own last N; the per-ship table counts
         // N per ship, which is the split the egui tab makes between its two
         // reads (`ui/stats_tab.rs:327` against `:406`).
-        let filtered = filter_games(&self.games, &self.filters);
-        let per_ship = filter_games_per_ship(&self.games, &self.filters);
+        let filtered = filter_games(self.games(), &self.filters);
+        let per_ship = filter_games_per_ship(self.games(), &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         self.ships.update(cx, |panel, cx| panel.set_games(&per_ship, cx));
         // A chart gets the whole session and the bar's answer: one that has
         // been taken off the bar narrows the session itself.
         for chart in &self.charts {
-            chart.update(cx, |panel, cx| panel.set_games(&self.games, &self.filters, cx));
+            chart.update(cx, |panel, cx| panel.set_games(self.games(), &self.filters, cx));
         }
         cx.notify();
     }
@@ -684,7 +756,7 @@ impl StatsView {
 
     /// Asks before forgetting every recorded game.
     fn confirm_clear_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.games.is_empty() {
+        if !self.persists() || self.games().is_empty() {
             return;
         }
         let view = cx.entity();
@@ -712,7 +784,9 @@ impl StatsView {
             let _ = this.update(cx, |this, cx| match cleared {
                 Ok(Ok(_)) => {
                     this.clear_error = None;
-                    this.games.clear();
+                    if let StatsScope::Session { games } = &mut this.scope {
+                        games.clear();
+                    }
                     this.available_modes.clear();
                     this.push_filtered(cx);
                 }
@@ -757,8 +831,10 @@ impl StatsView {
             let _ = this.update(cx, |this, cx| match cleared {
                 Ok(Ok(_)) => {
                     this.clear_error = None;
-                    this.games.retain(|game| game.ship_id != ship);
-                    this.available_modes = all_match_groups(&this.games).into_iter().collect();
+                    if let StatsScope::Session { games } = &mut this.scope {
+                        games.retain(|game| game.ship_id != ship);
+                    }
+                    this.available_modes = all_match_groups(this.games()).into_iter().collect();
                     this.push_filtered(cx);
                 }
                 Ok(Err(err)) => this.report_clear_failure(&err.to_string(), cx),
@@ -770,6 +846,9 @@ impl StatsView {
 
     /// Writes the filter bar's state to the rows `load::load_filters` reads.
     fn save_filters(&self, cx: &mut Context<Self>) {
+        if !self.persists() {
+            return;
+        }
         let (limit_enabled, count) = match self.filters.limit {
             GameLimit::All => (false, None),
             GameLimit::Recent(count) => (true, Some(count)),
@@ -805,7 +884,7 @@ impl StatsView {
         let chart = cx.new(|cx| StatsChartPanel::new(id, dock, window, cx));
         self._chart_subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
-        let games = self.games.clone();
+        let games = self.games().to_vec();
         let filters = self.filters.clone();
         chart.update(cx, |panel, cx| {
             // Before the session, so the narrowing is in place the first time
@@ -969,7 +1048,7 @@ impl Render for StatsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let accent = cx.theme().primary;
         // Read when the pool is ready; an early frame can precede its setup.
-        if !self.charts_load_started && self.charts_load_error.is_none() {
+        if self.persists() && !self.charts_load_started && self.charts_load_error.is_none() {
             self.load_charts(window, cx);
         }
         let border = cx.theme().border;
@@ -1140,15 +1219,18 @@ impl Render for StatsView {
             .when_some(self.clear_error.clone(), |this, reason| {
                 this.child(div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason))
             })
-            .child(
-                Button::new("stats-clear")
-                    .child(crate::icons::icon(crate::icons::ERASER))
-                    .label(t!("ui.stats.clear").into_owned())
-                    .compact()
-                    .disabled(self.games.is_empty())
-                    .tooltip(t!("ui.stats.clear_tooltip").to_string())
-                    .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear_session(window, cx))),
-            );
+            // A directory view only reads its replays; there is nothing to forget.
+            .when(self.persists(), |this| {
+                this.child(
+                    Button::new("stats-clear")
+                        .child(crate::icons::icon(crate::icons::ERASER))
+                        .label(t!("ui.stats.clear").into_owned())
+                        .compact()
+                        .disabled(self.games().is_empty())
+                        .tooltip(t!("ui.stats.clear_tooltip").to_string())
+                        .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear_session(window, cx))),
+                )
+            });
 
         let dock_bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
         let dock_bounds_for_layout = dock_bounds.clone();
@@ -1254,6 +1336,13 @@ impl Render for StatsView {
         let dock_layout = dock_layout.size_full().children(chart_splitter);
         let body = crate::ui::dock_with_expand_rails("stats-dock-rail", &self.dock_area, dock_layout, cx);
 
-        v_flex().id("stats-root").track_focus(&self.focus_handle).size_full().child(filter_bar).child(body)
+        let header = self.directory_scope().map(|scope| super::directory::directory_header(scope, cx.entity(), cx));
+        v_flex()
+            .id("stats-root")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .children(header)
+            .child(filter_bar)
+            .child(body)
     }
 }

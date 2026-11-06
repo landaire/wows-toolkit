@@ -4,6 +4,7 @@
 //! egui app; these modules read it out of the database and render it.
 
 pub mod chart_panel;
+pub mod directory;
 pub mod load;
 pub mod overview;
 pub mod plot;

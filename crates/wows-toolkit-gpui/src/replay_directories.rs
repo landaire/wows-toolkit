@@ -32,7 +32,13 @@ impl App {
     pub(super) fn tab_order(&self) -> Vec<AppTab> {
         let mut tabs = vec![AppTab::ReplayInspector];
         tabs.extend(self.replay_directories.iter().map(|tab| AppTab::ReplayDirectory(tab.inspector.entity_id())));
-        tabs.extend(AppTab::ALL.into_iter().skip(1));
+        for tab in AppTab::ALL.into_iter().skip(1) {
+            tabs.push(tab);
+            // A directory's stats sit beside the session's.
+            if tab == AppTab::Stats {
+                tabs.extend(self.directory_stats_tabs());
+            }
+        }
         tabs
     }
 
@@ -188,6 +194,13 @@ impl App {
                     this.open_tactics_board(window, cx);
                 },
             ),
+            cx.subscribe_in(
+                &inspector,
+                window,
+                |this, _view, event: &crate::stats::directory::DirectoryStatsRequested, window, cx| {
+                    this.open_directory_stats(event.0.clone(), window, cx);
+                },
+            ),
         ];
         inspector.update(cx, |view, cx| {
             view.configure_directory(context, locale, window, cx);
@@ -276,7 +289,7 @@ impl App {
     }
 }
 
-fn shortened_path(root: &std::path::Path) -> String {
+pub(super) fn shortened_path(root: &std::path::Path) -> String {
     let parts: Vec<_> = root.components().collect();
     let mut result = PathBuf::new();
     for (index, component) in parts.iter().enumerate() {

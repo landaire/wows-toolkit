@@ -1,5 +1,7 @@
 #[path = "replay_directories.rs"]
 mod replay_directories;
+#[path = "directory_stats.rs"]
+mod directory_stats;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -369,6 +371,8 @@ pub enum AppTab {
     ReplayInspector,
     ReplayDirectory(EntityId),
     Stats,
+    /// Stats over the replays in one directory, keyed by its view.
+    DirectoryStats(EntityId),
     PlayerTracker,
     Search,
     ArmorViewer,
@@ -398,7 +402,7 @@ impl AppTab {
         match self {
             AppTab::ReplayInspector => "ui.tabs.replay_parser",
             AppTab::ReplayDirectory(_) => "ui.tabs.replay_directory",
-            AppTab::Stats => "ui.tabs.stats",
+            AppTab::Stats | AppTab::DirectoryStats(_) => "ui.tabs.stats",
             AppTab::PlayerTracker => "ui.tabs.player_tracker",
             AppTab::Search => "ui.tabs.search",
             AppTab::ArmorViewer => "ui.tabs.armor_viewer",
@@ -419,7 +423,7 @@ impl AppTab {
         match self {
             AppTab::ReplayInspector => crate::icons::MAGNIFYING_GLASS,
             AppTab::ReplayDirectory(_) => crate::icons::FOLDER_OPEN,
-            AppTab::Stats => crate::icons::CHART_BAR,
+            AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::CHART_BAR,
             AppTab::PlayerTracker => crate::icons::DETECTIVE,
             AppTab::Search => crate::icons::MAGNIFYING_GLASS,
             AppTab::ArmorViewer => crate::icons::SHIELD,
@@ -505,6 +509,7 @@ pub struct App {
     replay_inspector: Entity<ReplayInspectorView>,
     armor_owner: Option<WeakEntity<ReplayInspectorView>>,
     replay_directories: Vec<replay_directories::DirectoryTab>,
+    directory_stats: Vec<directory_stats::DirectoryStatsTab>,
     directories_loaded: bool,
     directories_restoring: bool,
     directory_save_lock: Arc<futures::lock::Mutex<()>>,
@@ -793,6 +798,7 @@ impl App {
             replay_inspector,
             armor_owner: None,
             replay_directories: Vec::new(),
+            directory_stats: Vec::new(),
             directories_loaded: false,
             directories_restoring: false,
             directory_save_lock: Arc::new(futures::lock::Mutex::new(())),
@@ -1391,6 +1397,7 @@ impl App {
             tab.inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
         }
         self.stats.update(cx, |view, cx| view.set_locale(cx));
+        self.set_directory_stats_locale(cx);
         // Placeholders are stored on their input states, so the ones the
         // reader sees are rewritten rather than left in the old language.
         self.refresh_placeholders(window, cx);
@@ -3930,7 +3937,10 @@ impl Render for App {
                                 .shadow(vec![theme::phosphor_glow()]),
                         )
                     })
-                    .child(self.directory_tab_label(*t, attention, selected, cx))
+                    .child(match *t {
+                        AppTab::DirectoryStats(id) => self.directory_stats_tab_label(id, selected, cx),
+                        _ => self.directory_tab_label(*t, attention, selected, cx),
+                    })
             }))
             .on_click(cx.listener(move |this, ix: &usize, window, cx| {
                 let Some(tab) = tab_order.get(*ix).copied() else { return };
@@ -4019,6 +4029,10 @@ impl Render for App {
                 .unwrap_or_else(|| self.replay_inspector.clone().into_any_element()),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
+            AppTab::DirectoryStats(id) => self
+                .directory_stats_view(id)
+                .map(|view| view.into_any_element())
+                .unwrap_or_else(|| self.stats.clone().into_any_element()),
             AppTab::PlayerTracker => self.player_tracker.clone().into_any_element(),
             AppTab::Search => self.search.clone().into_any_element(),
             AppTab::Unpacker => self.unpacker.clone().into_any_element(),
