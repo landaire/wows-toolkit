@@ -16846,6 +16846,42 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "graviola-0.4.4.crate",
+    sha256 = "a1a15622a211648cbf64f485e0369791466d133eb6578fd99e4a61230c88a6aa",
+    size_bytes = 1166876,
+    strip_prefix = "graviola-0.4.4",
+    urls = ["https://static.crates.io/crates/graviola/0.4.4/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "graviola-0.4",
+    srcs = [":graviola-0.4.4.crate"],
+    crate = "graviola",
+    crate_root = "graviola-0.4.4.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "graviola",
+        "CARGO_MANIFEST_DIR": "graviola-0.4.4.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "graviola is a modern, fast cryptography library",
+        "CARGO_PKG_NAME": "graviola",
+        "CARGO_PKG_REPOSITORY": "https://github.com/ctz/graviola/",
+        "CARGO_PKG_VERSION": "0.4.4",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":cfg-if-1",
+        ":getrandom-0.4",
+    ],
+)
+
+http_archive(
     name = "group-0.13.0.crate",
     sha256 = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63",
     size_bytes = 16526,
@@ -38028,6 +38064,48 @@ cargo.rust_library(
         ":rustls-webpki-0.103",
         ":subtle-2",
         ":zeroize-1",
+    ],
+)
+
+alias(
+    name = "rustls-graviola",
+    actual = ":rustls-graviola-0.4",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "rustls-graviola-0.4.0.crate",
+    sha256 = "bf5d0a370be690f7f1aa4e1b912fde3f5f9a5c53285062fd2d6ac1a52ab3e883",
+    size_bytes = 43394,
+    strip_prefix = "rustls-graviola-0.4.0",
+    urls = ["https://static.crates.io/crates/rustls-graviola/0.4.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "rustls-graviola-0.4",
+    srcs = [":rustls-graviola-0.4.0.crate"],
+    crate = "rustls_graviola",
+    crate_root = "rustls-graviola-0.4.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "rustls_graviola",
+        "CARGO_MANIFEST_DIR": "rustls-graviola-0.4.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "graviola is a modern, fast cryptography library",
+        "CARGO_PKG_NAME": "rustls-graviola",
+        "CARGO_PKG_REPOSITORY": "https://github.com/ctz/graviola/",
+        "CARGO_PKG_VERSION": "0.4.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":graviola-0.4",
+        ":rustls-0.23",
     ],
 )
 

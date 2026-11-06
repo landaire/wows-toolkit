@@ -42,6 +42,7 @@ workspace_binary(
 
 WDM_TEST_DEPS = [
     "//third-party/rust:futures",
+    "//third-party/rust:rustls-graviola",
     "//third-party/rust:tempfile",
 ]
 

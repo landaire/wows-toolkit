@@ -3,6 +3,10 @@
 //! Files are fetched as raw content from GitHub. Content-addressed objects that
 //! already exist locally are skipped, so downloading a build only transfers the
 //! assets it does not already share with builds already in the cache.
+//!
+//! reqwest's rustls backend is enabled without a crypto provider. Install a
+//! process default (`CryptoProvider::install_default`) before building the
+//! `reqwest::Client` passed to these functions.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -883,6 +887,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        // Fails only when a provider is already installed.
+        let _ = rustls_graviola::default_provider().install_default();
         let client = reqwest::Client::builder().user_agent("wows-data-mgr-test").build().unwrap();
 
         let build = runtime

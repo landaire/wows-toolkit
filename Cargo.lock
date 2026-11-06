@@ -1441,6 +1441,7 @@ dependencies = [
  "postage",
  "proptest",
  "rust-crypto",
+ "rustls-graviola",
  "sevenz-rust2",
  "tar",
 ]
@@ -5620,6 +5621,16 @@ checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
 dependencies = [
  "arraydeque",
  "smallvec",
+]
+
+[[package]]
+name = "graviola"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a15622a211648cbf64f485e0369791466d133eb6578fd99e4a61230c88a6aa"
+dependencies = [
+ "cfg-if",
+ "getrandom 0.4.3",
 ]
 
 [[package]]
@@ -11321,6 +11332,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-graviola"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf5d0a370be690f7f1aa4e1b912fde3f5f9a5c53285062fd2d6ac1a52ab3e883"
+dependencies = [
+ "graviola",
+ "rustls",
+]
+
+[[package]]
 name = "rustls-native-certs"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15595,6 +15616,7 @@ dependencies = [
  "octocrab",
  "reqwest 0.12.28",
  "rootcause",
+ "rustls-graviola",
  "ruzstd",
  "serde",
  "serde_json",
