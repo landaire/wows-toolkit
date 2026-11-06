@@ -165,7 +165,7 @@ mod tests {
     /// the shape it is asked for.
     #[test]
     fn a_zoomed_window_takes_the_width_it_is_offered() {
-        let wide = MapViewport::new(4.0, (0.0, 0.0)).widened(16.0 / 9.0);
+        let wide = MapViewport::new(4.0, Vec2::from(0.0, 0.0)).widened(16.0 / 9.0);
         assert!((wide.widen() - 16.0 / 9.0).abs() < 1e-4, "{}", wide.widen());
         assert!((wide.drawn_width() - MINIMAP_SIZE as f32 * 16.0 / 9.0).abs() < 1e-2);
     }
