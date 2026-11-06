@@ -59,7 +59,11 @@ fn penetration_search_without_ammo_reports_every_method() {
         .penetration_search(&PenetrationSearchArgs { thickness_mm: Some(Millimeters::new(57.0)), ..Default::default() })
         .expect("thickness is valid");
 
-    let groups: Vec<_> = search.groups.iter().map(|group| (group.method, group.total)).collect();
+    let groups: Vec<_> = search
+        .groups
+        .iter()
+        .map(|group| json!({ "method": group.method, "qualifying": group.qualifying, "considered": group.considered }))
+        .collect();
     insta::assert_yaml_snapshot!(groups);
 }
 

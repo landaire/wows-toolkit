@@ -2,9 +2,40 @@
 source: crates/wows-query/tests/game_data.rs
 expression: groups
 ---
-- - he_penetration
-  - 246
-- - sap_penetration
-  - 15
-- - ap_overmatch
-  - 0
+- method: he_penetration
+  qualifying:
+    total: 246
+    by_class:
+      cruiser: 21
+      battleship: 225
+  considered:
+    total: 795
+    by_class:
+      destroyer: 224
+      cruiser: 317
+      battleship: 251
+      submarine: 3
+- method: sap_penetration
+  qualifying:
+    total: 15
+    by_class:
+      cruiser: 2
+      battleship: 13
+  considered:
+    total: 66
+    by_class:
+      destroyer: 19
+      cruiser: 21
+      battleship: 14
+      submarine: 12
+- method: ap_overmatch
+  qualifying:
+    total: 0
+    by_class: {}
+  considered:
+    total: 804
+    by_class:
+      destroyer: 202
+      cruiser: 334
+      battleship: 267
+      submarine: 1

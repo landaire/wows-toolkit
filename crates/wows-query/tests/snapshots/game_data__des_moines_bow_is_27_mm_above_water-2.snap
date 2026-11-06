@@ -15,9 +15,17 @@ ifhe: false
 rule: AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. HE and SAP never overmatch.
 groups:
   - method: ap_overmatch
-    total: 110
-    by_class:
-      battleship: 110
+    considered:
+      total: 478
+      by_class:
+        destroyer: 116
+        cruiser: 194
+        battleship: 167
+        submarine: 1
+    qualifying:
+      total: 110
+      by_class:
+        battleship: 110
     ships:
       - "T11 Affondatore (battleship, Italy): main 406 mm AP"
       - "T11 Devastation (battleship, United_Kingdom): main 419 mm AP"

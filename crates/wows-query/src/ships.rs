@@ -113,6 +113,25 @@ impl ShipClass {
         [Self::Destroyer, Self::Cruiser, Self::Battleship, Self::AircraftCarrier, Self::Submarine];
 }
 
+/// How many ships a list holds, in total and per class.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ShipCounts {
+    pub total: usize,
+    pub by_class: BTreeMap<ShipClass, usize>,
+}
+
+impl ShipCounts {
+    pub(crate) fn from_ships<'a>(ships: impl IntoIterator<Item = &'a Ship>) -> Self {
+        let mut counts = Self::default();
+        for ship in ships {
+            counts.total += 1;
+            *counts.by_class.entry(ship.class).or_default() += 1;
+        }
+
+        counts
+    }
+}
+
 /// A playable ship indexed by its English name.
 pub(crate) struct Ship {
     pub(crate) param: Rc<Param>,

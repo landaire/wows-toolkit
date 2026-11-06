@@ -99,7 +99,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "penetration_search",
-        description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. With a target ship and no tiers, searches the target's tier +-2.",
+        description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. Each group gives qualifying (ships that defeat the plate, listed in ships) and considered (ships under the same filters that fire that ammo), each as total and by_class. With a target ship and no tiers, searches the target's tier +-2.",
         schema: input_schema::<PenetrationSearchArgs>,
         call: |game, arguments| run(arguments, |args| game.penetration_search(args)),
     },

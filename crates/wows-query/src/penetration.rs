@@ -14,6 +14,7 @@ use crate::shells::Battery;
 use crate::shells::Shell;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
+use crate::ships::ShipCounts;
 use crate::ships::ShipFilter;
 use crate::ships::Tier;
 use crate::ships::TierRange;
@@ -122,12 +123,17 @@ pub struct PenetrationSearchOutput {
     pub groups: Vec<PenetrationGroup>,
 }
 
-/// Ships that defeat the plate by one method.
+/// Ships that defeat the plate by one method, out of those that could.
 #[derive(Debug, Clone, Serialize)]
 pub struct PenetrationGroup {
     pub method: DefeatMethod,
-    pub total: usize,
-    pub by_class: BTreeMap<ShipClass, usize>,
+
+    /// Ships matching the filters whose chosen battery fires this method's
+    /// ammo with a known penetration or caliber.
+    pub considered: ShipCounts,
+
+    /// Ships among those considered that defeat the plate; listed in `ships`.
+    pub qualifying: ShipCounts,
 
     /// "T10 Gearing (destroyer, USA): main 127 mm HE, 21 mm pen", best shell per ship.
     pub ships: Vec<String>,
@@ -175,6 +181,7 @@ impl GameData {
             None => vec![DefeatMethod::HePenetration, DefeatMethod::SapPenetration, DefeatMethod::ApOvermatch],
         };
 
+        let mut considered: BTreeMap<DefeatMethod, Vec<&Ship>> = BTreeMap::new();
         let mut hits: BTreeMap<DefeatMethod, Vec<(&Ship, Shell)>> = BTreeMap::new();
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
@@ -182,6 +189,10 @@ impl GameData {
             let shells: Vec<Shell> =
                 self.shells(ship).into_iter().filter(|shell| battery.includes(shell.battery)).collect();
             for &method in &methods {
+                if shells.iter().any(|shell| rating(shell, method, ifhe).is_some()) {
+                    considered.entry(method).or_default().push(ship);
+                }
+
                 let best = shells
                     .iter()
                     .filter_map(|shell| strength(shell, method, thickness, ifhe).map(|strength| (shell, strength)))
@@ -195,8 +206,9 @@ impl GameData {
         let groups = methods
             .iter()
             .map(|method| {
+                let candidates = considered.remove(method).unwrap_or_default();
                 let found = hits.remove(method).unwrap_or_default();
-                group(*method, &found, ifhe)
+                group(*method, &candidates, &found, ifhe)
             })
             .collect();
 
@@ -213,34 +225,48 @@ impl GameData {
     }
 }
 
-/// How strongly `shell` defeats `thickness` by `method`, for choosing the
-/// best shell; `None` when it does not.
-fn strength(shell: &Shell, method: DefeatMethod, thickness: Millimeters, ifhe: bool) -> Option<Millimeters> {
+/// What `method` compares against a plate for `shell`: caliber for AP
+/// overmatch, penetration for HE and SAP. `None` when the shell is of another
+/// ammo or the value is not known.
+fn rating(shell: &Shell, method: DefeatMethod, ifhe: bool) -> Option<Millimeters> {
     match (method, shell.ammo) {
-        (DefeatMethod::ApOvermatch, Ammo::Ap) => is_overmatch(shell.caliber_mm, thickness).then_some(shell.caliber_mm),
+        (DefeatMethod::ApOvermatch, Ammo::Ap) => Some(shell.caliber_mm),
         (DefeatMethod::HePenetration, Ammo::He) => {
-            let penetration = if ifhe { shell.ifhe_penetration_mm } else { shell.penetration_mm }?;
-            (penetration >= thickness).then_some(penetration)
+            if ifhe {
+                shell.ifhe_penetration_mm
+            } else {
+                shell.penetration_mm
+            }
         }
-        (DefeatMethod::SapPenetration, Ammo::Sap) => {
-            let penetration = shell.penetration_mm?;
-            (penetration >= thickness).then_some(penetration)
-        }
+        (DefeatMethod::SapPenetration, Ammo::Sap) => shell.penetration_mm,
         _ => None,
     }
 }
 
-fn group(method: DefeatMethod, hits: &[(&Ship, Shell)], ifhe: bool) -> PenetrationGroup {
-    let mut by_class: BTreeMap<ShipClass, usize> = BTreeMap::new();
-    for (ship, _) in hits {
-        *by_class.entry(ship.class).or_default() += 1;
-    }
+/// How strongly `shell` defeats `thickness` by `method`, for choosing the
+/// best shell; `None` when it does not.
+fn strength(shell: &Shell, method: DefeatMethod, thickness: Millimeters, ifhe: bool) -> Option<Millimeters> {
+    let rating = rating(shell, method, ifhe)?;
+    let defeats = match method {
+        DefeatMethod::ApOvermatch => is_overmatch(shell.caliber_mm, thickness),
+        DefeatMethod::HePenetration | DefeatMethod::SapPenetration => rating >= thickness,
+    };
 
+    defeats.then_some(rating)
+}
+
+fn group(method: DefeatMethod, considered: &[&Ship], hits: &[(&Ship, Shell)], ifhe: bool) -> PenetrationGroup {
     let ships: Vec<String> =
         hits.iter().take(GROUP_LIMIT).map(|(ship, shell)| describe_hit(ship, shell, ifhe)).collect();
     let omitted = (hits.len() > ships.len()).then(|| hits.len() - ships.len());
 
-    PenetrationGroup { method, total: hits.len(), by_class, ships, omitted }
+    PenetrationGroup {
+        method,
+        considered: ShipCounts::from_ships(considered.iter().copied()),
+        qualifying: ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship)),
+        ships,
+        omitted,
+    }
 }
 
 fn describe_hit(ship: &Ship, shell: &Shell, ifhe: bool) -> String {
