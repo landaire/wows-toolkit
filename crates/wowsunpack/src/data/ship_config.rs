@@ -175,12 +175,11 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     // Bits 0 and 1 enable camouflage and signal auto-buy. Higher bits select
     // the purchase currency for each exterior slot.
     let _exterior_auto_buy_info = take_u32(i);
-    // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs.
+    // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs. Skipped by
+    // slicing because a blob in an unknown layout can put a value near u32::MAX here.
     if let Some(color_scheme_count) = take_u32(i) {
-        for _ in 0..color_scheme_count {
-            take_u32(i);
-            take_u32(i);
-        }
+        let len = (color_scheme_count as usize).saturating_mul(8);
+        *i = i.get(len..).unwrap_or_default();
     }
 
     // ExteriorStateKeeper.KillTagState: count + (exterior_id, enabled) pairs.
@@ -583,6 +582,20 @@ mod tests {
             assert_eq!(config.exterior_kill_tags(), None);
             assert!(config.abilities().is_empty());
         }
+    }
+
+    #[test]
+    fn parse_oversized_color_scheme_count_consumes_rest() {
+        let mut blob = ShipConfigBlobBuilder::new(1000).units([10]).with_v13_2_field().build();
+        // Header (3) + unit section (2) + v13.2 field + two empty sections + auto-buy.
+        const COLOR_SCHEME_COUNT_OFFSET: usize = 9 * 4;
+        blob[COLOR_SCHEME_COUNT_OFFSET..COLOR_SCHEME_COUNT_OFFSET + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let config = parse_ship_config(&blob, &version_15_1()).unwrap();
+        assert_eq!(config.ship_params_id().raw(), 1000);
+        assert!(config.abilities().is_empty());
+        assert_eq!(config.naval_flag(), None);
+        assert_eq!(config.last_boarded_crew(), None);
     }
 
     #[test]
