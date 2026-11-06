@@ -1,18 +1,29 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::Serializer;
 use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_consumable;
+use wowsunpack::game_params::ttx::consumables::EffectiveConsumable;
 use wowsunpack::game_params::ttx::consumables::effective_consumable;
 use wowsunpack::game_params::ttx::model::AmmoCount;
+use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::AbilityCategory;
 use wowsunpack::game_params::types::GameParamProvider;
 
+use crate::builds::Better;
+use crate::builds::BuildStat;
+use crate::builds::Charges;
+use crate::builds::Exclusion;
+use crate::builds::Extract;
+use crate::builds::Item;
+use crate::builds::Outcome;
+use crate::builds::Planner;
+use crate::builds::StatPlan;
+use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AppliedSkill;
@@ -23,6 +34,7 @@ use crate::names::Lookup;
 use crate::names::NameIndex;
 use crate::names::NameKind;
 use crate::names::ResolutionMethod;
+use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
 use crate::text::clean;
 
@@ -40,6 +52,9 @@ pub(crate) const CONSUMABLE_ALIASES: &[(&str, &str)] = &[
     ("Sub Surveillance", "submarineLocator"),
 ];
 
+/// Length of a Random Battle, for whether an extra charge can be used.
+const MATCH: Seconds = Seconds::new(1200.0);
+
 /// Arguments for `ship_consumables`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -50,7 +65,7 @@ pub struct ShipConsumablesArgs {
     /// Only this consumable, e.g. "radar", "hydro", "Repair Party", "DCP".
     pub consumable: Option<String>,
 
-    /// Captain skills by name or abbreviation, e.g. ["SI"], applied to the consumable stats.
+    /// Captain skills by name or abbreviation, e.g. ["SI"], applied to the consumable stats. Without skills and upgrades, each consumable lists its base and best-fit build values.
     pub skills: Option<Vec<String>>,
 
     /// Upgrades by name, e.g. ["Engine Boost Modification 1"], applied to the consumable stats.
@@ -100,6 +115,7 @@ pub struct ConsumableStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preparation_s: Option<Seconds>,
 
+    /// No skill or upgrade changes it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ship_detection_m: Option<Meters>,
 
@@ -122,29 +138,31 @@ pub struct ConsumableStats {
     /// Usage pool of time-based consumables.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity_s: Option<Seconds>,
+
+    /// Base and best-fit build values, given when no skills or upgrades are.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builds: Option<ConsumableBuilds>,
 }
 
-/// Number of charges, or unlimited.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Charges {
-    Limited(u32),
-    Unlimited,
-}
+/// Consumable stats on the best-fit build: consumable upgrades and captain
+/// skills such as Superintendent and Consumable Enhancements.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConsumableBuilds {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_time: Option<BuildStat<Seconds>>,
 
-impl Serialize for Charges {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Limited(count) => serializer.serialize_u32(*count),
-            Self::Unlimited => serializer.serialize_str("unlimited"),
-        }
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charges: Option<BuildStat<Charges>>,
+
+    pub reload: BuildStat<Seconds>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smoke_lifetime: Option<BuildStat<Seconds>>,
 }
 
 impl GameData {
-    /// The consumables a ship can mount, with skills and upgrades applied.
+    /// The consumables a ship can mount, with skills and upgrades applied or
+    /// with their best-fit build values.
     pub fn ship_consumables(&self, args: &ShipConsumablesArgs) -> Result<ShipConsumables, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
@@ -161,6 +179,7 @@ impl GameData {
         let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let effects = self.effective_modifiers(ship, &loadout)?;
         let bundle = effects.modifiers.bundle();
+        let planner = loadout.is_empty().then(|| Planner::new(self, ship));
 
         let mut slots = Vec::new();
         let ability_slots = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default();
@@ -178,7 +197,11 @@ impl GameData {
                     continue;
                 }
                 let name = translate_consumable(ability, self.provider()).map(|name| clean(&name));
-                options.push(consumable_stats(name, category, bundle));
+                let mut stats = consumable_stats(name, category, bundle);
+                if let Some(planner) = &planner {
+                    stats.builds = Some(consumable_builds(planner, &stats.name, category)?);
+                }
+                options.push(stats);
             }
             if !options.is_empty() {
                 slots.push(ConsumableSlot { slot: index + 1, options });
@@ -220,21 +243,95 @@ impl GameData {
     }
 }
 
-fn consumable_stats(
-    name: Option<String>,
+/// Action time, charges, reload and smoke lifetime of one consumable on its
+/// best-fit build.
+fn consumable_builds(
+    planner: &Planner<'_>,
+    name: &str,
     category: &AbilityCategory,
-    bundle: &wowsunpack::game_params::ttx::modifiers::ModifierBundle,
-) -> ConsumableStats {
+) -> Result<ConsumableBuilds, QueryError> {
+    let effective = |bundle: &ModifierBundle| effective_consumable(category, bundle).0;
+    let action_time = planner.plan(&consumable_plan(name, "action time", Better::Higher, &|outcome| {
+        effective(&outcome.bundle).work_time.map(|time| Seconds::new(round(time.value())))
+    }))?;
+    let reload = planner
+        .plan(&consumable_plan(name, "reload", Better::Lower, &|outcome| {
+            Some(Seconds::new(round(effective(&outcome.bundle).reload_time.value())))
+        }))?
+        .expect("every consumable has a reload");
+    let smoke_lifetime = planner.plan(&consumable_plan(name, "smoke lifetime", Better::Higher, &|outcome| {
+        effective(&outcome.bundle).smoke_lifetime.map(|time| Seconds::new(round(time.value())))
+    }))?;
+
+    let exclude = |planner: &Planner<'_>, singles: &[(Item, Charges)]| unusable_charges(planner, category, singles);
+    let extract = |outcome: &Outcome| Some(charges(effective(&outcome.bundle).charges));
+    let charge_plan =
+        StatPlan { exclude: Some(&exclude), ..consumable_plan(name, "charges", Better::Higher, &extract) };
+    let charges = planner.plan(&charge_plan)?;
+
+    Ok(ConsumableBuilds { action_time, charges, reload, smoke_lifetime })
+}
+
+fn consumable_plan<'f, V>(name: &str, stat: &str, better: Better, extract: Extract<'f, V>) -> StatPlan<'f, V> {
+    StatPlan::new(format!("{name} {stat}"), better, extract).for_consumable()
+}
+
+/// Extra charges the best-fit build leaves out because using every charge
+/// back to back would outlast a match (shipbuilds `unburnable_consumable_charge`).
+/// A cruiser's or destroyer's Repair Party is used as damage comes in, not
+/// back to back, so its charges always count.
+fn unusable_charges(
+    planner: &Planner<'_>,
+    category: &AbilityCategory,
+    singles: &[(Item, Charges)],
+) -> Result<Vec<Exclusion>, QueryError> {
+    let reactive = category.consumable_type_raw() == "regenCrew"
+        && matches!(planner.ship().class, ShipClass::Cruiser | ShipClass::Destroyer);
+    if reactive {
+        return Ok(Vec::new());
+    }
+
+    let mut exclusions = Vec::new();
+    for (item, total) in singles {
+        let Charges::Limited(count) = *total else {
+            continue;
+        };
+        let outcome = planner.with_items(&[*item])?;
+        let EffectiveConsumable { work_time, reload_time, .. } = effective_consumable(category, &outcome.bundle).0;
+        let cycle = work_time.map_or(0.0, |time| time.value()) + reload_time.value();
+        // Charge counts are far below f32's exact integer range.
+        #[allow(clippy::cast_precision_loss)]
+        let needed = count as f32 * cycle;
+        if needed > MATCH.value() {
+            exclusions.push(Exclusion {
+                item: *item,
+                note: format!(
+                    "{count} charges of {} s action and reload take {} s, longer than a {} s match: the extra charge cannot be used",
+                    round(cycle),
+                    round(needed),
+                    MATCH.value()
+                ),
+            });
+        }
+    }
+    Ok(exclusions)
+}
+
+fn charges(count: AmmoCount) -> Charges {
+    match count {
+        AmmoCount::Finite(count) => Charges::Limited(count),
+        AmmoCount::Infinite => Charges::Unlimited,
+    }
+}
+
+fn consumable_stats(name: Option<String>, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {
     let (stats, _) = effective_consumable(category, bundle);
     let kind = category.consumable_type_raw().to_owned();
 
     ConsumableStats {
         name: name.unwrap_or_else(|| kind.clone()),
         kind,
-        charges: match stats.charges {
-            AmmoCount::Finite(count) => Charges::Limited(count),
-            AmmoCount::Infinite => Charges::Unlimited,
-        },
+        charges: charges(stats.charges),
         reload_s: Seconds::new(round(stats.reload_time.value())),
         action_time_s: stats.work_time.map(|time| Seconds::new(round(time.value()))),
         preparation_s: Some(stats.preparation_time.value())
@@ -248,12 +345,8 @@ fn consumable_stats(
         smoke_lifetime_s: stats.smoke_lifetime.map(|time| Seconds::new(round(time.value()))),
         fighters: stats.fighters_count,
         capacity_s: stats.max_capacity.map(|capacity| Seconds::new(round(capacity))),
+        builds: None,
     }
-}
-
-/// Two decimals, enough for every port value.
-fn round(value: f32) -> f32 {
-    (value * 100.0).round() / 100.0
 }
 
 /// English consumable names, GameParams names and types, and

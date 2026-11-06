@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 use wows_core::units::Percent;
 use wowsunpack::game_params::ttx::EffectActivation;
+use wowsunpack::game_params::ttx::EffectId;
 use wowsunpack::game_params::ttx::EffectKind;
 use wowsunpack::game_params::ttx::EffectiveModifiers;
 use wowsunpack::game_params::ttx::EffectsState;
@@ -10,6 +11,7 @@ use wowsunpack::game_params::ttx::HealthFraction;
 use wowsunpack::game_params::ttx::Loadout;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::CrewSkillModifier;
+use wowsunpack::game_params::types::CrewSkillName;
 
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -43,13 +45,23 @@ pub struct AppliedUpgrade {
     pub slot: u8,
 }
 
+/// Conditional skill triggers counted as met.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Triggers {
+    Unmet,
+    All,
+
+    /// Only the triggers of this skill, by internal name.
+    Skill(CrewSkillName),
+}
+
 /// A loadout resolved against one ship.
 pub(crate) struct ResolvedLoadout {
     pub(crate) skills: Vec<CrewSkill>,
     pub(crate) applied_skills: Vec<AppliedSkill>,
     pub(crate) modernizations: Vec<(String, Vec<CrewSkillModifier>)>,
     pub(crate) applied_upgrades: Vec<AppliedUpgrade>,
-    pub(crate) conditions_met: bool,
+    pub(crate) triggers: Triggers,
     pub(crate) hp_percent: Option<Percent>,
 
     /// Skill internal names and upgrade param names to English names, for
@@ -126,7 +138,7 @@ impl GameData {
             applied_skills,
             modernizations,
             applied_upgrades,
-            conditions_met: request.conditions_met,
+            triggers: if request.conditions_met { Triggers::All } else { Triggers::Unmet },
             hp_percent: request.hp_percent,
             labels,
         })
@@ -145,12 +157,15 @@ impl GameData {
         let mut state = EffectsState::default();
         let mut active_conditions = Vec::new();
         for effect in effects.iter() {
+            let met = match &loadout.triggers {
+                Triggers::Unmet => false,
+                Triggers::All => true,
+                Triggers::Skill(skill) => matches!(effect.id(), EffectId::Skill(name) if name == skill),
+            };
             let activation = match effect.kind() {
-                EffectKind::Binary { .. } if loadout.conditions_met => Some(EffectActivation::On),
-                EffectKind::StackingPerCount { .. } if loadout.conditions_met => {
-                    Some(EffectActivation::Stacks(u32::MAX))
-                }
-                EffectKind::Heat { heat_interpolator } if loadout.conditions_met => {
+                EffectKind::Binary { .. } if met => Some(EffectActivation::On),
+                EffectKind::StackingPerCount { .. } if met => Some(EffectActivation::Stacks(u32::MAX)),
+                EffectKind::Heat { heat_interpolator } if met => {
                     Some(EffectActivation::Heat(heat_interpolator.max_x()))
                 }
                 EffectKind::HealthScaledReload | EffectKind::InnateAdrenaline { .. } => loadout
@@ -162,7 +177,7 @@ impl GameData {
                 continue;
             };
 
-            if let wowsunpack::game_params::ttx::EffectId::Skill(name) = effect.id()
+            if let EffectId::Skill(name) = effect.id()
                 && matches!(
                     effect.kind(),
                     EffectKind::Binary { .. } | EffectKind::StackingPerCount { .. } | EffectKind::Heat { .. }
@@ -188,7 +203,7 @@ impl GameData {
             applied_skills: Vec::new(),
             modernizations: Vec::new(),
             applied_upgrades: Vec::new(),
-            conditions_met: false,
+            triggers: Triggers::Unmet,
             hp_percent: None,
             labels: HashMap::new(),
         }

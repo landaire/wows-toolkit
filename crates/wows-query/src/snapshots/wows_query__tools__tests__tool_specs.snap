@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/src/tools.rs
-assertion_line: 342
+assertion_line: 348
 expression: specs()
 ---
 - name: find_ships
@@ -76,7 +76,18 @@ expression: specs()
     required:
       - ship
 - name: ship_shells
-  description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration with and without Inertia Fuse for HE Shells, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance."
+  description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance. Each HE/SAP shell's penetration carries builds: base, best (the best-fit build, which takes Inertia Fuse for HE Shells only when it lifts the shell over its tier's armor threshold) and alternatives such as \"with Inertia Fuse for HE Shells\" with a note."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+    required:
+      - ship
+- name: ship_concealment
+  description: "Detectability of one ship by ships, by aircraft, after firing the main battery, and after firing the main battery from smoke, each with builds: base (stock), best (best-fit modules, skills such as Concealment Expert and upgrades, listed in assumed) and alternatives (e.g. without Concealment Expert). in_smoke_evidence explains, with values per skill and upgrade, why concealment skills and upgrades do not change the in-smoke value."
   input_schema:
     type: object
     additionalProperties: false
@@ -216,7 +227,7 @@ expression: specs()
     required:
       - ship
 - name: ship_stats
-  description: "Port stat card of one ship with stock modules. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
+  description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range and torpedo reload with builds: base, best-fit build (assumed) and alternatives. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
   input_schema:
     type: object
     additionalProperties: false
@@ -413,7 +424,7 @@ expression: specs()
     required:
       - ship
 - name: ship_consumables
-  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\"."
+  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\". With skills and upgrades, applies them instead."
   input_schema:
     type: object
     additionalProperties: false
@@ -428,7 +439,7 @@ expression: specs()
         type: array
         items:
           type: string
-        description: "Captain skills by name or abbreviation, e.g. [\"SI\"], applied to the consumable stats."
+        description: "Captain skills by name or abbreviation, e.g. [\"SI\"], applied to the consumable stats. Without skills and upgrades, each consumable lists its base and best-fit build values."
       upgrades:
         type: array
         items:

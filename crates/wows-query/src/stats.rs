@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::Km;
 use wows_core::units::Percent;
+use wows_core::units::Seconds;
 use wowsunpack::game_params::ttx::AttributionLine;
 use wowsunpack::game_params::ttx::ContributorLine;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -14,6 +16,11 @@ use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
 use wowsunpack::game_params::ttx::render_attributions;
 use wowsunpack::game_params::ttx::render_stat_rows;
 
+use crate::builds::Better;
+use crate::builds::BuildStat;
+use crate::builds::Planner;
+use crate::builds::StatPlan;
+use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AppliedSkill;
@@ -56,6 +63,10 @@ pub struct ShipStatsOutput {
 
     pub ship: ShipSummary,
 
+    /// Without skills and upgrades: weapon stats on the best-fit build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_stats: Option<WeaponBuilds>,
+
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<AppliedSkill>,
 
@@ -76,6 +87,22 @@ pub struct ShipStatsOutput {
     /// "Label (qualifier): value" lines of the port stat card, stock modules.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub stats: Vec<String>,
+}
+
+/// Weapon stats on the best-fit build.
+#[derive(Debug, Clone, Serialize)]
+pub struct WeaponBuilds {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_battery_reload: Option<BuildStat<Seconds>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_battery_range: Option<BuildStat<Km>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary_range: Option<BuildStat<Km>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub torpedo_reload: Option<BuildStat<Seconds>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -131,15 +158,47 @@ impl GameData {
 
         let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card.stats, self) } else { Vec::new() };
 
+        let build_stats = if loadout.is_empty() { Some(self.weapon_builds(ship)?) } else { None };
+
         Ok(ShipStatsOutput {
             interpretations,
             ship: ship.summary(),
+            build_stats,
             skill_points: (!loadout.applied_skills.is_empty()).then(|| loadout.skill_points()),
             skills: loadout.applied_skills,
             upgrades: loadout.applied_upgrades,
             active_conditions: card.active_conditions,
             changes,
             stats,
+        })
+    }
+
+    fn weapon_builds(&self, ship: &Ship) -> Result<WeaponBuilds, QueryError> {
+        let planner = Planner::new(self, ship);
+        let seconds = |value: Option<wowsunpack::game_params::ttx::model::Seconds>| {
+            value.map(|value| Seconds::new(round(value.value())))
+        };
+        let km = |value: Option<wowsunpack::game_params::types::Km>| value.map(|value| Km::new(round(value.value())));
+
+        Ok(WeaponBuilds {
+            main_battery_reload: planner.plan(&StatPlan::new(
+                "main battery reload".to_owned(),
+                Better::Lower,
+                &|outcome| seconds(outcome.stats.artillery.as_ref()?.reload_time),
+            ))?,
+            main_battery_range: planner.plan(&StatPlan::new(
+                "main battery range".to_owned(),
+                Better::Higher,
+                &|outcome| km(outcome.stats.artillery.as_ref()?.range),
+            ))?,
+            secondary_range: planner.plan(&StatPlan::new(
+                "secondary battery range".to_owned(),
+                Better::Higher,
+                &|outcome| km(Some(outcome.stats.secondaries.as_ref()?.range)),
+            ))?,
+            torpedo_reload: planner.plan(&StatPlan::new("torpedo reload".to_owned(), Better::Lower, &|outcome| {
+                seconds(outcome.stats.torpedoes.as_ref()?.reload_time)
+            }))?,
         })
     }
 

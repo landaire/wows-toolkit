@@ -1,0 +1,92 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 297
+expression: concealment
+---
+ship:
+  name: Småland
+  index: PWSD610
+  tier: 10
+  class: destroyer
+  nation: Europe
+  group: ultimate
+  status: released
+surface:
+  stat: detectability by ships
+  unit: km
+  builds:
+    base: 7.59
+    best:
+      value: 6.15
+      assumed:
+        - Concealment Expert
+        - Concealment System Modification 1
+      prerequisites:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+    alternatives:
+      - label: without Concealment Expert
+        value: 6.83
+        assumed:
+          - Concealment System Modification 1
+      - label: without Concealment System Modification 1
+        value: 6.83
+        assumed:
+          - Concealment Expert
+        prerequisites:
+          - Consumable Specialist
+          - Extra-Heavy Ammunition
+          - Adrenaline Rush
+air:
+  stat: detectability by aircraft
+  unit: km
+  builds:
+    base: 3.47
+    best:
+      value: 2.81
+      assumed:
+        - Concealment Expert
+        - Concealment System Modification 1
+      prerequisites:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+    alternatives:
+      - label: without Concealment Expert
+        value: 3.12
+        assumed:
+          - Concealment System Modification 1
+      - label: without Concealment System Modification 1
+        value: 3.12
+        assumed:
+          - Concealment Expert
+        prerequisites:
+          - Consumable Specialist
+          - Extra-Heavy Ammunition
+          - Adrenaline Rush
+after_main_battery:
+  stat: detectability after firing the main battery
+  unit: km
+  builds:
+    base: 11.45
+    best:
+      value: 11.45
+      assumed: []
+in_smoke_after_firing:
+  stat: detectability after firing the main battery in smoke
+  unit: km
+  builds:
+    base: 2.82
+    best:
+      value: 2.82
+      assumed: []
+in_smoke_evidence:
+  rule: "Detectability after firing the main battery from smoke is the hull's visibilityCoefGKInSmoke (plus visibilityFactorInSmoke, near zero), capped at the gun range. The client builds it without the ship's modifiers (CommonBattleLogicClasses/EntityVisibility.py EntityVisibilityBySmoke: constructed from params alone, and _calculateDistance ignores the modifier), unlike surface detectability, which multiplies visibilityDistCoeff. The port card shows the same hull value (ttx/FactoryVisibility.py). Concealment Expert and the concealment upgrades change only visibilityDistCoeff, so they do not change it."
+  checked:
+    - name: Concealment Expert
+      surface: 6.83
+      in_smoke_after_firing: 2.82
+    - name: Concealment System Modification 1
+      surface: 6.83
+      in_smoke_after_firing: 2.82

@@ -32,6 +32,7 @@ use crate::error::QueryError;
 use crate::fuzzy;
 use crate::fuzzy::Fuzzy;
 use crate::loadout::ResolvedLoadout;
+use crate::loadout::Triggers;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::search_key;
@@ -1244,7 +1245,7 @@ impl<'a> ShipSearch<'a> {
     fn configuration(&self, items: &[Item<'_>]) -> (ShipUpgradeSelection, ResolvedLoadout) {
         let mut selection = self.stock_selection.clone();
         let mut loadout = self.game.stock_loadout();
-        loadout.conditions_met = true;
+        loadout.triggers = Triggers::All;
         for item in items {
             match item {
                 Item::Module(module) => {
@@ -1454,7 +1455,7 @@ fn main_battery_barrels(ship: &Ship, selection: &ShipUpgradeSelection) -> Option
 /// A skill needs a learned skill on the tier below it
 /// (`CommonCrew.hasLearnedSkillOnTier`), so each cheaper tier left empty costs
 /// its cheapest skill on top.
-fn skills_fit(points: &[SkillPointCost]) -> bool {
+pub(crate) fn skills_fit(points: &[SkillPointCost]) -> bool {
     /// `SKILL_POINTS.MAX_FREE_SKILL_POINTS` in the client.
     const MAX_SKILL_POINTS: u32 = 21;
 

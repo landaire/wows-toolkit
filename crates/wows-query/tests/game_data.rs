@@ -82,12 +82,14 @@ fn schlieffen_ifhe_penetration_is_floored_per_battery() {
     let shells = game().ship_shells(&ship("Schlieffen")).expect("Schlieffen exists");
 
     let pen = |battery: Battery, caliber: Millimeters| {
-        let shell = shells
+        let report = shells
             .shells
             .iter()
-            .find(|shell| shell.battery == battery && shell.ammo == Ammo::He && shell.caliber_mm == caliber)
+            .find(|report| {
+                report.shell.battery == battery && report.shell.ammo == Ammo::He && report.shell.caliber_mm == caliber
+            })
             .expect("HE shell present");
-        (shell.penetration_mm.map(Millimeters::value), shell.ifhe_penetration_mm.map(Millimeters::value))
+        (report.shell.penetration_mm.map(Millimeters::value), report.shell.ifhe_penetration_mm.map(Millimeters::value))
     };
     assert_eq!(pen(Battery::Main, Millimeters::new(420.0)), (Some(105.0), Some(131.0)));
     assert_eq!(pen(Battery::Secondary, Millimeters::new(150.0)), (Some(38.0), Some(47.0)));
@@ -102,6 +104,7 @@ fn ap_overmatch_reaches_the_thickest_whole_mm_plate() {
         shells
             .shells
             .iter()
+            .map(|report| &report.shell)
             .find(|shell| shell.battery == Battery::Main && shell.ammo == Ammo::Ap && shell.caliber_mm == caliber)
             .and_then(|shell| shell.overmatches_up_to_mm)
     };
@@ -305,11 +308,56 @@ fn find_ships_lists_the_named_ship_first() {
     insta::assert_yaml_snapshot!(found);
 }
 
+/// The penetration builds of a ship's HE shells, by battery and caliber.
+fn he_penetration(name: &str) -> Vec<serde_json::Value> {
+    let shells = game().ship_shells(&ship(name)).expect("ship exists");
+    shells
+        .shells
+        .iter()
+        .filter(|report| report.shell.ammo == Ammo::He)
+        .map(|report| json!({ "battery": report.shell.battery, "caliber_mm": report.shell.caliber_mm, "penetration": report.penetration }))
+        .collect()
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
-fn test_ships_resolve_with_status() {
-    let overview = game().ship_overview(&ship("Neptunus")).expect("Neptunus is in the client data");
-    insta::assert_yaml_snapshot!(overview);
+fn conqueror_main_battery_he_penetration_leaves_out_ifhe() {
+    insta::assert_yaml_snapshot!(he_penetration("Conqueror"));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_he_penetration_lists_ifhe() {
+    insta::assert_yaml_snapshot!(he_penetration("DM"));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn smaland_concealment_with_and_without_concealment_expert() {
+    let concealment = game().ship_concealment(&ship("Smaland")).expect("Smaland exists");
+    insta::assert_yaml_snapshot!(concealment);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn moskva_radar_on_its_best_build() {
+    let consumables = game()
+        .ship_consumables(&ShipConsumablesArgs {
+            ship: "Moskva".to_owned(),
+            consumable: Some("radar".to_owned()),
+            ..Default::default()
+        })
+        .expect("Moskva has radar");
+    insta::assert_yaml_snapshot!(consumables);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_weapon_stats_on_their_best_builds() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs { ship: "Des Moines".to_owned(), ..Default::default() })
+        .expect("Des Moines exists");
+    insta::assert_yaml_snapshot!(stats.build_stats);
 }
 
 #[test]
@@ -356,6 +404,13 @@ fn ambiguous_names_list_candidates() {
         .call_tool("captain_skill", json!({ "skill": "Consumable" }))
         .expect_err("several skills start with Consumable");
     insta::assert_yaml_snapshot!(error.details());
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn test_ships_resolve_with_status() {
+    let overview = game().ship_overview(&ship("Neptunus")).expect("Neptunus is in the client data");
+    insta::assert_yaml_snapshot!(overview);
 }
 
 fn firing_arcs(ship: &str, target: Option<&str>, skills: &[&str]) -> ShipFiringArcs {

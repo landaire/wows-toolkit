@@ -1,0 +1,66 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 319
+expression: stats.build_stats
+---
+main_battery_reload:
+  stat: main battery reload
+  unit: s
+  builds:
+    base: 5.5
+    best:
+      value: 4.84
+      assumed:
+        - Main Battery Modification 3
+    alternatives:
+      - label: without Main Battery Modification 3
+        value: 5.5
+        assumed: []
+      - label: with Top Grade Gunner active
+        value: 4.45
+        assumed:
+          - Main Battery Modification 3
+          - Top Grade Gunner
+        prerequisites:
+          - Consumable Specialist
+          - Focus Fire Training
+          - Heavy AP Shells
+        note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+main_battery_range:
+  stat: main battery range
+  unit: km
+  builds:
+    base: 15.83
+    best:
+      value: 18.36
+      assumed:
+        - Gun Fire Control System Modification 2
+    alternatives:
+      - label: without Gun Fire Control System Modification 2
+        value: 15.83
+        assumed: []
+secondary_range:
+  stat: secondary battery range
+  unit: km
+  builds:
+    base: 7.3
+    best:
+      value: 10.51
+      assumed:
+        - Pack a Punch
+        - Secondary Battery Modification 1
+      prerequisites:
+        - Consumable Specialist
+        - Focus Fire Training
+    alternatives:
+      - label: without Pack a Punch
+        value: 8.76
+        assumed:
+          - Secondary Battery Modification 1
+      - label: without Secondary Battery Modification 1
+        value: 8.76
+        assumed:
+          - Pack a Punch
+        prerequisites:
+          - Consumable Specialist
+          - Focus Fire Training

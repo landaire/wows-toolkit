@@ -1,0 +1,36 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 284
+expression: "he_penetration(\"Conqueror\")"
+---
+- battery: main
+  caliber_mm: 419
+  penetration:
+    stat: HE penetration (main battery 419 mm PBPA050_419MM_MII_HE)
+    unit: mm
+    builds:
+      base: 105
+      best:
+        value: 105
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 131
+          assumed:
+            - Inertia Fuse for HE Shells
+          prerequisites:
+            - Emergency Repair Specialist
+          note: "Inertia Fuse for HE Shells raises this main battery HE penetration in game data, but best-fit builds skip it: this shell already reaches the 32 mm armor threshold of its tier without it"
+- battery: secondary
+  caliber_mm: 133
+  penetration:
+    stat: HE penetration (secondary battery 133 mm PBPA041_134MM_MI_HE)
+    unit: mm
+    builds:
+      base: 22
+      best:
+        value: 27
+        assumed:
+          - Inertia Fuse for HE Shells
+        prerequisites:
+          - Emergency Repair Specialist

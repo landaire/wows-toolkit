@@ -1,7 +1,8 @@
 # wows-mcp
 
 - Answers World of Warships game data questions for any [MCP](https://modelcontextprotocol.io) client.
-- Looks up ships (including ships in closed testing), armor, aircraft and their ordnance, shells, penetration and overmatch, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
+- Looks up ships (including ships in closed testing), armor, aircraft and their ordnance, shells, penetration and overmatch, concealment, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
+- Gives build-dependent stats the way players ask for them: the base value, the best-fit build with the skills and upgrades it assumes, and common alternatives such as the same build without Concealment Expert.
 - Understands community names: abbreviations such as SE, SI, IFHE, DM and GK, initialisms of any multi-word name, former skill names such as BFT, and names typed without the German sharp s. Every name read as something else is listed under `interpretations`.
 - Answers anything else in GameParams with a [jq](https://jqlang.org) filter over the raw entries.
 - Finds ships whose stats meet your conditions, with the fewest modules, upgrades and captain skills they need.
@@ -54,7 +55,7 @@ For a client that launches stdio servers from a JSON config:
 
 ## Tools
 
-`find_ships`, `ship_overview`, `ship_armor`, `ship_aircraft`, `ship_shells`, `penetration_search`, `armor_trace`, `citadel_profile`, `ship_stats`, `ship_firing_arcs`, `stat_names`, `stat_search`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `gameparams_query`, `replay_summary`.
+`find_ships`, `ship_overview`, `ship_armor`, `ship_aircraft`, `ship_shells`, `ship_concealment`, `penetration_search`, `armor_trace`, `citadel_profile`, `ship_stats`, `ship_firing_arcs`, `stat_names`, `stat_search`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `gameparams_query`, `replay_summary`.
 
 `armor_trace`, `citadel_profile` and `ship_firing_arcs` read the ship armor models in the game data dump. `ship_firing_arcs` takes the mount facings from them. These tools need a dump that carries the armor extract. `wows-data-mgr dump-renderer-data` writes it unless you pass `--no-armor`.
 

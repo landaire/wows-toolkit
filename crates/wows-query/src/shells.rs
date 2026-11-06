@@ -9,17 +9,27 @@ use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
-use wowsunpack::game_params::types::Species;
 
+use crate::builds::BuildAlternative;
+use crate::builds::BuildStat;
+use crate::builds::BuildValue;
+use crate::builds::Builds;
+use crate::builds::StatUnit;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
+use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
+use crate::ships::Tier;
 
 /// Internal name of Inertia Fuse for HE Shells.
 pub(crate) const IFHE_SKILL: &str = "HePenetration";
+
+/// Armor a secondary HE shell needs to defeat to matter: cruiser upper hulls
+/// and destroyer belts at tiers 8 to 10 (shipbuilds `SECONDARY_ARMOR_THRESHOLD_MM`).
+const SECONDARY_ARMOR_THRESHOLD: Millimeters = Millimeters::new(27.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -62,7 +72,8 @@ pub struct Shell {
     pub penetration_mm: Option<Millimeters>,
 
     /// HE penetration with Inertia Fuse for HE Shells, for this ship's class.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Absent when the class tree lacks the skill.
+    #[serde(skip)]
     pub ifhe_penetration_mm: Option<Millimeters>,
 
     /// Thickest whole-mm plate AP overmatches (caliber > 14.3 x thickness).
@@ -87,7 +98,17 @@ pub struct ShipShells {
     pub interpretations: Interpretations,
 
     pub ship: ShipSummary,
-    pub shells: Vec<Shell>,
+    pub shells: Vec<ShellReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShellReport {
+    #[serde(flatten)]
+    pub shell: Shell,
+
+    /// HE or SAP penetration on the best-fit build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub penetration: Option<BuildStat<Millimeters>>,
 }
 
 /// HE penetration multipliers Inertia Fuse for HE Shells gives one class.
@@ -106,20 +127,37 @@ impl IfheCoefficients {
     }
 }
 
+/// Inertia Fuse for HE Shells in one class tree.
+struct IfheBuild {
+    name: String,
+
+    /// The first skill in skill order of each cheaper tier, as
+    /// [`crate::builds`] takes when every skill of a tier leaves the stat as
+    /// it is.
+    prerequisites: Vec<String>,
+}
+
 impl GameData {
-    /// Main and secondary battery shells of one ship across all its gun modules.
+    /// Main and secondary battery shells of one ship across all its gun
+    /// modules, with HE and SAP penetration on the best-fit build.
     pub fn ship_shells(&self, args: &ShipArgs) -> Result<ShipShells, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
+        let ifhe = self.ifhe_build(ship.class);
+        let shells = self
+            .shells(ship)
+            .into_iter()
+            .map(|shell| ShellReport { penetration: penetration_builds(&shell, ship.tier, ifhe.as_ref()), shell })
+            .collect();
 
-        Ok(ShipShells { interpretations, ship: ship.summary(), shells: self.shells(ship) })
+        Ok(ShipShells { interpretations, ship: ship.summary(), shells })
     }
 
     pub(crate) fn shells(&self, ship: &Ship) -> Vec<Shell> {
         let Some(config) = ship.param.vehicle().and_then(|vehicle| vehicle.config_data()) else {
             return Vec::new();
         };
-        let ifhe = self.ifhe_coefficients(ship.class.species());
+        let ifhe = self.ifhe_coefficients(ship.class);
 
         let batteries =
             [(Battery::Main, &config.main_battery_ammo), (Battery::Secondary, &config.secondary_battery_ammo)];
@@ -141,10 +179,12 @@ impl GameData {
         shells
     }
 
-    /// `None` when the build has no Inertia Fuse for HE Shells skill.
-    pub(crate) fn ifhe_coefficients(&self, species: Species) -> Option<IfheCoefficients> {
+    /// `None` when the class tree has no Inertia Fuse for HE Shells.
+    pub(crate) fn ifhe_coefficients(&self, class: ShipClass) -> Option<IfheCoefficients> {
         let skill = self.skills.iter().find(|skill| skill.internal_name().as_str() == IFHE_SKILL)?;
+        self.skill_points(skill, class)?;
         let modifiers = skill.modifiers()?;
+        let species = class.species();
 
         // An absent coefficient leaves penetration unchanged, as in the client.
         let coefficient = |name: &str| {
@@ -159,6 +199,95 @@ impl GameData {
             secondary: coefficient("GSPenetrationCoeffHE"),
         })
     }
+
+    /// Inertia Fuse for HE Shells when the class tree has it.
+    fn ifhe_build(&self, class: ShipClass) -> Option<IfheBuild> {
+        let skill = self.skills.iter().find(|skill| skill.internal_name().as_str() == IFHE_SKILL)?;
+        let points = self.skill_points(skill, class)?;
+        let prerequisites = (1..points)
+            .filter_map(|tier| self.skills.iter().find(|other| self.skill_points(other, class) == Some(tier)))
+            .map(|other| self.skill_name(other))
+            .collect();
+
+        Some(IfheBuild { name: self.skill_name(skill), prerequisites })
+    }
+}
+
+/// Armor a main battery HE shell of this tier most needs to defeat: cruiser
+/// and battleship bows and decks (shipbuilds `tier_armor_threshold_mm`).
+fn main_armor_threshold(tier: Tier) -> Millimeters {
+    Millimeters::new(match tier.0 {
+        ..=4 => 13.0,
+        5 | 6 => 19.0,
+        7 => 25.0,
+        _ => 32.0,
+    })
+}
+
+/// HE or SAP penetration on the best-fit build. Inertia Fuse for HE Shells
+/// raises every HE shell it applies to, but the best-fit build takes it only
+/// when it lifts the shell over the armor threshold of its battery and tier
+/// (shipbuilds rule `ifhe`); otherwise it is an alternative.
+fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Option<BuildStat<Millimeters>> {
+    let base = shell.penetration_mm?;
+    let battery = match shell.battery {
+        Battery::Main => "main battery",
+        Battery::Secondary => "secondary battery",
+    };
+    let stat =
+        format!("{} penetration ({battery} {} mm {})", shell.ammo.label(), shell.caliber_mm.value(), shell.param);
+    let unchanged = |alternatives| BuildStat {
+        stat: stat.clone(),
+        unit: Millimeters::UNIT,
+        builds: Builds {
+            base,
+            best: BuildValue { value: base, assumed: Vec::new(), prerequisites: Vec::new() },
+            alternatives,
+        },
+    };
+
+    let (Some(ifhe), Some(with_ifhe)) = (ifhe, shell.ifhe_penetration_mm) else {
+        return Some(unchanged(Vec::new()));
+    };
+    if with_ifhe.value() <= base.value() {
+        return Some(unchanged(Vec::new()));
+    }
+
+    let name = &ifhe.name;
+    let threshold = match shell.battery {
+        Battery::Main => main_armor_threshold(tier),
+        Battery::Secondary => SECONDARY_ARMOR_THRESHOLD,
+    };
+    if base.value() < threshold.value() && with_ifhe.value() >= threshold.value() {
+        return Some(BuildStat {
+            stat,
+            unit: Millimeters::UNIT,
+            builds: Builds {
+                base,
+                best: BuildValue {
+                    value: with_ifhe,
+                    assumed: vec![name.clone()],
+                    prerequisites: ifhe.prerequisites.clone(),
+                },
+                alternatives: Vec::new(),
+            },
+        });
+    }
+
+    let reason = if base.value() >= threshold.value() {
+        format!("this shell already reaches the {} mm armor threshold of its tier without it", threshold.value())
+    } else {
+        format!("this shell stays below the {} mm armor threshold of its tier even with it", threshold.value())
+    };
+    Some(unchanged(vec![BuildAlternative {
+        label: format!("with {name}"),
+        value: with_ifhe,
+        assumed: vec![name.clone()],
+        prerequisites: ifhe.prerequisites.clone(),
+        note: Some(format!(
+            "{name} raises this {battery} HE penetration in game data, but best-fit builds skip it: {reason}"
+        )),
+    }]))
 }
 
 fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficients>) -> Option<Shell> {

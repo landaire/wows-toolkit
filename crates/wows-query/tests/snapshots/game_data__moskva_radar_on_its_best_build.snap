@@ -1,0 +1,90 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 310
+expression: consumables
+---
+interpretations:
+  - input: radar
+    resolved: Surveillance Radar
+    kind: consumable
+    method: exact-alias
+ship:
+  name: Moskva
+  index: PRSC110
+  tier: 10
+  class: cruiser
+  nation: Russia
+  group: ultimate
+  status: released
+slots:
+  - slot: 3
+    options:
+      - name: Surveillance Radar
+        type: rls
+        charges: 3
+        reload_s: 120
+        action_time_s: 30
+        ship_detection_m: 12000
+        builds:
+          action_time:
+            stat: Surveillance Radar action time
+            unit: s
+            builds:
+              base: 30
+              best:
+                value: 43.56
+                assumed:
+                  - Consumable Enhancements
+                  - Surveillance Radar Modification 1
+                  - Ship Consumable Modification 1
+                prerequisites:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Enhancements
+                  value: 39.6
+                  assumed:
+                    - Surveillance Radar Modification 1
+                    - Ship Consumable Modification 1
+                - label: without Surveillance Radar Modification 1
+                  value: 36.3
+                  assumed:
+                    - Consumable Enhancements
+                    - Ship Consumable Modification 1
+                  prerequisites:
+                    - Consumable Specialist
+                - label: without Ship Consumable Modification 1
+                  value: 39.6
+                  assumed:
+                    - Consumable Enhancements
+                    - Surveillance Radar Modification 1
+                  prerequisites:
+                    - Consumable Specialist
+          charges:
+            stat: Surveillance Radar charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 4
+                assumed:
+                  - Superintendent
+                prerequisites:
+                  - Consumable Specialist
+                  - Focus Fire Training
+              alternatives:
+                - label: without Superintendent
+                  value: 3
+                  assumed: []
+          reload:
+            stat: Surveillance Radar reload
+            unit: s
+            builds:
+              base: 120
+              best:
+                value: 111
+                assumed:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Specialist
+                  value: 120
+                  assumed: []

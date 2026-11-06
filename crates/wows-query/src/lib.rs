@@ -10,7 +10,9 @@ pub mod aircraft;
 pub mod armor;
 mod armor_models;
 pub mod armor_trace;
+pub mod builds;
 pub mod citadel;
+pub mod concealment;
 pub mod consumables;
 pub mod data;
 #[cfg(feature = "download")]

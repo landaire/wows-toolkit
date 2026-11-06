@@ -1,0 +1,45 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 290
+expression: "he_penetration(\"DM\")"
+---
+- battery: main
+  caliber_mm: 203
+  penetration:
+    stat: HE penetration (main battery 203 mm PAPA002_Shell_203mm_HE_HC_Mk_25)
+    unit: mm
+    builds:
+      base: 34
+      best:
+        value: 34
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 42
+          assumed:
+            - Inertia Fuse for HE Shells
+          prerequisites:
+            - Consumable Specialist
+            - Focus Fire Training
+            - Heavy AP Shells
+          note: "Inertia Fuse for HE Shells raises this main battery HE penetration in game data, but best-fit builds skip it: this shell already reaches the 32 mm armor threshold of its tier without it"
+- battery: secondary
+  caliber_mm: 127
+  penetration:
+    stat: HE penetration (secondary battery 127 mm PAPA018_Main_127mm_HE_C_Mk_32)
+    unit: mm
+    builds:
+      base: 21
+      best:
+        value: 21
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 26
+          assumed:
+            - Inertia Fuse for HE Shells
+          prerequisites:
+            - Consumable Specialist
+            - Focus Fire Training
+            - Heavy AP Shells
+          note: "Inertia Fuse for HE Shells raises this secondary battery HE penetration in game data, but best-fit builds skip it: this shell stays below the 27 mm armor threshold of its tier even with it"

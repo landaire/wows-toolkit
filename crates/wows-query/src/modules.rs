@@ -1,6 +1,7 @@
 //! Ship modules (hull, guns, torpedoes, engine, fire control) by English name.
 
 use serde::Serialize;
+use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::translations::translate_unit;
 use wowsunpack::game_params::ttx::ModuleSlot;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -45,6 +46,20 @@ impl ModuleKind {
 
     const SLOTS: [ModuleSlot; 5] =
         [ModuleSlot::Hull, ModuleSlot::Artillery, ModuleSlot::Torpedoes, ModuleSlot::Engine, ModuleSlot::FireControl];
+
+    pub(crate) const ALL: [ModuleKind; 5] = [Self::Hull, Self::Guns, Self::Torpedoes, Self::Engine, Self::FireControl];
+
+    /// Mounts the module `param` of this kind in `selection`.
+    pub(crate) fn set(self, selection: &mut ShipUpgradeSelection, param: String) {
+        let name = Some(param);
+        match self {
+            Self::Hull => selection.hull = name,
+            Self::Guns => selection.artillery = name,
+            Self::Torpedoes => selection.torpedoes = name,
+            Self::Engine => selection.engine = name,
+            Self::FireControl => selection.fire_control = name,
+        }
+    }
 }
 
 /// One module a ship can mount.
@@ -128,14 +143,7 @@ impl GameData {
                 });
             }
 
-            let name = Some(module.param.clone());
-            match module.kind {
-                ModuleKind::Hull => selection.hull = name,
-                ModuleKind::Guns => selection.artillery = name,
-                ModuleKind::Torpedoes => selection.torpedoes = name,
-                ModuleKind::Engine => selection.engine = name,
-                ModuleKind::FireControl => selection.fire_control = name,
-            }
+            module.kind.set(&mut selection, module.param.clone());
             chosen.push(module.clone());
         }
 
@@ -151,6 +159,32 @@ impl GameData {
         }
 
         translated.unwrap_or_else(|| param.to_owned())
+    }
+
+    /// Whether the selected hull mounts the selected guns and torpedoes. Data
+    /// without component links places no limit.
+    pub(crate) fn hull_fits(&self, ship: &Ship, selection: &ShipUpgradeSelection) -> bool {
+        let Some(vehicle) = ship.param.vehicle() else {
+            return true;
+        };
+        let Some(components) = vehicle.ttx_components() else {
+            return true;
+        };
+        let Some(hull) = selection.hull.as_deref().and_then(|hull| vehicle.hull_upgrade(hull)) else {
+            return true;
+        };
+
+        [
+            (ComponentType::Artillery, selection.artillery.as_deref()),
+            (ComponentType::Torpedoes, selection.torpedoes.as_deref()),
+        ]
+        .into_iter()
+        .all(|(component_type, param)| {
+            param.is_none_or(|param| {
+                components.upgrade_components(param).is_empty()
+                    || components.component_on_hull(param, hull, component_type).is_some()
+            })
+        })
     }
 }
 

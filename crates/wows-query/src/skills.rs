@@ -221,10 +221,10 @@ impl GameData {
         }
     }
 
-    fn skill_details(&self, skill: &CrewSkill, classes: &[ShipClass]) -> CaptainSkillDetails {
-        let version = self.version();
-        let trigger = skill.logic_trigger();
-        let trigger_sentence = trigger
+    /// The condition under which a skill's triggered effects apply.
+    pub(crate) fn skill_trigger_sentence(&self, skill: &CrewSkill) -> Option<String> {
+        skill
+            .logic_trigger()
             .and_then(|trigger| trigger.trigger_type())
             .filter(|kind| !kind.is_empty())
             .and_then(|kind| {
@@ -232,7 +232,13 @@ impl GameData {
                     .localized_name_from_id(&TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", kind.to_uppercase())))
             })
             .map(|sentence| clean(&sentence))
-            .filter(|sentence| !sentence.is_empty());
+            .filter(|sentence| !sentence.is_empty())
+    }
+
+    fn skill_details(&self, skill: &CrewSkill, classes: &[ShipClass]) -> CaptainSkillDetails {
+        let version = self.version();
+        let trigger = skill.logic_trigger();
+        let trigger_sentence = self.skill_trigger_sentence(skill);
 
         let mut grouped: Vec<SkillClassEffects> = Vec::new();
         for &class in classes {
