@@ -14,6 +14,7 @@ pub mod error;
 pub mod gameparams;
 pub mod jq_worker;
 pub mod loadout;
+pub mod modules;
 pub mod penetration;
 pub mod raw_params;
 pub mod replay;

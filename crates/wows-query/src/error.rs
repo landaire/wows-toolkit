@@ -82,6 +82,15 @@ pub enum QueryError {
     #[error("upgrades {first} and {second} both use slot {slot}; a ship mounts one upgrade per slot")]
     UpgradeSlotConflict { first: String, second: String, slot: u8 },
 
+    #[error("{ship} has no module matching {query:?}; modules: {}", modules.join(", "))]
+    ModuleNotFound { ship: String, query: String, modules: Vec<String> },
+
+    #[error("{query:?} matches several modules: {}; ask again with the exact name", candidates.join(", "))]
+    AmbiguousModule { query: String, candidates: Vec<String> },
+
+    #[error("modules {first} and {second} are both {kind}; a ship mounts one module of each kind")]
+    ModuleSlotConflict { first: String, second: String, kind: &'static str },
+
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 
