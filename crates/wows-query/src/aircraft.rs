@@ -292,7 +292,7 @@ impl GameData {
         })
     }
 
-    fn squadrons(&self, ship: &Ship) -> Vec<Squadron> {
+    pub(crate) fn squadrons(&self, ship: &Ship) -> Vec<Squadron> {
         let Some(components) = ship.param.vehicle().and_then(|vehicle| vehicle.ttx_components()) else {
             return Vec::new();
         };

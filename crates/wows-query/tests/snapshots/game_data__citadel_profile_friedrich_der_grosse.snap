@@ -1,0 +1,265 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: friedrich
+---
+ship: "T9 F. der Grosse (battleship, Germany)"
+hull: Hull A
+waterline:
+  keel_below_waterline_m: 10
+exposure:
+  roof_above_waterline_m: 1
+  floor_m: -10
+  sides:
+    - side: starboard
+      face_area_m2: 1870
+      above_waterline_pct: 9.1
+    - side: port
+      face_area_m2: 1870
+      above_waterline_pct: 9.1
+shape:
+  bands:
+    - band: below -2 m
+      rays: 10880
+      median_slope_deg: 0
+      faces:
+        vertical: 87.2
+        sloped_deck: 9.2
+        flat_deck: 3.6
+    - band: "-2 to 0 m"
+      rays: 2720
+      median_slope_deg: 0
+      faces:
+        vertical: 100
+    - band: 0 to 2 m
+      rays: 1360
+      median_slope_deg: 0
+      faces:
+        vertical: 100
+  above_waterline:
+    kind: vertical
+    share_pct: 100
+    median_slope_deg: 0
+  turtleback:
+    slope_deg: 67.2
+    median_deck_mm: 120
+    median_belt_mm: 300
+    share_pct: 57.1
+  length_profile:
+    - from_bow_m: 70.3
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 91.5
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 112.7
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 133.9
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 155.1
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 176.3
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 197.5
+      top_m: 0.7
+      bottom_m: -9.8
+    - from_bow_m: 218.7
+      top_m: 0.7
+      bottom_m: -9.8
+approaches:
+  - fall_angle_deg: 0
+    rays_over_citadel: 680
+    glancing_rays: 363
+    armor_before_citadel_mm:
+      min: 575.9
+      median: 703.8
+      max: 735.2
+    citadel_plate_mm:
+      min: 45
+      median: 45.5
+      max: 45.5
+    bands:
+      - band: 0 to 2 m
+        rays: 680
+        median_angle_deg: 7.1
+        doubled_pct: 0
+        may_ricochet_pct: 0
+        autobounce_pct: 0
+    stacks:
+      - label: least
+        from_bow_m: 109.3
+        height_m: 0.2
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 6.6
+            effective_mm: 302
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 120
+            angle_deg: 64
+            effective_mm: 273.9
+            shell:
+              - may_ricochet
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 0.7
+            effective_mm: 45
+            shell:
+              - arms_fuse
+        total_effective_mm: 620.9
+      - label: median
+        from_bow_m: 98.8
+        height_m: 0.2
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 16.2
+            effective_mm: 312.4
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 150
+            angle_deg: 67.5
+            effective_mm: 391.4
+            shell:
+              - may_ricochet
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 8.7
+            effective_mm: 45.5
+            shell:
+              - arms_fuse
+        total_effective_mm: 749.3
+      - label: most
+        from_bow_m: 72.3
+        height_m: 0.7
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 29.2
+            effective_mm: 343.8
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 150
+            angle_deg: 67.5
+            effective_mm: 391.4
+            shell:
+              - may_ricochet
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 8.7
+            effective_mm: 45.5
+            shell:
+              - arms_fuse
+        total_effective_mm: 780.8
+  - fall_angle_deg: 12.4
+    range_km: 12
+    rays_over_citadel: 4648
+    glancing_rays: 3202
+    armor_before_citadel_mm:
+      min: 510.2
+      median: 579.7
+      max: 699.7
+    citadel_plate_mm:
+      min: 46.1
+      median: 46.4
+      max: 46.6
+    bands:
+      - band: "-2 to 0 m"
+        rays: 778
+        median_angle_deg: 14.3
+        doubled_pct: 0
+        may_ricochet_pct: 0
+        autobounce_pct: 0
+      - band: 0 to 2 m
+        rays: 3870
+        median_angle_deg: 77.6
+        doubled_pct: 82.6
+        may_ricochet_pct: 0
+        autobounce_pct: 82.6
+    stacks:
+      - label: least
+        from_bow_m: 133.3
+        height_m: -1.1
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 18.8
+            effective_mm: 317
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 120
+            angle_deg: 51.6
+            effective_mm: 193.3
+            shell:
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 12.4
+            effective_mm: 46.1
+            shell:
+              - arms_fuse
+        total_effective_mm: 556.3
+      - label: median
+        from_bow_m: 97.8
+        height_m: 0.5
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 19.2
+            effective_mm: 317.6
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 150
+            angle_deg: 55.1
+            effective_mm: 262.1
+            shell:
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 15.1
+            effective_mm: 46.6
+            shell:
+              - arms_fuse
+        total_effective_mm: 626.3
+      - label: most
+        from_bow_m: 66.3
+        height_m: 1
+        plates:
+          - material: Cas_Belt
+            thickness_mm: 300
+            angle_deg: 46.7
+            effective_mm: 437.5
+            shell:
+              - arms_fuse
+          - material: Cas_Inclin
+            thickness_mm: 150
+            angle_deg: 55.1
+            effective_mm: 262.1
+            shell:
+              - arms_fuse
+          - material: Cit_Bulge
+            thickness_mm: 45
+            angle_deg: 15.1
+            effective_mm: 46.6
+            shell:
+              - arms_fuse
+        total_effective_mm: 746.3
+verdict: "Turtleback: a 120 mm deck sloped 67.2 deg from vertical behind a 300 mm belt, crossed by 57.1% of horizontal rays meeting the citadel within 2 m of the waterline. Above the waterline the citadel shows a vertical wall (0 deg from vertical on 100% of it); 9.1% of the side face is above the waterline and the roof is 1 m above the waterline. At broadside with flat fire, 0% of hits over the citadel strike its plate past 60 deg (effective thickness over double) and 0% at or past the shell's always-ricochet angle. At 12.0 km, 68.8% of hits over the citadel strike its plate past 60 deg (effective thickness over double) and 68.8% at or past the shell's always-ricochet angle."
+assumptions:
+  - "The waterline is model height 0, where the armor viewer draws the water."
+  - "Rays are parallel and evenly spaced, so shares are by area seen along the ray direction."
+  - "Effective thickness is thickness / cos(strike angle) with no normalization. Shell events use the shell's normalization for the fuse and its ricochet angles; ricochets between the two angles are random in the game."
+  - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
+  - "Approaches fire at the model's starboard side with the hull level, no heel or pitch, and turrets at their default heading."

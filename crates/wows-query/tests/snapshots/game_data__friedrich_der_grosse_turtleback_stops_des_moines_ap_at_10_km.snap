@@ -1,0 +1,210 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: trace
+---
+shooter: "T10 Des Moines (cruiser, USA)"
+target: "T9 F. der Grosse (battleship, Germany)"
+target_hull: Hull A
+weapon:
+  source: main battery
+  projectile: PAPA012_Shell_203mm_AP_AP_Mk_21
+  ammo: AP
+  caliber_mm: 203
+arrival:
+  velocity_mps: 485.9
+  fall_angle_deg: 9.1
+  range_km: 10
+  raw_penetration_mm: 262.5
+  basis: ballistic solution at the given range
+target_angle_deg: 0
+rays:
+  spacing_m: 1
+  cast: 13344
+  struck_ship: 6316
+  entered_water_first: 2193
+citadel:
+  rays_over_citadel: 906
+  detonating_inside: 0
+  fraction: 0
+  through_random_ricochet_band: 0
+citadel_face:
+  fall_angle_deg: 9.1
+  range_km: 10
+  rays_over_citadel: 906
+  glancing_rays: 585
+  armor_before_citadel_mm:
+    min: 520.2
+    median: 575.2
+    max: 657.4
+  citadel_plate_mm:
+    min: 45.6
+    median: 45.9
+    max: 46.1
+  bands:
+    - band: "-2 to 0 m"
+      rays: 153
+      median_angle_deg: 11.5
+      doubled_pct: 0
+      may_ricochet_pct: 0
+      autobounce_pct: 0
+    - band: 0 to 2 m
+      rays: 753
+      median_angle_deg: 80.9
+      doubled_pct: 77.6
+      may_ricochet_pct: 0
+      autobounce_pct: 77.6
+  stacks:
+    - label: least
+      from_bow_m: 109.5
+      height_m: -0.5
+      plates:
+        - material: Cas_Belt
+          thickness_mm: 300
+          angle_deg: 15.5
+          effective_mm: 311.4
+          shell:
+            - arms_fuse
+        - material: Cas_Inclin
+          thickness_mm: 120
+          angle_deg: 54.9
+          effective_mm: 208.8
+          shell:
+            - arms_fuse
+        - material: Cit_Bulge
+          thickness_mm: 45
+          angle_deg: 9.1
+          effective_mm: 45.6
+          shell:
+            - arms_fuse
+      total_effective_mm: 565.8
+    - label: median
+      from_bow_m: 186.5
+      height_m: 0.5
+      plates:
+        - material: Cas_Belt
+          thickness_mm: 300
+          angle_deg: 15
+          effective_mm: 310.5
+          shell:
+            - arms_fuse
+        - material: Cas_Inclin
+          thickness_mm: 150
+          angle_deg: 55.5
+          effective_mm: 264.7
+          shell:
+            - arms_fuse
+        - material: Cit_Bulge
+          thickness_mm: 45
+          angle_deg: 11.5
+          effective_mm: 45.9
+          shell:
+            - arms_fuse
+      total_effective_mm: 621.2
+    - label: most
+      from_bow_m: 63.5
+      height_m: 0.5
+      plates:
+        - material: Cas_Belt
+          thickness_mm: 300
+          angle_deg: 38
+          effective_mm: 380.9
+          shell:
+            - arms_fuse
+        - material: Cas_Inclin
+          thickness_mm: 150
+          angle_deg: 57.1
+          effective_mm: 276.5
+          shell:
+            - arms_fuse
+        - material: Cit_Bulge
+          thickness_mm: 45
+          angle_deg: 12.6
+          effective_mm: 46.1
+          shell:
+            - arms_fuse
+      total_effective_mm: 703.5
+zones:
+  - zone: Superstructure
+    rays: 1609
+    outcomes:
+      penetration: 87
+      overpenetration: 605
+      ricochet: 863
+      shatter: 54
+    detonated_in:
+      Superstructure: 40
+  - zone: Casemate
+    rays: 1213
+    outcomes:
+      penetration: 485
+      ricochet: 260
+      shatter: 468
+    detonated_in:
+      Casemate: 485
+  - zone: Bow
+    rays: 520
+    outcomes:
+      penetration: 119
+      overpenetration: 240
+      ricochet: 161
+    detonated_in:
+      Bow: 119
+  - zone: Turret
+    rays: 395
+    outcomes:
+      penetration: 220
+      ricochet: 79
+      shatter: 96
+    detonated_in:
+      Turret: 213
+  - zone: Stern
+    rays: 386
+    outcomes:
+      penetration: 117
+      overpenetration: 136
+      ricochet: 133
+    detonated_in:
+      SteeringGear: 11
+      Stern: 106
+examples:
+  - outcome: shatter
+    from_bow_m: 186.5
+    above_waterline_m: 1.2
+    plates:
+      - material: Cas_Belt
+        zone: Casemate
+        thickness_mm: 300
+        angle_deg: 15
+        result: shatter
+        effective_mm: 302.9
+        penetration_mm: 262.5
+    more_plates: 4
+  - outcome: penetration
+    from_bow_m: 132.5
+    above_waterline_m: 4.5
+    detonated_in: Casemate
+    plates:
+      - material: Cas_Belt
+        zone: Casemate
+        thickness_mm: 145
+        angle_deg: 9.4
+        result: penetrate
+        effective_mm: 145.1
+        penetration_mm: 262.5
+      - material: Dual_Cit_Cas_Deck
+        zone: Citadel
+        thickness_mm: 100
+        angle_deg: 80.9
+        result: not_reached
+    more_plates: 2
+verdict: "No: none of the 906 rays over F. der Grosse's citadel detonates inside it."
+assumptions:
+  - "Impact velocity and fall angle come from the toolkit's trajectory solution at 10.0 km (client drag model, no target movement)."
+  - "Each ray stands for an equal area of the target seen along the line of fire; fractions are by area, not weighted by dispersion or aim."
+  - Rays whose first armor contact is below the waterline entered the water first and are not modelled.
+  - "Target hull level and stationary, turrets at their default heading, and the projectile travels straight through the ship."
+  - "Penetration, ricochet and fuse behaviour are resolved by the game server; the client data holds only the inputs."
+  - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
+  - "AP uses the toolkit armor viewer's plate-by-plate simulation with community formulas from wows_shell (jcw780): penetration = krupp-scaled mass and caliber x velocity^1.38, normalization, overmatch when caliber > 14.3 x thickness, velocity loss after each plate, fuse armed by a plate at least the fuse threshold thick and fired after the fuse time."
+  - A plate struck at or past the always-ricochet angle ricochets. Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.
+  - "A citadel hit is a detonation inside the citadel volume, judged by how many citadel plates the ray crossed before the detonation (armor viewer rule)."

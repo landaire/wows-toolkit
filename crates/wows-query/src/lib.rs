@@ -8,6 +8,8 @@
 pub mod aircraft;
 pub mod armor;
 mod armor_models;
+pub mod armor_trace;
+pub mod citadel;
 pub mod consumables;
 pub mod data;
 #[cfg(feature = "download")]

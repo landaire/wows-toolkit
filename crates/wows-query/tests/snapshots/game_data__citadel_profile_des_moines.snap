@@ -1,0 +1,183 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: des_moines
+---
+ship: "T10 Des Moines (cruiser, USA)"
+hull: Des Moines
+waterline:
+  keel_below_waterline_m: 7.7
+exposure:
+  roof_above_waterline_m: 1.7
+  floor_m: -7.7
+  sides:
+    - side: starboard
+      face_area_m2: 1202
+      above_waterline_pct: 21.1
+    - side: port
+      face_area_m2: 1207
+      above_waterline_pct: 21.1
+shape:
+  bands:
+    - band: below -2 m
+      rays: 5577
+      median_slope_deg: 49.4
+      faces:
+        vertical: 2.2
+        inclined_belt: 12.1
+        sloped_deck: 69.9
+        flat_deck: 15.8
+    - band: "-2 to 0 m"
+      rays: 2028
+      median_slope_deg: 8.3
+      faces:
+        vertical: 61.8
+        inclined_belt: 29.1
+        sloped_deck: 9
+    - band: 0 to 2 m
+      rays: 2028
+      median_slope_deg: 3.6
+      faces:
+        vertical: 92.1
+        inclined_belt: 7.9
+  above_waterline:
+    kind: vertical
+    share_pct: 92.1
+    median_slope_deg: 3.6
+  length_profile:
+    - from_bow_m: 52
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 67.8
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 83.6
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 99.4
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 115.2
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 131.1
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 146.9
+      top_m: 1.6
+      bottom_m: -7.4
+    - from_bow_m: 162.7
+      top_m: 1.6
+      bottom_m: -7.4
+approaches:
+  - fall_angle_deg: 0
+    rays_over_citadel: 1012
+    glancing_rays: 0
+    armor_before_citadel_mm:
+      min: 0
+      median: 0
+      max: 0
+    citadel_plate_mm:
+      min: 152.1
+      median: 153
+      max: 154.5
+    bands:
+      - band: 0 to 2 m
+        rays: 1012
+        median_angle_deg: 6.5
+        doubled_pct: 0
+        may_ricochet_pct: 0
+        autobounce_pct: 0
+    stacks:
+      - label: least
+        from_bow_m: 170.3
+        height_m: 0.1
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 2.2
+            effective_mm: 152.1
+            shell:
+              - arms_fuse
+        total_effective_mm: 152.1
+      - label: median
+        from_bow_m: 63.3
+        height_m: 1.1
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 6.5
+            effective_mm: 153
+            shell:
+              - arms_fuse
+        total_effective_mm: 153
+      - label: most
+        from_bow_m: 157.8
+        height_m: 1.6
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 10.3
+            effective_mm: 154.5
+            shell:
+              - arms_fuse
+        total_effective_mm: 154.5
+  - fall_angle_deg: 12.4
+    range_km: 12
+    rays_over_citadel: 3112
+    glancing_rays: 2315
+    armor_before_citadel_mm:
+      min: 0
+      median: 0
+      max: 0
+    citadel_plate_mm:
+      min: 156
+      median: 158.4
+      max: 164.7
+    bands:
+      - band: 0 to 2 m
+        rays: 3112
+        median_angle_deg: 77.6
+        doubled_pct: 74.4
+        may_ricochet_pct: 0
+        autobounce_pct: 74.4
+    stacks:
+      - label: least
+        from_bow_m: 169.3
+        height_m: 0.2
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 13
+            effective_mm: 156
+            shell:
+              - arms_fuse
+        total_effective_mm: 156
+      - label: median
+        from_bow_m: 88.3
+        height_m: 0.7
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 16.3
+            effective_mm: 158.4
+            shell:
+              - arms_fuse
+        total_effective_mm: 158.4
+      - label: most
+        from_bow_m: 157.8
+        height_m: 1.3
+        plates:
+          - material: Cit_Belt
+            thickness_mm: 152
+            angle_deg: 22.6
+            effective_mm: 164.7
+            shell:
+              - arms_fuse
+        total_effective_mm: 164.7
+verdict: "Above the waterline the citadel shows a vertical wall (3.6 deg from vertical on 92.1% of it); 21.1% of the side face is above the waterline and the roof is 1.7 m above the waterline. At broadside with flat fire, 0% of hits over the citadel strike its plate past 60 deg (effective thickness over double) and 0% at or past the shell's always-ricochet angle. At 12.0 km, 74.4% of hits over the citadel strike its plate past 60 deg (effective thickness over double) and 74.4% at or past the shell's always-ricochet angle."
+assumptions:
+  - "The waterline is model height 0, where the armor viewer draws the water."
+  - "Rays are parallel and evenly spaced, so shares are by area seen along the ray direction."
+  - "Effective thickness is thickness / cos(strike angle) with no normalization. Shell events use the shell's normalization for the fuse and its ricochet angles; ricochets between the two angles are random in the game."
+  - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
+  - "Approaches fire at the model's starboard side with the hull level, no heel or pitch, and turrets at their default heading."

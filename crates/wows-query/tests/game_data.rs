@@ -9,6 +9,9 @@ use wows_core::units::Km;
 use wows_core::units::Millimeters;
 use wows_query::GameData;
 use wows_query::QueryError;
+use wows_query::armor_trace::ArmorTraceArgs;
+use wows_query::armor_trace::TraceWeapon;
+use wows_query::citadel::CitadelProfileArgs;
 use wows_query::consumables::ShipConsumablesArgs;
 use wows_query::firing_arcs::BatteryArcs;
 use wows_query::firing_arcs::FiringArcsArgs;
@@ -478,4 +481,128 @@ fn ship_aircraft_lists_squadrons_air_strikes_and_plate_verdicts() {
             game().call_tool("ship_aircraft", json!({ "ship": name, "thickness_mm": thickness })).expect("ship exists");
         insta::assert_yaml_snapshot!(format!("ship_aircraft_{}", name.replace(' ', "_")), aircraft);
     }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn sekiryu_ap_bombs_citadel_yamato_from_the_deck() {
+    let trace = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Sekiryu".to_owned(),
+            target_ship: "Yamato".to_owned(),
+            weapon: Some(TraceWeapon::Bombs),
+            ..Default::default()
+        })
+        .expect("Sekiryu carries AP dive bombers");
+
+    let citadel = &trace.citadel;
+    assert!(citadel.detonating_inside > 0);
+    insta::assert_yaml_snapshot!(trace);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_ap_citadels_a_broadside_hindenburg_at_10_km() {
+    let trace = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Des Moines".to_owned(),
+            target_ship: "Hindenburg".to_owned(),
+            range_km: Some(Km::new(10.0)),
+            ..Default::default()
+        })
+        .expect("Des Moines fires AP");
+
+    assert!(trace.citadel.detonating_inside > 0);
+    insta::assert_yaml_snapshot!(trace);
+}
+
+/// The 300 mm belt and the sloped deck behind it keep 203 mm AP out at 10 km.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn friedrich_der_grosse_turtleback_stops_des_moines_ap_at_10_km() {
+    let trace = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Des Moines".to_owned(),
+            target_ship: "Friedrich der Grosse".to_owned(),
+            range_km: Some(Km::new(10.0)),
+            ..Default::default()
+        })
+        .expect("Des Moines fires AP");
+
+    let citadel = &trace.citadel;
+    assert!(citadel.rays_over_citadel > 0);
+    assert_eq!(citadel.detonating_inside, 0);
+    insta::assert_yaml_snapshot!(trace);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn guns_out_of_range_and_bombless_ships_are_refused() {
+    let out_of_range = game().armor_trace(&ArmorTraceArgs {
+        shooter: "Des Moines".to_owned(),
+        target_ship: "Yamato".to_owned(),
+        range_km: Some(Km::new(40.0)),
+        ..Default::default()
+    });
+    assert!(matches!(out_of_range, Err(QueryError::OutOfRange { .. })));
+
+    let no_bombs = game().armor_trace(&ArmorTraceArgs {
+        shooter: "Des Moines".to_owned(),
+        target_ship: "Yamato".to_owned(),
+        weapon: Some(TraceWeapon::Bombs),
+        ..Default::default()
+    });
+    assert!(matches!(no_bombs, Err(QueryError::WeaponNotFound { .. })));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn citadel_profiles_of_a_battleship_a_turtleback_and_cruisers() {
+    let profile = |ship: &str| {
+        game()
+            .citadel_profile(&CitadelProfileArgs {
+                ship: ship.to_owned(),
+                shooter: Some("Des Moines".to_owned()),
+                range_km: Some(Km::new(12.0)),
+                ..Default::default()
+            })
+            .expect("the ship has an armor model")
+    };
+
+    let yamato = profile("Yamato");
+    assert!(yamato.shape.turtleback.is_none());
+    insta::assert_yaml_snapshot!("citadel_profile_yamato", yamato);
+
+    let friedrich = profile("Friedrich der Grosse");
+    assert!(friedrich.shape.turtleback.is_some());
+    insta::assert_yaml_snapshot!("citadel_profile_friedrich_der_grosse", friedrich);
+
+    let des_moines = profile("Des Moines");
+    assert!(des_moines.shape.turtleback.is_none());
+    insta::assert_yaml_snapshot!("citadel_profile_des_moines", des_moines);
+
+    let zao = profile("Zao");
+    assert!(zao.shape.turtleback.is_none());
+    insta::assert_yaml_snapshot!("citadel_profile_zao", zao);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn sap_traces_ignore_ifhe_and_destroyers_have_no_citadel() {
+    let sap = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Venezia".to_owned(),
+            target_ship: "Des Moines".to_owned(),
+            ammo: Some(Ammo::Sap),
+            ifhe: Some(true),
+            range_km: Some(Km::new(10.0)),
+            ..Default::default()
+        })
+        .expect("Venezia fires SAP");
+    assert_eq!(sap.weapon.ammo, Ammo::Sap);
+    assert!(sap.weapon.penetration_mm.is_some());
+    assert!(sap.verdict.starts_with("Main battery SAP"), "{}", sap.verdict);
+
+    let destroyer = game().citadel_profile(&CitadelProfileArgs { ship: "Gearing".to_owned(), ..Default::default() });
+    assert!(matches!(destroyer, Err(QueryError::NoCitadel { .. })), "{destroyer:?}");
 }

@@ -16,6 +16,8 @@ use serde_json::Value;
 use crate::GameData;
 use crate::QueryError;
 use crate::aircraft::ShipAircraftArgs;
+use crate::armor_trace::ArmorTraceArgs;
+use crate::citadel::CitadelProfileArgs;
 use crate::consumables::ShipConsumablesArgs;
 use crate::firing_arcs::FiringArcsArgs;
 use crate::gameparams::GameParamsQueryArgs;
@@ -112,6 +114,18 @@ const TOOLS: &[Tool] = &[
         description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. Each group gives qualifying (ships that defeat the plate, listed in ships) and considered (ships under the same filters that fire that ammo), each as total and by_class. With a target ship and no tiers, searches the target's tier +-2.",
         schema: input_schema::<PenetrationSearchArgs>,
         call: |game, arguments| run(arguments, |args| game.penetration_search(args)),
+    },
+    Tool {
+        name: "armor_trace",
+        description: "Trace a shooter's shell or bomb through a target ship's 3D armor model, e.g. whether Sekiryu's AP bombs can citadel Yamato or Des Moines AP can citadel a broadside cruiser at 10 km. Casts a grid of parallel rays along the line of fire (gun range and target angle, or the bomber's dive) and runs AP through every plate with the armor viewer's simulation; HE and SAP are tested against the first plate. Returns the fraction of rays over the citadel that detonate inside it, a summary per struck zone, example rays with their plates, a verdict, and the assumptions behind it.",
+        schema: input_schema::<ArmorTraceArgs>,
+        call: |game, arguments| run(arguments, |args| game.armor_trace(args)),
+    },
+    Tool {
+        name: "citadel_profile",
+        description: "Shape and exposure of one ship's citadel from its 3D armor model: share of the citadel face above the waterline per side, roof height, slope of the citadel plates by height band (vertical, inclined belt, sloped deck, flat deck), whether it is a turtleback, and its height along the ship. For broadside flat fire, and for a shooter's main battery AP at range_km when given, the armor in front of the citadel (effective thickness spread and the least, median and most armored plate stacks with overmatch, ricochet and fuse events, over rays without a glancing strike, with the glancing rays counted apart) and how often the citadel plate is struck past 60 deg or past the ricochet angles.",
+        schema: input_schema::<CitadelProfileArgs>,
+        call: |game, arguments| run(arguments, |args| game.citadel_profile(args)),
     },
     Tool {
         name: "ship_stats",

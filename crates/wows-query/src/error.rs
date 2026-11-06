@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::Km;
 use wowsunpack::game_params::ttx::modifiers::ModifierError;
 
 /// Failure to load a game data build.
@@ -153,6 +154,29 @@ pub enum QueryError {
         #[source]
         source: ArmorReadError,
     },
+
+    #[error(
+        "this game data holds no armor model for {ship}; the dump lacks the armor extract for this ship, which wows-data-mgr dump-renderer-data writes unless given --no-armor"
+    )]
+    ArmorMissing { ship: String },
+
+    #[error("{ship} has no {weapon}")]
+    WeaponNotFound { ship: String, weapon: String },
+
+    #[error("projectile {projectile} is not in this game data")]
+    ProjectileNotFound { projectile: String },
+
+    #[error("{range} is beyond the maximum range of {projectile}")]
+    OutOfRange { projectile: String, range: Km },
+
+    #[error("the ordnance of {aircraft} cannot be traced: {reason}")]
+    OrdnanceNotTraceable { aircraft: String, reason: &'static str },
+
+    #[error("{ship}'s armor model has no citadel plates")]
+    NoCitadel { ship: String },
+
+    #[error("projectile {projectile} lacks the normalization angle or fuse threshold the ballistic solution needs")]
+    ProjectileIncomplete { projectile: String },
 }
 
 /// Failure to build or read the raw GameParams store.

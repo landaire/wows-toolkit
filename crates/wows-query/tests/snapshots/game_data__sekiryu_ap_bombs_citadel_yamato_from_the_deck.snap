@@ -1,0 +1,360 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: trace
+---
+shooter: "T11 Sekiryu (aircraft_carrier, Japan)"
+target: "T10 Yamato (battleship, Japan)"
+target_hull: Yamato
+weapon:
+  source: J5N Tenrai
+  projectile: PJPB120_SEKIRYU_STOCK
+  ammo: AP
+  caliber_mm: 404
+arrival:
+  velocity_mps: 490
+  fall_angle_deg: 75
+  raw_penetration_mm: 350.8
+  basis: "assumed: bulletSpeed and the aircraft's angleOfDive"
+target_angle_deg: 0
+rays:
+  spacing_m: 1
+  cast: 11309
+  struck_ship: 8045
+  entered_water_first: 383
+citadel:
+  rays_over_citadel: 4661
+  detonating_inside: 3513
+  fraction: 0.754
+  through_random_ricochet_band: 504
+citadel_face:
+  fall_angle_deg: 75
+  rays_over_citadel: 4661
+  glancing_rays: 554
+  armor_before_citadel_mm:
+    min: 0
+    median: 59.1
+    max: 1282.3
+  citadel_plate_mm:
+    min: 207.1
+    median: 207.1
+    max: 454.8
+  bands:
+    - band: 2 to 4 m
+      rays: 1354
+      median_angle_deg: 22.4
+      doubled_pct: 0
+      may_ricochet_pct: 0
+      autobounce_pct: 0
+    - band: above 4 m
+      rays: 3307
+      median_angle_deg: 15
+      doubled_pct: 0
+      may_ricochet_pct: 0
+      autobounce_pct: 0
+  stacks:
+    - label: least
+      from_bow_m: 121.5
+      height_m: 4.1
+      plates:
+        - material: Cas_Deck
+          thickness_mm: 57
+          angle_deg: 15
+          effective_mm: 59
+          shell:
+            - arms_fuse
+        - material: Cas_Deck
+          thickness_mm: 0
+          angle_deg: 15
+          effective_mm: 0
+        - material: Cit_Deck
+          thickness_mm: 200
+          angle_deg: 15
+          effective_mm: 207.1
+          shell:
+            - arms_fuse
+      total_effective_mm: 266.1
+    - label: median
+      from_bow_m: 158.5
+      height_m: 4.1
+      plates:
+        - material: SS_Top
+          thickness_mm: 19
+          angle_deg: 15
+          effective_mm: 19.7
+          shell:
+            - overmatch
+        - material: SS_Top
+          thickness_mm: 0
+          angle_deg: 15
+          effective_mm: 0
+        - material: SS_Top
+          thickness_mm: 19
+          angle_deg: 15
+          effective_mm: 19.7
+          shell:
+            - overmatch
+        - material: Cas_Deck
+          thickness_mm: 57
+          angle_deg: 15
+          effective_mm: 59
+          shell:
+            - arms_fuse
+        - material: SS_Top
+          thickness_mm: 0
+          angle_deg: 15
+          effective_mm: 0
+        - material: Cas_Deck
+          thickness_mm: 0
+          angle_deg: 15
+          effective_mm: 0
+        - material: Cit_Deck
+          thickness_mm: 200
+          angle_deg: 15
+          effective_mm: 207.1
+          shell:
+            - arms_fuse
+      total_effective_mm: 305.4
+    - label: most
+      from_bow_m: 201.5
+      height_m: 4.1
+      plates:
+        - material: TurretFwd
+          thickness_mm: 650
+          angle_deg: 46.9
+          effective_mm: 951
+          shell:
+            - may_ricochet
+            - arms_fuse
+        - material: TurretDown
+          thickness_mm: 135
+          angle_deg: 15
+          effective_mm: 139.8
+          shell:
+            - arms_fuse
+        - material: Tur3GkTop
+          thickness_mm: 135
+          angle_deg: 15
+          effective_mm: 139.8
+          shell:
+            - arms_fuse
+        - material: St_Deck
+          thickness_mm: 50
+          angle_deg: 15
+          effective_mm: 51.8
+          shell:
+            - arms_fuse
+        - material: Cit_Deck
+          thickness_mm: 200
+          angle_deg: 15
+          effective_mm: 207.1
+          shell:
+            - arms_fuse
+      total_effective_mm: 1489.3
+zones:
+  - zone: Casemate
+    rays: 2260
+    outcomes:
+      citadel: 2007
+      penetration: 144
+      overpenetration: 12
+      ricochet: 97
+    detonated_in:
+      Bow: 8
+      Casemate: 136
+      Citadel: 2007
+  - zone: Stern
+    rays: 1766
+    outcomes:
+      citadel: 175
+      penetration: 1082
+      overpenetration: 406
+      ricochet: 103
+    detonated_in:
+      Casemate: 1
+      Citadel: 175
+      SteeringGear: 49
+      Stern: 1009
+      TorpedoProtection: 3
+  - zone: Superstructure
+    rays: 1521
+    outcomes:
+      citadel: 1259
+      penetration: 139
+      overpenetration: 20
+      ricochet: 102
+      shatter: 1
+    detonated_in:
+      Casemate: 51
+      Citadel: 1259
+      Superstructure: 82
+  - zone: Bow
+    rays: 1452
+    outcomes:
+      citadel: 61
+      penetration: 1121
+      overpenetration: 235
+      ricochet: 35
+    detonated_in:
+      Bow: 1083
+      Citadel: 61
+  - zone: Turret
+    rays: 634
+    outcomes:
+      citadel: 11
+      penetration: 450
+      ricochet: 87
+      shatter: 86
+    detonated_in:
+      Bow: 1
+      Casemate: 1
+      Citadel: 11
+      Stern: 7
+      Turret: 406
+  - zone: Citadel
+    rays: 29
+    outcomes:
+      shatter: 29
+examples:
+  - outcome: citadel
+    from_bow_m: 173.5
+    above_waterline_m: 13.1
+    detonated_in: Citadel
+    plates:
+      - material: SS_Side
+        zone: Superstructure
+        thickness_mm: 19
+        angle_deg: 46.8
+        result: overmatch
+        effective_mm: 19
+        penetration_mm: 350.8
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 19
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 19
+        penetration_mm: 350.8
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 0
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 0
+        penetration_mm: 350.8
+      - material: Cas_Deck
+        zone: Casemate
+        thickness_mm: 57
+        angle_deg: 15
+        result: penetrate
+        effective_mm: 57
+        penetration_mm: 350.8
+      - material: Cas_Deck
+        zone: Casemate
+        thickness_mm: 0
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 0
+        penetration_mm: 348
+      - material: Cit_Deck
+        zone: Citadel
+        thickness_mm: 200
+        angle_deg: 15
+        result: penetrate
+        effective_mm: 200
+        penetration_mm: 348
+      - material: Deck
+        zone: Hull
+        thickness_mm: 18
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 18
+        penetration_mm: 142.2
+      - material: Cit_Bottom
+        zone: Citadel
+        thickness_mm: 50
+        angle_deg: 15
+        result: not_reached
+  - outcome: penetration
+    from_bow_m: 177.5
+    above_waterline_m: 14
+    detonated_in: Casemate
+    plates:
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 75
+        angle_deg: 15
+        result: penetrate
+        effective_mm: 75
+        penetration_mm: 350.8
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 75
+        angle_deg: 15
+        result: penetrate
+        effective_mm: 75
+        penetration_mm: 338.6
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 0
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 0
+        penetration_mm: 324.8
+      - material: Cas_Deck
+        zone: Casemate
+        thickness_mm: 57
+        angle_deg: 15
+        result: penetrate
+        effective_mm: 57
+        penetration_mm: 324.8
+      - material: SS_Top
+        zone: Superstructure
+        thickness_mm: 0
+        angle_deg: 15
+        result: overmatch
+        effective_mm: 0
+        penetration_mm: 320.7
+      - material: ConstrSide
+        zone: Hull
+        thickness_mm: 75
+        angle_deg: 79.5
+        result: ricochet
+        effective_mm: 409.8
+        penetration_mm: 320.7
+    more_plates: 4
+  - outcome: ricochet
+    from_bow_m: 106.5
+    above_waterline_m: 12.7
+    plates:
+      - material: TurretSide
+        zone: Turret
+        thickness_mm: 250
+        angle_deg: 61.2
+        result: ricochet
+        effective_mm: 519
+        penetration_mm: 350.8
+    more_plates: 8
+  - outcome: shatter
+    from_bow_m: 201.5
+    above_waterline_m: 10.8
+    plates:
+      - material: TurretFwd
+        zone: Turret
+        thickness_mm: 650
+        angle_deg: 46.9
+        result: shatter
+        effective_mm: 654.7
+        penetration_mm: 350.8
+    more_plates: 9
+verdict: "Yes: 3513 of 4661 rays over Yamato's citadel (75%) detonate inside it. 504 of them cross a plate at an angle where the game rolls a ricochet."
+assumptions:
+  - "Bomb impact speed is assumed to be its bulletSpeed (490 m/s) and its fall angle the aircraft's angleOfDive (75 deg). The client does not define bomb impact kinematics; the server does."
+  - AP bombs are simulated with the gun shell formulas; the game may treat bombs differently on the server.
+  - "Each ray stands for an equal area of the target seen along the line of fire; fractions are by area, not weighted by dispersion or aim."
+  - Rays whose first armor contact is below the waterline entered the water first and are not modelled.
+  - "Target hull level and stationary, turrets at their default heading, and the projectile travels straight through the ship."
+  - "Penetration, ricochet and fuse behaviour are resolved by the game server; the client data holds only the inputs."
+  - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
+  - "AP uses the toolkit armor viewer's plate-by-plate simulation with community formulas from wows_shell (jcw780): penetration = krupp-scaled mass and caliber x velocity^1.38, normalization, overmatch when caliber > 14.3 x thickness, velocity loss after each plate, fuse armed by a plate at least the fuse threshold thick and fired after the fuse time."
+  - A plate struck at or past the always-ricochet angle ricochets. Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.
+  - "A citadel hit is a detonation inside the citadel volume, judged by how many citadel plates the ray crossed before the detonation (armor viewer rule)."

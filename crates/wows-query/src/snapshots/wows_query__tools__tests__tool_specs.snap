@@ -135,6 +135,79 @@ expression: specs()
       nation:
         type: string
         description: "Nation as GameParams spells it, e.g. \"USA\"."
+- name: armor_trace
+  description: "Trace a shooter's shell or bomb through a target ship's 3D armor model, e.g. whether Sekiryu's AP bombs can citadel Yamato or Des Moines AP can citadel a broadside cruiser at 10 km. Casts a grid of parallel rays along the line of fire (gun range and target angle, or the bomber's dive) and runs AP through every plate with the armor viewer's simulation; HE and SAP are tested against the first plate. Returns the fraction of rays over the citadel that detonate inside it, a summary per struck zone, example rays with their plates, a verdict, and the assumptions behind it."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      shooter:
+        type: string
+        description: "Firing ship, e.g. \"Des Moines\" or \"Sekiryu\"."
+      target_ship:
+        type: string
+        description: "Target ship, e.g. \"Yamato\"."
+      weapon:
+        description: Defaults to main_battery.
+        oneOf:
+          - type: string
+            enum:
+              - main_battery
+              - secondary_battery
+          - type: string
+            const: bombs
+            description: "AP, HE or SAP bombs of the shooter's dive bombers or air strike."
+      ammo:
+        type: string
+        enum:
+          - AP
+          - HE
+          - SAP
+        description: Shell or bomb type. Defaults to AP when the weapon has it.
+      range_km:
+        type: number
+        description: "Gun range in km, 0 or more; 0 is point blank, flat at muzzle velocity. Required for guns, not used for bombs."
+      target_angle_deg:
+        type: number
+        description: "Target heading away from broadside in degrees: 0 is broadside, 30 angled, 90 bow-on with the bow toward the shooter. For bombs, 0 is a dive across the ship and 90 a dive along it from bow to stern. Defaults to 0."
+      target_hull:
+        type: string
+        description: "Target hull module, e.g. \"Hull B\". Defaults to the stock hull."
+      ifhe:
+        type: boolean
+        description: Apply Inertia Fuse for HE Shells to gun HE penetration. Defaults to false.
+      spacing_m:
+        type: number
+        description: "Distance between neighbouring rays in m, 0.25 to 10. Defaults to 1."
+      aircraft:
+        type: string
+        description: "Aircraft name when the shooter carries several bomb-carrying squadrons, e.g. \"Ryusei\". Without it, squadrons with AP bombs come first, then stock dive bombers before researched or jet dive bombers, and those before the air strike."
+    required:
+      - shooter
+      - target_ship
+- name: citadel_profile
+  description: "Shape and exposure of one ship's citadel from its 3D armor model: share of the citadel face above the waterline per side, roof height, slope of the citadel plates by height band (vertical, inclined belt, sloped deck, flat deck), whether it is a turtleback, and its height along the ship. For broadside flat fire, and for a shooter's main battery AP at range_km when given, the armor in front of the citadel (effective thickness spread and the least, median and most armored plate stacks with overmatch, ricochet and fuse events, over rays without a glancing strike, with the glancing rays counted apart) and how often the citadel plate is struck past 60 deg or past the ricochet angles."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship whose citadel is described, e.g. \"Yamato\"."
+      hull:
+        type: string
+        description: "Hull module, e.g. \"Hull B\". Defaults to the stock hull."
+      shooter:
+        type: string
+        description: "Ship whose main battery AP is fired at the citadel, e.g. \"Des Moines\". Needs range_km."
+      range_km:
+        type: number
+        description: "Range in km for the shooter's plunging fire."
+      spacing_m:
+        type: number
+        description: "Distance between neighbouring rays in m, 0.25 to 10. Defaults to 0.5."
+    required:
+      - ship
 - name: ship_stats
   description: "Port stat card of one ship with stock modules. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
   input_schema:
