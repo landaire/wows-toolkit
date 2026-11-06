@@ -258,6 +258,12 @@ impl Ship {
         self.param.vehicle().map_or("", |vehicle| vehicle.group())
     }
 
+    /// Position of the ship's group among the groups players can own, tech
+    /// tree groups first; `None` for other groups.
+    pub(crate) fn group_order(&self) -> Option<usize> {
+        REGULAR_GROUPS.iter().position(|group| *group == self.group())
+    }
+
     pub(crate) fn is_regular(&self) -> bool {
         REGULAR_GROUPS.contains(&self.group())
     }
@@ -478,6 +484,11 @@ impl TierRange {
     /// Matchmaking spread around `tier`: two tiers either way, within 1..=11.
     pub(crate) fn around(tier: Tier) -> Self {
         Self { min: Tier(tier.0.saturating_sub(2).max(1)), max: Tier((tier.0 + 2).min(11)) }
+    }
+
+    /// `tier` and the tiers either side of it, within 1..=11.
+    pub(crate) fn adjacent(tier: Tier) -> Self {
+        Self { min: Tier(tier.0.saturating_sub(1).max(1)), max: Tier((tier.0 + 1).min(11)) }
     }
 
     pub(crate) fn contains(self, tier: Tier) -> bool {

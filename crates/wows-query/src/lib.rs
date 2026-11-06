@@ -9,6 +9,7 @@
 pub mod aircraft;
 pub mod armament;
 pub mod armor;
+pub mod armor_assessment;
 mod armor_models;
 pub mod armor_trace;
 pub mod builds;

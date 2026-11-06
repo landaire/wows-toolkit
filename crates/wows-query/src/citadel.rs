@@ -439,24 +439,15 @@ impl GameData {
         let TargetHull { param: hull_param, name: hull_name } = self.target_hull(ship, args.hull.as_deref())?;
         let meshes = self.target_meshes(ship, &hull_param)?;
         let bow = bow_position(&meshes);
-        let Some(extent) = citadel_extent(&meshes) else {
+        if !has_citadel_plates(&meshes) {
             return Err(QueryError::NoCitadel { ship: ship.name.clone() });
-        };
-
+        }
         let starboard = cast_grid(&meshes, line_of_fire(Degrees::new(0.0), Degrees::new(0.0)), spacing)?;
         let port = cast_grid(&meshes, line_of_fire(Degrees::new(180.0), Degrees::new(0.0)), spacing)?;
-        let cell_area = SquareMeters::new(spacing.value() * spacing.value());
-        let sides = vec![
-            side_exposure(Side::Starboard, &starboard.rays, cell_area),
-            side_exposure(Side::Port, &port.rays, cell_area),
-        ];
-
-        let side_rays: Vec<&GridRay> = starboard.rays.iter().chain(&port.rays).collect();
-        let shape = CitadelShape {
-            bands: shape_bands(&side_rays),
-            above_waterline: above_waterline(&side_rays),
-            turtleback: turtleback(&side_rays),
-            length_profile: length_profile(&side_rays, bow),
+        let Some(CitadelGeometry { exposure, shape }) =
+            citadel_geometry(&meshes, &starboard.rays, &port.rays, spacing, bow)
+        else {
+            return Err(QueryError::NoCitadel { ship: ship.name.clone() });
         };
 
         let materials = meshes.iter().flat_map(|mesh| mesh.triangle_info.iter().map(|info| info.material));
@@ -468,11 +459,6 @@ impl GameData {
             approaches.push(approach(&plunging.rays, fall, weapon.arrival.range_km, shell.as_ref(), bow, &names));
         }
 
-        let exposure = CitadelExposure {
-            roof_above_waterline_m: round_m(extent.top.to_meters()),
-            floor_m: round_m(extent.bottom.to_meters()),
-            sides,
-        };
         let verdict = verdict(&shape, &exposure, &approaches);
 
         Ok(CitadelProfileOutput {
@@ -495,6 +481,45 @@ impl GameData {
             ],
         })
     }
+}
+
+/// The citadel as horizontal rays from either side see it, `spacing` apart.
+pub(crate) struct CitadelGeometry {
+    pub(crate) exposure: CitadelExposure,
+    pub(crate) shape: CitadelShape,
+}
+
+/// The citadel's extent against the waterline, the face each side presents
+/// and the shape of its plates. `None` when the armor model has no citadel
+/// plates.
+pub(crate) fn citadel_geometry(
+    meshes: &[InteractiveArmorMesh],
+    starboard: &[GridRay],
+    port: &[GridRay],
+    spacing: Meters,
+    bow: ShipModelDistance,
+) -> Option<CitadelGeometry> {
+    let extent = citadel_extent(meshes)?;
+
+    let cell_area = SquareMeters::new(spacing.value() * spacing.value());
+    let sides = vec![side_exposure(Side::Starboard, starboard, cell_area), side_exposure(Side::Port, port, cell_area)];
+
+    let side_rays: Vec<&GridRay> = starboard.iter().chain(port).collect();
+    let shape = CitadelShape {
+        bands: shape_bands(&side_rays),
+        above_waterline: above_waterline(&side_rays),
+        turtleback: turtleback(&side_rays),
+        length_profile: length_profile(&side_rays, bow),
+    };
+
+    Some(CitadelGeometry {
+        exposure: CitadelExposure {
+            roof_above_waterline_m: round_m(extent.top.to_meters()),
+            floor_m: round_m(extent.bottom.to_meters()),
+            sides,
+        },
+        shape,
+    })
 }
 
 /// The armor in front of the citadel for rays along one direction. Only rays
@@ -804,6 +829,10 @@ fn shell_events(shell: &ShellFlags, plate: &RayPlate) -> Vec<PlateEvent> {
 
 fn first_citadel<'a, 'b>(plates: &'b [RayPlate<'a>]) -> Option<&'b RayPlate<'a>> {
     plates.iter().find(|plate| is_citadel_zone(plate.zone))
+}
+
+pub(crate) fn has_citadel_plates(meshes: &[InteractiveArmorMesh]) -> bool {
+    citadel_extent(meshes).is_some()
 }
 
 /// The lowest and highest model height of any citadel triangle.

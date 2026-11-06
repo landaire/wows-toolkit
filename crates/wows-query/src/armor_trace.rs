@@ -47,6 +47,7 @@ use crate::names::Interpretations;
 use crate::names::search_key;
 use crate::shells::Ammo;
 use crate::shells::Battery;
+use crate::shells::Shell;
 use crate::ships::Ship;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -411,13 +412,13 @@ pub(crate) struct GridRay<'a> {
 }
 
 /// What one modelled ray did.
-struct TracedRay<'a> {
-    plates: Vec<RayPlate<'a>>,
-    outcome: RayOutcome,
+pub(crate) struct TracedRay<'a> {
+    pub(crate) plates: Vec<RayPlate<'a>>,
+    pub(crate) outcome: RayOutcome,
     over_citadel: bool,
     random_ricochet_band: bool,
     detonated_in: Option<&'a str>,
-    sim: Option<ShellSimResult>,
+    pub(crate) sim: Option<ShellSimResult>,
 }
 
 /// A plate [`ray_plates`] kept, to recognize a second crossing of it.
@@ -585,13 +586,7 @@ impl GameData {
         };
         let ammo = request.ammo;
 
-        // Gun modules of one ship can fire different shells of one type; the
-        // largest caliber is the one a trace is usually asked about.
-        let Some(shell) = shells
-            .iter()
-            .filter(|shell| shell.ammo == ammo)
-            .max_by(|left, right| left.caliber_mm.value().total_cmp(&right.caliber_mm.value()))
-        else {
+        let Some(shell) = largest_shell(&shells, ammo) else {
             return Err(QueryError::WeaponNotFound {
                 ship: shooter.name.clone(),
                 weapon: format!("{source} {}", ammo.label()),
@@ -749,7 +744,7 @@ impl GameData {
         })
     }
 
-    fn projectile(&self, name: &str) -> Result<Projectile, QueryError> {
+    pub(crate) fn projectile(&self, name: &str) -> Result<Projectile, QueryError> {
         self.provider()
             .game_param_by_name(name)
             .and_then(|param| param.projectile().cloned())
@@ -855,6 +850,16 @@ pub(crate) fn cast_grid(
     Ok(grid)
 }
 
+/// The largest-caliber shell of `ammo` among `shells`. Gun modules of one
+/// ship can fire different shells of one type; the largest caliber is the one
+/// a trace is usually asked about.
+pub(crate) fn largest_shell(shells: &[Shell], ammo: Ammo) -> Option<&Shell> {
+    shells
+        .iter()
+        .filter(|shell| shell.ammo == ammo)
+        .max_by(|left, right| left.caliber_mm.value().total_cmp(&right.caliber_mm.value()))
+}
+
 fn gun_request(battery: Battery, ammo: Ammo, args: &ArmorTraceArgs) -> GunRequest {
     GunRequest { battery, ammo, range_km: args.range_km, ifhe: args.ifhe.unwrap_or(false) }
 }
@@ -958,20 +963,12 @@ fn ray_plates<'a>(meshes: &'a [InteractiveArmorMesh], hits: &[ArmorRayHit], dire
     plates
 }
 
-fn trace_ray<'a>(model: &WeaponModel, plates: Vec<RayPlate<'a>>) -> TracedRay<'a> {
+pub(crate) fn trace_ray<'a>(model: &WeaponModel, plates: Vec<RayPlate<'a>>) -> TracedRay<'a> {
     let over_citadel = plates.iter().any(|plate| is_citadel_zone(plate.zone));
 
     match model {
         WeaponModel::ArmorPiercing { params, impact_velocity } => {
-            let hits: Vec<PlateHit> = plates
-                .iter()
-                .map(|plate| PlateHit {
-                    thickness: plate.thickness,
-                    angle_from_normal: plate.angle,
-                    distance_along_ray: plate.distance,
-                })
-                .collect();
-            let sim = simulate_shell_through_plates(params, *impact_velocity, &hits, false);
+            let sim = simulate_shell_through_plates(params, *impact_velocity, &plate_hits(&plates), false);
             let zones: Vec<&'a str> = plates.iter().map(|plate| plate.zone).collect();
             let (outcome, detonated_in) = ap_outcome(&sim, &zones);
             let reached = sim.plates.len();
@@ -1001,10 +998,22 @@ fn trace_ray<'a>(model: &WeaponModel, plates: Vec<RayPlate<'a>>) -> TracedRay<'a
     }
 }
 
+/// `plates` as the shell simulation takes them.
+pub(crate) fn plate_hits(plates: &[RayPlate]) -> Vec<PlateHit> {
+    plates
+        .iter()
+        .map(|plate| PlateHit {
+            thickness: plate.thickness,
+            angle_from_normal: plate.angle,
+            distance_along_ray: plate.distance,
+        })
+        .collect()
+}
+
 /// The armor viewer's reading of a simulated run
 /// (`wows_toolkit_viewmodel::armor::arc::sim_outcome`), with the zone the
 /// fuse went off in.
-fn ap_outcome<'a>(sim: &ShellSimResult, zones: &[&'a str]) -> (RayOutcome, Option<&'a str>) {
+pub(crate) fn ap_outcome<'a>(sim: &ShellSimResult, zones: &[&'a str]) -> (RayOutcome, Option<&'a str>) {
     if sim.detonation.is_some() {
         if sim.detonated_at.is_none() {
             return (RayOutcome::Overpenetration, None);

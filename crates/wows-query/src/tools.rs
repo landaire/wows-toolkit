@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::GameData;
 use crate::QueryError;
 use crate::aircraft::ShipAircraftArgs;
+use crate::armor_assessment::ArmorAssessmentArgs;
 use crate::armor_trace::ArmorTraceArgs;
 use crate::citadel::CitadelProfileArgs;
 use crate::consumables::ShipConsumablesArgs;
@@ -158,6 +159,12 @@ const TOOLS: &[Tool] = &[
         description: "Shape and exposure of one ship's citadel from its 3D armor model: share of the citadel face above the waterline per side, roof height, slope of the citadel plates by height band (vertical, inclined belt, sloped deck, flat deck), whether it is a turtleback, and its height along the ship. For broadside flat fire, and for a shooter's main battery AP at range_km when given, the armor in front of the citadel (effective thickness spread and the least, median and most armored plate stacks with overmatch, ricochet and fuse events, over rays without a glancing strike, with the glancing rays counted apart) and how often the citadel plate is struck past 60 deg or past the ricochet angles.",
         schema: input_schema::<CitadelProfileArgs>,
         call: |game, arguments| run(arguments, |args| game.citadel_profile(args)),
+    },
+    Tool {
+        name: "armor_assessment",
+        description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers.",
+        schema: input_schema::<ArmorAssessmentArgs>,
+        call: |game, arguments| run(arguments, |args| game.armor_assessment(args)),
     },
     Tool {
         name: "ship_stats",

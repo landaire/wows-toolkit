@@ -9,6 +9,8 @@ use wows_core::units::Km;
 use wows_core::units::Millimeters;
 use wows_query::GameData;
 use wows_query::QueryError;
+use wows_query::armor_assessment::ArmorAssessmentArgs;
+use wows_query::armor_assessment::ArmorAssessmentOutput;
 use wows_query::armor_trace::ArmorTraceArgs;
 use wows_query::armor_trace::TraceWeapon;
 use wows_query::citadel::CitadelProfileArgs;
@@ -1034,4 +1036,44 @@ fn sap_traces_ignore_ifhe_and_destroyers_have_no_citadel() {
 
     let destroyer = game().citadel_profile(&CitadelProfileArgs { ship: "Gearing".to_owned(), ..Default::default() });
     assert!(matches!(destroyer, Err(QueryError::NoCitadel { .. })), "{destroyer:?}");
+}
+
+fn armor_assessment(ship: &str) -> ArmorAssessmentOutput {
+    game()
+        .armor_assessment(&ArmorAssessmentArgs { ship: ship.to_owned(), hull: None })
+        .expect("the ship has an armor model")
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn armor_assessment_finds_plates_arming_destroyer_ap_fuses() {
+    for (ship, snapshot) in [("Khabarovsk", "armor_assessment_khabarovsk"), ("Elbing", "armor_assessment_elbing")] {
+        let assessment = armor_assessment(ship);
+        assert!(
+            assessment.properties.fuse_arming.iter().any(|arming| arming.group.starts_with("destroyer AP")),
+            "{ship}: {:?}",
+            assessment.properties.fuse_arming
+        );
+        insta::assert_yaml_snapshot!(snapshot, assessment);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn armor_assessment_of_battleships() {
+    let friedrich = armor_assessment("Friedrich der Grosse");
+    assert!(friedrich.properties.turtleback.is_some());
+    insta::assert_yaml_snapshot!("armor_assessment_friedrich_der_grosse", friedrich);
+
+    let yamato = armor_assessment("Yamato");
+    assert!(yamato.properties.turtleback.is_none());
+    insta::assert_yaml_snapshot!("armor_assessment_yamato", yamato);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn armor_assessment_of_cruisers() {
+    for (ship, snapshot) in [("Des Moines", "armor_assessment_des_moines"), ("Zao", "armor_assessment_zao")] {
+        insta::assert_yaml_snapshot!(snapshot, armor_assessment(ship));
+    }
 }

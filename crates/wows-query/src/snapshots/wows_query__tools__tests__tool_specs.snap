@@ -232,6 +232,20 @@ expression: specs()
         description: "Distance between neighbouring rays in m, 0.25 to 10. Defaults to 0.5."
     required:
       - ship
+- name: armor_assessment
+  description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship whose armor is assessed, e.g. \"Khabarovsk\"."
+      hull:
+        type: string
+        description: "Hull module, e.g. \"Hull B\". Defaults to the stock hull. Peers are compared on their stock hulls."
+    required:
+      - ship
 - name: ship_stats
   description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range and torpedo reload with builds: base, best-fit build (assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
   input_schema:

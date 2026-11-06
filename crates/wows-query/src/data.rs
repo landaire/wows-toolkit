@@ -17,6 +17,7 @@ use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
+use crate::armor_assessment::ComparisonCache;
 use crate::consumables::consumable_names;
 use crate::error::LoadError;
 use crate::gameparams::RawParamsSlot;
@@ -74,6 +75,9 @@ pub struct GameData {
 
     /// Raw GameParams, opened or built on first use.
     pub(crate) raw_params: RawParamsSlot,
+
+    /// Peer tables of armor assessments, traced on first use.
+    pub(crate) armor_comparisons: ComparisonCache,
 }
 
 impl GameData {
@@ -93,8 +97,9 @@ impl GameData {
         load_english(&provider, &dump, dump_dir)?;
 
         let raw_params = RawParamsSlot::new(dump_dir, cache_root, build);
+        let armor_comparisons = ComparisonCache::new(cache_root, build);
 
-        Ok(Self::index(version, provider, dump.vfs(), raw_params))
+        Ok(Self::index(version, provider, dump.vfs(), raw_params, armor_comparisons))
     }
 
     /// Loads the newest build listed in a wows-replay-data dump root (the
@@ -140,7 +145,13 @@ impl GameData {
         if unknown.is_empty() { Ok(()) } else { Err(AliasError { unknown }) }
     }
 
-    fn index(version: Version, provider: GameMetadataProvider, vfs: VfsPath, raw_params: RawParamsSlot) -> Self {
+    fn index(
+        version: Version,
+        provider: GameMetadataProvider,
+        vfs: VfsPath,
+        raw_params: RawParamsSlot,
+        armor_comparisons: ComparisonCache,
+    ) -> Self {
         let mut ships: Vec<Ship> =
             provider.params().iter().filter_map(|param| Ship::from_param(&provider, param)).collect();
         Ship::mark_test_copies(&mut ships);
@@ -182,6 +193,7 @@ impl GameData {
             upgrade_names,
             consumable_names,
             raw_params,
+            armor_comparisons,
         }
     }
 }
