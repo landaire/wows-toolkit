@@ -93,6 +93,11 @@ fn main() {
     };
     viewport::device::choose_adapter(asked.adapter_choice());
 
+    // `ring` and `aws_lc_rs` are both enabled in the dependency graph (octocrab
+    // pulls hyper-rustls with its defaults), so rustls cannot pick a provider by
+    // crate features and `ClientConfig::builder()` panics unless one is installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // The log file is what a bug report is copied from, so it is started before
     // anything that could fail. The setting is read straight from the database:
     // the app that owns the pool does not exist yet, and a crash here would

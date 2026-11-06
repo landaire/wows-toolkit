@@ -51,6 +51,7 @@ GPUI_DEPS = [
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
     "//third-party/rust:rfd",
+    "//third-party/rust:rustls",
     "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
