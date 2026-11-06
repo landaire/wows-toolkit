@@ -634,6 +634,55 @@ fn read_float(dict: &pickled::Dict, key: &str) -> Option<f32> {
     dict.get(&pk(key)).and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
 }
 
+/// Helper: read a nonzero price. GameParams writes `0` for "not sold for this
+/// currency", which is absence rather than a free item.
+fn read_price(dict: &pickled::Dict, key: &str) -> Option<u64> {
+    let value = dict.get(&pk(key))?;
+    let price = value.i64_ref().copied().or_else(|| value.f64_ref().map(|f| *f as i64))?;
+
+    u64::try_from(price).ok().filter(|price| *price > 0)
+}
+
+/// Helper: read every string from a pickled list or tuple value.
+fn read_string_sequence(val: &Value) -> Vec<String> {
+    let strings = |items: &[Value]| -> Vec<String> {
+        items.iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
+    };
+
+    if let Some(list) = val.list_ref() {
+        strings(&list.inner())
+    } else if let Some(tuple) = val.tuple_ref() {
+        strings(tuple.inner())
+    } else {
+        Vec::new()
+    }
+}
+
+/// Port price and research links from a ship's `ShipUpgradeInfo` dict.
+fn read_ship_research(upgrade_info: &pickled::Dict) -> super::types::ShipResearch {
+    let mut next_ships: Vec<String> = upgrade_info
+        .values()
+        .filter_map(|module| module.dict_or_object_dict())
+        .flat_map(|module| module.inner().get(&pk(keys::NEXT_SHIPS)).map(read_string_sequence).unwrap_or_default())
+        .collect();
+    next_ships.sort();
+    next_ships.dedup();
+
+    let required_ship = upgrade_info
+        .get(&pk("requiredShip"))
+        .and_then(|v| v.string_ref())
+        .map(|s| s.inner().clone())
+        .filter(|s| !s.is_empty());
+
+    super::types::ShipResearch::builder()
+        .maybe_cost_credits(read_price(upgrade_info, "costCR").map(super::types::Credits::new))
+        .maybe_cost_doubloons(read_price(upgrade_info, "costGold").map(super::types::Doubloons::new))
+        .maybe_cost_xp(read_price(upgrade_info, "costXP").map(super::types::Experience::new))
+        .next_ships(next_ships)
+        .maybe_required_ship(required_ship)
+        .build()
+}
+
 /// Helper: extract first string from a pickled list value.
 fn read_first_string(val: &Value) -> Option<String> {
     let list = val.list_ref()?;
@@ -1031,6 +1080,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
     });
 
     let upgrade_data = game_param_to_type!(ship_data, keys::SHIP_UPGRADE_INFO, HashMap<(), ()>);
+    let research = read_ship_research(&upgrade_data.inner());
     let upgrades: Vec<String> = upgrade_data
         .inner()
         .keys()
@@ -1685,6 +1735,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
         .camera_trajectories(camera_trajectories)
         .maybe_ttx_components((!ttx_components.is_empty()).then_some(ttx_components))
         .innate_skills(innate_skills)
+        .research(research)
         .build()
 }
 
@@ -1883,6 +1934,11 @@ impl GameMetadataProvider {
                 let groups = string_list_field(&param_data, "group");
                 let ships = string_list_field(&param_data, "ships");
                 let excludes = string_list_field(&param_data, "excludes");
+                let kind = param_data
+                    .get(&pk("type"))
+                    .and_then(|v| v.i64_ref())
+                    .map(|&raw| super::types::ModernizationKind::from_raw(raw));
+                let cost_credits = read_price(&param_data, "costCR").map(super::types::Credits::new);
                 Some(ParamData::Modernization(super::types::Modernization::new(
                     modifiers,
                     slot,
@@ -1892,6 +1948,8 @@ impl GameMetadataProvider {
                     groups,
                     ships,
                     excludes,
+                    kind,
+                    cost_credits,
                 )))
             }
             ParamType::Unit => {
@@ -2869,6 +2927,45 @@ mod camera_tests {
         let ttx = vehicle.ttx_components().expect("ttx components extracted");
         assert!(ttx.fire_controls.is_empty());
         assert!(ttx.fire_control_max_dist_coef("PAUH001_Hull").is_none());
+    }
+
+    /// Mirrors Baltimore's `ShipUpgradeInfo`: a researchable hull unlocking the
+    /// next ship, a zero doubloon price, and an empty `requiredShip`.
+    #[test]
+    fn build_ship_extracts_research_costs_and_links() {
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![
+            (pk("ucType"), sv("_Hull")),
+            (pk("components"), hull_components),
+            (pk("nextShips"), list(vec![sv("PASC020_Des_Moines_1948")])),
+            (pk("prev"), sv("PAUH801_Baltimore_1944")),
+        ]);
+        let stock_hull = dict(vec![(pk("ucType"), sv("_Hull")), (pk("nextShips"), list(vec![])), (pk("prev"), sv(""))]);
+        let a_hull = dict(vec![(pk("health"), fv(10000.0)), (pk("model"), sv("A_Hull.model"))]);
+        let upgrade_info = dict(vec![
+            (pk("PAUH801_Baltimore_1944"), stock_hull),
+            (pk("PAUH802_Baltimore_1948"), hull_upgrade),
+            (pk("costCR"), iv(13_600_000)),
+            (pk("costGold"), iv(0)),
+            (pk("costXP"), iv(165_000)),
+            (pk("requiredShip"), sv("")),
+        ]);
+
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(9)),
+            (pk("group"), sv("upgradeable")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect();
+
+        let research = build_ship(&ship_data).research().clone();
+        assert_eq!(research.cost_credits(), Some(super::super::types::Credits::new(13_600_000)));
+        assert_eq!(research.cost_doubloons(), None);
+        assert_eq!(research.cost_xp(), Some(super::super::types::Experience::new(165_000)));
+        assert_eq!(research.next_ships(), ["PASC020_Des_Moines_1948".to_owned()]);
+        assert_eq!(research.required_ship(), None);
     }
 }
 

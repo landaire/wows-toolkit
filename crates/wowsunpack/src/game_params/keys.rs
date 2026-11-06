@@ -14,6 +14,8 @@ pub const COMPONENTS: &str = "components";
 /// Names the upgrade this one follows in its slot's research chain; the chain root
 /// (stock module) has an empty `prev`.
 pub const PREV: &str = "prev";
+/// Ships unlocked by researching this upgrade.
+pub const NEXT_SHIPS: &str = "nextShips";
 
 // ucType values
 pub const UC_TYPE_ENGINE: &str = "_Engine";

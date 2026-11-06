@@ -1412,6 +1412,93 @@ impl HitLocation {
     }
 }
 
+/// A price in credits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Credits(u64);
+
+impl Credits {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// A price in doubloons (GameParams `costGold`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Doubloons(u64);
+
+impl Doubloons {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// An amount of ship experience.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Experience(u64);
+
+impl Experience {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// Port price and research-tree links from a ship's `ShipUpgradeInfo`. A zero
+/// price in GameParams means the ship is not sold for that currency and is
+/// stored as `None`.
+#[derive(Clone, Builder, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ShipResearch {
+    cost_credits: Option<Credits>,
+    cost_doubloons: Option<Doubloons>,
+    cost_xp: Option<Experience>,
+    /// Ship param names unlocked by researching this ship's modules.
+    #[builder(default)]
+    next_ships: Vec<String>,
+    /// Ship param name that must be owned before this ship can be bought.
+    required_ship: Option<String>,
+}
+
+impl ShipResearch {
+    pub fn cost_credits(&self) -> Option<Credits> {
+        self.cost_credits
+    }
+
+    pub fn cost_doubloons(&self) -> Option<Doubloons> {
+        self.cost_doubloons
+    }
+
+    pub fn cost_xp(&self) -> Option<Experience> {
+        self.cost_xp
+    }
+
+    pub fn next_ships(&self) -> &[String] {
+        &self.next_ships
+    }
+
+    pub fn required_ship(&self) -> Option<&str> {
+        self.required_ship.as_deref()
+    }
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -1442,6 +1529,10 @@ pub struct Vehicle {
     /// Empty for ships that have no innate skills.
     #[cfg_attr(feature = "serde", serde(default))]
     innate_skills: Vec<InnateSkill>,
+    /// Price and research links. Empty when the build carries none.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    research: ShipResearch,
 }
 
 impl Vehicle {
@@ -1499,6 +1590,11 @@ impl Vehicle {
     /// HP-breakpoint innate skills from the ship's hull component.
     pub fn innate_skills(&self) -> &[InnateSkill] {
         &self.innate_skills
+    }
+
+    /// Port price and research-tree links.
+    pub fn research(&self) -> &ShipResearch {
+        &self.research
     }
 
     /// Look up a specific hull upgrade config by name.
@@ -2855,6 +2951,31 @@ impl BuffDrop {
     }
 }
 
+/// GameParams modernization `type`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ModernizationKind {
+    Regular,
+    /// Modifies one consumable (e.g. Engine Boost Modification 1).
+    ConsumableModification,
+    /// Unique (legendary) upgrade for one ship.
+    Unique,
+}
+
+impl ModernizationKind {
+    pub fn from_raw(raw: i64) -> crate::recognized::Recognized<Self, i64> {
+        use crate::recognized::Recognized;
+
+        match raw {
+            0 => Recognized::Known(Self::Regular),
+            1 => Recognized::Known(Self::ConsumableModification),
+            3 => Recognized::Known(Self::Unique),
+            other => Recognized::Unknown(other),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -2868,6 +2989,10 @@ pub struct Modernization {
     groups: Vec<String>,
     ships: Vec<String>,
     excludes: Vec<String>,
+    /// `None` when the build carries no `type` field.
+    kind: Option<crate::recognized::Recognized<ModernizationKind, i64>>,
+    /// `None` when the upgrade has no credit price.
+    cost_credits: Option<Credits>,
 }
 
 impl Modernization {
@@ -2881,8 +3006,10 @@ impl Modernization {
         groups: Vec<String>,
         ships: Vec<String>,
         excludes: Vec<String>,
+        kind: Option<crate::recognized::Recognized<ModernizationKind, i64>>,
+        cost_credits: Option<Credits>,
     ) -> Self {
-        Self { modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes }
+        Self { modifiers, slot, ship_levels, ship_types, nations, groups, ships, excludes, kind, cost_credits }
     }
 
     pub fn modifiers(&self) -> &[CrewSkillModifier] {
@@ -2891,6 +3018,42 @@ impl Modernization {
 
     pub fn slot(&self) -> Option<u8> {
         self.slot
+    }
+
+    pub fn kind(&self) -> Option<&crate::recognized::Recognized<ModernizationKind, i64>> {
+        self.kind.as_ref()
+    }
+
+    pub fn cost_credits(&self) -> Option<Credits> {
+        self.cost_credits
+    }
+
+    /// Ship tiers the upgrade fits, together with the other criteria.
+    pub fn ship_levels(&self) -> &[u32] {
+        &self.ship_levels
+    }
+
+    /// Species names (`"Cruiser"`) the upgrade fits.
+    pub fn ship_types(&self) -> &[String] {
+        &self.ship_types
+    }
+
+    pub fn nations(&self) -> &[String] {
+        &self.nations
+    }
+
+    pub fn groups(&self) -> &[String] {
+        &self.groups
+    }
+
+    /// Ship param names the upgrade fits regardless of the other criteria.
+    pub fn ships(&self) -> &[String] {
+        &self.ships
+    }
+
+    /// Ship param names the upgrade never fits.
+    pub fn excludes(&self) -> &[String] {
+        &self.excludes
     }
 
     /// Port of the client's `isModApplicable`. An empty criterion list (e.g. empty
@@ -2988,6 +3151,8 @@ mod modernization_tests {
             groups.iter().map(|s| s.to_string()).collect(),
             ships.iter().map(|s| s.to_string()).collect(),
             excludes.iter().map(|s| s.to_string()).collect(),
+            None,
+            None,
         )
     }
 
@@ -3340,6 +3505,7 @@ mod tests {
             camera_trajectories: Vec::new(),
             ttx_components: None,
             innate_skills: Vec::new(),
+            research: ShipResearch::default(),
         };
         let ship = Param {
             id: ship_id,
