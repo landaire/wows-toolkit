@@ -1,0 +1,164 @@
+---
+source: crates/wows-query/src/data.rs
+assertion_line: 439
+expression: resolutions
+---
+- name: Großer Kurfürst
+  resolved: G. Kurfürst
+  method: exact-alias
+- name: GK
+  resolved: G. Kurfürst
+  method: exact-alias
+- name: Friedrich der Große
+  resolved: F. der Grosse
+  method: exact-alias
+- name: FdG
+  resolved: F. der Grosse
+  method: exact-alias
+- name: DM
+  resolved: Des Moines
+  method: exact-alias
+- name: Dmitri Donskoi
+  resolved: Dm. Donskoi
+  method: exact-alias
+- name: Dmitry Donskoy
+  resolved: Dm. Donskoi
+  method: exact-alias
+- name: Dmitri Pozharsky
+  resolved: D. Pozharsky
+  method: exact-alias
+- name: Dmitry Pozharsky
+  resolved: D. Pozharsky
+  method: exact-alias
+- name: Attilio Regolo
+  resolved: A. Regolo
+  method: exact-alias
+- name: Francesco Ferruccio
+  resolved: F. Ferruccio
+  method: exact-alias
+- name: Forrest Sherman
+  resolved: F. Sherman
+  method: exact-alias
+- name: Prinz Eitel Friedrich
+  resolved: P. E. Friedrich
+  method: exact-alias
+- name: IFHE
+  resolved: Inertia Fuse for HE Shells
+  method: exact-alias
+- name: SI
+  resolved: Superintendent
+  method: exact-alias
+- name: CE
+  resolved: Concealment Expert
+  method: exact-alias
+- name: AR
+  resolved: Adrenaline Rush
+  method: exact-alias
+- name: DE
+  resolved: Demolition Expert
+  method: exact-alias
+- name: FP
+  resolved: Fire Prevention Expert
+  method: exact-alias
+- name: FPE
+  resolved: Fire Prevention Expert
+  method: exact-alias
+- name: PT
+  resolved: Priority Target
+  method: exact-alias
+- name: BoS
+  resolved: Basics of Survivability
+  method: exact-alias
+- name: GtG
+  resolved: Grease the Gears
+  method: exact-alias
+- name: CQC
+  resolved: Close Quarters Combat
+  method: exact-alias
+- name: LS
+  resolved: Last Stand
+  method: exact-alias
+- name: RL
+  resolved: Radio Location
+  method: exact-alias
+- name: PM
+  resolved: Preventive Maintenance
+  method: exact-alias
+- name: SE
+  resolved: Survivability Expert
+  method: exact-alias
+- name: SHAP
+  resolved: Super-Heavy AP Shells
+  method: exact-alias
+- name: MSBA
+  resolved: Manual Secondary Battery Aiming
+  method: exact-alias
+- name: IFA
+  resolved: Incoming Fire Alert
+  method: exact-alias
+- name: RPF
+  resolved: Radio Location
+  method: historical
+- name: Radio Position Finding
+  resolved: Radio Location
+  method: historical
+- name: BFT
+  resolved: Main Battery and AA Specialist
+  method: historical
+- name: Basic Firing Training
+  resolved: Main Battery and AA Specialist
+  method: historical
+- name: AFT
+  resolved: Main Battery and AA Expert
+  method: historical
+- name: Advanced Firing Training
+  resolved: Main Battery and AA Expert
+  method: historical
+- name: CSM
+  resolved: Concealment System Modification 1
+  method: exact-alias
+- name: Concealment Module
+  resolved: Concealment System Modification 1
+  method: exact-alias
+- name: Radar Mod
+  resolved: Surveillance Radar Modification 1
+  method: exact-alias
+- name: Hydro Mod
+  resolved: Hydroacoustic Search Modification 1
+  method: exact-alias
+- name: Smoke Mod
+  resolved: Smoke Generator Modification 1
+  method: exact-alias
+- name: Radar
+  resolved: Surveillance Radar
+  method: exact-alias
+- name: Hydro
+  resolved: Hydroacoustic Search
+  method: exact-alias
+- name: Heal
+  resolved: Repair Party
+  method: exact-alias
+- name: DC
+  resolved: Damage Control Party
+  method: exact-alias
+- name: Smoke
+  resolved: Smoke Generator
+  method: exact-alias
+- name: Speed Boost
+  resolved: Engine Boost
+  method: exact-alias
+- name: Spotter
+  resolved: Spotting Aircraft
+  method: exact-alias
+- name: Sub Surveillance
+  resolved: Submarine Surveillance
+  method: exact-alias
+- name: MBM3
+  resolved: Main Battery Modification 3
+  method: initialism
+- name: DCP
+  resolved: Damage Control Party
+  method: initialism
+- name: Fighter
+  resolved: Fighters
+  method: ~

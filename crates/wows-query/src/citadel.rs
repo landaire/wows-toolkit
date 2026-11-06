@@ -33,6 +33,7 @@ use crate::armor_trace::cast_grid;
 use crate::armor_trace::line_of_fire;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 
@@ -60,6 +61,10 @@ pub struct CitadelProfileArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CitadelProfileOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: String,
     pub hull: String,
     pub waterline: Waterline,
@@ -402,7 +407,8 @@ impl HeightRange {
 impl GameData {
     /// Citadel exposure, shape and the armor in front of it, from the armor model.
     pub fn citadel_profile(&self, args: &CitadelProfileArgs) -> Result<CitadelProfileOutput, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let spacing = args.spacing_m.unwrap_or(Meters::new(0.5));
         if !(0.25..=10.0).contains(&spacing.value()) {
             return Err(QueryError::InvalidArguments { reason: "spacing_m must be between 0.25 and 10" });
@@ -410,7 +416,7 @@ impl GameData {
 
         let weapon = match (&args.shooter, args.range_km) {
             (Some(shooter), Some(range_km)) => {
-                let shooter = self.resolve_ship(shooter)?;
+                let shooter = self.resolve_ship(shooter, &mut interpretations)?;
                 let request =
                     GunRequest { battery: Battery::Main, ammo: Some(Ammo::Ap), range_km: Some(range_km), ifhe: false };
                 Some(self.gun_weapon(shooter, &request)?)
@@ -461,6 +467,7 @@ impl GameData {
         let verdict = verdict(&shape, &exposure, &approaches);
 
         Ok(CitadelProfileOutput {
+            interpretations,
             ship: ship.label(),
             hull: hull_name,
             waterline: Waterline {

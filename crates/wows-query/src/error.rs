@@ -91,6 +91,18 @@ pub enum QueryError {
     #[error("upgrades {first} and {second} both use slot {slot}; a ship mounts one upgrade per slot")]
     UpgradeSlotConflict { first: String, second: String, slot: u8 },
 
+    #[error(
+        "no consumable matches {query:?}; {}",
+        did_you_mean(suggestions, "use the consumable's English name, e.g. \"Surveillance Radar\"")
+    )]
+    ConsumableNotFound { query: String, suggestions: Vec<String> },
+
+    #[error("{query:?} matches several consumables: {}; ask again with the exact name", candidates.join(", "))]
+    AmbiguousConsumable { query: String, candidates: Vec<String> },
+
+    #[error("{ship} has no {consumable}")]
+    ConsumableNotOnShip { consumable: String, ship: String },
+
     #[error("{ship} has no module matching {query:?}; modules: {}", modules.join(", "))]
     ModuleNotFound { ship: String, query: String, modules: Vec<String> },
 
@@ -179,6 +191,32 @@ pub enum QueryError {
 
     #[error("projectile {projectile} lacks the normalization angle or fuse threshold the ballistic solution needs")]
     ProjectileIncomplete { projectile: String },
+}
+
+impl QueryError {
+    /// Names an ambiguous query matched equally. Empty for other errors.
+    pub fn candidates(&self) -> &[String] {
+        match self {
+            Self::AmbiguousShip { candidates, .. }
+            | Self::AmbiguousSkill { candidates, .. }
+            | Self::AmbiguousUpgrade { candidates, .. }
+            | Self::AmbiguousConsumable { candidates, .. }
+            | Self::AmbiguousModule { candidates, .. } => candidates,
+            _ => &[],
+        }
+    }
+
+    /// Names near a query that matched nothing. Empty for other errors.
+    pub fn suggestions(&self) -> &[String] {
+        match self {
+            Self::ShipNotFound { suggestions, .. }
+            | Self::SkillNotFound { suggestions, .. }
+            | Self::UpgradeNotFound { suggestions, .. }
+            | Self::ConsumableNotFound { suggestions, .. }
+            | Self::StatNotFound { suggestions, .. } => suggestions,
+            _ => &[],
+        }
+    }
 }
 
 /// Failure to build or read the raw GameParams store.

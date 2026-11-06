@@ -34,13 +34,13 @@ use crate::fuzzy::Fuzzy;
 use crate::loadout::ResolvedLoadout;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
+use crate::names::search_key;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipCounts;
 use crate::ships::ShipFilter;
 use crate::ships::Tier;
 use crate::ships::TierRange;
-use crate::ships::search_key;
 use crate::text::clean;
 use crate::upgrades::Upgrade;
 

@@ -1,0 +1,16 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 366
+expression: "json!({ \"copy\": copy, \"variants_of_conqueror\": variants })"
+---
+copy:
+  ship:
+    name: "[Conqueror]"
+    index: PBSB910
+    tier: 10
+    class: battleship
+    nation: United_Kingdom
+    group: clan
+    status: released
+variants_of_conqueror:
+  - "[Conqueror]"

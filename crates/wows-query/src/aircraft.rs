@@ -24,6 +24,7 @@ use wowsunpack::game_params::types::Projectile;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
@@ -42,6 +43,10 @@ pub struct ShipAircraftArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipAircraftOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
     pub squadron_count: usize,
     pub squadrons: Vec<Squadron>,
@@ -267,7 +272,8 @@ impl GameData {
     /// Every squadron a ship can launch, carrier and hybrid squadrons first,
     /// then air strikes, optionally tested against a plate.
     pub fn ship_aircraft(&self, args: &ShipAircraftArgs) -> Result<ShipAircraftOutput, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let thickness = match args.thickness_mm {
             Some(thickness) if thickness.value() > 0.0 => Some(thickness),
             Some(_) => return Err(QueryError::InvalidArguments { reason: "thickness_mm must be above 0" }),
@@ -282,6 +288,7 @@ impl GameData {
         }
 
         Ok(ShipAircraftOutput {
+            interpretations,
             ship: ship.summary(),
             squadron_count: squadrons.len(),
             squadrons,

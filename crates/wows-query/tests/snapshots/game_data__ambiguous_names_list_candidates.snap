@@ -1,0 +1,9 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 299
+expression: error.details()
+---
+message: "\"Consumable\" matches several captain skills: Consumable Enhancements, Consumable Specialist; ask again with the exact name"
+candidates:
+  - Consumable Enhancements
+  - Consumable Specialist

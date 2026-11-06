@@ -8,12 +8,17 @@ use wowsunpack::game_params::ttx::armor_materials::collision_material_name;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipSummary;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipArmor {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
 
     /// Per hull zone, the thinnest and thickest nonzero plate above the waterline.
@@ -53,11 +58,12 @@ pub struct ZoneThickness {
 impl GameData {
     /// Armor of one ship by zone and plate.
     pub fn ship_armor(&self, args: &ShipArgs) -> Result<ShipArmor, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let plates = plates(ship);
         let zones = zone_armor(&plates);
 
-        Ok(ShipArmor { ship: ship.summary(), zones, plates })
+        Ok(ShipArmor { interpretations, ship: ship.summary(), zones, plates })
     }
 }
 

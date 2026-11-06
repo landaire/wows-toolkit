@@ -2,6 +2,7 @@
 
 - Answers World of Warships game data questions for any [MCP](https://modelcontextprotocol.io) client.
 - Looks up ships (including ships in closed testing), armor, aircraft and their ordnance, shells, penetration and overmatch, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
+- Understands community names: abbreviations such as SE, SI, IFHE, DM and GK, initialisms of any multi-word name, former skill names such as BFT, and names typed without the German sharp s. Every name read as something else is listed under `interpretations`.
 - Answers anything else in GameParams with a [jq](https://jqlang.org) filter over the raw entries.
 - Finds ships whose stats meet your conditions, with the fewest modules, upgrades and captain skills they need.
 - Reads one game build from a [wows-replay-data](https://github.com/landaire/wows-replay-data) dump, or downloads the newest one.

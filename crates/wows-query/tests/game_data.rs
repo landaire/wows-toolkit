@@ -112,7 +112,9 @@ fn ap_overmatch_reaches_the_thickest_whole_mm_plate() {
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn fpe_names_fire_prevention_expert() {
-    let skill = game().captain_skill(&CaptainSkillArgs { skill: "FPE".to_owned(), class: None }).expect("FPE resolves");
+    let skill = game()
+        .captain_skill(&CaptainSkillArgs { skill: "FPE".to_owned(), ..Default::default() })
+        .expect("FPE resolves");
     let names: Vec<&str> = skill.skills.iter().map(|skill| skill.internal_name.as_str()).collect();
     assert_eq!(names, ["DefenceFireProbability"]);
 }
@@ -153,7 +155,7 @@ fn upgrades_and_consumables_of_des_moines() {
         .ship_consumables(&ShipConsumablesArgs {
             ship: "Des Moines".to_owned(),
             skills: Some(vec!["SI".to_owned()]),
-            upgrades: None,
+            ..Default::default()
         })
         .expect("loadout resolves");
     insta::assert_yaml_snapshot!(consumables);
@@ -163,12 +165,18 @@ fn upgrades_and_consumables_of_des_moines() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn per_class_skill_names_resolve_by_class() {
     let submarine = game()
-        .captain_skill(&CaptainSkillArgs { skill: "Adrenaline Rush".to_owned(), class: Some(ShipClass::Submarine) })
+        .captain_skill(&CaptainSkillArgs {
+            skill: "Adrenaline Rush".to_owned(),
+            class: Some(ShipClass::Submarine),
+            ..Default::default()
+        })
         .expect("submarines have Adrenaline Rush");
     let names: Vec<&str> = submarine.skills.iter().map(|skill| skill.internal_name.as_str()).collect();
     assert_eq!(names, ["ArmamentReloadSubmarine"]);
 
-    let ifhe = game().captain_skill(&CaptainSkillArgs { skill: "ifhe".to_owned(), class: None }).expect("IFHE exists");
+    let ifhe = game()
+        .captain_skill(&CaptainSkillArgs { skill: "ifhe".to_owned(), ..Default::default() })
+        .expect("IFHE exists");
     insta::assert_yaml_snapshot!(ifhe);
 }
 
@@ -206,7 +214,7 @@ fn registry_calls_report_each_failure_kind() {
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn misspelled_names_resolve_or_suggest() {
-    let resolved = |query: &str| game().ship_summary(query).map(|ship| ship.name);
+    let resolved = |query: &str| game().ship_summary(query).map(|resolved| resolved.ship.name);
     assert_eq!(resolved("Sekryu").expect("one typo"), "Sekiryu");
     assert_eq!(resolved("Des Moins").expect("one typo"), "Des Moines");
     assert_eq!(resolved("Kurfurts").expect("one transposition"), "G. Kurf\u{fc}rst");
@@ -215,7 +223,7 @@ fn misspelled_names_resolve_or_suggest() {
 
     let far = resolved("Smolensker").expect_err("two names are equally near");
     let skill = game()
-        .captain_skill(&CaptainSkillArgs { skill: "Concealment Expertt".to_owned(), class: None })
+        .captain_skill(&CaptainSkillArgs { skill: "Concealment Expertt".to_owned(), ..Default::default() })
         .map(|output| output.skills.into_iter().map(|skill| skill.name).collect::<Vec<_>>());
     let upgrade = game()
         .upgrade(&wows_query::upgrades::UpgradeArgs { upgrade: "Main Batery Modification 2".to_owned(), ship: None })
@@ -241,7 +249,10 @@ fn full_names_resolve_to_abbreviated_ships() {
         "Friedrich der Grose",
     ]
     .into_iter()
-    .map(|query| (query, game().ship_summary(query).map(|ship| ship.name).unwrap_or_else(|error| error.to_string())))
+    .map(|query| {
+        let name = game().ship_summary(query).map(|resolved| resolved.ship.name);
+        (query, name.unwrap_or_else(|error| error.to_string()))
+    })
     .collect();
     insta::assert_yaml_snapshot!(resolved);
 }
@@ -251,9 +262,47 @@ fn full_names_resolve_to_abbreviated_ships() {
 fn sekiryu_is_indexed() {
     let found =
         game().find_ships(&wows_query::ships::FindShipsArgs { name: Some("Seki".to_owned()), ..Default::default() });
-    let names: Vec<(&str, &str, u32)> =
-        found.ships.iter().map(|ship| (ship.name.as_str(), ship.index.as_str(), ship.tier.0)).collect();
+    let names: Vec<(&str, &str, u32)> = found
+        .ships
+        .iter()
+        .map(|found| (found.ship.name.as_str(), found.ship.index.as_str(), found.ship.tier.0))
+        .collect();
     insta::assert_yaml_snapshot!(names);
+}
+
+/// A named ship the filters leave out is not reported as read.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn find_ships_names_no_ship_the_filters_leave_out() {
+    let found = game().find_ships(&wows_query::ships::FindShipsArgs {
+        name: Some("DM".to_owned()),
+        nation: Some("Russia".to_owned()),
+        ..Default::default()
+    });
+
+    assert!(found.interpretations.is_empty(), "{:?}", found.interpretations);
+    assert!(found.ships.iter().all(|found| found.name_match == Some(wows_query::ships::NameMatch::Partial)));
+    assert!(found.ships.iter().any(|found| found.ship.name == "Dm. Donskoi"));
+}
+
+/// "DM" is an alias of Des Moines although "Dm. Donskoi" contains it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn find_ships_lists_the_named_ship_first() {
+    let found: Vec<_> = ["DM", "GK"]
+        .into_iter()
+        .map(|name| {
+            let found = game()
+                .find_ships(&wows_query::ships::FindShipsArgs { name: Some(name.to_owned()), ..Default::default() });
+            let ships: Vec<_> = found
+                .ships
+                .iter()
+                .map(|found| json!({ "ship": found.ship.name, "name_match": found.name_match }))
+                .collect();
+            json!({ "name": name, "interpretations": found.interpretations, "ships": ships })
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(found);
 }
 
 #[test]
@@ -261,6 +310,52 @@ fn sekiryu_is_indexed() {
 fn test_ships_resolve_with_status() {
     let overview = game().ship_overview(&ship("Neptunus")).expect("Neptunus is in the client data");
     insta::assert_yaml_snapshot!(overview);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn grosser_kurfurst_resolves_from_abbreviations() {
+    let resolved: Vec<_> = ["GK", "grober", "Grober Kurfurst", "Groer Kurfurst"]
+        .into_iter()
+        .map(|name| {
+            let skill = game()
+                .captain_skill(&CaptainSkillArgs {
+                    skill: "IFA".to_owned(),
+                    ship: Some(name.to_owned()),
+                    ..Default::default()
+                })
+                .expect("names resolve");
+            json!({ "ship": skill.ship.map(|ship| ship.name), "interpretations": skill.interpretations })
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(resolved);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn bracketed_variant_resolves_by_its_exact_name() {
+    let copy = game().ship_summary("[Conqueror]").expect("the clan variant is in the client data");
+    let released = game().ship_overview(&ship("Conqueror")).expect("Conqueror exists");
+    let variants: Vec<&str> = released.variants.iter().map(|variant| variant.name.as_str()).collect();
+    insta::assert_yaml_snapshot!(json!({ "copy": copy, "variants_of_conqueror": variants }));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn former_skill_name_in_part_is_historical() {
+    let skill = game()
+        .captain_skill(&CaptainSkillArgs { skill: "Basic Firing".to_owned(), ..Default::default() })
+        .expect("a former name resolves");
+    insta::assert_yaml_snapshot!(skill.interpretations);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ambiguous_names_list_candidates() {
+    let error = game()
+        .call_tool("captain_skill", json!({ "skill": "Consumable" }))
+        .expect_err("several skills start with Consumable");
+    insta::assert_yaml_snapshot!(error.details());
 }
 
 fn firing_arcs(ship: &str, target: Option<&str>, skills: &[&str]) -> ShipFiringArcs {

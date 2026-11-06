@@ -1,0 +1,45 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 290
+expression: resolved
+---
+- ship: G. Kurfürst
+  interpretations:
+    - input: GK
+      resolved: G. Kurfürst
+      kind: ship
+      method: exact-alias
+    - input: IFA
+      resolved: Incoming Fire Alert
+      kind: skill
+      method: exact-alias
+- ship: G. Kurfürst
+  interpretations:
+    - input: grober
+      resolved: G. Kurfürst
+      kind: ship
+      method: partial
+    - input: IFA
+      resolved: Incoming Fire Alert
+      kind: skill
+      method: exact-alias
+- ship: G. Kurfürst
+  interpretations:
+    - input: Grober Kurfurst
+      resolved: G. Kurfürst
+      kind: ship
+      method: exact-alias
+    - input: IFA
+      resolved: Incoming Fire Alert
+      kind: skill
+      method: exact-alias
+- ship: G. Kurfürst
+  interpretations:
+    - input: Groer Kurfurst
+      resolved: G. Kurfürst
+      kind: ship
+      method: exact-alias
+    - input: IFA
+      resolved: Incoming Fire Alert
+      kind: skill
+      method: exact-alias

@@ -1,7 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 578
 expression: trace
 ---
+interpretations:
+  - input: Friedrich der Grosse
+    resolved: F. der Grosse
+    kind: ship
+    method: exact-alias
 shooter: "T10 Des Moines (cruiser, USA)"
 target: "T9 F. der Grosse (battleship, Germany)"
 target_hull: Hull A

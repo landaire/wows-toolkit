@@ -13,6 +13,7 @@ use wowsunpack::game_params::types::CrewSkillModifier;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 
 /// What a player chose for a ship, as named in tool arguments.
@@ -77,12 +78,13 @@ impl GameData {
         &self,
         ship: &Ship,
         request: &LoadoutRequest<'_>,
+        interpretations: &mut Interpretations,
     ) -> Result<ResolvedLoadout, QueryError> {
         let mut skills: Vec<CrewSkill> = Vec::new();
         let mut applied_skills = Vec::new();
         let mut labels = HashMap::new();
         for query in request.skills {
-            let (skill, points) = self.resolve_skill_for_class(query, ship.class)?;
+            let (skill, points) = self.resolve_skill_for_class(query, ship.class, interpretations)?;
             if skills.iter().any(|chosen| chosen.internal_name() == skill.internal_name()) {
                 continue;
             }
@@ -94,7 +96,7 @@ impl GameData {
 
         let mut chosen: Vec<&crate::upgrades::Upgrade> = Vec::new();
         for query in request.upgrades {
-            let upgrade = self.resolve_upgrade_for_ship(query, ship)?;
+            let upgrade = self.resolve_upgrade_for_ship(query, ship, interpretations)?;
             if chosen.iter().any(|other| other.param.id() == upgrade.param.id()) {
                 continue;
             }

@@ -1,8 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 159
+assertion_line: 161
 expression: consumables
 ---
+interpretations:
+  - input: SI
+    resolved: Superintendent
+    kind: skill
+    method: exact-alias
 ship:
   name: Des Moines
   index: PASC020

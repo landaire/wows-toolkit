@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 150
+assertion_line: 152
 expression: upgrades
 ---
 ship:
@@ -139,7 +139,7 @@ slots:
         effects:
           - "-80% Steering gears repair time"
           - "-40% Rudder shift time"
-      - name: "Ship Consumable\nModification 1"
+      - name: Ship Consumable Modification 1
         kind: regular
         cost_credits: 2000000
         effects:

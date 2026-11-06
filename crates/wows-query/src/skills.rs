@@ -3,9 +3,11 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::Version;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::modifier_settings_data::describe_modifiers;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::skill_grid_data::skill_grid;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::CrewSkillModifier;
@@ -13,48 +15,74 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
-use crate::fuzzy;
-use crate::fuzzy::Candidate;
-use crate::fuzzy::Fuzzy;
+use crate::names::Interpretations;
+use crate::names::Lookup;
+use crate::names::NameIndex;
+use crate::names::NameKind;
+use crate::names::ResolutionMethod;
 use crate::ships::ShipClass;
-use crate::ships::search_key;
+use crate::ships::ShipSummary;
 use crate::text::clean;
 
-/// Community acronyms and the internal names they stand for.
-const ACRONYMS: &[(&str, &[&str])] = &[
-    ("ifhe", &["HePenetration"]),
-    ("si", &["ConsumablesAdditional"]),
-    ("ce", &["DetectionVisibilityRange"]),
-    ("ar", &["ArmamentReloadAaDamage", "ArmamentReloadSubmarine"]),
-    ("de", &["HeFireProbability"]),
-    ("fp", &["DefenceFireProbability"]),
-    ("fpe", &["DefenceFireProbability"]),
-    ("pt", &["DetectionAiming"]),
-    ("bos", &["DefenceCritFireFlooding"]),
-    ("gtg", &["GmTurn"]),
-    ("cqc", &["TriggerGmAtbaReloadBb"]),
-    ("ls", &["Maneuverability"]),
-    ("rl", &["DetectionDirection"]),
-    ("pm", &["DefenseCritProbability"]),
-    ("se", &["DefenseHp", "PlanesHp"]),
-    ("shap", &["ApDamageBb"]),
-    ("msba", &["AtbaAccuracy"]),
-    ("ifa", &["DetectionAlert"]),
+/// Community abbreviations and former names of captain skills, with the
+/// internal name of the skill they mean today. Initialisms of current names
+/// ("MBAAS", "DFE") resolve without an entry; these are the ones that differ
+/// from the current name or clash with another skill's initialism ("CE" is
+/// also Consumable Enhancements). The pre-0.10 Basic and Advanced Firing
+/// Training skills became the main battery and AA skills with the same
+/// modifier families (`GMShotDelay` and `GMMaxDist`, each with AA). Every
+/// target is checked by the `alias_tables_resolve_to_their_targets` test.
+pub(crate) const SKILL_ALIASES: &[(&str, &str, ResolutionMethod)] = &[
+    ("IFHE", "HePenetration", ResolutionMethod::ExactAlias),
+    ("SI", "ConsumablesAdditional", ResolutionMethod::ExactAlias),
+    ("CE", "DetectionVisibilityRange", ResolutionMethod::ExactAlias),
+    ("AR", "ArmamentReloadAaDamage", ResolutionMethod::ExactAlias),
+    ("DE", "HeFireProbability", ResolutionMethod::ExactAlias),
+    ("FP", "DefenceFireProbability", ResolutionMethod::ExactAlias),
+    ("FPE", "DefenceFireProbability", ResolutionMethod::ExactAlias),
+    ("PT", "DetectionAiming", ResolutionMethod::ExactAlias),
+    ("BoS", "DefenceCritFireFlooding", ResolutionMethod::ExactAlias),
+    ("GtG", "GmTurn", ResolutionMethod::ExactAlias),
+    ("CQC", "TriggerGmAtbaReloadBb", ResolutionMethod::ExactAlias),
+    ("LS", "Maneuverability", ResolutionMethod::ExactAlias),
+    ("RL", "DetectionDirection", ResolutionMethod::ExactAlias),
+    ("PM", "DefenseCritProbability", ResolutionMethod::ExactAlias),
+    ("SE", "DefenseHp", ResolutionMethod::ExactAlias),
+    ("SHAP", "ApDamageBb", ResolutionMethod::ExactAlias),
+    ("MSBA", "AtbaAccuracy", ResolutionMethod::ExactAlias),
+    ("IFA", "DetectionAlert", ResolutionMethod::ExactAlias),
+    ("RPF", "DetectionDirection", ResolutionMethod::Historical),
+    ("Radio Position Finding", "DetectionDirection", ResolutionMethod::Historical),
+    ("BFT", "GmReloadAaDamageConstant", ResolutionMethod::Historical),
+    ("Basic Firing Training", "GmReloadAaDamageConstant", ResolutionMethod::Historical),
+    ("AFT", "GmRangeAaDamageBubbles", ResolutionMethod::Historical),
+    ("Advanced Firing Training", "GmRangeAaDamageBubbles", ResolutionMethod::Historical),
 ];
 
 /// Arguments for `captain_skill`.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CaptainSkillArgs {
-    /// Skill name, e.g. "Inertia Fuse for HE Shells", or a common acronym such as IFHE, SI, CE, AR, DE, BoS.
+    /// Skill name, e.g. "Inertia Fuse for HE Shells", a common abbreviation such as IFHE, SI, CE, SE, PT, IFA, AR, DE, BoS, or a former name such as BFT.
     pub skill: String,
 
     /// Only describe the skill for this class.
     pub class: Option<ShipClass>,
+
+    /// Only describe the skill for this ship's class, e.g. "GK". Overrides class.
+    pub ship: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CaptainSkillOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
+    /// The ship named in the arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ship: Option<ShipSummary>,
+
     /// Usually one skill. Several when a name is used by one skill per class,
     /// such as Adrenaline Rush.
     pub skills: Vec<CaptainSkillDetails>,
@@ -110,21 +138,28 @@ pub struct SkillTreeRow {
 impl GameData {
     /// One captain skill: point cost and effects per class.
     pub fn captain_skill(&self, args: &CaptainSkillArgs) -> Result<CaptainSkillOutput, QueryError> {
-        let mut skills = self.match_skills(&args.skill)?;
-        if let Some(class) = args.class {
+        let mut interpretations = Interpretations::default();
+        let ship = match args.ship.as_deref() {
+            Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
+            None => None,
+        };
+        let class = ship.map(|ship| ship.class).or(args.class);
+
+        let mut skills = self.match_skills(&args.skill, &mut interpretations)?;
+        if let Some(class) = class {
             skills.retain(|skill| self.skill_points(skill, class).is_some());
             if skills.is_empty() {
                 return Err(QueryError::SkillNotForClass { skill: args.skill.clone(), class: class.label() });
             }
         }
 
-        let classes: Vec<ShipClass> = match args.class {
+        let classes: Vec<ShipClass> = match class {
             Some(class) => vec![class],
             None => ShipClass::ALL.to_vec(),
         };
         let skills = skills.into_iter().map(|skill| self.skill_details(skill, &classes)).collect();
 
-        Ok(CaptainSkillOutput { skills })
+        Ok(CaptainSkillOutput { interpretations, ship: ship.map(|ship| ship.summary()), skills })
     }
 
     /// The captain skill tree of one class, by point cost.
@@ -147,10 +182,7 @@ impl GameData {
 
     /// English name of a skill, or its internal name when it has none.
     pub(crate) fn skill_name(&self, skill: &CrewSkill) -> String {
-        skill
-            .translated_name(self.provider(), &self.version())
-            .map(|name| clean(&name))
-            .unwrap_or_else(|| skill.internal_name().as_str().to_owned())
+        english_skill_name(skill, self.provider(), &self.version())
     }
 
     /// Point cost of `skill` in the class's tree, `None` when it is not in it.
@@ -166,8 +198,9 @@ impl GameData {
         &self,
         query: &str,
         class: ShipClass,
+        interpretations: &mut Interpretations,
     ) -> Result<(&CrewSkill, u8), QueryError> {
-        let skills = self.match_skills(query)?;
+        let skills = self.match_skills(query, interpretations)?;
 
         skills
             .into_iter()
@@ -175,59 +208,16 @@ impl GameData {
             .ok_or_else(|| QueryError::SkillNotForClass { skill: query.to_owned(), class: class.label() })
     }
 
-    /// Skills a player-written name, acronym or internal name refers to.
-    fn match_skills(&self, query: &str) -> Result<Vec<&CrewSkill>, QueryError> {
-        let key = search_key(query);
-        let by_internal = |names: &[&str]| -> Vec<&CrewSkill> {
-            self.skills.iter().filter(|skill| names.contains(&skill.internal_name().as_str())).collect()
-        };
-
-        if let Some((_, names)) = ACRONYMS.iter().find(|(acronym, _)| *acronym == key) {
-            let skills = by_internal(names);
-            if skills.is_empty() {
-                return Err(QueryError::SkillNotFound { query: query.to_owned(), suggestions: Vec::new() });
+    /// Skills a player-written name, abbreviation or internal name refers
+    /// to: one per class tree that names a skill this way.
+    fn match_skills(&self, query: &str, interpretations: &mut Interpretations) -> Result<Vec<&CrewSkill>, QueryError> {
+        match self.skill_names.lookup(query) {
+            Lookup::Found(resolved, targets) => {
+                interpretations.note(query, &resolved, NameKind::Skill);
+                Ok(targets.iter().map(|index| &self.skills[*index]).collect())
             }
-            return Ok(skills);
-        }
-
-        let named: Vec<(&CrewSkill, String)> =
-            self.skills.iter().map(|skill| (skill, search_key(&self.skill_name(skill)))).collect();
-        let exact: Vec<&CrewSkill> = named
-            .iter()
-            .filter(|(skill, name)| *name == key || skill.internal_name().as_str().eq_ignore_ascii_case(query.trim()))
-            .map(|(skill, _)| *skill)
-            .collect();
-        if !exact.is_empty() {
-            return Ok(exact);
-        }
-
-        let matching = |accept: &dyn Fn(&str) -> bool| -> Vec<&CrewSkill> {
-            named.iter().filter(|(_, name)| !key.is_empty() && accept(name)).map(|(skill, _)| *skill).collect()
-        };
-        let prefix = matching(&|name| name.starts_with(key.as_str()));
-        let partial = if prefix.is_empty() { matching(&|name| name.contains(key.as_str())) } else { prefix };
-        let mut distinct: Vec<String> = partial.iter().map(|skill| self.skill_name(skill)).collect();
-        distinct.sort();
-        distinct.dedup();
-        match distinct.len() {
-            0 => {}
-            1 => return Ok(partial),
-            _ => return Err(QueryError::AmbiguousSkill { query: query.to_owned(), candidates: distinct }),
-        }
-
-        let names: Vec<String> = named.iter().map(|(skill, _)| self.skill_name(skill)).collect();
-        let candidates = named.iter().zip(&names).map(|((_, key), name)| Candidate::primary(key, name));
-        match fuzzy::closest(&key, candidates) {
-            Fuzzy::Unique(name) => Ok(names
-                .iter()
-                .zip(&named)
-                .filter(|(skill_name, _)| *skill_name == name)
-                .map(|(_, (skill, _))| *skill)
-                .collect()),
-            Fuzzy::Suggestions(suggestions) => Err(QueryError::SkillNotFound {
-                query: query.to_owned(),
-                suggestions: suggestions.into_iter().map(str::to_owned).collect(),
-            }),
+            Lookup::Ambiguous(candidates) => Err(QueryError::AmbiguousSkill { query: query.to_owned(), candidates }),
+            Lookup::NotFound(suggestions) => Err(QueryError::SkillNotFound { query: query.to_owned(), suggestions }),
         }
     }
 
@@ -285,4 +275,29 @@ impl GameData {
         .map(|line| clean(line))
         .collect()
     }
+}
+
+fn english_skill_name(skill: &CrewSkill, provider: &GameMetadataProvider, version: &Version) -> String {
+    skill
+        .translated_name(provider, version)
+        .map(|name| clean(&name))
+        .unwrap_or_else(|| skill.internal_name().as_str().to_owned())
+}
+
+/// Skill names, internal names and [`SKILL_ALIASES`].
+pub(crate) fn skill_names(
+    provider: &GameMetadataProvider,
+    version: &Version,
+    skills: &[CrewSkill],
+) -> NameIndex<usize> {
+    let mut names = NameIndex::default();
+    for (index, skill) in skills.iter().enumerate() {
+        let name = english_skill_name(skill, provider, version);
+        names.add_name(&name, index, false);
+        names.add_id(skill.internal_name().as_str(), &name, index);
+    }
+    for (alias, internal_name, method) in SKILL_ALIASES {
+        names.add_alias(alias, internal_name, *method);
+    }
+    names
 }

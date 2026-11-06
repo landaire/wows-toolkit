@@ -1,8 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 132
+assertion_line: 134
 expression: stats
 ---
+interpretations:
+  - input: IFHE
+    resolved: Inertia Fuse for HE Shells
+    kind: skill
+    method: exact-alias
 ship:
   name: Schlieffen
   index: PGSB210

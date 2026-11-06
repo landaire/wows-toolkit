@@ -9,6 +9,7 @@ use wowsunpack::ballistics::is_overmatch;
 use crate::armor::zone_thickness;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
@@ -107,6 +108,10 @@ pub enum TierSource {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PenetrationSearchOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub thickness_mm: Millimeters,
 
     /// Target ship and zone, when given.
@@ -149,8 +154,9 @@ impl GameData {
     /// Ships whose shells defeat a plate outright: HE or SAP whose penetration
     /// is at least the thickness, or AP whose caliber overmatches it.
     pub fn penetration_search(&self, args: &PenetrationSearchArgs) -> Result<PenetrationSearchOutput, QueryError> {
+        let mut interpretations = Interpretations::default();
         let target = match args.target_ship.as_deref() {
-            Some(name) => Some(self.resolve_ship(name)?),
+            Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
             None => None,
         };
 
@@ -222,6 +228,7 @@ impl GameData {
             .collect();
 
         Ok(PenetrationSearchOutput {
+            interpretations,
             thickness_mm: thickness,
             target: target_label,
             plates,

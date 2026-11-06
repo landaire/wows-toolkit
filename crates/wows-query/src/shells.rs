@@ -13,6 +13,7 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipSummary;
@@ -81,6 +82,10 @@ pub struct Shell {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipShells {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
     pub shells: Vec<Shell>,
 }
@@ -104,9 +109,10 @@ impl IfheCoefficients {
 impl GameData {
     /// Main and secondary battery shells of one ship across all its gun modules.
     pub fn ship_shells(&self, args: &ShipArgs) -> Result<ShipShells, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
 
-        Ok(ShipShells { ship: ship.summary(), shells: self.shells(ship) })
+        Ok(ShipShells { interpretations, ship: ship.summary(), shells: self.shells(ship) })
     }
 
     pub(crate) fn shells(&self, ship: &Ship) -> Vec<Shell> {

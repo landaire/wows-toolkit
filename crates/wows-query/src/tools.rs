@@ -65,6 +65,31 @@ pub enum ToolCallError {
     },
 }
 
+/// A tool failure as data: the message plus the names a host can offer
+/// instead, so it never parses the message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolErrorDetails {
+    pub message: String,
+
+    /// Names an ambiguous query matched equally; ask which one was meant.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<String>,
+
+    /// Names near one that matched nothing.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suggestions: Vec<String>,
+}
+
+impl ToolCallError {
+    pub fn details(&self) -> ToolErrorDetails {
+        let (candidates, suggestions) = match self {
+            Self::Query(error) => (error.candidates().to_vec(), error.suggestions().to_vec()),
+            _ => (Vec::new(), Vec::new()),
+        };
+        ToolErrorDetails { message: self.to_string(), candidates, suggestions }
+    }
+}
+
 struct Tool {
     name: &'static str,
     description: &'static str,
@@ -81,7 +106,7 @@ enum CallFailure {
 const TOOLS: &[Tool] = &[
     Tool {
         name: "find_ships",
-        description: "List ships by name fragment, tier, class or nation, including ships in closed testing (status \"test\", counted in test). Returns name, GameParams index, tier, class, nation, group and status.",
+        description: "List ships by name, tier, class or nation, including ships in closed testing (status \"test\", counted in test). Returns name, GameParams index, tier, class, nation, group and status. With a name, a ship it names as the single-ship tools read it (exact name, alias such as \"DM\", initials or former name) comes first with name_match \"named\"; ships whose names merely contain it follow with name_match \"partial\".",
         schema: input_schema::<FindShipsArgs>,
         call: |game, arguments| run(arguments, |args| Ok(game.find_ships(args))),
     },
@@ -153,7 +178,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "captain_skill",
-        description: "One captain skill by name or acronym (IFHE, SI, CE, AR, DE, BoS): description, point cost and effects per ship class.",
+        description: "One captain skill by name, abbreviation (IFHE, SI, CE, SE, PT, IFA, AR, DE, BoS, RPF) or former name (BFT, AFT): description, point cost and effects per ship class, or for one ship's class with ship.",
         schema: input_schema::<CaptainSkillArgs>,
         call: |game, arguments| run(arguments, |args| game.captain_skill(args)),
     },
@@ -177,7 +202,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_consumables",
-        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied.",
+        description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\".",
         schema: input_schema::<ShipConsumablesArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_consumables(args)),
     },

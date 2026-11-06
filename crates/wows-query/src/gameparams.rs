@@ -26,6 +26,7 @@ use crate::jq::Limits;
 use crate::jq::Stop;
 use crate::jq::floor_char_boundary;
 use crate::jq_worker;
+use crate::names::Interpretations;
 use crate::raw_params::RawParamEntry;
 use crate::raw_params::RawParams;
 use crate::ships::Tier;
@@ -96,6 +97,10 @@ impl ParamSet {
 /// Filter output, cut to the byte budget.
 #[derive(Debug, Clone, Serialize)]
 pub struct GameParamsQueryOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     /// Entries the selection matched.
     pub matched: usize,
     /// Entries the filter ran on: `matched` capped at the limit, fewer when
@@ -243,6 +248,7 @@ impl GameData {
             Limits { steps_per_input: 1_000_000, time: Duration::from_secs(5), output_bytes: 1024 * 1024 };
 
         let store = self.raw_params()?;
+        let mut interpretations = Interpretations::default();
 
         let selected: Vec<&RawParamEntry> = match &args.select {
             ParamSelection::Param(key) => {
@@ -250,7 +256,7 @@ impl GameData {
                 vec![entry]
             }
             ParamSelection::Ship(name) => {
-                let ship = self.resolve_ship(name)?;
+                let ship = self.resolve_ship(name, &mut interpretations)?;
                 let param = ship.param.name();
                 let entry = store.find(param).ok_or_else(|| QueryError::ParamNotFound { query: param.to_owned() })?;
                 vec![entry]
@@ -281,6 +287,7 @@ impl GameData {
             Stop::Crashed => StopReason::Crashed,
         });
         let mut output = GameParamsQueryOutput {
+            interpretations,
             matched,
             queried: evaluation.inputs.len(),
             total_bytes: evaluation.output_bytes,

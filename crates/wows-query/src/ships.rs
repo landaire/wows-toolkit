@@ -16,35 +16,33 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
-use crate::fuzzy;
-use crate::fuzzy::Candidate;
-use crate::fuzzy::Fuzzy;
+use crate::names::Interpretations;
+use crate::names::Lookup;
+use crate::names::NameIndex;
+use crate::names::NameKind;
+use crate::names::ResolutionMethod;
+use crate::names::search_key;
 use crate::text::clean;
 
 const FIND_SHIPS_LIMIT: usize = 40;
 
-/// A full English name for a ship whose in-game name is abbreviated.
-struct Alias {
-    /// Search key of the full name.
-    key: &'static str,
-
-    /// In-game English name.
-    name: &'static str,
-}
-
-/// Every target is checked against the data by the
-/// `full_names_resolve_to_abbreviated_ships` test.
-const ALIASES: &[Alias] = &[
-    Alias { key: "grosser kurfurst", name: "G. Kurf\u{fc}rst" },
-    Alias { key: "friedrich der grosse", name: "F. der Grosse" },
-    Alias { key: "dmitri donskoi", name: "Dm. Donskoi" },
-    Alias { key: "dmitry donskoy", name: "Dm. Donskoi" },
-    Alias { key: "dmitri pozharsky", name: "D. Pozharsky" },
-    Alias { key: "dmitry pozharsky", name: "D. Pozharsky" },
-    Alias { key: "attilio regolo", name: "A. Regolo" },
-    Alias { key: "francesco ferruccio", name: "F. Ferruccio" },
-    Alias { key: "forrest sherman", name: "F. Sherman" },
-    Alias { key: "prinz eitel friedrich", name: "P. E. Friedrich" },
+/// Full names of ships whose in-game name is abbreviated, and community
+/// abbreviations, each with the in-game English name. Every target is
+/// checked against the data by the `alias_tables_resolve_to_their_targets` test.
+pub(crate) const SHIP_ALIASES: &[(&str, &str)] = &[
+    ("Gro\u{df}er Kurf\u{fc}rst", "G. Kurf\u{fc}rst"),
+    ("GK", "G. Kurf\u{fc}rst"),
+    ("Friedrich der Gro\u{df}e", "F. der Grosse"),
+    ("FdG", "F. der Grosse"),
+    ("DM", "Des Moines"),
+    ("Dmitri Donskoi", "Dm. Donskoi"),
+    ("Dmitry Donskoy", "Dm. Donskoi"),
+    ("Dmitri Pozharsky", "D. Pozharsky"),
+    ("Dmitry Pozharsky", "D. Pozharsky"),
+    ("Attilio Regolo", "A. Regolo"),
+    ("Francesco Ferruccio", "F. Ferruccio"),
+    ("Forrest Sherman", "F. Sherman"),
+    ("Prinz Eitel Friedrich", "P. E. Friedrich"),
 ];
 
 /// Groups of ships players can own. Event, clan-battle, test and retired
@@ -258,7 +256,7 @@ pub struct ShipSummary {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindShipsArgs {
-    /// Part of the ship's name, e.g. "moines". Omit to list by the other filters.
+    /// Ship name or part of it, e.g. "moines". A name that names one ship exactly, by an alias such as "DM", by its initials or by a former name lists that ship first. Omit to list by the other filters.
     pub name: Option<String>,
 
     pub min_tier: Option<Tier>,
@@ -277,17 +275,40 @@ pub struct FindShipsArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FindShipsOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub total: usize,
 
     /// Ships in closed testing among `total`.
     #[serde(skip_serializing_if = "is_zero")]
     pub test: usize,
 
-    pub ships: Vec<ShipSummary>,
+    pub ships: Vec<FoundShip>,
 
     /// Matches left out of `ships` to keep the answer short.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FoundShip {
+    #[serde(flatten)]
+    pub ship: ShipSummary,
+
+    /// How the name filter matched; absent without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_match: Option<NameMatch>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NameMatch {
+    /// The name names this ship, as single-ship tools read it.
+    Named,
+    /// The ship's name contains the name.
+    Partial,
 }
 
 /// Arguments naming one ship.
@@ -298,9 +319,23 @@ pub struct ShipArgs {
     pub ship: String,
 }
 
+/// A ship resolved from a player-written name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedShip {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
+    pub ship: ShipSummary,
+}
+
 /// Price, research position and availability of one ship.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipOverview {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
 
     /// Port price in credits. Absent when the ship is not sold for credits.
@@ -403,20 +438,49 @@ impl GameData {
             exclude_test: args.exclude_test_ships.unwrap_or(false),
         };
 
-        let mut ships: Vec<&Ship> = self
+        // A name single-ship tools resolve without guessing leads the list,
+        // so "DM" lists Des Moines before Dm. Donskoi.
+        let mut interpretations = Interpretations::default();
+        let named: Vec<&Ship> = match args.name.as_deref().map(|name| (name, self.ship_names.lookup(name))) {
+            Some((name, Lookup::Found(resolved, targets)))
+                if !matches!(resolved.method, Some(ResolutionMethod::Partial | ResolutionMethod::Fuzzy)) =>
+            {
+                let named: Vec<&Ship> =
+                    targets.iter().map(|index| &self.ships[*index]).filter(|ship| filter.matches(ship)).collect();
+                if !named.is_empty() {
+                    interpretations.note(name, &resolved, NameKind::Ship);
+                }
+                named
+            }
+            _ => Vec::new(),
+        };
+
+        let mut partial: Vec<&Ship> = self
             .ships
             .iter()
             .filter(|ship| needle.as_ref().is_none_or(|needle| ship.search_key.contains(needle.as_str())))
             .filter(|ship| filter.matches(ship))
+            .filter(|ship| !named.iter().any(|named| named.param.id() == ship.param.id()))
             .collect();
-        ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        partial.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+
+        let partial_match = needle.as_ref().map(|_| NameMatch::Partial);
+        let ships: Vec<(&Ship, Option<NameMatch>)> = named
+            .iter()
+            .map(|ship| (*ship, Some(NameMatch::Named)))
+            .chain(partial.iter().map(|ship| (*ship, partial_match)))
+            .collect();
 
         let total = ships.len();
-        let test = ships.iter().filter(|ship| ship.status() == ShipStatus::Test).count();
-        let listed: Vec<ShipSummary> = ships.iter().take(FIND_SHIPS_LIMIT).map(|ship| ship.summary()).collect();
+        let test = ships.iter().filter(|(ship, _)| ship.status() == ShipStatus::Test).count();
+        let listed: Vec<FoundShip> = ships
+            .iter()
+            .take(FIND_SHIPS_LIMIT)
+            .map(|(ship, name_match)| FoundShip { ship: ship.summary(), name_match: *name_match })
+            .collect();
         let omitted = (total > listed.len()).then(|| total - listed.len());
 
-        FindShipsOutput { total, test, ships: listed, omitted }
+        FindShipsOutput { interpretations, total, test, ships: listed, omitted }
     }
 
     /// The playable ship with this GameParams id, e.g. from a replay.
@@ -425,13 +489,17 @@ impl GameData {
     }
 
     /// Resolves a player-written ship name or GameParams index to one ship.
-    pub fn ship_summary(&self, query: &str) -> Result<ShipSummary, QueryError> {
-        self.resolve_ship(query).map(Ship::summary)
+    pub fn ship_summary(&self, query: &str) -> Result<ResolvedShip, QueryError> {
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(query, &mut interpretations)?.summary();
+
+        Ok(ResolvedShip { interpretations, ship })
     }
 
     /// Price, research links and availability of one ship.
     pub fn ship_overview(&self, args: &ShipArgs) -> Result<ShipOverview, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let Some(vehicle) = ship.param.vehicle() else {
             return Err(QueryError::ShipNotFound { query: args.ship.clone(), suggestions: Vec::new() });
         };
@@ -457,11 +525,12 @@ impl GameData {
         let variants = self
             .ships
             .iter()
-            .filter(|other| other.name == ship.name && other.param.id() != ship.param.id())
+            .filter(|other| other.search_key == ship.search_key && other.param.id() != ship.param.id())
             .map(Ship::summary)
             .collect();
 
         Ok(ShipOverview {
+            interpretations,
             ship: ship.summary(),
             cost_credits: research.cost_credits(),
             game_params_doubloon_value: research.cost_doubloons(),
@@ -478,64 +547,19 @@ impl GameData {
         })
     }
 
-    pub(crate) fn resolve_ship(&self, query: &str) -> Result<&Ship, QueryError> {
-        let key = search_key(query);
-
-        let exact: Vec<&Ship> = self.ships.iter().filter(|ship| ship.search_key == key).collect();
-        if let Some(ship) = preferred(&exact) {
-            return Ok(ship);
-        }
-
-        let by_index = self.ships.iter().find(|ship| {
-            ship.param.index().eq_ignore_ascii_case(query.trim())
-                || ship.param.name().eq_ignore_ascii_case(query.trim())
-        });
-        if let Some(ship) = by_index {
-            return Ok(ship);
-        }
-
-        if let Some(alias) = ALIASES.iter().find(|alias| alias.key == key) {
-            let named: Vec<&Ship> = self.ships.iter().filter(|ship| ship.name == alias.name).collect();
-            if let Some(ship) = preferred(&named) {
-                return Ok(ship);
+    /// The ship `query` names. A ship name shared by event or retired copies
+    /// resolves to the regular variant.
+    pub(crate) fn resolve_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
+        match self.ship_names.lookup(query) {
+            Lookup::Found(resolved, targets) => {
+                let ships: Vec<&Ship> = targets.iter().map(|index| &self.ships[*index]).collect();
+                let ship = preferred(&ships)
+                    .ok_or_else(|| QueryError::ShipNotFound { query: query.to_owned(), suggestions: Vec::new() })?;
+                interpretations.note(query, &resolved, NameKind::Ship);
+                Ok(ship)
             }
-        }
-
-        let prefix: Vec<&Ship> = self.ships.iter().filter(|ship| ship.search_key.starts_with(key.as_str())).collect();
-        let partial: Vec<&Ship> = if prefix.is_empty() {
-            self.ships.iter().filter(|ship| ship.search_key.contains(key.as_str())).collect()
-        } else {
-            prefix
-        };
-        let distinct: BTreeMap<&str, &Ship> = partial.iter().map(|ship| (ship.name.as_str(), *ship)).collect();
-        if distinct.len() > 1 {
-            return Err(QueryError::AmbiguousShip {
-                query: query.to_owned(),
-                candidates: distinct.keys().take(15).map(|name| (*name).to_owned()).collect(),
-            });
-        }
-        if let Some(ship) = preferred(&partial) {
-            return Ok(ship);
-        }
-
-        // Aliases join as names of their own so a misspelled full name still
-        // resolves.
-        let candidates = self
-            .ships
-            .iter()
-            .map(|ship| Candidate { key: &ship.search_key, name: &ship.name, secondary: !ship.is_regular() })
-            .chain(ALIASES.iter().map(|alias| Candidate::primary(alias.key, alias.name)));
-
-        match fuzzy::closest(&key, candidates) {
-            Fuzzy::Unique(name) => {
-                let named: Vec<&Ship> = self.ships.iter().filter(|ship| ship.name == name).collect();
-                preferred(&named)
-                    .ok_or_else(|| QueryError::ShipNotFound { query: query.to_owned(), suggestions: Vec::new() })
-            }
-            Fuzzy::Suggestions(names) => Err(QueryError::ShipNotFound {
-                query: query.to_owned(),
-                suggestions: names.into_iter().map(str::to_owned).collect(),
-            }),
+            Lookup::Ambiguous(candidates) => Err(QueryError::AmbiguousShip { query: query.to_owned(), candidates }),
+            Lookup::NotFound(suggestions) => Err(QueryError::ShipNotFound { query: query.to_owned(), suggestions }),
         }
     }
 
@@ -568,35 +592,23 @@ fn acquisition_note(group: &str) -> Option<&'static str> {
     }
 }
 
-/// Lowercase ASCII with punctuation folded to single spaces, so names with
-/// diacritics match their plain spelling.
-pub(crate) fn search_key(name: &str) -> String {
-    let ascii = deunicode::deunicode(name).to_lowercase();
-
-    ascii
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+/// Ship names, GameParams indexes and names, and [`SHIP_ALIASES`].
+pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
+    let mut names = NameIndex::default();
+    for (index, ship) in ships.iter().enumerate() {
+        names.add_name(&ship.name, index, !ship.is_regular());
+        names.add_id(ship.param.index(), &ship.name, index);
+        names.add_id(ship.param.name(), &ship.name, index);
+    }
+    for (alias, name) in SHIP_ALIASES {
+        names.add_alias(alias, name, ResolutionMethod::ExactAlias);
+    }
+    names
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn alias_keys_are_search_keys() {
-        for alias in ALIASES {
-            assert_eq!(search_key(alias.key), alias.key);
-        }
-    }
-
-    #[test]
-    fn search_key_folds_diacritics_and_punctuation() {
-        assert_eq!(search_key("Gro\u{df}er Kurf\u{fc}rst"), "grosser kurfurst");
-        assert_eq!(search_key("ARP My\u{14d}k\u{14d}"), "arp myoko");
-        assert_eq!(search_key("Des-Moines "), "des moines");
-    }
 
     #[test]
     fn matchmaking_range_is_clamped() {

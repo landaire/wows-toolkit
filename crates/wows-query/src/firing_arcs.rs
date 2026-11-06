@@ -38,6 +38,7 @@ use crate::loadout::ResolvedLoadout;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::modules::ModuleSelection;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
@@ -330,6 +331,10 @@ pub struct FireTarget {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ShipFiringArcs {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -406,7 +411,8 @@ impl GameData {
     /// Guns and torpedo tubes on target per bearing, per battery, with salvo
     /// damage, fires per minute and main battery dispersion.
     pub fn ship_firing_arcs(&self, args: &FiringArcsArgs) -> Result<ShipFiringArcs, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let modules = self.resolve_modules(ship, args.modules.as_deref().unwrap_or_default())?;
         self.check_hull_fit(ship, &modules)?;
         let selection = &modules.selection;
@@ -416,9 +422,9 @@ impl GameData {
             conditions_met: false,
             hp_percent: None,
         };
-        let loadout = self.resolve_loadout(ship, &request)?;
+        let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let target = match args.target_ship.as_deref() {
-            Some(name) => Some(self.fire_target(self.resolve_ship(name)?)?),
+            Some(name) => Some(self.fire_target(self.resolve_ship(name, &mut interpretations)?)?),
             None => None,
         };
 
@@ -470,6 +476,7 @@ impl GameData {
         }
 
         Ok(ShipFiringArcs {
+            interpretations,
             ship: ship.summary(),
             modules: modules.chosen,
             skills: loadout.applied_skills,
@@ -952,7 +959,7 @@ mod tests {
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
-        let ship = game.resolve_ship("Louisiana").expect("Louisiana exists");
+        let ship = game.resolve_ship("Louisiana", &mut Interpretations::default()).expect("Louisiana exists");
         let selection = ShipUpgradeSelection::stock(&ship.param);
         let facings = game.hardpoint_facings(ship, &selection).expect("hull facings");
 

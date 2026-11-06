@@ -1,0 +1,28 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: found
+---
+- name: DM
+  interpretations:
+    - input: DM
+      resolved: Des Moines
+      kind: ship
+      method: exact-alias
+  ships:
+    - ship: Des Moines
+      name_match: named
+    - ship: Dm. Donskoi
+      name_match: partial
+    - ship: Admiraal
+      name_match: partial
+- name: GK
+  interpretations:
+    - input: GK
+      resolved: G. Kurfürst
+      kind: ship
+      method: exact-alias
+  ships:
+    - ship: G. Kurfürst
+      name_match: named
+    - ship: Chungking
+      name_match: partial

@@ -17,13 +17,21 @@ use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
+use crate::consumables::consumable_names;
 use crate::error::LoadError;
 use crate::gameparams::RawParamsSlot;
+use crate::names::Alias;
+use crate::names::AliasError;
+use crate::names::AliasTarget;
+use crate::names::NameIndex;
 use crate::raw_params::COMPLETE_MARKER;
 use crate::raw_params::LAST_USED_MARKER;
 use crate::raw_params::touch;
 use crate::ships::Ship;
+use crate::ships::ship_names;
+use crate::skills::skill_names;
 use crate::upgrades::Upgrade;
+use crate::upgrades::upgrade_names;
 
 /// Cache kind directory of rebuilt `game_params.rkyv` files under a cache
 /// root, laid out `<kind>/<build>/` like [`crate::raw_params::RAW_PARAMS_KIND`].
@@ -56,6 +64,13 @@ pub struct GameData {
 
     /// Ship param name to the param names of the ships that research it.
     pub(crate) research_predecessors: HashMap<String, Vec<String>>,
+
+    /// Names that resolve to indexes into `ships`, `skills` and `upgrades`,
+    /// and to consumable types.
+    pub(crate) ship_names: NameIndex<usize>,
+    pub(crate) skill_names: NameIndex<usize>,
+    pub(crate) upgrade_names: NameIndex<usize>,
+    pub(crate) consumable_names: NameIndex<String>,
 
     /// Raw GameParams, opened or built on first use.
     pub(crate) raw_params: RawParamsSlot,
@@ -104,6 +119,27 @@ impl GameData {
         self.ships.len()
     }
 
+    /// Teaches the resolvers extra names, such as former skill names. Each
+    /// alias names its target by GameParams name, index, skill internal name,
+    /// consumable type or English name. Aliases whose target is not in this
+    /// game data are returned in the error; the others are registered.
+    pub fn add_aliases(&mut self, aliases: impl IntoIterator<Item = Alias>) -> Result<(), AliasError> {
+        let mut unknown = Vec::new();
+        for alias in aliases {
+            let added = match &alias.target {
+                AliasTarget::Ship(target) => self.ship_names.add_alias(&alias.name, target, alias.method),
+                AliasTarget::Skill(target) => self.skill_names.add_alias(&alias.name, target, alias.method),
+                AliasTarget::Upgrade(target) => self.upgrade_names.add_alias(&alias.name, target, alias.method),
+                AliasTarget::Consumable(target) => self.consumable_names.add_alias(&alias.name, target, alias.method),
+            };
+            if !added {
+                unknown.push(alias);
+            }
+        }
+
+        if unknown.is_empty() { Ok(()) } else { Err(AliasError { unknown }) }
+    }
+
     fn index(version: Version, provider: GameMetadataProvider, vfs: VfsPath, raw_params: RawParamsSlot) -> Self {
         let mut ships: Vec<Ship> =
             provider.params().iter().filter_map(|param| Ship::from_param(&provider, param)).collect();
@@ -115,7 +151,8 @@ impl GameData {
             .find_map(|param| param.crew().and_then(|crew| crew.skills()).map(<[CrewSkill]>::to_vec))
             .unwrap_or_default();
 
-        let upgrades = provider.params().iter().filter_map(|param| Upgrade::from_param(&provider, param)).collect();
+        let upgrades: Vec<Upgrade> =
+            provider.params().iter().filter_map(|param| Upgrade::from_param(&provider, param)).collect();
 
         let mut research_predecessors: HashMap<String, Vec<String>> = HashMap::new();
         for ship in &ships {
@@ -127,7 +164,25 @@ impl GameData {
             }
         }
 
-        Self { version, provider, vfs, ships, skills, upgrades, research_predecessors, raw_params }
+        let ship_names = ship_names(&ships);
+        let skill_names = skill_names(&provider, &version, &skills);
+        let upgrade_names = upgrade_names(&upgrades);
+        let consumable_names = consumable_names(&provider);
+
+        Self {
+            version,
+            provider,
+            vfs,
+            ships,
+            skills,
+            upgrades,
+            research_predecessors,
+            ship_names,
+            skill_names,
+            upgrade_names,
+            consumable_names,
+            raw_params,
+        }
     }
 }
 
@@ -307,7 +362,82 @@ fn parse_version(version: &str, build: u32) -> Option<Version> {
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+
     use super::*;
+    use crate::consumables::CONSUMABLE_ALIASES;
+    use crate::names::Lookup;
+    use crate::names::ResolutionMethod;
+    use crate::ships::SHIP_ALIASES;
+    use crate::skills::SKILL_ALIASES;
+    use crate::upgrades::UPGRADE_ALIASES;
+
+    #[derive(Serialize)]
+    struct NameResolution {
+        name: &'static str,
+        resolved: String,
+        method: Option<ResolutionMethod>,
+    }
+
+    /// How `name` resolves in `names`, after checking that it reaches a
+    /// target `is_target` accepts by `method`, `None` for an exact name or
+    /// identifier.
+    fn resolve_name<T>(
+        names: &NameIndex<T>,
+        name: &'static str,
+        method: Option<ResolutionMethod>,
+        is_target: impl Fn(&T) -> bool,
+    ) -> NameResolution
+    where
+        T: Clone + PartialEq,
+    {
+        let Lookup::Found(resolved, targets) = names.lookup(name) else {
+            panic!("{name} does not resolve to one name");
+        };
+        assert!(targets.iter().any(is_target), "{name} resolves to {}, not its target", resolved.name);
+        assert_eq!(resolved.method, method, "{name} resolves to {} by {:?}", resolved.name, resolved.method);
+
+        NameResolution { name, resolved: resolved.name.to_owned(), method }
+    }
+
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn alias_tables_resolve_to_their_targets() {
+        let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
+        let index = BuildsIndex::load(&root.join("builds.toml"));
+        let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
+        let cache = std::env::temp_dir().join("wows-query-test-cache");
+        let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
+
+        let alias = Some(ResolutionMethod::ExactAlias);
+        let mut resolutions = Vec::new();
+        for (name, ship) in SHIP_ALIASES {
+            resolutions.push(resolve_name(&game.ship_names, name, alias, |index| game.ships[*index].name == *ship));
+        }
+        for (name, internal_name, method) in SKILL_ALIASES {
+            resolutions.push(resolve_name(&game.skill_names, name, Some(*method), |index| {
+                game.skills[*index].internal_name().as_str() == *internal_name
+            }));
+        }
+        for (name, param) in UPGRADE_ALIASES {
+            resolutions.push(resolve_name(&game.upgrade_names, name, alias, |index| {
+                game.upgrades[*index].param.name() == *param
+            }));
+        }
+        for (name, kind) in CONSUMABLE_ALIASES {
+            resolutions.push(resolve_name(&game.consumable_names, name, alias, |target| target == kind));
+        }
+
+        // Names the tables leave out because they resolve without an entry.
+        let initialism = Some(ResolutionMethod::Initialism);
+        resolutions.push(resolve_name(&game.upgrade_names, "MBM3", initialism, |index| {
+            game.upgrades[*index].name == "Main Battery Modification 3"
+        }));
+        resolutions.push(resolve_name(&game.consumable_names, "DCP", initialism, |target| target == "crashCrew"));
+        resolutions.push(resolve_name(&game.consumable_names, "Fighter", None, |target| target == "fighter"));
+
+        insta::assert_yaml_snapshot!(resolutions);
+    }
 
     #[test]
     fn parse_version_reads_three_components() {

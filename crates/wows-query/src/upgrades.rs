@@ -15,22 +15,32 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
-use crate::fuzzy;
-use crate::fuzzy::Candidate;
-use crate::fuzzy::Fuzzy;
+use crate::names::Interpretations;
+use crate::names::Lookup;
+use crate::names::NameIndex;
+use crate::names::NameKind;
+use crate::names::ResolutionMethod;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
 use crate::ships::Tier;
-use crate::ships::search_key;
 use crate::text::clean;
+
+/// Community names of upgrades, with the GameParams name of the upgrade.
+/// Every target is checked by the `alias_tables_resolve_to_their_targets` test.
+pub(crate) const UPGRADE_ALIASES: &[(&str, &str)] = &[
+    ("CSM", "PCM027_ConcealmentMeasures_Mod_I"),
+    ("Concealment Module", "PCM027_ConcealmentMeasures_Mod_I"),
+    ("Radar Mod", "PCM042_RLSSearch_Mod_I"),
+    ("Hydro Mod", "PCM041_SonarSearch_Mod_I"),
+    ("Smoke Mod", "PCM037_SmokeGenerator_Mod_I"),
+];
 
 /// A mountable upgrade indexed by its English name.
 pub(crate) struct Upgrade {
     pub(crate) param: Rc<Param>,
     pub(crate) name: String,
-    pub(crate) search_key: String,
 
     /// 0-based slot.
     pub(crate) slot: u8,
@@ -39,9 +49,10 @@ pub(crate) struct Upgrade {
 impl Upgrade {
     pub(crate) fn from_param(provider: &GameMetadataProvider, param: &Rc<Param>) -> Option<Self> {
         let slot = param.modernization()?.slot()?;
-        let name = translate_module(param.name(), provider).0.map(|name| clean(&name))?;
+        // Some names break across two lines in the port.
+        let name = translate_module(param.name(), provider).0.map(|name| clean(&name.replace('\n', " ")))?;
 
-        Some(Self { param: Rc::clone(param), search_key: search_key(&name), name, slot })
+        Some(Self { param: Rc::clone(param), name, slot })
     }
 
     pub(crate) fn modernization(&self) -> &Modernization {
@@ -104,6 +115,10 @@ pub struct UpgradeArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpgradeOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     /// Usually one. Several when upgrades share a name.
     pub upgrades: Vec<UpgradeDetails>,
 }
@@ -153,6 +168,10 @@ pub struct UpgradeClassEffects {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipUpgrades {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
     pub slots: Vec<UpgradeSlot>,
 }
@@ -180,20 +199,22 @@ pub struct UpgradeOption {
 impl GameData {
     /// One upgrade: slot, price, effects and which ships it fits.
     pub fn upgrade(&self, args: &UpgradeArgs) -> Result<UpgradeOutput, QueryError> {
+        let mut interpretations = Interpretations::default();
         let ship = match args.ship.as_deref() {
-            Some(name) => Some(self.resolve_ship(name)?),
+            Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
             None => None,
         };
-        let matches = self.match_upgrades(&args.upgrade)?;
+        let matches = self.match_upgrades(&args.upgrade, &mut interpretations)?;
 
         let upgrades = matches.into_iter().map(|upgrade| self.upgrade_details(upgrade, ship)).collect();
 
-        Ok(UpgradeOutput { upgrades })
+        Ok(UpgradeOutput { interpretations, upgrades })
     }
 
     /// Every upgrade that fits one ship, by slot.
     pub fn ship_upgrades(&self, args: &ShipArgs) -> Result<ShipUpgrades, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let species = ship.class.species();
 
         let mut slots: BTreeMap<u8, Vec<UpgradeOption>> = BTreeMap::new();
@@ -208,12 +229,17 @@ impl GameData {
         }
         let slots = slots.into_iter().map(|(slot, options)| UpgradeSlot { slot, options }).collect();
 
-        Ok(ShipUpgrades { ship: ship.summary(), slots })
+        Ok(ShipUpgrades { interpretations, ship: ship.summary(), slots })
     }
 
     /// The upgrade named `query` that fits `ship`.
-    pub(crate) fn resolve_upgrade_for_ship(&self, query: &str, ship: &Ship) -> Result<&Upgrade, QueryError> {
-        let matches = self.match_upgrades(query)?;
+    pub(crate) fn resolve_upgrade_for_ship(
+        &self,
+        query: &str,
+        ship: &Ship,
+        interpretations: &mut Interpretations,
+    ) -> Result<&Upgrade, QueryError> {
+        let matches = self.match_upgrades(query, interpretations)?;
         let Some(first) = matches.first() else {
             return Err(QueryError::UpgradeNotFound { query: query.to_owned(), suggestions: Vec::new() });
         };
@@ -225,46 +251,16 @@ impl GameData {
             .ok_or_else(|| QueryError::UpgradeNotApplicable { upgrade: first.name.clone(), ship: ship.name.clone() })
     }
 
-    fn match_upgrades(&self, query: &str) -> Result<Vec<&Upgrade>, QueryError> {
-        let key = search_key(query);
-
-        let exact: Vec<&Upgrade> = self
-            .upgrades
-            .iter()
-            .filter(|upgrade| upgrade.search_key == key || upgrade.param.name().eq_ignore_ascii_case(query.trim()))
-            .collect();
-        if !exact.is_empty() {
-            return Ok(exact);
-        }
-
-        let matching = |accept: &dyn Fn(&str) -> bool| -> Vec<&Upgrade> {
-            self.upgrades.iter().filter(|upgrade| !key.is_empty() && accept(&upgrade.search_key)).collect()
-        };
-        let prefix = matching(&|name| name.starts_with(key.as_str()));
-        let partial = if prefix.is_empty() { matching(&|name| name.contains(key.as_str())) } else { prefix };
-        let mut distinct: Vec<&str> = partial.iter().map(|upgrade| upgrade.name.as_str()).collect();
-        distinct.sort();
-        distinct.dedup();
-        match distinct.len() {
-            0 => {}
-            1 => return Ok(partial),
-            _ => {
-                return Err(QueryError::AmbiguousUpgrade {
-                    query: query.to_owned(),
-                    candidates: distinct.into_iter().take(15).map(str::to_owned).collect(),
-                });
+    /// Upgrades a player-written name, abbreviation or GameParams name refers
+    /// to; several when upgrades share a name.
+    fn match_upgrades(&self, query: &str, interpretations: &mut Interpretations) -> Result<Vec<&Upgrade>, QueryError> {
+        match self.upgrade_names.lookup(query) {
+            Lookup::Found(resolved, targets) => {
+                interpretations.note(query, &resolved, NameKind::Upgrade);
+                Ok(targets.iter().map(|index| &self.upgrades[*index]).collect())
             }
-        }
-
-        match fuzzy::closest(
-            &key,
-            self.upgrades.iter().map(|upgrade| Candidate::primary(&upgrade.search_key, &upgrade.name)),
-        ) {
-            Fuzzy::Unique(name) => Ok(self.upgrades.iter().filter(|upgrade| upgrade.name == name).collect()),
-            Fuzzy::Suggestions(suggestions) => Err(QueryError::UpgradeNotFound {
-                query: query.to_owned(),
-                suggestions: suggestions.into_iter().map(str::to_owned).collect(),
-            }),
+            Lookup::Ambiguous(candidates) => Err(QueryError::AmbiguousUpgrade { query: query.to_owned(), candidates }),
+            Lookup::NotFound(suggestions) => Err(QueryError::UpgradeNotFound { query: query.to_owned(), suggestions }),
         }
     }
 
@@ -321,4 +317,18 @@ impl GameData {
 
         if covers_all { Vec::new() } else { nations.to_vec() }
     }
+}
+
+/// Upgrade names, GameParams names and indexes, and [`UPGRADE_ALIASES`].
+pub(crate) fn upgrade_names(upgrades: &[Upgrade]) -> NameIndex<usize> {
+    let mut names = NameIndex::default();
+    for (index, upgrade) in upgrades.iter().enumerate() {
+        names.add_name(&upgrade.name, index, false);
+        names.add_id(upgrade.param.name(), &upgrade.name, index);
+        names.add_id(upgrade.param.index(), &upgrade.name, index);
+    }
+    for (alias, param) in UPGRADE_ALIASES {
+        names.add_alias(alias, param, ResolutionMethod::ExactAlias);
+    }
+    names
 }

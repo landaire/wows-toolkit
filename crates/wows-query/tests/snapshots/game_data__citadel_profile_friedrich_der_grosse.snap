@@ -1,7 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 621
 expression: friedrich
 ---
+interpretations:
+  - input: Friedrich der Grosse
+    resolved: F. der Grosse
+    kind: ship
+    method: exact-alias
 ship: "T9 F. der Grosse (battleship, Germany)"
 hull: Hull A
 waterline:

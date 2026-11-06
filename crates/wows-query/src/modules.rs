@@ -7,8 +7,8 @@ use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::search_key;
 use crate::ships::Ship;
-use crate::ships::search_key;
 use crate::text::clean;
 
 /// The kind of module a ship mounts in one research slot.

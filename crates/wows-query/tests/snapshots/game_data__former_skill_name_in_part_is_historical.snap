@@ -1,0 +1,9 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 375
+expression: skill.interpretations
+---
+- input: Basic Firing
+  resolved: Main Battery and AA Specialist
+  kind: skill
+  method: historical

@@ -40,10 +40,11 @@ use crate::citadel::ShellFlags;
 use crate::data::GameData;
 use crate::error::ArmorReadError;
 use crate::error::QueryError;
+use crate::names::Interpretations;
+use crate::names::search_key;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::ships::Ship;
-use crate::ships::search_key;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +92,10 @@ pub struct ArmorTraceArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArmorTraceOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub shooter: String,
     pub target: String,
     pub target_hull: String,
@@ -350,8 +355,9 @@ impl GameData {
     /// Casts a grid of parallel rays at `target` along the line of fire and
     /// runs `shooter`'s projectile through the armor each ray crosses.
     pub fn armor_trace(&self, args: &ArmorTraceArgs) -> Result<ArmorTraceOutput, QueryError> {
-        let shooter = self.resolve_ship(&args.shooter)?;
-        let target = self.resolve_ship(&args.target_ship)?;
+        let mut interpretations = Interpretations::default();
+        let shooter = self.resolve_ship(&args.shooter, &mut interpretations)?;
+        let target = self.resolve_ship(&args.target_ship, &mut interpretations)?;
 
         let spacing = args.spacing_m.unwrap_or(Meters::new(1.0));
         if !(0.25..=10.0).contains(&spacing.value()) {
@@ -400,6 +406,7 @@ impl GameData {
         assumptions.extend(common_assumptions(&weapon.model).into_iter().map(str::to_owned));
 
         Ok(ArmorTraceOutput {
+            interpretations,
             shooter: shooter.label(),
             target: target.label(),
             target_hull: hull_name,
@@ -1114,10 +1121,10 @@ mod tests {
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
 
-        let target = game.resolve_ship("Hindenburg").expect("Hindenburg exists");
+        let target = game.resolve_ship("Hindenburg", &mut Interpretations::default()).expect("Hindenburg exists");
         let hull = game.target_hull(target, None).expect("a stock hull");
         let meshes = game.target_meshes(target, &hull.param).expect("the dump carries Hindenburg's armor");
-        let shooter = game.resolve_ship("Des Moines").expect("Des Moines exists");
+        let shooter = game.resolve_ship("Des Moines", &mut Interpretations::default()).expect("Des Moines exists");
         let request =
             GunRequest { battery: Battery::Main, ammo: Some(Ammo::Ap), range_km: Some(Km::new(10.0)), ifhe: false };
         let weapon = game.gun_weapon(shooter, &request).expect("Des Moines fires AP at 10 km");

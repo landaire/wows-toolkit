@@ -1,7 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 180
 expression: ifhe
 ---
+interpretations:
+  - input: ifhe
+    resolved: Inertia Fuse for HE Shells
+    kind: skill
+    method: exact-alias
 skills:
   - name: Inertia Fuse for HE Shells
     internal_name: HePenetration

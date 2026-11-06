@@ -1,17 +1,17 @@
 ---
 source: crates/wows-query/src/tools.rs
-assertion_line: 317
+assertion_line: 342
 expression: specs()
 ---
 - name: find_ships
-  description: "List ships by name fragment, tier, class or nation, including ships in closed testing (status \"test\", counted in test). Returns name, GameParams index, tier, class, nation, group and status."
+  description: "List ships by name, tier, class or nation, including ships in closed testing (status \"test\", counted in test). Returns name, GameParams index, tier, class, nation, group and status. With a name, a ship it names as the single-ship tools read it (exact name, alias such as \"DM\", initials or former name) comes first with name_match \"named\"; ships whose names merely contain it follow with name_match \"partial\"."
   input_schema:
     type: object
     additionalProperties: false
     properties:
       name:
         type: string
-        description: "Part of the ship's name, e.g. \"moines\". Omit to list by the other filters."
+        description: "Ship name or part of it, e.g. \"moines\". A name that names one ship exactly, by an alias such as \"DM\", by its initials or by a former name lists that ship first. Omit to list by the other filters."
       min_tier:
         type: integer
         description: "A ship tier, 1 to 11."
@@ -349,14 +349,14 @@ expression: specs()
     required:
       - conditions
 - name: captain_skill
-  description: "One captain skill by name or acronym (IFHE, SI, CE, AR, DE, BoS): description, point cost and effects per ship class."
+  description: "One captain skill by name, abbreviation (IFHE, SI, CE, SE, PT, IFA, AR, DE, BoS, RPF) or former name (BFT, AFT): description, point cost and effects per ship class, or for one ship's class with ship."
   input_schema:
     type: object
     additionalProperties: false
     properties:
       skill:
         type: string
-        description: "Skill name, e.g. \"Inertia Fuse for HE Shells\", or a common acronym such as IFHE, SI, CE, AR, DE, BoS."
+        description: "Skill name, e.g. \"Inertia Fuse for HE Shells\", a common abbreviation such as IFHE, SI, CE, SE, PT, IFA, AR, DE, BoS, or a former name such as BFT."
       class:
         type: string
         enum:
@@ -366,6 +366,9 @@ expression: specs()
           - aircraft_carrier
           - submarine
         description: Only describe the skill for this class.
+      ship:
+        type: string
+        description: "Only describe the skill for this ship's class, e.g. \"GK\". Overrides class."
     required:
       - skill
 - name: skill_tree
@@ -410,7 +413,7 @@ expression: specs()
     required:
       - ship
 - name: ship_consumables
-  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied."
+  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\"."
   input_schema:
     type: object
     additionalProperties: false
@@ -418,11 +421,14 @@ expression: specs()
       ship:
         type: string
         description: "Ship name, e.g. \"Des Moines\"."
+      consumable:
+        type: string
+        description: "Only this consumable, e.g. \"radar\", \"hydro\", \"Repair Party\", \"DCP\"."
       skills:
         type: array
         items:
           type: string
-        description: "Captain skills by name or acronym, e.g. [\"SI\"], applied to the consumable stats."
+        description: "Captain skills by name or abbreviation, e.g. [\"SI\"], applied to the consumable stats."
       upgrades:
         type: array
         items:

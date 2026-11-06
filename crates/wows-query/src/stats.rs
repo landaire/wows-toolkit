@@ -20,6 +20,7 @@ use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::LoadoutRequest;
 use crate::loadout::ResolvedLoadout;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
 use crate::text::clean;
@@ -49,6 +50,10 @@ pub struct ShipStatsArgs {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipStatsOutput {
+    /// Names read as something they do not spell exactly.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     pub ship: ShipSummary,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -102,14 +107,15 @@ impl GameData {
     /// The port stat card of one ship, optionally with captain skills and
     /// upgrades applied and the changes they make explained.
     pub fn ship_stats(&self, args: &ShipStatsArgs) -> Result<ShipStatsOutput, QueryError> {
-        let ship = self.resolve_ship(&args.ship)?;
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let request = LoadoutRequest {
             skills: args.skills.as_deref().unwrap_or_default(),
             upgrades: args.upgrades.as_deref().unwrap_or_default(),
             conditions_met: args.conditions_met.unwrap_or(false),
             hp_percent: args.hp_percent,
         };
-        let loadout = self.resolve_loadout(ship, &request)?;
+        let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let modified = !loadout.is_empty() || args.hp_percent.is_some();
 
         let card = self.card(ship, &loadout)?;
@@ -126,6 +132,7 @@ impl GameData {
         let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card.stats, self) } else { Vec::new() };
 
         Ok(ShipStatsOutput {
+            interpretations,
             ship: ship.summary(),
             skill_points: (!loadout.applied_skills.is_empty()).then(|| loadout.skill_points()),
             skills: loadout.applied_skills,
