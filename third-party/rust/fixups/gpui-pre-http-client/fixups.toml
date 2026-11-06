@@ -2,3 +2,5 @@
 # //build-support/buck/test-support:transition incoming transition, so the
 # shipped binaries build without it.
 rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:enabled" = ["--cfg=feature=\"test-support\""] }]
+# test-support needs log. It stays unused, and so unlinked, elsewhere.
+extra_deps = [":log-0.4"]

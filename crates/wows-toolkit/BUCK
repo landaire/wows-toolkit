@@ -68,6 +68,7 @@ TOOLKIT_COMMON_DEPS = [
     "//third-party/rust:octocrab",
     "//third-party/rust:parking_lot",
     "//third-party/rust:pickled",
+    "//third-party/rust:pollster",
     "//third-party/rust:rand",
     "//third-party/rust:regex",
     "//third-party/rust:reqwest",

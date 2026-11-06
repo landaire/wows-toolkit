@@ -2,3 +2,7 @@
 # //build-support/buck/test-support:transition incoming transition, so the
 # shipped binaries build without it.
 rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:enabled" = ["--cfg=feature=\"test-support\""] }]
+
+# test-support reaches the headless renderer through gpui_wgpu on Linux.
+['cfg(target_os = "linux")']
+extra_deps = [":gpui-pre-wgpu-0.3"]

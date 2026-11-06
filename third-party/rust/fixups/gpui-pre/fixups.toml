@@ -5,7 +5,7 @@ buildscript.run = false
 # test-support is for the GPUI tests only. They reach it through the
 # //build-support/buck/test-support:transition incoming transition, so the
 # shipped binaries build without it.
-# leak-detection and proptest need these. They stay unused, and so unlinked,
-# elsewhere.
-extra_deps = [":backtrace-0.3", ":proptest-1"]
+# leak-detection, proptest and test-support need these. They stay unused, and
+# so unlinked, elsewhere.
+extra_deps = [":backtrace-0.3", ":futures-concurrency-7", ":postage-0.5", ":proptest-1", ":web-time-1"]
 rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:enabled" = ["--cfg=feature=\"backtrace\"", "--cfg=feature=\"leak-detection\"", "--cfg=feature=\"proptest\"", "--cfg=feature=\"test-support\""] }]

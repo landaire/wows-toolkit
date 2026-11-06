@@ -16,7 +16,9 @@ tar = "0.4"
 egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
 filetime = "0.2"
 insta = { workspace = true }
-# gpui's proptest feature, which its test-support enables. The gpui-pre fixup
-# adds the feature only under //build-support/buck/test-support:enabled.
+# gpui's test-support dependencies. The gpui-pre fixup adds the features only
+# under //build-support/buck/test-support:enabled.
+futures-concurrency = "7.7.1"
+postage = { version = "0.5", features = ["blocking"] }
 proptest = { version = "1", features = ["attr-macro"] }
 rust-crypto = "0.2.36"
