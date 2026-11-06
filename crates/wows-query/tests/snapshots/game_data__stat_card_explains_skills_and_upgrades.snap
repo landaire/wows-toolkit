@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 178
 expression: stats
 ---
 interpretations:
@@ -97,3 +98,25 @@ changes:
     to: 9.0 km
     because:
       - Concealment Expert x0.9 (-1)
+  - stat: "Fire starts per minute, all armament, every projectile hitting"
+    from: 47.08 fires/min
+    to: 28.02 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-13.5)
+      - Inertia Fuse for HE Shells x0.5 (-4)
+      - Inertia Fuse for HE Shells x0.5 (-2.5)
+  - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+    from: 4.80 fires/min
+    to: 2.40 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-13.5)
+  - stat: "Secondary fire starts per minute, every shell hitting (150 mm)"
+    from: 10.82 fires/min
+    to: 5.41 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-4)
+  - stat: "Secondary fire starts per minute, every shell hitting (105 mm)"
+    from: 22.50 fires/min
+    to: 11.25 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-2.5)

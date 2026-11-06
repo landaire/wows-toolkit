@@ -1,0 +1,205 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 646
+expression: fire_rates(name)
+---
+total:
+  stat: "fire starts per minute, all armament"
+  unit: fires/min
+  builds:
+    base: 29.87
+    best:
+      value: 36.53
+      assumed:
+        - Demolition Expert
+        - Manual Secondary Battery Aiming
+        - Auxiliary Armaments Modification 2
+      tier_fillers:
+        - AA Defense and ASW Expert
+        - Focus Fire Training
+    alternatives:
+      - label: without Demolition Expert
+        value: 34.34
+        assumed:
+          - Manual Secondary Battery Aiming
+          - Auxiliary Armaments Modification 2
+        tier_fillers:
+          - Emergency Repair Specialist
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+      - label: without Manual Secondary Battery Aiming
+        value: 34.73
+        assumed:
+          - Demolition Expert
+          - Auxiliary Armaments Modification 2
+      - label: without Auxiliary Armaments Modification 2
+        value: 32.93
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+        tier_fillers:
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+      - label: with Inertia Fuse for HE Shells
+        value: 22.72
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+          - Auxiliary Armaments Modification 2
+          - Inertia Fuse for HE Shells
+        tier_fillers:
+          - Focus Fire Training
+        note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+      - label: with Close Quarters Combat active
+        value: 37.84
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+          - Auxiliary Armaments Modification 2
+          - Close Quarters Combat
+        tier_fillers:
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+        note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+sources:
+  - armament: main_battery
+    source: main battery HE
+    rate:
+      stat: main battery HE fire starts per minute
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 11.63
+          fire_chance_pct: 63
+          projectiles_per_minute: 18.5
+        best:
+          value:
+            fires_per_minute: 13.43
+            fire_chance_pct: 64
+            projectiles_per_minute: 21
+          assumed:
+            - Demolition Expert
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Demolition Expert
+            value:
+              fires_per_minute: 13.22
+              fire_chance_pct: 63
+              projectiles_per_minute: 21
+            assumed:
+              - Main Battery Modification 3
+          - label: without Main Battery Modification 3
+            value:
+              fires_per_minute: 11.82
+              fire_chance_pct: 64
+              projectiles_per_minute: 18.5
+            assumed:
+              - Demolition Expert
+          - label: with Inertia Fuse for HE Shells
+            value:
+              fires_per_minute: 6.82
+              fire_chance_pct: 32.5
+              projectiles_per_minute: 21
+            assumed:
+              - Demolition Expert
+              - Main Battery Modification 3
+              - Inertia Fuse for HE Shells
+            note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+          - label: with Close Quarters Combat active
+            value:
+              fires_per_minute: 14.92
+              fire_chance_pct: 64
+              projectiles_per_minute: 23.3
+            assumed:
+              - Demolition Expert
+              - Main Battery Modification 3
+              - Close Quarters Combat
+            tier_fillers:
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+            note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+  - armament: secondary
+    source: secondary battery 133 mm
+    rate:
+      stat: secondary battery 133 mm fire starts per minute
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 11.51
+          fire_chance_pct: 8
+          projectiles_per_minute: 143.9
+        best:
+          value:
+            fires_per_minute: 17.99
+            fire_chance_pct: 9
+            projectiles_per_minute: 199.9
+          assumed:
+            - Demolition Expert
+            - Manual Secondary Battery Aiming
+            - Auxiliary Armaments Modification 2
+          tier_fillers:
+            - AA Defense and ASW Expert
+            - Focus Fire Training
+        alternatives:
+          - label: without Demolition Expert
+            value:
+              fires_per_minute: 15.99
+              fire_chance_pct: 8
+              projectiles_per_minute: 199.9
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Auxiliary Armaments Modification 2
+            tier_fillers:
+              - Emergency Repair Specialist
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          - label: without Manual Secondary Battery Aiming
+            value:
+              fires_per_minute: 16.19
+              fire_chance_pct: 9
+              projectiles_per_minute: 179.9
+            assumed:
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value:
+              fires_per_minute: 14.39
+              fire_chance_pct: 9
+              projectiles_per_minute: 159.9
+            assumed:
+              - Demolition Expert
+              - Manual Secondary Battery Aiming
+            tier_fillers:
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          - label: with Inertia Fuse for HE Shells
+            value:
+              fires_per_minute: 10
+              fire_chance_pct: 5
+              projectiles_per_minute: 199.9
+            assumed:
+              - Demolition Expert
+              - Manual Secondary Battery Aiming
+              - Auxiliary Armaments Modification 2
+              - Inertia Fuse for HE Shells
+            tier_fillers:
+              - Focus Fire Training
+            note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+  - armament: air_strike
+    source: air strike Handley Page Halifax GR
+    aircraft_param: PBAD903_ASW_T10
+    rate:
+      stat: air strike Handley Page Halifax GR fire starts per minute
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 6.72
+          fire_chance_pct: 28
+          projectiles_per_minute: 24
+        best:
+          value:
+            fires_per_minute: 6.72
+            fire_chance_pct: 28
+            projectiles_per_minute: 24
+          assumed: []
+note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."

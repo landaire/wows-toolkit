@@ -519,10 +519,12 @@ impl SearchStat {
             Self::Derived(stat) => stat.field_key(),
         };
 
-        if key.starts_with("artillery.shells.") {
+        if key.starts_with("artillery.shells.") || key == "fires_per_minute.main_battery" {
             Some("per ammo type")
-        } else if key.starts_with("secondary.") {
+        } else if key.starts_with("secondary.") || key == "fires_per_minute.secondary" {
             Some("per secondary mount")
+        } else if key.starts_with("aircraft.") || key == "fires_per_minute.aircraft" {
+            Some("per aircraft, by GameParams name")
         } else if key.starts_with("torpedoes.launchers.") {
             Some("per launcher")
         } else if key.starts_with("torpedoes.torpedoes.") {
@@ -1000,6 +1002,7 @@ impl GameData {
                         stats: &outcome.stats,
                         modifiers: &outcome.bundle,
                         stock_ranges,
+                        provider: self.provider(),
                     }
                     .rows();
                     let values = derived_rows(&rows, stat, rank.qualifier.as_deref()).map(|row| row.value.as_f32());
@@ -1165,7 +1168,13 @@ impl<'a> ShipSearch<'a> {
             }
         }
 
-        for item in loadout_items.iter().filter(|item| relevant.contains(&input_id(item))) {
+        // A derived stat moved by inputs no card stat records, such as
+        // aircraft fire starts, cannot narrow the items by provenance.
+        let untraced = self
+            .conditions
+            .iter()
+            .any(|condition| matches!(condition.stat, SearchStat::Derived(stat) if !stat.fully_traced()));
+        for item in loadout_items.iter().filter(|item| untraced || relevant.contains(&input_id(item))) {
             let mut helps: Vec<usize> = Vec::new();
             for (base, before) in &bases {
                 let mut with = base.clone();
@@ -1439,6 +1448,7 @@ impl<'a> ShipSearch<'a> {
             stats: &stats,
             modifiers: effects.build.modifiers.bundle(),
             stock_ranges: self.stock_ranges()?,
+            provider: self.game.provider(),
         }
         .rows();
 

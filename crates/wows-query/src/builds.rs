@@ -29,6 +29,7 @@ use std::rc::Rc;
 
 use serde::Serialize;
 use serde::Serializer;
+use wows_core::units::FiresPerMinute;
 use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
@@ -116,6 +117,16 @@ impl StatAmount for TorpedoesPerMinute {
 
 impl StatUnit for TorpedoesPerMinute {
     const UNIT: &'static str = "torpedoes/min";
+}
+
+impl StatAmount for FiresPerMinute {
+    fn amount(self) -> f32 {
+        self.value()
+    }
+}
+
+impl StatUnit for FiresPerMinute {
+    const UNIT: &'static str = "fires/min";
 }
 
 /// Number of charges, or unlimited.
@@ -450,6 +461,11 @@ impl<'a> Planner<'a> {
     /// The outcome of the stock modules with `items`.
     pub(crate) fn with_items(&self, items: &[Item]) -> Result<Rc<Outcome>, QueryError> {
         self.outcome(0, items, None)
+    }
+
+    /// The outcome of module combination `selection` with `items`.
+    pub(crate) fn with_items_on(&self, selection: usize, items: &[Item]) -> Result<Rc<Outcome>, QueryError> {
+        self.outcome(selection, items, None)
     }
 
     /// The outcome of `items` on module combination `selection`, with the

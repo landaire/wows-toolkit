@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 416
+assertion_line: 436
 expression: at(50.0)
 ---
 ship:
@@ -29,5 +29,15 @@ changes:
   - stat: Main battery damage per minute (AP)
     from: 734118 hp/min
     to: 815686 hp/min
+    because:
+      - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"
+  - stat: "Fire starts per minute, all armament, every projectile hitting"
+    from: 26.48 fires/min
+    to: 28.68 fires/min
+    because:
+      - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"
+  - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+    from: 19.76 fires/min
+    to: 21.96 fires/min
     because:
       - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"

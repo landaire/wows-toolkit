@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1708
 expression: stats.changes
 ---
 - stat: Main Battery Reload Time
@@ -81,3 +82,13 @@ expression: stats.changes
   because:
     - Aiming Systems Modification 1 x0.95 (-23.345)
     - Aiming Systems Modification 1 x1.05 (+0.365) via Firing Range
+- stat: "Fire starts per minute, all armament, every projectile hitting"
+  from: 29.83 fires/min
+  to: 31.70 fires/min
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)
+- stat: "Main battery fire starts per minute, every shell hitting (HE)"
+  from: 13.75 fires/min
+  to: 15.62 fires/min
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)

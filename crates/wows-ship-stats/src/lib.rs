@@ -5,6 +5,7 @@
 pub mod build;
 pub mod derived;
 pub mod error;
+pub mod fires;
 pub mod mounts;
 pub mod stat;
 
@@ -19,5 +20,9 @@ pub use derived::DerivedValue;
 pub use derived::StockRanges;
 pub use derived::mount_salvo;
 pub use error::BuildError;
+pub use fires::FireArmament;
+pub use fires::FireInputs;
+pub use fires::FireSource;
+pub use fires::total_fires;
 pub use stat::Direction;
 pub use stat::Unit;

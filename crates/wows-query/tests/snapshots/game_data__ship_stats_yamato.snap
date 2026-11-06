@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1694
 expression: stats.stats
 ---
 - "Hit Points: 97200"
@@ -119,3 +120,10 @@ expression: stats.stats
 - "Time to use every charge (regenCrew): 432.0 s"
 - "Time to use every charge (scout): 1360.0 s"
 - "Time to use every charge (fighter): 450.0 s"
+- "Fire starts per minute, all armament, every projectile hitting: 39.38 fires/min"
+- "Main battery fire starts per minute, every shell hitting (HE): 6.30 fires/min"
+- "Secondary fire starts per minute, every shell hitting (155 mm): 3.00 fires/min"
+- "Secondary fire starts per minute, every shell hitting (127 mm): 9.60 fires/min"
+- "Secondary fire starts per minute, every shell hitting (127 mm (2)): 11.52 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PJAD903_ASW_T10): 8.96 fires/min"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PJAD903_ASW_T10): 28.0%"

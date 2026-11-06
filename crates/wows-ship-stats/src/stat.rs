@@ -9,6 +9,7 @@ use wowsunpack::game_params::ttx::labels::TtxStat;
 pub enum Unit {
     Hp,
     HpPerMinute,
+    FiresPerMinute,
     Knots,
     Seconds,
     Meters,
@@ -35,6 +36,7 @@ impl Unit {
         match self {
             Self::Hp => " hp",
             Self::HpPerMinute => " hp/min",
+            Self::FiresPerMinute => " fires/min",
             Self::Knots => " kn",
             Self::Seconds => " s",
             Self::Meters => " m",
@@ -53,6 +55,7 @@ impl Unit {
         match self {
             Self::Hp => "hp",
             Self::HpPerMinute => "hp/min",
+            Self::FiresPerMinute => "fires/min",
             Self::Knots => "kn",
             Self::Seconds => "s",
             Self::Meters => "m",

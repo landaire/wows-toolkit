@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1694
 expression: stats.stats
 ---
 - "Hit Points: 67600"
@@ -43,3 +44,17 @@ expression: stats.stats
 - "Secondary horizontal dispersion at stock secondary range (127 mm): 315 m"
 - "Secondary vertical dispersion at stock secondary range (127 mm): 315 m"
 - "Time to use every charge (fighter): 2560.0 s"
+- "Fire starts per minute, all armament, every projectile hitting: 55.95 fires/min"
+- "Secondary fire starts per minute, every shell hitting (127 mm): 24.30 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAD110_Midway_stock): 25.60 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAF110_Midway_stock): 25.20 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAD210_Midway_top): 25.60 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAF210_Midway_top): 25.20 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAF310_Midway_top): 35.64 fires/min"
+- "Aircraft fire starts per minute, all ordnance hitting (PAAD913_ASW_T10_CV): 6.05 fires/min"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD110_Midway_stock): 64.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF110_Midway_stock): 7.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD210_Midway_top): 64.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF210_Midway_top): 7.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAF310_Midway_top): 33.0%"
+- "Fire chance of one aircraft bomb, rocket or depth charge (PAAD913_ASW_T10_CV): 28.0%"

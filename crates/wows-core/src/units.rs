@@ -238,6 +238,20 @@ pub struct DamagePerSecond(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct TorpedoesPerMinute(f32);
 
+/// Shells, bombs or rockets released per minute.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ProjectilesPerMinute(f32);
+
+/// Expected fires started per minute.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct FiresPerMinute(f32);
+
 impl From<f32> for Meters {
     fn from(v: f32) -> Self {
         Self(v)
@@ -608,6 +622,39 @@ impl TorpedoesPerMinute {
     }
 }
 
+impl ProjectilesPerMinute {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    /// `projectiles` released every `interval`.
+    pub fn from_interval(projectiles: f32, interval: Seconds) -> Self {
+        Self(60.0 * projectiles / interval.0)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+
+    /// Fires these projectiles start when each hits and starts one with
+    /// `chance`.
+    pub fn fires(self, chance: Percent) -> FiresPerMinute {
+        FiresPerMinute(self.0 * chance.to_fraction())
+    }
+}
+
+impl FiresPerMinute {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// Conventional English-port rounding: whole meters.
 impl fmt::Display for Meters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -695,6 +742,17 @@ impl Add for DamagePerMinute {
 impl Sum for DamagePerMinute {
     fn sum<I: Iterator<Item = DamagePerMinute>>(iter: I) -> DamagePerMinute {
         DamagePerMinute(iter.map(|rate| rate.0).sum())
+    }
+}
+impl Add for FiresPerMinute {
+    type Output = FiresPerMinute;
+    fn add(self, rhs: FiresPerMinute) -> FiresPerMinute {
+        FiresPerMinute(self.0 + rhs.0)
+    }
+}
+impl Sum for FiresPerMinute {
+    fn sum<I: Iterator<Item = FiresPerMinute>>(iter: I) -> FiresPerMinute {
+        FiresPerMinute(iter.map(|rate| rate.0).sum())
     }
 }
 

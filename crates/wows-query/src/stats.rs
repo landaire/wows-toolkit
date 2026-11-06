@@ -30,6 +30,7 @@ use crate::builds::StatPlan;
 use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::fires::FireRates;
 use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::LoadoutRequest;
@@ -128,6 +129,10 @@ pub struct WeaponBuilds {
 
     #[serde(flatten)]
     pub rates: Rates,
+
+    /// Theoretical fire starts per minute of every armament.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fires_per_minute: Option<FireRates>,
 }
 
 /// Burst timing on the best-fit build. The client scales the interval and
@@ -293,6 +298,7 @@ impl GameData {
                 seconds(outcome.stats.torpedoes.as_ref()?.reload_time)
             }))?,
             burst_fire,
+            fires_per_minute: self.fire_rates(&planner)?,
             rates: self.rates(&planner)?,
         })
     }
@@ -315,6 +321,7 @@ impl GameData {
             stats: &card.stats,
             modifiers: effects.build.modifiers.bundle(),
             stock_ranges: self.stock_ranges(ship)?,
+            provider: self.provider(),
         }
         .rows();
 
@@ -421,9 +428,11 @@ fn derived_changes(
 
             let (stat, qualifier) = key;
             let mut because: Vec<String> = Vec::new();
+            // A whole-ship stat, such as total fire starts, draws on every
+            // ammo type and gun group it adds up.
             for line in attributions.iter().filter(|line| {
                 stat.sources().contains(&line.stat)
-                    && (line.qualifier.is_none() || line.qualifier.as_deref() == qualifier)
+                    && (line.qualifier.is_none() || qualifier.is_none() || line.qualifier.as_deref() == qualifier)
             }) {
                 for cause in causes(line, loadout) {
                     if !because.contains(&cause) {

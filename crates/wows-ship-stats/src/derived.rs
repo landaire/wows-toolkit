@@ -5,6 +5,8 @@ use std::fmt;
 use serde::Serialize;
 use wows_core::units;
 use wows_core::units::DamagePerMinute;
+use wows_core::units::FiresPerMinute;
+use wows_core::units::Percent;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::constants::DispersionEllipse;
@@ -16,10 +18,14 @@ use wowsunpack::game_params::ttx::model::ShellStats;
 use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::Param;
 
+use crate::fires::FireArmament;
+use crate::fires::FireInputs;
+use crate::fires::total_fires;
 use crate::mounts::aiming_mounts;
 use crate::stat::Direction;
 use crate::stat::Unit;
@@ -56,6 +62,24 @@ pub enum DerivedStat {
     /// Time to use every charge of a consumable back to back, per
     /// consumable: charges times action time plus reload.
     ConsumableAllChargesTime,
+
+    /// Theoretical fire starts per minute of every armament together: the
+    /// main battery's best ammo type, every secondary group, the best squadron
+    /// of the stock plane modules and the best air strike aircraft.
+    FiresPerMinuteTotal,
+
+    /// Theoretical fire starts per minute, per main battery ammo type.
+    FiresPerMinuteMainBattery,
+
+    /// Theoretical fire starts per minute, per secondary gun group.
+    FiresPerMinuteSecondary,
+
+    /// Theoretical fire starts per minute, per squadron or air strike
+    /// aircraft.
+    FiresPerMinuteAircraft,
+
+    /// Chance one bomb, rocket or depth charge starts a fire, per aircraft.
+    AircraftFireChance,
 }
 
 impl DerivedStat {
@@ -69,6 +93,11 @@ impl DerivedStat {
         DerivedStat::SecondaryVerticalDispersionAtStockRange,
         DerivedStat::TorpedoTubes,
         DerivedStat::ConsumableAllChargesTime,
+        DerivedStat::FiresPerMinuteTotal,
+        DerivedStat::FiresPerMinuteMainBattery,
+        DerivedStat::FiresPerMinuteSecondary,
+        DerivedStat::FiresPerMinuteAircraft,
+        DerivedStat::AircraftFireChance,
     ];
 
     /// Dotted name in the namespace of `TtxStat::field_key`.
@@ -83,6 +112,11 @@ impl DerivedStat {
             Self::SecondaryVerticalDispersionAtStockRange => "secondary.dispersion_vertical_at_stock_range",
             Self::TorpedoTubes => "torpedoes.tubes",
             Self::ConsumableAllChargesTime => "consumable.all_charges_time",
+            Self::FiresPerMinuteTotal => "fires_per_minute.total",
+            Self::FiresPerMinuteMainBattery => "fires_per_minute.main_battery",
+            Self::FiresPerMinuteSecondary => "fires_per_minute.secondary",
+            Self::FiresPerMinuteAircraft => "fires_per_minute.aircraft",
+            Self::AircraftFireChance => "aircraft.fire_chance",
         }
     }
 
@@ -97,6 +131,11 @@ impl DerivedStat {
             Self::SecondaryVerticalDispersionAtStockRange => "Secondary vertical dispersion at stock secondary range",
             Self::TorpedoTubes => "Torpedo tubes, all launchers",
             Self::ConsumableAllChargesTime => "Time to use every charge",
+            Self::FiresPerMinuteTotal => "Fire starts per minute, all armament, every projectile hitting",
+            Self::FiresPerMinuteMainBattery => "Main battery fire starts per minute, every shell hitting",
+            Self::FiresPerMinuteSecondary => "Secondary fire starts per minute, every shell hitting",
+            Self::FiresPerMinuteAircraft => "Aircraft fire starts per minute, all ordnance hitting",
+            Self::AircraftFireChance => "Fire chance of one aircraft bomb, rocket or depth charge",
         }
     }
 
@@ -110,6 +149,11 @@ impl DerivedStat {
             | Self::SecondaryDispersionAtStockRange
             | Self::SecondaryVerticalDispersionAtStockRange => Unit::Meters,
             Self::ConsumableAllChargesTime => Unit::Seconds,
+            Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteMainBattery
+            | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteAircraft => Unit::FiresPerMinute,
+            Self::AircraftFireChance => Unit::Percent,
         }
     }
 
@@ -126,6 +170,11 @@ impl DerivedStat {
 
             // More charges and longer action raise it, and so does a longer reload.
             Self::ConsumableAllChargesTime => None,
+            Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteMainBattery
+            | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteAircraft
+            | Self::AircraftFireChance => Some(Direction::Higher),
         }
     }
 
@@ -146,7 +195,24 @@ impl DerivedStat {
             Self::ConsumableAllChargesTime => {
                 &[TtxStat::ConsumableCharges, TtxStat::ConsumableWorkTime, TtxStat::ConsumableReloadTime]
             }
+            Self::FiresPerMinuteTotal => &[
+                TtxStat::ShellBurnChance,
+                TtxStat::ArtilleryReloadTime,
+                TtxStat::SecondaryShellBurnChance,
+                TtxStat::SecondaryReloadTime,
+            ],
+            Self::FiresPerMinuteMainBattery => &[TtxStat::ShellBurnChance, TtxStat::ArtilleryReloadTime],
+            Self::FiresPerMinuteSecondary => &[TtxStat::SecondaryShellBurnChance, TtxStat::SecondaryReloadTime],
+
+            // The card lists no aircraft stat.
+            Self::FiresPerMinuteAircraft | Self::AircraftFireChance => &[],
         }
+    }
+
+    /// Whether `sources` covers every input that moves it. Aircraft
+    /// ordnance reads modifiers the card records under no stat.
+    pub fn fully_traced(self) -> bool {
+        !matches!(self, Self::FiresPerMinuteTotal | Self::FiresPerMinuteAircraft | Self::AircraftFireChance)
     }
 }
 
@@ -159,6 +225,8 @@ pub enum DerivedValue {
     DamagePerMinute(DamagePerMinute),
     Meters(Meters),
     Seconds(Seconds),
+    FiresPerMinute(FiresPerMinute),
+    Percent(Percent),
 }
 
 impl DerivedValue {
@@ -169,6 +237,8 @@ impl DerivedValue {
             Self::DamagePerMinute(rate) => rate.value(),
             Self::Meters(meters) => meters.value(),
             Self::Seconds(seconds) => seconds.value(),
+            Self::FiresPerMinute(rate) => rate.value(),
+            Self::Percent(percent) => percent.value(),
         }
     }
 }
@@ -181,6 +251,8 @@ impl fmt::Display for DerivedValue {
             Self::DamagePerMinute(rate) => write!(f, "{:.0} hp/min", rate.value()),
             Self::Meters(meters) => write!(f, "{:.0} m", meters.value()),
             Self::Seconds(seconds) => write!(f, "{seconds}"),
+            Self::FiresPerMinute(rate) => write!(f, "{:.2} fires/min", rate.value()),
+            Self::Percent(percent) => write!(f, "{:.1}%", percent.value()),
         }
     }
 }
@@ -221,6 +293,7 @@ pub struct Derivation<'a> {
     /// The modifiers the card was computed with.
     pub modifiers: &'a ModifierBundle,
     pub stock_ranges: StockRanges,
+    pub provider: &'a dyn GameParamProvider,
 }
 
 impl Derivation<'_> {
@@ -312,6 +385,43 @@ impl Derivation<'_> {
                 stat: DerivedStat::ConsumableAllChargesTime,
                 qualifier: Some(card.label.clone()),
                 value: DerivedValue::Seconds(Seconds::from(charges as f32 * cycle)),
+            });
+        }
+
+        let fires = FireInputs {
+            ship: self.ship,
+            selection: self.selection,
+            stats: self.stats,
+            modifiers: self.modifiers,
+            provider: self.provider,
+        }
+        .sources();
+        if let Some(total) = total_fires(&fires) {
+            rows.push(DerivedRow {
+                stat: DerivedStat::FiresPerMinuteTotal,
+                qualifier: None,
+                value: DerivedValue::FiresPerMinute(total),
+            });
+        }
+        for source in &fires {
+            let stat = match source.armament {
+                FireArmament::MainBattery => DerivedStat::FiresPerMinuteMainBattery,
+                FireArmament::Secondary => DerivedStat::FiresPerMinuteSecondary,
+                FireArmament::Squadron | FireArmament::AirStrike => DerivedStat::FiresPerMinuteAircraft,
+            };
+            rows.push(DerivedRow {
+                stat,
+                qualifier: Some(source.qualifier.clone()),
+                value: DerivedValue::FiresPerMinute(source.fires_per_minute),
+            });
+        }
+        for source in
+            fires.iter().filter(|source| matches!(source.armament, FireArmament::Squadron | FireArmament::AirStrike))
+        {
+            rows.push(DerivedRow {
+                stat: DerivedStat::AircraftFireChance,
+                qualifier: Some(source.qualifier.clone()),
+                value: DerivedValue::Percent(source.fire_chance),
             });
         }
 

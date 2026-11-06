@@ -676,6 +676,73 @@ fn torpedoes_per_minute_follow_the_loaders() {
     assert_eq!(base("Shimakaze"), (15, 6.0));
 }
 
+fn fire_rates(name: &str) -> wows_query::fires::FireRates {
+    game()
+        .ship_stats(&ShipStatsArgs { ship: name.to_owned(), ..Default::default() })
+        .expect("ship exists")
+        .build_stats
+        .and_then(|builds| builds.fires_per_minute)
+        .expect("the ship can start fires")
+}
+
+/// Libertad's secondaries and Prins van Oranje's secondaries and air strike
+/// start more fires than their main batteries; Thunderer and Conqueror carry
+/// some of the highest main battery shell fire chances.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn fire_starts_per_minute_cover_every_armament() {
+    for name in ["Libertad", "Prins van Oranje", "Thunderer", "Conqueror"] {
+        insta::assert_yaml_snapshot!(format!("fire_rates_{}", name.replace(' ', "_")), fire_rates(name));
+    }
+}
+
+/// The 15 ships that start the most fires on their best build, each
+/// armament with its own best value, against the 15 with the highest main
+/// battery shell fire chance, and the 15 cruisers that start the most fires.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn fire_starts_rank_ships_by_every_armament() {
+    let rank = |stat: &str, class: Option<&str>| -> Vec<serde_json::Value> {
+        let mut arguments =
+            json!({ "rank": { "stat": stat, "order": "desc", "limit": 15 }, "exclude_test_ships": true });
+        if let Some(class) = class {
+            arguments["class"] = json!(class);
+        }
+        let search = game().call_tool("stat_search", arguments).expect("rank resolves");
+        search["ranking"]["ships"].as_array().expect("ships is a list").clone()
+    };
+    // "T10 Des Moines (cruiser, USA)" names Des Moines.
+    let name = |ship: &serde_json::Value| -> String {
+        let label = ship["ship"].as_str().expect("ship is a label");
+        let (_, rest) = label.split_once(' ').expect("tier prefix");
+        rest.rsplit_once(" (").map_or(rest, |(name, _)| name).to_owned()
+    };
+
+    let by_fires: Vec<serde_json::Value> = rank("fires_per_minute.total", None)
+        .iter()
+        .map(|ship| {
+            let split: Vec<String> = fire_rates(&name(ship))
+                .sources
+                .iter()
+                .map(|source| format!("{}: {}", source.source, source.rate.builds.best.value.fires_per_minute.value()))
+                .collect();
+            json!({ "rank": ship["rank"], "ship": ship["ship"], "fires_per_minute": ship["value"], "by_armament": split })
+        })
+        .collect();
+    let line = |ship: &serde_json::Value| {
+        format!("{} {} {}", ship["rank"], ship["ship"].as_str().unwrap_or_default(), ship["value"])
+    };
+    let cruisers: Vec<String> = rank("fires_per_minute.total", Some("cruiser")).iter().map(line).collect();
+    let by_shell: Vec<String> = rank("artillery.shells.burn_chance", None).iter().map(line).collect();
+
+    assert!(cruisers.iter().any(|ship| ship.contains("Prins van Oranje")), "{cruisers:?}");
+    insta::assert_yaml_snapshot!(json!({
+        "by_fire_starts": by_fires,
+        "cruisers_by_fire_starts": cruisers,
+        "by_shell_fire_chance": by_shell,
+    }));
+}
+
 /// Torpedo Crew Training shares its trigger type with Fearless Brawler; its
 /// alternative must carry its own torpedo sentence.
 #[test]
