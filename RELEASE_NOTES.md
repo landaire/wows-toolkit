@@ -18,6 +18,7 @@ per-commit history lives in `CHANGELOG.md`.
 ### Game data and compatibility
 
 - GitHub constants checks remain available after the application fetches versioned constants in a background worker.
+- Bundled replay constants match WoWs 15.10.
 - Ship configuration and captain skill parsing handles current packet data, including the 15.9 exterior state layout, and older replay layouts.
 
 ## 1.0.2
