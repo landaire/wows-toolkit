@@ -713,6 +713,14 @@ impl Param {
         }
     }
 
+    /// Returns the modifier set if this param is a `Modifier` param.
+    pub fn modifier_param(&self) -> Option<&ModifierParam> {
+        match &self.data {
+            ParamData::Modifier(m) => Some(m),
+            _ => None,
+        }
+    }
+
     /// Returns the Exterior data if this param is an Exterior type.
     pub fn exterior(&self) -> Option<&Exterior> {
         match &self.data {
@@ -1910,6 +1918,19 @@ pub struct AbilityCategory {
     #[cfg_attr(feature = "serde", serde(default))]
     #[builder(default)]
     modifiers: Vec<CrewSkillModifier>,
+
+    /// `logic.buff`: the buff modifier param the consumable applies to its
+    /// target, e.g. `PCOM914_SupportHeal`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    buff: Option<String>,
+
+    /// `logic.buffOnSelf`: the buff applied instead when used on the own ship.
+    #[cfg_attr(feature = "serde", serde(default))]
+    buff_on_self: Option<String>,
+
+    /// `tacticalParams.targetTeam`, e.g. `ally`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    target_team: Option<String>,
 }
 
 impl AbilityCategory {
@@ -1992,6 +2013,18 @@ impl AbilityCategory {
     pub(crate) fn modifiers(&self) -> &[CrewSkillModifier] {
         &self.modifiers
     }
+
+    pub fn buff(&self) -> Option<&str> {
+        self.buff.as_deref()
+    }
+
+    pub fn buff_on_self(&self) -> Option<&str> {
+        self.buff_on_self.as_deref()
+    }
+
+    pub fn target_team(&self) -> Option<&str> {
+        self.target_team.as_deref()
+    }
 }
 
 #[derive(Clone, Builder, Debug)]
@@ -2023,6 +2056,23 @@ pub struct CrewPersonalityShips {
     nation: Vec<String>,
     peculiarity: Vec<String>,
     ships: Vec<String>,
+}
+
+/// The ships a commander can serve on: those of the listed nations, plus the
+/// listed ships.
+impl CrewPersonalityShips {
+    pub fn nations(&self) -> &[String] {
+        &self.nation
+    }
+
+    /// Ship param names.
+    pub fn ships(&self) -> &[String] {
+        &self.ships
+    }
+
+    pub fn groups(&self) -> &[String] {
+        &self.groups
+    }
 }
 
 #[derive(Clone, Builder, Debug)]
@@ -2068,6 +2118,14 @@ impl CrewPersonality {
     /// looked up as `IDS_<NAME>` with the token uppercased.
     pub fn name(&self) -> &str {
         &self.person_name
+    }
+
+    pub fn ships(&self) -> &CrewPersonalityShips {
+        &self.ships
+    }
+
+    pub fn tags(&self) -> &[String] {
+        &self.tags
     }
 }
 
@@ -2700,6 +2758,11 @@ pub struct Crew {
     /// lists, each ~28 KiB, so owning one apiece is most of what the crews cost
     /// (see [`share_crew_skills`]).
     skills: Option<Rc<[CrewSkill]>>,
+
+    /// `UniqueSkills`: the talents of a unique commander.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    talents: Vec<CrewTalent>,
 }
 
 impl Crew {
@@ -2713,6 +2776,330 @@ impl Crew {
 
     pub fn personality(&self) -> &CrewPersonality {
         &self.personality
+    }
+
+    pub fn talents(&self) -> &[CrewTalent] {
+        &self.talents
+    }
+}
+
+/// The client's `UNIQUE_SKILLS` talent effect type (shared_constants
+/// `UNIQUE_SKILLS`), the `uniqueType` of a talent effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TalentEffectType(u32);
+
+impl TalentEffectType {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    pub fn known(self) -> Option<KnownTalentEffect> {
+        KnownTalentEffect::ALL.get(self.0 as usize).copied()
+    }
+}
+
+/// Talent effect types in `UNIQUE_SKILLS` order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KnownTalentEffect {
+    AdditionalConsumables,
+    Regen,
+    MainBatteryReloadBooster,
+    VisibilityBooster,
+    AdditionalCoolConsumable,
+    CrashCrew,
+    ShootShift,
+    BurnProbability,
+    ShipSpeedBooster,
+    MaxDistGm,
+    ConsumableWorkTimeCoeff,
+    TorpedoReloadBooster,
+    AirplaneReloadBooster,
+    ArtilleryReloadBooster,
+    AtbaReloadBooster,
+    SquadronSpeedBooster,
+    AaNearDamageCoeff,
+    ConsumableReloadTimeCoeff,
+    TorpedoSpeedBooster,
+    TorpedoReloaderBooster,
+    RageModeBooster,
+    AddModifiers,
+    ManualSecondariesReloadBooster,
+    AddConsumablesReloadModifiers,
+    AddBuff,
+}
+
+impl KnownTalentEffect {
+    const ALL: [Self; 25] = [
+        Self::AdditionalConsumables,
+        Self::Regen,
+        Self::MainBatteryReloadBooster,
+        Self::VisibilityBooster,
+        Self::AdditionalCoolConsumable,
+        Self::CrashCrew,
+        Self::ShootShift,
+        Self::BurnProbability,
+        Self::ShipSpeedBooster,
+        Self::MaxDistGm,
+        Self::ConsumableWorkTimeCoeff,
+        Self::TorpedoReloadBooster,
+        Self::AirplaneReloadBooster,
+        Self::ArtilleryReloadBooster,
+        Self::AtbaReloadBooster,
+        Self::SquadronSpeedBooster,
+        Self::AaNearDamageCoeff,
+        Self::ConsumableReloadTimeCoeff,
+        Self::TorpedoSpeedBooster,
+        Self::TorpedoReloaderBooster,
+        Self::RageModeBooster,
+        Self::AddModifiers,
+        Self::ManualSecondariesReloadBooster,
+        Self::AddConsumablesReloadModifiers,
+        Self::AddBuff,
+    ];
+}
+
+/// `battleGroup` of a talent: the battle types it works in (shared_constants
+/// `TALENT_GROUPS`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum TalentBattleGroup {
+    /// Every battle type that allows talents.
+    Every,
+    /// Random, Co-op, Ranked and Brawl battles.
+    Regular,
+    /// Operations.
+    Operations,
+    Disabled,
+    Unknown(String),
+}
+
+impl TalentBattleGroup {
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "BATTLE_GROUP_EVERY" => Self::Every,
+            "BATTLE_GROUP_REGULAR" => Self::Regular,
+            "BATTLE_GROUP_OPERATIONS" => Self::Operations,
+            "BATTLE_GROUP_DISABLED" => Self::Disabled,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
+/// A named number of a talent activator.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TalentValue {
+    pub name: String,
+    pub value: f32,
+}
+
+/// One condition a talent counts towards, e.g. `RibbonActivator` with the
+/// ribbons that count and how many are required at each activation.
+#[derive(Debug, Clone, PartialEq, Builder)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TalentActivator {
+    /// `type`, e.g. `RibbonActivator`, `RemainingHealthActivator`.
+    kind: String,
+
+    /// Numeric fields, e.g. `requiredCount`, `hitsCount`, `thresholdPerMaxHealth`.
+    values: Vec<TalentValue>,
+
+    /// `level_N` overrides of `values` for the Nth activation, in order.
+    levels: Vec<Vec<TalentValue>>,
+
+    /// `damageTypes`, e.g. `MAIN`, `SHIP_TORPEDO`.
+    damage_types: Vec<String>,
+
+    /// `ribbons`: the client ribbon ids that count.
+    ribbons: Vec<i64>,
+
+    /// Sub-activators of an `AllInGroupActivator`, all of which must be met.
+    parts: Vec<TalentActivatorPart>,
+}
+
+impl TalentActivator {
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn values(&self) -> &[TalentValue] {
+        &self.values
+    }
+
+    pub fn levels(&self) -> &[Vec<TalentValue>] {
+        &self.levels
+    }
+
+    pub fn damage_types(&self) -> &[String] {
+        &self.damage_types
+    }
+
+    pub fn ribbons(&self) -> &[i64] {
+        &self.ribbons
+    }
+
+    pub fn parts(&self) -> &[TalentActivatorPart] {
+        &self.parts
+    }
+}
+
+/// A sub-activator of an `AllInGroupActivator`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TalentActivatorPart {
+    pub kind: String,
+    pub values: Vec<TalentValue>,
+    pub damage_types: Vec<String>,
+}
+
+/// What a talent does on activation: one talent params block with its
+/// `uniqueType`. The client applies the block of level N (the base block
+/// updated with `level_N`) on the Nth activation (`ParamsByLevel.level`).
+#[derive(Debug, Clone, PartialEq, Builder)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TalentEffect {
+    /// Params block name, e.g. `UniqueRegen1`.
+    name: String,
+    effect_type: TalentEffectType,
+
+    /// `useShipTierAsWorkTime`: the action time in seconds is the ship's tier.
+    use_ship_tier_as_work_time: bool,
+
+    /// `scaleRegenWithShipTier`: the heal rate is multiplied by the ship's tier.
+    scale_regen_with_ship_tier: bool,
+
+    /// `buffParamsId` of an `ADD_BUFF` effect: the buff modifier applied.
+    buff: Option<String>,
+
+    /// Numeric fields, and the entries of a `modifiers` block, per class.
+    values: Vec<CrewSkillModifier>,
+
+    /// `level_N` overrides of `values`, in order.
+    levels: Vec<Vec<CrewSkillModifier>>,
+}
+
+impl TalentEffect {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn effect_type(&self) -> TalentEffectType {
+        self.effect_type
+    }
+
+    pub fn use_ship_tier_as_work_time(&self) -> bool {
+        self.use_ship_tier_as_work_time
+    }
+
+    pub fn scale_regen_with_ship_tier(&self) -> bool {
+        self.scale_regen_with_ship_tier
+    }
+
+    pub fn buff(&self) -> Option<&str> {
+        self.buff.as_deref()
+    }
+
+    pub fn values(&self) -> &[CrewSkillModifier] {
+        &self.values
+    }
+
+    pub fn levels(&self) -> &[Vec<CrewSkillModifier>] {
+        &self.levels
+    }
+
+    /// The values the Nth activation (1-based) applies: the base values
+    /// with that level's overrides, or the base values when the effect has
+    /// no such level.
+    pub fn activation(&self, activation: u32) -> Vec<CrewSkillModifier> {
+        let Some(overrides) = (activation as usize).checked_sub(1).and_then(|index| self.levels.get(index)) else {
+            return self.values.clone();
+        };
+
+        let mut values = self.values.clone();
+        for value in overrides {
+            match values.iter_mut().find(|base| base.name() == value.name()) {
+                Some(base) => *base = value.clone(),
+                None => values.push(value.clone()),
+            }
+        }
+
+        values
+    }
+}
+
+/// One talent of a unique commander (a `UniqueSkills` entry): what activates
+/// it and what it does.
+#[derive(Debug, Clone, PartialEq, Builder)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct CrewTalent {
+    /// Entry name, e.g. `UniqueSkillTriggerKills1`.
+    id: String,
+    battle_group: TalentBattleGroup,
+
+    /// `sortIndex`: the talent's position, shared by its per-battle-group variants.
+    sort_index: u32,
+
+    /// `maxTriggerNum`: activations per battle; `None` when `isUnlimited`.
+    max_activations: Option<u32>,
+
+    /// `triggerAllowedShips`: ship classes the talent works on.
+    allowed_classes: Vec<Species>,
+
+    activators: Vec<TalentActivator>,
+    effects: Vec<TalentEffect>,
+}
+
+impl CrewTalent {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn battle_group(&self) -> &TalentBattleGroup {
+        &self.battle_group
+    }
+
+    pub fn sort_index(&self) -> u32 {
+        self.sort_index
+    }
+
+    /// Activations per battle; `None` when unlimited.
+    pub fn max_activations(&self) -> Option<u32> {
+        self.max_activations
+    }
+
+    pub fn allowed_classes(&self) -> &[Species] {
+        &self.allowed_classes
+    }
+
+    pub fn activators(&self) -> &[TalentActivator] {
+        &self.activators
+    }
+
+    pub fn effects(&self) -> &[TalentEffect] {
+        &self.effects
+    }
+
+    /// The client's talent key, `<crew index>_<sortIndex>_<effect types>`,
+    /// behind `IDS_TALENT_<key>` (StateSystem `__onCrewUniqueTalentsActivate`).
+    pub fn translation_key(&self, crew_index: &str) -> String {
+        let mut types: Vec<u32> = self.effects.iter().map(|effect| effect.effect_type.raw()).collect();
+        types.sort_unstable();
+        let types: Vec<String> = types.iter().map(u32::to_string).collect();
+
+        format!("{crew_index}_{}_{}", self.sort_index, types.join("_"))
     }
 }
 
@@ -2797,6 +3184,11 @@ pub struct Aircraft {
     /// `hangarSettings`: how the hangar restores planes.
     #[cfg_attr(feature = "serde", serde(default))]
     hangar_restore: Option<HangarRestore>,
+
+    /// `PlaneAbilities`: per slot, the `(ability, category)` choices.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    abilities: Vec<Vec<(String, String)>>,
 }
 
 impl Aircraft {
@@ -2856,6 +3248,10 @@ impl Aircraft {
 
     pub fn hangar_restore(&self) -> Option<HangarRestore> {
         self.hangar_restore
+    }
+
+    pub fn abilities(&self) -> &[Vec<(String, String)>] {
+        &self.abilities
     }
 
     /// Determine the effective plane category for display/icon purposes.
@@ -3211,6 +3607,17 @@ pub struct BuffDrop {
     marker_name_inactive: String,
     #[cfg_attr(feature = "serde", serde(default))]
     sorting: i64,
+
+    /// How many times the buff stacks (`maxBuffLevel`); absent when the
+    /// param does not say.
+    #[cfg_attr(feature = "serde", serde(default))]
+    max_buff_level: Option<u32>,
+
+    /// Names of the `Modifier` params the drop applies (`payload` items),
+    /// sorted by item key.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    buffs: Vec<String>,
 }
 
 impl BuffDrop {
@@ -3226,6 +3633,14 @@ impl BuffDrop {
         self.sorting
     }
 
+    pub fn max_buff_level(&self) -> Option<u32> {
+        self.max_buff_level
+    }
+
+    pub fn buffs(&self) -> &[String] {
+        &self.buffs
+    }
+
     /// Returns the game asset path for the active icon.
     pub fn active_icon_path(&self) -> String {
         format!("gui/powerups/drops/icon_marker_{}.png", self.marker_name_active)
@@ -3234,6 +3649,39 @@ impl BuffDrop {
     /// Returns the game asset path for the inactive icon.
     pub fn inactive_icon_path(&self) -> String {
         format!("gui/powerups/drops/icon_marker_{}.png", self.marker_name_inactive)
+    }
+}
+
+/// A `Modifier` param: the ship modifiers a buff applies, from a drop, a
+/// consumable's `buff`, or a game mode.
+#[derive(Clone, Debug, Builder)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ModifierParam {
+    /// Ship classes it applies to (`restrictions.subtype`); empty for every
+    /// class.
+    #[cfg_attr(feature = "serde", serde(default))]
+    classes: Vec<Species>,
+
+    /// Modifiers per buff level, `level_1` first, or the one `modifier`
+    /// block. Entries holding the default every `Modifier` param shares are
+    /// left out.
+    #[cfg_attr(feature = "serde", serde(default))]
+    levels: Vec<Vec<CrewSkillModifier>>,
+}
+
+impl ModifierParam {
+    pub fn classes(&self) -> &[Species] {
+        &self.classes
+    }
+
+    pub fn levels(&self) -> &[Vec<CrewSkillModifier>] {
+        &self.levels
+    }
+
+    /// Whether it applies to ships of `species`.
+    pub fn applies_to(&self, species: Species) -> bool {
+        self.classes.is_empty() || self.classes.contains(&species)
     }
 }
 
@@ -3518,6 +3966,7 @@ pub enum ParamData {
     Projectile(Projectile),
     Drop(BuffDrop),
     Building(Building),
+    Modifier(ModifierParam),
 }
 
 variant_accessors!(ParamData {
@@ -3532,6 +3981,7 @@ variant_accessors!(ParamData {
     tuple Drop(BuffDrop) => drop;
     tuple Building(Building) => building;
     tuple Unit(Unit) => unit;
+    tuple Modifier(ModifierParam) => modifier;
 });
 
 pub trait GameParamProvider {

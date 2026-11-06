@@ -159,6 +159,18 @@ pub(crate) fn modifier_identity(version: Version, name: &str) -> Result<f32, Mod
     Combine::classify(version, name).map(Combine::identity).map_err(|e| ModifierError::Unknown(vec![e.name]))
 }
 
+/// Folds the values several sources give one modifier, as the client mixes
+/// them: coefficients multiply and bonuses add.
+pub fn fold_modifier_values(
+    version: Version,
+    name: &str,
+    values: impl IntoIterator<Item = f32>,
+) -> Result<f32, UnknownModifier> {
+    let combine = Combine::classify(version, name)?;
+
+    Ok(values.into_iter().fold(combine.identity(), |total, value| combine.fold(total, value)))
+}
+
 /// Equipped modifiers aggregated per name and resolved for a fixed `Species`.
 ///
 /// Each entry holds the fold of every same-name modifier value using that name's
@@ -299,7 +311,7 @@ impl ModifierBundle {
 }
 
 /// The skill modifier the client spreads over consumable reload coefficients.
-pub(crate) const RELOAD_FACTOR: &str = "reloadFactor";
+pub const RELOAD_FACTOR: &str = "reloadFactor";
 
 /// Modifier names a `reloadFactor` sets, per `createConsumablesReloadParams`
 /// (`CommonConsumables/ConsumableUtils.py:11-24`): `otherConsumablesReloadTime` and

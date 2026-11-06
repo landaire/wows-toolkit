@@ -445,13 +445,11 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
         .collect()
 }
 
-/// Extract a list-of-strings field, returning empty when the field is absent or
-/// not a string list. Older builds omit some of these list fields entirely.
+/// Extract a list-of-strings field (a list or tuple), returning empty when the
+/// field is absent or not a string sequence. Older builds omit some of these
+/// list fields entirely.
 fn string_list_field(dict: &pickled::Dict, key: &str) -> Vec<String> {
-    dict.get(&HashableValue::String(key.to_owned().into()))
-        .and_then(|value| value.list_ref())
-        .map(|list| list.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().to_owned())).collect())
-        .unwrap_or_default()
+    dict.get(&HashableValue::String(key.to_owned().into())).map(read_string_sequence).unwrap_or_default()
 }
 
 fn build_crew_personality(personality: &pickled::Dict) -> CrewPersonality {
@@ -497,6 +495,276 @@ fn build_crew_personality(personality: &pickled::Dict) -> CrewPersonality {
         )
         .ships(ships)
         .build()
+}
+
+/// The string-keyed entries of a dict, sorted by key for a stable order.
+fn sorted_entries(dict: &pickled::Dict) -> Vec<(String, &Value)> {
+    dict.iter()
+        .filter_map(|(key, value)| Some((key.string_ref()?.inner().to_owned(), value)))
+        .sorted_by(|left, right| left.0.cmp(&right.0))
+        .collect()
+}
+
+/// The `N` of a `level_N` key.
+fn level_number(key: &str) -> Option<u32> {
+    key.strip_prefix("level_")?.parse().ok()
+}
+
+/// `UniqueSkills` of a crew: each talent is an `EventTrigger` holding a
+/// `GameLogicTrigger*` block with its `Activator*` conditions, and the talent
+/// params blocks it applies (Components/UniqueSkills.py `getTalentParams`
+/// takes every params block not named with the trigger prefix).
+fn build_crew_talents(unique_skills: &pickled::Dict) -> Vec<CrewTalent> {
+    sorted_entries(unique_skills)
+        .into_iter()
+        .filter_map(|(id, talent)| {
+            let talent = talent.dict_or_object_dict()?;
+            Some(build_crew_talent(id, &talent.inner()))
+        })
+        .sorted_by(|left, right| left.sort_index().cmp(&right.sort_index()).then_with(|| left.id().cmp(right.id())))
+        .collect()
+}
+
+fn build_crew_talent(id: String, talent: &pickled::Dict) -> CrewTalent {
+    let mut activators = Vec::new();
+    let mut effects = Vec::new();
+    for (key, value) in sorted_entries(talent) {
+        let Some(block) = value.dict_or_object_dict() else {
+            continue;
+        };
+        let block = block.inner();
+
+        if key.starts_with("GameLogic") {
+            for (part_key, part) in sorted_entries(&block) {
+                if let Some(activator) = part.dict_or_object_dict().filter(|_| part_key.starts_with("Activator")) {
+                    activators.push(build_talent_activator(&activator.inner()));
+                }
+            }
+            continue;
+        }
+
+        if let Some(effect) = build_talent_effect(key, &block) {
+            effects.push(effect);
+        }
+    }
+
+    let allowed_classes = talent
+        .get(&pk("triggerAllowedShips"))
+        .map(read_string_sequence)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|name| Species::from_name(name).known().copied())
+        .collect();
+    // Missing or negative counts are malformed; the panic skips the param
+    // like any other missing required field.
+    let count = |key: &str| -> u32 {
+        let value =
+            talent.get(&pk(key)).and_then(|v| v.i64_ref()).copied().unwrap_or_else(|| panic!("talent has no {key}"));
+        u32::try_from(value).unwrap_or_else(|_| panic!("talent {key} is {value}"))
+    };
+    let is_unlimited =
+        talent.get(&pk("isUnlimited")).and_then(|v| v.bool_ref().copied()).expect("talent has no isUnlimited");
+
+    CrewTalent::builder()
+        .id(id)
+        .battle_group(TalentBattleGroup::from_name(&game_param_to_type!(talent, "battleGroup", String)))
+        .sort_index(count("sortIndex"))
+        .maybe_max_activations((!is_unlimited).then(|| count("maxTriggerNum")))
+        .allowed_classes(allowed_classes)
+        .activators(activators)
+        .effects(effects)
+        .build()
+}
+
+fn build_talent_activator(activator: &pickled::Dict) -> TalentActivator {
+    let mut values = Vec::new();
+    let mut levels = Vec::new();
+    let mut parts = Vec::new();
+    for (key, value) in sorted_entries(activator) {
+        if let Some(level) = level_number(&key) {
+            if let Some(overrides) = value.dict_or_object_dict() {
+                levels.push((level, talent_values(&overrides.inner())));
+            }
+            continue;
+        }
+
+        if key.starts_with("ActivatorSub") {
+            if let Some(part) = value.dict_or_object_dict() {
+                let part = part.inner();
+                parts.push(TalentActivatorPart {
+                    kind: game_param_to_type!(part, "type", String),
+                    values: talent_values(&part),
+                    damage_types: string_list_field(&part, "damageTypes"),
+                });
+            }
+            continue;
+        }
+
+        // The talent's `maxTriggerNum` bounds activations.
+        if key == "maxActivations" {
+            continue;
+        }
+
+        if let Some(number) = value_f32(value) {
+            values.push(TalentValue { name: key, value: number });
+        }
+    }
+    levels.sort_by_key(|(level, _)| *level);
+
+    let ribbons = activator
+        .get(&pk("ribbons"))
+        .map(|value| read_sequence(value).iter().filter_map(|value| value.i64_ref().copied()).collect())
+        .unwrap_or_default();
+
+    TalentActivator::builder()
+        .kind(game_param_to_type!(activator, "type", String))
+        .values(values)
+        .levels(levels.into_iter().map(|(_, values)| values).collect())
+        .damage_types(string_list_field(activator, "damageTypes"))
+        .ribbons(ribbons)
+        .parts(parts)
+        .build()
+}
+
+/// The numeric entries of a dict.
+fn talent_values(dict: &pickled::Dict) -> Vec<TalentValue> {
+    sorted_entries(dict)
+        .into_iter()
+        .filter_map(|(name, value)| Some(TalentValue { name, value: value_f32(value)? }))
+        .collect()
+}
+
+/// A talent params block, `None` when it has no integer `uniqueType`.
+fn build_talent_effect(name: String, block: &pickled::Dict) -> Option<TalentEffect> {
+    let effect_type =
+        block.get(&pk("uniqueType")).and_then(|v| v.i64_ref()).and_then(|kind| u32::try_from(*kind).ok())?;
+    let levels = sorted_entries(block)
+        .into_iter()
+        .filter_map(|(key, value)| Some((level_number(&key)?, value.dict_or_object_dict()?)))
+        .sorted_by_key(|(level, _)| *level)
+        .map(|(_, overrides)| talent_effect_values(&overrides.inner()))
+        .collect();
+    let flag = |key: &str| block.get(&pk(key)).and_then(|v| v.bool_ref().copied()).unwrap_or(false);
+
+    Some(
+        TalentEffect::builder()
+            .name(name)
+            .effect_type(TalentEffectType::new(effect_type))
+            .use_ship_tier_as_work_time(flag("useShipTierAsWorkTime"))
+            .scale_regen_with_ship_tier(flag("scaleRegenWithShipTier"))
+            .maybe_buff(game_param_to_type!(block, "buffParamsId", Option<String>).filter(|buff| !buff.is_empty()))
+            .values(talent_effect_values(block))
+            .levels(levels)
+            .build(),
+    )
+}
+
+/// Numeric fields and `modifiers` entries of a talent params block.
+/// `uniqueType` is the block's kind, and the `...UI` copies hold the totals
+/// the client displays, which follow from the levels.
+fn talent_effect_values(block: &pickled::Dict) -> Vec<CrewSkillModifier> {
+    let fields: pickled::Dict = block
+        .iter()
+        .filter(|(key, _)| {
+            key.string_ref().is_some_and(|key| {
+                let key = key.inner();
+                key.as_str() != "uniqueType" && !key.ends_with("UI") && level_number(key).is_none()
+            })
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let mut values = build_skill_modifiers(&fields);
+    if let Some(modifiers) = block.get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict()) {
+        values.extend(build_skill_modifiers(&modifiers.inner()));
+    }
+    values.sort_by(|left, right| left.name().cmp(right.name()));
+
+    values
+}
+
+fn build_buff_drop(param_data: &pickled::Dict) -> BuffDrop {
+    let string = |key: &str| {
+        param_data.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()).unwrap_or_default()
+    };
+    let buffs = param_data
+        .get(&pk("payload"))
+        .and_then(|v| v.dict_or_object_dict())
+        .map(|payload| {
+            sorted_entries(&payload.inner())
+                .into_iter()
+                .filter_map(|(_, item)| {
+                    let item = item.dict_or_object_dict()?;
+                    let name = item.inner().get(&pk("params"))?.string_ref()?.inner().to_string();
+                    Some(name)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    BuffDrop::builder()
+        .marker_name_active(string("markerNameActive"))
+        .marker_name_inactive(string("markerNameInactive"))
+        .sorting(param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0))
+        .maybe_max_buff_level(
+            param_data.get(&pk("maxBuffLevel")).and_then(|v| v.i64_ref()).and_then(|level| u32::try_from(*level).ok()),
+        )
+        .buffs(buffs)
+        .build()
+}
+
+/// The `level` block of a `Modifier` param: every one holds the same full
+/// table of default values, which its level blocks override.
+fn modifier_defaults(params: &pickled::Dict) -> Option<pickled::Dict> {
+    params.values().find_map(|param| {
+        let param = param.dict_or_object_dict()?;
+        let param = param.inner();
+        let species = param.get(&pk(keys::TYPEINFO))?.dict_or_object_dict()?;
+        if species.inner().get(&pk(keys::TYPEINFO_SPECIES))?.string_ref()?.inner().as_str() != "Modifier" {
+            return None;
+        }
+        let defaults = param.get(&pk("level"))?.dict_or_object_dict()?;
+
+        Some(defaults.inner().clone())
+    })
+}
+
+/// A `Modifier` param's blocks, each without the entries equal to
+/// `defaults`. Without defaults every entry is kept.
+fn build_modifier_param(param_data: &pickled::Dict, defaults: Option<&pickled::Dict>) -> ModifierParam {
+    let changed = |block: &pickled::Dict| -> Vec<CrewSkillModifier> {
+        let changed: pickled::Dict = block
+            .iter()
+            .filter(|(key, value)| defaults.and_then(|defaults| defaults.get(key)) != Some(*value))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let mut modifiers = build_skill_modifiers(&changed);
+        modifiers.sort_by(|left, right| left.name().cmp(right.name()));
+
+        modifiers
+    };
+
+    let mut levels: Vec<(u32, Vec<CrewSkillModifier>)> = sorted_entries(param_data)
+        .into_iter()
+        .filter_map(|(key, value)| Some((level_number(&key)?, changed(&value.dict_or_object_dict()?.inner()))))
+        .collect();
+    levels.sort_by_key(|(level, _)| *level);
+    let mut levels: Vec<Vec<CrewSkillModifier>> = levels.into_iter().map(|(_, modifiers)| modifiers).collect();
+    if levels.is_empty()
+        && let Some(block) = param_data.get(&pk("modifier")).and_then(|v| v.dict_or_object_dict())
+    {
+        levels.push(changed(&block.inner()));
+    }
+
+    let classes = param_data
+        .get(&pk("restrictions"))
+        .and_then(|v| v.dict_or_object_dict())
+        .map(|restrictions| string_list_field(&restrictions.inner(), "subtype"))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|name| Species::from_name(name).known().copied())
+        .collect();
+
+    ModifierParam::builder().classes(classes).levels(levels).build()
 }
 
 fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
@@ -577,7 +845,24 @@ fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
         ability_modifiers = build_skill_modifiers(&modifiers_dict.inner());
     }
 
+    // Empty strings mean the field is unused.
+    let logic_string = |key: &str| {
+        logic
+            .as_ref()
+            .and_then(|logic| logic.inner().get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_owned()))
+            .filter(|value| !value.is_empty())
+    };
+    let target_team = tactical
+        .as_ref()
+        .and_then(|tactical| {
+            tactical.inner().get(&pk("targetTeam")).and_then(|v| v.string_ref()).map(|s| s.inner().to_owned())
+        })
+        .filter(|team| !team.is_empty());
+
     AbilityCategory::builder()
+        .maybe_buff(logic_string("buff"))
+        .maybe_buff_on_self(logic_string("buffOnSelf"))
+        .maybe_target_team(target_team)
         .effect_fields(effect_fields)
         .modifiers(ability_modifiers)
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
@@ -1330,47 +1615,50 @@ fn hardpoint_number(key: &str) -> u32 {
     reversed.parse().unwrap_or(u32::MAX)
 }
 
+/// `ShipAbilities` or `PlaneAbilities`: per slot in slot order, the
+/// `(ability, category)` choices.
+fn build_ability_slots(abilities_data: &pickled::Dict) -> Vec<Vec<(String, String)>> {
+    abilities_data
+        .iter()
+        .filter_map(|(slot_name, slot_data)| {
+            let _slot_name = slot_name.string_ref().expect("ability slot name is not a string");
+            if slot_data.is_none() {
+                return None;
+            }
+
+            let slot_data = slot_data.dict_or_object_dict().expect("slot data is not a dictionary");
+            let slot_data = slot_data.inner();
+
+            let slot = game_param_to_type!(slot_data, "slot", usize);
+            let abils = game_param_to_type!(slot_data, "abils", &[()]).inner();
+            let abils: Vec<(String, String)> = abils
+                .iter()
+                .map(|abil| {
+                    let map_abil = |abil: &Vec<Value>| {
+                        (
+                            abil[0].string_ref().expect("abil[0] is not a string").inner().clone(),
+                            abil[1].string_ref().expect("abil[1] is not a string").inner().clone(),
+                        )
+                    };
+                    match abil {
+                        Value::Tuple(inner) => map_abil(inner.inner()),
+                        Value::List(inner) => map_abil(&inner.inner()),
+                        _ => panic!("abil is not a list/tuple"),
+                    }
+                })
+                .collect();
+
+            Some((slot, abils))
+        })
+        .sorted_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, abils)| abils)
+        .collect()
+}
+
 fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
     let ability_data = game_param_to_type!(ship_data, keys::SHIP_ABILITIES, Option<HashMap<(), ()>>);
-    let abilities: Option<Vec<Vec<(String, String)>>> = ability_data.map(|abilities_data| {
-        abilities_data
-            .inner()
-            .iter()
-            .filter_map(|(slot_name, slot_data)| {
-                let _slot_name = slot_name.string_ref().expect("ship ability slot name is not a string");
-                if slot_data.is_none() {
-                    return None;
-                }
-
-                let slot_data = slot_data.dict_or_object_dict().expect("slot data is not a dictionary");
-                let slot_data = slot_data.inner();
-
-                let slot = game_param_to_type!(slot_data, "slot", usize);
-                let abils = game_param_to_type!(slot_data, "abils", &[()]).inner();
-                let abils: Vec<(String, String)> = abils
-                    .iter()
-                    .map(|abil| {
-                        let map_abil = |abil: &Vec<Value>| {
-                            (
-                                abil[0].string_ref().expect("abil[0] is not a string").inner().clone(),
-                                abil[1].string_ref().expect("abil[1] is not a string").inner().clone(),
-                            )
-                        };
-                        match abil {
-                            Value::Tuple(inner) => map_abil(inner.inner()),
-                            Value::List(inner) => map_abil(&inner.inner()),
-                            _ => panic!("abil is not a list/tuple"),
-                        }
-                    })
-                    .collect();
-
-                Some((slot, abils))
-            })
-            .sorted_by(|a, b| a.0.cmp(&b.0))
-            // drop the slot
-            .map(|abil| abil.1)
-            .collect()
-    });
+    let abilities: Option<Vec<Vec<(String, String)>>> =
+        ability_data.map(|abilities_data| build_ability_slots(&abilities_data.inner()));
 
     let upgrade_data = game_param_to_type!(ship_data, keys::SHIP_UPGRADE_INFO, HashMap<(), ()>);
     let research = read_ship_research(&upgrade_data.inner());
@@ -2184,6 +2472,7 @@ impl GameMetadataProvider {
         let pickled_params: Value = game_params_to_pickle(game_params_data)?;
 
         let params_dict = base_params_dict(&pickled_params)?;
+        let modifier_defaults = modifier_defaults(&params_dict.inner());
 
         let new_params = params_dict
             .inner()
@@ -2193,7 +2482,7 @@ impl GameMetadataProvider {
                 // versions skip the individual param rather than aborting everything.
                 let param = param.clone();
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    Self::parse_single_param(&param, &params_dict)
+                    Self::parse_single_param(&param, &params_dict, modifier_defaults.as_ref())
                 }))
                 .unwrap_or_default()
             })
@@ -2203,8 +2492,13 @@ impl GameMetadataProvider {
     }
 
     /// Parse a single param from pickled dict data. Panics on missing fields are
-    /// caught by the caller's `catch_unwind`.
-    fn parse_single_param(param: &Value, params_dict: &Shared<pickled::Dict>) -> Option<Param> {
+    /// caught by the caller's `catch_unwind`. `modifier_defaults` is the block
+    /// of values every `Modifier` param starts from.
+    fn parse_single_param(
+        param: &Value,
+        params_dict: &Shared<pickled::Dict>,
+        modifier_defaults: Option<&pickled::Dict>,
+    ) -> Option<Param> {
         if param.is_none() {
             return None;
         }
@@ -2246,12 +2540,17 @@ impl GameMetadataProvider {
                 // Owned per crew here; `share_crew_skills` collapses the
                 // duplicates once every param is built.
                 let skills = skills.map(|skills| crate::Rc::from(build_crew_skills(&skills.inner())));
+                // Crews without the key have no talents.
+                let talents = game_param_to_type!(param_data, "UniqueSkills", Option<HashMap<(), ()>>)
+                    .map(|unique_skills| build_crew_talents(&unique_skills.inner()))
+                    .unwrap_or_default();
 
                 Some(ParamData::Crew(
                     Crew::builder()
                         .money_training_level(money_training_level)
                         .personality(crew_personality)
                         .maybe_skills(skills)
+                        .talents(talents)
                         .build(),
                 ))
             }
@@ -2353,26 +2652,7 @@ impl GameMetadataProvider {
                     .filter(|s| !s.is_empty());
                 Some(ParamData::Unit(super::types::Unit::new(uc_type)))
             }
-            ParamType::Drop => {
-                let marker_name_active = param_data
-                    .get(&pk("markerNameActive"))
-                    .and_then(|v| v.string_ref())
-                    .map(|s| s.inner().to_string())
-                    .unwrap_or_default();
-                let marker_name_inactive = param_data
-                    .get(&pk("markerNameInactive"))
-                    .and_then(|v| v.string_ref())
-                    .map(|s| s.inner().to_string())
-                    .unwrap_or_default();
-                let sorting = param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
-                Some(ParamData::Drop(
-                    super::types::BuffDrop::builder()
-                        .marker_name_active(marker_name_active)
-                        .marker_name_inactive(marker_name_inactive)
-                        .sorting(sorting)
-                        .build(),
-                ))
-            }
+            ParamType::Drop => Some(ParamData::Drop(build_buff_drop(&param_data))),
             ParamType::Aircraft => {
                 let subtypes: Vec<String> = param_data
                     .get(&pk("planeSubtype"))
@@ -2433,6 +2713,12 @@ impl GameMetadataProvider {
                             time: crate::game_params::types::Seconds::new(time),
                         })
                     });
+                // Planes without the key carry no consumables.
+                let abilities = param_data
+                    .get(&pk("PlaneAbilities"))
+                    .and_then(|v| v.dict_or_object_dict())
+                    .map(|slots| build_ability_slots(&slots.inner()))
+                    .unwrap_or_default();
                 Some(ParamData::Aircraft(
                     Aircraft::builder()
                         .category(category)
@@ -2451,6 +2737,7 @@ impl GameMetadataProvider {
                             read_opt_f32("attackCooldown").map(crate::game_params::types::Seconds::new),
                         )
                         .maybe_hangar_restore(hangar_restore)
+                        .abilities(abilities)
                         .build(),
                 ))
             }
@@ -2569,24 +2856,9 @@ impl GameMetadataProvider {
                 // Some params (e.g. Drops) have typeinfo.type = "Other"
                 // but contain Drop-specific fields
                 if param_data.contains_key(&pk("markerNameActive")) {
-                    let marker_name_active = param_data
-                        .get(&pk("markerNameActive"))
-                        .and_then(|v| v.string_ref())
-                        .map(|s| s.inner().to_string())
-                        .unwrap_or_default();
-                    let marker_name_inactive = param_data
-                        .get(&pk("markerNameInactive"))
-                        .and_then(|v| v.string_ref())
-                        .map(|s| s.inner().to_string())
-                        .unwrap_or_default();
-                    let sorting = param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
-                    Some(ParamData::Drop(
-                        super::types::BuffDrop::builder()
-                            .marker_name_active(marker_name_active)
-                            .marker_name_inactive(marker_name_inactive)
-                            .sorting(sorting)
-                            .build(),
-                    ))
+                    Some(ParamData::Drop(build_buff_drop(&param_data)))
+                } else if species.as_ref().and_then(|species| species.known()) == Some(&Species::Modifier) {
+                    Some(ParamData::Modifier(build_modifier_param(&param_data, modifier_defaults)))
                 } else {
                     None
                 }
@@ -2694,6 +2966,16 @@ impl GameMetadataProvider {
         if result == key { None } else { Some(result.to_string()) }
     }
 
+    /// The plural form of a translation key for `count`. Plural entries in
+    /// the client catalog use the key as both the singular and plural id.
+    /// `None` when the catalog is absent or lacks the key.
+    pub fn localized_plural_from_id(&self, key: &TranslationKey, count: u64) -> Option<String> {
+        let guard = self.translations.read().ok()?;
+        let catalog = guard.as_ref()?;
+        let result = catalog.ngettext(key.as_str(), key.as_str(), count);
+        if result == key.as_str() { None } else { Some(result.to_string()) }
+    }
+
     pub fn param_localization_id(&self, ship_id: GameParamId) -> Option<&str> {
         self.param_id_to_translation_id.get(&ship_id).map(|s| s.as_str())
     }
@@ -2769,7 +3051,7 @@ mod camera_tests {
             (pk("ignoreClasses"), list(vec![sv("Cruiser"), sv("Destroyer")])),
         ]);
         let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
-        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
+        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict, None).expect("param parsed");
         let projectile = param.projectile().expect("projectile data");
 
         assert_eq!(projectile.alpha_damage(), Some(53500.0));
@@ -2792,7 +3074,7 @@ mod camera_tests {
             (pk("ammoType"), sv("torpedo")),
         ]);
         let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
-        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict).expect("param parsed");
+        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict, None).expect("param parsed");
         let projectile = param.projectile().expect("projectile data");
         assert_eq!(projectile.speed(), None);
         assert_eq!(projectile.damage(), None);
