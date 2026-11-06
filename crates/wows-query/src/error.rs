@@ -123,6 +123,13 @@ pub enum QueryError {
 
     #[error(transparent)]
     Jq(#[from] JqError),
+
+    #[error("the armor model of {ship} in this game data is unreadable")]
+    ArmorUnreadable {
+        ship: String,
+        #[source]
+        source: ArmorReadError,
+    },
 }
 
 /// Failure to build or read the raw GameParams store.
@@ -246,4 +253,17 @@ fn did_you_mean(suggestions: &[String], hint: &str) -> String {
     }
 
     format!("did you mean: {}?", suggestions.join(", "))
+}
+
+/// Why an armor extract object could not be read from a dump.
+#[derive(Debug, thiserror::Error)]
+pub enum ArmorReadError {
+    #[error("dump lookup failed")]
+    Vfs(#[from] wowsunpack::vfs::VfsError),
+
+    #[error("reading the object failed")]
+    Io(#[from] std::io::Error),
+
+    #[error("the object is not a readable armor extract")]
+    Format(#[from] wowsunpack::export::armor_extract::ArmorExtractError),
 }

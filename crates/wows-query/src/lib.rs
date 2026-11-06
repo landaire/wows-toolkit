@@ -6,6 +6,7 @@
 //! [`jq_worker::init`] first in `main`.
 
 pub mod armor;
+mod armor_models;
 pub mod consumables;
 pub mod data;
 #[cfg(feature = "download")]

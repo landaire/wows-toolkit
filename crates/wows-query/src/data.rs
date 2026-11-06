@@ -15,6 +15,7 @@ use wowsunpack::game_params::cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::vfs::VfsPath;
 
 use crate::error::LoadError;
 use crate::gameparams::RawParamsSlot;
@@ -41,6 +42,10 @@ pub(crate) const GAME_PARAMS_DATA: &str = "content/GameParams.data";
 pub struct GameData {
     version: Version,
     provider: GameMetadataProvider,
+
+    /// The dump's files, for data read on demand such as ship armor.
+    pub(crate) vfs: VfsPath,
+
     pub(crate) ships: Vec<Ship>,
 
     /// The captain skill table. Every crew in a build shares it.
@@ -89,7 +94,7 @@ impl GameData {
 
         let raw_params = RawParamsSlot::new(dump_dir, cache_root, metadata.build);
 
-        Ok(Self::index(version, provider, raw_params))
+        Ok(Self::index(version, provider, dump.vfs(), raw_params))
     }
 
     /// Loads the newest build listed in a wows-replay-data dump root (the
@@ -114,7 +119,7 @@ impl GameData {
         self.ships.len()
     }
 
-    fn index(version: Version, provider: GameMetadataProvider, raw_params: RawParamsSlot) -> Self {
+    fn index(version: Version, provider: GameMetadataProvider, vfs: VfsPath, raw_params: RawParamsSlot) -> Self {
         let ships: Vec<Ship> =
             provider.params().iter().filter_map(|param| Ship::from_param(&provider, param)).collect();
 
@@ -136,7 +141,7 @@ impl GameData {
             }
         }
 
-        Self { version, provider, ships, skills, upgrades, research_predecessors, raw_params }
+        Self { version, provider, vfs, ships, skills, upgrades, research_predecessors, raw_params }
     }
 }
 
