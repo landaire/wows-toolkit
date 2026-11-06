@@ -21,6 +21,7 @@ use gpui_kit::component::v_flex;
 use gpui_kit::div;
 use gpui_kit::px;
 
+use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::thickness_to_color;
 
 use crate::viewport::renderer::Viewport3D;
@@ -33,7 +34,6 @@ use super::load_ship::ArmorTriangleTooltip;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::transform_normal;
-use super::load_ship::transform_point;
 use super::upload;
 use super::visibility::VisibilityFilter;
 

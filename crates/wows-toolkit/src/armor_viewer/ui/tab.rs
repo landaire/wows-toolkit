@@ -10,6 +10,8 @@ use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::TabViewer;
 
+use wowsunpack::export::armor_ray::transform_point;
+
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::common::ActiveCamo;
 use crate::armor_viewer::constants::*;
@@ -3867,49 +3869,17 @@ fn cast_armor_trajectory(
 ) -> (Vec3, Vec<crate::armor_viewer::penetration::TrajectoryHit>) {
     let ray_origin = impact_anchor - direction * 50.0;
     let (model_origin, model_direction) = viewport.ray_to_model_space(ray_origin, direction);
-    let mut raw_hits = Vec::new();
+    let raw_hits: Vec<ArmorRayHit<'_>> =
+        wowsunpack::export::armor_ray::cast_ray(&armor.meshes, model_origin.into(), model_direction.into())
+            .into_iter()
+            .map(|hit| ArmorRayHit {
+                distance: hit.distance.value(),
+                position: viewport.pos_to_world_space(Vec3::from(hit.position)),
+                normal: viewport.pos_to_world_space(Vec3::from(hit.normal)).normalize(),
+                info: &armor.meshes[hit.mesh_index].triangle_info[hit.triangle_index],
+            })
+            .collect();
 
-    for mesh in &armor.meshes {
-        for (triangle_index, info) in mesh.triangle_info.iter().enumerate() {
-            let index_offset = triangle_index * 3;
-            let Some(indices) = mesh.indices.get(index_offset..index_offset + 3) else {
-                continue;
-            };
-            let Some(mut p0) = mesh.positions.get(indices[0] as usize).copied() else {
-                continue;
-            };
-            let Some(mut p1) = mesh.positions.get(indices[1] as usize).copied() else {
-                continue;
-            };
-            let Some(mut p2) = mesh.positions.get(indices[2] as usize).copied() else {
-                continue;
-            };
-            if let Some(transform) = &mesh.transform {
-                p0 = transform_point(transform, p0);
-                p1 = transform_point(transform, p1);
-                p2 = transform_point(transform, p2);
-            }
-
-            let p0 = Vec3::from(p0);
-            let p1 = Vec3::from(p1);
-            let p2 = Vec3::from(p2);
-            let Some(distance) =
-                crate::viewport_3d::picking::ray_triangle_intersect(&model_origin, &model_direction, &p0, &p1, &p2)
-            else {
-                continue;
-            };
-            let model_position = model_origin + model_direction * distance;
-            let model_normal = (p1 - p0).cross(&(p2 - p0)).normalize();
-            raw_hits.push(ArmorRayHit {
-                distance,
-                position: viewport.pos_to_world_space(model_position),
-                normal: viewport.pos_to_world_space(model_normal).normalize(),
-                info,
-            });
-        }
-    }
-
-    raw_hits.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
     let start_index = raw_hits
         .iter()
         .enumerate()
@@ -4854,15 +4824,6 @@ fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu
     }
 
     gap_count
-}
-
-/// Apply a column-major 4x4 transform to a point (position).
-pub(crate) fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
-    [
-        t[0] * p[0] + t[4] * p[1] + t[8] * p[2] + t[12],
-        t[1] * p[0] + t[5] * p[1] + t[9] * p[2] + t[13],
-        t[2] * p[0] + t[6] * p[1] + t[10] * p[2] + t[14],
-    ]
 }
 
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and renormalize.

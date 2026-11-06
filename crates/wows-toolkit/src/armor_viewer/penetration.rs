@@ -66,8 +66,7 @@ pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate: PlateIndex) -> Option<
 /// glancing (parallel to it). This is the convention the game's ricochet angles
 /// (45/60 deg) are stated in.
 pub fn impact_angle_from_normal(ray_dir: &Vec3, normal: &Vec3) -> Degrees {
-    let cos_angle = ray_dir.dot(normal).abs().min(1.0);
-    Degrees::from(cos_angle.acos().to_degrees())
+    wowsunpack::export::armor_ray::angle_from_normal((*ray_dir).into(), (*normal).into())
 }
 
 // The per-plate simulation lives in wowsunpack::ballistics; re-exported here

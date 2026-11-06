@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
 
 use crate::viewport::renderer::GpuPipeline;
@@ -33,7 +34,6 @@ use crate::viewport::types::Vertex;
 
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::transform_normal;
-use super::load_ship::transform_point;
 
 /// Hull-mesh vertex-color brightness boost for baked colors; the lighting
 /// shader multiplies this base by `(flat + key*halfLambert)`. Matches the

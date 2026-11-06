@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::HitLocation;
@@ -51,15 +52,6 @@ impl std::ops::Div<f32> for ModelUnit {
         ModelUnit(self.0 / rhs)
     }
 }
-/// Apply a column-major 4x4 transform to a position.
-fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
-    [
-        t[0] * p[0] + t[4] * p[1] + t[8] * p[2] + t[12],
-        t[1] * p[0] + t[5] * p[1] + t[9] * p[2] + t[13],
-        t[2] * p[0] + t[6] * p[1] + t[10] * p[2] + t[14],
-    ]
-}
-
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and renormalize.
 fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
     let x = t[0] * n[0] + t[4] * n[1] + t[8] * n[2];

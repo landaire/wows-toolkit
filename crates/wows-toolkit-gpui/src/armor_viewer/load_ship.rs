@@ -41,6 +41,7 @@ use gpui_kit::AppContext;
 use gpui_kit::Task;
 use rust_i18n::t;
 
+use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::CamoTextureSource;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
@@ -192,16 +193,6 @@ impl LoadedShipArmor {
     pub fn center(&self) -> Vec3 {
         (self.bounds.0 + self.bounds.1) * 0.5
     }
-}
-
-/// Apply a column-major 4x4 transform to a point (position). Ports
-/// `armor_viewer::ui::tab::transform_point` verbatim.
-pub(crate) fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
-    [
-        t[0] * p[0] + t[4] * p[1] + t[8] * p[2] + t[12],
-        t[1] * p[0] + t[5] * p[1] + t[9] * p[2] + t[13],
-        t[2] * p[0] + t[6] * p[1] + t[10] * p[2] + t[14],
-    ]
 }
 
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and
@@ -727,19 +718,6 @@ mod tests {
         assert_eq!(group_names, vec!["Hull", "Main Battery"]);
         let hull_parts = &groups.iter().find(|(g, _)| g == "Hull").unwrap().1;
         assert_eq!(hull_parts, &vec!["Hull_Main".to_string()], "duplicate mesh names within a group must dedupe");
-    }
-
-    #[test]
-    fn transform_point_applies_translation() {
-        #[rustfmt::skip]
-        let identity_translated: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            5.0, 6.0, 7.0, 1.0,
-        ];
-        let p = transform_point(&identity_translated, [1.0, 2.0, 3.0]);
-        assert_eq!(p, [6.0, 8.0, 10.0]);
     }
 
     #[test]

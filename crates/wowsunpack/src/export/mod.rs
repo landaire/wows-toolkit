@@ -2,6 +2,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 #[cfg(feature = "models")]
+pub mod armor_ray;
+#[cfg(feature = "models")]
 pub mod camo_composite;
 #[cfg(feature = "models")]
 pub mod camo_textures;

@@ -105,8 +105,7 @@ impl Trajectory {
 /// dropped: a plate hit from behind strikes at the same angle as one hit from
 /// in front.
 pub fn impact_angle_from_normal(ray_dir: &Vec3, normal: &Vec3) -> Degrees {
-    let cosine = ray_dir.dot(normal).abs().min(1.0);
-    Degrees::from(cosine.acos().to_degrees())
+    wowsunpack::export::armor_ray::angle_from_normal((*ray_dir).into(), (*normal).into())
 }
 
 /// The horizontal direction a shell came in from.

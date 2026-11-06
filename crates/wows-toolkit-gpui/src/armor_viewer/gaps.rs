@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use wowsunpack::export::armor_ray::transform_point;
+
 use super::load_ship::LoadedShipArmor;
 
 use crate::viewport::types::Vertex;
@@ -214,15 +216,6 @@ fn face_normal(corners: [[f32; 3]; 3]) -> [f32; 3] {
     // A degenerate triangle has no facing; up is as good as any, and the
     // ribbon it would produce is discarded by the tangent check anyway.
     normalize(cross(e1, e2)).unwrap_or([0.0, 1.0, 0.0])
-}
-
-/// Applies a column-major 4x4 transform to a point.
-fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
-    [
-        t[0] * p[0] + t[4] * p[1] + t[8] * p[2] + t[12],
-        t[1] * p[0] + t[5] * p[1] + t[9] * p[2] + t[13],
-        t[2] * p[0] + t[6] * p[1] + t[10] * p[2] + t[14],
-    ]
 }
 
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {

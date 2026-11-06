@@ -99,33 +99,11 @@ pub fn screen_to_ray(screen_pos: Vec2, viewport_rect: ViewRect, camera: &Arcball
 /// Moller-Trumbore ray-triangle intersection.
 /// Returns `Some(t)` where `t` is the distance along the ray to the hit point.
 pub fn ray_triangle_intersect(origin: &Vec3, dir: &Vec3, v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Option<f32> {
-    const EPSILON: f32 = 1e-7;
-
-    let edge1 = v1 - v0;
-    let edge2 = v2 - v0;
-    let h = dir.cross(&edge2);
-    let a = edge1.dot(&h);
-
-    // Check both sides (double-sided)
-    if a.abs() < EPSILON {
-        return None;
-    }
-
-    let f = 1.0 / a;
-    let s = origin - v0;
-    let u = f * s.dot(&h);
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-
-    let q = s.cross(&edge1);
-    let v = f * dir.dot(&q);
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-
-    let t = f * edge2.dot(&q);
-    if t > EPSILON { Some(t) } else { None }
+    wowsunpack::export::armor_ray::ray_triangle_intersect(
+        (*origin).into(),
+        (*dir).into(),
+        &[(*v0).into(), (*v1).into(), (*v2).into()],
+    )
 }
 
 /// Pick ALL triangles hit by a ray from an arbitrary origin and direction, sorted by distance.

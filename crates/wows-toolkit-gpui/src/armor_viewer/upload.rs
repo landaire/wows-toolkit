@@ -30,6 +30,7 @@
 
 use std::collections::HashMap;
 
+use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
@@ -45,7 +46,6 @@ use super::load_ship::ArmorTriangleTooltip;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::transform_normal;
-use super::load_ship::transform_point;
 use super::visibility::VisibilityFilter;
 use super::visibility::part_on;
 

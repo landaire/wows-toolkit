@@ -166,7 +166,7 @@ pub(crate) fn load_ship_armor(
     for mesh in &meshes {
         for pos in &mesh.positions {
             let p = if let Some(t) = &mesh.transform {
-                crate::armor_viewer::ui::tab::transform_point(t, *pos)
+                wowsunpack::export::armor_ray::transform_point(t, *pos)
             } else {
                 *pos
             };
@@ -233,7 +233,7 @@ pub(crate) fn load_ship_armor(
     for mesh in &hull_meshes {
         for pos in &mesh.positions {
             let p = if let Some(t) = &mesh.transform {
-                crate::armor_viewer::ui::tab::transform_point(t, *pos)
+                wowsunpack::export::armor_ray::transform_point(t, *pos)
             } else {
                 *pos
             };
