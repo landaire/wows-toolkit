@@ -929,6 +929,57 @@ fn parse_pitch_dead_zones(mount_dict: &pickled::Dict) -> Vec<[f32; 4]> {
     }
 }
 
+/// Reads a two-number `(start, end)` angle pair in degrees.
+fn read_yaw_sector(value: &Value) -> Option<YawSector> {
+    let numbers: Vec<f32> = match value {
+        Value::List(list) => list.inner().iter().filter_map(read_number).collect(),
+        Value::Tuple(tuple) => tuple.inner().iter().filter_map(read_number).collect(),
+        _ => return None,
+    };
+    let [start, end] = numbers.as_slice() else {
+        return None;
+    };
+
+    Some(YawSector::new(Degrees::new(*start), Degrees::new(*end)))
+}
+
+fn read_number(value: &Value) -> Option<f32> {
+    value.f64_ref().map(|float| *float as f32).or_else(|| value.i64_ref().map(|int| *int as f32))
+}
+
+/// Attaches `horizSector`, `deadZone`, `numBarrels` and `ammoList` of a mount
+/// dict. `horizSector` with equal ends means unlimited rotation (the client's
+/// `limitedRotation` test); a span of a full turn is unlimited as well.
+fn with_aiming(mount_point: MountPoint, mount: &pickled::Dict) -> MountPoint {
+    let traverse = mount.get(&pk("horizSector")).and_then(read_yaw_sector).map(|sector| {
+        let span = (sector.end.value() - sector.start.value()).abs();
+        if sector.start == sector.end || span >= 360.0 { Traverse::Unlimited } else { Traverse::Limited(sector) }
+    });
+
+    let dead_zones = match mount.get(&pk("deadZone")) {
+        Some(Value::List(list)) => list.inner().iter().filter_map(read_yaw_sector).collect(),
+        Some(Value::Tuple(tuple)) => tuple.inner().iter().filter_map(read_yaw_sector).collect(),
+        _ => Vec::new(),
+    };
+
+    // GameParams stores the count as a float; a fractional or negative count
+    // is malformed and left absent.
+    let num_barrels = read_float(mount, keys::NUM_BARRELS)
+        .filter(|count| *count >= 0.0 && count.fract() == 0.0)
+        .map(|count| count as u32);
+
+    // ammoList can be pickled as a List or a Tuple.
+    let ammo = match mount.get(&pk(keys::AMMO_LIST)) {
+        Some(Value::Tuple(tuple)) => {
+            tuple.inner().iter().filter_map(|value| value.string_ref().map(|name| name.inner().clone())).collect()
+        }
+        Some(value) => read_all_strings(value),
+        None => Vec::new(),
+    };
+
+    mount_point.with_aiming(traverse, dead_zones, num_barrels, ammo)
+}
+
 /// Parse a raw GameParams armor dict into an [`ArmorMap`].
 ///
 /// Raw keys are `(model_index << 16) | material_id`.  We group by `material_id`
@@ -1000,10 +1051,11 @@ fn extract_mounts(ship_data: &pickled::Dict, component_name: &str) -> Vec<MountP
                 .map(|d| parse_custom_miscs(&d.inner()))
                 .unwrap_or_default();
 
-            Some(
+            let mount_point =
                 MountPoint::with_armor(key_str.clone(), model_path, mount_armor, species, pitch_dead_zones)
-                    .with_miscs(misc_filter, custom_miscs),
-            )
+                    .with_miscs(misc_filter, custom_miscs);
+
+            Some(with_aiming(mount_point, &mount_inner))
         })
         .collect()
 }
@@ -1138,6 +1190,27 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     speed_coef: read_float(&eng_data.inner(), keys::SPEED_COEF),
                 },
             );
+        }
+
+        // A gun or torpedo upgrade lists one component per hull it fits, in
+        // hull order; a hull mounts the listed one it names as its default or
+        // as an alternative.
+        let component_key = if uc_type == keys::UC_TYPE_TORPEDOES {
+            Some(keys::COMP_TORPEDOES)
+        } else if uc_type == keys::UC_TYPE_ARTILLERY {
+            Some(keys::COMP_ARTILLERY)
+        } else {
+            None
+        };
+        if let Some(component_key) = component_key {
+            let listed = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(component_key)).map(read_all_strings))
+                .unwrap_or_default();
+            if !listed.is_empty() {
+                ttx_components.upgrade_components.insert(upgrade_name.clone(), listed);
+            }
         }
 
         // Torpedoes are a standalone _Torpedoes upgrade naming a torpedo component
@@ -2930,6 +3003,50 @@ mod camera_tests {
         assert_eq!(research.cost_xp(), Some(super::super::types::Experience::new(165_000)));
         assert_eq!(research.next_ships(), ["PASC020_Des_Moines_1948".to_owned()]);
         assert_eq!(research.required_ship(), None);
+    }
+
+    #[test]
+    fn mounts_carry_traverse_dead_zones_barrels_and_ammo() {
+        // Tianjin PZSC719 HP_ZGS_1: unlimited rotation with a rear dead zone;
+        // Des Moines HP_AGM_3: limited to +-150.
+        let atba = dict(vec![(
+            pk("HP_ZGS_1"),
+            dict(vec![
+                (pk("model"), sv("content/gun.model")),
+                (pk("typeinfo"), typeinfo("China", "Secondary", "Gun")),
+                (pk("horizSector"), tuple(vec![fv(0.0), fv(0.0)])),
+                (pk("deadZone"), tuple(vec![tuple(vec![fv(147.0), fv(-147.0)])])),
+                (pk("numBarrels"), fv(2.0)),
+                (pk("ammoList"), tuple(vec![sv("PZPA001_HE")])),
+            ]),
+        )]);
+        let artillery = dict(vec![(
+            pk("HP_AGM_3"),
+            dict(vec![
+                (pk("model"), sv("content/turret.model")),
+                (pk("horizSector"), tuple(vec![fv(-150.0), iv(150)])),
+                (pk("deadZone"), tuple(vec![])),
+                (pk("numBarrels"), fv(3.0)),
+            ]),
+        )]);
+        let ship_data: pickled::Dict = vec![(pk("A_ATBA"), atba), (pk("A_Artillery"), artillery)].into_iter().collect();
+
+        let secondary = &extract_mounts(&ship_data, "A_ATBA")[0];
+        assert_eq!(secondary.traverse(), Some(Traverse::Unlimited));
+        assert_eq!(secondary.num_barrels(), Some(2));
+        assert_eq!(secondary.ammo(), ["PZPA001_HE".to_owned()]);
+        assert_eq!(secondary.can_fire_at(Degrees::new(146.0)), Some(true));
+        assert_eq!(secondary.can_fire_at(Degrees::new(180.0)), Some(false));
+        assert_eq!(secondary.can_fire_at(Degrees::new(-147.0)), Some(false));
+        assert_eq!(secondary.can_fire_at(Degrees::new(-146.0)), Some(true));
+
+        let turret = &extract_mounts(&ship_data, "A_Artillery")[0];
+        assert_eq!(turret.num_barrels(), Some(3));
+        assert_eq!(turret.can_fire_at(Degrees::new(150.0)), Some(true));
+        assert_eq!(turret.can_fire_at(Degrees::new(151.0)), Some(false));
+        assert_eq!(turret.can_fire_at(Degrees::new(-150.0)), Some(true));
+        assert_eq!(turret.can_fire_at(Degrees::new(0.0)), Some(true));
+        assert_eq!(turret.can_fire_at(Degrees::new(180.0)), Some(false));
     }
 }
 

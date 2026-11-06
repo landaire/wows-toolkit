@@ -860,6 +860,51 @@ impl MountSpecies {
     }
 }
 
+/// A yaw arc in a mount's own frame, from `start` turning toward increasing
+/// yaw until `end`, wrapping through 180 when `start > end`. Yaw 0 is the
+/// direction the mount's hull hardpoint faces. GameParams `horizSector` and
+/// `deadZone` entries use this form (the client's `angleInSector`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct YawSector {
+    pub start: Degrees,
+    pub end: Degrees,
+}
+
+impl YawSector {
+    pub fn new(start: Degrees, end: Degrees) -> Self {
+        Self { start, end }
+    }
+
+    /// Whether `yaw` lies on the arc, ends included.
+    pub fn contains(&self, yaw: Degrees) -> bool {
+        let width = (self.end.value() - self.start.value()).rem_euclid(360.0);
+        let offset = (yaw.value() - self.start.value()).rem_euclid(360.0);
+
+        offset <= width
+    }
+}
+
+/// How far a mount turns, from GameParams `horizSector`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum Traverse {
+    /// `horizSector` with equal ends: the client does not limit rotation.
+    Unlimited,
+    Limited(YawSector),
+}
+
+impl Traverse {
+    pub fn allows(&self, yaw: Degrees) -> bool {
+        match self {
+            Self::Unlimited => true,
+            Self::Limited(sector) => sector.contains(yaw),
+        }
+    }
+}
+
 /// A single mount point (hardpoint) within a ship component.
 ///
 /// Each ship component (artillery, atba, etc.) has one or more mount points
@@ -886,6 +931,18 @@ pub struct MountPoint {
     /// to `[pitch_min, pitch_max]`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     pitch_dead_zones: Vec<[f32; 4]>,
+    /// Yaw limits from `horizSector`. Absent on mounts that do not aim.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    traverse: Option<Traverse>,
+    /// `deadZone` arcs: the mount turns through them but does not fire.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    yaw_dead_zones: Vec<YawSector>,
+    /// `numBarrels`: barrels or tubes on the mount.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    num_barrels: Option<u32>,
+    /// Projectile param names from `ammoList`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    ammo: Vec<String>,
     /// Whitelist of misc-part node names (`MP_*`) from this mount's model that are
     /// visible when the mount is equipped. The game's `MiscsController` shows a
     /// mount model's misc node only if its full node name is in this list (or its
@@ -906,6 +963,10 @@ impl MountPoint {
             mount_armor: None,
             species: None,
             pitch_dead_zones: Vec::new(),
+            traverse: None,
+            yaw_dead_zones: Vec::new(),
+            num_barrels: None,
+            ammo: Vec::new(),
             misc_filter: Vec::new(),
             custom_miscs: HashMap::new(),
         }
@@ -924,6 +985,10 @@ impl MountPoint {
             mount_armor,
             species,
             pitch_dead_zones,
+            traverse: None,
+            yaw_dead_zones: Vec::new(),
+            num_barrels: None,
+            ammo: Vec::new(),
             misc_filter: Vec::new(),
             custom_miscs: HashMap::new(),
         }
@@ -934,6 +999,46 @@ impl MountPoint {
         self.misc_filter = misc_filter;
         self.custom_miscs = custom_miscs;
         self
+    }
+
+    /// Attach aiming data: yaw limits, yaw dead zones, barrel count and ammo.
+    pub fn with_aiming(
+        mut self,
+        traverse: Option<Traverse>,
+        yaw_dead_zones: Vec<YawSector>,
+        num_barrels: Option<u32>,
+        ammo: Vec<String>,
+    ) -> Self {
+        self.traverse = traverse;
+        self.yaw_dead_zones = yaw_dead_zones;
+        self.num_barrels = num_barrels;
+        self.ammo = ammo;
+        self
+    }
+
+    pub fn traverse(&self) -> Option<Traverse> {
+        self.traverse
+    }
+
+    pub fn yaw_dead_zones(&self) -> &[YawSector] {
+        &self.yaw_dead_zones
+    }
+
+    pub fn num_barrels(&self) -> Option<u32> {
+        self.num_barrels
+    }
+
+    pub fn ammo(&self) -> &[String] {
+        &self.ammo
+    }
+
+    /// Whether the mount can fire at `yaw` in its own frame: inside its
+    /// traverse and outside every yaw dead zone. `None` when the mount has no
+    /// traverse data.
+    pub fn can_fire_at(&self, yaw: Degrees) -> Option<bool> {
+        let traverse = self.traverse?;
+
+        Some(traverse.allows(yaw) && !self.yaw_dead_zones.iter().any(|zone| zone.contains(yaw)))
     }
 
     pub fn misc_filter(&self) -> &[String] {

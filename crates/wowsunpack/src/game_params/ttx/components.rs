@@ -224,6 +224,12 @@ pub struct ShipTtxComponents {
     /// range-extender FC options carry > 1.0.
     #[cfg_attr(feature = "serde", serde(default))]
     pub fire_controls: HashMap<String, f32>,
+    /// Components each `_Artillery` and `_Torpedoes` upgrade lists, one per
+    /// hull it fits, e.g. `["A_Artillery", "B_Artillery"]`. A hull mounts the
+    /// listed one its [`crate::game_params::types::HullUpgradeConfig`] names as
+    /// its default or as an alternative.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub upgrade_components: HashMap<String, Vec<String>>,
     /// Stock (base) upgrade selection per slot: the empty-`prev` upgrade in each
     /// `ShipUpgradeInfo` chain, captured during the same walk that fills the maps
     /// above (the raw `ShipUpgradeInfo` pickle is dropped after parsing).
@@ -270,6 +276,25 @@ impl ShipTtxComponents {
     /// Look up the fire-control `maxDistCoef` for a given `_Suo` upgrade name.
     pub fn fire_control_max_dist_coef(&self, upgrade_name: &str) -> Option<f32> {
         self.fire_controls.get(upgrade_name).copied()
+    }
+
+    /// Every component a `_Artillery` or `_Torpedoes` upgrade lists.
+    pub fn upgrade_components(&self, upgrade_name: &str) -> &[String] {
+        self.upgrade_components.get(upgrade_name).map_or(&[], Vec::as_slice)
+    }
+
+    /// The component of a `_Artillery` or `_Torpedoes` upgrade that `hull`
+    /// mounts: the listed one the hull names as its own or as an alternative.
+    /// `None` when the upgrade does not fit the hull.
+    pub fn component_on_hull<'a>(
+        &'a self,
+        upgrade_name: &str,
+        hull: &crate::game_params::types::HullUpgradeConfig,
+        component_type: crate::game_params::keys::ComponentType,
+    ) -> Option<&'a str> {
+        self.upgrade_components(upgrade_name).iter().map(String::as_str).find(|name| {
+            hull.component_name(component_type) == Some(*name) || hull.alternative_mounts.contains_key(*name)
+        })
     }
 
     /// The stock (base) upgrade selection per slot.
