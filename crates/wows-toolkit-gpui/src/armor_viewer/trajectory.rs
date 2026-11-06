@@ -163,7 +163,7 @@ pub(crate) fn simulate(
             distance_along_ray: hit.distance_from_start,
         })
         .collect();
-    simulate_shell_through_plates(params, impact, &plates, continue_on_ricochet)
+    simulate_shell_through_plates(params, impact.impact_velocity, &plates, continue_on_ricochet)
 }
 
 /// Where along the shell's path the fuse goes off.

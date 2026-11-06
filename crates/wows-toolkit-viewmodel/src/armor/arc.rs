@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use wowsunpack::ballistics::PlateOutcome;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::ShellSimResult;
+use wowsunpack::ballistics::enclosing_zone;
+use wowsunpack::ballistics::is_citadel_zone;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Millimeters;
@@ -60,23 +62,6 @@ pub enum ArcOutcome {
     },
     /// No shell was cast, so there is nothing to say about one.
     NotSimulated,
-}
-
-/// The zone the shell is inside after crossing the plates up to `up_to`.
-///
-/// Every crossing of a zone's boundary toggles whether the shell is within it,
-/// so a zone crossed an odd number of times has been entered and not left. The
-/// innermost such zone is the one the shell sits in; `None` once it is clear of
-/// every zone.
-pub fn enclosing_zone<'a>(zones: &[&'a str], up_to: usize) -> Option<&'a str> {
-    let crossed = &zones[..zones.len().min(up_to)];
-
-    let mut crossings: HashMap<&str, usize> = HashMap::new();
-    for zone in crossed {
-        *crossings.entry(zone).or_default() += 1;
-    }
-
-    crossed.iter().rev().copied().find(|zone| crossings[zone] % 2 == 1)
 }
 
 /// Reads `sim` back as what the shell did to `plates`.
@@ -171,14 +156,6 @@ pub fn isolate(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_zone_crossed_twice_has_been_left_again() {
-        let zones = ["hull", "citadel", "citadel", "hull"];
-        assert_eq!(enclosing_zone(&zones, 4), None);
-        assert_eq!(enclosing_zone(&zones, 2), Some("citadel"));
-        assert_eq!(enclosing_zone(&zones, 1), Some("hull"));
-    }
 
     #[test]
     fn isolating_nothing_hides_nothing() {
@@ -311,8 +288,7 @@ pub fn sim_outcome(sim: &ShellSimResult, plates: &[ArcPlate]) -> SimOutcome {
             return SimOutcome::Overpenetration;
         };
         let zones: Vec<&str> = plates.iter().map(|plate| plate.zone.as_str()).collect();
-        let inside_citadel =
-            enclosing_zone(&zones, detonated_at.number()).is_some_and(|zone| zone.to_lowercase().contains("citadel"));
+        let inside_citadel = enclosing_zone(&zones, detonated_at.number()).is_some_and(is_citadel_zone);
         return if inside_citadel { SimOutcome::Citadel } else { SimOutcome::Penetration };
     }
 

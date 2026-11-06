@@ -53,11 +53,10 @@ pub struct TrajectoryResult {
 /// Which zone volume the shell is inside after crossing plates up to and
 /// including `last_plate`.
 ///
-/// Shared with the GPUI port, which reads the same answer out of the same cast
-/// (`wows_toolkit_viewmodel::armor::arc`).
+/// Shared with the GPUI port, which reads the same answer out of the same cast.
 pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate: PlateIndex) -> Option<&str> {
     let zones: Vec<&str> = hits.iter().map(|hit| hit.zone.as_str()).collect();
-    wows_toolkit_viewmodel::armor::arc::enclosing_zone(&zones, last_plate.number())
+    wowsunpack::ballistics::enclosing_zone(&zones, last_plate.number())
 }
 
 /// Strike angle between a ray direction and a triangle normal.
@@ -114,7 +113,7 @@ pub fn simulate_shell_through_hits(
             distance_along_ray: hit.distance_from_start,
         })
         .collect();
-    simulate_shell_through_plates(params, impact, &plates, continue_on_ricochet)
+    simulate_shell_through_plates(params, impact.impact_velocity, &plates, continue_on_ricochet)
 }
 
 /// 3D position of a fuse detonation along the trajectory ray.

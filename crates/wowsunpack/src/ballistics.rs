@@ -10,6 +10,7 @@
 //! by jcw780, licensed under the MIT License.
 //! Copyright (c) 2020 jcw780
 
+use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use crate::game_params::types::Degrees;
@@ -149,7 +150,7 @@ impl ShellParams {
     }
 
     /// Normalization the shell actually gets: uncapped shells get none.
-    fn effective_normalization(&self) -> Radians {
+    pub fn effective_normalization(&self) -> Radians {
         if self.capped { self.normalization } else { Radians::new(0.0) }
     }
 }
@@ -341,7 +342,7 @@ fn simulate_trajectory(params: &ShellParams, launch_angle: Radians) -> Option<Fl
 
 /// Angle left over after the shell's cap straightens the strike out. Zero once
 /// the strike is shallower than the normalization the cap provides.
-fn normalized_strike_angle(angle: Radians, normalization: Radians) -> Radians {
+pub fn normalized_strike_angle(angle: Radians, normalization: Radians) -> Radians {
     (angle.abs() - normalization).max_zero()
 }
 
@@ -537,7 +538,7 @@ pub fn is_overmatch(caliber: Millimeters, thickness: Millimeters) -> bool {
 }
 
 /// Thickness a strike at `angle` from the plate normal has to defeat.
-fn effective_thickness(thickness: Millimeters, angle: Radians) -> Millimeters {
+pub fn effective_thickness(thickness: Millimeters, angle: Radians) -> Millimeters {
     thickness / angle.cos().max(MIN_STRIKE_COSINE)
 }
 
@@ -643,6 +644,31 @@ impl ShellSimResult {
     }
 }
 
+/// The zone a shell is inside after crossing the first `up_to` of `zones`,
+/// which name the zone of each plate along its ray in strike order.
+///
+/// Every crossing of a zone's boundary toggles whether the shell is within it,
+/// so a zone crossed an odd number of times has been entered and not left. The
+/// innermost such zone is the one the shell sits in; `None` once it is clear of
+/// every zone.
+pub fn enclosing_zone<'a>(zones: &[&'a str], up_to: usize) -> Option<&'a str> {
+    let crossed = &zones[..zones.len().min(up_to)];
+
+    let mut crossings: HashMap<&str, usize> = HashMap::new();
+    for zone in crossed {
+        *crossings.entry(zone).or_default() += 1;
+    }
+
+    crossed.iter().rev().copied().find(|zone| crossings[zone] % 2 == 1)
+}
+
+/// Whether a detonation inside `zone` counts as a citadel hit.
+pub fn is_citadel_zone(zone: &str) -> bool {
+    const NAME: &[u8] = b"citadel";
+
+    zone.as_bytes().windows(NAME.len()).any(|window| window.eq_ignore_ascii_case(NAME))
+}
+
 /// A fuse burning down while the shell works through the plate stack.
 #[derive(Clone, Copy, Debug)]
 struct ArmedFuse {
@@ -667,7 +693,8 @@ impl ArmedFuse {
     }
 }
 
-/// Simulate a shell passing through a sequence of armor plates along one ray.
+/// Simulate a shell passing through a sequence of armor plates along one ray,
+/// arriving at `impact_velocity`.
 ///
 /// Uses formulas from wows_shell (jcw780):
 ///   raw_pen = penetration_factor * velocity^1.38
@@ -679,13 +706,13 @@ impl ArmedFuse {
 /// distance and stops processing further plates when the fuse distance is exceeded.
 pub fn simulate_shell_through_plates(
     params: &ShellParams,
-    impact: &ImpactResult,
+    impact_velocity: MetersPerSecond,
     hits: &[PlateHit],
     continue_on_ricochet: bool,
 ) -> ShellSimResult {
     let normalization = params.effective_normalization();
 
-    let mut velocity = impact.impact_velocity;
+    let mut velocity = impact_velocity;
     let mut plates: Vec<PlateResult> = Vec::with_capacity(hits.len());
     let mut stopped_at: Option<PlateIndex> = None;
     let mut detonated_at: Option<PlateIndex> = None;
@@ -842,23 +869,6 @@ mod tests {
         }
     }
 
-    fn impact_at(velocity: MetersPerSecond) -> ImpactResult {
-        let fall = Degrees::from(4.3).to_radians();
-        ImpactResult {
-            distance: Meters::from(8500.0),
-            impact_velocity: velocity,
-            impact_angle_horizontal: fall,
-            impact_angle_deck: Radians::new(std::f32::consts::FRAC_PI_2) - fall,
-            time_to_target: Seconds::from(0.0),
-            raw_penetration: Millimeters::from(0.0),
-            effective_penetration_belt: Millimeters::from(0.0),
-            effective_penetration_belt_normalized: Millimeters::from(0.0),
-            effective_penetration_deck: Millimeters::from(0.0),
-            effective_penetration_deck_normalized: Millimeters::from(0.0),
-            launch_angle: Radians::new(0.0),
-        }
-    }
-
     /// A plate struck at the 24.7 deg the issue #43 screenshot reports.
     fn plate(distance: ShipModelDistance, thickness: Millimeters) -> PlateHit {
         PlateHit { thickness, angle_from_normal: Degrees::from(24.7), distance_along_ray: distance }
@@ -925,10 +935,9 @@ mod tests {
     #[test]
     fn fuse_travel_uses_ship_model_scale() {
         let params = colombo_ap();
-        let impact = impact_at(mps(699.0));
         let hits = vec![plate(units(0.0), mm(425.0)), plate(units(0.42), mm(40.0)), plate(units(0.6), mm(375.0))];
 
-        let sim = simulate_shell_through_plates(&params, &impact, &hits, false);
+        let sim = simulate_shell_through_plates(&params, mps(699.0), &hits, false);
 
         let det = sim.detonation.expect("fuse armed on the belt, shell must detonate");
         let travel_m = det.travel_distance.value();
@@ -952,7 +961,7 @@ mod tests {
         let params = colombo_ap();
         let sim = simulate_shell_through_plates(
             &params,
-            &impact_at(mps(699.0)),
+            mps(699.0),
             &[plate(units(0.0), mm(425.0)), plate(units(0.42), mm(40.0)), plate(units(0.6), mm(375.0))],
             false,
         );
@@ -970,8 +979,8 @@ mod tests {
         let uncapped = ShellParams { capped: false, ..colombo_ap() };
         let hits = [plate(units(0.0), mm(425.0))];
 
-        let capped_sim = simulate_shell_through_plates(&capped, &impact_at(mps(699.0)), &hits, false);
-        let uncapped_sim = simulate_shell_through_plates(&uncapped, &impact_at(mps(699.0)), &hits, false);
+        let capped_sim = simulate_shell_through_plates(&capped, mps(699.0), &hits, false);
+        let uncapped_sim = simulate_shell_through_plates(&uncapped, mps(699.0), &hits, false);
 
         assert!(uncapped_sim.plates[0].effective_thickness > capped_sim.plates[0].effective_thickness);
     }
@@ -980,8 +989,7 @@ mod tests {
     #[test]
     fn a_shattered_plate_reports_no_exit_velocity() {
         let params = colombo_ap();
-        let sim =
-            simulate_shell_through_plates(&params, &impact_at(mps(200.0)), &[plate(units(0.0), mm(425.0))], false);
+        let sim = simulate_shell_through_plates(&params, mps(200.0), &[plate(units(0.0), mm(425.0))], false);
 
         assert_eq!(sim.plates[0].outcome, PlateOutcome::Shatter);
         assert_eq!(sim.plates[0].velocity_after, None);
@@ -1007,7 +1015,7 @@ mod tests {
         let params = small_caliber_ap_20mm_fuse();
         let hits = [plate_at(units(0.0), mm(19.0), Degrees::from(35.0))];
 
-        let sim = simulate_shell_through_plates(&params, &impact_at(mps(700.0)), &hits, false);
+        let sim = simulate_shell_through_plates(&params, mps(700.0), &hits, false);
 
         assert_eq!(sim.plates[0].outcome, PlateOutcome::Penetrate);
         assert!(sim.plates[0].fuse_armed_here, "19 mm at 35 deg presents 21.2 mm to a 20 mm fuse");
@@ -1021,10 +1029,18 @@ mod tests {
         let params = small_caliber_ap_20mm_fuse();
         let hits = [plate_at(units(0.0), mm(19.0), Degrees::from(20.0))];
 
-        let sim = simulate_shell_through_plates(&params, &impact_at(mps(700.0)), &hits, false);
+        let sim = simulate_shell_through_plates(&params, mps(700.0), &hits, false);
 
         assert_eq!(sim.plates[0].outcome, PlateOutcome::Penetrate);
         assert!(!sim.plates[0].fuse_armed_here, "19 mm at 20 deg presents 19.4 mm to a 20 mm fuse");
         assert!(sim.detonation.is_none(), "an unarmed fuse must not detonate");
+    }
+
+    #[test]
+    fn a_zone_crossed_twice_has_been_left_again() {
+        let zones = ["Casemate", "Citadel", "Citadel", "Casemate"];
+        assert_eq!(enclosing_zone(&zones, 4), None);
+        assert_eq!(enclosing_zone(&zones, 2), Some("Citadel"));
+        assert_eq!(enclosing_zone(&zones, 1), Some("Casemate"));
     }
 }
