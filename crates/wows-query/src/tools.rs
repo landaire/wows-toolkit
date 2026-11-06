@@ -143,7 +143,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "penetration_search",
-        description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. Each group gives qualifying (ships that defeat the plate, listed in ships) and considered (ships under the same filters that fire that ammo), each as total and by_class. With a target ship and no tiers, searches the target's tier +-2.",
+        description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. Each group gives qualifying (ships that defeat the plate, listed in ships) and considered (ships under the same filters that fire that ammo), each as total and by_class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\". With a target ship and no tiers, searches the target's tier +-2.",
         schema: input_schema::<PenetrationSearchArgs>,
         call: |game, arguments| run(arguments, |args| game.penetration_search(args)),
     },
@@ -179,7 +179,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "stat_search",
-        description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class.",
+        description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\".",
         schema: input_schema::<StatSearchArgs>,
         call: |game, arguments| run(arguments, |args| game.stat_search(args)),
     },

@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 61
+assertion_line: 66
 expression: search
 ---
 thickness_mm: 27
@@ -29,6 +29,12 @@ groups:
       by_class:
         battleship: 124
       test: 14
+    share_pct: 24
+    share_pct_by_class:
+      destroyer: 0
+      cruiser: 0
+      battleship: 65.6
+      submarine: 0
     ships:
       - "T11 Affondatore (battleship, Italy): main 406 mm AP"
       - "T11 Devastation (battleship, United_Kingdom): main 419 mm AP"

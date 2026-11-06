@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 692
 expression: search
 ---
 conditions:
@@ -15,6 +16,9 @@ qualifying:
     cruiser: 3
   stock: 1
   with_requirements: 2
+share_pct: 37.5
+share_pct_by_class:
+  cruiser: 37.5
 ships:
   - ship: "T10 Worcester (cruiser, USA)"
     stock: true

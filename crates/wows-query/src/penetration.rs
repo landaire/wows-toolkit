@@ -13,6 +13,7 @@ use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
+use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipCounts;
@@ -142,6 +143,9 @@ pub struct PenetrationGroup {
 
     /// Ships among those considered that defeat the plate; listed in `ships`.
     pub qualifying: ShipCounts,
+
+    #[serde(flatten)]
+    pub shares: Shares,
 
     /// "T10 Gearing (destroyer, USA): main 127 mm HE, 21 mm pen", best shell per ship.
     pub ships: Vec<String>,
@@ -276,10 +280,14 @@ fn group(method: DefeatMethod, considered: &[&Ship], hits: &[(&Ship, Shell)], if
         hits.iter().take(GROUP_LIMIT).map(|(ship, shell)| describe_hit(ship, shell, ifhe)).collect();
     let omitted = (hits.len() > ships.len()).then(|| hits.len() - ships.len());
 
+    let considered = ShipCounts::from_ships(considered.iter().copied());
+    let qualifying = ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship));
+
     PenetrationGroup {
         method,
-        considered: ShipCounts::from_ships(considered.iter().copied()),
-        qualifying: ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship)),
+        shares: Shares::new(&qualifying.by_class, &considered),
+        considered,
+        qualifying,
         ships,
         omitted,
     }

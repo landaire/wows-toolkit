@@ -36,6 +36,7 @@ use crate::loadout::Triggers;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::search_key;
+use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipCounts;
@@ -157,6 +158,9 @@ pub struct StatSearchOutput {
     pub considered: ShipCounts,
 
     pub qualifying: QualifyingCounts,
+
+    #[serde(flatten)]
+    pub shares: Shares,
 
     /// Fewest requirements first, then highest tier.
     pub ships: Vec<StatSearchHit>,
@@ -810,10 +814,13 @@ impl GameData {
         let listed: Vec<StatSearchHit> = hits.into_iter().take(HIT_LIMIT).map(|(_, hit)| hit).collect();
         let omitted = (qualifying.total > listed.len()).then(|| qualifying.total - listed.len());
 
+        let considered = ShipCounts::from_ships(ships.iter().copied());
+
         Ok(StatSearchOutput {
             conditions: conditions.iter().map(Condition::describe).collect(),
             rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health.",
-            considered: ShipCounts::from_ships(ships.iter().copied()),
+            shares: Shares::new(&qualifying.by_class, &considered),
+            considered,
             qualifying,
             ships: listed,
             omitted,

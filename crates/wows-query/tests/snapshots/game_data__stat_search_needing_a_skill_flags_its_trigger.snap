@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 543
+assertion_line: 713
 expression: search
 ---
 conditions:
@@ -23,6 +23,13 @@ qualifying:
   stock: 0
   with_requirements: 4
   test: 1
+share_pct: 11.8
+share_pct_by_class:
+  destroyer: 0
+  cruiser: 0
+  battleship: 33.3
+  aircraft_carrier: 0
+  submarine: 0
 ships:
   - ship: "T10 BA Montana (battleship, USA)"
     stock: false

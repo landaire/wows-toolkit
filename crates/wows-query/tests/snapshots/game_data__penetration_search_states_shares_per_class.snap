@@ -1,0 +1,24 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 216
+expression: shares
+---
+- considered:
+    total: 516
+    by_class:
+      destroyer: 120
+      cruiser: 206
+      battleship: 189
+      submarine: 1
+    test: 38
+  qualifying:
+    total: 124
+    by_class:
+      battleship: 124
+    test: 14
+  share_pct: 24
+  share_pct_by_class:
+    destroyer: 0
+    cruiser: 0
+    battleship: 65.6
+    submarine: 0

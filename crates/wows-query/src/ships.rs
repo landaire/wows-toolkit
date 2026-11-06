@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_core::game_types::GameParamId;
+use wows_core::units::Percent;
 use wowsunpack::Rc;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -16,6 +17,7 @@ use wowsunpack::game_params::types::Species;
 use crate::armament::Armament;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::firing_arcs::round_to;
 use crate::names::Interpretation;
 use crate::names::Interpretations;
 use crate::names::Lookup;
@@ -182,6 +184,34 @@ impl ShipCounts {
         }
 
         counts
+    }
+}
+
+/// Qualifying ships as a percent of the ships considered, to 0.1 percent.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Shares {
+    /// Absent when no ship was considered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_pct: Option<Percent>,
+
+    /// Every considered class, 0 when none of it qualifies.
+    pub share_pct_by_class: BTreeMap<ShipClass, Percent>,
+}
+
+impl Shares {
+    pub(crate) fn new(qualifying: &BTreeMap<ShipClass, usize>, considered: &ShipCounts) -> Self {
+        // Ship counts stay far below 2^24, so the f32 conversion is exact.
+        let share = |part: usize, whole: usize| Percent::new(round_to(part as f32 * 100.0 / whole as f32, 10.0));
+        let qualifying_total: usize = qualifying.values().sum();
+
+        Self {
+            share_pct: (considered.total > 0).then(|| share(qualifying_total, considered.total)),
+            share_pct_by_class: considered
+                .by_class
+                .iter()
+                .map(|(class, whole)| (*class, share(qualifying.get(class).copied().unwrap_or_default(), *whole)))
+                .collect(),
+        }
     }
 }
 

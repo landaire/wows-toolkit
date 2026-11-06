@@ -191,6 +191,33 @@ fn ship_overview_lists_armament_and_what_is_absent() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn penetration_search_states_shares_per_class() {
+    // Through call_tool, which prints each f32 share at its own precision.
+    let search = game()
+        .call_tool(
+            "penetration_search",
+            json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "min_tier": 8, "max_tier": 11 }),
+        )
+        .expect("zone resolves");
+    let shares: Vec<_> = search["groups"]
+        .as_array()
+        .expect("groups is a list")
+        .iter()
+        .map(|group| {
+            json!({
+                "considered": group["considered"],
+                "qualifying": group["qualifying"],
+                "share_pct": group["share_pct"],
+                "share_pct_by_class": group["share_pct_by_class"],
+            })
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(shares);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn other_modules_select_another_armament() {
     let selected: Vec<_> = ["Gearing", "Cleveland"]
         .into_iter()
