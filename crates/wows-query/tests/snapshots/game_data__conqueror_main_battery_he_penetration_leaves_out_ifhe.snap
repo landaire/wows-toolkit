@@ -19,7 +19,7 @@ expression: "he_penetration(\"Conqueror\")"
             - Inertia Fuse for HE Shells
           tier_fillers:
             - Emergency Repair Specialist
-          note: "Inertia Fuse for HE Shells raises this main battery HE penetration in game data, but best-fit builds skip it: this shell already reaches the 32 mm armor threshold of its tier without it"
+          note: "Main battery HE: 105 mm base; 131 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 105 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
 - battery: secondary
   caliber_mm: 133
   penetration:
@@ -33,3 +33,8 @@ expression: "he_penetration(\"Conqueror\")"
           - Inertia Fuse for HE Shells
         tier_fillers:
           - Emergency Repair Specialist
+      alternatives:
+        - label: without Inertia Fuse for HE Shells
+          value: 22
+          assumed: []
+          note: "Secondary battery HE: 22 mm base; 27 mm with Inertia Fuse for HE Shells. Best-fit builds take the skill because only with it does the shell penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

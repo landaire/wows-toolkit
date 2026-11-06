@@ -54,6 +54,7 @@ use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::search_key;
 use crate::shells::Ammo;
+use crate::shells::Battery;
 use crate::shells::RicochetAngles;
 use crate::shells::ricochet_angles;
 use crate::shells::shell_ammo;
@@ -545,6 +546,25 @@ impl SearchStat {
     /// stats, except that every extra charge counts.
     fn is_consumable(self) -> bool {
         matches!(self, Self::Card(stat) if stat.field_key().starts_with("consumable."))
+    }
+
+    /// The battery a shell stat describes, named with each value so main and
+    /// secondary battery rows are told apart.
+    fn shell_battery(self) -> Option<Battery> {
+        let key = match self {
+            Self::Ricochet { .. } => return Some(Battery::Main),
+            Self::Armor { .. } => return None,
+            Self::Card(stat) => stat.field_key(),
+            Self::Derived(stat) => stat.field_key(),
+        };
+
+        if key.starts_with("artillery.shells.") {
+            Some(Battery::Main)
+        } else if key.starts_with("secondary.shells.") {
+            Some(Battery::Secondary)
+        } else {
+            None
+        }
     }
 }
 
@@ -1411,8 +1431,10 @@ impl<'a> ShipSearch<'a> {
             .zip(readings)
             .filter_map(|(condition, readings)| {
                 let reading = condition.best(readings)?;
+                let battery = condition.stat.shell_battery().map(Battery::label);
+                let qualifier: Vec<&str> = battery.into_iter().chain(reading.qualifier.as_deref()).collect();
                 let qualifier =
-                    reading.qualifier.as_deref().map(|qualifier| format!(" ({qualifier})")).unwrap_or_default();
+                    if qualifier.is_empty() { String::new() } else { format!(" ({})", qualifier.join(" ")) };
                 Some(format!(
                     "{}{qualifier}: {}",
                     condition.stat.name(),

@@ -597,10 +597,7 @@ impl GameData {
     pub(crate) fn gun_weapon(&self, shooter: &Ship, request: &GunRequest) -> Result<Weapon, QueryError> {
         let battery = request.battery;
         let shells: Vec<_> = self.shells(shooter).into_iter().filter(|shell| shell.battery == battery).collect();
-        let source = match battery {
-            Battery::Main => "main battery",
-            Battery::Secondary => "secondary battery",
-        };
+        let source = battery.label();
         let ammo = request.ammo;
 
         let Some(shell) = largest_shell(&shells, ammo) else {

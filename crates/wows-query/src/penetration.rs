@@ -150,9 +150,9 @@ pub struct PenetrationGroup {
     #[serde(flatten)]
     pub shares: Shares,
 
-    /// "T10 Gearing (destroyer, USA): main 127 mm HE, 21 mm pen", best shell
-    /// per ship. A SAP shell that also overmatches the plate, and so cannot
-    /// ricochet off it, ends with ", overmatches".
+    /// "T10 Gearing (destroyer, USA): main battery 127 mm HE, 21 mm pen", best
+    /// shell per ship. A SAP shell that also overmatches the plate, and so
+    /// cannot ricochet off it, ends with ", overmatches".
     pub ships: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -306,10 +306,7 @@ fn group(
 }
 
 fn describe_hit(ship: &Ship, shell: &Shell, thickness: Millimeters, ifhe: bool) -> String {
-    let battery = match shell.battery {
-        Battery::Main => "main",
-        Battery::Secondary => "secondary",
-    };
+    let battery = shell.battery.label();
     let penetration = match shell.ammo {
         Ammo::He if ifhe => shell.ifhe_penetration_mm,
         Ammo::He | Ammo::Sap => shell.penetration_mm,

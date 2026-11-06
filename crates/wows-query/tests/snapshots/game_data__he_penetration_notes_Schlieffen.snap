@@ -1,0 +1,58 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: he_penetration(name)
+---
+- battery: main
+  caliber_mm: 420
+  penetration:
+    stat: HE penetration (main battery 420 mm PGPA117_420MM_HE_L_50)
+    unit: mm
+    builds:
+      base: 105
+      best:
+        value: 105
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 131
+          assumed:
+            - Inertia Fuse for HE Shells
+          tier_fillers:
+            - Emergency Repair Specialist
+          note: "Main battery HE: 105 mm base; 131 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 105 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
+- battery: secondary
+  caliber_mm: 150
+  penetration:
+    stat: HE penetration (secondary battery 150 mm PGPA003_150mm_HE_HE_N_F)
+    unit: mm
+    builds:
+      base: 38
+      best:
+        value: 38
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 47
+          assumed:
+            - Inertia Fuse for HE Shells
+          tier_fillers:
+            - Emergency Repair Specialist
+          note: "Secondary battery HE: 38 mm base; 47 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 38 mm already penetrates the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."
+- battery: secondary
+  caliber_mm: 105
+  penetration:
+    stat: HE penetration (secondary battery 105 mm PGPA085_105mm_HE_HE_33lbs)
+    unit: mm
+    builds:
+      base: 26
+      best:
+        value: 32
+        assumed:
+          - Inertia Fuse for HE Shells
+        tier_fillers:
+          - Emergency Repair Specialist
+      alternatives:
+        - label: without Inertia Fuse for HE Shells
+          value: 26
+          assumed: []
+          note: "Secondary battery HE: 26 mm base; 32 mm with Inertia Fuse for HE Shells. Best-fit builds take the skill because only with it does the shell penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

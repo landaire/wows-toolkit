@@ -617,6 +617,14 @@ fn des_moines_he_penetration_lists_ifhe() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn he_penetration_notes_name_battery_and_plating() {
+    for name in ["Hannover", "Schlieffen"] {
+        insta::assert_yaml_snapshot!(format!("he_penetration_notes_{name}"), he_penetration(name));
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn smaland_concealment_with_and_without_concealment_expert() {
     let concealment = game().ship_concealment(&ship("Smaland")).expect("Smaland exists");
     insta::assert_yaml_snapshot!(concealment);

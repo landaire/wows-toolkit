@@ -44,6 +44,15 @@ pub enum Battery {
     Secondary,
 }
 
+impl Battery {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Main => "main battery",
+            Self::Secondary => "secondary battery",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub enum Ammo {
     #[serde(rename = "AP")]
@@ -156,6 +165,9 @@ pub struct ShipShells {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ShellReport {
+    /// Battery, caliber and ammo type, e.g. "main battery 203 mm HE".
+    pub label: String,
+
     #[serde(flatten)]
     pub shell: Shell,
 
@@ -207,6 +219,7 @@ impl GameData {
             .shells(ship)
             .into_iter()
             .map(|shell| ShellReport {
+                label: format!("{} {} mm {}", shell.battery.label(), shell.caliber_mm.value(), shell.ammo.label()),
                 penetration: penetration_builds(&shell, ship.tier, ifhe.as_ref()),
                 ricochet_note: standards.note(&shell),
                 shell,
@@ -349,15 +362,17 @@ fn main_armor_threshold(tier: Tier) -> Millimeters {
 /// HE or SAP penetration on the best-fit build. Inertia Fuse for HE Shells
 /// raises every HE shell it applies to, but the best-fit build takes it only
 /// when it lifts the shell over the armor threshold of its battery and tier
-/// (shipbuilds rule `ifhe`); otherwise it is an alternative.
+/// (shipbuilds rule `ifhe`). The build that differs is an alternative whose
+/// note states both values and the reason.
 fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Option<BuildStat<Millimeters>> {
     let base = shell.penetration_mm?;
-    let battery = match shell.battery {
-        Battery::Main => "main battery",
-        Battery::Secondary => "secondary battery",
-    };
-    let stat =
-        format!("{} penetration ({battery} {} mm {})", shell.ammo.label(), shell.caliber_mm.value(), shell.param);
+    let stat = format!(
+        "{} penetration ({} {} mm {})",
+        shell.ammo.label(),
+        shell.battery.label(),
+        shell.caliber_mm.value(),
+        shell.param
+    );
     let unchanged = |alternatives| BuildStat {
         stat: stat.clone(),
         unit: Millimeters::UNIT,
@@ -380,6 +395,20 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
         Battery::Main => main_armor_threshold(tier),
         Battery::Secondary => SECONDARY_ARMOR_THRESHOLD,
     };
+    let plating = match shell.battery {
+        Battery::Main => {
+            format!("the {threshold} bow and deck plating of the cruisers and battleships a tier {} ship meets", tier.0)
+        }
+        Battery::Secondary => {
+            format!("the {threshold} upper hull plating of cruisers and belts of destroyers at tiers 8 to 10")
+        }
+    };
+    let battery = match shell.battery {
+        Battery::Main => "Main battery",
+        Battery::Secondary => "Secondary battery",
+    };
+    let summary = format!("{battery} HE: {base} base; {with_ifhe} with {name}.");
+
     if base.value() < threshold.value() && with_ifhe.value() >= threshold.value() {
         return Some(BuildStat {
             stat,
@@ -391,24 +420,30 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
                     assumed: vec![name.clone()],
                     tier_fillers: ifhe.tier_fillers.clone(),
                 },
-                alternatives: Vec::new(),
+                alternatives: vec![BuildAlternative {
+                    label: format!("without {name}"),
+                    value: base,
+                    assumed: Vec::new(),
+                    tier_fillers: Vec::new(),
+                    note: Some(format!(
+                        "{summary} Best-fit builds take the skill because only with it does the shell penetrate {plating}."
+                    )),
+                }],
             },
         });
     }
 
     let reason = if base.value() >= threshold.value() {
-        format!("this shell already reaches the {} mm armor threshold of its tier without it", threshold.value())
+        format!("{base} already penetrates {plating}")
     } else {
-        format!("this shell stays below the {} mm armor threshold of its tier even with it", threshold.value())
+        format!("even {with_ifhe} does not penetrate {plating}")
     };
     Some(unchanged(vec![BuildAlternative {
         label: format!("with {name}"),
         value: with_ifhe,
         assumed: vec![name.clone()],
         tier_fillers: ifhe.tier_fillers.clone(),
-        note: Some(format!(
-            "{name} raises this {battery} HE penetration in game data, but best-fit builds skip it: {reason}"
-        )),
+        note: Some(format!("{summary} Best-fit builds leave the skill out because {reason}.")),
     }]))
 }
 

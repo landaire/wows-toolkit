@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: he_penetration(name)
+---
+- battery: main
+  caliber_mm: 483
+  penetration:
+    stat: HE penetration (main battery 483 mm PGPA115_483MM_HE_HANNOVER)
+    unit: mm
+    builds:
+      base: 121
+      best:
+        value: 121
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 151
+          assumed:
+            - Inertia Fuse for HE Shells
+          tier_fillers:
+            - Emergency Repair Specialist
+          note: "Main battery HE: 121 mm base; 151 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 121 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 11 ship meets."
+- battery: secondary
+  caliber_mm: 128
+  penetration:
+    stat: HE penetration (secondary battery 128 mm PGPA059_128MM_HE_SPR_GR_KZ)
+    unit: mm
+    builds:
+      base: 32
+      best:
+        value: 32
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 40
+          assumed:
+            - Inertia Fuse for HE Shells
+          tier_fillers:
+            - Emergency Repair Specialist
+          note: "Secondary battery HE: 32 mm base; 40 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 32 mm already penetrates the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."
