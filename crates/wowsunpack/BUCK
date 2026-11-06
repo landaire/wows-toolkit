@@ -154,5 +154,6 @@ workspace_integration_tests(
     library = ":wowsunpack",
     features = WOWSUNPACK_FEATURES,
     deps = WOWSUNPACK_DEPS,
+    buildscript = buildscript,
     test_deps = WOWSUNPACK_TEST_DEPS,
 )

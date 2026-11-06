@@ -59,5 +59,6 @@ workspace_integration_tests(
     library = ":wows_query",
     features = ["download"],
     deps = WOWS_QUERY_DEPS,
+    buildscript = buildscript,
     test_deps = WOWS_QUERY_TEST_DEPS,
 )

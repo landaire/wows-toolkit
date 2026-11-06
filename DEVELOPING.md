@@ -349,6 +349,21 @@ Set `WOWS_GAME_DATA` to override the default `game_data/` directory:
 WOWS_GAME_DATA=/path/to/game_data cargo test --workspace
 ```
 
+Buck tests see game data only when you name it, as an absolute path:
+
+```bash
+bin/buck2 test //crates/wows-query/... -c wows.game_data=/path/to/game_data
+```
+
+To keep it on one machine, add it to `.buckconfig.local`:
+
+```ini
+[wows]
+game_data = /path/to/game_data
+```
+
+The build scripts then read the dump, so those actions are no longer hermetic. Buck reruns them when the path changes but not when the dump's contents change. Run `bin/buck2 clean` after you replace the dump in place.
+
 ## Test Fixtures
 
 Replay fixtures live in `tests/fixtures/replays/` and are committed to the repo. They span multiple game versions (12.3 through 15.1) and ship types (DD, CA, BB, SS, CV) to provide broad parser coverage.

@@ -23,6 +23,29 @@ def _cargo_env(crate, package, version):
         "CARGO_PKG_VERSION_PRE": pre,
     }
 
+def _game_data():
+    """The game data dump named by `-c wows.game_data=/abs/path`, or None.
+
+    Buck does not track files outside the repository, so a build script that
+    reads the dump reruns only when this path changes, not when the dump does.
+    """
+    return read_config("wows", "game_data", None)
+
+def _buildscript_game_data_env():
+    game_data = _game_data()
+    if game_data != None:
+        return {"WOWS_GAME_DATA": game_data}
+    return {
+        "WOWS_GAME_DATA": "$(location //build-support/no-game-data:versions_toml)",
+        "WOWS_HERMETIC_BUILD": "1",
+    }
+
+def _test_game_data_env():
+    game_data = _game_data()
+    if game_data != None:
+        return {"WOWS_GAME_DATA": game_data}
+    return {}
+
 def os_select(macos, linux, windows):
     """Select a value by target operating system.
 
@@ -97,10 +120,7 @@ def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDIT
         package_name = package,
         version = version,
         local_manifest_dir = "src",
-        env = _cargo_env("build_script_build", package, version) | {
-            "WOWS_GAME_DATA": "$(location //build-support/no-game-data:versions_toml)",
-            "WOWS_HERMETIC_BUILD": "1",
-        } | env,
+        env = _cargo_env("build_script_build", package, version) | _buildscript_game_data_env() | env,
         visibility = [],
     )
     return run_name
@@ -173,7 +193,7 @@ def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT
         run_env = {
             "CARGO_MANIFEST_DIR": native.package_name(),
             "INSTA_WORKSPACE_ROOT": ".",
-        } | run_env,
+        } | _test_game_data_env() | run_env,
         features = features,
         rustc_flags = rustc_flags,
         resources = resources,
@@ -182,12 +202,13 @@ def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT
         **kwargs
     )
 
-def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = [], run_env = {}):
+def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = [], run_env = {}, buildscript = None):
     """One test target per file directly under tests/, as Cargo builds them.
 
     Each links `library`, the crate under test, as an integration test does.
     A test that reaches the network is marked #[ignore] in its source, so these
-    run offline.
+    run offline. `buildscript` gives the tests the package's build script cfgs,
+    as Cargo does, which is what enables tests gated on game data.
     """
     for path in glob(["tests/*.rs"], exclude = exclude):
         stem = path.removeprefix("tests/").removesuffix(".rs")
@@ -201,6 +222,7 @@ def workspace_integration_tests(package, version, library, deps = [], test_deps 
             features = features,
             deps = [library] + deps,
             test_deps = test_deps,
+            buildscript = buildscript,
             run_env = run_env,
         )
 
