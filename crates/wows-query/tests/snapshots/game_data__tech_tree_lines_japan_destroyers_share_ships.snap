@@ -1,0 +1,110 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: lines
+---
+tiers:
+  min: 4
+  max: 10
+sort_by: research_xp
+total: 2
+lines:
+  - tier_10_ship: Harugumo
+    nation: Japan
+    class: destroyer
+    path:
+      - Hashidate
+      - Chikuma
+      - Umikaze
+      - Wakatake
+      - Isokaze
+      - Minekaze
+      - Hatsuharu
+      - Shiratsuyu
+      - Akizuki
+      - Kitakaze
+      - Harugumo
+    branches_from: Isokaze
+    ships:
+      - name: Isokaze
+        tier: 4
+        research_xp: 5100
+        purchase_credits: 705000
+        shared_with:
+          - Hakuryū
+          - Shimakaze
+      - name: Minekaze
+        tier: 5
+        research_xp: 11500
+        purchase_credits: 1380000
+      - name: Hatsuharu
+        tier: 6
+        research_xp: 34000
+        purchase_credits: 2950000
+      - name: Shiratsuyu
+        tier: 7
+        research_xp: 60000
+        purchase_credits: 5100000
+      - name: Akizuki
+        tier: 8
+        research_xp: 115000
+        purchase_credits: 9000000
+      - name: Kitakaze
+        tier: 9
+        research_xp: 154000
+        purchase_credits: 13200000
+      - name: Harugumo
+        tier: 10
+        research_xp: 223000
+        purchase_credits: 19500000
+    total_research_xp: 602600
+    total_purchase_credits: 51835000
+  - tier_10_ship: Shimakaze
+    nation: Japan
+    class: destroyer
+    path:
+      - Hashidate
+      - Chikuma
+      - Umikaze
+      - Wakatake
+      - Isokaze
+      - Mutsuki
+      - Fubuki
+      - Akatsuki
+      - Kagerō
+      - Yūgumo
+      - Shimakaze
+    branches_from: Isokaze
+    ships:
+      - name: Isokaze
+        tier: 4
+        research_xp: 5100
+        purchase_credits: 705000
+        shared_with:
+          - Hakuryū
+          - Harugumo
+      - name: Mutsuki
+        tier: 5
+        research_xp: 11000
+        purchase_credits: 1380000
+      - name: Fubuki
+        tier: 6
+        research_xp: 34000
+        purchase_credits: 2950000
+      - name: Akatsuki
+        tier: 7
+        research_xp: 63000
+        purchase_credits: 5100000
+      - name: Kagerō
+        tier: 8
+        research_xp: 115000
+        purchase_credits: 9100000
+      - name: Yūgumo
+        tier: 9
+        research_xp: 154000
+        purchase_credits: 13200000
+      - name: Shimakaze
+        tier: 10
+        research_xp: 223000
+        purchase_credits: 19300000
+    total_research_xp: 605100
+    total_purchase_credits: 51735000

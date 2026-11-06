@@ -31,6 +31,7 @@ use crate::skills::SkillTreeArgs;
 use crate::stat_search::StatNamesArgs;
 use crate::stat_search::StatSearchArgs;
 use crate::stats::ShipStatsArgs;
+use crate::tech_tree::TechTreeLinesArgs;
 use crate::upgrades::UpgradeArgs;
 
 /// A query tool as presented to a model.
@@ -117,6 +118,12 @@ const TOOLS: &[Tool] = &[
         description: "Port purchase price in credits (purchase_credits) and research XP of tech tree ships, a note on how ships are obtained when price and research fields do not tell it (e.g. Armory ships sold for coal or steel, prices not in game data, or tier 11 ships, which cost no XP), research tree predecessors and successors, group and upgrade slot count of one ship, and its armament: main and secondary battery mounts with barrels and caliber (e.g. \"2 x 2 152 mm\"), torpedo launchers and torpedoes, depth charge launchers, aircraft squadrons and air strike (an air strike with depth_charge ordnance is anti-submarine armament), and consumables by slot. Every armament category the ship lacks is listed as \"none\". Armament is for stock modules; pass names from other_modules in modules for another hull, guns or torpedoes. other_squadrons lists squadrons of researched plane modules.",
         schema: input_schema::<ShipOverviewArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_overview(args)),
+    },
+    Tool {
+        name: "tech_tree_lines",
+        description: "Tech tree lines, each the research path from tier 1 to one tier 10 ship (tier 11 ships are not part of a line), with the research XP and purchase credits of its ships in a tier range (default 8 to 10) and their totals, cheapest first by sort_by: research_xp (ties broken by credits) or purchase_credits (ties broken by XP). branches_from names the highest-tier ship the line shares with another line; shared_with on a ship lists the tier 10 ships of the other lines through it. Costs leave out module research and upgrades. Filter by nation and by class of the tier 10 ship.",
+        schema: input_schema::<TechTreeLinesArgs>,
+        call: |game, arguments| run(arguments, |args| game.tech_tree_lines(args)),
     },
     Tool {
         name: "ship_armor",

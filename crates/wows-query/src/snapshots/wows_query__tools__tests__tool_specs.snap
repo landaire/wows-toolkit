@@ -55,6 +55,47 @@ expression: specs()
         description: "Modules whose armament to report instead of stock, e.g. [\"Hull B\"]. Omit for stock."
     required:
       - ship
+- name: tech_tree_lines
+  description: "Tech tree lines, each the research path from tier 1 to one tier 10 ship (tier 11 ships are not part of a line), with the research XP and purchase credits of its ships in a tier range (default 8 to 10) and their totals, cheapest first by sort_by: research_xp (ties broken by credits) or purchase_credits (ties broken by XP). branches_from names the highest-tier ship the line shares with another line; shared_with on a ship lists the tier 10 ships of the other lines through it. Costs leave out module research and upgrades. Filter by nation and by class of the tier 10 ship."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\", \"Germany\", \"Japan\", \"Russia\", \"United_Kingdom\"."
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: Class of the tier 10 ship the line ends at.
+      min_tier:
+        type: integer
+        description: Lowest tier whose ships are costed. Defaults to 8.
+        minimum: 1
+        maximum: 10
+      max_tier:
+        type: integer
+        description: Highest tier whose ships are costed. Defaults to 10.
+        minimum: 1
+        maximum: 10
+      sort_by:
+        description: "Order of the lines, cheapest first. Defaults to research_xp."
+        oneOf:
+          - type: string
+            const: research_xp
+            description: "Total research XP, then total purchase credits."
+          - type: string
+            const: purchase_credits
+            description: "Total purchase credits, then total research XP."
+      limit:
+        type: integer
+        description: Most lines to list. Defaults to 20.
+        minimum: 0
 - name: ship_armor
   description: "Armor of one ship by hull zone: plate thickness above the waterline (thickness_mm when every plate is equal, else thinnest_mm and thickest_mm), and each plate by its in-game name led by its zone, e.g. \"bow: Fore End Deck\", with thickness in mm. Plates of 0 mm, which only close a zone for hit detection, are left out."
   input_schema:

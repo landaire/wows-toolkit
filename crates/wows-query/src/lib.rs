@@ -35,6 +35,7 @@ pub mod ships;
 pub mod skills;
 pub mod stat_search;
 pub mod stats;
+pub mod tech_tree;
 pub mod tools;
 pub mod upgrades;
 

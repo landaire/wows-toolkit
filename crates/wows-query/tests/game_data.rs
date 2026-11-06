@@ -25,9 +25,12 @@ use wows_query::shells::Battery;
 use wows_query::ships::ShipArgs;
 use wows_query::ships::ShipClass;
 use wows_query::ships::ShipOverviewArgs;
+use wows_query::ships::Tier;
 use wows_query::skills::CaptainSkillArgs;
 use wows_query::skills::SkillTreeArgs;
 use wows_query::stats::ShipStatsArgs;
+use wows_query::tech_tree::LineOrder;
+use wows_query::tech_tree::TechTreeLinesArgs;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
@@ -205,6 +208,58 @@ fn ship_overview_reports_purchase_and_research_costs() {
         .collect();
 
     insta::assert_yaml_snapshot!(costs);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_cheapest_by_research_xp() {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs { limit: Some(5), ..Default::default() })
+        .expect("default tiers are valid");
+
+    insta::assert_yaml_snapshot!(lines);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_usa_battleships_by_credits() {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs {
+            nation: Some("USA".to_owned()),
+            class: Some(ShipClass::Battleship),
+            sort_by: Some(LineOrder::PurchaseCredits),
+            ..Default::default()
+        })
+        .expect("default tiers are valid");
+
+    insta::assert_yaml_snapshot!(lines);
+}
+
+/// Both Japanese destroyer lines branch at tier 4 Isokaze, which the carrier
+/// line shares.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_japan_destroyers_share_ships() {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs {
+            nation: Some("Japan".to_owned()),
+            class: Some(ShipClass::Destroyer),
+            min_tier: Some(Tier(4)),
+            ..Default::default()
+        })
+        .expect("tiers 4 to 10 are valid");
+
+    insta::assert_yaml_snapshot!(lines);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_reject_tier_11() {
+    let error = game()
+        .tech_tree_lines(&TechTreeLinesArgs { max_tier: Some(Tier(11)), ..Default::default() })
+        .expect_err("tier 11 is outside every line");
+
+    assert!(matches!(error, QueryError::InvalidArguments { .. }));
 }
 
 #[test]

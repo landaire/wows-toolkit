@@ -1,0 +1,161 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: lines
+---
+tiers:
+  min: 8
+  max: 10
+sort_by: research_xp
+total: 60
+lines:
+  - tier_10_ship: Grozovoi
+    nation: Russia
+    class: destroyer
+    path:
+      - Orlan
+      - Novik
+      - Storozhevoi
+      - Derzki
+      - Izyaslav
+      - Podvoisky
+      - Gnevny
+      - Minsk
+      - Ognevoi
+      - Udaloi
+      - Grozovoi
+    branches_from: Minsk
+    ships:
+      - name: Ognevoi
+        tier: 8
+        research_xp: 105000
+        purchase_credits: 9000000
+      - name: Udaloi
+        tier: 9
+        research_xp: 160000
+        purchase_credits: 13000000
+      - name: Grozovoi
+        tier: 10
+        research_xp: 225000
+        purchase_credits: 18000000
+    total_research_xp: 490000
+    total_purchase_credits: 40000000
+  - tier_10_ship: Essex
+    nation: USA
+    class: aircraft_carrier
+    path:
+      - Erie
+      - Chester
+      - Sampson
+      - Wickes
+      - Clemson
+      - Langley
+      - Ranger
+      - Independence
+      - Yorktown
+      - Essex
+    branches_from: Ranger
+    ships:
+      - name: Yorktown
+        tier: 8
+        research_xp: 120000
+        purchase_credits: 9000000
+      - name: Essex
+        tier: 10
+        research_xp: 371000
+        purchase_credits: 28500000
+    total_research_xp: 491000
+    total_purchase_credits: 37500000
+  - tier_10_ship: Shimakaze
+    nation: Japan
+    class: destroyer
+    path:
+      - Hashidate
+      - Chikuma
+      - Umikaze
+      - Wakatake
+      - Isokaze
+      - Mutsuki
+      - Fubuki
+      - Akatsuki
+      - Kagerō
+      - Yūgumo
+      - Shimakaze
+    branches_from: Isokaze
+    ships:
+      - name: Kagerō
+        tier: 8
+        research_xp: 115000
+        purchase_credits: 9100000
+      - name: Yūgumo
+        tier: 9
+        research_xp: 154000
+        purchase_credits: 13200000
+      - name: Shimakaze
+        tier: 10
+        research_xp: 223000
+        purchase_credits: 19300000
+    total_research_xp: 492000
+    total_purchase_credits: 41600000
+  - tier_10_ship: Harugumo
+    nation: Japan
+    class: destroyer
+    path:
+      - Hashidate
+      - Chikuma
+      - Umikaze
+      - Wakatake
+      - Isokaze
+      - Minekaze
+      - Hatsuharu
+      - Shiratsuyu
+      - Akizuki
+      - Kitakaze
+      - Harugumo
+    branches_from: Isokaze
+    ships:
+      - name: Akizuki
+        tier: 8
+        research_xp: 115000
+        purchase_credits: 9000000
+      - name: Kitakaze
+        tier: 9
+        research_xp: 154000
+        purchase_credits: 13200000
+      - name: Harugumo
+        tier: 10
+        research_xp: 223000
+        purchase_credits: 19500000
+    total_research_xp: 492000
+    total_purchase_credits: 41700000
+  - tier_10_ship: Delny
+    nation: Russia
+    class: destroyer
+    path:
+      - Orlan
+      - Novik
+      - Storozhevoi
+      - Derzki
+      - Izyaslav
+      - Podvoisky
+      - Gnevny
+      - Minsk
+      - Kiev
+      - Tashkent
+      - Delny
+    branches_from: Minsk
+    ships:
+      - name: Kiev
+        tier: 8
+        research_xp: 109000
+        purchase_credits: 8800000
+      - name: Tashkent
+        tier: 9
+        research_xp: 160000
+        purchase_credits: 13200000
+      - name: Delny
+        tier: 10
+        research_xp: 226000
+        purchase_credits: 18800000
+    total_research_xp: 495000
+    total_purchase_credits: 40800000
+omitted: 55

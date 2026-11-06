@@ -1,0 +1,103 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: lines
+---
+tiers:
+  min: 8
+  max: 10
+sort_by: purchase_credits
+total: 3
+lines:
+  - tier_10_ship: Montana
+    nation: USA
+    class: battleship
+    path:
+      - Erie
+      - Chester
+      - St. Louis
+      - S. Carolina
+      - Wyoming
+      - New York
+      - New Mexico
+      - Colorado
+      - N. Carolina
+      - Iowa
+      - Montana
+    branches_from: Colorado
+    ships:
+      - name: N. Carolina
+        tier: 8
+        research_xp: 120000
+        purchase_credits: 9800000
+      - name: Iowa
+        tier: 9
+        research_xp: 175000
+        purchase_credits: 15500000
+      - name: Montana
+        tier: 10
+        research_xp: 247000
+        purchase_credits: 20800000
+    total_research_xp: 542000
+    total_purchase_credits: 46100000
+  - tier_10_ship: Louisiana
+    nation: USA
+    class: battleship
+    path:
+      - Erie
+      - Chester
+      - St. Louis
+      - S. Carolina
+      - Wyoming
+      - New York
+      - New Mexico
+      - Colorado
+      - Nebraska
+      - Delaware
+      - Louisiana
+    branches_from: Colorado
+    ships:
+      - name: Nebraska
+        tier: 8
+        research_xp: 140000
+        purchase_credits: 10500000
+      - name: Delaware
+        tier: 9
+        research_xp: 180000
+        purchase_credits: 15000000
+      - name: Louisiana
+        tier: 10
+        research_xp: 255000
+        purchase_credits: 21000000
+    total_research_xp: 575000
+    total_purchase_credits: 46500000
+  - tier_10_ship: Vermont
+    nation: USA
+    class: battleship
+    path:
+      - Erie
+      - Chester
+      - St. Louis
+      - S. Carolina
+      - Wyoming
+      - New York
+      - New Mexico
+      - Colorado
+      - Kansas
+      - Minnesota
+      - Vermont
+    branches_from: Colorado
+    ships:
+      - name: Kansas
+        tier: 8
+        research_xp: 140000
+        purchase_credits: 11000000
+      - name: Minnesota
+        tier: 9
+        research_xp: 180000
+        purchase_credits: 15500000
+      - name: Vermont
+        tier: 10
+        research_xp: 255000
+        purchase_credits: 20700000
+    total_research_xp: 575000
+    total_purchase_credits: 47200000
