@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1227
 expression: armor_assessment(ship)
 ---
 ship: "T10 Des Moines (cruiser, USA)"
@@ -444,8 +445,8 @@ bands:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 50
-                lower_pct: 48
+                higher_pct: 56
+                lower_pct: 42
           - aspect: angled_30
             rays: 7073
             citadel_pct: 0
@@ -457,8 +458,8 @@ bands:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 54
-                lower_pct: 45
+                higher_pct: 58
+                lower_pct: 41
           - aspect: angled_45
             rays: 6037
             citadel_pct: 0
@@ -470,8 +471,8 @@ bands:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 50
-                lower_pct: 49
+                higher_pct: 56
+                lower_pct: 43
   - band: moderate
     label: "moderate, 12 to 15 km"
     groups:
@@ -771,8 +772,8 @@ bands:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 55
-                lower_pct: 43
+                higher_pct: 60
+                lower_pct: 37
           - aspect: angled_30
             rays: 5116
             citadel_pct: 0
@@ -784,8 +785,8 @@ bands:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 51
-                lower_pct: 48
+                higher_pct: 60
+                lower_pct: 39
           - aspect: angled_45
             rays: 4448
             citadel_pct: 0
@@ -797,8 +798,8 @@ bands:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 47
-                lower_pct: 52
+                higher_pct: 53
+                lower_pct: 46
     excluded:
       - group: destroyer AP 127 mm
         max_range_km: 10.54

@@ -68,7 +68,7 @@ pub const ARMOR_COMPARISONS_KIND: &str = "armor-comparisons-v1";
 
 /// Revision of the tracing and outcome rules behind a peer table. Bump it
 /// whenever a change alters traced rates, so stored tables are traced again.
-const TABLE_REVISION: u32 = 2;
+const TABLE_REVISION: u32 = 3;
 
 /// Distance between neighbouring rays of every assessment trace. Peers are
 /// traced with the same spacing so their rates compare.

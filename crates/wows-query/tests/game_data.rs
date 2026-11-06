@@ -5,13 +5,16 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use serde_json::json;
+use wows_core::units::Degrees;
 use wows_core::units::Km;
 use wows_core::units::Millimeters;
 use wows_query::GameData;
 use wows_query::QueryError;
 use wows_query::armor_assessment::ArmorAssessmentArgs;
 use wows_query::armor_assessment::ArmorAssessmentOutput;
+use wows_query::armor_trace::AmmoTrace;
 use wows_query::armor_trace::ArmorTraceArgs;
+use wows_query::armor_trace::RayOutcome;
 use wows_query::armor_trace::TraceWeapon;
 use wows_query::citadel::CitadelProfileArgs;
 use wows_query::citadel::Turtleback;
@@ -72,6 +75,23 @@ fn des_moines_bow_is_27_mm_above_water() {
         })
         .expect("zone resolves");
     assert_eq!(search.thickness_mm, Millimeters::new(27.0));
+    insta::assert_yaml_snapshot!(search);
+}
+
+/// SAP needs penetration for Des Moines' 27 mm bow; the 406 mm and larger
+/// SAP shells that also overmatch it cannot ricochet off it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_bow_sap_search_marks_overmatch() {
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            target_ship: Some("Des Moines".to_owned()),
+            zone: Some("bow".to_owned()),
+            ammo: Some(Ammo::Sap),
+            ..Default::default()
+        })
+        .expect("zone resolves");
+    assert!(search.groups[0].ships.iter().any(|ship| ship.ends_with(", overmatches")), "{:?}", search.groups[0].ships);
     insta::assert_yaml_snapshot!(search);
 }
 
@@ -1282,6 +1302,44 @@ fn sap_traces_ignore_ifhe_and_destroyers_have_no_citadel() {
 
     let destroyer = game().citadel_profile(&CitadelProfileArgs { ship: "Gearing".to_owned(), ..Default::default() });
     assert!(matches!(destroyer, Err(QueryError::NoCitadel { .. })), "{destroyer:?}");
+}
+
+/// SAP cannot ricochet off a plate its caliber overmatches. Bow-on, Venezia's
+/// 203 mm SAP (overmatching 14 mm) ricochets off Des Moines' steep 27 mm bow,
+/// while Marco Polo's 406 mm SAP (overmatching 28 mm) does not.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn sap_does_not_ricochet_off_an_overmatched_bow() {
+    let trace = |shooter: &str| {
+        let output = game()
+            .armor_trace(&ArmorTraceArgs {
+                shooter: shooter.to_owned(),
+                target_ship: "Des Moines".to_owned(),
+                ammo: Some(Ammo::Sap),
+                range_km: Some(Km::new(10.0)),
+                target_angle_deg: Some(Degrees::new(90.0)),
+                ..Default::default()
+            })
+            .expect("the shooter fires SAP");
+        let [trace] = output.traces.as_slice() else {
+            panic!("one trace for the ammo asked for");
+        };
+        trace.clone()
+    };
+    let bow_ricochets = |trace: &AmmoTrace| {
+        let bow = trace.zones.iter().find(|zone| zone.zone == "Bow").expect("rays strike the bow first");
+        bow.outcomes.get(&RayOutcome::Ricochet).copied().unwrap_or(0)
+    };
+
+    let venezia = trace("Venezia");
+    assert!(bow_ricochets(&venezia) > 0, "{:?}", venezia.zones);
+
+    let marco_polo = trace("Marco Polo");
+    assert_eq!(bow_ricochets(&marco_polo), 0, "{:?}", marco_polo.zones);
+    insta::assert_yaml_snapshot!(json!({
+        "venezia": { "weapon": venezia.weapon, "zones": venezia.zones },
+        "marco_polo": { "weapon": marco_polo.weapon, "zones": marco_polo.zones, "examples": marco_polo.examples },
+    }));
 }
 
 fn armor_assessment(ship: &str) -> ArmorAssessmentOutput {

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1216
 expression: friedrich
 ---
 interpretations:
@@ -441,8 +442,8 @@ bands:
           - aspect: broadside
             rays: 10979
             citadel_pct: 0
-            penetration_pct: 46.3
-            ricochet_pct: 11.6
+            penetration_pct: 46.5
+            ricochet_pct: 11.4
             shatter_pct: 42.1
             ranks:
               citadel:
@@ -454,8 +455,8 @@ bands:
           - aspect: angled_30
             rays: 10019
             citadel_pct: 0
-            penetration_pct: 47.8
-            ricochet_pct: 9.5
+            penetration_pct: 48.1
+            ricochet_pct: 9.2
             shatter_pct: 42.8
             ranks:
               citadel:
@@ -467,8 +468,8 @@ bands:
           - aspect: angled_45
             rays: 8723
             citadel_pct: 0
-            penetration_pct: 48.1
-            ricochet_pct: 10.5
+            penetration_pct: 48.4
+            ricochet_pct: 10.2
             shatter_pct: 41.4
             ranks:
               citadel:
@@ -768,21 +769,21 @@ bands:
           - aspect: broadside
             rays: 8153
             citadel_pct: 0
-            penetration_pct: 41.5
-            ricochet_pct: 19.9
+            penetration_pct: 41.8
+            ricochet_pct: 19.5
             shatter_pct: 38.6
             ranks:
               citadel:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 79
-                lower_pct: 21
+                higher_pct: 78
+                lower_pct: 22
           - aspect: angled_30
             rays: 7456
             citadel_pct: 0
-            penetration_pct: 41.9
-            ricochet_pct: 20.3
+            penetration_pct: 42.4
+            ricochet_pct: 19.9
             shatter_pct: 37.8
             ranks:
               citadel:
@@ -794,15 +795,15 @@ bands:
           - aspect: angled_45
             rays: 6555
             citadel_pct: 0
-            penetration_pct: 43.1
-            ricochet_pct: 20.9
+            penetration_pct: 43.7
+            ricochet_pct: 20.3
             shatter_pct: 36
             ranks:
               citadel:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 78
+                higher_pct: 77
                 lower_pct: 22
     excluded:
       - group: destroyer AP 127 mm

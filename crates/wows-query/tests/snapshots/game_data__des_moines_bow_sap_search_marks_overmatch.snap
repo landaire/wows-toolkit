@@ -1,0 +1,80 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 94
+expression: search
+---
+thickness_mm: 27
+target: "T10 Des Moines (cruiser, USA) bow"
+plates:
+  - "bow: Fore End Plating"
+  - "bow: Fore End Deck"
+tiers:
+  min: 8
+  max: 11
+tier_source: target_matchmaking
+ifhe: false
+rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches."
+groups:
+  - method: sap_penetration
+    considered:
+      total: 40
+      by_class:
+        destroyer: 11
+        cruiser: 12
+        battleship: 8
+        submarine: 9
+      test: 4
+    qualifying:
+      total: 39
+      by_class:
+        destroyer: 10
+        cruiser: 12
+        battleship: 8
+        submarine: 9
+      test: 4
+    share_pct: 97.5
+    share_pct_by_class:
+      destroyer: 90.9
+      cruiser: 100
+      battleship: 100
+      submarine: 100
+    ships:
+      - "T11 Affondatore (battleship, Italy): main 406 mm SAP, 102 mm pen, overmatches"
+      - "T11 Piemonte (cruiser, Italy): main 254 mm SAP, 67 mm pen"
+      - "T10 A. Regolo (destroyer, Italy): main 135 mm SAP, 38 mm pen"
+      - "T10 A. Vespucci (battleship, Italy, test): main 381 mm SAP, 96 mm pen"
+      - "T10 Archerfish (submarine, USA): main 127 mm SAP, 36 mm pen"
+      - "T10 Austin (cruiser, USA): main 127 mm SAP, 36 mm pen"
+      - "T10 Burrows (destroyer, USA): main 137 mm SAP, 38 mm pen"
+      - "T10 C. Colombo (battleship, Italy): main 381 mm SAP, 96 mm pen"
+      - "T10 Conte Verde (battleship, Italy): main 203 mm SAP, 54 mm pen"
+      - "T10 F. Sherman (destroyer, USA): main 127 mm SAP, 36 mm pen"
+      - "T10 K-1 (submarine, Russia): main 100 mm SAP, 29 mm pen"
+      - "T10 Orzeł (submarine, Europe): main 105 mm SAP, 29 mm pen"
+      - "T10 Pietro Calvi (submarine, Italy): main 120 mm SAP, 34 mm pen"
+      - "T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]: main 457 mm SAP, 114 mm pen, overmatches"
+      - "T10 Ravenna (cruiser, Italy, test): main 203 mm SAP, 54 mm pen"
+      - "T10 Seal (submarine, United_Kingdom): main 102 mm SAP, 29 mm pen"
+      - "T10 Thrasher (submarine, United_Kingdom): main 102 mm SAP, 29 mm pen"
+      - "T10 Venezia (cruiser, Italy): main 203 mm SAP, 54 mm pen"
+      - "T9 Adriatico (destroyer, Italy): main 135 mm SAP, 38 mm pen"
+      - "T9 Brindisi (cruiser, Italy): main 203 mm SAP, 54 mm pen"
+      - "T9 Christopher (destroyer, USA): main 137 mm SAP, 38 mm pen"
+      - "T9 F. Gonzaga (cruiser, Italy): main 135 mm SAP, 38 mm pen"
+      - "T9 Frank Friday (destroyer, USA, test): main 127 mm SAP, 36 mm pen"
+      - "T9 Johnston (destroyer, USA) [replicas: GQ Johnny]: main 127 mm SAP, 36 mm pen"
+      - "T9 La Spezia (cruiser, Italy): main 203 mm SAP, 54 mm pen"
+      - "T9 Lepanto (battleship, Italy): main 381 mm SAP, 96 mm pen"
+      - "T9 Marco Polo (battleship, Italy) [replicas: AL Marco Polo, Pilus Prior]: main 406 mm SAP, 102 mm pen, overmatches"
+      - "T9 Messina (cruiser, Italy): main 152 mm SAP, 42 mm pen"
+      - "T9 Michelangelo (cruiser, Italy): main 320 mm SAP, 82 mm pen"
+      - "T9 Paolo Emilio (destroyer, Italy): main 135 mm SAP, 38 mm pen"
+      - "T8 Amalfi (cruiser, Italy): main 203 mm SAP, 54 mm pen"
+      - "T8 I-56 (submarine, Japan): main 140 mm SAP, 39 mm pen"
+      - "T8 L-20 (submarine, Russia): main 100 mm SAP, 29 mm pen"
+      - "T8 Mirage (cruiser, Italy, test): main 203 mm SAP, 54 mm pen"
+      - "T8 Osborne (destroyer, USA): main 137 mm SAP, 38 mm pen"
+      - "T8 Pietro Micca (submarine, Italy): main 120 mm SAP, 34 mm pen"
+      - "T8 San Diego (cruiser, USA): main 127 mm SAP, 36 mm pen"
+      - "T8 V. Cuniberti (destroyer, Italy): main 120 mm SAP, 34 mm pen"
+      - "T8 V. Veneto (battleship, Italy): main 381 mm SAP, 96 mm pen"

@@ -1,0 +1,108 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1148
+expression: "json!({\n    \"venezia\": { \"weapon\": venezia.weapon, \"zones\": venezia.zones },\n    \"marco_polo\":\n    {\n        \"weapon\": marco_polo.weapon, \"zones\": marco_polo.zones, \"examples\":\n        marco_polo.examples\n    },\n})"
+---
+venezia:
+  weapon:
+    source: main battery
+    projectile: PIPA041_203MM_55_1924_CS
+    ammo: SAP
+    caliber_mm: 203
+    penetration_mm: 54
+  zones:
+    - zone: Superstructure
+      rays: 151
+      outcomes:
+        penetration: 121
+        ricochet: 20
+        shatter: 10
+    - zone: Turret
+      rays: 137
+      outcomes:
+        penetration: 57
+        ricochet: 22
+        shatter: 58
+    - zone: Bow
+      rays: 112
+      outcomes:
+        penetration: 27
+        ricochet: 85
+    - zone: Casemate
+      rays: 104
+      outcomes:
+        ricochet: 104
+    - zone: Stern
+      rays: 39
+      outcomes:
+        ricochet: 39
+    - zone: Citadel
+      rays: 16
+      outcomes:
+        ricochet: 16
+marco_polo:
+  weapon:
+    source: main battery
+    projectile: PIPA053_406MM_1940_CS_M_POLO
+    ammo: SAP
+    caliber_mm: 406
+    penetration_mm: 102
+  zones:
+    - zone: Turret
+      rays: 147
+      outcomes:
+        penetration: 84
+        ricochet: 4
+        shatter: 59
+    - zone: Superstructure
+      rays: 145
+      outcomes:
+        penetration: 130
+        shatter: 15
+    - zone: Bow
+      rays: 115
+      outcomes:
+        penetration: 115
+    - zone: Casemate
+      rays: 90
+      outcomes:
+        ricochet: 90
+    - zone: Stern
+      rays: 34
+      outcomes:
+        penetration: 34
+    - zone: Citadel
+      rays: 13
+      outcomes:
+        ricochet: 13
+  examples:
+    - outcome: penetration
+      from_bow_m: 89.69999694824219
+      above_waterline_m: 10
+      plates:
+        - plate: "turret: Top Plate"
+          zone: Turret
+          thickness_mm: 25
+          angle_deg: 84.80000305175781
+          result: overmatch
+      more_plates: 9
+    - outcome: ricochet
+      from_bow_m: 75.4000015258789
+      above_waterline_m: 5.300000190734863
+      plates:
+        - plate: "casemate: Armor Belt"
+          zone: Casemate
+          thickness_mm: 30
+          angle_deg: 86.30000305175781
+          result: ricochet
+      more_plates: 4
+    - outcome: shatter
+      from_bow_m: 62.79999923706055
+      above_waterline_m: 9.5
+      plates:
+        - plate: "turret 2: Barbette Armor (barbette)"
+          zone: Turret
+          thickness_mm: 160
+          angle_deg: 70.0999984741211
+          result: shatter
+      more_plates: 10

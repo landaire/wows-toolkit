@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 77
 expression: search
 ---
 thickness_mm: 27
@@ -12,7 +13,7 @@ tiers:
   max: 11
 tier_source: target_matchmaking
 ifhe: false
-rule: AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. HE and SAP never overmatch.
+rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches."
 groups:
   - method: ap_overmatch
     considered:

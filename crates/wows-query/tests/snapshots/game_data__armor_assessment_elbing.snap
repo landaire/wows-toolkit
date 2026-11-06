@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1207
 expression: assessment
 ---
 ship: "T10 Elbing (destroyer, Germany)"
@@ -382,33 +383,33 @@ bands:
           - aspect: broadside
             rays: 4148
             citadel_pct: 0
-            penetration_pct: 89.8
-            ricochet_pct: 10.2
+            penetration_pct: 91.8
+            ricochet_pct: 8.2
             shatter_pct: 0
             ranks:
               damaging:
-                higher_pct: 68
-                lower_pct: 32
+                higher_pct: 80
+                lower_pct: 20
           - aspect: angled_30
             rays: 3870
             citadel_pct: 0
-            penetration_pct: 90.8
-            ricochet_pct: 8.7
+            penetration_pct: 93.6
+            ricochet_pct: 5.9
             shatter_pct: 0.5
             ranks:
               damaging:
-                higher_pct: 68
-                lower_pct: 30
+                higher_pct: 62
+                lower_pct: 36
           - aspect: angled_45
             rays: 3299
             citadel_pct: 0
-            penetration_pct: 91.6
-            ricochet_pct: 7.7
+            penetration_pct: 94.2
+            ricochet_pct: 5
             shatter_pct: 0.7
             ranks:
               damaging:
-                higher_pct: 38
-                lower_pct: 61
+                higher_pct: 47
+                lower_pct: 50
   - band: moderate
     label: "moderate, 12 to 15 km"
     groups:
@@ -655,33 +656,33 @@ bands:
           - aspect: broadside
             rays: 3053
             citadel_pct: 0
-            penetration_pct: 86.8
-            ricochet_pct: 13.2
+            penetration_pct: 91.4
+            ricochet_pct: 8.6
             shatter_pct: 0
             ranks:
               damaging:
-                higher_pct: 53
-                lower_pct: 46
+                higher_pct: 66
+                lower_pct: 32
           - aspect: angled_30
             rays: 2798
             citadel_pct: 0
-            penetration_pct: 87.6
-            ricochet_pct: 12
+            penetration_pct: 92.6
+            ricochet_pct: 7
             shatter_pct: 0.4
             ranks:
               damaging:
-                higher_pct: 54
-                lower_pct: 43
+                higher_pct: 49
+                lower_pct: 50
           - aspect: angled_45
             rays: 2421
             citadel_pct: 0
-            penetration_pct: 85.8
-            ricochet_pct: 13.5
+            penetration_pct: 91.2
+            ricochet_pct: 8.1
             shatter_pct: 0.7
             ranks:
               damaging:
-                higher_pct: 59
-                lower_pct: 36
+                higher_pct: 64
+                lower_pct: 35
     excluded:
       - group: destroyer AP 127 mm
         max_range_km: 10.54

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1207
 expression: assessment
 ---
 ship: "T10 Khabarovsk (destroyer, Russia)"
@@ -382,33 +383,33 @@ bands:
           - aspect: broadside
             rays: 3326
             citadel_pct: 0
+            penetration_pct: 97.2
+            ricochet_pct: 2.8
+            shatter_pct: 0
+            ranks:
+              damaging:
+                higher_pct: 4
+                lower_pct: 95
+          - aspect: angled_30
+            rays: 2990
+            citadel_pct: 0
             penetration_pct: 95.9
             ricochet_pct: 4.1
             shatter_pct: 0
             ranks:
               damaging:
-                higher_pct: 0
-                lower_pct: 100
-          - aspect: angled_30
-            rays: 2990
-            citadel_pct: 0
-            penetration_pct: 93
-            ricochet_pct: 7
-            shatter_pct: 0
-            ranks:
-              damaging:
-                higher_pct: 8
-                lower_pct: 89
+                higher_pct: 9
+                lower_pct: 85
           - aspect: angled_45
             rays: 2591
             citadel_pct: 0
-            penetration_pct: 92.3
-            ricochet_pct: 7.7
+            penetration_pct: 95.6
+            ricochet_pct: 4.4
             shatter_pct: 0
             ranks:
               damaging:
-                higher_pct: 15
-                lower_pct: 84
+                higher_pct: 11
+                lower_pct: 88
   - band: moderate
     label: "moderate, 12 to 15 km"
     groups:
@@ -655,33 +656,33 @@ bands:
           - aspect: broadside
             rays: 2356
             citadel_pct: 0
-            penetration_pct: 83.7
-            ricochet_pct: 16.3
+            penetration_pct: 92.3
+            ricochet_pct: 7.7
             shatter_pct: 0
             ranks:
               damaging:
-                higher_pct: 85
-                lower_pct: 15
+                higher_pct: 53
+                lower_pct: 46
           - aspect: angled_30
             rays: 2151
             citadel_pct: 0
-            penetration_pct: 86.1
-            ricochet_pct: 13.9
-            shatter_pct: 0
-            ranks:
-              damaging:
-                higher_pct: 80
-                lower_pct: 20
-          - aspect: angled_45
-            rays: 1865
-            citadel_pct: 0
-            penetration_pct: 86.1
-            ricochet_pct: 13.9
+            penetration_pct: 92.3
+            ricochet_pct: 7.7
             shatter_pct: 0
             ranks:
               damaging:
                 higher_pct: 54
-                lower_pct: 45
+                lower_pct: 42
+          - aspect: angled_45
+            rays: 1865
+            citadel_pct: 0
+            penetration_pct: 91.8
+            ricochet_pct: 8.2
+            shatter_pct: 0
+            ranks:
+              damaging:
+                higher_pct: 53
+                lower_pct: 47
     excluded:
       - group: destroyer AP 127 mm
         max_range_km: 10.54

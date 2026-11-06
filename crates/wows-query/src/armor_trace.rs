@@ -363,7 +363,24 @@ pub(crate) enum WeaponModel {
     ArmorPiercing { params: ShellParams, impact_velocity: MetersPerSecond },
 
     /// HE or SAP against the first plate.
-    FirstPlate { penetration: Millimeters, always_ricochet: Option<Degrees> },
+    FirstPlate { penetration: Millimeters, ricochet: Option<FirstPlateRicochet> },
+}
+
+/// When SAP ricochets off its first plate: struck at or past `always_at`,
+/// unless its caliber overmatches the plate.
+pub(crate) struct FirstPlateRicochet {
+    always_at: Degrees,
+    caliber: Millimeters,
+}
+
+impl FirstPlateRicochet {
+    fn overmatches(&self, plate: &RayPlate) -> bool {
+        is_overmatch(self.caliber, plate.thickness)
+    }
+
+    fn ricochets(&self, plate: &RayPlate) -> bool {
+        plate.angle.value() >= self.always_at.value() && !self.overmatches(plate)
+    }
 }
 
 /// The gun a trace fires and from how far.
@@ -627,8 +644,8 @@ impl GameData {
                 if ifhe && ammo == Ammo::He {
                     assumptions.push("Inertia Fuse for HE Shells is applied to the HE penetration.".to_owned());
                 }
-                let always_ricochet = first_plate_ricochet(ammo, &projectile);
-                (WeaponModel::FirstPlate { penetration, always_ricochet }, Some(penetration))
+                let ricochet = first_plate_ricochet(ammo, &projectile, shell.caliber_mm);
+                (WeaponModel::FirstPlate { penetration, ricochet }, Some(penetration))
             }
         };
 
@@ -719,8 +736,8 @@ impl GameData {
                     _ => ordnance.he_penetration_mm,
                 };
                 let penetration = penetration.ok_or_else(|| not_traceable("the bomb lists no penetration"))?;
-                let always_ricochet = first_plate_ricochet(ammo, &projectile);
-                (WeaponModel::FirstPlate { penetration, always_ricochet }, Some(penetration), None)
+                let ricochet = first_plate_ricochet(ammo, &projectile, caliber);
+                (WeaponModel::FirstPlate { penetration, ricochet }, Some(penetration), None)
             }
         };
 
@@ -981,9 +998,9 @@ pub(crate) fn trace_ray<'a>(model: &WeaponModel, plates: Vec<RayPlate<'a>>) -> T
 
             TracedRay { plates, outcome, over_citadel, random_ricochet_band, detonated_in, sim: Some(sim) }
         }
-        WeaponModel::FirstPlate { penetration, always_ricochet } => {
+        WeaponModel::FirstPlate { penetration, ricochet } => {
             let first = &plates[0];
-            let outcome = if always_ricochet.is_some_and(|angle| first.angle.value() >= angle.value()) {
+            let outcome = if ricochet.as_ref().is_some_and(|ricochet| ricochet.ricochets(first)) {
                 RayOutcome::Ricochet
             } else if penetration.value() >= first.thickness.value() && is_citadel_zone(first.zone) {
                 RayOutcome::Citadel
@@ -1035,11 +1052,12 @@ pub(crate) fn ap_outcome<'a>(sim: &ShellSimResult, zones: &[&'a str]) -> (RayOut
     (outcome, None)
 }
 
-/// The always-ricochet angle that applies to HE or SAP on its first plate.
-/// HE does not ricochet; SAP does past its always-ricochet angle.
-fn first_plate_ricochet(ammo: Ammo, projectile: &Projectile) -> Option<Degrees> {
+/// How SAP ricochets off its first plate; HE does not ricochet.
+fn first_plate_ricochet(ammo: Ammo, projectile: &Projectile, caliber: Millimeters) -> Option<FirstPlateRicochet> {
     match ammo {
-        Ammo::Sap => projectile.bullet_always_ricochet_at().map(Degrees::new),
+        Ammo::Sap => projectile
+            .bullet_always_ricochet_at()
+            .map(|always_at| FirstPlateRicochet { always_at: Degrees::new(always_at), caliber }),
         Ammo::He | Ammo::Ap => None,
     }
 }
@@ -1099,10 +1117,10 @@ fn examples(rays: &[TracedRay], model: &WeaponModel, bow: ShipModelDistance, nam
     let mut groups: Vec<(RayOutcome, Vec<&TracedRay>)> = by_outcome.into_iter().collect();
     groups.sort_by(|left, right| right.1.len().cmp(&left.1.len()).then_with(|| left.0.cmp(&right.0)));
 
-    groups.into_iter().take(EXAMPLE_LIMIT).map(|(_, rays)| example(rays[rays.len() / 2], bow, names)).collect()
+    groups.into_iter().take(EXAMPLE_LIMIT).map(|(_, rays)| example(rays[rays.len() / 2], model, bow, names)).collect()
 }
 
-fn example(ray: &TracedRay, bow: ShipModelDistance, names: &PlateNames) -> RayExample {
+fn example(ray: &TracedRay, model: &WeaponModel, bow: ShipModelDistance, names: &PlateNames) -> RayExample {
     const EXAMPLE_PLATE_LIMIT: usize = 10;
 
     // A fuse that fired between plates leaves the next one unreached, which is
@@ -1128,9 +1146,12 @@ fn example(ray: &TracedRay, bow: ShipModelDistance, names: &PlateNames) -> RayEx
                     PlateOutcome::Shatter => PlateResultKind::Shatter,
                 },
                 (None, Some(_)) => PlateResultKind::NotReached,
-                (None, None) => match ray.outcome {
-                    RayOutcome::Ricochet => PlateResultKind::Ricochet,
-                    RayOutcome::Shatter => PlateResultKind::Shatter,
+                (None, None) => match (ray.outcome, model) {
+                    (RayOutcome::Ricochet, _) => PlateResultKind::Ricochet,
+                    (RayOutcome::Shatter, _) => PlateResultKind::Shatter,
+                    (_, WeaponModel::FirstPlate { ricochet: Some(ricochet), .. }) if ricochet.overmatches(plate) => {
+                        PlateResultKind::Overmatch
+                    }
                     _ => PlateResultKind::Penetrate,
                 },
             };
@@ -1249,7 +1270,7 @@ fn common_assumptions(model: &WeaponModel) -> Vec<&'static str> {
             "A citadel hit is a detonation inside the citadel volume, judged by how many citadel plates the ray crossed before the detonation (armor viewer rule).",
         ]),
         WeaponModel::FirstPlate { .. } => assumptions.extend([
-            "HE and SAP defeat the first plate when penetration >= its nominal thickness, at any angle. SAP ricochets past its always-ricochet angle; HE does not ricochet.",
+            "HE and SAP defeat the first plate when penetration >= its nominal thickness; the strike angle does not change penetration. SAP ricochets off a plate struck at or past its always-ricochet angle unless its caliber > 14.3 x thickness overmatches the plate. HE does not ricochet or overmatch.",
             "Damage behind the first plate is not modelled.",
         ]),
     }

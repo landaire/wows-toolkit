@@ -150,7 +150,9 @@ pub struct PenetrationGroup {
     #[serde(flatten)]
     pub shares: Shares,
 
-    /// "T10 Gearing (destroyer, USA): main 127 mm HE, 21 mm pen", best shell per ship.
+    /// "T10 Gearing (destroyer, USA): main 127 mm HE, 21 mm pen", best shell
+    /// per ship. A SAP shell that also overmatches the plate, and so cannot
+    /// ricochet off it, ends with ", overmatches".
     pub ships: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,8 +160,8 @@ pub struct PenetrationGroup {
 }
 
 impl GameData {
-    /// Ships whose shells defeat a plate outright: HE or SAP whose penetration
-    /// is at least the thickness, or AP whose caliber overmatches it.
+    /// Ships whose shells defeat a plate: HE or SAP whose penetration is at
+    /// least the thickness, or AP whose caliber overmatches it.
     pub fn penetration_search(&self, args: &PenetrationSearchArgs) -> Result<PenetrationSearchOutput, QueryError> {
         let mut interpretations = Interpretations::default();
         let target = match args.target_ship.as_deref() {
@@ -231,7 +233,7 @@ impl GameData {
             .map(|method| {
                 let candidates = considered.remove(method).unwrap_or_default();
                 let found = hits.remove(method).unwrap_or_default();
-                group(*method, &candidates, &found, ifhe)
+                group(*method, &candidates, &found, thickness, ifhe)
             })
             .collect();
 
@@ -243,7 +245,7 @@ impl GameData {
             tiers,
             tier_source,
             ifhe,
-            rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. HE and SAP never overmatch.",
+            rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches.",
             groups,
         })
     }
@@ -279,9 +281,15 @@ fn strength(shell: &Shell, method: DefeatMethod, thickness: Millimeters, ifhe: b
     defeats.then_some(rating)
 }
 
-fn group(method: DefeatMethod, considered: &[&Ship], hits: &[(&Ship, Shell)], ifhe: bool) -> PenetrationGroup {
+fn group(
+    method: DefeatMethod,
+    considered: &[&Ship],
+    hits: &[(&Ship, Shell)],
+    thickness: Millimeters,
+    ifhe: bool,
+) -> PenetrationGroup {
     let ships: Vec<String> =
-        hits.iter().take(GROUP_LIMIT).map(|(ship, shell)| describe_hit(ship, shell, ifhe)).collect();
+        hits.iter().take(GROUP_LIMIT).map(|(ship, shell)| describe_hit(ship, shell, thickness, ifhe)).collect();
     let omitted = (hits.len() > ships.len()).then(|| hits.len() - ships.len());
 
     let considered = ShipCounts::from_ships(considered.iter().copied());
@@ -297,7 +305,7 @@ fn group(method: DefeatMethod, considered: &[&Ship], hits: &[(&Ship, Shell)], if
     }
 }
 
-fn describe_hit(ship: &Ship, shell: &Shell, ifhe: bool) -> String {
+fn describe_hit(ship: &Ship, shell: &Shell, thickness: Millimeters, ifhe: bool) -> String {
     let battery = match shell.battery {
         Battery::Main => "main",
         Battery::Secondary => "secondary",
@@ -308,6 +316,13 @@ fn describe_hit(ship: &Ship, shell: &Shell, ifhe: bool) -> String {
         Ammo::Ap => None,
     };
     let penetration = penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
+    let overmatch =
+        if shell.ammo == Ammo::Sap && is_overmatch(shell.caliber_mm, thickness) { ", overmatches" } else { "" };
 
-    format!("{}: {battery} {} mm {}{penetration}", ship.listing_label(), shell.caliber_mm.value(), shell.ammo.label())
+    format!(
+        "{}: {battery} {} mm {}{penetration}{overmatch}",
+        ship.listing_label(),
+        shell.caliber_mm.value(),
+        shell.ammo.label()
+    )
 }

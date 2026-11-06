@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1227
 expression: armor_assessment(ship)
 ---
 ship: "T10 Zaō (cruiser, Japan)"
@@ -436,42 +437,42 @@ bands:
           - aspect: broadside
             rays: 6736
             citadel_pct: 0
-            penetration_pct: 85.6
-            ricochet_pct: 10.8
+            penetration_pct: 85.8
+            ricochet_pct: 10.6
             shatter_pct: 3.6
             ranks:
               citadel:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 18
-                lower_pct: 82
+                higher_pct: 21
+                lower_pct: 78
           - aspect: angled_30
             rays: 6204
             citadel_pct: 0
-            penetration_pct: 85.2
-            ricochet_pct: 10.5
+            penetration_pct: 85.3
+            ricochet_pct: 10.4
             shatter_pct: 4.3
             ranks:
               citadel:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 21
-                lower_pct: 79
+                higher_pct: 23
+                lower_pct: 77
           - aspect: angled_45
             rays: 5293
             citadel_pct: 0
-            penetration_pct: 84.6
-            ricochet_pct: 10.6
+            penetration_pct: 84.7
+            ricochet_pct: 10.5
             shatter_pct: 4.8
             ranks:
               citadel:
                 higher_pct: 0
                 lower_pct: 0
               damaging:
-                higher_pct: 19
-                lower_pct: 81
+                higher_pct: 21
+                lower_pct: 78
   - band: moderate
     label: "moderate, 12 to 15 km"
     groups:
@@ -763,42 +764,42 @@ bands:
           - aspect: broadside
             rays: 4974
             citadel_pct: 0
-            penetration_pct: 76.1
-            ricochet_pct: 20.2
+            penetration_pct: 76.3
+            ricochet_pct: 20
             shatter_pct: 3.7
             ranks:
               citadel:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 38
-                lower_pct: 63
+                higher_pct: 46
+                lower_pct: 54
           - aspect: angled_30
             rays: 4517
             citadel_pct: 0
-            penetration_pct: 74.8
-            ricochet_pct: 21.2
+            penetration_pct: 74.9
+            ricochet_pct: 21.1
             shatter_pct: 4
             ranks:
               citadel:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 45
-                lower_pct: 55
+                higher_pct: 50
+                lower_pct: 49
           - aspect: angled_45
             rays: 3900
             citadel_pct: 0
             penetration_pct: 73.1
-            ricochet_pct: 22.4
+            ricochet_pct: 22.3
             shatter_pct: 4.6
             ranks:
               citadel:
                 higher_pct: 1
                 lower_pct: 0
               damaging:
-                higher_pct: 44
-                lower_pct: 56
+                higher_pct: 52
+                lower_pct: 48
     excluded:
       - group: destroyer AP 127 mm
         max_range_km: 10.54

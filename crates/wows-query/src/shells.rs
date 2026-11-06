@@ -125,7 +125,7 @@ pub struct Shell {
     #[serde(skip)]
     pub ifhe_penetration_mm: Option<Millimeters>,
 
-    /// Thickest whole-mm plate AP overmatches (caliber > 14.3 x thickness).
+    /// Thickest whole-mm plate AP or SAP overmatches (caliber > 14.3 x thickness).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overmatches_up_to_mm: Option<Millimeters>,
 
@@ -427,7 +427,10 @@ fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficien
         Ammo::Sap => (projectile.alpha_piercing_cs().map(|base| Millimeters::new(base.floor())), None),
         Ammo::Ap => (None, None),
     };
-    let overmatches_up_to_mm = if ammo == Ammo::Ap { thickest_overmatched_plate(caliber_mm) } else { None };
+    let overmatches_up_to_mm = match ammo {
+        Ammo::Ap | Ammo::Sap => thickest_overmatched_plate(caliber_mm),
+        Ammo::He => None,
+    };
 
     Some(Shell {
         param: param.name().to_owned(),

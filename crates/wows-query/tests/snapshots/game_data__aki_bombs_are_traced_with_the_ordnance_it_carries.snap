@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 989
 expression: trace
 ---
 shooter: "T10 Aki (battleship, Japan)"
@@ -215,5 +216,5 @@ traces:
       - "Target hull level and stationary, turrets at their default heading, and the projectile travels straight through the ship."
       - "Penetration, ricochet and fuse behaviour are resolved by the game server; the client data holds only the inputs."
       - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
-      - "HE and SAP defeat the first plate when penetration >= its nominal thickness, at any angle. SAP ricochets past its always-ricochet angle; HE does not ricochet."
+      - HE and SAP defeat the first plate when penetration >= its nominal thickness; the strike angle does not change penetration. SAP ricochets off a plate struck at or past its always-ricochet angle unless its caliber > 14.3 x thickness overmatches the plate. HE does not ricochet or overmatch.
       - Damage behind the first plate is not modelled.

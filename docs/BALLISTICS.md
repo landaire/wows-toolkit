@@ -381,6 +381,10 @@ Our `wowsunpack::ballistics` implements these for the offline armor viewer simul
 - **Post-penetration velocity**: `v_after = v * (1 - exp(1 - raw_pen / eff_thickness))`
 - **Fuse distance**: `fuse_arm_velocity * fuse_time`, converted to ship-model units (15 m per unit; the armor meshes' space)
 
+`wows-query`'s armor_trace also applies overmatch to SAP: an overmatched plate
+cannot ricochet SAP, which still needs `alphaPiercingCS >= thickness` to
+penetrate. HE never overmatches.
+
 These formulas are consistent with observed in-game behavior and widely used by
 community tools (wows_shell, WoWs Fitting Tool, ShipBuilder). While they cannot
 be verified against the binary, they produce results that match server behavior
