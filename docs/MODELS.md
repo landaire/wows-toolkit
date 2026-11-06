@@ -1135,4 +1135,4 @@ New dumps extract armor unless `dump-renderer-data --no-armor` is given. To add 
 wows-data-mgr extract-armor --build 13533378 --game-dir /path/to/World_of_Warships --output /path/to/wows-replay-data
 ```
 
-The install needs `content/GameParams.data`, `content/assets.bin` and the ship and mount geometry (`wows-data-mgr required-paths` lists the globs).
+The install needs `content/GameParams.data`, `content/assets.bin` and the ship and mount geometry (`wows-data-mgr required-paths --armor` lists the globs). `scripts/bulk_archive.py --armor-only` does this for every archived build that lacks armor, downloading only the packages holding those files.

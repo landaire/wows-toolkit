@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = []
 # ///
 
@@ -8,6 +8,7 @@ Bulk download and archive all World of Warships game versions.
 
 Usage:
     uv run scripts/bulk_archive.py [--dry-run] [--start-from N] [--no-skip] [-y]
+    uv run scripts/bulk_archive.py --armor-only [--install-dir <install>] [--no-skip] [-y]
 
 Requires:
     - steamroom built and on PATH (or pointed at by $STEAMROOM_BIN, or built in a
@@ -45,6 +46,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from datetime import datetime
 from pathlib import Path
 
@@ -93,6 +95,8 @@ CONTENT_DEPOT = 552991
 CLIENT_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_raw.txt"
 LOCALIZATION_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_552994_raw.txt"
 CONTENT_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_552991_raw.txt"
+# Per-build depot manifest ids.
+GAME_VERSIONS_FILE = REPO_ROOT / "game_versions.toml"
 
 
 def parse_date(s: str) -> datetime | None:
@@ -314,21 +318,228 @@ def get_required_globs() -> list[str]:
     return _REQUIRED_GLOBS
 
 
-def resolve_pkgs(build: int) -> list[str]:
-    """Resolve the minimal set of .pkg files needed to dump `build`, from idx alone."""
-    idx_dir = TEMP_DIR / "bin" / str(build) / "idx"
-    res = run_tool([WOWSUNPACK, "--idx-files", idx_dir, "pkgs", "--json", *get_required_globs()])
+def resolve_pkgs(build: int, globs: list[str], game_dir: Path = TEMP_DIR) -> dict:
+    """Resolve the minimal set of .pkg files holding `globs` for `build`, from idx alone.
+
+    Returns `wowsunpack pkgs --json` output: `pkgs` and `unmatched_patterns`."""
+    idx_dir = game_dir / "bin" / str(build) / "idx"
+    res = run_tool([WOWSUNPACK, "--idx-files", idx_dir, "pkgs", "--json", *globs])
     if res.returncode != 0:
         raise RuntimeError(
             f"pkg resolution failed for build {build} (rc={res.returncode}): "
             f"{(res.stderr or res.stdout).strip()[:300]}"
         )
-    data = json.loads(res.stdout)
-    unmatched = data.get("unmatched_patterns", [])
-    if unmatched:
-        # Expected for version-specific dirs absent in this build; informational.
-        print(f"    note: {len(unmatched)} required glob(s) matched nothing in build {build}")
+    return json.loads(res.stdout)
+
+
+_ARMOR_GLOBS: list[str] | None = None
+
+
+def get_armor_globs() -> list[str]:
+    """The VFS path globs `extract-armor` reads (cached; identical for every build)."""
+    global _ARMOR_GLOBS
+    if _ARMOR_GLOBS is None:
+        res = run_tool([WOWS_DATA_MGR, "required-paths", "--armor"], timeout=300)
+        if res.returncode != 0:
+            raise RuntimeError(f"required-paths --armor failed: {res.stderr.strip()}")
+        _ARMOR_GLOBS = [s for line in res.stdout.splitlines() if (s := line.strip())]
+    return _ARMOR_GLOBS
+
+
+# Extraction reads the ship prototypes from this file; builds without it have no
+# armor to extract.
+ASSETS_BIN = "content/assets.bin"
+
+# Resume state for --armor-only: builds that cannot carry armor or failed
+# extraction, and manifests whose builds are all settled. A build whose
+# metadata.toml already lists armor/ entries is done regardless of this file.
+ARMOR_PROGRESS_FILE = REPO_ROOT / "armor_backfill.json"
+
+
+def load_armor_progress() -> dict:
+    progress = {"no_assets_bin": [], "failed": {}, "manifests_done": []}
+    if ARMOR_PROGRESS_FILE.exists():
+        progress.update(json.loads(ARMOR_PROGRESS_FILE.read_text(encoding="utf-8")))
+    return progress
+
+
+def save_armor_progress(progress: dict):
+    ARMOR_PROGRESS_FILE.write_text(json.dumps(progress, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def has_armor(build: int) -> bool:
+    """True if this build's dump records the armor extract."""
+    dump = find_dump_dir(build)
+    meta = dump / "metadata.toml" if dump else None
+    if meta is None or not meta.exists():
+        return False
+    return re.search(r'^"armor/', meta.read_text(encoding="utf-8"), re.MULTILINE) is not None
+
+
+def armor_pending(build: int, progress: dict) -> bool:
+    """True if `build` is archived, lacks armor, and has not been settled before."""
+    return (
+        already_archived(build)
+        and not has_armor(build)
+        and build not in progress["no_assets_bin"]
+        and str(build) not in progress["failed"]
+    )
+
+
+def gib(size: int) -> str:
+    return f"{size / 2**30:.2f} GiB"
+
+
+def tree_size(path: Path) -> int:
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) if path.exists() else 0
+
+
+def extract_build_armor(build: int, game_dir: Path, progress: dict):
+    """Run `wows-data-mgr extract-armor` for `build` from `game_dir` into ARCHIVE_DIR
+    and record a failure in `progress`. A timeout leaves the build pending."""
+    print(f"    Extracting armor for build {build} from {game_dir}...")
+    try:
+        res = run_tool(
+            [WOWS_DATA_MGR, "extract-armor", "--build", str(build), "--game-dir", game_dir, "--output", ARCHIVE_DIR],
+            timeout=7200,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"    ARMOR EXTRACTION TIMED OUT for build {build}")
+        return
+    for line in (res.stdout or "").splitlines():
+        if stripped := line.strip():
+            print(f"      {stripped}")
+    if res.returncode != 0:
+        # stderr leads with per-model warnings; the error is at the end.
+        error = (res.stderr or "").strip()[-2000:]
+        print(f"    ARMOR EXTRACTION FAILED (exit {res.returncode}): {error[-800:]}")
+        progress["failed"][str(build)] = error
+    save_armor_progress(progress)
+
+
+def armor_pkgs(build: int, game_dir: Path, progress: dict) -> list[str] | None:
+    """The pkgs `extract-armor` reads for `build`, or None when they cannot be
+    resolved or the build has no assets.bin (recorded in `progress`)."""
+    try:
+        data = resolve_pkgs(build, get_armor_globs(), game_dir)
+    except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+        print(f"    PKG RESOLUTION FAILED for build {build}: {e}")
+        return None
+    if ASSETS_BIN in data.get("unmatched_patterns", []):
+        print(f"    Build {build}: no {ASSETS_BIN}, no armor to extract")
+        progress["no_assets_bin"].append(build)
+        save_armor_progress(progress)
+        return None
     return data["pkgs"]
+
+
+def extract_if_complete(build: int, pkgs: list[str], game_dir: Path, progress: dict):
+    """Extract `build` when `game_dir` holds all of `pkgs`. A download that matched
+    fewer files still succeeds, and the build is then left for another manifest."""
+    pkg_dir = game_dir / "res_packages"
+    missing = [p for p in pkgs if not (pkg_dir / p).exists()]
+    if missing:
+        print(f"    Build {build}: {game_dir} lacks {len(missing)} of {len(pkgs)} pkg(s); left pending")
+        return
+    size = sum((pkg_dir / p).stat().st_size for p in pkgs)
+    print(f"    Build {build}: {len(pkgs)} pkg(s), {gib(size)}")
+    extract_build_armor(build, game_dir, progress)
+
+
+def backfill_armor_from_install(install: Path, progress: dict):
+    """Extract armor for every pending build `install` holds completely, without
+    downloading anything."""
+    for build in sorted(detect_builds(install), reverse=True):
+        if armor_pending(build, progress) and (pkgs := armor_pkgs(build, install, progress)) is not None:
+            extract_if_complete(build, pkgs, install, progress)
+
+
+def armor_manifest_candidates(download_list: list[tuple[str, str]],
+                              content_manifests: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """(label, client manifest, content manifest) to search for pending builds,
+    newest first: the manifests game_versions.toml records per build, then the
+    dated manifest lists. A manifest also carries the previous build's idx, which
+    covers archived builds game_versions.toml does not list."""
+    versions = tomllib.loads(GAME_VERSIONS_FILE.read_text(encoding="utf-8"))["versions"]
+    candidates = []
+    seen = set()
+    for build, entry in sorted(versions.items(), key=lambda item: int(item[0]), reverse=True):
+        pair = (entry.get("client_manifest_id"), entry.get("content_manifest_id"))
+        if None not in pair and pair not in seen:
+            seen.add(pair)
+            candidates.append((f"{entry['version']} ({build})", *pair))
+    for date_str, manifest_id in reversed(download_list):
+        manifest_date = parse_date(date_str)
+        content_manifest = find_closest_manifest(manifest_date, content_manifests) if manifest_date else None
+        pair = (manifest_id, content_manifest)
+        if content_manifest and pair not in seen:
+            seen.add(pair)
+            candidates.append((date_str, *pair))
+    return candidates
+
+
+def backfill_armor(candidates: list[tuple[str, str, str]], filelist_dir: Path, progress: dict):
+    """Add the armor extract to archived builds that lack it. Per manifest pair,
+    in order: fetch its idx, download only the pkgs `extract-armor` reads for its
+    pending builds, extract them, then delete the downloads."""
+    idx_filelist = filelist_dir / "idx.txt"
+    idx_filelist.write_bytes(b"regex:\\.idx$\n")
+    pkg_filelist = filelist_dir / "pkgs.txt"
+
+    for label, client_manifest, content_manifest in candidates:
+        key = f"{client_manifest}/{content_manifest}"
+        if key in progress["manifests_done"]:
+            continue
+        print(f"\n{'=' * 60}")
+        print(f"{label} - manifests {CLIENT_DEPOT}:{client_manifest} {CONTENT_DEPOT}:{content_manifest}")
+
+        shutil.rmtree(TEMP_DIR, ignore_errors=True)
+        TEMP_DIR.mkdir(parents=True)
+        try:
+            if not (run_steamroom(CLIENT_DEPOT, client_manifest, TEMP_DIR, idx_filelist, timeout=900)
+                    and run_steamroom(CONTENT_DEPOT, content_manifest, TEMP_DIR, idx_filelist, timeout=900)):
+                continue
+            builds = detect_builds(TEMP_DIR)
+            print(f"  Builds: {builds} (idx {gib(tree_size(TEMP_DIR))})")
+
+            needed: dict[int, list[str]] = {}
+            for build in sorted(builds, reverse=True):
+                if armor_pending(build, progress) and (pkgs := armor_pkgs(build, TEMP_DIR, progress)) is not None:
+                    needed[build] = pkgs
+
+            if needed:
+                union = sorted({p for pkgs in needed.values() for p in pkgs})
+                write_pkg_filelist(union, pkg_filelist)
+                print(f"  Downloading {len(union)} pkg(s) for builds {list(needed)}...")
+                ok_client = run_steamroom(CLIENT_DEPOT, client_manifest, TEMP_DIR, pkg_filelist, timeout=7200)
+                ok_content = run_steamroom(CONTENT_DEPOT, content_manifest, TEMP_DIR, pkg_filelist, timeout=7200)
+                if not (ok_client and ok_content):
+                    print("  PKG DOWNLOAD FAILED")
+                    continue
+                print(f"  Downloaded {gib(tree_size(TEMP_DIR / 'res_packages'))}")
+                for build, pkgs in needed.items():
+                    extract_if_complete(build, pkgs, TEMP_DIR, progress)
+
+            if not any(armor_pending(build, progress) for build in builds):
+                progress["manifests_done"].append(key)
+                save_armor_progress(progress)
+        finally:
+            shutil.rmtree(TEMP_DIR, ignore_errors=True)
+
+    print(f"\n{'=' * 60}")
+    print(f"Builds still without armor: {armor_pending_dumps(progress) or 'none'}")
+    print(f"Failed: {sorted(progress['failed'])}; without {ASSETS_BIN}: {len(progress['no_assets_bin'])}")
+
+
+def armor_pending_dumps(progress: dict) -> list[str]:
+    """Archived dump directories still lacking armor."""
+    if not ARCHIVE_DIR.exists():
+        return []
+    return [
+        entry.name for entry in sorted(ARCHIVE_DIR.iterdir())
+        if entry.is_dir() and entry.name.rsplit("_", 1)[-1].isdigit()
+        and armor_pending(int(entry.name.rsplit("_", 1)[-1]), progress)
+    ]
 
 
 def write_pkg_filelist(pkgs: list[str], path: Path):
@@ -353,7 +564,14 @@ def main():
     parser.add_argument("--start-from", type=int, default=0, help="Start from manifest index N (0-based)")
     parser.add_argument("--no-skip", action="store_true", help="Download every major manifest instead of every other")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--armor-only", action="store_true",
+                        help="Add the armor extract to archived builds that lack it, newest first, downloading "
+                             "only the pkgs extraction reads")
+    parser.add_argument("--install-dir", type=Path,
+                        help="With --armor-only: a game install whose builds are extracted first, without downloading")
     args = parser.parse_args()
+    if args.install_dir and not args.armor_only:
+        parser.error("--install-dir requires --armor-only")
 
     client_manifests = parse_manifests(CLIENT_MANIFESTS_FILE)
     major = filter_major_manifests(client_manifests)
@@ -381,7 +599,11 @@ def main():
         print(f"  {i + args.start_from:3d}. {date_str:40s} {manifest}")
 
     if args.dry_run:
-        print("\n--dry-run: would download the above manifests")
+        if args.armor_only:
+            pending = armor_pending_dumps(load_armor_progress())
+            print(f"\n--dry-run: {len(pending)} archived build(s) lack armor: {pending}")
+        else:
+            print("\n--dry-run: would download the above manifests")
         return
 
     for name, path in (("steamroom", STEAMROOM), ("wows-data-mgr", WOWS_DATA_MGR), ("wowsunpack", WOWSUNPACK)):
@@ -400,8 +622,20 @@ def main():
         print()
         input("Press Enter to start, Ctrl+C to abort...")
 
-    ensure_daemon(steam_user)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    if args.armor_only:
+        progress = load_armor_progress()
+        if args.install_dir:
+            backfill_armor_from_install(args.install_dir, progress)
+        ensure_daemon(steam_user)
+        filelist_dir = Path(tempfile.mkdtemp(prefix="bulk_archive_"))
+        try:
+            backfill_armor(armor_manifest_candidates(download_list, content_manifests), filelist_dir, progress)
+        finally:
+            shutil.rmtree(filelist_dir, ignore_errors=True)
+        return
+
+    ensure_daemon(steam_user)
     discovered = {}
 
     # idx files are small and index every packed file, so we fetch all of them from
@@ -465,7 +699,11 @@ def main():
                     continue
 
                 try:
-                    pkgs = resolve_pkgs(build)
+                    data = resolve_pkgs(build, get_required_globs())
+                    pkgs = data["pkgs"]
+                    if unmatched := data.get("unmatched_patterns", []):
+                        # Expected for version-specific dirs absent in this build; informational.
+                        print(f"    note: {len(unmatched)} required glob(s) matched nothing in build {build}")
                 except (RuntimeError, json.JSONDecodeError) as e:
                     print(f"    PKG RESOLUTION FAILED for build {build}: {e}")
                     continue
