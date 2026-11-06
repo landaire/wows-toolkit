@@ -26,6 +26,7 @@ use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
 
 use crate::minimap_preview::FRAME_INTERVAL;
+use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
 use crate::replay_inspector::GameDataCache;
 
@@ -38,10 +39,6 @@ const STALLED_AFTER: std::time::Duration = std::time::Duration::from_millis(1500
 
 /// A baked preview and where it is in its loop.
 struct Shown {
-    /// The row this track was baked for. Held here because the track outlives
-    /// the hover: `drop_shown` runs once the pointer is already on the next
-    /// row, and the cache has to be keyed by the row the frames belong to.
-    path: PathBuf,
     frames: PreviewFrames,
     started: Instant,
     /// When the newest frame arrived. A bake that has stopped producing them
@@ -66,7 +63,7 @@ pub struct PreviewHover {
     /// Tracks whose textures are still held by the window. gpui keeps an
     /// image's texture until it is told to let go, and only a `Window` can be
     /// told; the surface hands them back on its next render
-    /// (`release_dropped`).
+    /// (`sync_with_window`).
     released: Vec<PreviewFrames>,
     /// Whether a bake is in flight, so the surface can say the preview is
     /// coming rather than showing nothing for the seconds it takes to read
@@ -87,12 +84,9 @@ pub struct PreviewHover {
     /// installed is the ordinary case here, and a blank square reads as a broken
     /// preview rather than as a missing build.
     failed: Option<SharedString>,
-    /// The last track baked in full, so moving the pointer away and back is
-    /// instant rather than another bake.
-    ///
-    /// One entry, not a table: a track is a few dozen megabytes of frames,
-    /// and the hover that is worth saving is the one just left.
-    cached: Option<(PathBuf, PreviewFrames)>,
+    /// The physical size frames are rasterised at, from the window the
+    /// preview is drawn in (`sync_with_window`).
+    edge: PreviewEdge,
     /// Set when a bake in flight should stop: the pointer has moved on.
     cancel: Arc<AtomicBool>,
     _bake: Option<Task<()>>,
@@ -119,7 +113,9 @@ impl Default for PreviewHover {
             baking: false,
             expecting: false,
             failed: None,
-            cached: None,
+            // Corrected by the owning view's first render, which comes before
+            // any row can be hovered.
+            edge: PreviewEdge::for_scale_factor(1.0),
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
             _dwell_timer: None,
@@ -135,12 +131,14 @@ impl PreviewHover {
         shown.frames.at(shown.started.elapsed())
     }
 
-    /// Releases the textures of every track that is no longer showing.
+    /// Releases the textures of every track that is no longer showing, and
+    /// takes the window's scale factor for the frames baked next.
     ///
     /// Called from the owning view's `render`, which is where a `Window` is
     /// at hand. Without it a hover over a dozen replays leaves a dozen
     /// tracks' frames resident.
-    pub fn release_dropped(&mut self, window: &mut gpui_kit::Window) {
+    pub fn sync_with_window(&mut self, window: &mut gpui_kit::Window) {
+        self.edge = PreviewEdge::for_scale_factor(window.scale_factor());
         for track in self.released.drain(..) {
             for image in track.images() {
                 let _ = window.drop_image(image);
@@ -230,10 +228,10 @@ impl PreviewHover {
 
     /// Seeds a preview that is playing while its bake runs on. Test-only.
     #[cfg(test)]
-    pub(crate) fn seed_playing_for_test(&mut self, path: PathBuf, frames: PreviewFrames) {
+    pub(crate) fn seed_playing_for_test(&mut self, frames: PreviewFrames) {
         self.baking = true;
         // A track, not the still map: this seeds the playing case.
-        self.shown = Some(Shown { path, frames, started: Instant::now(), last_frame: Instant::now(), map_only: false });
+        self.shown = Some(Shown { frames, started: Instant::now(), last_frame: Instant::now(), map_only: false });
     }
 
     /// How many frames the current preview has. Test-only.
@@ -266,23 +264,6 @@ impl PreviewHover {
         self.drop_shown();
         self._ticker = None;
 
-        // The row just left is the one most likely to be returned to, and its
-        // track is still here; there is nothing to bake or to wait for.
-        if self.cached.as_ref().is_some_and(|(cached, _)| cached == &path) {
-            let (_, frames) = self.cached.take().expect("the cache was just checked");
-            // A track kept from the row just left, so it plays rather than
-            // standing in for one still being baked.
-            self.shown = Some(Shown {
-                path: path.clone(),
-                frames,
-                started: Instant::now(),
-                last_frame: Instant::now(),
-                map_only: false,
-            });
-            self.start_ticker(cx, field);
-            cx.notify();
-            return;
-        }
         cx.notify();
 
         // No game data is no preview, so nothing is waited for and no space is
@@ -290,6 +271,13 @@ impl PreviewHover {
         let Some(game_data) = game_data else { return };
         self.expecting = true;
         self.failed = None;
+
+        // A battle walked recently plays without the dwell, as the egui popup
+        // plays a cached track: what the dwell holds back is the walk.
+        if crate::minimap_preview::is_walked(&path) {
+            self.bake(path, map_name, game_data, cx, field);
+            return;
+        }
         self._dwell_timer = Some(cx.spawn(async move |view, cx| {
             cx.background_executor().timer(DWELL).await;
             let _ = view.update(cx, |view, cx| {
@@ -322,20 +310,15 @@ impl PreviewHover {
         cx.notify();
     }
 
-    /// Stops showing the current track.
-    ///
-    /// A track that finished baking is kept for a return visit; the previous
-    /// tenant of that one slot, and any unfinished track, go back to the
+    /// Stops showing the current track and hands its frames back to the
     /// window to have their textures released.
+    ///
+    /// Not kept for a return visit: a track's frames are tens of megabytes,
+    /// and the battle's commands are kept instead (`minimap_preview`), which
+    /// rasterise again in a few frames' time.
     fn drop_shown(&mut self) {
         let Some(shown) = self.shown.take() else { return };
-        if !shown.frames.is_complete() {
-            self.released.push(shown.frames);
-            return;
-        }
-        if let Some((_, evicted)) = self.cached.replace((shown.path, shown.frames)) {
-            self.released.push(evicted);
-        }
+        self.released.push(shown.frames);
     }
 
     fn cancel_bake(&mut self) {
@@ -345,6 +328,18 @@ impl PreviewHover {
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
         self._bake = None;
+    }
+
+    /// Puts up the still map standing in for a track that has not arrived,
+    /// unless one is already up: replacing a map with another build's art of
+    /// the same map would only stutter. A map that is not shown was never
+    /// painted, so it holds no texture to release.
+    fn show_map<V: Render>(&mut self, frames: PreviewFrames, cx: &mut Context<V>) {
+        if self.shown.is_some() {
+            return;
+        }
+        self.shown = Some(Shown { frames, started: Instant::now(), last_frame: Instant::now(), map_only: true });
+        cx.notify();
     }
 
     /// Bakes and rasterises `path`'s preview off the UI thread.
@@ -363,30 +358,8 @@ impl PreviewHover {
         self.baking = true;
         cx.notify();
         let cancel = Arc::clone(&self.cancel);
+        let edge = self.edge;
         self._bake = Some(cx.spawn(async move |view, cx| {
-            // The map, from a build that is already open. This is the first
-            // thing on screen: it costs one image decode, where the track
-            // costs a replay read and possibly a build load.
-            if let Some(name) = map_name {
-                let game_data = game_data.clone();
-                let drawn =
-                    cx.background_executor().spawn(async move { crate::minimap_preview::map_frame(&name, &game_data) });
-                if let Some(frames) = drawn.await {
-                    let _ = view.update(cx, |view, cx| {
-                        let this = field(view);
-                        this.drop_shown();
-                        this.shown = Some(Shown {
-                            path: path.clone(),
-                            frames,
-                            started: Instant::now(),
-                            last_frame: Instant::now(),
-                            map_only: true,
-                        });
-                        cx.notify();
-                    });
-                }
-            }
-
             let (map_tx, map_rx) = futures::channel::oneshot::channel();
             let (frame_tx, mut frame_rx) = futures::channel::mpsc::unbounded();
             // gpui's own pool, not the two-worker tokio runtime: a bake is
@@ -394,10 +367,12 @@ impl PreviewHover {
             // and network awaits it would otherwise be blocking.
             let baked = cx.background_executor().spawn({
                 let path = path.clone();
+                let game_data = game_data.clone();
                 async move {
                     crate::minimap_preview::bake_from_file(
                         &path,
                         &game_data,
+                        edge,
                         &cancel,
                         move |map| {
                             let _ = map_tx.send(map);
@@ -409,25 +384,22 @@ impl PreviewHover {
                 }
             });
 
+            // The map, from a build that is already open, while the bake
+            // runs: it costs one image decode, where the bake may cost a
+            // build load. The first map put up stays (`show_map`).
+            if let Some(name) = map_name {
+                let drawn = cx
+                    .background_executor()
+                    .spawn(async move { crate::minimap_preview::map_frame(&name, &game_data, edge) });
+                if let Some(frames) = drawn.await {
+                    let _ = view.update(cx, |view, cx| field(view).show_map(frames, cx));
+                }
+            }
             // The bake's own map, drawn from the build the replay was
-            // recorded on. Only wanted when the stage above had no build open
-            // or no art for this map; otherwise the map is already showing and
-            // restarting it would stutter.
+            // recorded on, for when the stage above had no build open or no
+            // art for this map.
             if let Ok(map) = map_rx.await {
-                let _ = view.update(cx, |view, cx| {
-                    let this = field(view);
-                    if this.shown.is_some() {
-                        return;
-                    }
-                    this.shown = Some(Shown {
-                        path: path.clone(),
-                        frames: map,
-                        started: Instant::now(),
-                        last_frame: Instant::now(),
-                        map_only: true,
-                    });
-                    cx.notify();
-                });
+                let _ = view.update(cx, |view, cx| field(view).show_map(map, cx));
             }
 
             // Frames play as they are rasterised: the first replaces the
@@ -441,7 +413,6 @@ impl PreviewHover {
                         started = true;
                         this.drop_shown();
                         this.shown = Some(Shown {
-                            path: path.clone(),
                             frames: PreviewFrames::streaming(),
                             started: Instant::now(),
                             last_frame: Instant::now(),
@@ -470,6 +441,7 @@ impl PreviewHover {
                 }
                 Ok(()) => None,
             };
+            let superseded = matches!(baked, Err(crate::minimap_preview::PreviewError::Cancelled));
 
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
@@ -478,6 +450,12 @@ impl PreviewHover {
                 // stops holding the map's space.
                 this.expecting = false;
                 this.failed = failed;
+                // A pointer that moves on drops this task, so a bake that gets
+                // here superseded had its source replaced under it; the map it
+                // put up came from that source and comes down with it.
+                if superseded {
+                    this.drop_shown();
+                }
                 // Looping only starts once the whole track is here.
                 if let Some(shown) = this.shown.as_mut() {
                     shown.frames.finish();
@@ -527,7 +505,7 @@ mod tests {
         hover.baking = true;
         assert!(hover.is_stalled(), "a bake with nothing to play yet is what a reader is waiting on");
 
-        hover.seed_playing_for_test(PathBuf::from("a.wowsreplay"), PreviewFrames::streaming());
+        hover.seed_playing_for_test(PreviewFrames::streaming());
         assert!(!hover.is_stalled(), "a preview that is playing does not need one");
 
         hover.age_last_frame_for_test(STALLED_AFTER + std::time::Duration::from_millis(1));

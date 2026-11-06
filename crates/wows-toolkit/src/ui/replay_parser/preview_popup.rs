@@ -27,27 +27,14 @@ use crate::replay::renderer::preview::PreviewKey;
 use crate::replay::renderer::preview::PreviewState;
 use crate::replay::renderer::preview::poll_preview;
 
-/// What a preview draws. At 384x384 the canvas scales to about 0.48x, so ship
-/// names render around 5px tall - readable at a glance but only just. Player
-/// names and the HUD panels stay off to keep the map uncluttered.
+/// What a preview draws: the preset shared with the GPUI port.
 ///
 /// This is a paint-time filter over what
 /// [`bake_options`](crate::replay::renderer::preview::bake_options) put in the
 /// track, so every switch here may be turned on without invalidating a cached
 /// track. Asking for a class the bake withholds would silently draw nothing.
 pub(crate) fn preview_options() -> RenderOptions {
-    RenderOptions {
-        show_stats_panel: false,
-        show_team_rosters: false,
-        show_kill_feed: false,
-        show_chat: false,
-        show_player_names: false,
-        show_ship_names: true,
-        show_dead_ship_names: false,
-        show_ship_config: false,
-        show_battle_result: false,
-        ..RenderOptions::default()
-    }
+    wows_minimap_renderer::frame_track::paint_options()
 }
 
 pub(crate) const PREVIEW_SIZE: f32 = 384.0;

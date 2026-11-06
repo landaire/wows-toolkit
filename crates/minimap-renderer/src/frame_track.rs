@@ -128,9 +128,9 @@ impl FrameSink for TrackSink {
 
 /// What a preview track is baked with.
 ///
-/// Wider than [`preview_options`](crate::ui::replay_parser::preview_popup::preview_options),
-/// the paint-time preset, so turning one of that preset's switches on does not
-/// invalidate cached tracks. It is not everything the renderer can emit: the
+/// Wider than [`paint_options`], the paint-time preset, so turning one of that
+/// preset's switches on does not invalidate cached tracks. It is not everything
+/// the renderer can emit: the
 /// panel commands (stats, rosters) carry a full roster per frame and position
 /// trails carry the whole match's position history per ship per frame, so
 /// baking either would cost tens of megabytes for one track. Widening this set
@@ -147,6 +147,27 @@ pub fn bake_options() -> RenderOptions {
         show_ship_config: false,
         show_trails: false,
         show_speed_trails: false,
+        ..RenderOptions::default()
+    }
+}
+
+/// What a hover preview paints out of a track baked with [`bake_options`].
+///
+/// At 384x384 the canvas scales to about 0.48x, so ship names render around
+/// 5px tall: readable at a glance but only just. Player names and the HUD
+/// panels stay off to keep the map uncluttered. Shared so the egui popup and
+/// the GPUI port show the same layers.
+pub fn paint_options() -> RenderOptions {
+    RenderOptions {
+        show_stats_panel: false,
+        show_team_rosters: false,
+        show_kill_feed: false,
+        show_chat: false,
+        show_player_names: false,
+        show_ship_names: true,
+        show_dead_ship_names: false,
+        show_ship_config: false,
+        show_battle_result: false,
         ..RenderOptions::default()
     }
 }

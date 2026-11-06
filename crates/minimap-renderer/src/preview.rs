@@ -117,8 +117,12 @@ impl PreviewRenderer {
     }
 
     /// One frame of `commands`, drawn over the whole map.
-    pub fn render(&mut self, commands: &[DrawCommand]) -> RgbImage {
-        self.render_at(MapViewport::default(), commands)
+    ///
+    /// Takes any sequence of borrowed commands, so a caller showing a subset
+    /// of a track filters it here rather than cloning the commands it keeps.
+    pub fn render<'a>(&mut self, commands: impl IntoIterator<Item = &'a DrawCommand>) -> RgbImage {
+        self.draw(MapViewport::default(), commands);
+        self.target.frame()
     }
 
     /// One frame of `commands`, drawn over the part of the map `viewport`
@@ -128,7 +132,8 @@ impl PreviewRenderer {
     /// is shared by every preview of a map: one that remembered a zoom would
     /// zoom the others with it.
     pub fn render_at(&mut self, viewport: MapViewport, commands: &[DrawCommand]) -> RgbImage {
-        self.render_regions(viewport, commands).0
+        self.draw(viewport, commands);
+        self.target.frame()
     }
 
     /// The same, with what the frame drew that a pointer can rest on.
@@ -141,12 +146,16 @@ impl PreviewRenderer {
         viewport: MapViewport,
         commands: &[DrawCommand],
     ) -> (RgbImage, Vec<crate::drawing::DrawnRegion>) {
+        self.draw(viewport, commands);
+        (self.target.frame(), self.target.drawn_regions().to_vec())
+    }
+
+    fn draw<'a>(&mut self, viewport: MapViewport, commands: impl IntoIterator<Item = &'a DrawCommand>) {
         self.target.set_map_viewport(viewport);
         self.target.begin_frame();
         for command in commands {
             self.target.draw(command);
         }
         self.target.end_frame();
-        (self.target.frame(), self.target.drawn_regions().to_vec())
     }
 }

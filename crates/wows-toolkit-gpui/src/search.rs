@@ -1921,7 +1921,7 @@ impl Render for SearchView {
         if std::mem::take(&mut self.pending_commit) {
             self.commit_typed(window, cx);
         }
-        self.preview.release_dropped(window);
+        self.preview.sync_with_window(window);
         self.open_saved_query(window, cx);
         self.load_column_widths(cx);
         self.refresh_bar(window, cx);

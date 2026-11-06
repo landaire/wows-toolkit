@@ -7,36 +7,47 @@
 //! paints and the video export encodes, rasterised to an image here because
 //! this front end has no painter of its own.
 
-use rust_i18n::t;
 use std::num::NonZeroU32;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::SystemTime;
 
 use gpui_kit::RenderImage;
+use image::GenericImageView;
+use image::Rgb;
 use image::RgbImage;
+use rust_i18n::t;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
+use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::config::RenderOptions;
+use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::frame_track::PREVIEW_FPS;
+use wows_minimap_renderer::frame_track::PREVIEW_MAX_FRAMES;
 use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
 use wows_minimap_renderer::frame_track::TrackSink;
-use wows_minimap_renderer::frame_track::bake_options;
 use wows_minimap_renderer::frame_track::build_frame_track;
+use wows_minimap_renderer::frame_track::paint_options;
 use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
-use wows_replays::game_constants::GameConstants;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::VfsPath;
+
+use crate::replay_inspector::GameDataCache;
+use crate::replay_inspector::LoadedGameData;
 
 /// A renderer shared between the previews that draw the same map.
 ///
@@ -159,10 +170,108 @@ pub fn layout_for(options: &RenderOptions) -> SidePanelLayout {
     }
 }
 
-/// Drops every kept renderer, for a caller that would rather have the memory
-/// back than the next preview's speed.
-pub fn forget_renderers() {
+/// Drops every kept renderer and walked track, for a caller that would rather
+/// have the memory back than the next preview's speed, or whose install or
+/// language has changed under them.
+pub fn forget_kept_previews() {
     RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    let mut kept = TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    kept.tracks.clear();
+    kept.generation = TrackGeneration(kept.generation.0 + 1);
+}
+
+/// Which replay a kept track was walked from.
+///
+/// The modification time is part of it so a replay replaced in place is
+/// walked again rather than playing the battle it replaced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TrackKey {
+    path: PathBuf,
+    modified: SystemTime,
+}
+
+impl TrackKey {
+    /// `None` when the file's modification time cannot be read, which leaves
+    /// nothing to tell a replaced file by; such a replay is walked every time.
+    fn of(path: &Path) -> Option<Self> {
+        let modified = std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok()?;
+        Some(Self { path: path.to_owned(), modified })
+    }
+}
+
+/// A battle walked for the hover preview, kept as commands.
+///
+/// Commands rather than frames: a track's frames are tens of megabytes and its
+/// commands a fraction of that, and rasterising them again is far quicker than
+/// walking the battle.
+struct WalkedTrack {
+    frames: Vec<Vec<DrawCommand>>,
+    build: NonZeroU32,
+    version: Version,
+    map_name: String,
+}
+
+/// One kept track and the replay it was walked from.
+struct CachedTrack {
+    key: TrackKey,
+    track: Arc<WalkedTrack>,
+}
+
+/// How many times the kept tracks have been forgotten.
+///
+/// A walk notes it before it starts, so one that was running when the tracks
+/// were forgotten, and may carry names in the language they were forgotten
+/// for, is not kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TrackGeneration(u64);
+
+/// The tracks walked most recently, least recently asked for first, and the
+/// generation they belong to.
+struct KeptTracks {
+    tracks: Vec<CachedTrack>,
+    generation: TrackGeneration,
+}
+
+static TRACKS: Mutex<KeptTracks> = Mutex::new(KeptTracks { tracks: Vec::new(), generation: TrackGeneration(0) });
+
+/// How many walked tracks are kept: the egui popup's own
+/// `PREVIEW_CACHE_CAPACITY`, so a reader moving back over the last few rows
+/// waits for neither app.
+const TRACK_CACHE_SIZE: usize = 8;
+
+fn track_generation() -> TrackGeneration {
+    TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).generation
+}
+
+fn kept_track(key: &TrackKey) -> Option<Arc<WalkedTrack>> {
+    let mut kept = TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let at = kept.tracks.iter().position(|held| &held.key == key)?;
+    // Moved to the end, so the least recently asked for is the one dropped.
+    let entry = kept.tracks.remove(at);
+    let track = Arc::clone(&entry.track);
+    kept.tracks.push(entry);
+    Some(track)
+}
+
+/// Keeps `track`, unless the kept tracks were forgotten after it was
+/// `walked_in`.
+fn keep_track(key: TrackKey, track: Arc<WalkedTrack>, walked_in: TrackGeneration) {
+    let mut kept = TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if kept.generation != walked_in {
+        return;
+    }
+    kept.tracks.retain(|held| held.key != key);
+    kept.tracks.push(CachedTrack { key, track });
+    while kept.tracks.len() > TRACK_CACHE_SIZE {
+        kept.tracks.remove(0);
+    }
+}
+
+/// Whether `path`'s battle is kept walked, so its preview costs only the
+/// rasterising.
+pub fn is_walked(path: &Path) -> bool {
+    let Some(key) = TrackKey::of(path) else { return false };
+    TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).tracks.iter().any(|held| held.key == key)
 }
 
 /// How long each baked frame is shown. The bake keeps an evenly spaced subset
@@ -223,39 +332,87 @@ impl PreviewError {
     }
 }
 
-/// Reads the replay at `path` and bakes its preview against its own build.
+/// Reads the replay at `path` and plays its preview against its own build.
 ///
 /// The build is loaded through the shared cache, so a replay from a build
 /// already open costs nothing extra and one from a build that is not
-/// installed simply has no preview.
+/// installed simply has no preview. A replay walked recently is not walked
+/// again; only its rasterising is repeated.
 ///
 /// `on_map` is handed the map on its own, with nothing drawn over it, as soon
-/// as the art is loaded and before the battle is walked: the walk is the
-/// seconds of this, and the egui popup shows the map for all of them rather
-/// than an empty box (`ui/replay_parser/preview_popup.rs`).
+/// as the art is loaded and before the battle is walked, the way the egui
+/// popup shows the map rather than an empty box
+/// (`ui/replay_parser/preview_popup.rs`).
+///
+/// `on_frame` is handed each frame as it is rasterised rather than the track
+/// at the end: rasterising a whole track costs seconds, and a preview that
+/// waits for all of it shows a still map for the whole time.
 pub fn bake_from_file(
-    path: &std::path::Path,
-    game_data: &crate::replay_inspector::GameDataCache,
+    path: &Path,
+    game_data: &GameDataCache,
+    edge: PreviewEdge,
     cancel: &AtomicBool,
     on_map: impl FnOnce(PreviewFrames),
     on_frame: impl FnMut(Arc<RenderImage>),
 ) -> Result<(), PreviewError> {
-    let read_at = std::time::Instant::now();
+    // Noted before anything is read, so a forget at any point in the bake is
+    // seen by the check after the walk.
+    let started_in = track_generation();
+    let key = TrackKey::of(path);
+    if let Some(track) = key.as_ref().and_then(kept_track) {
+        let loaded = load_build(game_data, track.build, &track.version)?;
+        let renderer = renderer_for(
+            Some(track.build),
+            &track.map_name,
+            loaded.vfs(),
+            Some(&track.version),
+            SidePanelLayout::None,
+        )?;
+        on_map(map_only_frames(&renderer, edge));
+        return rasterise(&renderer, &track.frames, edge, cancel, on_frame);
+    }
+
     let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
-    tracing::debug!("preview: replay read in {:?}", read_at.elapsed());
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
-
     // A replay whose header carries no build number names no build to load.
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
-    let build_at = std::time::Instant::now();
-    let loaded = game_data
-        .get_or_load_build_for(build.get(), Some(&version))
-        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
-    tracing::debug!("preview: build {} ready in {:?}", build.get(), build_at.elapsed());
 
-    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map, on_frame)
+    // Before the build: loading one that is not open is seconds of work a
+    // preview the pointer has already left should not start.
+    if cancel.load(Ordering::Relaxed) {
+        return Err(PreviewError::Cancelled);
+    }
+    let loaded = load_build(game_data, build, &version)?;
+
+    let map_name = replay.meta.mapName.clone();
+    let renderer = renderer_for(Some(build), &map_name, loaded.vfs(), Some(&version), SidePanelLayout::None)?;
+    on_map(map_only_frames(&renderer, edge));
+
+    // Forgotten while walking: the commands came from a source or language
+    // that has since been replaced, and so did `loaded`, so walking again
+    // with it would only repeat that. The owner bakes afresh on the next
+    // hover, against the cache it holds then.
+    let frames = walk(&replay, &loaded, cancel)?;
+    if track_generation() != started_in {
+        return Err(PreviewError::Cancelled);
+    }
+    let track = Arc::new(WalkedTrack { frames, build, version, map_name });
+    if let Some(key) = key {
+        keep_track(key, Arc::clone(&track), started_in);
+    }
+    rasterise(&renderer, &track.frames, edge, cancel, on_frame)
+}
+
+fn load_build(
+    game_data: &GameDataCache,
+    build: NonZeroU32,
+    version: &Version,
+) -> Result<Arc<LoadedGameData>, PreviewError> {
+    game_data
+        .get_or_load_build_for(build.get(), Some(version))
+        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })
 }
 
 /// A battle walked once: every kept frame's draw commands, the clock each was
@@ -413,28 +570,17 @@ pub fn bake_track(
 /// is open yet, or when the open one ships no art for that map -- a preview
 /// that was recorded on a build with a map since removed then waits for its
 /// own bake, which carries the art it was recorded against.
-pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCache) -> Option<PreviewFrames> {
+pub fn map_frame(map_name: &str, game_data: &GameDataCache, edge: PreviewEdge) -> Option<PreviewFrames> {
     let loaded = game_data.newest_loaded()?;
     // The art alone, not a rendered frame of it: building a `PreviewRenderer`
     // reads this build's fonts and six icon sets and then runs a full render
     // pass, none of which draws anything on an empty command slice. The egui
     // popup does the same, uploading the decoded map straight as a texture
-    // (`RendererTextureCache::get_or_upload_map`).
+    // (`RendererTextureCache::get_or_upload_map`). The art is the map itself
+    // rather than a canvas the renderer drew it into, so there is no HUD
+    // strip to crop.
     let art = assets::load_map_image(map_name, loaded.vfs())?;
-    Some(PreviewFrames { frames: vec![scaled_map_image(&art)], complete: true })
-}
-
-/// A decoded map scaled to the preview, with no HUD strip to crop: this art
-/// is the map itself rather than a canvas the renderer drew it into.
-fn scaled_map_image(art: &RgbImage) -> Arc<RenderImage> {
-    let scaled = image::imageops::resize(art, PREVIEW_PX, PREVIEW_PX, image::imageops::FilterType::Triangle);
-    let mut bgra = Vec::with_capacity((PREVIEW_PX * PREVIEW_PX * 4) as usize);
-    for pixel in scaled.pixels() {
-        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-    }
-    let buffer = image::RgbaImage::from_raw(PREVIEW_PX, PREVIEW_PX, bgra)
-        .expect("the buffer is four bytes per pixel of the size it was built at");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
+    Some(PreviewFrames { frames: vec![scaled_image(&art, edge)], complete: true })
 }
 
 /// Draws one map with `commands` on it, and nothing else.
@@ -515,28 +661,11 @@ fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> Shar
     renderer
 }
 
-/// The square map out of a rendered canvas.
-///
-/// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
-/// than the map by that strip. Resizing the canvas whole would letterbox the
-/// strip above the map and squash the map itself, since the canvas is not
-/// square and the preview is.
-fn crop_to_map(canvas: &RgbImage) -> RgbImage {
-    use wows_minimap_renderer::HUD_HEIGHT;
-    use wows_minimap_renderer::MINIMAP_SIZE;
-
-    let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
-    image::imageops::crop_imm(canvas, 0, HUD_HEIGHT, side, side).to_image()
-}
-
 /// The map layer of a rendered canvas, at its own size.
 ///
 /// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
 /// than the map by that strip, so the crop is the strip taken off the top.
 fn map_only_image(canvas: RgbImage) -> Arc<RenderImage> {
-    use wows_minimap_renderer::HUD_HEIGHT;
-    use wows_minimap_renderer::MINIMAP_SIZE;
-
     let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
     let mut bgra = Vec::with_capacity((side * side * 4) as usize);
     for y in 0..side {
@@ -550,93 +679,117 @@ fn map_only_image(canvas: RgbImage) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
 
-/// Bakes `replay` into the frames a preview plays, rasterising them one at a
-/// time.
+/// Walks `replay`'s battle once, keeping the commands of the frames a preview
+/// plays.
 ///
-/// One forward pass over the battle, sampled by the shared [`TrackSink`], so
-/// the port shows the same track the egui app does. `cancel` is checked
-/// between the phases that cost anything: a preview the pointer has already
-/// left should not finish parsing a replay.
-///
-/// `on_frame` is handed each frame as it is rasterised rather than the track
-/// at the end: rasterising a whole track costs seconds, and a preview that
-/// waits for all of it shows a still map for the whole time.
-#[allow(clippy::too_many_arguments)]
-pub fn bake(
+/// One forward pass sampled by the shared [`TrackSink`], so the port plays the
+/// same frames the egui app does. Baked with the paint preset rather than
+/// [`bake_options`](wows_minimap_renderer::frame_track::bake_options): these
+/// commands are only ever rasterised through it, so a class it hides is not
+/// worth emitting, and the player names the egui popup drops at paint time
+/// never reach a ship's command, which this renderer would draw.
+fn walk(
     replay: &ReplayFile,
-    provider: &GameMetadataProvider,
-    constants: &GameConstants,
-    vfs: &VfsPath,
-    version: Option<&Version>,
+    loaded: &LoadedGameData,
     cancel: &AtomicBool,
-    on_map: impl FnOnce(PreviewFrames),
-    mut on_frame: impl FnMut(Arc<RenderImage>),
-) -> Result<(), PreviewError> {
-    let cancelled = || cancel.load(std::sync::atomic::Ordering::Relaxed);
-    if cancelled() {
-        return Err(PreviewError::Cancelled);
-    }
-
-    let map_name = replay.meta.mapName.clone();
+) -> Result<Vec<Vec<DrawCommand>>, PreviewError> {
+    let provider = loaded.provider().as_ref();
+    let vfs = loaded.vfs();
+    let map_name = &replay.meta.mapName;
     let map_info =
-        assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
+        assets::load_map_info(map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
 
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
-    let started = std::time::Instant::now();
-    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
+    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, paint_options());
     renderer.set_fonts(assets::load_game_fonts(vfs));
-    tracing::debug!("preview: fonts and renderer in {:?}", started.elapsed());
 
-    // Built before the battle is walked so the map can be shown during it; it
-    // is the same renderer the track is rasterised with afterwards.
-    let assets_at = std::time::Instant::now();
-    let preview =
-        renderer_for(version.and_then(|version| version.build), &map_name, vfs, version, SidePanelLayout::None)?;
-    let mut preview = preview.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    tracing::debug!("preview: art for {map_name} in {:?}", assets_at.elapsed());
-    let nothing_drawn: Vec<DrawCommand> = Vec::new();
-    let map_at = std::time::Instant::now();
-    on_map(PreviewFrames::render(&mut preview, std::slice::from_ref(&nothing_drawn)));
-    tracing::debug!("preview: map frame in {:?}", map_at.elapsed());
-
-    let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
-        .map_err(PreviewError::UnwalkableBattle)?;
+    let mut session =
+        MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, replay, &[])
+            .map_err(PreviewError::UnwalkableBattle)?;
     // Tracked, not Untracked: the tracer commands come from `active_shots()`,
     // which stays empty unless shot recording is on.
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::new();
-    let walk_at = std::time::Instant::now();
     build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
     session.finish();
-    tracing::debug!("preview: battle walked in {:?}", walk_at.elapsed());
 
-    if cancelled() {
+    if cancel.load(Ordering::Relaxed) {
         return Err(PreviewError::Cancelled);
     }
+    Ok(sink.finish())
+}
 
-    let raster_at = std::time::Instant::now();
-    let mut first = true;
-    for commands in sink.finish() {
-        if cancelled() {
+/// Rasterises `frames` one at a time through the paint preset, handing each
+/// to `on_frame` as it is done.
+///
+/// The renderer is locked per frame rather than for the track: it is shared
+/// with every other preview of the map and with the playback viewport, which
+/// would otherwise wait out the whole track.
+fn rasterise(
+    renderer: &SharedPreviewRenderer,
+    frames: &[Vec<DrawCommand>],
+    edge: PreviewEdge,
+    cancel: &AtomicBool,
+    mut on_frame: impl FnMut(Arc<RenderImage>),
+) -> Result<(), PreviewError> {
+    let options = paint_options();
+    let edge = edge.for_track(frames.len());
+    for commands in frames {
+        if cancel.load(Ordering::Relaxed) {
             return Err(PreviewError::Cancelled);
         }
-        on_frame(to_image(preview.render(&commands)));
-        if first {
-            tracing::debug!("preview: first animated frame in {:?}", raster_at.elapsed());
-            first = false;
-        }
+        // Dead ships are shown, as the egui popup shows them.
+        let painted = commands.iter().filter(|command| should_draw_command(command, &options, true));
+        let canvas = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(painted);
+        on_frame(to_image(&canvas, edge));
     }
-    tracing::debug!("preview: whole track in {:?}", raster_at.elapsed());
     Ok(())
 }
 
-/// The edge length a preview's frames are rasterised and drawn at.
-///
-/// The renderer composes at the minimap's own resolution; a preview is shown
-/// far smaller than that, and keeping a whole track at full size is both the
-/// memory and the decode cost that makes the playback stutter.
+/// The map `renderer` draws, with nothing over it, as a track of one frame.
+fn map_only_frames(renderer: &SharedPreviewRenderer, edge: PreviewEdge) -> PreviewFrames {
+    let canvas = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(std::iter::empty());
+    PreviewFrames { frames: vec![to_image(&canvas, edge)], complete: true }
+}
+
+/// The edge length, in logical pixels, a preview is drawn at.
 pub const PREVIEW_PX: u32 = 384;
+
+/// The edge length, in physical pixels, a preview's frames are rasterised at.
+///
+/// [`PREVIEW_PX`] times the window's scale factor, so one image pixel lands on
+/// one screen pixel and a frame is not resampled again when it is painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreviewEdge(u32);
+
+impl PreviewEdge {
+    pub fn for_scale_factor(scale_factor: f32) -> Self {
+        let edge = (PREVIEW_PX as f32 * scale_factor).round() as u32;
+        // Capped at the canvas the renderer composes: past it a frame would
+        // only be enlarged.
+        Self(edge.clamp(1, MINIMAP_SIZE))
+    }
+
+    /// The largest edge, no larger than this one, at which a track of `frames`
+    /// frames fits the decoded budget; never below [`PREVIEW_PX`].
+    ///
+    /// A track's frames stay decoded for as long as it plays, so the budget
+    /// holds every track to what a full one costs at scale one, whatever the
+    /// display: a short battle is drawn at the display's own size, a long one
+    /// on a dense display smaller, and enlarged when it is painted.
+    pub fn for_track(self, frames: usize) -> Self {
+        const BUDGET_BYTES: u64 = PREVIEW_MAX_FRAMES as u64 * PREVIEW_PX as u64 * PREVIEW_PX as u64 * 4;
+
+        let pixels_per_frame = BUDGET_BYTES / 4 / frames.max(1) as u64;
+        let fitting = u32::try_from(pixels_per_frame.isqrt()).unwrap_or(u32::MAX);
+        Self(self.0.min(fitting.max(PREVIEW_PX)))
+    }
+
+    pub fn pixels(self) -> u32 {
+        self.0
+    }
+}
 
 /// A rendered preview: every frame as an image gpui can draw.
 ///
@@ -653,16 +806,6 @@ pub struct PreviewFrames {
 }
 
 impl PreviewFrames {
-    /// Rasterises every frame of a baked track.
-    ///
-    /// Done once per preview rather than per paint: the frames are small and
-    /// few, and re-rasterising on every frame of the *UI* would redraw the
-    /// whole map for each one.
-    pub fn render(renderer: &mut PreviewRenderer, track: &[Vec<DrawCommand>]) -> Self {
-        let frames = track.iter().map(|commands| to_image(renderer.render(commands))).collect();
-        Self { frames, complete: true }
-    }
-
     /// An empty track, for a preview whose frames are still arriving.
     pub fn streaming() -> Self {
         Self { frames: Vec::new(), complete: false }
@@ -678,7 +821,9 @@ impl PreviewFrames {
         self.complete = true;
     }
 
-    /// Whether every frame of the track has been rasterised.
+    /// Whether every frame of the track has been rasterised. Only the tests
+    /// read this back; playback asks [`Self::at`].
+    #[cfg(test)]
     pub fn is_complete(&self) -> bool {
         self.complete
     }
@@ -710,19 +855,39 @@ impl PreviewFrames {
     }
 }
 
-/// An RGB frame as an image gpui can paint straight from.
+/// The map out of a rendered canvas, as an image gpui can paint straight from.
 ///
-/// Scaled to the size it is drawn at, then handed over as BGRA, which is the
-/// layout `RenderImage` stores. The renderer composes every frame over opaque
-/// map art, so the alpha channel added here is fully opaque by construction.
-fn to_image(frame: RgbImage) -> Arc<RenderImage> {
-    let frame = crop_to_map(&frame);
-    let frame = image::imageops::resize(&frame, PREVIEW_PX, PREVIEW_PX, image::imageops::FilterType::Triangle);
-    let mut bgra = Vec::with_capacity((PREVIEW_PX * PREVIEW_PX * 4) as usize);
-    for pixel in frame.pixels() {
-        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+/// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas taller than the
+/// map by that strip, so the strip is cropped off: scaling the canvas whole
+/// would squash the map, since the canvas is not square and the preview is.
+fn to_image(canvas: &RgbImage, edge: PreviewEdge) -> Arc<RenderImage> {
+    let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
+    let map = image::imageops::crop_imm(canvas, 0, HUD_HEIGHT, side, side);
+    scaled_image(&*map, edge)
+}
+
+/// `map` scaled to `edge` and handed over as BGRA, which is the layout
+/// `RenderImage` stores.
+///
+/// Lanczos rather than a triangle filter: on a scale-one display the renderer
+/// composes at twice the drawn size, and a triangle filter halves that into a
+/// blur over every name and icon edge. The renderer composes every frame
+/// over opaque map art, so the alpha channel added here is fully opaque by
+/// construction.
+fn scaled_image(map: &impl GenericImageView<Pixel = Rgb<u8>>, edge: PreviewEdge) -> Arc<RenderImage> {
+    let edge = edge.pixels();
+    let mut bgra = Vec::with_capacity((edge * edge * 4) as usize);
+    if map.dimensions() == (edge, edge) {
+        for (_, _, pixel) in map.pixels() {
+            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+        }
+    } else {
+        let scaled = image::imageops::resize(map, edge, edge, image::imageops::FilterType::Lanczos3);
+        for pixel in scaled.pixels() {
+            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+        }
     }
-    let buffer = image::RgbaImage::from_raw(PREVIEW_PX, PREVIEW_PX, bgra)
+    let buffer = image::RgbaImage::from_raw(edge, edge, bgra)
         .expect("the buffer is four bytes per pixel of the size it was built at");
     Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
@@ -766,23 +931,54 @@ mod tests {
         assert!(track.is_complete(), "a finished track loops");
     }
 
-    /// A frame is handed over decoded and at the size it is drawn: gpui
-    /// decodes an encoded image when it paints and caches it by id, and a
-    /// track holds more frames than that cache does, so an encoded track
-    /// would decode a frame afresh on every pass of the loop.
+    /// A frame is handed over decoded and at the physical size it is drawn:
+    /// gpui decodes an encoded image when it paints and caches it by id, and a
+    /// track holds more frames than that cache does, so an encoded track would
+    /// decode a frame afresh on every pass of the loop. Sized for the window's
+    /// scale factor, a frame lands one image pixel per screen pixel instead of
+    /// being resampled again when it is painted.
     #[test]
-    fn a_frame_is_scaled_to_the_drawn_size_and_stored_as_pixels() {
-        let rendered = image::RgbImage::from_pixel(super::PREVIEW_PX * 2, super::PREVIEW_PX * 2, image::Rgb([9, 9, 9]));
+    fn a_frame_is_scaled_to_the_physical_drawn_size_and_stored_as_pixels() {
+        use super::PreviewEdge;
+        use wows_minimap_renderer::CANVAS_HEIGHT;
+        use wows_minimap_renderer::MINIMAP_SIZE;
 
-        let image = super::to_image(rendered);
+        let rendered = image::RgbImage::from_pixel(MINIMAP_SIZE, CANVAS_HEIGHT, image::Rgb([9, 9, 9]));
+        let edge_at = |scale_factor: f32| {
+            let image = super::to_image(&rendered, PreviewEdge::for_scale_factor(scale_factor));
+            let size = image.size(0);
+            assert_eq!(size.width.0, size.height.0, "the preview is square");
+            assert_eq!(
+                image.as_bytes(0).expect("frame 0").len(),
+                (size.width.0 * size.height.0 * 4) as usize,
+                "four bytes per pixel, ready to upload"
+            );
+            size.width.0 as u32
+        };
 
-        let size = image.size(0);
-        assert_eq!((size.width.0 as u32, size.height.0 as u32), (super::PREVIEW_PX, super::PREVIEW_PX));
-        assert_eq!(
-            image.as_bytes(0).expect("frame 0").len(),
-            (super::PREVIEW_PX * super::PREVIEW_PX * 4) as usize,
-            "four bytes per pixel, ready to upload"
-        );
+        assert_eq!(edge_at(1.0), super::PREVIEW_PX);
+        assert_eq!(edge_at(1.5), super::PREVIEW_PX * 3 / 2);
+        assert_eq!(edge_at(2.0), MINIMAP_SIZE);
+        assert_eq!(edge_at(3.0), MINIMAP_SIZE, "never enlarged past the canvas the renderer composes");
+    }
+
+    /// The HUD strip above the map is cropped off, not squeezed into the square.
+    #[test]
+    fn a_frame_shows_the_map_without_the_hud_strip() {
+        use super::PreviewEdge;
+        use wows_minimap_renderer::CANVAS_HEIGHT;
+        use wows_minimap_renderer::HUD_HEIGHT;
+        use wows_minimap_renderer::MINIMAP_SIZE;
+
+        let hud = image::Rgb([255, 0, 0]);
+        let map = image::Rgb([0, 0, 255]);
+        let rendered =
+            image::RgbImage::from_fn(MINIMAP_SIZE, CANVAS_HEIGHT, |_, y| if y < HUD_HEIGHT { hud } else { map });
+
+        let image = super::to_image(&rendered, PreviewEdge::for_scale_factor(2.0));
+
+        let bgra = image.as_bytes(0).expect("frame 0");
+        assert!(bgra.chunks(4).all(|pixel| pixel == [255, 0, 0, 255]), "every pixel is the map's blue, stored BGRA");
     }
 
     #[test]
@@ -808,5 +1004,85 @@ mod tests {
         assert_eq!(shown(FRAME_INTERVAL * 2), 2);
         assert_eq!(shown(FRAME_INTERVAL * 3), 0, "and it loops");
         assert_eq!(shown(FRAME_INTERVAL * 7), 1);
+    }
+
+    /// A walked battle is kept for the next hover of its row, until its file
+    /// is replaced, enough other battles have been walked since, or the kept
+    /// tracks are forgotten for a change of language.
+    #[test]
+    fn a_walked_track_is_kept_until_its_file_changes_it_is_evicted_or_forgotten() {
+        use std::num::NonZeroU32;
+        use std::time::SystemTime;
+
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let replay = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"replay").expect("the file can be written");
+            path
+        };
+        let keep_walked_in = |path: &std::path::Path, walked_in: super::TrackGeneration| {
+            let track = super::WalkedTrack {
+                frames: Vec::new(),
+                build: NonZeroU32::new(1).expect("nonzero"),
+                version: wowsunpack::data::Version::from_client_exe("0,15,7,0"),
+                map_name: String::new(),
+            };
+            let key = super::TrackKey::of(path).expect("the file has a modification time");
+            super::keep_track(key, Arc::new(track), walked_in);
+        };
+        let keep = |path: &std::path::Path| keep_walked_in(path, super::track_generation());
+
+        let replaced = replay("replaced.wowsreplay");
+        keep(&replaced);
+        assert!(super::is_walked(&replaced));
+        std::fs::File::options()
+            .write(true)
+            .open(&replaced)
+            .and_then(|file| file.set_modified(SystemTime::now() + Duration::from_secs(60)))
+            .expect("the modification time can be moved");
+        assert!(!super::is_walked(&replaced), "a file replaced in place is walked again");
+
+        let oldest = replay("oldest.wowsreplay");
+        keep(&oldest);
+        for index in 0..super::TRACK_CACHE_SIZE {
+            keep(&replay(&format!("{index}.wowsreplay")));
+        }
+        assert!(!super::is_walked(&oldest), "the battle walked longest ago makes room");
+        let newest = dir.path().join("0.wowsreplay");
+        assert!(super::is_walked(&newest));
+
+        let in_flight = replay("in_flight.wowsreplay");
+        let walked_in = super::track_generation();
+        super::forget_kept_previews();
+        assert!(!super::is_walked(&newest), "a change of language forgets every kept track");
+        keep_walked_in(&in_flight, walked_in);
+        assert!(!super::is_walked(&in_flight), "and a walk begun before it is not kept");
+    }
+
+    /// A track's decoded frames cost no more than a full track does at scale
+    /// one, whatever the display: a full track on a scale-two display would
+    /// otherwise hold four times that.
+    #[test]
+    fn a_tracks_decoded_frames_stay_within_the_scale_one_footprint() {
+        use super::PREVIEW_MAX_FRAMES;
+        use super::PREVIEW_PX;
+        use super::PreviewEdge;
+        use wows_minimap_renderer::MINIMAP_SIZE;
+
+        let bytes = |frames: usize, edge: u32| frames as u64 * u64::from(edge) * u64::from(edge) * 4;
+        let scale_one = bytes(PREVIEW_MAX_FRAMES, PREVIEW_PX);
+        let dense = PreviewEdge::for_scale_factor(2.0);
+
+        let full = dense.for_track(PREVIEW_MAX_FRAMES).pixels();
+        assert!(bytes(PREVIEW_MAX_FRAMES, full) <= scale_one, "{full}px frames exceed the budget");
+        assert_eq!(full, PREVIEW_PX, "and are never drawn below the preview's own size");
+
+        let short = dense.for_track(PREVIEW_MAX_FRAMES / 4).pixels();
+        assert_eq!(short, MINIMAP_SIZE, "a short battle fits at the display's own size");
+        assert!(bytes(PREVIEW_MAX_FRAMES / 4, short) <= scale_one);
+
+        let between = dense.for_track(PREVIEW_MAX_FRAMES / 2).pixels();
+        assert!(between > PREVIEW_PX && between < MINIMAP_SIZE, "a middling one takes what fits: {between}px");
+        assert!(bytes(PREVIEW_MAX_FRAMES / 2, between) <= scale_one);
     }
 }

@@ -1237,7 +1237,7 @@ fn render_browser_item(
 
 impl Render for ReplayBrowser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.preview.release_dropped(window);
+        self.preview.sync_with_window(window);
         let body = match &self.status {
             // A spinner beside the line, as the egui listing shows while it
             // is reading the directory.
