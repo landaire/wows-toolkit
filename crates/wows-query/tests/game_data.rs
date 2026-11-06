@@ -180,6 +180,30 @@ fn ship_overview_reports_cost_and_research() {
     insta::assert_yaml_snapshot!(overviews);
 }
 
+/// Tier 11 ships cost no experience: GameParams lists `costXP` 0 and the
+/// tier 10 ship to research in `requiredShip`.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_overview_reports_purchase_and_research_costs() {
+    let costs: Vec<_> = ["Zao", "Kurama", "Montana", "Maine"]
+        .into_iter()
+        .map(|name| {
+            let overview = game().ship_overview(&overview(name)).expect("ship exists");
+            json!({
+                "ship": overview.ship.name,
+                "purchase_credits": overview.purchase_credits,
+                "research_xp": overview.research_xp,
+                "acquisition_note": overview.acquisition_note,
+                "researched_from": overview.researched_from,
+                "unlocks": overview.unlocks,
+                "requires_ship": overview.requires_ship,
+            })
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(costs);
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn ship_overview_lists_armament_and_what_is_absent() {

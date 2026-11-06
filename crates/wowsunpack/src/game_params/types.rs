@@ -1578,7 +1578,7 @@ pub struct ShipResearch {
     /// Ship param names unlocked by researching this ship's modules.
     #[builder(default)]
     next_ships: Vec<String>,
-    /// Ship param name that must be owned before this ship can be bought.
+    /// Ship param name that must be researched before this ship can be bought.
     required_ship: Option<String>,
 }
 

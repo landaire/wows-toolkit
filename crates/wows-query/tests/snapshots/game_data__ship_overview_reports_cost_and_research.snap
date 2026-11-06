@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 180
 expression: overviews
 ---
 - ship:
@@ -11,7 +10,7 @@ expression: overviews
     nation: USA
     group: upgradeable
     status: released
-  cost_credits: 19800000
+  purchase_credits: 19800000
   research_xp: 237500
   researched_from:
     - Buffalo
@@ -66,7 +65,8 @@ expression: overviews
     nation: USA
     group: superShip
     status: released
-  cost_credits: 47500000
+  purchase_credits: 47500000
+  acquisition_note: "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships."
   researched_from:
     - Des Moines
   requires_ship: Des Moines

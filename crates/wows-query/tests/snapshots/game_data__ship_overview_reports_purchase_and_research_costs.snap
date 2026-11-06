@@ -1,0 +1,38 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: costs
+---
+- ship: Zaō
+  purchase_credits: 20000000
+  research_xp: 238000
+  acquisition_note: ~
+  researched_from:
+    - Ibuki
+  unlocks:
+    - Kurama
+  requires_ship: ~
+- ship: Kurama
+  purchase_credits: 47500000
+  research_xp: ~
+  acquisition_note: "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships."
+  researched_from:
+    - Zaō
+  unlocks: []
+  requires_ship: Zaō
+- ship: Montana
+  purchase_credits: 20800000
+  research_xp: 247000
+  acquisition_note: ~
+  researched_from:
+    - Iowa
+  unlocks:
+    - Maine
+  requires_ship: ~
+- ship: Maine
+  purchase_credits: 57000000
+  research_xp: ~
+  acquisition_note: "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships."
+  researched_from:
+    - Montana
+  unlocks: []
+  requires_ship: Montana

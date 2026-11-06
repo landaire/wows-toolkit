@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 473
 expression: overview
 ---
 ship:
@@ -12,7 +11,7 @@ ship:
   group: demoWithoutStats
   status: test
   status_note: "test ship, values from the current client may change before release"
-cost_credits: 21000000
+purchase_credits: 21000000
 research_xp: 260000
 upgrade_slots: 6
 armament:

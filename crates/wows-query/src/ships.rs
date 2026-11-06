@@ -423,15 +423,16 @@ pub struct ShipOverview {
 
     pub ship: ShipSummary,
 
-    /// Port price in credits. Absent when the ship is not sold for credits.
+    /// Port purchase price in credits. Absent when the ship is not sold for credits.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost_credits: Option<Credits>,
+    pub purchase_credits: Option<Credits>,
 
-    /// How the ship is obtained when it is not researched or sold in the port.
+    /// How the ship is obtained when the price and research fields do not tell it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acquisition_note: Option<&'static str>,
 
-    /// Ship experience needed to research it. Absent for ships outside the research tree.
+    /// Ship experience needed to research it. Absent for ships outside the
+    /// research tree and for tier 11 ships, which cost no experience.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub research_xp: Option<Experience>,
 
@@ -443,7 +444,7 @@ pub struct ShipOverview {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unlocks: Vec<String>,
 
-    /// Ship that must be owned before this one can be bought.
+    /// Ship that must be researched before this one can be bought.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_ship: Option<String>,
 
@@ -612,7 +613,7 @@ impl GameData {
         Ok(ShipOverview {
             interpretations,
             ship: ship.summary(),
-            cost_credits: research.cost_credits(),
+            purchase_credits: research.cost_credits(),
             acquisition_note: acquisition_note(ship.group()),
             research_xp: research.cost_xp(),
             researched_from,
@@ -744,8 +745,8 @@ fn preferred<'a>(ships: &[&'a Ship]) -> Option<&'a Ship> {
     ships.iter().find(|ship| ship.is_regular()).or_else(|| ships.first()).copied()
 }
 
-/// Groups of ships obtained outside the port. The prices are server side and
-/// absent from game data.
+/// Groups of ships obtained in ways the price and research fields do not
+/// show. Armory prices are server side and absent from game data.
 fn acquisition_note(group: &str) -> Option<&'static str> {
     match group {
         "ultimate" => Some(
@@ -755,6 +756,9 @@ fn acquisition_note(group: &str) -> Option<&'static str> {
             "Obtained from the Armory, events, containers or bundles, not as a doubloon store item. Game data does not hold that price.",
         ),
         "disabled" => Some("Not obtainable."),
+        "superShip" => Some(
+            "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships.",
+        ),
         _ => None,
     }
 }
