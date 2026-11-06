@@ -15824,6 +15824,7 @@ dependencies = [
  "tracing-subscriber",
  "twitch_api",
  "unidecode",
+ "walkdir",
  "web-time",
  "wgc-auth",
  "wgc-catalog",

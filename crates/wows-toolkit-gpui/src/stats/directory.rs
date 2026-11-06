@@ -295,8 +295,7 @@ pub(super) fn directory_header(scope: &DirectoryScope, view: Entity<StatsView>, 
 /// directory spanning many builds loads their game data one after another
 /// rather than all at once.
 fn read_directory(root: &Path, game_data: &GameDataCache, tx: &UnboundedSender<DirectoryStatsUpdate>) {
-    // The same files the directory listing shows.
-    let paths = crate::replay_index::replays_under(root);
+    let paths = replays_beneath(root);
     let total = paths.len();
     let workers = worker_count();
 
@@ -381,6 +380,25 @@ fn read_directory(root: &Path, game_data: &GameDataCache, tx: &UnboundedSender<D
             return;
         }
     }
+}
+
+/// Every replay at or below `root`, matching the egui app's directory stats:
+/// symlinks are not followed, and the live recording is left out because it
+/// has no results yet.
+fn replays_beneath(root: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .map(walkdir::DirEntry::into_path)
+        .filter(|path| {
+            path.extension().is_some_and(|extension| extension == "wowsreplay")
+                && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+        })
+        .collect();
+    paths.sort();
+    paths
 }
 
 /// Half the cores, at most four: a full parse holds a battle's packet stream
@@ -508,5 +526,27 @@ mod tests {
         assert!(game.is_none());
         assert_eq!(*progress, ReplaySetProgress { done: 1, total: 1 }, "only the broken replay is in the set");
         assert_eq!(*skips, ReplaySetSkips { unreadable: 1, ..ReplaySetSkips::default() });
+    }
+
+    /// Replays in subdirectories are part of the set; a live recording there
+    /// is still left out.
+    #[test]
+    fn replays_in_subdirectories_are_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let nested = dir.path().join("2026").join("archive");
+        std::fs::create_dir_all(&nested).expect("the directory can be made");
+        std::fs::write(dir.path().join("top.wowsreplay"), b"not a replay").expect("the file can be written");
+        std::fs::write(nested.join("nested.wowsreplay"), b"not a replay").expect("the file can be written");
+        std::fs::write(nested.join("temp.wowsreplay"), b"in progress").expect("the file can be written");
+
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+        read_directory(dir.path(), &GameDataCache::without_install(), &tx);
+
+        let updates = drain(&mut rx);
+        let Some(DirectoryStatsUpdate::Read { progress, skips, .. }) = updates.last() else {
+            panic!("the read ends on a read update");
+        };
+        assert_eq!(*progress, ReplaySetProgress { done: 2, total: 2 });
+        assert_eq!(*skips, ReplaySetSkips { unreadable: 2, ..ReplaySetSkips::default() });
     }
 }

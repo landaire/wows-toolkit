@@ -66,6 +66,7 @@ GPUI_DEPS = [
     "//third-party/rust:tracing-subscriber",
     "//third-party/rust:twitch_api",
     "//third-party/rust:unidecode",
+    "//third-party/rust:walkdir",
     "//third-party/rust:web-time",
     "//third-party/rust:wgpu",
     "//third-party/rust:zip",
