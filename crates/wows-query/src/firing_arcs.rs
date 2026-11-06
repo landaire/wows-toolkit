@@ -444,20 +444,9 @@ impl GameData {
             if submarine && weapon == Weapon::Torpedoes {
                 continue;
             }
-            let mounts = weapon_mounts(ship, selection, weapon);
-            if mounts.is_empty() {
+            let oriented = oriented_mounts(ship, selection, weapon, &facings)?;
+            if oriented.is_empty() {
                 continue;
-            }
-
-            let mut oriented = Vec::with_capacity(mounts.len());
-            for (mount, barrels) in mounts {
-                let Some(facing) = facings.get(mount.hp_name()).copied() else {
-                    return Err(QueryError::MountFacingMissing {
-                        ship: ship.name.clone(),
-                        hardpoint: mount.hp_name().to_owned(),
-                    });
-                };
-                oriented.push(OrientedMount { mount, facing, barrels });
             }
 
             let ordnance = self.ordnance(&oriented, &card.stats, weapon, node_probability);
@@ -563,7 +552,7 @@ impl GameData {
     }
 
     /// Hardpoint name to the yaw it faces, for the selected hull.
-    fn hardpoint_facings(
+    pub(crate) fn hardpoint_facings(
         &self,
         ship: &Ship,
         selection: &ShipUpgradeSelection,
@@ -767,7 +756,11 @@ impl GameData {
 
 /// The aiming mounts of one weapon for the selected hull and modules, with
 /// their barrel counts.
-fn weapon_mounts<'a>(ship: &'a Ship, selection: &ShipUpgradeSelection, weapon: Weapon) -> Vec<(&'a MountPoint, u32)> {
+pub(crate) fn weapon_mounts<'a>(
+    ship: &'a Ship,
+    selection: &ShipUpgradeSelection,
+    weapon: Weapon,
+) -> Vec<(&'a MountPoint, u32)> {
     let component_type = match weapon {
         Weapon::MainBattery => ComponentType::Artillery,
         Weapon::Secondaries => ComponentType::Atba,
@@ -781,6 +774,42 @@ fn weapon_mounts<'a>(ship: &'a Ship, selection: &ShipUpgradeSelection, weapon: W
         .collect();
     mounts.sort_by(|(left, _), (right, _)| left.hp_name().cmp(right.hp_name()));
     mounts
+}
+
+/// The aiming mounts of one weapon, each with the facing of its hardpoint.
+pub(crate) fn oriented_mounts<'a>(
+    ship: &'a Ship,
+    selection: &ShipUpgradeSelection,
+    weapon: Weapon,
+    facings: &HashMap<String, Degrees>,
+) -> Result<Vec<OrientedMount<'a>>, QueryError> {
+    weapon_mounts(ship, selection, weapon)
+        .into_iter()
+        .map(|(mount, barrels)| {
+            let facing = facings.get(mount.hp_name()).copied().ok_or_else(|| QueryError::MountFacingMissing {
+                ship: ship.name.clone(),
+                hardpoint: mount.hp_name().to_owned(),
+            })?;
+
+            Ok(OrientedMount { mount, facing, barrels })
+        })
+        .collect()
+}
+
+/// Per arc, each distinct set of mounts that bear together at one bearing
+/// inside it, as indices into `mounts`.
+pub(crate) fn bearing_sets(mounts: &[OrientedMount<'_>]) -> PerArc<Vec<Vec<usize>>> {
+    PerArc::from_fn(|arc| {
+        let mut sets: Vec<Vec<usize>> = Vec::new();
+        for bearing in arc.bearings() {
+            let set: Vec<usize> = (0..mounts.len()).filter(|index| mounts[*index].bears(bearing)).collect();
+            if !set.is_empty() && !sets.contains(&set) {
+                sets.push(set);
+            }
+        }
+
+        sets
+    })
 }
 
 fn battery_arcs(weapon: Weapon, mounts: &[OrientedMount<'_>], ordnance: &Ordnance) -> BatteryArcs {

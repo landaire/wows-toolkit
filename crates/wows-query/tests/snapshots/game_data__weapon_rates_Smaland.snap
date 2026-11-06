@@ -1,0 +1,206 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 520
+expression: rates(name)
+---
+torpedoes_per_minute:
+  launchers: 2
+  tubes: 8
+  tubes_per_reload: 8
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base: 4.8
+      best:
+        value: 6.27
+        assumed:
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+        tier_fillers:
+          - Consumable Specialist
+          - Extra-Heavy Ammunition
+      alternatives:
+        - label: without Fill the Tubes
+          value: 5.65
+          assumed:
+            - Torpedo Tubes Modification 2
+        - label: without Torpedo Tubes Modification 2
+          value: 5.33
+          assumed:
+            - Fill the Tubes
+          tier_fillers:
+            - Consumable Specialist
+            - Extra-Heavy Ammunition
+main_battery_damage:
+  - ammo: AP
+    damage: 2100
+    barrels: 4
+    rates:
+      stat: main battery AP damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 296471
+          damage_per_second: 4941.2
+          broadside_damage_per_minute: 296471
+          bow_on_damage_per_minute: 148235
+        best:
+          value:
+            damage_per_minute: 381227
+            damage_per_second: 6353.8
+            broadside_damage_per_minute: 381227
+            bow_on_damage_per_minute: 190614
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+        alternatives:
+          - label: without Extra-Heavy Ammunition
+            value:
+              damage_per_minute: 354630
+              damage_per_second: 5910.5
+              broadside_damage_per_minute: 354630
+              bow_on_damage_per_minute: 177315
+            assumed:
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+              - Consumable Enhancements
+          - label: without Main Battery and AA Specialist
+            value:
+              damage_per_minute: 362166
+              damage_per_second: 6036.1
+              broadside_damage_per_minute: 362166
+              bow_on_damage_per_minute: 181083
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 335480
+              damage_per_second: 5591.3
+              broadside_damage_per_minute: 335480
+              bow_on_damage_per_minute: 167740
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery and AA Specialist
+            tier_fillers:
+              - Consumable Specialist
+          - label: with Fearless Brawler active
+            value:
+              damage_per_minute: 423586
+              damage_per_second: 7059.8
+              broadside_damage_per_minute: 423586
+              bow_on_damage_per_minute: 211793
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+              - Fearless Brawler
+            tier_fillers:
+              - Consumable Specialist
+            note: Reduces main battery reload time while your ship remains detected by an enemy.
+  - ammo: HE
+    damage: 1750
+    barrels: 4
+    rates:
+      stat: main battery HE damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 247059
+          damage_per_second: 4117.6
+          broadside_damage_per_minute: 247059
+          bow_on_damage_per_minute: 123529
+        best:
+          value:
+            damage_per_minute: 295525
+            damage_per_second: 4925.4
+            broadside_damage_per_minute: 295525
+            bow_on_damage_per_minute: 147762
+          assumed:
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+            - Extra-Heavy Ammunition
+        alternatives:
+          - label: without Main Battery and AA Specialist
+            value:
+              damage_per_minute: 280749
+              damage_per_second: 4679.1
+              broadside_damage_per_minute: 280749
+              bow_on_damage_per_minute: 140374
+            assumed:
+              - Main Battery Modification 3
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 260062
+              damage_per_second: 4334.4
+              broadside_damage_per_minute: 260062
+              bow_on_damage_per_minute: 130031
+            assumed:
+              - Main Battery and AA Specialist
+            tier_fillers:
+              - Consumable Specialist
+              - Extra-Heavy Ammunition
+          - label: with Fearless Brawler active
+            value:
+              damage_per_minute: 328361
+              damage_per_second: 5472.7
+              broadside_damage_per_minute: 328361
+              bow_on_damage_per_minute: 164181
+            assumed:
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+              - Fearless Brawler
+            tier_fillers:
+              - Consumable Specialist
+              - Extra-Heavy Ammunition
+            note: Reduces main battery reload time while your ship remains detected by an enemy.
+torpedo_damage:
+  - ammo: Torped M1943 mod 1
+    damage: 10700
+    barrels: 8
+    rates:
+      stat: Torped M1943 mod 1 damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 51360
+          damage_per_second: 856
+        best:
+          value:
+            damage_per_minute: 67137
+            damage_per_second: 1119
+          assumed:
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+          tier_fillers:
+            - Consumable Specialist
+            - Extra-Heavy Ammunition
+        alternatives:
+          - label: without Fill the Tubes
+            value:
+              damage_per_minute: 60424
+              damage_per_second: 1007.1
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 57067
+              damage_per_second: 951.1
+            assumed:
+              - Fill the Tubes
+            tier_fillers:
+              - Consumable Specialist
+              - Extra-Heavy Ammunition
+rate_notes:
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."

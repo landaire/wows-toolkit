@@ -1,0 +1,167 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 520
+expression: rates(name)
+---
+torpedoes_per_minute:
+  launchers: 10
+  tubes: 12
+  loader_groups:
+    - direction: bow
+      launchers: 4
+      tubes: 4
+      loaders: 2
+      tubes_per_reload: 2
+    - direction: rotating
+      launchers: 1
+      tubes: 2
+      loaders: 1
+      tubes_per_reload: 2
+    - direction: rotating
+      launchers: 1
+      tubes: 2
+      loaders: 1
+      tubes_per_reload: 2
+    - direction: stern
+      launchers: 4
+      tubes: 4
+      loaders: 2
+      tubes_per_reload: 2
+  tubes_per_reload: 8
+  limit: "2 of the 4 bow launchers (4 tubes) reload at a time. 2 of the 4 stern launchers (4 tubes) reload at a time. 8 of the 12 tubes reload per reload time, not all 12."
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base: 7.74
+      best:
+        value: 9.11
+        assumed:
+          - Torpedo Tubes Modification 2
+      alternatives:
+        - label: without Torpedo Tubes Modification 2
+          value: 7.74
+          assumed: []
+        - label: with Torpedo Crew Training active
+          value: 10.72
+          assumed:
+            - Torpedo Tubes Modification 2
+            - Torpedo Crew Training
+          tier_fillers:
+            - Priority Target
+          note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+main_battery_damage:
+  - ammo: SAP
+    damage: 2250
+    barrels: 1
+    rates:
+      stat: main battery SAP damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 27000
+          damage_per_second: 450
+          broadside_damage_per_minute: 27000
+          bow_on_damage_per_minute: 27000
+        best:
+          value:
+            damage_per_minute: 30682
+            damage_per_second: 511.4
+            broadside_damage_per_minute: 30682
+            bow_on_damage_per_minute: 30682
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 27000
+              damage_per_second: 450
+              broadside_damage_per_minute: 27000
+              bow_on_damage_per_minute: 27000
+            assumed: []
+torpedo_damage:
+  - ammo: 533 mm wz.AB akustyczna
+    damage: 7833
+    barrels: 12
+    rates:
+      stat: 533 mm wz.AB akustyczna damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 60645
+          damage_per_second: 1010.8
+        best:
+          value:
+            damage_per_minute: 76342
+            damage_per_second: 1272.4
+          assumed:
+            - Torpedo Tubes Modification 3
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Torpedo Tubes Modification 3
+            value:
+              damage_per_minute: 71347
+              damage_per_second: 1189.1
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 64890
+              damage_per_second: 1081.5
+            assumed:
+              - Torpedo Tubes Modification 3
+          - label: with Torpedo Crew Training active
+            value:
+              damage_per_minute: 89814
+              damage_per_second: 1496.9
+            assumed:
+              - Torpedo Tubes Modification 3
+              - Torpedo Tubes Modification 2
+              - Torpedo Crew Training
+            tier_fillers:
+              - Priority Target
+            note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+  - ammo: 533 mm wz.AB
+    damage: 17133
+    barrels: 12
+    rates:
+      stat: 533 mm wz.AB damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 132645
+          damage_per_second: 2210.8
+        best:
+          value:
+            damage_per_minute: 166977
+            damage_per_second: 2782.9
+          assumed:
+            - Torpedo Tubes Modification 3
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Torpedo Tubes Modification 3
+            value:
+              damage_per_minute: 156053
+              damage_per_second: 2600.9
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 141930
+              damage_per_second: 2365.5
+            assumed:
+              - Torpedo Tubes Modification 3
+          - label: with Torpedo Crew Training active
+            value:
+              damage_per_minute: 196443
+              damage_per_second: 3274.1
+            assumed:
+              - Torpedo Tubes Modification 3
+              - Torpedo Tubes Modification 2
+              - Torpedo Crew Training
+            tier_fillers:
+              - Priority Target
+            note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+rate_notes:
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."

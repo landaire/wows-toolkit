@@ -15,6 +15,7 @@
 //! trigonometric step wants radians.
 
 use std::fmt;
+use std::iter::Sum;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
@@ -215,6 +216,27 @@ pub struct Percent(f32);
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct SquareMeters(f32);
+
+/// Hit points of damage dealt per minute.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DamagePerMinute(f32);
+
+/// Hit points of damage dealt per second.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DamagePerSecond(f32);
+
+/// Torpedoes launched per minute.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TorpedoesPerMinute(f32);
 
 impl From<f32> for Meters {
     fn from(v: f32) -> Self {
@@ -539,6 +561,53 @@ impl SquareMeters {
     }
 }
 
+impl DamagePerMinute {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    /// Damage per minute of `damage` dealt every `reload`.
+    pub fn from_reload(damage: f32, reload: Seconds) -> Self {
+        Self(60.0 * damage / reload.0)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+
+    pub fn per_second(self) -> DamagePerSecond {
+        DamagePerSecond(self.0 / 60.0)
+    }
+}
+
+impl DamagePerSecond {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
+impl TorpedoesPerMinute {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    /// Torpedoes launched per minute by `tubes` reloaded every `reload`.
+    pub fn from_reload(tubes: f32, reload: Seconds) -> Self {
+        Self(60.0 * tubes / reload.0)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// Conventional English-port rounding: whole meters.
 impl fmt::Display for Meters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -614,6 +683,18 @@ impl Sub for Radians {
     type Output = Radians;
     fn sub(self, rhs: Radians) -> Radians {
         Radians(self.0 - rhs.0)
+    }
+}
+
+impl Add for DamagePerMinute {
+    type Output = DamagePerMinute;
+    fn add(self, rhs: DamagePerMinute) -> DamagePerMinute {
+        DamagePerMinute(self.0 + rhs.0)
+    }
+}
+impl Sum for DamagePerMinute {
+    fn sum<I: Iterator<Item = DamagePerMinute>>(iter: I) -> DamagePerMinute {
+        DamagePerMinute(iter.map(|rate| rate.0).sum())
     }
 }
 

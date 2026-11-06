@@ -33,6 +33,7 @@ use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
 use wows_core::units::Seconds;
+use wows_core::units::TorpedoesPerMinute;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
@@ -93,6 +94,14 @@ impl StatUnit for Seconds {
     }
 }
 
+impl StatUnit for TorpedoesPerMinute {
+    const UNIT: &'static str = "torpedoes/min";
+
+    fn amount(self) -> f32 {
+        self.value()
+    }
+}
+
 /// Number of charges, or unlimited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Charges {
@@ -136,7 +145,8 @@ pub struct BuildStat<V> {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Builds<V> {
-    /// Stock modules, no captain skills or upgrades.
+    /// Stock modules, or the modules a stat needs when stock lacks it; no
+    /// captain skills or upgrades.
     pub base: V,
 
     /// The best-fit build for this stat.
@@ -208,6 +218,9 @@ pub(crate) enum Item {
 pub(crate) struct Outcome {
     pub(crate) stats: ShipStats,
     pub(crate) bundle: ModifierBundle,
+
+    /// Index into [`Planner::selections`] of the module combination.
+    pub(crate) selection: usize,
 }
 
 /// Why the best-fit build leaves out an item that changes the stat.
@@ -273,6 +286,10 @@ pub(crate) struct StatPlan<'f, V> {
     pub(crate) triggered: bool,
 
     pub(crate) exclude: Option<Exclude<'f, V>>,
+
+    /// Index into [`Planner::selections`] of the modules the base value uses:
+    /// stock, unless the stat exists only with other modules.
+    pub(crate) base_selection: usize,
 }
 
 /// Items the best-fit build leaves out although they change the stat, given
@@ -282,13 +299,19 @@ pub(crate) type Exclude<'f, V> = &'f dyn Fn(&Planner<'_>, &[(Item, V)]) -> Resul
 impl<'f, V> StatPlan<'f, V> {
     /// A stat module choices and conditional skills may change.
     pub(crate) fn new(label: String, better: Better, extract: Extract<'f, V>) -> Self {
-        Self { label, better, extract, modules: true, triggered: true, exclude: None }
+        Self { label, better, extract, modules: true, triggered: true, exclude: None, base_selection: 0 }
     }
 
     /// For consumable stats: the ship's modules do not change them.
     pub(crate) fn for_consumable(mut self) -> Self {
         self.modules = false;
         self.triggered = false;
+        self
+    }
+
+    /// For a stat that exists only with the modules of combination `selection`.
+    pub(crate) fn on_selection(mut self, selection: usize) -> Self {
+        self.base_selection = selection;
         self
     }
 }
@@ -327,6 +350,21 @@ impl<'a> Planner<'a> {
 
     pub(crate) fn ship(&self) -> &Ship {
         self.ship
+    }
+
+    /// Module combinations that fit, stock first.
+    pub(crate) fn selections(&self) -> impl Iterator<Item = &ShipUpgradeSelection> {
+        self.selections.iter().map(|(selection, _)| selection)
+    }
+
+    /// Names of the modules of combination `selection` that are not stock.
+    pub(crate) fn selection_modules(&self, selection: usize) -> &[String] {
+        &self.selections[selection].1
+    }
+
+    /// The outcome of module combination `selection` and no items.
+    pub(crate) fn bare(&self, selection: usize) -> Result<Rc<Outcome>, QueryError> {
+        self.outcome(selection, &[], None)
     }
 
     /// Items whose English names are in `names`.
@@ -377,7 +415,7 @@ impl<'a> Planner<'a> {
             self.ship.tier.0,
             self.game.provider(),
         );
-        let outcome = Rc::new(Outcome { stats, bundle: effects.modifiers.bundle().clone() });
+        let outcome = Rc::new(Outcome { stats, bundle: effects.modifiers.bundle().clone(), selection });
         self.outcomes.borrow_mut().insert(key, Rc::clone(&outcome));
         Ok(outcome)
     }
@@ -415,14 +453,14 @@ impl<'a> Planner<'a> {
     /// ship lacks the stat.
     pub(crate) fn plan<V: StatUnit>(&self, plan: &StatPlan<'_, V>) -> Result<Option<BuildStat<V>>, QueryError> {
         let value = |outcome: &Outcome| (plan.extract)(outcome);
-        let Some(base) = value(&*self.stock()?) else {
+        let Some(base) = value(&*self.bare(plan.base_selection)?) else {
             return Ok(None);
         };
 
-        let mut selection = 0;
+        let mut selection = plan.base_selection;
         let mut start = base;
         if plan.modules {
-            for index in 1..self.selections.len() {
+            for index in (0..self.selections.len()).filter(|index| *index != plan.base_selection) {
                 if let Some(candidate) = value(&*self.outcome(index, &[], None)?)
                     && plan.better.improves(candidate.amount(), start.amount())
                 {

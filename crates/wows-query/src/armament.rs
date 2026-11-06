@@ -59,7 +59,7 @@ where
 #[serde(transparent)]
 pub struct MountCount(pub u32);
 
-/// Number of barrels or tubes on one mount.
+/// Number of barrels or tubes, on one mount or on several.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct BarrelCount(pub u32);
@@ -361,7 +361,7 @@ impl GameData {
     }
 
     /// English name of a projectile, or its GameParams name when it has none.
-    fn unit_name(&self, param: &str) -> String {
+    pub(crate) fn unit_name(&self, param: &str) -> String {
         translate_unit(param, self.provider()).map_or_else(|| param.to_owned(), |name| clean(&name))
     }
 }
@@ -393,16 +393,7 @@ pub(crate) fn selected_mounts<'a>(
     let Some(hull) = selection.hull.as_deref().and_then(|name| vehicle.hull_upgrade(name)) else {
         return &[];
     };
-
-    let upgrade = match component_type {
-        ComponentType::Artillery => selection.artillery.as_deref(),
-        ComponentType::Torpedoes => selection.torpedoes.as_deref(),
-        _ => None,
-    };
-    let component = upgrade
-        .and_then(|name| vehicle.ttx_components()?.component_on_hull(name, hull, component_type))
-        .or_else(|| hull.component_name(component_type));
-    let Some(component) = component else {
+    let Some(component) = selected_component(ship, selection, component_type) else {
         return &[];
     };
 
@@ -411,4 +402,24 @@ pub(crate) fn selected_mounts<'a>(
     } else {
         hull.alternative_mounts.get(component).map(|mounts| mounts.mounts()).unwrap_or_default()
     }
+}
+
+/// Name of the component of one type the selected hull and modules mount,
+/// e.g. `B_Torpedoes`.
+pub(crate) fn selected_component<'a>(
+    ship: &'a Ship,
+    selection: &ShipUpgradeSelection,
+    component_type: ComponentType,
+) -> Option<&'a str> {
+    let vehicle = ship.param.vehicle()?;
+    let hull = vehicle.hull_upgrade(selection.hull.as_deref()?)?;
+    let upgrade = match component_type {
+        ComponentType::Artillery => selection.artillery.as_deref(),
+        ComponentType::Torpedoes => selection.torpedoes.as_deref(),
+        _ => None,
+    };
+
+    upgrade
+        .and_then(|name| vehicle.ttx_components()?.component_on_hull(name, hull, component_type))
+        .or_else(|| hull.component_name(component_type))
 }

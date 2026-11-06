@@ -28,6 +28,7 @@ use crate::loadout::AppliedUpgrade;
 use crate::loadout::LoadoutRequest;
 use crate::loadout::ResolvedLoadout;
 use crate::names::Interpretations;
+use crate::rates::Rates;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
 use crate::text::clean;
@@ -103,6 +104,9 @@ pub struct WeaponBuilds {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub torpedo_reload: Option<BuildStat<Seconds>>,
+
+    #[serde(flatten)]
+    pub rates: Rates,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -199,6 +203,7 @@ impl GameData {
             torpedo_reload: planner.plan(&StatPlan::new("torpedo reload".to_owned(), Better::Lower, &|outcome| {
                 seconds(outcome.stats.torpedoes.as_ref()?.reload_time)
             }))?,
+            rates: self.rates(&planner)?,
         })
     }
 

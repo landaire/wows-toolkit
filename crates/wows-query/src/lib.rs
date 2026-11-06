@@ -28,6 +28,7 @@ pub mod modules;
 pub mod names;
 pub mod penetration;
 pub mod raw_params;
+pub mod rates;
 pub mod replay;
 pub mod replay_worker;
 pub mod shells;

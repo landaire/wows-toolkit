@@ -561,17 +561,52 @@ fn des_moines_weapon_stats_on_their_best_builds() {
     insta::assert_yaml_snapshot!(stats.build_stats);
 }
 
+fn rates(name: &str) -> wows_query::rates::Rates {
+    game()
+        .ship_stats(&ShipStatsArgs { ship: name.to_owned(), ..Default::default() })
+        .expect("ship exists")
+        .build_stats
+        .expect("a stock call reports build stats")
+        .rates
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn weapon_rates_on_their_best_builds() {
+    for name in ["Yamato", "Shimakaze", "Smaland", "Orzel", "Barfleur"] {
+        insta::assert_yaml_snapshot!(format!("weapon_rates_{name}"), rates(name));
+    }
+}
+
+/// Barfleur's one loader serves both launchers; Orzel's bow and stern groups
+/// reload two launchers each; Shimakaze reloads every launcher at once.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn torpedoes_per_minute_follow_the_loaders() {
+    let base = |name: &str| {
+        let rate = rates(name).torpedoes_per_minute.expect("the ship has torpedoes");
+        (rate.tubes.0, rate.rate.builds.base.value())
+    };
+
+    assert_eq!(base("Barfleur"), (10, 5.26));
+    assert_eq!(base("Orzel"), (12, 7.74));
+    assert_eq!(base("Shimakaze"), (15, 6.0));
+}
+
 /// Torpedo Crew Training shares its trigger type with Fearless Brawler; its
 /// alternative must carry its own torpedo sentence.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn triggered_alternatives_carry_their_own_skill_condition() {
-    let stats = game()
-        .ship_stats(&ShipStatsArgs { ship: "Orzel".to_owned(), ..Default::default() })
-        .expect("Orzel exists");
+    let stats =
+        game().ship_stats(&ShipStatsArgs { ship: "Orzel".to_owned(), ..Default::default() }).expect("Orzel exists");
     let torpedo_reload = stats.build_stats.and_then(|builds| builds.torpedo_reload).expect("Orzel has torpedoes");
-    let triggered: Vec<_> =
-        torpedo_reload.builds.alternatives.iter().filter(|alternative| alternative.label.ends_with(" active")).collect();
+    let triggered: Vec<_> = torpedo_reload
+        .builds
+        .alternatives
+        .iter()
+        .filter(|alternative| alternative.label.ends_with(" active"))
+        .collect();
     assert!(!triggered.is_empty(), "{torpedo_reload:?}");
 
     for alternative in triggered {
