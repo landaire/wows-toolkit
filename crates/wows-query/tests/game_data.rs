@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
+use serde_json::json;
 use wows_core::units::Millimeters;
 use wows_query::GameData;
 use wows_query::consumables::ShipConsumablesArgs;
@@ -170,4 +171,21 @@ fn conflicting_upgrades_are_rejected() {
         .expect_err("both use slot 3");
 
     insta::assert_snapshot!(error.to_string());
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn registry_calls_report_each_failure_kind() {
+    let armor = game().call_tool("ship_armor", json!({ "ship": "Des Moines" })).expect("Des Moines exists");
+    assert_eq!(armor["ship"]["name"], "Des Moines");
+
+    let failures = [
+        game().call_tool("ship_armour", json!({ "ship": "Des Moines" })),
+        game().call_tool("ship_armor", json!({ "name": "Des Moines" })),
+        game().call_tool("ship_armor", json!({ "ship": "Des Moines", "zone": "Bow" })),
+        game().call_tool("ship_armor", json!({ "ship": "Nonexistent Ship" })),
+    ];
+    let messages: Vec<String> =
+        failures.into_iter().map(|failure| failure.expect_err("call fails").to_string()).collect();
+    insta::assert_yaml_snapshot!(messages);
 }

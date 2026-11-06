@@ -90,6 +90,7 @@ impl UpgradeKind {
 
 /// Arguments for `upgrade`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpgradeArgs {
     /// Upgrade name, e.g. "Main Battery Modification 2" or "Concealment System Modification 1".
     pub upgrade: String,

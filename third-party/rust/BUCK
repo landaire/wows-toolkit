@@ -36887,7 +36887,6 @@ cargo.rust_library(
     },
     features = [
         "base64",
-        "macros",
         "schemars",
         "server",
         "server-side-http",
@@ -36921,7 +36920,6 @@ cargo.rust_library(
         ":pastey-0.2",
         ":pin-project-lite-0.2",
         ":rand-0.10",
-        ":rmcp-macros-3",
         ":schemars-1",
         ":serde-1",
         ":serde_json-1",
@@ -36934,45 +36932,6 @@ cargo.rust_library(
         ":tower-service-0.3",
         ":tracing-0.1",
         ":uuid-1",
-    ],
-)
-
-http_archive(
-    name = "rmcp-macros-3.9.0.crate",
-    sha256 = "b3140f24a766f80f9ec1607bde85680959a69b83d46fa9ce87dadab7e67ab029",
-    size_bytes = 24500,
-    strip_prefix = "rmcp-macros-3.9.0",
-    urls = ["https://static.crates.io/crates/rmcp-macros/3.9.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "rmcp-macros-3",
-    srcs = [":rmcp-macros-3.9.0.crate"],
-    crate = "rmcp_macros",
-    crate_root = "rmcp-macros-3.9.0.crate/src/lib.rs",
-    edition = "2024",
-    env = {
-        "CARGO_CRATE_NAME": "rmcp_macros",
-        "CARGO_MANIFEST_DIR": "rmcp-macros-3.9.0.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol macros library",
-        "CARGO_PKG_NAME": "rmcp-macros",
-        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
-        "CARGO_PKG_VERSION": "3.9.0",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    proc_macro = True,
-    visibility = [],
-    deps = [
-        ":darling-0.24",
-        ":proc-macro2-1",
-        ":quote-1",
-        ":serde_json-1",
-        ":syn-3",
     ],
 )
 

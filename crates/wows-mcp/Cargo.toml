@@ -13,7 +13,7 @@ clap = { workspace = true }
 hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
 # rustls without a crypto provider; rustls-graviola is installed at startup.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots-no-provider"] }
-rmcp = { version = "3.9", default-features = false, features = ["macros", "server", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
 rootcause = { workspace = true }
 rustls-graviola = "0.4"
 schemars = "1.2"

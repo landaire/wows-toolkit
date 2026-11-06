@@ -22,13 +22,13 @@ WOWS_QUERY_DEPS = [
     "//third-party/rust:rootcause",
     "//third-party/rust:schemars",
     "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
     "//third-party/rust:thiserror",
     "//third-party/rust:tracing",
 ]
 
 WOWS_QUERY_TEST_DEPS = [
     "//third-party/rust:insta",
-    "//third-party/rust:serde_json",
 ]
 
 workspace_library(

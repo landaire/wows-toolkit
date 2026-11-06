@@ -22,6 +22,7 @@ use crate::text::clean;
 
 /// Arguments for `ship_consumables`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ShipConsumablesArgs {
     /// Ship name, e.g. "Des Moines".
     pub ship: String,

@@ -26,6 +26,7 @@ use crate::text::clean;
 
 /// Arguments for `ship_stats`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ShipStatsArgs {
     /// Ship name, e.g. "Des Moines".
     pub ship: String,

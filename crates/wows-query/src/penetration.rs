@@ -41,6 +41,7 @@ impl BatteryFilter {
 
 /// Give either `thickness_mm`, or `target_ship` with `zone`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PenetrationSearchArgs {
     /// Plate thickness in mm to test against.
     pub thickness_mm: Option<Millimeters>,

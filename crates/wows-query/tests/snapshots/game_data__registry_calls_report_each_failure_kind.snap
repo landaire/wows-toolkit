@@ -1,0 +1,9 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 167
+expression: messages
+---
+- "no tool named \"ship_armour\""
+- "invalid arguments for ship_armor: unknown field `name`, expected `ship`"
+- "invalid arguments for ship_armor: unknown field `zone`, expected `ship`"
+- "no ship matches \"Nonexistent Ship\"; try find_ships with a shorter name"

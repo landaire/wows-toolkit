@@ -17,6 +17,7 @@ pub mod shells;
 pub mod ships;
 pub mod skills;
 pub mod stats;
+pub mod tools;
 pub mod upgrades;
 
 mod text;

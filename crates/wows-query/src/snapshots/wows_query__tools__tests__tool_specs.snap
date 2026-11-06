@@ -1,0 +1,235 @@
+---
+source: crates/wows-query/src/tools.rs
+expression: specs()
+---
+- name: find_ships
+  description: "List ships by name fragment, tier, class or nation. Returns name, GameParams index, tier, class, nation and group."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        description: "Part of the ship's name, e.g. \"moines\". Omit to list by the other filters."
+      min_tier:
+        type: integer
+        description: "A ship tier, 1 to 11."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "A ship tier, 1 to 11."
+        minimum: 1
+        maximum: 11
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\", \"Germany\", \"Japan\", \"Russia\", \"United_Kingdom\"."
+      include_event_variants:
+        type: boolean
+        description: "Include event, clan-battle and retired variants. Defaults to false."
+- name: ship_overview
+  description: "Credit price and research XP of tech tree ships, the GameParams doubloon value (with a note when it is not how the ship is obtained, e.g. Armory ships sold for coal or steel), research tree predecessors and successors, group and upgrade slot count of one ship."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+    required:
+      - ship
+- name: ship_armor
+  description: "Armor of one ship: per hull zone the thinnest and thickest plate above the waterline, and every plate by collision material (Bow_*, St_* stern, Cit_* citadel, Cas_* casemate, SS_* superstructure) with thickness in mm."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+    required:
+      - ship
+- name: ship_shells
+  description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration with and without Inertia Fuse for HE Shells, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+    required:
+      - ship
+- name: penetration_search
+  description: "Find ships whose shells defeat a plate outright: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. With a target ship and no tiers, searches the target's tier +-2."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      thickness_mm:
+        type: number
+        description: Plate thickness in mm to test against.
+      target_ship:
+        type: string
+        description: "Ship whose armor is the target, e.g. \"Des Moines\"."
+      zone:
+        type: string
+        description: "Zone or plate of the target ship: \"Bow\", \"Stern\", \"Cit\", \"Cas\", \"SS\", or a plate name from ship_armor. A zone uses its thinnest plate above the waterline."
+      ammo:
+        type: string
+        enum:
+          - AP
+          - HE
+          - SAP
+        description: "Only this shell type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer."
+      ifhe:
+        type: boolean
+        description: Apply Inertia Fuse for HE Shells to HE penetration. Defaults to false.
+      battery:
+        type: string
+        enum:
+          - main
+          - secondary
+          - any
+        description: Which guns to consider. Defaults to main.
+      min_tier:
+        type: integer
+        description: "Lowest tier to include. With a target ship and no tier bounds, the target's tier +-2 is used."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "Highest tier to include. With a target ship and no tier bounds, the target's tier +-2 is used."
+        minimum: 1
+        maximum: 11
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\"."
+- name: ship_stats
+  description: "Port stat card of one ship with stock modules. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name, e.g. \"Des Moines\"."
+      skills:
+        type: array
+        items:
+          type: string
+        description: "Captain skills by name or acronym, e.g. [\"IFHE\", \"Concealment Expert\"]. Resolved in the ship's class tree."
+      upgrades:
+        type: array
+        items:
+          type: string
+        description: "Upgrades by name, e.g. [\"Main Battery Modification 2\"]. One per slot."
+      conditions_met:
+        type: boolean
+        description: "Treat conditional skill triggers as met, e.g. an enemy in secondary range for Close Quarters Combat. Defaults to false."
+      hp_percent:
+        type: number
+        description: Remaining health in percent for health-scaled effects such as Adrenaline Rush. Defaults to full health.
+      full_card:
+        type: boolean
+        description: "Include the full stat card. Defaults to true without skills or upgrades and false with them, when only the changes are listed."
+    required:
+      - ship
+- name: captain_skill
+  description: "One captain skill by name or acronym (IFHE, SI, CE, AR, DE, BoS): description, point cost and effects per ship class."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      skill:
+        type: string
+        description: "Skill name, e.g. \"Inertia Fuse for HE Shells\", or a common acronym such as IFHE, SI, CE, AR, DE, BoS."
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: Only describe the skill for this class.
+    required:
+      - skill
+- name: skill_tree
+  description: "The captain skill tree of one ship class, skill names by point cost."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+    required:
+      - class
+- name: upgrade
+  description: "One upgrade (modernization) by name: slot, kind, credit price, effects per class and which tiers, nations and ships it fits."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      upgrade:
+        type: string
+        description: "Upgrade name, e.g. \"Main Battery Modification 2\" or \"Concealment System Modification 1\"."
+      ship:
+        type: string
+        description: Ship to check the upgrade against; also selects the class for effects.
+    required:
+      - upgrade
+- name: ship_upgrades
+  description: "Every upgrade that fits one ship, by slot, with price and effects."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
+    required:
+      - ship
+- name: ship_consumables
+  description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name, e.g. \"Des Moines\"."
+      skills:
+        type: array
+        items:
+          type: string
+        description: "Captain skills by name or acronym, e.g. [\"SI\"], applied to the consumable stats."
+      upgrades:
+        type: array
+        items:
+          type: string
+        description: "Upgrades by name, e.g. [\"Engine Boost Modification 1\"], applied to the consumable stats."
+    required:
+      - ship

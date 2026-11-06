@@ -37,7 +37,7 @@ const REGULAR_GROUPS: &[&str] = &[
 /// A ship tier, 1 to 11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct Tier(pub u32);
+pub struct Tier(#[schemars(range(min = 1, max = 11))] pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -152,6 +152,7 @@ pub struct ShipSummary {
 
 /// Arguments for `find_ships`. Every filter is optional.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FindShipsArgs {
     /// Part of the ship's name, e.g. "moines". Omit to list by the other filters.
     pub name: Option<String>,
@@ -179,6 +180,7 @@ pub struct FindShipsOutput {
 
 /// Arguments naming one ship.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ShipArgs {
     /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020".
     pub ship: String,

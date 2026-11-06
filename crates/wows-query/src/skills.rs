@@ -41,6 +41,7 @@ const ACRONYMS: &[(&str, &[&str])] = &[
 
 /// Arguments for `captain_skill`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CaptainSkillArgs {
     /// Skill name, e.g. "Inertia Fuse for HE Shells", or a common acronym such as IFHE, SI, CE, AR, DE, BoS.
     pub skill: String,
@@ -86,6 +87,7 @@ pub struct SkillClassEffects {
 
 /// Arguments for `skill_tree`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SkillTreeArgs {
     pub class: ShipClass,
 }
