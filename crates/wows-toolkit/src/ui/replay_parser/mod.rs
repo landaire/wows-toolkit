@@ -5580,7 +5580,7 @@ impl ToolkitTabViewer<'_> {
     /// there is nothing renderable. The replays themselves are read on the
     /// render thread: reading is decrypt plus inflate of a whole packet stream,
     /// and a group context menu can select hundreds of them.
-    fn batch_render_inputs(
+    pub(crate) fn batch_render_inputs(
         &self,
         paths: Vec<PathBuf>,
     ) -> Option<(Vec<PathBuf>, crate::data::wows_data::BuildDataCache)> {
@@ -5592,7 +5592,7 @@ impl ToolkitTabViewer<'_> {
 
     /// Assemble the shared render/encode context for a batch render from the
     /// saved renderer settings and the current encoder availability.
-    fn batch_render_context(
+    pub(crate) fn batch_render_context(
         &self,
         build_cache: crate::data::wows_data::BuildDataCache,
     ) -> crate::replay::renderer::BatchRenderContext {
