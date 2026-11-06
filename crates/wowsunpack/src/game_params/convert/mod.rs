@@ -13,6 +13,31 @@ use std::io::Cursor;
 
 use flate2::read::ZlibDecoder;
 use pickled::DeOptions;
+use pickled::HashableValue;
+use pickled::Value;
+use pickled::object::DictObject;
+use pickled::value::Shared;
+
+use crate::error::GameDataError;
+
+/// Dict extraction for both `Value::Dict` and `Value::Object`.
+pub(crate) trait ValueDictExt {
+    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>>;
+}
+
+impl ValueDictExt for Value {
+    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>> {
+        match self {
+            Value::Dict(d) => Some(d.clone()),
+            Value::Object(o) => {
+                let inner = o.inner();
+                let dict_obj = inner.as_any().downcast_ref::<DictObject>()?;
+                Some(Shared::new(dict_obj.state().clone()))
+            }
+            _ => None,
+        }
+    }
+}
 
 /// Converts a raw pickled GameParams.data file to its pickled representation. This operation is quite
 /// expensive.
@@ -38,4 +63,26 @@ pub fn game_params_to_pickle(mut game_params_data: Vec<u8>) -> Result<pickled::V
             .replace_reconstructor_objects_structures()
             .decode_strings(),
     )?)
+}
+
+/// The base parameters of a decoded GameParams tree, keyed by param name.
+///
+/// Modern builds wrap them as `{"": {name: param}}`; old builds store the
+/// dictionary flat, or as the first element of a list or tuple.
+pub fn base_params_dict(root: &Value) -> Result<Shared<pickled::Dict>, GameDataError> {
+    let dict = if let Some(root_dict) = root.dict_or_object_dict() {
+        let nested = root_dict.inner().get(&HashableValue::String(String::new().into())).cloned();
+        match nested {
+            Some(nested) => nested.dict_or_object_dict(),
+            None => Some(root_dict),
+        }
+    } else if let Some(list) = root.list_ref() {
+        list.inner().first().and_then(Value::dict_or_object_dict)
+    } else if let Some(tuple) = root.tuple_ref() {
+        tuple.inner().first().and_then(Value::dict_or_object_dict)
+    } else {
+        None
+    };
+
+    dict.ok_or(GameDataError::InvalidGameParamsData)
 }

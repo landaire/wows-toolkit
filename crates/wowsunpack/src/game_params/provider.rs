@@ -11,29 +11,9 @@ use itertools::Itertools;
 
 use pickled::HashableValue;
 use pickled::Value;
-use pickled::object::DictObject;
 use pickled::value::Shared;
 #[cfg(feature = "vfs")]
 use tracing::debug;
-
-/// Extension trait that provides dict extraction for both `Value::Dict` and `Value::Object`.
-trait ValueDictExt {
-    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>>;
-}
-
-impl ValueDictExt for Value {
-    fn dict_or_object_dict(&self) -> Option<Shared<pickled::Dict>> {
-        match self {
-            Value::Dict(d) => Some(d.clone()),
-            Value::Object(o) => {
-                let inner = o.inner();
-                let dict_obj = inner.as_any().downcast_ref::<DictObject>()?;
-                Some(Shared::new(dict_obj.state().clone()))
-            }
-            _ => None,
-        }
-    }
-}
 
 use crate::Rc;
 #[cfg(feature = "vfs")]
@@ -41,6 +21,8 @@ use crate::data::DataFileWithCallback;
 use crate::data::ResourceLoader;
 use crate::data::TranslationKey;
 use crate::error::GameDataError;
+use crate::game_params::convert::ValueDictExt;
+use crate::game_params::convert::base_params_dict;
 use crate::game_params::convert::game_params_to_pickle;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
@@ -1772,25 +1754,7 @@ impl GameMetadataProvider {
     pub fn params_from_data(game_params_data: Vec<u8>) -> Result<Vec<Param>, GameDataError> {
         let pickled_params: Value = game_params_to_pickle(game_params_data)?;
 
-        let params_dict = if let Some(params_dict) = pickled_params.dict_or_object_dict() {
-            let inner = params_dict.inner();
-            if let Some(nested) = inner.get(&pk("")) {
-                // Modern format: {"": {param_name: param_data, ...}}
-                nested.dict_or_object_dict().expect("game params is not a dict").clone()
-            } else {
-                // Old format: {param_name: param_data, ...} (flat, no wrapper key)
-                params_dict.clone()
-            }
-        } else if let Some(params_list) = pickled_params.list_ref() {
-            let params = &params_list.inner()[0];
-            params.dict_or_object_dict().expect("First element of GameParams list is not a dictionary").clone()
-        } else if let Some(params_tuple) = pickled_params.tuple_ref() {
-            let inner = params_tuple.inner();
-            let params = &inner[0];
-            params.dict_or_object_dict().expect("First element of GameParams tuple is not a dictionary").clone()
-        } else {
-            panic!("Root game params is not a dict, list, or tuple");
-        };
+        let params_dict = base_params_dict(&pickled_params)?;
 
         let new_params = params_dict
             .inner()

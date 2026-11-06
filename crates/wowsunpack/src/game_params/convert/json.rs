@@ -89,6 +89,29 @@ pub fn pickle_to_json(pickled: pickled::Value) -> serde_json::Value {
     }
 }
 
+/// Each base parameter of a decoded GameParams tree as its name and JSON, in
+/// dictionary order. A parameter is converted when the iterator reaches it, so
+/// a caller that drops each one holds at most one converted parameter.
+pub fn base_params_json(
+    root: &pickled::Value,
+) -> Result<impl Iterator<Item = (String, serde_json::Value)> + use<>, crate::error::GameDataError> {
+    let dict = super::base_params_dict(root)?;
+    // Cloning shares the parameter trees; it copies no parameter data.
+    let entries: Vec<(pickled::HashableValue, pickled::Value)> =
+        dict.inner().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+
+    Ok(entries.into_iter().filter_map(|(key, value)| {
+        let name = match hashable_pickle_to_json(key) {
+            serde_json::Value::String(name) => name,
+            serde_json::Value::Number(number) => number.to_string(),
+            // Param names are strings; any other key is not a parameter.
+            _ => return None,
+        };
+
+        Some((name, pickle_to_json(value)))
+    }))
+}
+
 #[cfg(feature = "vfs")]
 pub fn read_game_params_as_json<W: Write>(
     pretty_print: bool,
