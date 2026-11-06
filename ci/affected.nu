@@ -51,7 +51,6 @@ const GRAPH_TEST_SUFFIXES = [
     "Cargo.toml"
     "build.rs"
     "fixups.toml"
-    "generated-for-version"
 ]
 const GRAPH_TEST_PREFIXES = ["assets/"]
 
