@@ -18258,28 +18258,16 @@ cargo.rust_library(
         "client",
         "default",
         "http1",
+        "http2",
         "server",
     ],
-    platform = {
-        "linux-x86_64": dict(
-            features = ["http2"],
-            deps = [":h2-0.4"],
-        ),
-        "macos-arm64": dict(
-            features = ["http2"],
-            deps = [":h2-0.4"],
-        ),
-        "windows-msvc": dict(
-            features = ["http2"],
-            deps = [":h2-0.4"],
-        ),
-    },
     visibility = [],
     deps = [
         ":atomic-waker-1",
         ":bytes-1",
         ":futures-channel-0.3",
         ":futures-core-0.3",
+        ":h2-0.4",
         ":http-1",
         ":http-body-1",
         ":httparse-1",
@@ -18493,7 +18481,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "20",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["default"],
+    features = [
+        "default",
+        "http2",
+        "server",
+        "server-auto",
+        "service",
+    ],
     platform = {
         "linux-x86_64": dict(
             features = [
@@ -18502,7 +18496,6 @@ cargo.rust_library(
                 "client-proxy",
                 "client-proxy-system",
                 "http1",
-                "http2",
                 "tokio",
             ],
             deps = [
@@ -18514,7 +18507,6 @@ cargo.rust_library(
                 ":percent-encoding-2",
                 ":socket2-0.6",
                 ":tokio-1",
-                ":tower-service-0.3",
                 ":tracing-0.1",
             ],
         ),
@@ -18525,7 +18517,6 @@ cargo.rust_library(
                 "client-proxy",
                 "client-proxy-system",
                 "http1",
-                "http2",
                 "tokio",
             ],
             deps = [
@@ -18538,7 +18529,6 @@ cargo.rust_library(
                 ":socket2-0.6",
                 ":system-configuration-0.7",
                 ":tokio-1",
-                ":tower-service-0.3",
                 ":tracing-0.1",
             ],
         ),
@@ -18549,7 +18539,6 @@ cargo.rust_library(
                 "client-proxy",
                 "client-proxy-system",
                 "http1",
-                "http2",
                 "tokio",
             ],
             deps = [
@@ -18561,7 +18550,6 @@ cargo.rust_library(
                 ":percent-encoding-2",
                 ":socket2-0.6",
                 ":tokio-1",
-                ":tower-service-0.3",
                 ":tracing-0.1",
                 ":windows-registry-0.6",
             ],
@@ -18574,6 +18562,7 @@ cargo.rust_library(
         ":http-body-1",
         ":hyper-1",
         ":pin-project-lite-0.2",
+        ":tower-service-0.3",
     ],
 )
 
@@ -30783,6 +30772,38 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "pastey-0.2.3.crate",
+    sha256 = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4",
+    size_bytes = 20361,
+    strip_prefix = "pastey-0.2.3",
+    urls = ["https://static.crates.io/crates/pastey/0.2.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "pastey-0.2",
+    srcs = [":pastey-0.2.3.crate"],
+    crate = "pastey",
+    crate_root = "pastey-0.2.3.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "pastey",
+        "CARGO_MANIFEST_DIR": "pastey-0.2.3.crate",
+        "CARGO_PKG_AUTHORS": "Aditya Kumar <git@adityais.dev>:David Tolnay <dtolnay@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Macros for all your token pasting needs. Successor of paste.",
+        "CARGO_PKG_NAME": "pastey",
+        "CARGO_PKG_REPOSITORY": "https://github.com/as1100k/pastey",
+        "CARGO_PKG_VERSION": "0.2.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    proc_macro = True,
+    visibility = [],
+)
+
+http_archive(
     name = "pathfinder_geometry-0.5.1.crate",
     sha256 = "0b7b7e7b4ea703700ce73ebf128e1450eb69c3a8329199ffbfb9b2a0418e5ad3",
     size_bytes = 11583,
@@ -36831,6 +36852,131 @@ cargo.rust_library(
 )
 
 alias(
+    name = "rmcp",
+    actual = ":rmcp-3",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "rmcp-3.9.0.crate",
+    sha256 = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909",
+    size_bytes = 677294,
+    strip_prefix = "rmcp-3.9.0",
+    urls = ["https://static.crates.io/crates/rmcp/3.9.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "rmcp-3",
+    srcs = [":rmcp-3.9.0.crate"],
+    crate = "rmcp",
+    crate_root = "rmcp-3.9.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "rmcp",
+        "CARGO_MANIFEST_DIR": "rmcp-3.9.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol",
+        "CARGO_PKG_NAME": "rmcp",
+        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
+        "CARGO_PKG_VERSION": "3.9.0",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "base64",
+        "macros",
+        "schemars",
+        "server",
+        "server-side-http",
+        "tower",
+        "transport-async-rw",
+        "transport-io",
+        "transport-streamable-http-server",
+        "transport-streamable-http-server-session",
+        "transport-worker",
+        "uuid",
+    ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":libc-0.2"],
+        ),
+        "macos-arm64": dict(
+            deps = [":libc-0.2"],
+        ),
+    },
+    visibility = [],
+    deps = [
+        ":async-trait-0.1",
+        ":base64-0.23",
+        ":bytes-1",
+        ":chrono-0.4",
+        ":futures-0.3",
+        ":http-1",
+        ":http-body-1",
+        ":http-body-util-0.1",
+        ":indexmap-2",
+        ":pastey-0.2",
+        ":pin-project-lite-0.2",
+        ":rand-0.10",
+        ":rmcp-macros-3",
+        ":schemars-1",
+        ":serde-1",
+        ":serde_json-1",
+        ":sha2-0.11",
+        ":sse-stream-0.2",
+        ":thiserror-2",
+        ":tokio-1",
+        ":tokio-stream-0.1",
+        ":tokio-util-0.7",
+        ":tower-service-0.3",
+        ":tracing-0.1",
+        ":uuid-1",
+    ],
+)
+
+http_archive(
+    name = "rmcp-macros-3.9.0.crate",
+    sha256 = "b3140f24a766f80f9ec1607bde85680959a69b83d46fa9ce87dadab7e67ab029",
+    size_bytes = 24500,
+    strip_prefix = "rmcp-macros-3.9.0",
+    urls = ["https://static.crates.io/crates/rmcp-macros/3.9.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "rmcp-macros-3",
+    srcs = [":rmcp-macros-3.9.0.crate"],
+    crate = "rmcp_macros",
+    crate_root = "rmcp-macros-3.9.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "rmcp_macros",
+        "CARGO_MANIFEST_DIR": "rmcp-macros-3.9.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Rust SDK for Model Context Protocol macros library",
+        "CARGO_PKG_NAME": "rmcp-macros",
+        "CARGO_PKG_REPOSITORY": "https://github.com/modelcontextprotocol/rust-sdk/",
+        "CARGO_PKG_VERSION": "3.9.0",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":darling-0.24",
+        ":proc-macro2-1",
+        ":quote-1",
+        ":serde_json-1",
+        ":syn-3",
+    ],
+)
+
+alias(
     name = "ron",
     actual = ":ron-0.12",
     visibility = ["PUBLIC"],
@@ -38741,6 +38887,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "chrono04",
         "default",
         "derive",
         "indexmap2",
@@ -38748,6 +38895,7 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
+        "chrono04": ":chrono-0.4",
         "indexmap2": ":indexmap-2",
     },
     visibility = [],
@@ -40219,29 +40367,19 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "alloc",
+        "default",
+        "oid",
+    ],
     platform = {
         "linux-x86_64": dict(
-            features = [
-                "alloc",
-                "default",
-                "oid",
-            ],
             deps = [":cpufeatures-0.3"],
         ),
         "macos-arm64": dict(
-            features = [
-                "alloc",
-                "default",
-                "oid",
-            ],
             deps = [":cpufeatures-0.3"],
         ),
         "windows-msvc": dict(
-            features = [
-                "alloc",
-                "default",
-                "oid",
-            ],
             deps = [":cpufeatures-0.3"],
         ),
     },
@@ -41968,6 +42106,45 @@ cargo.rust_library(
         ":thiserror-2",
         ":tracing-0.1",
         ":url-2",
+    ],
+)
+
+http_archive(
+    name = "sse-stream-0.2.6.crate",
+    sha256 = "c25ac7aff0abd1dbc474536e40416e1102c7dd9bfba0b9861c6d357f835dcfb4",
+    size_bytes = 26576,
+    strip_prefix = "sse-stream-0.2.6",
+    urls = ["https://static.crates.io/crates/sse-stream/0.2.6/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "sse-stream-0.2",
+    srcs = [":sse-stream-0.2.6.crate"],
+    crate = "sse_stream",
+    crate_root = "sse-stream-0.2.6.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "sse_stream",
+        "CARGO_MANIFEST_DIR": "sse-stream-0.2.6.crate",
+        "CARGO_PKG_AUTHORS": "4t145 <u4t145@163.com>",
+        "CARGO_PKG_DESCRIPTION": "Conversion between http body and sse stream",
+        "CARGO_PKG_NAME": "sse-stream",
+        "CARGO_PKG_REPOSITORY": "https://github.com/4t145/sse-stream/",
+        "CARGO_PKG_VERSION": "0.2.6",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":bytes-1",
+        ":futures-util-0.3",
+        ":http-body-1",
+        ":http-body-util-0.1",
+        ":pin-project-lite-0.2",
     ],
 )
 

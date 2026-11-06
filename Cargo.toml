@@ -28,6 +28,7 @@ members = [
     "crates/wgc-auth",
     "crates/wows-battle-world",
     "crates/wows-query",
+    "crates/wows-mcp",
     "build-support/buck/reindeer-features",
 ]
 exclude = ["third-party/rust/vendor"]
