@@ -113,7 +113,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_overview",
-        description: "Credit price and research XP of tech tree ships, the GameParams doubloon value (with a note when it is not how the ship is obtained, e.g. Armory ships sold for coal or steel), research tree predecessors and successors, group and upgrade slot count of one ship, and its armament: main and secondary battery mounts with barrels and caliber (e.g. \"2 x 2 152 mm\"), torpedo launchers and torpedoes, depth charge launchers, aircraft squadrons and air strike (an air strike with depth_charge ordnance is anti-submarine armament), and consumables by slot. Every armament category the ship lacks is listed as \"none\". Armament is for stock modules; pass names from other_modules in modules for another hull, guns or torpedoes. other_squadrons lists squadrons of researched plane modules.",
+        description: "Credit price and research XP of tech tree ships, a note on how ships outside the port are obtained (e.g. Armory ships sold for coal or steel, prices not in game data), research tree predecessors and successors, group and upgrade slot count of one ship, and its armament: main and secondary battery mounts with barrels and caliber (e.g. \"2 x 2 152 mm\"), torpedo launchers and torpedoes, depth charge launchers, aircraft squadrons and air strike (an air strike with depth_charge ordnance is anti-submarine armament), and consumables by slot. Every armament category the ship lacks is listed as \"none\". Armament is for stock modules; pass names from other_modules in modules for another hull, guns or torpedoes. other_squadrons lists squadrons of researched plane modules.",
         schema: input_schema::<ShipOverviewArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_overview(args)),
     },
@@ -215,7 +215,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "gameparams_query",
-        description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys`, then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available.",
+        description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys`, then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available. A ship's costGold is a nominal value, not what the ship sells for; never quote it as a price.",
         schema: input_schema::<GameParamsQueryArgs>,
         call: |game, arguments| run(arguments, |args| game.gameparams_query(args)),
     },

@@ -117,7 +117,6 @@ expression: overviews
     nation: USA
     group: ultimate
     status: released
-  game_params_doubloon_value: 26000
   acquisition_note: "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price."
   upgrade_slots: 6
   armament:

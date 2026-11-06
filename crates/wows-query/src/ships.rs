@@ -8,7 +8,6 @@ use wowsunpack::Rc;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Credits;
-use wowsunpack::game_params::types::Doubloons;
 use wowsunpack::game_params::types::Experience;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
@@ -398,12 +397,7 @@ pub struct ShipOverview {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_credits: Option<Credits>,
 
-    /// GameParams `costGold`. The doubloon store price for ships sold for
-    /// doubloons; see `acquisition_note` for ships it does not price.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub game_params_doubloon_value: Option<Doubloons>,
-
-    /// How the ship is obtained when `game_params_doubloon_value` is not its price.
+    /// How the ship is obtained when it is not researched or sold in the port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acquisition_note: Option<&'static str>,
 
@@ -589,7 +583,6 @@ impl GameData {
             interpretations,
             ship: ship.summary(),
             cost_credits: research.cost_credits(),
-            game_params_doubloon_value: research.cost_doubloons(),
             acquisition_note: acquisition_note(ship.group()),
             research_xp: research.cost_xp(),
             researched_from,
@@ -721,8 +714,8 @@ fn preferred<'a>(ships: &[&'a Ship]) -> Option<&'a Ship> {
     ships.iter().find(|ship| ship.is_regular()).or_else(|| ships.first()).copied()
 }
 
-/// Groups whose GameParams doubloon value is not how the ship is obtained.
-/// The real currencies are server side and absent from game data.
+/// Groups of ships obtained outside the port. The prices are server side and
+/// absent from game data.
 fn acquisition_note(group: &str) -> Option<&'static str> {
     match group {
         "ultimate" => Some(
@@ -731,7 +724,7 @@ fn acquisition_note(group: &str) -> Option<&'static str> {
         "specialUnsellable" => Some(
             "Obtained from the Armory, events, containers or bundles, not as a doubloon store item. Game data does not hold that price.",
         ),
-        "disabled" => Some("Not obtainable. The doubloon value is a placeholder."),
+        "disabled" => Some("Not obtainable."),
         _ => None,
     }
 }
