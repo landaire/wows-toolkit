@@ -125,6 +125,7 @@ loading_replays = "Loading %{count} replays..."
 # -- Toast messages --
 
 [ui.messages]
+bug_report_info_copied = "Bug report information copied."
 update_downloading = "Downloading the update: %{read} of %{total}"
 update_downloading_unknown = "Downloading the update: %{read} so far"
 app_up_to_date = "Application up-to-date"
@@ -393,6 +394,7 @@ result = "Result"
 division = "Division"
 
 [ui.replay]
+copy_bug_report_info = "Copy Bug Report Info"
 collapse_listing = "Collapse Replay Listing"
 expand_listing = "Expand Replay Listing"
 listing_caption = "Replays"

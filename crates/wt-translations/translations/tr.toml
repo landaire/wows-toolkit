@@ -101,6 +101,7 @@ more_info = "Daha fazla bilgi"
 loading_replays = "%{count} tekrar yükleniyor..."
 
 [ui.messages]
+bug_report_info_copied = "Hata raporu bilgileri kopyalandı."
 app_up_to_date = "Uygulama güncel"
 update_check_failed = "Güncelleme kontrolü başarısız"
 constants_fetch_failed = "Güncellenmiş tekrar veri eşlemesi alınamadı. Daha sonra yeniden denenecek."
@@ -271,6 +272,7 @@ paste_token_invalid = "Jeton Yapıştır (Jeton Geçersiz / Süresi Dolmuş)"
 monitored_channel = "İzlenen Kanal (Varsayılan Kendi)"
 
 [ui.replay]
+copy_bug_report_info = "Hata raporu bilgilerini kopyala"
 collapse_listing = "Tekrar Listesini Daralt"
 expand_listing = "Tekrar Listesini Genişlet"
 listing_caption = "Tekrarlar"

@@ -101,6 +101,7 @@ more_info = "Mais informações"
 loading_replays = "Carregando %{count} replays..."
 
 [ui.messages]
+bug_report_info_copied = "Informações para o relatório de bug copiadas."
 app_up_to_date = "Aplicativo atualizado"
 update_check_failed = "Falha ao verificar atualizações do aplicativo"
 constants_fetch_failed = "Falha ao obter o mapeamento de dados de replay atualizado. Tentará novamente mais tarde."
@@ -271,6 +272,7 @@ paste_token_invalid = "Colar token (token inválido / expirado)"
 monitored_channel = "Canal monitorado (padrão: próprio)"
 
 [ui.replay]
+copy_bug_report_info = "Copiar informações para o relatório de bug"
 collapse_listing = "Recolher lista de replays"
 expand_listing = "Expandir lista de replays"
 listing_caption = "Replays"

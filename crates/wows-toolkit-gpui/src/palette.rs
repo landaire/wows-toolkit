@@ -35,6 +35,8 @@ pub enum PaletteAction {
     },
     /// Put the newest log file on the clipboard, for a bug report.
     CopyLatestLog,
+    /// Put the small support summary on the clipboard.
+    CopyBugReportInfo,
     /// List a directory of replays other than the install's.
     OpenReplayDirectory,
     /// Read every replay that is not indexed yet.
@@ -156,6 +158,10 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.copy_latest_log").into_owned(),
         action: PaletteAction::CopyLatestLog,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.replay.copy_bug_report_info").into_owned(),
+        action: PaletteAction::CopyBugReportInfo,
     });
 
     for (key, choice) in [

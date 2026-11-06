@@ -23,6 +23,7 @@ pub fn locale() -> String {
 
 pub mod armor;
 pub mod breakdown;
+pub mod bug_report;
 pub mod controls;
 pub mod fire_chance;
 pub mod formatting;

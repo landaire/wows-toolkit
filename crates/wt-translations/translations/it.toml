@@ -117,6 +117,7 @@ loading_replays = "Caricamento di %{count} replay..."
 # -- Messaggi toast --
 
 [ui.messages]
+bug_report_info_copied = "Informazioni per la segnalazione di bug copiate."
 app_up_to_date = "Applicazione aggiornata"
 update_check_failed = "Impossibile verificare gli aggiornamenti dell'app"
 constants_fetch_failed = "Impossibile recuperare la mappatura dati replay aggiornata. Riproverà più tardi."
@@ -297,6 +298,7 @@ monitored_channel = "Canale monitorato (predefinito: sé stesso)"
 # -- Ispettore replay --
 
 [ui.replay]
+copy_bug_report_info = "Copia informazioni per la segnalazione di bug"
 collapse_listing = "Comprimi elenco replay"
 expand_listing = "Espandi elenco replay"
 listing_caption = "Replay"

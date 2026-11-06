@@ -1342,9 +1342,10 @@ impl WowsToolkitApp {
         // Check if the application panicked
         let panic_log_path = Self::panic_log_path();
         if panic_log_path.exists() {
-            let mut file = File::open(panic_log_path).expect("failed to open panic log");
+            let mut file = File::open(&panic_log_path).expect("failed to open panic log");
             let mut contents = String::new();
             file.read_to_string(&mut contents).expect("failed to read panic log");
+            let _ = std::fs::remove_file(&panic_log_path);
             state.panic_info = Some(contents);
             state.panic_window_open = true;
         }
@@ -1932,6 +1933,9 @@ impl WowsToolkitApp {
                     self.tab_state.toasts.lock().error(t!("ui.messages.update_check_failed"));
                 }
                 NetworkResult::ConstantsFetched { data, commit } => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                    );
                     // Save under the current build number so the versioned system finds it.
                     // If game data hasn't loaded yet, stash for later (DataLoaded will flush it).
                     if let Some(wows_data) = &self.tab_state.world_of_warships_data {
@@ -1952,9 +1956,16 @@ impl WowsToolkitApp {
                     self.tab_state.persisted.write().settings.game.constants_file_commit = commit;
                     check_version_mismatch = true;
                 }
-                NetworkResult::ConstantsUpToDate => {}
+                NetworkResult::ConstantsUpToDate => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                    );
+                }
                 NetworkResult::ConstantsFetchFailed(msg) => {
                     warn!("Constants fetch failed: {}", msg);
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(msg.clone()),
+                    );
                     if !self.constants_update_error_shown {
                         self.constants_update_error_shown = true;
                         self.tab_state.toasts.lock().error(t!("ui.messages.constants_fetch_failed")).duration(None);
@@ -1972,6 +1983,11 @@ impl WowsToolkitApp {
                     warn!("PR data fetch failed: {}", msg);
                 }
                 NetworkResult::VersionedConstantsFetched { build, source } => {
+                    if source == crate::task::networking::VersionedConstantsSource::Downloaded {
+                        wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                            wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                        );
+                    }
                     if let Some(build_cache) = self.tab_state.build_cache.as_ref()
                         && let Some(data) = build_cache.get(build)
                     {
@@ -2020,6 +2036,11 @@ impl WowsToolkitApp {
                     }
                 }
                 NetworkResult::VersionedConstantsFetchFailed { build, msg } => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(format!(
+                            "build {build}: {msg}"
+                        )),
+                    );
                     warn!("Versioned constants fetch failed for build {}: {}", build, msg);
                 }
             }
@@ -3448,11 +3469,6 @@ impl WowsToolkitApp {
                 });
             });
         }
-
-        if !self.panic_window_open {
-            let _ = std::fs::remove_file(Self::panic_log_path());
-            self.panic_info = None;
-        }
     }
 
     fn show_update_window(&mut self, ctx: &Context) {
@@ -3711,6 +3727,31 @@ impl WowsToolkitApp {
                 self.tab_state.toasts.lock().error(t!("ui.messages.log_copy_failed", error = e.to_string()));
             }
         }
+    }
+
+    fn copy_bug_report_info(&mut self, ctx: &Context) {
+        let loaded_game_version = self
+            .tab_state
+            .build_cache
+            .as_ref()
+            .and_then(|cache| cache.loaded_builds().into_iter().filter_map(|data| data.read().full_version).max())
+            .map(wows_toolkit_viewmodel::bug_report::full_game_version);
+        let constants_commit = self.tab_state.persisted.read().settings.game.constants_file_commit.clone();
+        let storage_dir = crate::storage_dir();
+        let downloaded_constants =
+            wows_toolkit_viewmodel::bug_report::latest_downloaded_constants(storage_dir.as_deref());
+        let report = wows_toolkit_viewmodel::bug_report::BugReportInfo {
+            constants_fetch: wows_toolkit_viewmodel::bug_report::constants_fetch_status(),
+            application_version: env!("CARGO_PKG_VERSION").to_owned(),
+            loaded_game_version,
+            downloaded_constants,
+            constants_commit,
+            recent_crash: self.panic_info.clone(),
+        }
+        .discord_code_block();
+
+        Context::copy_text(ctx, report);
+        self.tab_state.toasts.lock().success(t!("ui.messages.bug_report_info_copied"));
     }
 
     fn show_err_window(&mut self, err: Report) {
@@ -4784,6 +4825,7 @@ impl WowsToolkitApp {
                 crate::ui::theme::apply(ctx, choice);
             }
             PaletteAction::CopyLatestLog => self.copy_latest_log(ctx),
+            PaletteAction::CopyBugReportInfo => self.copy_bug_report_info(ctx),
             // Handled by the render loop before it reaches dispatch: entering a
             // sub-mode keeps the palette open instead of running an action.
             PaletteAction::EnterSub(_) => {}

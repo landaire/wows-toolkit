@@ -644,6 +644,9 @@ impl ReplayInspectorView {
             for (build, outcome) in outcomes {
                 match outcome {
                     crate::constants::Fetched::Written { build, actual } => {
+                        wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                            wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                        );
                         tracing::info!(build, actual, "constants: the result mapping was fetched");
                         written += 1;
                         answered.push(build);
@@ -653,6 +656,11 @@ impl ReplayInspectorView {
                     // is worth asking again on a later scan, where marking it here
                     // would need a restart to retry.
                     crate::constants::Fetched::Failed(reason) => {
+                        wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                            wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(format!(
+                                "build {build}: {reason}"
+                            )),
+                        );
                         tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
                     }
                 }

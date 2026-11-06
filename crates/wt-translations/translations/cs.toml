@@ -101,6 +101,7 @@ more_info = "Více informací"
 loading_replays = "Načítání %{count} záznamů..."
 
 [ui.messages]
+bug_report_info_copied = "Informace pro hlášení chyby byly zkopírovány."
 app_up_to_date = "Aplikace je aktuální"
 update_check_failed = "Kontrola aktualizací selhala"
 constants_fetch_failed = "Nepodařilo se získat aktualizované mapování dat záznamů. Zkusíme to znovu později."
@@ -271,6 +272,7 @@ paste_token_invalid = "Vložit token (token neplatný / vypršel)"
 monitored_channel = "Sledovaný kanál (výchozí vlastní)"
 
 [ui.replay]
+copy_bug_report_info = "Kopírovat informace pro hlášení chyby"
 collapse_listing = "Sbalit seznam záznamů"
 expand_listing = "Rozbalit seznam záznamů"
 listing_caption = "Záznamy"

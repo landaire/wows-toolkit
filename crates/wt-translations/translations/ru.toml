@@ -101,6 +101,7 @@ more_info = "Подробнее"
 loading_replays = "Загрузка %{count} реплеев..."
 
 [ui.messages]
+bug_report_info_copied = "Информация для отчёта об ошибке скопирована."
 app_up_to_date = "Приложение обновлено"
 update_check_failed = "Не удалось проверить обновления приложения"
 constants_fetch_failed = "Не удалось получить обновлённую карту данных реплеев. Повторная попытка позже."
@@ -271,6 +272,7 @@ paste_token_invalid = "Вставить токен (токен недейств�
 monitored_channel = "Отслеживаемый канал (по умолчанию — свой)"
 
 [ui.replay]
+copy_bug_report_info = "Копировать информацию для отчёта об ошибке"
 collapse_listing = "Свернуть список реплеев"
 expand_listing = "Развернуть список реплеев"
 listing_caption = "Реплеи"

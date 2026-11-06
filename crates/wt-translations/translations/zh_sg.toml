@@ -117,6 +117,7 @@ loading_replays = "正在加载 %{count} 个回放..."
 # -- 提示消息 --
 
 [ui.messages]
+bug_report_info_copied = "已复制错误报告信息。"
 app_up_to_date = "应用程序已是最新版本"
 update_check_failed = "检查应用更新失败"
 constants_fetch_failed = "无法获取更新的回放数据映射。稍后将重试。"
@@ -297,6 +298,7 @@ monitored_channel = "监控频道（默认为自己）"
 # -- 回放检查器 --
 
 [ui.replay]
+copy_bug_report_info = "复制错误报告信息"
 collapse_listing = "折叠回放列表"
 expand_listing = "展开回放列表"
 listing_caption = "回放"

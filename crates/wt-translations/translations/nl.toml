@@ -117,6 +117,7 @@ loading_replays = "%{count} replays laden..."
 # -- Toastberichten --
 
 [ui.messages]
+bug_report_info_copied = "Informatie voor bugrapport gekopieerd."
 app_up_to_date = "Applicatie is up-to-date"
 update_check_failed = "Kan niet controleren op app-updates"
 constants_fetch_failed = "Kan bijgewerkte replaydatamapping niet ophalen. Wordt later opnieuw geprobeerd."
@@ -297,6 +298,7 @@ monitored_channel = "Bewaakt kanaal (standaard: uzelf)"
 # -- Replay-inspecteur --
 
 [ui.replay]
+copy_bug_report_info = "Informatie voor bugrapport kopiëren"
 collapse_listing = "Replaylijst inklappen"
 expand_listing = "Replaylijst uitklappen"
 listing_caption = "Replays"

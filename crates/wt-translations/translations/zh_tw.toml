@@ -117,6 +117,7 @@ loading_replays = "正在載入 %{count} 個戰鬥回放..."
 # -- 通知訊息 --
 
 [ui.messages]
+bug_report_info_copied = "已複製錯誤回報資訊。"
 app_up_to_date = "應用程式已是最新版本"
 update_check_failed = "無法檢查應用程式更新"
 constants_fetch_failed = "無法獲取更新的回放資料對應。稍後將重試。"
@@ -297,6 +298,7 @@ monitored_channel = "監控的頻道（預設為自己）"
 # -- 回放檢視器 --
 
 [ui.replay]
+copy_bug_report_info = "複製錯誤回報資訊"
 collapse_listing = "收合回放清單"
 expand_listing = "展開回放清單"
 listing_caption = "回放"

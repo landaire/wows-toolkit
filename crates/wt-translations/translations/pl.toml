@@ -101,6 +101,7 @@ more_info = "Więcej informacji"
 loading_replays = "Wczytywanie %{count} powtórek..."
 
 [ui.messages]
+bug_report_info_copied = "Skopiowano informacje do zgłoszenia błędu."
 app_up_to_date = "Aplikacja jest aktualna"
 update_check_failed = "Nie udało się sprawdzić aktualizacji"
 constants_fetch_failed = "Nie udało się pobrać zaktualizowanego mapowania danych powtórek. Ponowna próba później."
@@ -271,6 +272,7 @@ paste_token_invalid = "Wklej token (token nieprawidłowy / wygasły)"
 monitored_channel = "Monitorowany kanał (domyślnie własny)"
 
 [ui.replay]
+copy_bug_report_info = "Kopiuj informacje do zgłoszenia błędu"
 collapse_listing = "Zwiń listę powtórek"
 expand_listing = "Rozwiń listę powtórek"
 listing_caption = "Powtórki"

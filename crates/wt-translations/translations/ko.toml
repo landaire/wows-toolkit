@@ -117,6 +117,7 @@ loading_replays = "%{count}개의 리플레이 로딩 중..."
 # -- 알림 메시지 --
 
 [ui.messages]
+bug_report_info_copied = "버그 보고서 정보를 복사했습니다."
 app_up_to_date = "애플리케이션이 최신 버전입니다"
 update_check_failed = "앱 업데이트 확인 실패"
 constants_fetch_failed = "업데이트된 리플레이 데이터 매핑을 가져오지 못했습니다. 나중에 다시 시도합니다."
@@ -297,6 +298,7 @@ monitored_channel = "모니터링 채널 (기본값: 본인)"
 # -- 리플레이 검사기 --
 
 [ui.replay]
+copy_bug_report_info = "버그 보고서 정보 복사"
 collapse_listing = "리플레이 목록 접기"
 expand_listing = "리플레이 목록 펼치기"
 listing_caption = "리플레이"

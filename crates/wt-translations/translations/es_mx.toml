@@ -101,6 +101,7 @@ more_info = "Más información"
 loading_replays = "Cargando %{count} repeticiones..."
 
 [ui.messages]
+bug_report_info_copied = "Se copió la información para el informe de errores."
 app_up_to_date = "La aplicación está actualizada"
 update_check_failed = "Error al buscar actualizaciones"
 constants_fetch_failed = "Error al obtener el mapeo de datos de repetición actualizado. Se reintentará más tarde."
@@ -271,6 +272,7 @@ paste_token_invalid = "Pegar token (token inválido / expirado)"
 monitored_channel = "Canal monitoreado (por defecto el propio)"
 
 [ui.replay]
+copy_bug_report_info = "Copiar información para el informe de errores"
 collapse_listing = "Contraer lista de repeticiones"
 expand_listing = "Expandir lista de repeticiones"
 listing_caption = "Repeticiones"

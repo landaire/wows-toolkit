@@ -44,6 +44,7 @@
 //! "no overrides"; only a warning is logged.
 
 use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -208,6 +209,7 @@ pub struct LoadedGameData {
     /// The build this data is for. A dump of a different build of the same
     /// version reports its own, which is what a per-build cache is keyed by.
     build: u32,
+    version: Option<Version>,
 }
 
 impl LoadedGameData {
@@ -221,6 +223,10 @@ impl LoadedGameData {
     /// The build this data is for.
     pub fn build(&self) -> u32 {
         self.build
+    }
+
+    pub fn version(&self) -> Option<Version> {
+        self.version
     }
 
     /// This build's base `GameConstants`, before a specific replay's own
@@ -279,9 +285,10 @@ impl LoadedGameData {
         }
         let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
+        let version = version_from_vfs(&vfs);
         crate::heap_profile::mark(&format!("build{build}.done"));
 
-        Ok(Self { provider, base_constants, vfs, assets_vfs: OnceLock::new(), build })
+        Ok(Self { provider, base_constants, vfs, assets_vfs: OnceLock::new(), build, version })
     }
 
     /// Loads a build out of the game-data cache, for a replay recorded on one
@@ -326,8 +333,16 @@ impl LoadedGameData {
         }
 
         let base_constants = GameConstants::from_vfs(&vfs);
+        let version = version_from_vfs(&vfs);
 
-        Ok(Self { provider: Arc::new(provider), base_constants, vfs, assets_vfs: OnceLock::new(), build: dump_build })
+        Ok(Self {
+            provider: Arc::new(provider),
+            base_constants,
+            vfs,
+            assets_vfs: OnceLock::new(),
+            build: dump_build,
+            version,
+        })
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
@@ -340,6 +355,12 @@ impl LoadedGameData {
         GameMetadataProvider::from_params_with_vfs(load_game_params(vfs, build)?, vfs)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))
     }
+}
+
+fn version_from_vfs(vfs: &VfsPath) -> Option<Version> {
+    let mut contents = String::new();
+    vfs.join("scripts/entity_defs/Account.def").ok()?.open_file().ok()?.read_to_string(&mut contents).ok()?;
+    Version::from_account_def(&contents)
 }
 
 /// `build`'s decoded game parameters, preferring the on-disk cache (see the
@@ -527,6 +548,16 @@ impl GameDataCache {
             guard.keys().copied().collect()
         };
         builds.into_iter().max().and_then(|build| self.loaded_build(build))
+    }
+
+    /// The greatest full version among builds already loaded.
+    pub fn latest_loaded_version(&self) -> Option<Version> {
+        self.loaded
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .filter_map(|slot| slot.get()?.as_ref().ok()?.version())
+            .max()
     }
 
     /// Returns `build`'s cached game data, loading and caching it first if

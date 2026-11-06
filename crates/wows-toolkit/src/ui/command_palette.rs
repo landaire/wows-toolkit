@@ -65,6 +65,8 @@ pub enum PaletteAction {
     SetTheme(crate::data::settings::ThemeChoice),
     /// Copy the whole newest rotated log file to the clipboard for a bug report.
     CopyLatestLog,
+    /// Copy the small support summary used for bug reports.
+    CopyBugReportInfo,
 }
 
 /// Which screen the palette is currently showing.
@@ -149,6 +151,10 @@ impl CommandPalette {
         ));
         entries
             .push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.copy_latest_log"), PaletteAction::CopyLatestLog));
+        entries.push(egui_palette::Entry::new(
+            rust_i18n::t!("ui.replay.copy_bug_report_info"),
+            PaletteAction::CopyBugReportInfo,
+        ));
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));
         entries.push(egui_palette::Entry::new("Index all replays", PaletteAction::IndexAllReplays));
         entries.push(egui_palette::Entry::new(

@@ -101,6 +101,7 @@ more_info = "Детальніше"
 loading_replays = "Завантаження %{count} реплеїв..."
 
 [ui.messages]
+bug_report_info_copied = "Інформацію для звіту про помилку скопійовано."
 app_up_to_date = "Програма оновлена"
 update_check_failed = "Не вдалося перевірити оновлення програми"
 constants_fetch_failed = "Не вдалося отримати оновлену карту даних реплеїв. Повторна спроба пізніше."
@@ -271,6 +272,7 @@ paste_token_invalid = "Вставити токен (токен недійсни�
 monitored_channel = "Відстежуваний канал (за замовчуванням — свій)"
 
 [ui.replay]
+copy_bug_report_info = "Копіювати інформацію для звіту про помилку"
 collapse_listing = "Згорнути список реплеїв"
 expand_listing = "Розгорнути список реплеїв"
 listing_caption = "Реплеї"

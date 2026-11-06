@@ -117,6 +117,7 @@ loading_replays = "Lade %{count} Replays..."
 # -- Toast-Nachrichten --
 
 [ui.messages]
+bug_report_info_copied = "Informationen für den Fehlerbericht wurden kopiert."
 app_up_to_date = "Anwendung ist aktuell"
 update_check_failed = "Konnte nicht nach App-Updates suchen"
 constants_fetch_failed = "Replay-Datenzuordnung konnte nicht abgerufen werden. Erneuter Versuch später."
@@ -297,6 +298,7 @@ monitored_channel = "Überwachter Kanal (Standard: eigener Kanal)"
 # -- Replay-Inspektor --
 
 [ui.replay]
+copy_bug_report_info = "Informationen für Fehlerbericht kopieren"
 collapse_listing = "Replay-Liste einklappen"
 expand_listing = "Replay-Liste ausklappen"
 listing_caption = "Replays"

@@ -117,6 +117,7 @@ loading_replays = "%{count} 件のリプレイを読み込み中..."
 # -- トーストメッセージ --
 
 [ui.messages]
+bug_report_info_copied = "バグ報告情報をコピーしました。"
 app_up_to_date = "アプリケーションは最新です"
 update_check_failed = "アプリのアップデート確認に失敗しました"
 constants_fetch_failed = "更新されたリプレイデータマッピングの取得に失敗しました。後で再試行します。"
@@ -297,6 +298,7 @@ monitored_channel = "監視チャンネル（デフォルト: 自分）"
 # -- リプレイインスペクター --
 
 [ui.replay]
+copy_bug_report_info = "バグ報告情報をコピー"
 collapse_listing = "リプレイ一覧を折りたたむ"
 expand_listing = "リプレイ一覧を展開"
 listing_caption = "リプレイ"

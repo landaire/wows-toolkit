@@ -683,7 +683,6 @@ pub struct App {
     /// The command state for the currently open palette. Replaced on each open
     /// so a prior query and selection do not leak into the next invocation.
     palette: Entity<CommandState>,
-    palette_entries: Rc<Vec<PaletteEntry>>,
     /// The Unpacker tab: build selector, VFS browsers and the extraction
     /// queue. Runs its own VFS load per build, independent of the replay
     /// inspector's game-data cache, since it needs only the package tree.
@@ -719,6 +718,7 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    recent_crash_report: Option<String>,
     update_status: UpdateStatus,
     /// The board already open, so the menu brings it forward rather than
     /// opening another.
@@ -948,7 +948,6 @@ impl App {
             stats_game_data_requested: false,
             twitch_status: TwitchStatus::Unset,
             palette: cx.new(|cx| CommandState::new(window, cx)),
-            palette_entries: Rc::new(crate::palette::entries()),
             unpacker,
             stats,
             player_tracker,
@@ -962,6 +961,7 @@ impl App {
             download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            recent_crash_report: None,
             update_status: UpdateStatus::Idle,
             tactics_board: None,
             _board_subscription: None,
@@ -1194,6 +1194,7 @@ impl App {
     /// clipboard, which is what a reader does with it next.
     pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(report) = crate::logging::take_crash_report() else { return };
+        self.recent_crash_report = Some(report.clone());
         let copied = report.clone();
         window.open_alert_dialog(cx, move |alert, _window, _cx| {
             let copied = copied.clone();
@@ -1208,6 +1209,34 @@ impl App {
                     true
                 })
         });
+    }
+
+    pub(crate) fn copy_bug_report_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The saved commit and a startup crash both arrive with the settings.
+        let Some(constants_commit) = self.settings().map(|settings| settings.constants_commit.clone()) else {
+            return;
+        };
+        let loaded_game_version = self
+            .replay_inspector
+            .read(cx)
+            .game_data()
+            .and_then(|cache| cache.latest_loaded_version())
+            .map(wows_toolkit_viewmodel::bug_report::full_game_version);
+        let storage_dir = wows_toolkit_config::storage_dir();
+        let downloaded_constants =
+            wows_toolkit_viewmodel::bug_report::latest_downloaded_constants(storage_dir.as_deref());
+        let report = wows_toolkit_viewmodel::bug_report::BugReportInfo {
+            constants_fetch: wows_toolkit_viewmodel::bug_report::constants_fetch_status(),
+            application_version: env!("CARGO_PKG_VERSION").to_owned(),
+            loaded_game_version,
+            downloaded_constants,
+            constants_commit,
+            recent_crash: self.recent_crash_report.clone(),
+        }
+        .discord_code_block();
+
+        cx.write_to_clipboard(ClipboardItem::new_string(report));
+        crate::toast::ok(t!("ui.messages.bug_report_info_copied").into_owned(), window, cx);
     }
 
     /// Puts the newest log file on the clipboard, for a bug report.
@@ -1570,6 +1599,9 @@ impl App {
             let outcome = checked.await;
             let _ = this.update_in(cx, |this, window, cx| match outcome {
                 crate::constants::Checked::Written { build, commit } => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                    );
                     tracing::info!(build, "constants: the newest result mapping was written");
                     if let Some(settings) = this.settings_mut() {
                         settings.constants_commit = Some(commit.clone());
@@ -1583,8 +1615,15 @@ impl App {
                         tab.inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
                     }
                 }
-                crate::constants::Checked::UpToDate => {}
+                crate::constants::Checked::UpToDate => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                    );
+                }
                 crate::constants::Checked::Failed(reason) => {
+                    wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(reason.clone()),
+                    );
                     // Said once, as the egui app says it once: the mappings that
                     // are cached still read, so this is a notice rather than a
                     // failure to work.
@@ -1896,7 +1935,8 @@ impl App {
 
     /// Opens the command palette over the window.
     pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let entries = Rc::clone(&self.palette_entries);
+        // Built per opening so the labels follow the current locale.
+        let entries = Rc::new(crate::palette::entries());
         self.open_palette_with(entries, window, cx);
     }
 
@@ -2028,6 +2068,7 @@ impl App {
                     .update(cx, |pane, cx| pane.show_with_hits(param_index, named, Vec::new(), Default::default(), cx));
             }
             PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
+            PaletteAction::CopyBugReportInfo => self.copy_bug_report_info(window, cx),
             PaletteAction::RefreshPersistedData => {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
