@@ -1,0 +1,73 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: mentions
+---
+- text: what is Neptunus?
+  mentions:
+    - text: Neptunus
+      kind: ship
+      names:
+        - Neptunus
+      method: ~
+- text: is DM better than Moskva
+  mentions:
+    - text: DM
+      kind: ship
+      names:
+        - Des Moines
+      method: exact-alias
+    - text: DM
+      kind: consumable
+      names:
+        - Drop Minefield
+      method: initialism
+    - text: Moskva
+      kind: ship
+      names:
+        - Moskva
+      method: ~
+- text: should I take SE or dm the streamer
+  mentions:
+    - text: SE
+      kind: ship
+      names:
+        - STAR Edinburgh
+      method: initialism
+    - text: SE
+      kind: skill
+      names:
+        - Survivability Expert
+      method: exact-alias
+- text: is radar on Grosser Kurfurst a thing
+  mentions:
+    - text: radar
+      kind: consumable
+      names:
+        - Surveillance Radar
+      method: exact-alias
+    - text: Grosser Kurfurst
+      kind: ship
+      names:
+        - G. Kurfürst
+      method: exact-alias
+- text: is the Radar Mod worth a slot
+  mentions:
+    - text: Radar Mod
+      kind: upgrade
+      names:
+        - Surveillance Radar Modification 1
+      method: exact-alias
+- text: can you recommend a good pizza place near the station
+  mentions: []
+- text: my boy scout fighter friend asked about AI on a PC
+  mentions:
+    - text: AI
+      kind: ship
+      names:
+        - Almte. Irízar
+      method: initialism
+    - text: PC
+      kind: ship
+      names:
+        - Pietro Calvi
+      method: initialism

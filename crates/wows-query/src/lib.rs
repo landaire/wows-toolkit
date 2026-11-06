@@ -48,5 +48,6 @@ pub use names::Alias;
 pub use names::AliasError;
 pub use names::AliasTarget;
 pub use names::Interpretation;
+pub use names::Mention;
 pub use names::NameKind;
 pub use names::ResolutionMethod;

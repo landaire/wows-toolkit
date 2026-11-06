@@ -4,10 +4,12 @@
 //! is reported as an [`Interpretation`] so a reader can check what was meant.
 
 use std::collections::BTreeSet;
+use std::ops::Range;
 
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::data::GameData;
 use crate::fuzzy;
 use crate::fuzzy::Candidate;
 use crate::fuzzy::Fuzzy;
@@ -144,6 +146,85 @@ pub struct AliasError {
     pub unknown: Vec<Alias>,
 }
 
+/// A ship, captain skill, upgrade or consumable named in a text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Mention {
+    /// The words as written.
+    pub text: String,
+
+    pub kind: NameKind,
+
+    /// The English names the words may mean, more than one when they are
+    /// ambiguous.
+    pub names: Vec<String>,
+
+    /// `None` for an exact English name or identifier.
+    pub method: Option<ResolutionMethod>,
+}
+
+impl GameData {
+    /// The ships, captain skills, upgrades and consumables `text` names by
+    /// exact name, identifier, alias, initialism or former name, in the order
+    /// written. Partial names and misspellings are not read, since ordinary
+    /// words would match them. Abbreviations count only when written with
+    /// capitals: "DM" names Des Moines, "dm" does not.
+    pub fn mentions(&self, text: &str) -> Vec<Mention> {
+        let longest = [
+            self.ship_names.longest_key_words(),
+            self.skill_names.longest_key_words(),
+            self.upgrade_names.longest_key_words(),
+            self.consumable_names.longest_key_words(),
+        ]
+        .into_iter()
+        .fold(0, usize::max);
+        let words = word_spans(text);
+
+        // The longest name starting at each word wins over the shorter names
+        // inside it.
+        let mut mentions = Vec::new();
+        let mut start = 0;
+        while start < words.len() {
+            let mut consumed = 1;
+            for count in (1..=longest.min(words.len() - start)).rev() {
+                let span = &text[words[start].start..words[start + count - 1].end];
+                let Some(phrase) = Phrase::new(span) else {
+                    continue;
+                };
+
+                let recognized = [
+                    (NameKind::Ship, self.ship_names.recognize(&phrase)),
+                    (NameKind::Skill, self.skill_names.recognize(&phrase)),
+                    (NameKind::Upgrade, self.upgrade_names.recognize(&phrase)),
+                    (NameKind::Consumable, self.consumable_names.recognize(&phrase)),
+                ];
+                let before = mentions.len();
+
+                for (kind, recognized) in recognized {
+                    let Some(recognized) = recognized else {
+                        continue;
+                    };
+
+                    mentions.push(Mention {
+                        text: span.to_owned(),
+                        kind,
+                        names: recognized.names.into_iter().map(str::to_owned).collect(),
+                        method: recognized.method,
+                    });
+                }
+
+                if mentions.len() > before {
+                    consumed = count;
+                    break;
+                }
+            }
+
+            start += consumed;
+        }
+
+        mentions
+    }
+}
+
 /// One way to name a target.
 #[derive(Debug, Clone)]
 struct Entry<T> {
@@ -154,6 +235,10 @@ struct Entry<T> {
     keys: Vec<String>,
     initialisms: Vec<String>,
     source: Source,
+
+    /// An alias written in capitals, such as "DM" or "BoS", which ordinary
+    /// words such as "dm" do not spell.
+    abbreviation: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +275,48 @@ pub(crate) struct Resolved<'a> {
     pub(crate) method: Option<ResolutionMethod>,
 }
 
+/// The English names a whole span of text spells, and how.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Recognized<'a> {
+    /// More than one when the span is ambiguous.
+    pub(crate) names: Vec<&'a str>,
+
+    /// `None` for an exact English or internal name.
+    pub(crate) method: Option<ResolutionMethod>,
+}
+
+/// A span of text as [`NameIndex::recognize`] compares it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Phrase {
+    key: String,
+
+    /// The span lowercased whole, compared with identifiers.
+    id: String,
+
+    /// Two or more capitals, as in "DM" or "BoS". Initialisms and abbreviated
+    /// aliases need them, so the word "dm" is not "DM".
+    capitals: bool,
+
+    /// Capitals, a digit or an underscore, as in "PASC020". Identifiers need
+    /// them, so the word "fighter" is not the consumable type "fighter".
+    identifier: bool,
+}
+
+impl Phrase {
+    /// `None` when `span` has no letters or digits.
+    pub(crate) fn new(span: &str) -> Option<Self> {
+        let key = search_key(span);
+        if key.is_empty() {
+            return None;
+        }
+
+        let capitals = capital_count(span) >= 2;
+        let identifier = capitals || span.contains(|character: char| character.is_ascii_digit() || character == '_');
+
+        Some(Self { key, id: span.trim().to_lowercase(), capitals, identifier })
+    }
+}
+
 /// Names of one kind of thing, each pointing at a target such as an index
 /// into the indexed ships.
 #[derive(Debug, Clone)]
@@ -213,6 +340,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             keys,
             initialisms,
             source: Source::Name { secondary },
+            abbreviation: false,
         });
     }
 
@@ -224,6 +352,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             keys: vec![id.trim().to_lowercase()],
             initialisms: Vec::new(),
             source: Source::Id,
+            abbreviation: false,
         });
     }
 
@@ -254,6 +383,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
 
         let keys = key_variants(alias);
         let initialisms: Vec<String> = keys.iter().flat_map(|key| initialisms(key)).collect();
+        let abbreviation = !alias.contains(' ') && capital_count(alias) >= 2;
         for (name, target, _) in named {
             self.entries.push(Entry {
                 name,
@@ -261,6 +391,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
                 keys: keys.clone(),
                 initialisms: initialisms.clone(),
                 source: Source::Alias(method),
+                abbreviation,
             });
         }
         true
@@ -275,6 +406,64 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             }
         }
         targets
+    }
+
+    /// The names `phrase` spells whole: an exact name or identifier, an alias
+    /// or an initialism. Partial names and misspellings are not read, since
+    /// ordinary words would match them.
+    pub(crate) fn recognize(&self, phrase: &Phrase) -> Option<Recognized<'_>> {
+        let key = &phrase.key;
+
+        let named: Vec<&Entry<T>> = self
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry.source, Source::Name { .. }) && entry.keys.contains(key))
+            .collect();
+        if !named.is_empty() {
+            let method = (!named.iter().any(|entry| entry.keys[0] == *key)).then_some(ResolutionMethod::ExactAlias);
+            return Some(Recognized { names: primary_names(&named), method });
+        }
+
+        if phrase.identifier
+            && let Some(entry) =
+                self.entries.iter().find(|entry| entry.source == Source::Id && entry.keys[0] == phrase.id)
+        {
+            return Some(Recognized { names: vec![entry.name.as_str()], method: None });
+        }
+
+        let aliased: Vec<(&Entry<T>, ResolutionMethod)> = self
+            .entries
+            .iter()
+            .filter_map(|entry| match entry.source {
+                Source::Alias(method) if entry.keys.contains(key) && (phrase.capitals || !entry.abbreviation) => {
+                    Some((entry, method))
+                }
+                _ => None,
+            })
+            .collect();
+        if let Some(&(_, method)) = aliased.first() {
+            let entries: Vec<&Entry<T>> = aliased.iter().map(|(entry, _)| *entry).collect();
+            return Some(Recognized { names: distinct_names(&entries), method: Some(method) });
+        }
+
+        if !phrase.capitals || !is_initialism_query(key) {
+            return None;
+        }
+
+        let initialism: Vec<&Entry<T>> =
+            self.entries.iter().filter(|entry| entry.source != Source::Id && entry.initialisms.contains(key)).collect();
+        let first = initialism.first()?;
+        let method = match first.source {
+            Source::Alias(ResolutionMethod::Historical) => ResolutionMethod::Historical,
+            _ => ResolutionMethod::Initialism,
+        };
+
+        Some(Recognized { names: primary_names(&initialism), method: Some(method) })
+    }
+
+    /// Words in the longest search key.
+    pub(crate) fn longest_key_words(&self) -> usize {
+        self.entries.iter().flat_map(|entry| entry.keys.iter()).map(|key| key.split(' ').count()).max().unwrap_or(0)
     }
 
     /// Resolves `query`: exact English name, identifier, alias, initialism,
@@ -424,6 +613,43 @@ impl<T: Clone + PartialEq> NameIndex<T> {
 
 fn distinct_names<'a, T>(entries: &[&'a Entry<T>]) -> Vec<&'a str> {
     entries.iter().map(|entry| entry.name.as_str()).collect::<BTreeSet<_>>().into_iter().collect()
+}
+
+/// Distinct names, leaving out event and test copies when the regular item
+/// is among them.
+fn primary_names<'a, T>(entries: &[&'a Entry<T>]) -> Vec<&'a str> {
+    let primary: Vec<&Entry<T>> =
+        entries.iter().copied().filter(|entry| !matches!(entry.source, Source::Name { secondary: true })).collect();
+    match primary.is_empty() {
+        true => distinct_names(entries),
+        false => distinct_names(&primary),
+    }
+}
+
+fn capital_count(text: &str) -> usize {
+    text.chars().filter(char::is_ascii_uppercase).count()
+}
+
+/// Byte ranges of the runs of letters and digits in `text`.
+fn word_spans(text: &str) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (offset, character) in text.char_indices() {
+        match (character.is_alphanumeric(), start) {
+            (true, None) => start = Some(offset),
+            (false, Some(begin)) => {
+                spans.push(begin..offset);
+                start = None;
+            }
+            // Inside a word or between words.
+            _ => {}
+        }
+    }
+    if let Some(begin) = start {
+        spans.push(begin..text.len());
+    }
+
+    spans
 }
 
 /// Initialisms are two to five letters or digits without spaces.
@@ -608,5 +834,59 @@ mod tests {
         assert_eq!(found(names.lookup("Basic Firing")), ("Gun Feeder", Some(ResolutionMethod::Historical)));
         assert_eq!(found(names.lookup("Basic Firing Trainng")), ("Gun Feeder", Some(ResolutionMethod::Historical)));
         assert_eq!(found(names.lookup("Gun Feder")), ("Gun Feeder", Some(ResolutionMethod::Fuzzy)));
+    }
+
+    fn recognized(names: &NameIndex<&'static str>, span: &str) -> Option<(Vec<String>, Option<ResolutionMethod>)> {
+        let phrase = Phrase::new(span).expect("span has words");
+
+        names
+            .recognize(&phrase)
+            .map(|recognized| (recognized.names.into_iter().map(str::to_owned).collect(), recognized.method))
+    }
+
+    #[test]
+    fn recognize_reads_whole_names_only() {
+        let mut names = index(&["Des Moines", "Survivability Expert", "Gun Feeder", "Catapult Fighter"]);
+        names.add_id("PASC020", "Des Moines", "Des Moines");
+        names.add_id("fighter", "Catapult Fighter", "Catapult Fighter");
+        assert!(names.add_alias("DM", "Des Moines", ResolutionMethod::ExactAlias));
+        assert!(names.add_alias("Basic Firing Training", "Gun Feeder", ResolutionMethod::Historical));
+        let one = |name: &str, method| Some((vec![name.to_owned()], method));
+
+        assert_eq!(recognized(&names, "des moines"), one("Des Moines", None));
+        assert_eq!(recognized(&names, "pasc020"), one("Des Moines", None));
+        assert_eq!(recognized(&names, "DM"), one("Des Moines", Some(ResolutionMethod::ExactAlias)));
+        assert_eq!(recognized(&names, "SE"), one("Survivability Expert", Some(ResolutionMethod::Initialism)));
+        assert_eq!(recognized(&names, "basic firing training"), one("Gun Feeder", Some(ResolutionMethod::Historical)));
+
+        // Ordinary words that spell an abbreviation, an identifier, a partial
+        // name and a misspelling.
+        assert_eq!(recognized(&names, "dm"), None);
+        assert_eq!(recognized(&names, "se"), None);
+        assert_eq!(recognized(&names, "fighter"), None);
+        assert_eq!(recognized(&names, "moines"), None);
+        assert_eq!(recognized(&names, "Des Moins"), None);
+    }
+
+    #[test]
+    fn recognize_prefers_the_regular_ship_to_its_copies() {
+        let mut names = NameIndex::default();
+        names.add_name("Conqueror", "released", false);
+        names.add_name("[Conqueror]", "test", true);
+        names.add_name("[Neptunus]", "test only", true);
+
+        let names_of =
+            |span| names.recognize(&Phrase::new(span).expect("span has words")).map(|recognized| recognized.names);
+
+        assert_eq!(names_of("conqueror"), Some(vec!["Conqueror"]));
+        assert_eq!(names_of("Neptunus"), Some(vec!["[Neptunus]"]));
+    }
+
+    #[test]
+    fn word_spans_split_on_punctuation() {
+        let text = "G. Kurf\u{fc}rst's AP?";
+        let words: Vec<&str> = word_spans(text).into_iter().map(|span| &text[span]).collect();
+
+        assert_eq!(words, ["G", "Kurf\u{fc}rst", "s", "AP"]);
     }
 }

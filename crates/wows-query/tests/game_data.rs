@@ -440,6 +440,24 @@ fn test_ships_resolve_with_status() {
     insta::assert_yaml_snapshot!(overview);
 }
 
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn mentions_name_ships_skills_and_consumables() {
+    let mentions: Vec<_> = [
+        "what is Neptunus?",
+        "is DM better than Moskva",
+        "should I take SE or dm the streamer",
+        "is radar on Grosser Kurfurst a thing",
+        "is the Radar Mod worth a slot",
+        "can you recommend a good pizza place near the station",
+        "my boy scout fighter friend asked about AI on a PC",
+    ]
+    .into_iter()
+    .map(|text| json!({ "text": text, "mentions": game().mentions(text) }))
+    .collect();
+    insta::assert_yaml_snapshot!(mentions);
+}
+
 fn firing_arcs(ship: &str, target: Option<&str>, skills: &[&str]) -> ShipFiringArcs {
     game()
         .ship_firing_arcs(&FiringArcsArgs {
