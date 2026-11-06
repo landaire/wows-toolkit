@@ -1700,7 +1700,7 @@ fn render_zone_row(
     let toggle_entity = entity.clone();
     let toggle_zone_name = zone.name.clone();
     let checkbox = tri_checkbox(format!("armor-vis-zone-{}", zone.name), state, warn, move |checked, window, cx| {
-        let solo = window.modifiers().secondary();
+        let solo = window.modifiers().secondary(cx);
         toggle_entity.update(cx, |view, cx| view.toggle_zone(toggle_zone_name.clone(), *checked, solo, cx));
     });
 

@@ -2334,7 +2334,7 @@ impl ViewportView {
         }
     }
 
-    fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_scroll_wheel(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !self.is_gpu_ready() {
             return;
         }
@@ -2371,21 +2371,21 @@ impl ViewportView {
         if !event.is_held {
             let modifiers = event.keystroke.modifiers;
             let key = event.keystroke.key.as_str();
-            if modifiers.secondary() && key == "s" {
+            if modifiers.secondary(cx) && key == "s" {
                 if let Some(pane) = self.pane() {
                     pane.update(cx, |pane, cx| pane.toggle_options(cx));
                 }
                 return;
             }
-            if modifiers.secondary() && key == "t" {
+            if modifiers.secondary(cx) && key == "t" {
                 self.set_trajectory_mode(!self.trajectory_mode, cx);
                 return;
             }
-            if modifiers.secondary() && !modifiers.shift && key == "z" {
+            if modifiers.secondary(cx) && !modifiers.shift && key == "z" {
                 self.undo_visibility(cx);
                 return;
             }
-            if modifiers.secondary() && (key == "r" || (key == "z" && modifiers.shift)) {
+            if modifiers.secondary(cx) && (key == "r" || (key == "z" && modifiers.shift)) {
                 self.redo_visibility(cx);
                 return;
             }
@@ -3723,7 +3723,7 @@ impl Render for ViewportView {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::handle_mouse_up_out))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::handle_mouse_up_out))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
-            .on_scroll_wheel(cx.listener(Self::handle_scroll_wheel))
+            .on_scroll(cx.listener(Self::handle_scroll_wheel))
             .on_key_down(cx.listener(Self::handle_key_down))
             .on_key_up(cx.listener(Self::handle_key_up))
             .child(image_child)

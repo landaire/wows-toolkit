@@ -1727,7 +1727,7 @@ impl ReplayRendererPanel {
             return;
         }
         let shift = event.keystroke.modifiers.shift;
-        let ctrl = event.keystroke.modifiers.secondary();
+        let ctrl = event.keystroke.modifiers.secondary(cx);
 
         // The drawing tools, which were mouse-only here: the egui board takes
         // ctrl and a digit for each (`replay/minimap_view/shapes.rs:84`), and a
@@ -2218,7 +2218,7 @@ impl ReplayRendererPanel {
     }
 
     /// The wheel zooms about whatever is under the pointer.
-    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(at) = self.drawn_point(event.position) else { return };
         let delta = event.delta.pixel_delta(SCROLL_LINE).y.as_f32();
         if delta == 0.0 {
@@ -2585,7 +2585,7 @@ impl ReplayRendererPanel {
         if let Some((x, y)) = self.map_point(event.position()) {
             let annotations = self.collab.annotations();
             if !annotations.is_empty() {
-                self.picked.click(&annotations, [x, y], event.modifiers().secondary());
+                self.picked.click(&annotations, [x, y], event.modifiers().secondary(cx));
                 self.picked.retain_within(&annotations);
                 cx.notify();
                 if !self.picked.is_empty() {
@@ -2849,16 +2849,16 @@ impl ReplayRendererPanel {
                         .children(self.consumable_reading(cx))
                         .on_modifiers_changed(cx.listener(
                             |this, event: &gpui_kit::ModifiersChangedEvent, _window, cx| {
-                                if this.ctrl_held == event.modifiers.secondary() {
+                                if this.ctrl_held == event.modifiers.secondary(cx) {
                                     return;
                                 }
-                                this.ctrl_held = event.modifiers.secondary();
+                                this.ctrl_held = event.modifiers.secondary(cx);
                                 cx.notify();
                             },
                         ))
                         .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_ping))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
-                        .on_scroll_wheel(cx.listener(Self::on_scroll))
+                        .on_scroll(cx.listener(Self::on_scroll))
                         .on_mouse_down(MouseButton::Left, cx.listener(Self::on_drag_start))
                         .on_mouse_move(cx.listener(Self::on_drag_move))
                         .on_mouse_up(MouseButton::Left, cx.listener(Self::on_drag_end))
@@ -5175,7 +5175,8 @@ mod tests {
     fn the_wheel_zooms_about_what_is_under_the_pointer(cx: &mut TestAppContext) {
         use gpui_kit::Modifiers;
         use gpui_kit::ScrollDelta;
-        use gpui_kit::ScrollWheelEvent;
+        use gpui_kit::ScrollEvent;
+        use gpui_kit::ScrollSource;
         use gpui_kit::TouchPhase;
         use gpui_kit::point;
 
@@ -5193,11 +5194,12 @@ mod tests {
                 let at = point(px(on_map.0), px(on_map.1 + super::DEFAULT_MAP_ORIGIN.1));
                 let before = panel.view().to_map(on_map.0, on_map.1);
 
-                let event = ScrollWheelEvent {
+                let event = ScrollEvent {
                     position: at,
                     delta: ScrollDelta::Pixels(point(px(0.), px(120.))),
                     modifiers: Modifiers::default(),
                     touch_phase: TouchPhase::Moved,
+                    source: ScrollSource::Pointer,
                 };
                 panel.on_scroll(&event, window, cx);
 
@@ -5219,7 +5221,8 @@ mod tests {
     fn a_wheel_over_the_hud_does_not_zoom(cx: &mut TestAppContext) {
         use gpui_kit::Modifiers;
         use gpui_kit::ScrollDelta;
-        use gpui_kit::ScrollWheelEvent;
+        use gpui_kit::ScrollEvent;
+        use gpui_kit::ScrollSource;
         use gpui_kit::TouchPhase;
         use gpui_kit::point;
 
@@ -5231,11 +5234,12 @@ mod tests {
         window
             .update(cx, |panel, window, cx| {
                 panel.seed_frame_for_test();
-                let event = ScrollWheelEvent {
+                let event = ScrollEvent {
                     position: point(px(200.), px(4.)),
                     delta: ScrollDelta::Pixels(point(px(0.), px(120.))),
                     modifiers: Modifiers::default(),
                     touch_phase: TouchPhase::Moved,
+                    source: ScrollSource::Pointer,
                 };
                 panel.on_scroll(&event, window, cx);
                 assert!(panel.view().is_whole_map());

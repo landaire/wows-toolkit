@@ -454,7 +454,7 @@ fn detail_text(text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .id(id)
         .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary() {
+            if !event.modifiers().secondary(cx) {
                 cx.stop_propagation();
             }
         })

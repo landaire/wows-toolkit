@@ -907,7 +907,7 @@ fn cell_element(
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, player, col))
         .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary() {
+            if !event.modifiers().secondary(cx) {
                 cx.stop_propagation();
             }
         })
@@ -969,7 +969,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, ReplayColumn::Name))
         .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary() {
+            if !event.modifiers().secondary(cx) {
                 cx.stop_propagation();
             }
         })
@@ -1191,7 +1191,7 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Ent
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, row.db_id, ReplayColumn::Skills))
         .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary() {
+            if !event.modifiers().secondary(cx) {
                 cx.stop_propagation();
             }
         })
@@ -1724,7 +1724,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .when_some(background, |el, color| el.bg(color))
         .hover(move |style| style.bg(hover_bg))
         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
-            if event.modifiers().secondary() {
+            if event.modifiers().secondary(cx) {
                 select_entity.update(cx, |this, cx| this.toggle_selected(ix, cx));
                 return;
             }

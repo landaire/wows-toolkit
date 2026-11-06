@@ -4,8 +4,7 @@
 //! The egui app reports these through `egui_notify` toasts: a path copied, a
 //! directory opened, a credential refused. A port that only logged them left
 //! the reader pressing a button and seeing nothing. `Root` holds the queue and
-//! the window's own view draws the layer (`App::render`, `window_shell::Shell`),
-//! so this is only the wording and the level.
+//! draws the layer, so this is only the wording and the level.
 
 use gpui_kit::SharedString;
 use gpui_kit::Window;

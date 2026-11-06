@@ -438,7 +438,7 @@ impl Render for StatsShipsPanel {
                         .accessibility_label(accessibility_label)
                         .tooltip(label)
                         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
-                            let skip_confirmation = event.modifiers().secondary();
+                            let skip_confirmation = event.modifiers().secondary(cx);
                             panel.update(cx, |this, cx| this.clear_ship(ship_id, skip_confirmation, cx));
                         })
                 });

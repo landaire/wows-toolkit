@@ -20,7 +20,6 @@ use gpui_kit::Subscription;
 use gpui_kit::Window;
 use gpui_kit::WindowBounds;
 use gpui_kit::WindowOptions;
-use gpui_kit::component::Root;
 use gpui_kit::div;
 use gpui_kit::point;
 use gpui_kit::px;
@@ -191,14 +190,9 @@ pub fn bounds_for(saved: Option<WindowSettings>, default_bounds: Bounds<gpui_kit
     }
 }
 
-/// What a secondary window's own view draws: its content, and the layers `Root`
-/// holds but does not draw itself.
-///
-/// `Root` keeps the dialog, sheet and notification queues; whoever renders the
-/// window's view has to put them on screen, which the main window does in
-/// `App::render`. A window opened straight around a panel has no such view, so
-/// everything queued there -- every toast the panel reports -- is queued and
-/// never seen.
+/// What a secondary window's own view draws: its content, in the same
+/// workspace frame the main window gives its page. `Root` draws the dialog,
+/// sheet and notification layers above it.
 pub struct Shell {
     content: AnyView,
 }
@@ -210,17 +204,8 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sheets = Root::render_sheet_layer(window, cx);
-        let dialogs = Root::render_dialog_layer(window, cx);
-        let notifications = Root::render_notification_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(crate::ui::workspace(self.content.clone(), cx))
-            .children(sheets)
-            .children(dialogs)
-            .children(notifications)
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(crate::ui::workspace(self.content.clone(), cx))
     }
 }
 

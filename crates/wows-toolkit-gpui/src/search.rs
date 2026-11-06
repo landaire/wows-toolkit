@@ -860,7 +860,7 @@ impl SearchView {
         }
         let offered = self.offered_completions().len();
         let modifiers = event.keystroke.modifiers;
-        if modifiers.secondary() {
+        if modifiers.secondary(cx) {
             match event.keystroke.key.as_str() {
                 "z" if !modifiers.shift => {
                     self.undo_edit(window, cx);

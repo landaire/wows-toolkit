@@ -4002,10 +4002,6 @@ impl Render for App {
             let pending = std::mem::take(&mut self.pending_missing_builds);
             self.offer_missing_game_data(pending, window, cx);
         }
-        let sheet_layer = Root::render_sheet_layer(window, cx);
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
-
         let tab_order = self.tab_order();
         let active_ix = tab_order.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
@@ -4206,14 +4202,8 @@ impl Render for App {
             .child(div().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)))
             .children(self.status_strip(cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
-            // Dialogs, sheets and toasts are held by `Root` but drawn by
-            // whoever renders the window's own view, so they go last and over
-            // everything else.
-            .children(sheet_layer)
-            .children(dialog_layer)
-            .children(notification_layer)
-            // Over all of it: a drag is about to become a drop, and what it
-            // would do is the only thing worth reading while it hovers.
+            // Over the rest of the view: a drag is about to become a drop, and
+            // what it would do is the only thing worth reading while it hovers.
             .children(self.drop_scrim())
     }
 }

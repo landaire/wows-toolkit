@@ -2085,8 +2085,8 @@ fn dragging_across_a_selectable_run_selects_its_text(cx: &mut TestAppContext) {
 
 /// A toast reaches the screen.
 ///
-/// Same layer question as the palette: `Root` holds the queue, the window's
-/// own view draws it. Without that child every toast in the app is silent.
+/// Same layer question as the palette: `Root` holds the queue and draws it.
+/// Without that layer every toast in the app is silent.
 #[gpui_kit::test]
 fn a_toast_reaches_the_screen(cx: &mut TestAppContext) {
     let (window, _app) = open_app_in_root(cx);
@@ -2149,9 +2149,8 @@ async fn a_stuck_state_stays_up_and_does_not_stack(cx: &mut TestAppContext) {
 
 /// A toast reaches the screen of a secondary window too.
 ///
-/// A popped-out panel's window is rooted in a `Shell` for exactly this: rooted
-/// straight in the panel, the `Root` holds the queue and nothing draws it, so
-/// the renderer's own messages are queued and never seen.
+/// A popped-out panel's window is rooted in a `Shell` around the panel, and the
+/// `Root` above it must still draw the renderer's own messages.
 #[gpui_kit::test]
 fn a_toast_reaches_a_secondary_windows_screen(cx: &mut TestAppContext) {
     struct Panel;
@@ -2187,8 +2186,8 @@ fn a_toast_reaches_a_secondary_windows_screen(cx: &mut TestAppContext) {
 
 /// The palette dialog reaches the screen.
 ///
-/// The dialog is held by `Root` but drawn by the window's own view, so a view
-/// that forgets to draw the layer opens a palette nobody can see.
+/// The dialog is held and drawn by `Root`; without that layer the palette
+/// opens where nobody can see it.
 #[gpui_kit::test]
 fn opening_the_palette_puts_its_search_field_on_screen(cx: &mut TestAppContext) {
     let (window, app) = open_app_in_root(cx);

@@ -560,7 +560,7 @@ impl StatsChartPanel {
         }
     }
 
-    fn zoom_view(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn zoom_view(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(window.line_height()).y.as_f32();
         if delta == 0.0 {
             return;
@@ -1011,7 +1011,7 @@ impl Render for StatsChartPanel {
                         .on_mouse_move(cx.listener(Self::drag_view))
                         .on_mouse_up(MouseButton::Left, cx.listener(Self::end_drag))
                         .on_mouse_up_out(MouseButton::Left, cx.listener(Self::end_drag))
-                        .on_scroll_wheel(cx.listener(Self::zoom_view))
+                        .on_scroll(cx.listener(Self::zoom_view))
                 })
                 .child(surface)
                 .into_any_element()

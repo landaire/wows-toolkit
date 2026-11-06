@@ -2138,7 +2138,7 @@ impl TacticsBoard {
             // whatever is already picked. The reach is the shared one, which is
             // what the replay viewport picks with too.
             let was: Vec<usize> = self.picked.picked().to_vec();
-            self.picked.click(&self.shapes(), [at.0, at.1], event.modifiers.secondary());
+            self.picked.click(&self.shapes(), [at.0, at.1], event.modifiers.secondary(cx));
             if self.picked.picked() != was.as_slice() {
                 cx.notify();
                 return;
@@ -2305,7 +2305,7 @@ impl TacticsBoard {
         true
     }
 
-    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let notches = event.delta.pixel_delta(window.line_height()).y.as_f32();
         if notches != 0.0 {
             self.zoom_about(notches, event.position, cx);
@@ -2668,7 +2668,7 @@ impl TacticsBoard {
             return;
         }
         let modifiers = event.keystroke.modifiers;
-        if modifiers.secondary() {
+        if modifiers.secondary(cx) {
             match event.keystroke.key.as_str() {
                 "z" if !modifiers.shift => self.undo(cx),
                 "y" | "z" => self.redo(cx),
@@ -3389,7 +3389,7 @@ impl TacticsBoard {
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_context_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_scroll))
+            .on_scroll(cx.listener(Self::on_scroll))
             .context_menu(move |mut menu, _window, cx| {
                 let opening_board = board.clone();
                 opening_board.update(cx, |board, cx| {

@@ -1020,7 +1020,7 @@ impl ReplayBrowser {
     fn handle_leaf_click(&mut self, path: PathBuf, click_count: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
         // Ctrl adds to or removes from the set, the way a file manager does;
         // a plain click replaces it, so the common case stays one replay.
-        if modifiers.secondary() {
+        if modifiers.secondary(cx) {
             self.toggle_selected(path, cx);
             return;
         }
@@ -1929,7 +1929,7 @@ mod tests {
         let b = PathBuf::from("b.wowsreplay");
         let c = PathBuf::from("c.wowsreplay");
         let plain = Modifiers::default();
-        let ctrl = Modifiers::secondary_key();
+        let ctrl = cx.update(|cx| Modifiers::secondary_key(cx));
 
         cx.update(|cx| {
             browser.update(cx, |browser, cx| {
