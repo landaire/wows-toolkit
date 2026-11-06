@@ -48,6 +48,10 @@ pub enum ResolutionMethod {
 
     /// The nearest name to a misspelling.
     Fuzzy,
+
+    /// "Super <ship>": the tier 11 ship researched from a tier 10 ship, e.g.
+    /// "Super Colombo".
+    Supership,
 }
 
 /// One name read as something it does not spell exactly.
@@ -80,6 +84,12 @@ impl Interpretations {
     pub(crate) fn push(&mut self, interpretation: Interpretation) {
         if !self.0.contains(&interpretation) {
             self.0.push(interpretation);
+        }
+    }
+
+    pub(crate) fn append(&mut self, other: Interpretations) {
+        for interpretation in other.0 {
+            self.push(interpretation);
         }
     }
 

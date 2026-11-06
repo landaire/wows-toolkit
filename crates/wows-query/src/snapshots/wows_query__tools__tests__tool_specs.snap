@@ -14,12 +14,12 @@ expression: specs()
         description: "Ship name or part of it, e.g. \"moines\". A name that names one ship exactly, by an alias such as \"DM\", by its initials or by a former name lists that ship first. Omit to list by the other filters."
       min_tier:
         type: integer
-        description: "A ship tier, 1 to 11."
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
         minimum: 1
         maximum: 11
       max_tier:
         type: integer
-        description: "A ship tier, 1 to 11."
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
         minimum: 1
         maximum: 11
       class:
@@ -339,12 +339,12 @@ expression: specs()
         description: Conditions that must all hold.
       min_tier:
         type: integer
-        description: "A ship tier, 1 to 11."
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
         minimum: 1
         maximum: 11
       max_tier:
         type: integer
-        description: "A ship tier, 1 to 11."
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
         minimum: 1
         maximum: 11
       class:

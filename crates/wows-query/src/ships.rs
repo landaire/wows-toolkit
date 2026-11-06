@@ -17,6 +17,7 @@ use wowsunpack::game_params::types::Species;
 use crate::armament::Armament;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretation;
 use crate::names::Interpretations;
 use crate::names::Lookup;
 use crate::names::NameIndex;
@@ -61,10 +62,47 @@ const REGULAR_GROUPS: &[&str] = &[
     "superShip",
 ];
 
-/// A ship tier, 1 to 11.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
+/// A ship tier, 1 to 11. Arguments also accept "supership" for tier 11.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Tier(#[schemars(range(min = 1, max = 11))] pub u32);
+
+impl<'de> Deserialize<'de> for Tier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(TierVisitor)
+    }
+}
+
+struct TierVisitor;
+
+impl serde::de::Visitor<'_> for TierVisitor {
+    type Value = Tier;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a tier from 1 to 11 or \"supership\"")
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Tier, E>
+    where
+        E: serde::de::Error,
+    {
+        u32::try_from(value).map(Tier).map_err(|_| E::invalid_value(serde::de::Unexpected::Unsigned(value), &self))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Tier, E>
+    where
+        E: serde::de::Error,
+    {
+        if ["supership", "superships"].iter().any(|name| value.eq_ignore_ascii_case(name)) {
+            return Ok(Tier(11));
+        }
+
+        Err(E::invalid_value(serde::de::Unexpected::Str(value), &self))
+    }
+}
 
 /// A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
@@ -462,18 +500,9 @@ impl GameData {
         // A name single-ship tools resolve without guessing leads the list,
         // so "DM" lists Des Moines before Dm. Donskoi.
         let mut interpretations = Interpretations::default();
-        let named: Vec<&Ship> = match args.name.as_deref().map(|name| (name, self.ship_names.lookup(name))) {
-            Some((name, Lookup::Found(resolved, targets)))
-                if !matches!(resolved.method, Some(ResolutionMethod::Partial | ResolutionMethod::Fuzzy)) =>
-            {
-                let named: Vec<&Ship> =
-                    targets.iter().map(|index| &self.ships[*index]).filter(|ship| filter.matches(ship)).collect();
-                if !named.is_empty() {
-                    interpretations.note(name, &resolved, NameKind::Ship);
-                }
-                named
-            }
-            _ => Vec::new(),
+        let named = match args.name.as_deref() {
+            Some(name) => self.named_ships(name, &filter, &mut interpretations),
+            None => Vec::new(),
         };
 
         let mut partial: Vec<&Ship> = self
@@ -576,8 +605,17 @@ impl GameData {
     }
 
     /// The ship `query` names. A ship name shared by event or retired copies
-    /// resolves to the regular variant.
+    /// resolves to the regular variant. "Super <ship>" names the tier 11 ship
+    /// a tier 10 ship leads to.
     pub(crate) fn resolve_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
+        if let Some(supership) = self.resolve_supership(query, interpretations) {
+            return supership;
+        }
+
+        self.resolve_named_ship(query, interpretations)
+    }
+
+    fn resolve_named_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
         match self.ship_names.lookup(query) {
             Lookup::Found(resolved, targets) => {
                 let ships: Vec<&Ship> = targets.iter().map(|index| &self.ships[*index]).collect();
@@ -591,6 +629,75 @@ impl GameData {
         }
     }
 
+    /// The tier 11 research successor of the tier 10 ship a "super <ship>"
+    /// query names. `None` when `query` is not of that form, or names no ship
+    /// or one not of tier 10, so the query is read as a plain name.
+    fn resolve_supership(
+        &self,
+        query: &str,
+        interpretations: &mut Interpretations,
+    ) -> Option<Result<&Ship, QueryError>> {
+        let base_query = supership_base(query)?;
+        let mut base_interpretations = Interpretations::default();
+        let base = match self.resolve_named_ship(base_query, &mut base_interpretations) {
+            Ok(base) => base,
+            Err(error @ QueryError::AmbiguousShip { .. }) => return Some(Err(error)),
+            Err(_) => return None,
+        };
+        if base.tier != Tier(10) {
+            return None;
+        }
+
+        let next = base.param.vehicle().map(|vehicle| vehicle.research().next_ships()).unwrap_or_default();
+        let successors: Vec<&Ship> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.tier == Tier(11) && next.iter().any(|name| name == ship.param.name()))
+            .collect();
+        let Some(successor) = preferred(&successors) else {
+            return Some(Err(QueryError::NoSupership { query: query.to_owned(), ship: base.name.clone() }));
+        };
+
+        interpretations.append(base_interpretations);
+        interpretations.push(Interpretation {
+            input: query.to_owned(),
+            resolved: successor.name.clone(),
+            kind: NameKind::Ship,
+            method: ResolutionMethod::Supership,
+        });
+
+        Some(Ok(successor))
+    }
+
+    /// The ships `name` names as the single-ship tools read it, without
+    /// partial names or misspellings except in the ship a "super <ship>" name
+    /// leads from, that pass `filter`.
+    fn named_ships(&self, name: &str, filter: &ShipFilter, interpretations: &mut Interpretations) -> Vec<&Ship> {
+        let mut supership_interpretations = Interpretations::default();
+        if let Some(Ok(ship)) = self.resolve_supership(name, &mut supership_interpretations) {
+            if !filter.matches(ship) {
+                return Vec::new();
+            }
+
+            interpretations.append(supership_interpretations);
+            return vec![ship];
+        }
+
+        match self.ship_names.lookup(name) {
+            Lookup::Found(resolved, targets)
+                if !matches!(resolved.method, Some(ResolutionMethod::Partial | ResolutionMethod::Fuzzy)) =>
+            {
+                let named: Vec<&Ship> =
+                    targets.iter().map(|index| &self.ships[*index]).filter(|ship| filter.matches(ship)).collect();
+                if !named.is_empty() {
+                    interpretations.note(name, &resolved, NameKind::Ship);
+                }
+                named
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// English name of a ship param, or the param name when it has none.
     pub(crate) fn ship_display_name(&self, param_name: &str) -> String {
         self.provider()
@@ -598,6 +705,15 @@ impl GameData {
             .and_then(|param| self.provider().localized_name_from_param(&param))
             .map_or_else(|| param_name.to_owned(), |name| clean(&name))
     }
+}
+
+/// The ship name in "super <name>" or "super-<name>", any case.
+fn supership_base(query: &str) -> Option<&str> {
+    let query = query.trim();
+    let (word, rest) = query.split_at_checked(5)?;
+    let base = rest.strip_prefix([' ', '-'])?.trim();
+
+    (word.eq_ignore_ascii_case("super") && !base.is_empty()).then_some(base)
 }
 
 /// The regular variant when one exists, else the first.
@@ -637,6 +753,7 @@ pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn matchmaking_range_is_clamped() {
@@ -664,5 +781,44 @@ mod tests {
         Cruiser -> Cruiser
         aircraft_carrier -> AircraftCarrier
         ");
+    }
+
+    #[test]
+    fn tier_arguments_accept_supership() {
+        let parsed: Vec<String> =
+            [json!(10), json!("supership"), json!("Superships"), json!("super"), json!(-1), json!(true)]
+                .into_iter()
+                .map(|value| match serde_json::from_value::<Tier>(value.clone()) {
+                    Ok(tier) => format!("{value} -> {}", tier.0),
+                    Err(error) => format!("{value} -> {error}"),
+                })
+                .collect();
+
+        insta::assert_snapshot!(parsed.join("\n"), @r#"
+        10 -> 10
+        "supership" -> 11
+        "Superships" -> 11
+        "super" -> invalid value: string "super", expected a tier from 1 to 11 or "supership"
+        -1 -> invalid type: integer `-1`, expected a tier from 1 to 11 or "supership"
+        true -> invalid type: boolean `true`, expected a tier from 1 to 11 or "supership"
+        "#);
+    }
+
+    #[test]
+    fn supership_queries_name_their_base_ship() {
+        let bases: Vec<String> =
+            ["Super Colombo", "super-montana", "  SUPER  Des Moines ", "Superb", "super", "super-"]
+                .into_iter()
+                .map(|query| format!("{query:?} -> {:?}", supership_base(query)))
+                .collect();
+
+        insta::assert_snapshot!(bases.join("\n"), @r#"
+        "Super Colombo" -> Some("Colombo")
+        "super-montana" -> Some("montana")
+        "  SUPER  Des Moines " -> Some("Des Moines")
+        "Superb" -> None
+        "super" -> None
+        "super-" -> None
+        "#);
     }
 }

@@ -210,6 +210,38 @@ fn other_modules_select_another_armament() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn super_names_resolve_to_the_tier_11_successor() {
+    let resolved: Vec<_> = ["Super Colombo", "super-montana", "SUPER DM", "Super Stalingrad", "Super Yamato"]
+        .into_iter()
+        .map(|query| match game().ship_summary(query) {
+            Ok(resolved) => {
+                json!({ "query": query, "ship": resolved.ship.name, "interpretations": resolved.interpretations })
+            }
+            Err(error) => json!({ "query": query, "error": error.to_string() }),
+        })
+        .collect();
+    let names = |arguments: serde_json::Value| -> serde_json::Value {
+        let found = game().call_tool("find_ships", arguments).expect("find_ships answers");
+        let ships: Vec<_> = found["ships"]
+            .as_array()
+            .expect("ships is a list")
+            .iter()
+            .take(3)
+            .map(|ship| json!({ "name": ship["name"], "name_match": ship["name_match"] }))
+            .collect();
+        json!({ "interpretations": found["interpretations"], "total": found["total"], "first": ships })
+    };
+
+    insta::assert_yaml_snapshot!(json!({
+        "resolved": resolved,
+        "tier_11_cruisers": names(json!({ "min_tier": "supership", "class": "CA" })),
+        "find_super_colombo": names(json!({ "name": "Super Colombo" })),
+        "find_super_colombo_up_to_tier_10": names(json!({ "name": "Super Colombo", "max_tier": 10 })),
+    }));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn upgrades_and_consumables_of_des_moines() {
     let upgrades = game().ship_upgrades(&ship("Des Moines")).expect("Des Moines exists");
     insta::assert_yaml_snapshot!(upgrades);

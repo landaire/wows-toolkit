@@ -1,0 +1,72 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 235
+expression: "json!({\n    \"resolved\": resolved, \"tier_11_cruisers\":\n    names(json!({ \"min_tier\": \"supership\", \"class\": \"CA\" })),\n    \"find_super_colombo\": names(json!({ \"name\": \"Super Colombo\" })),\n    \"find_super_colombo_up_to_tier_10\":\n    names(json!({ \"name\": \"Super Colombo\", \"max_tier\": 10 })),\n})"
+---
+resolved:
+  - query: Super Colombo
+    ship: Affondatore
+    interpretations:
+      - input: Colombo
+        resolved: C. Colombo
+        kind: ship
+        method: partial
+      - input: Super Colombo
+        resolved: Affondatore
+        kind: ship
+        method: supership
+  - query: super-montana
+    ship: Maine
+    interpretations:
+      - input: super-montana
+        resolved: Maine
+        kind: ship
+        method: supership
+  - query: SUPER DM
+    ship: Annapolis
+    interpretations:
+      - input: DM
+        resolved: Des Moines
+        kind: ship
+        method: exact-alias
+      - input: SUPER DM
+        resolved: Annapolis
+        kind: ship
+        method: supership
+  - query: Super Stalingrad
+    error: "\"Super Stalingrad\" asks for the tier 11 ship researched from Stalingrad, but Stalingrad leads to no tier 11 ship"
+  - query: Super Yamato
+    ship: Satsuma
+    interpretations:
+      - input: Super Yamato
+        resolved: Satsuma
+        kind: ship
+        method: supership
+tier_11_cruisers:
+  interpretations: ~
+  total: 8
+  first:
+    - name: Annapolis
+      name_match: ~
+    - name: Clausewitz
+      name_match: ~
+    - name: Condé
+      name_match: ~
+find_super_colombo:
+  interpretations:
+    - input: Colombo
+      resolved: C. Colombo
+      kind: ship
+      method: partial
+    - input: Super Colombo
+      resolved: Affondatore
+      kind: ship
+      method: supership
+  total: 1
+  first:
+    - name: Affondatore
+      name_match: named
+find_super_colombo_up_to_tier_10:
+  interpretations: ~
+  total: 0
+  first: []

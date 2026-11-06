@@ -61,6 +61,9 @@ pub enum QueryError {
     #[error("{query:?} matches several ships: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousShip { query: String, candidates: Vec<String> },
 
+    #[error("{query:?} asks for the tier 11 ship researched from {ship}, but {ship} leads to no tier 11 ship")]
+    NoSupership { query: String, ship: String },
+
     #[error("{ship} has no armor zone or plate named {zone:?}; zones: {}", zones.join(", "))]
     ZoneNotFound { ship: String, zone: String, zones: Vec<&'static str> },
 
