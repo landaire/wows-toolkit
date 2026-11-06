@@ -22,10 +22,7 @@ use std::process::ChildStdin;
 use std::process::ChildStdout;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::Condvar;
-use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::PoisonError;
 use std::sync::mpsc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -37,6 +34,7 @@ use serde::Serialize;
 use crate::error::CompileError;
 use crate::error::JqError;
 use crate::jq::Program;
+use crate::sandbox::WorkerSlots;
 
 pub use crate::jq::InputOutputs;
 pub use crate::jq::Limits;
@@ -59,9 +57,9 @@ const _: () = assert!(WORKER_MARGIN.as_millis() > GRACE.as_millis(), "the parent
 /// Distinguishes the working directories of concurrent workers.
 static NEXT_WORKDIR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Workers running now.
-static RUNNING_WORKERS: Mutex<usize> = Mutex::new(0);
-static WORKER_FINISHED: Condvar = Condvar::new();
+/// Each worker may use up to its address-space limit, so further callers
+/// wait.
+static WORKER_SLOTS: WorkerSlots = WorkerSlots::new(2);
 
 /// Outputs of a filter over a sequence of inputs.
 #[derive(Debug)]
@@ -111,41 +109,6 @@ enum Progress {
     Started,
 }
 
-/// A claim on one of the workers that may run at once. Each worker may use
-/// up to its address-space limit, so further callers wait.
-struct WorkerPermit;
-
-impl WorkerPermit {
-    fn acquire() -> Result<Self, JqError> {
-        const MAX_WORKERS: usize = 2;
-        // Each `gameparams_query` worker runs at most 5 s plus 2 s of grace;
-        // this lets two evaluations ahead of the caller finish.
-        const MAX_WAIT: Duration = Duration::from_secs(15);
-
-        let deadline = Instant::now() + MAX_WAIT;
-        // A poisoned lock only means a holder panicked; the count stays right.
-        let mut running = RUNNING_WORKERS.lock().unwrap_or_else(PoisonError::into_inner);
-        while *running >= MAX_WORKERS {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(JqError::Busy { waited: MAX_WAIT });
-            }
-            running = WORKER_FINISHED.wait_timeout(running, left).unwrap_or_else(PoisonError::into_inner).0;
-        }
-        *running += 1;
-
-        Ok(Self)
-    }
-}
-
-impl Drop for WorkerPermit {
-    fn drop(&mut self) {
-        let mut running = RUNNING_WORKERS.lock().unwrap_or_else(PoisonError::into_inner);
-        *running -= 1;
-        WORKER_FINISHED.notify_one();
-    }
-}
-
 /// In a worker process, evaluates the request on standard input and exits.
 /// Otherwise registers this program as the jq worker. Call it first in
 /// `main`, before anything that reads standard input.
@@ -185,7 +148,12 @@ pub fn evaluate(
     let Some(worker) = WORKER_PROGRAM.get() else {
         return Err(JqError::NoWorker);
     };
-    let _permit = WorkerPermit::acquire()?;
+    // Each `gameparams_query` worker runs at most 5 s plus 2 s of grace;
+    // this lets two evaluations ahead of the caller finish.
+    const MAX_WAIT: Duration = Duration::from_secs(15);
+    let Some(_permit) = WORKER_SLOTS.acquire(MAX_WAIT) else {
+        return Err(JqError::Busy { waited: MAX_WAIT });
+    };
     // An empty working directory, so nothing the host keeps there is reachable.
     let workdir = std::env::temp_dir().join(format!(
         "wows-query-jq-{}-{}",
@@ -335,7 +303,8 @@ fn serve() -> std::io::Result<()> {
     // Reserved address space; pages are committed as used.
     const STACK_BYTES: usize = 256 * 1024 * 1024;
 
-    limit_memory();
+    // Filters get 4 GiB of address space.
+    crate::sandbox::limit_memory(4 * 1024 * 1024 * 1024);
     let confinement = deny_filesystem();
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
@@ -411,60 +380,12 @@ fn write_reply(output: &mut impl Write, reply: &Reply) -> std::io::Result<()> {
     output.flush()
 }
 
-/// Caps the worker's address space, so a filter that allocates without
-/// bound fails in the worker instead of exhausting the machine.
-#[cfg(target_os = "linux")]
-fn limit_memory() {
-    const ADDRESS_SPACE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-
-    let limit = rustix::process::Rlimit { current: Some(ADDRESS_SPACE_BYTES), maximum: Some(ADDRESS_SPACE_BYTES) };
-    // Without the cap the worker still runs; the deadline still ends it.
-    let _ = rustix::process::setrlimit(rustix::process::Resource::As, limit);
-}
-
-/// Other systems have no enforced address-space limit; the deadline ends a
-/// runaway worker.
-#[cfg(not(target_os = "linux"))]
-fn limit_memory() {}
-
-/// Denies the worker every filesystem access right, along with TCP and
-/// signals or abstract sockets outside it. Files already open, the pipes to
-/// the parent, stay usable.
-#[cfg(target_os = "linux")]
+/// Denies the worker filesystem access; see [`crate::sandbox::deny_filesystem`].
 fn deny_filesystem() -> Confinement {
-    use landlock::ABI;
-    use landlock::Access;
-    use landlock::AccessFs;
-    use landlock::AccessNet;
-    use landlock::Ruleset;
-    use landlock::RulesetAttr;
-    use landlock::RulesetStatus;
-    use landlock::Scope;
-
-    // Older kernels enforce the subset they know.
-    const ABI_VERSION: ABI = ABI::V6;
-
-    let restricted = Ruleset::default()
-        .handle_access(AccessFs::from_all(ABI_VERSION))
-        .and_then(|ruleset| ruleset.handle_access(AccessNet::from_all(ABI_VERSION)))
-        .and_then(|ruleset| ruleset.scope(Scope::from_all(ABI_VERSION)))
-        .and_then(|ruleset| ruleset.create())
-        .and_then(|ruleset| ruleset.restrict_self());
-    match restricted {
-        // Every ABI denies opening, listing and creating files when no rule
-        // allows them; later ABIs add rights over network, signals and
-        // files already open.
-        Ok(status) if status.ruleset != RulesetStatus::NotEnforced => Confinement::FilesystemDenied,
-        Ok(status) => Confinement::Unavailable { reason: format!("Landlock is {:?}", status.landlock) },
-        Err(error) => Confinement::Unavailable { reason: error.to_string() },
+    match crate::sandbox::deny_filesystem() {
+        Ok(()) => Confinement::FilesystemDenied,
+        Err(error) => Confinement::Unavailable { reason: error.reason() },
     }
-}
-
-/// Other systems have no Landlock; the empty environment and working
-/// directory and the disabled jq builtins remain.
-#[cfg(not(target_os = "linux"))]
-fn deny_filesystem() -> Confinement {
-    Confinement::Unavailable { reason: "Landlock is Linux only".to_owned() }
 }
 
 #[cfg(all(test, target_os = "linux"))]

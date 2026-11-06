@@ -11,7 +11,8 @@ description = "Query World of Warships game data: ships, armor, shells, stat car
 wowsunpack = { workspace = true, features = ["arc", "json", "models", "rkyv", "serde", "vfs"] }
 wows-core = { workspace = true, features = ["arc", "schemars", "serde"] }
 wows-data-mgr = { workspace = true }
-wows_replays = { workspace = true, features = ["arc", "parsing"] }
+wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
+replayshark = { workspace = true }
 deunicode = "1"
 flate2 = { workspace = true }
 gettext = { workspace = true }
@@ -27,10 +28,12 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-# Caps the jq worker's address space.
+[target.'cfg(unix)'.dependencies]
+# Caps the address space and descriptors of jq and replay workers.
 rustix = { version = "1", features = ["process"] }
-# Denies the jq worker filesystem access.
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Denies jq and replay workers filesystem access.
 landlock = "0.4"
 
 [features]

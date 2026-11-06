@@ -70,29 +70,14 @@ impl GameData {
     /// [`crate::raw_params::RAW_PARAMS_KIND`], each marked with `.complete`
     /// and `.last-used`.
     pub fn load_dump(dump_dir: &Path, cache_root: Option<&Path>) -> Result<Self, Report<LoadError>> {
-        let Some(metadata) = BuildMetadata::load(&dump_dir.join("metadata.toml")) else {
-            return Err(report!(LoadError::NotADump { dir: dump_dir.to_path_buf() }));
-        };
-        let version = parse_version(&metadata.version, metadata.build).ok_or_else(|| {
-            report!(LoadError::Version { dir: dump_dir.to_path_buf(), version: metadata.version.clone() })
-        })?;
-
+        let (version, build) = dump_version(dump_dir)?;
         let dump = Dump::open(dump_dir);
-        // Keyed by build: the cache header carries no build, so a shared
-        // directory would serve one build's params for another.
-        let params_cache = cache_root.map(|root| root.join(game_params_cache_kind()).join(metadata.build.to_string()));
+        let params = load_params(&dump, dump_dir, params_cache(cache_root, build).as_deref())?;
+        let provider = GameMetadataProvider::from_params_no_specs(params)
+            .map_err(|source| report!(LoadError::GameParams { dir: dump_dir.to_path_buf(), source }))?;
+        load_english(&provider, &dump, dump_dir)?;
 
-        let provider = load_provider(&dump, dump_dir, params_cache.as_deref())?;
-        let Some(catalog_path) = dump.derived_path(ENGLISH_CATALOG) else {
-            return Err(report!(LoadError::MissingFile { dir: dump_dir.to_path_buf(), file: ENGLISH_CATALOG }));
-        };
-        let file = File::open(&catalog_path)
-            .map_err(|source| report!(LoadError::Io { path: catalog_path.clone(), source }))?;
-        let catalog = Catalog::parse(file)
-            .map_err(|source| report!(LoadError::Translations { path: catalog_path.clone(), source }))?;
-        provider.set_translations(catalog);
-
-        let raw_params = RawParamsSlot::new(dump_dir, cache_root, metadata.build);
+        let raw_params = RawParamsSlot::new(dump_dir, cache_root, build);
 
         Ok(Self::index(version, provider, dump.vfs(), raw_params))
     }
@@ -155,29 +140,103 @@ pub fn latest_dump_dir(root: &Path) -> Result<PathBuf, Report<LoadError>> {
     Ok(root.join(&entry.dir))
 }
 
+/// One dump build's GameParams, entity definitions and English names: what
+/// parsing a replay's packets needs.
+pub(crate) struct ReplayGameData {
+    pub version: Version,
+    pub provider: GameMetadataProvider,
+    pub vfs: VfsPath,
+}
+
+impl ReplayGameData {
+    /// Loads `dump_dir` like [`GameData::load_dump`], with the entity
+    /// definitions the packet parser needs.
+    pub(crate) fn load(dump_dir: &Path, cache_root: Option<&Path>) -> Result<Self, Report<LoadError>> {
+        let (version, build) = dump_version(dump_dir)?;
+        let dump = Dump::open(dump_dir);
+        let params = load_params(&dump, dump_dir, params_cache(cache_root, build).as_deref())?;
+        let vfs = dump.vfs();
+        let provider = GameMetadataProvider::from_params_with_vfs(params, &vfs)
+            .map_err(|source| report!(LoadError::GameParams { dir: dump_dir.to_path_buf(), source }))?;
+        load_english(&provider, &dump, dump_dir)?;
+
+        Ok(Self { version, provider, vfs })
+    }
+}
+
+/// A game build number, such as `13357625`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct BuildNumber(u32);
+
+impl BuildNumber {
+    pub(crate) fn new(build: u32) -> Self {
+        Self(build)
+    }
+
+    pub(crate) fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for BuildNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// The version and build in a dump directory's `metadata.toml`.
+fn dump_version(dump_dir: &Path) -> Result<(Version, BuildNumber), Report<LoadError>> {
+    let Some(metadata) = BuildMetadata::load(&dump_dir.join("metadata.toml")) else {
+        return Err(report!(LoadError::NotADump { dir: dump_dir.to_path_buf() }));
+    };
+    let version = parse_version(&metadata.version, metadata.build).ok_or_else(|| {
+        report!(LoadError::Version { dir: dump_dir.to_path_buf(), version: metadata.version.clone() })
+    })?;
+
+    Ok((version, BuildNumber::new(metadata.build)))
+}
+
+/// This build's [`game_params_cache_kind`] directory under `cache_root`.
+/// Keyed by build: the cache header carries no build, so a shared directory
+/// would serve one build's params for another.
+fn params_cache(cache_root: Option<&Path>, build: BuildNumber) -> Option<PathBuf> {
+    cache_root.map(|root| root.join(game_params_cache_kind()).join(build.to_string()))
+}
+
 /// `params_cache` is this build's [`game_params_cache_kind`] directory.
-fn load_provider(
+fn load_params(
     dump: &Dump,
     dump_dir: &Path,
     params_cache: Option<&Path>,
-) -> Result<GameMetadataProvider, Report<LoadError>> {
-    let params_error = |source| report!(LoadError::GameParams { dir: dump_dir.to_path_buf(), source });
+) -> Result<Vec<wowsunpack::game_params::types::Param>, Report<LoadError>> {
     let cache_path = params_cache.map(|dir| dir.join(GAME_PARAMS_CACHE));
+    if let Some(params) = load_cached_params(cache_path.as_deref(), dump.derived_path(GAME_PARAMS_CACHE).as_deref()) {
+        return Ok(params);
+    }
 
-    let params = match load_cached_params(cache_path.as_deref(), dump.derived_path(GAME_PARAMS_CACHE).as_deref()) {
-        Some(params) => params,
-        None => {
-            tracing::info!(dir = %dump_dir.display(), "game_params.rkyv unusable; parsing GameParams.data");
-            let bytes = read_vfs_file(dump, dump_dir, GAME_PARAMS_DATA)?;
-            let params = GameMetadataProvider::params_from_data(bytes).map_err(params_error)?;
-            if let Some(path) = &cache_path {
-                save_params_cache(path, &params);
-            }
-            params
-        }
+    tracing::info!(dir = %dump_dir.display(), "game_params.rkyv unusable; parsing GameParams.data");
+    let bytes = read_vfs_file(dump, dump_dir, GAME_PARAMS_DATA)?;
+    let params = GameMetadataProvider::params_from_data(bytes)
+        .map_err(|source| report!(LoadError::GameParams { dir: dump_dir.to_path_buf(), source }))?;
+    if let Some(path) = &cache_path {
+        save_params_cache(path, &params);
+    }
+
+    Ok(params)
+}
+
+/// Installs the dump's English translation catalog in `provider`.
+fn load_english(provider: &GameMetadataProvider, dump: &Dump, dump_dir: &Path) -> Result<(), Report<LoadError>> {
+    let Some(catalog_path) = dump.derived_path(ENGLISH_CATALOG) else {
+        return Err(report!(LoadError::MissingFile { dir: dump_dir.to_path_buf(), file: ENGLISH_CATALOG }));
     };
+    let file =
+        File::open(&catalog_path).map_err(|source| report!(LoadError::Io { path: catalog_path.clone(), source }))?;
+    let catalog = Catalog::parse(file)
+        .map_err(|source| report!(LoadError::Translations { path: catalog_path.clone(), source }))?;
+    provider.set_translations(catalog);
 
-    GameMetadataProvider::from_params_no_specs(params).map_err(params_error)
+    Ok(())
 }
 
 /// The cache directory's copy at `cache_path` when it loads, else the dump's

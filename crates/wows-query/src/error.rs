@@ -6,6 +6,8 @@ use serde::Serialize;
 use wows_core::units::Km;
 use wowsunpack::game_params::ttx::modifiers::ModifierError;
 
+use crate::replay_worker::ByteCount;
+
 /// Failure to load a game data build.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
@@ -284,6 +286,48 @@ pub enum JqError {
 
     #[error("the jq worker sent an unreadable reply")]
     Reply(#[source] serde_json::Error),
+}
+
+/// Failure to read a replay in a replay worker.
+#[derive(Debug, thiserror::Error)]
+pub enum ReplayWorkerError {
+    #[error("replay reading is not set up in this program; call wows_query::replay_worker::init() first in main")]
+    NoWorker,
+
+    #[error("the replay is {} bytes, more than the {} byte limit", bytes.get(), limit.get())]
+    TooLarge { bytes: ByteCount, limit: ByteCount },
+
+    #[error("failed to start the replay worker {program}")]
+    Spawn {
+        program: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to create the replay worker's working directory {path}")]
+    Workdir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("the replay worker stayed busy for {waited:?}; retry later")]
+    Busy { waited: std::time::Duration },
+
+    #[error("reading the replay took longer than {limit:?}")]
+    TimedOut { limit: std::time::Duration },
+
+    #[error("the replay worker stopped without an answer ({})", exit_description(.status.as_ref()))]
+    Crashed { status: Option<std::process::ExitStatus> },
+
+    #[error("the replay worker sent an unreadable reply")]
+    Reply(#[source] serde_json::Error),
+
+    #[error("the replay worker answered out of order")]
+    UnexpectedReply,
+
+    #[error(transparent)]
+    Failed(#[from] crate::replay_worker::WorkerFailure),
 }
 
 fn exit_description(status: Option<&std::process::ExitStatus>) -> String {

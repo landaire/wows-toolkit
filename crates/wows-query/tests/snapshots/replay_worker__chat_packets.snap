@@ -1,0 +1,37 @@
+---
+source: crates/wows-query/tests/replay_worker.rs
+expression: selection
+---
+records:
+  - index: 7788
+    clock: 63.12356
+    kind: Chat
+    payload:
+      entity_id: 375972
+      sender_id: 402958697
+      audience: battle_common
+      message: "Y'all got any radar?"
+      extra_data: ~
+  - index: 9718
+    clock: 79.128265
+    kind: Chat
+    payload:
+      entity_id: 375972
+      sender_id: 402966546
+      audience: battle_common
+      message: "depends. who's asking?"
+      extra_data: ~
+  - index: 11021
+    clock: 89.967834
+    kind: Chat
+    payload:
+      entity_id: 375972
+      sender_id: 402958697
+      audience: battle_common
+      message: "jus' lil ol' me"
+      extra_data: ~
+scan:
+  packets: 146436
+  matched: 12
+  unparsed_from: ~
+  stopped: false

@@ -12,6 +12,7 @@ buildscript = workspace_buildscript(
 )
 
 WOWS_QUERY_DEPS = [
+    "//crates/replayshark:replayshark",
     "//crates/wows-core:wows_core",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replays:wows_replays",
@@ -30,8 +31,9 @@ WOWS_QUERY_DEPS = [
     "//third-party/rust:thiserror",
     "//third-party/rust:tracing",
 ] + os_select(
-    macos = [],
-    # The cfg(target_os = "linux") dependency section of Cargo.toml.
+    # The cfg(unix) dependency section of Cargo.toml.
+    macos = ["//third-party/rust:rustix"],
+    # The cfg(unix) and cfg(target_os = "linux") dependency sections.
     linux = ["//third-party/rust:landlock", "//third-party/rust:rustix"],
     windows = [],
 )
@@ -71,6 +73,15 @@ workspace_binary(
     deps = [":wows_query"],
 )
 
+workspace_binary(
+    name = "wows_query_replay_worker_bin",
+    crate = "wows_query_replay_worker",
+    crate_root = "src/bin/wows-query-replay-worker.rs",
+    package = "wows-query",
+    version = "0.1.0",
+    deps = [":wows_query"],
+)
+
 workspace_integration_tests(
     package = "wows-query",
     version = "0.1.0",
@@ -80,5 +91,8 @@ workspace_integration_tests(
     buildscript = buildscript,
     test_deps = WOWS_QUERY_TEST_DEPS,
     # Cargo names the worker to the tests through CARGO_BIN_EXE_*.
-    run_env = {"WOWS_QUERY_JQ_WORKER_BIN": "$(location :wows_query_jq_worker_bin)"},
+    run_env = {
+        "WOWS_QUERY_JQ_WORKER_BIN": "$(location :wows_query_jq_worker_bin)",
+        "WOWS_QUERY_REPLAY_WORKER_BIN": "$(location :wows_query_replay_worker_bin)",
+    },
 )

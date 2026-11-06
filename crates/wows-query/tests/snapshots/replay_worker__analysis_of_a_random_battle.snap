@@ -1,0 +1,1806 @@
+---
+source: crates/wows-query/tests/replay_worker.rs
+assertion_line: 55
+expression: analysis
+---
+game:
+  client_version: 15.4.0.12506899
+  map: Crash Zone Alpha
+  game_mode: Domination
+  game_type: Random Battle
+  match_group: pvp
+  date_time: "04.06.2026 17:23:36"
+  arena_id: 1580244802858189
+  recorder: Alpine_Mustache
+  battle_start: 31.375772
+  time_limit:
+    secs: 1200
+    nanos: 0
+  played:
+    secs: 886
+    nanos: 126464844
+  outcome: win
+  has_battle_results: true
+players:
+  - name: Turkish
+    clan: HEAVY
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1000110292
+    ship_entity: 375971
+    avatar_entity: 375970
+    division: ~
+    ship:
+      name: Mainz
+      index: PGSC518
+      param_id: 3751720752
+      tier: 8
+      class: Cruiser
+      nation: Germany
+    results:
+      base_xp: 524
+      raw_xp: 524
+      damage: 3201
+      kills: 0
+      spotting_damage: 3386
+      potential_damage: 662399
+      received_damage: 48451
+      main_battery_hits: 7
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 16.720997
+      damage_by_type:
+        damage_atba_he: 396
+        damage_main_he: 2805
+      hits_by_type:
+        hits_atba_he: 1
+        hits_main_he: 7
+      received_by_type:
+        damage_atba_he: 495
+        damage_main_ap: 44253
+        damage_main_he: 3703
+      interactions:
+        - account: 1025031331
+          damage_dealt: 1122
+          damage_received: 24901
+        - account: 1021904849
+          damage_dealt: 0
+          damage_received: 12481
+        - account: 1022594435
+          damage_dealt: 0
+          damage_received: 7366
+        - account: 1001584611
+          damage_dealt: 0
+          damage_received: 3703
+        - account: 1011195825
+          damage_dealt: 2079
+          damage_received: 0
+    observed_damage: 3201
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 285
+      nanos: 0
+    death:
+      clock: 315.38947
+      killer: 375951
+      cause:
+        Known: ApShell
+  - name: 0ldGrump
+    clan: MONST
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1001584611
+    ship_entity: 375963
+    avatar_entity: 375962
+    division: ~
+    ship:
+      name: Yoshino
+      index: PJSC520
+      param_id: 3749623504
+      tier: 10
+      class: Cruiser
+      nation: Japan
+    results:
+      base_xp: 1332
+      raw_xp: 888
+      damage: 130254
+      kills: 0
+      spotting_damage: 16633
+      potential_damage: 519750
+      received_damage: 28106
+      main_battery_hits: 51
+      fires: 6
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 43.902958
+      damage_by_type:
+        damage_fire: 71085
+        damage_main_he: 59169
+      hits_by_type:
+        hits_main_he: 51
+      received_by_type:
+        damage_main_ap: 28106
+      interactions:
+        - account: 1037908366
+          damage_dealt: 84266
+          damage_received: 28106
+        - account: 1021043409
+          damage_dealt: 23132
+          damage_received: 0
+        - account: 1056416878
+          damage_dealt: 17152
+          damage_received: 0
+        - account: 1000110292
+          damage_dealt: 3703
+          damage_received: 0
+        - account: 1016956546
+          damage_dealt: 2001
+          damage_received: 0
+    observed_damage: 72849
+    observed_kills: 0
+    survived: true
+    time_lived: ~
+    death: ~
+  - name: lizardhunter
+    clan: BADAS
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1001810134
+    ship_entity: 375943
+    avatar_entity: 375942
+    division: ~
+    ship:
+      name: "Błyskawica '44"
+      index: PWSD708
+      param_id: 3552458032
+      tier: 8
+      class: Destroyer
+      nation: Europe
+    results:
+      base_xp: 677
+      raw_xp: 677
+      damage: 12774
+      kills: 0
+      spotting_damage: 35120
+      potential_damage: 599682
+      received_damage: 19451
+      main_battery_hits: 12
+      fires: 0
+      floods: 1
+      citadels: 0
+      crits: 2
+      distance: 21.862875
+      damage_by_type:
+        damage_flood: 1802
+        damage_main_ap: 2572
+        damage_tpd_normal: 8400
+      hits_by_type:
+        hits_main_ap: 12
+        hits_tpd: 1
+      received_by_type:
+        damage_fire: 175
+        damage_main_ap: 3440
+        damage_main_he: 15836
+      interactions:
+        - account: 1025031331
+          damage_dealt: 10202
+          damage_received: 2820
+        - account: 1011195825
+          damage_dealt: 2572
+          damage_received: 10390
+        - account: 1058780873
+          damage_dealt: 0
+          damage_received: 5621
+        - account: 1035753883
+          damage_dealt: 0
+          damage_received: 620
+    observed_damage: 12774
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 366
+      nanos: 0
+    death:
+      clock: 396.8515
+      killer: 375977
+      cause:
+        Known: HeShell
+  - name: Elk310
+    clan: CE
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1010384123
+    ship_entity: 375935
+    avatar_entity: 375934
+    division: ~
+    ship:
+      name: Akizuki
+      index: PJSD108
+      param_id: 4181604048
+      tier: 8
+      class: Destroyer
+      nation: Japan
+    results:
+      base_xp: 1242
+      raw_xp: 828
+      damage: 24883
+      kills: 2
+      spotting_damage: 27944
+      potential_damage: 153050
+      received_damage: 15106
+      main_battery_hits: 140
+      fires: 3
+      floods: 0
+      citadels: 0
+      crits: 2
+      distance: 62.817238
+      damage_by_type:
+        damage_fire: 1725
+        damage_main_he: 23158
+      hits_by_type:
+        hits_main_he: 140
+      received_by_type:
+        damage_flood: 107
+        damage_main_he: 2129
+        damage_tpd_normal: 12870
+      interactions:
+        - account: 1021211697
+          damage_dealt: 8010
+          damage_received: 12977
+        - account: 1032805417
+          damage_dealt: 4398
+          damage_received: 1419
+        - account: 1037908366
+          damage_dealt: 5706
+          damage_received: 0
+        - account: 1019877248
+          damage_dealt: 4591
+          damage_received: 710
+        - account: 1056416878
+          damage_dealt: 1980
+          damage_received: 0
+        - account: 1047365996
+          damage_dealt: 198
+          damage_received: 0
+    observed_damage: 19531
+    observed_kills: 2
+    survived: true
+    time_lived: ~
+    death: ~
+  - name: Alpine_Mustache
+    clan: ~
+    side: recorder
+    team_id: 1
+    is_bot: false
+    account: 1011195825
+    ship_entity: 375973
+    avatar_entity: 375972
+    division: ~
+    ship:
+      name: Benson
+      index: PASD008
+      param_id: 4286461936
+      tier: 8
+      class: Destroyer
+      nation: USA
+    results:
+      base_xp: 2603
+      raw_xp: 1736
+      damage: 36392
+      kills: 2
+      spotting_damage: 116189
+      potential_damage: 473834
+      received_damage: 18200
+      main_battery_hits: 57
+      fires: 1
+      floods: 1
+      citadels: 0
+      crits: 2
+      distance: 38.425648
+      damage_by_type:
+        damage_fire: 117
+        damage_main_he: 21232
+        damage_tpd_normal: 15043
+      hits_by_type:
+        hits_main_he: 57
+        hits_tpd: 1
+      received_by_type:
+        damage_atba_he: 396
+        damage_main_ap: 5761
+        damage_main_he: 12043
+      interactions:
+        - account: 1019877248
+          damage_dealt: 9028
+          damage_received: 10360
+        - account: 1021211697
+          damage_dealt: 15043
+          damage_received: 0
+        - account: 1001810134
+          damage_dealt: 10390
+          damage_received: 2572
+        - account: 1037908366
+          damage_dealt: 0
+          damage_received: 3189
+        - account: 1000110292
+          damage_dealt: 0
+          damage_received: 2079
+        - account: 1047365996
+          damage_dealt: 1931
+          damage_received: 0
+    observed_damage: 36393
+    observed_kills: 2
+    survived: false
+    time_lived:
+      secs: 502
+      nanos: 0
+    death:
+      clock: 532.6873
+      killer: 375961
+      cause:
+        Known: ApShell
+  - name: G3th62
+    clan: OCLUB
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1015328880
+    ship_entity: 375975
+    avatar_entity: 375974
+    division: ~
+    ship:
+      name: Shimakaze
+      index: PJSD012
+      param_id: 4282267344
+      tier: 10
+      class: Destroyer
+      nation: Japan
+    results:
+      base_xp: 735
+      raw_xp: 490
+      damage: 4967
+      kills: 0
+      spotting_damage: 3696
+      potential_damage: 240350
+      received_damage: 17900
+      main_battery_hits: 7
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 1
+      distance: 15.419798
+      damage_by_type:
+        damage_main_he: 4967
+      hits_by_type:
+        hits_main_he: 7
+      received_by_type:
+        damage_main_ap: 5481
+        damage_main_he: 12419
+      interactions:
+        - account: 1021211697
+          damage_dealt: 3548
+          damage_received: 6265
+        - account: 1019877248
+          damage_dealt: 1419
+          damage_received: 6154
+        - account: 1047365996
+          damage_dealt: 0
+          damage_received: 5481
+    observed_damage: 2838
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 206
+      nanos: 0
+    death:
+      clock: 236.10782
+      killer: 375931
+      cause:
+        Known: HeShell
+  - name: usersap
+    clan: "-RSE-"
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1016956546
+    ship_entity: 375969
+    avatar_entity: 375968
+    division: ~
+    ship:
+      name: Shimanto
+      index: PJSC208
+      param_id: 4076779216
+      tier: 8
+      class: Cruiser
+      nation: Japan
+    results:
+      base_xp: 678
+      raw_xp: 678
+      damage: 32908
+      kills: 0
+      spotting_damage: 2129
+      potential_damage: 527500
+      received_damage: 50540
+      main_battery_hits: 40
+      fires: 1
+      floods: 1
+      citadels: 0
+      crits: 0
+      distance: 13.741382
+      damage_by_type:
+        damage_fire: 803
+        damage_flood: 41
+        damage_main_ap: 7809
+        damage_main_he: 13184
+        damage_tpd_normal: 11071
+      hits_by_type:
+        hits_main_ap: 13
+        hits_main_he: 27
+        hits_tpd: 1
+      received_by_type:
+        damage_main_ap: 48539
+        damage_main_he: 2001
+      interactions:
+        - account: 1022594435
+          damage_dealt: 8585
+          damage_received: 27751
+        - account: 1035753883
+          damage_dealt: 13211
+          damage_received: 16293
+        - account: 1041363498
+          damage_dealt: 11112
+          damage_received: 0
+        - account: 1021904849
+          damage_dealt: 0
+          damage_received: 4495
+        - account: 1001584611
+          damage_dealt: 0
+          damage_received: 2001
+    observed_damage: 32908
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 276
+      nanos: 0
+    death:
+      clock: 306.66977
+      killer: 375957
+      cause:
+        Known: ApShell
+  - name: hollowpoint58
+    clan: ~
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1019877248
+    ship_entity: 375945
+    avatar_entity: 375944
+    division: ~
+    ship:
+      name: Asashio
+      index: PJSD518
+      param_id: 3751687888
+      tier: 8
+      class: Destroyer
+      nation: Japan
+    results:
+      base_xp: 815
+      raw_xp: 815
+      damage: 21922
+      kills: 0
+      spotting_damage: 57452
+      potential_damage: 360901
+      received_damage: 18800
+      main_battery_hits: 44
+      fires: 2
+      floods: 0
+      citadels: 0
+      crits: 3
+      distance: 37.196083
+      damage_by_type:
+        damage_fire: 796
+        damage_main_he: 21126
+      hits_by_type:
+        hits_main_he: 44
+      received_by_type:
+        damage_fire: 56
+        damage_main_he: 18744
+      interactions:
+        - account: 1011195825
+          damage_dealt: 10360
+          damage_received: 9028
+        - account: 1015328880
+          damage_dealt: 6154
+          damage_received: 1419
+        - account: 1058780873
+          damage_dealt: 3902
+          damage_received: 2838
+        - account: 1010384123
+          damage_dealt: 710
+          damage_received: 4591
+        - account: 1022126193
+          damage_dealt: 0
+          damage_received: 924
+        - account: 1075357120
+          damage_dealt: 796
+          damage_received: 0
+    observed_damage: 21922
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 502
+      nanos: 0
+    death:
+      clock: 532.83545
+      killer: 375935
+      cause:
+        Known: HeShell
+  - name: MJR_HOOPTIE
+    clan: D3D
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1020584259
+    ship_entity: 375933
+    avatar_entity: 375932
+    division: ~
+    ship:
+      name: Vermont
+      index: PASB110
+      param_id: 4179572720
+      tier: 10
+      class: Battleship
+      nation: USA
+    results:
+      base_xp: 905
+      raw_xp: 905
+      damage: 146088
+      kills: 2
+      spotting_damage: 4125
+      potential_damage: 1278767
+      received_damage: 121799
+      main_battery_hits: 64
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 2
+      distance: 36.8321
+      damage_by_type:
+        damage_main_ap: 146088
+      hits_by_type:
+        hits_main_ap: 64
+      received_by_type:
+        damage_atba_he: 841
+        damage_fire: 5150
+        damage_main_ap: 99523
+        damage_main_he: 16285
+      interactions:
+        - account: 1022594435
+          damage_dealt: 37313
+          damage_received: 79313
+        - account: 1025031331
+          damage_dealt: 35742
+          damage_received: 20210
+        - account: 1075357120
+          damage_dealt: 49315
+          damage_received: 0
+        - account: 1035753883
+          damage_dealt: 11355
+          damage_received: 16600
+        - account: 1058780873
+          damage_dealt: 12363
+          damage_received: 4472
+        - account: 1022126193
+          damage_dealt: 0
+          damage_received: 1204
+    observed_damage: 137340
+    observed_kills: 2
+    survived: false
+    time_lived:
+      secs: 638
+      nanos: 0
+    death:
+      clock: 668.2614
+      killer: 375939
+      cause:
+        Known: Fire
+  - name: SQREHD
+    clan: ~
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1021043409
+    ship_entity: 375955
+    avatar_entity: 375954
+    division: ~
+    ship:
+      name: Kii
+      index: PJSB508
+      param_id: 3762239184
+      tier: 8
+      class: Battleship
+      nation: Japan
+    results:
+      base_xp: 513
+      raw_xp: 513
+      damage: 34246
+      kills: 0
+      spotting_damage: 0
+      potential_damage: 1920600
+      received_damage: 91712
+      main_battery_hits: 25
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 23.820066
+      damage_by_type:
+        damage_main_ap: 34246
+      hits_by_type:
+        hits_main_ap: 25
+      received_by_type:
+        damage_fire: 7454
+        damage_main_ap: 62258
+        damage_main_he: 22000
+      interactions:
+        - account: 1022594435
+          damage_dealt: 19630
+          damage_received: 23075
+        - account: 1021904849
+          damage_dealt: 14616
+          damage_received: 27057
+        - account: 1001584611
+          damage_dealt: 0
+          damage_received: 23132
+        - account: 1025031331
+          damage_dealt: 0
+          damage_received: 12126
+        - account: 1035753883
+          damage_dealt: 0
+          damage_received: 5612
+        - account: 1058780873
+          damage_dealt: 0
+          damage_received: 710
+    observed_damage: 34246
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 469
+      nanos: 0
+    death:
+      clock: 499.38788
+      killer: 375957
+      cause:
+        Known: ApShell
+  - name: EvilOcean
+    clan: DPACT
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1021211697
+    ship_entity: 375931
+    avatar_entity: 375930
+    division: ~
+    ship:
+      name: Álvaro de Bazán
+      index: PSSD510
+      param_id: 3760076208
+      tier: 10
+      class: Destroyer
+      nation: Spain
+    results:
+      base_xp: 878
+      raw_xp: 878
+      damage: 54620
+      kills: 1
+      spotting_damage: 13818
+      potential_damage: 458266
+      received_damage: 26601
+      main_battery_hits: 74
+      fires: 0
+      floods: 2
+      citadels: 0
+      crits: 2
+      distance: 30.731028
+      damage_by_type:
+        damage_flood: 319
+        damage_main_ap: 16275
+        damage_main_he: 12597
+        damage_tpd_normal: 25429
+      hits_by_type:
+        hits_main_ap: 42
+        hits_main_he: 32
+        hits_tpd: 2
+      received_by_type:
+        damage_fire: 559
+        damage_main_he: 10999
+        damage_tpd_normal: 15043
+      interactions:
+        - account: 1058780873
+          damage_dealt: 22607
+          damage_received: 0
+        - account: 1010384123
+          damage_dealt: 12977
+          damage_received: 8010
+        - account: 1011195825
+          damage_dealt: 0
+          damage_received: 15043
+        - account: 1022126193
+          damage_dealt: 12771
+          damage_received: 0
+        - account: 1015328880
+          damage_dealt: 6265
+          damage_received: 3548
+    observed_damage: 54147
+    observed_kills: 1
+    survived: false
+    time_lived:
+      secs: 440
+      nanos: 0
+    death:
+      clock: 470.2735
+      killer: 375973
+      cause:
+        Known: Torpedo
+  - name: Thatdidinthurt
+    clan: USN-W
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1021904849
+    ship_entity: 375967
+    avatar_entity: 375966
+    division: ~
+    ship:
+      name: Montana
+      index: PASB017
+      param_id: 4277090288
+      tier: 10
+      class: Battleship
+      nation: USA
+    results:
+      base_xp: 1477
+      raw_xp: 985
+      damage: 90020
+      kills: 0
+      spotting_damage: 58952
+      potential_damage: 465202
+      received_damage: 17271
+      main_battery_hits: 54
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 49.302204
+      damage_by_type:
+        damage_atba_he: 1188
+        damage_main_ap: 88832
+      hits_by_type:
+        hits_atba_he: 2
+        hits_main_ap: 54
+      received_by_type:
+        damage_main_ap: 14616
+        damage_main_cs: 2655
+      interactions:
+        - account: 1021043409
+          damage_dealt: 27057
+          damage_received: 14616
+        - account: 1056416878
+          damage_dealt: 29569
+          damage_received: 2655
+        - account: 1037908366
+          damage_dealt: 15230
+          damage_received: 0
+        - account: 1000110292
+          damage_dealt: 12481
+          damage_received: 0
+        - account: 1016956546
+          damage_dealt: 4495
+          damage_received: 0
+        - account: 1032805417
+          damage_dealt: 1188
+          damage_received: 0
+    observed_damage: 87974
+    observed_kills: 0
+    survived: true
+    time_lived: ~
+    death: ~
+  - name: leo_ascue
+    clan: CAZA
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1022126193
+    ship_entity: 375953
+    avatar_entity: 375952
+    division: ~
+    ship:
+      name: Baltimore
+      index: PASC108
+      param_id: 4181637104
+      tier: 8
+      class: Cruiser
+      nation: USA
+    results:
+      base_xp: 1069
+      raw_xp: 713
+      damage: 39429
+      kills: 0
+      spotting_damage: 39093
+      potential_damage: 674300
+      received_damage: 54271
+      main_battery_hits: 77
+      fires: 1
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 45.132233
+      damage_by_type:
+        damage_atba_he: 2918
+        damage_fire: 255
+        damage_main_ap: 29508
+        damage_main_he: 6748
+      hits_by_type:
+        hits_atba_he: 11
+        hits_main_ap: 55
+        hits_main_he: 22
+      received_by_type:
+        damage_flood: 212
+        damage_main_ap: 24575
+        damage_main_cs: 16925
+        damage_tpd_normal: 12559
+      interactions:
+        - account: 1056416878
+          damage_dealt: 37301
+          damage_received: 21182
+        - account: 1037908366
+          damage_dealt: 0
+          damage_received: 20318
+        - account: 1021211697
+          damage_dealt: 0
+          damage_received: 12771
+        - account: 1020584259
+          damage_dealt: 1204
+          damage_received: 0
+        - account: 1019877248
+          damage_dealt: 924
+          damage_received: 0
+    observed_damage: 36658
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 811
+      nanos: 0
+    death:
+      clock: 841.66125
+      killer: 375959
+      cause:
+        Known: CsShell
+  - name: duck46
+    clan: BR-RJ
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1022594435
+    ship_entity: 375957
+    avatar_entity: 375956
+    division: ~
+    ship:
+      name: Montana
+      index: PASB017
+      param_id: 4277090288
+      tier: 10
+      class: Battleship
+      nation: USA
+    results:
+      base_xp: 1925
+      raw_xp: 1284
+      damage: 190658
+      kills: 3
+      spotting_damage: 58319
+      potential_damage: 1224650
+      received_damage: 86034
+      main_battery_hits: 84
+      fires: 0
+      floods: 0
+      citadels: 4
+      crits: 1
+      distance: 43.16091
+      damage_by_type:
+        damage_main_ap: 190658
+      hits_by_type:
+        hits_main_ap: 84
+      received_by_type:
+        damage_fire: 289
+        damage_main_ap: 76652
+        damage_main_cs: 6188
+        damage_main_he: 2905
+      interactions:
+        - account: 1020584259
+          damage_dealt: 79313
+          damage_received: 37313
+        - account: 1021043409
+          damage_dealt: 23075
+          damage_received: 19630
+        - account: 1037908366
+          damage_dealt: 34425
+          damage_received: 5804
+        - account: 1016956546
+          damage_dealt: 27751
+          damage_received: 8585
+        - account: 1056416878
+          damage_dealt: 14273
+          damage_received: 14702
+        - account: 1000110292
+          damage_dealt: 7366
+          damage_received: 0
+        - account: 1047365996
+          damage_dealt: 4455
+          damage_received: 0
+    observed_damage: 177129
+    observed_kills: 3
+    survived: true
+    time_lived: ~
+    death: ~
+  - name: Kitty_Mel
+    clan: XLDS
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1025031331
+    ship_entity: 375951
+    avatar_entity: 375950
+    division: ~
+    ship:
+      name: Mecklenburg
+      index: PGSB610
+      param_id: 3655284528
+      tier: 10
+      class: Battleship
+      nation: Germany
+    results:
+      base_xp: 1662
+      raw_xp: 1108
+      damage: 131217
+      kills: 3
+      spotting_damage: 22506
+      potential_damage: 1225170
+      received_damage: 82859
+      main_battery_hits: 104
+      fires: 1
+      floods: 0
+      citadels: 2
+      crits: 0
+      distance: 53.40881
+      damage_by_type:
+        damage_atba_he: 495
+        damage_fire: 1388
+        damage_main_ap: 122956
+        damage_main_he: 6378
+      hits_by_type:
+        hits_atba_he: 1
+        hits_main_ap: 92
+        hits_main_he: 12
+      received_by_type:
+        damage_flood: 16218
+        damage_main_ap: 45814
+        damage_main_he: 1122
+        damage_tpd_normal: 19705
+      interactions:
+        - account: 1020584259
+          damage_dealt: 20210
+          damage_received: 35742
+        - account: 1037908366
+          damage_dealt: 31876
+          damage_received: 1693
+        - account: 1000110292
+          damage_dealt: 24901
+          damage_received: 1122
+        - account: 1032805417
+          damage_dealt: 0
+          damage_received: 25721
+        - account: 1047365996
+          damage_dealt: 14296
+          damage_received: 8379
+        - account: 1041386601
+          damage_dealt: 19435
+          damage_received: 0
+        - account: 1001810134
+          damage_dealt: 2820
+          damage_received: 10202
+        - account: 1021043409
+          damage_dealt: 12126
+          damage_received: 0
+        - account: 1056416878
+          damage_dealt: 5553
+          damage_received: 0
+    observed_damage: 72198
+    observed_kills: 3
+    survived: true
+    time_lived: ~
+    death: ~
+  - name: nastypatty21
+    clan: I-B-L
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1032805417
+    ship_entity: 375941
+    avatar_entity: 375940
+    division: ~
+    ship:
+      name: Kagerō
+      index: PJSD208
+      param_id: 4076746448
+      tier: 8
+      class: Destroyer
+      nation: Japan
+    results:
+      base_xp: 973
+      raw_xp: 973
+      damage: 32229
+      kills: 1
+      spotting_damage: 33596
+      potential_damage: 446668
+      received_damage: 18801
+      main_battery_hits: 10
+      fires: 1
+      floods: 1
+      citadels: 0
+      crits: 0
+      distance: 32.77597
+      damage_by_type:
+        damage_flood: 14416
+        damage_main_he: 6508
+        damage_tpd_normal: 11305
+      hits_by_type:
+        hits_main_he: 10
+        hits_tpd: 1
+      received_by_type:
+        damage_atba_he: 2541
+        damage_main_ap: 3717
+        damage_main_he: 12543
+      interactions:
+        - account: 1025031331
+          damage_dealt: 25721
+          damage_received: 0
+        - account: 1041363498
+          damage_dealt: 5089
+          damage_received: 5940
+        - account: 1035753883
+          damage_dealt: 0
+          damage_received: 7275
+        - account: 1010384123
+          damage_dealt: 1419
+          damage_received: 4398
+        - account: 1021904849
+          damage_dealt: 0
+          damage_received: 1188
+    observed_damage: 31397
+    observed_kills: 1
+    survived: false
+    time_lived:
+      secs: 583
+      nanos: 0
+    death:
+      clock: 613.24695
+      killer: 375935
+      cause:
+        Known: HeShell
+  - name: nikos176
+    clan: 1UCN
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1035753883
+    ship_entity: 375939
+    avatar_entity: 375938
+    division: ~
+    ship:
+      name: Roon
+      index: PGSC109
+      param_id: 4180588336
+      tier: 9
+      class: Cruiser
+      nation: Germany
+    results:
+      base_xp: 1780
+      raw_xp: 1187
+      damage: 104657
+      kills: 1
+      spotting_damage: 61000
+      potential_damage: 1418950
+      received_damage: 76041
+      main_battery_hits: 95
+      fires: 4
+      floods: 0
+      citadels: 5
+      crits: 1
+      distance: 44.84829
+      damage_by_type:
+        damage_atba_he: 3976
+        damage_fire: 6424
+        damage_main_ap: 67581
+        damage_main_he: 26676
+      hits_by_type:
+        hits_atba_he: 14
+        hits_main_ap: 46
+        hits_main_he: 49
+      received_by_type:
+        damage_fire: 803
+        damage_main_ap: 44589
+        damage_main_cs: 18241
+        damage_main_he: 12408
+      interactions:
+        - account: 1037908366
+          damage_dealt: 10453
+          damage_received: 33234
+        - account: 1056416878
+          damage_dealt: 23461
+          damage_received: 18241
+        - account: 1016956546
+          damage_dealt: 16293
+          damage_received: 13211
+        - account: 1020584259
+          damage_dealt: 16600
+          damage_received: 11355
+        - account: 1041386601
+          damage_dealt: 24343
+          damage_received: 0
+        - account: 1032805417
+          damage_dealt: 7275
+          damage_received: 0
+        - account: 1021043409
+          damage_dealt: 5612
+          damage_received: 0
+        - account: 1001810134
+          damage_dealt: 620
+          damage_received: 0
+    observed_damage: 103711
+    observed_kills: 1
+    survived: false
+    time_lived:
+      secs: 679
+      nanos: 0
+    death:
+      clock: 709.4066
+      killer: 375959
+      cause:
+        Known: CsShell
+  - name: VeroDHero
+    clan: WULUF
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1037908366
+    ship_entity: 375961
+    avatar_entity: 375960
+    division: ~
+    ship:
+      name: Vermont
+      index: PASB110
+      param_id: 4179572720
+      tier: 10
+      class: Battleship
+      nation: USA
+    results:
+      base_xp: 833
+      raw_xp: 833
+      damage: 92344
+      kills: 1
+      spotting_damage: 10066
+      potential_damage: 1914500
+      received_damage: 181956
+      main_battery_hits: 33
+      fires: 1
+      floods: 0
+      citadels: 3
+      crits: 0
+      distance: 34.35287
+      damage_by_type:
+        damage_fire: 289
+        damage_main_ap: 89926
+        damage_main_he: 2129
+      hits_by_type:
+        hits_main_ap: 27
+        hits_main_he: 6
+      received_by_type:
+        damage_fire: 52875
+        damage_main_ap: 82106
+        damage_main_he: 46975
+      interactions:
+        - account: 1001584611
+          damage_dealt: 28106
+          damage_received: 84266
+        - account: 1035753883
+          damage_dealt: 33234
+          damage_received: 10453
+        - account: 1022594435
+          damage_dealt: 5804
+          damage_received: 34425
+        - account: 1025031331
+          damage_dealt: 1693
+          damage_received: 31876
+        - account: 1022126193
+          damage_dealt: 20318
+          damage_received: 0
+        - account: 1021904849
+          damage_dealt: 0
+          damage_received: 15230
+        - account: 1010384123
+          damage_dealt: 0
+          damage_received: 5706
+        - account: 1011195825
+          damage_dealt: 3189
+          damage_received: 0
+    observed_damage: 89155
+    observed_kills: 1
+    survived: false
+    time_lived:
+      secs: 703
+      nanos: 0
+    death:
+      clock: 733.6797
+      killer: 375951
+      cause:
+        Known: ApShell
+  - name: Waether
+    clan: GPBB
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1041363498
+    ship_entity: 375949
+    avatar_entity: 375948
+    division: ~
+    ship:
+      name: Split
+      index: PWSD208
+      param_id: 4076746032
+      tier: 8
+      class: Destroyer
+      nation: Europe
+    results:
+      base_xp: 984
+      raw_xp: 656
+      damage: 5940
+      kills: 0
+      spotting_damage: 3703
+      potential_damage: 144351
+      received_damage: 16201
+      main_battery_hits: 9
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 14.892483
+      damage_by_type:
+        damage_main_he: 5940
+      hits_by_type:
+        hits_main_he: 9
+      received_by_type:
+        damage_flood: 41
+        damage_main_he: 5089
+        damage_tpd_normal: 11071
+      interactions:
+        - account: 1016956546
+          damage_dealt: 0
+          damage_received: 11112
+        - account: 1032805417
+          damage_dealt: 5940
+          damage_received: 5089
+    observed_damage: 2640
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 290
+      nanos: 0
+    death:
+      clock: 320.10568
+      killer: 375941
+      cause:
+        Known: HeShell
+  - name: tanktastic03
+    clan: T-CF
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1041386601
+    ship_entity: 375937
+    avatar_entity: 375936
+    division: ~
+    ship:
+      name: Minotaur
+      index: PBSC110
+      param_id: 4179539920
+      tier: 10
+      class: Cruiser
+      nation: United_Kingdom
+    results:
+      base_xp: 154
+      raw_xp: 154
+      damage: 0
+      kills: 0
+      spotting_damage: 3386
+      potential_damage: 354600
+      received_damage: 44488
+      main_battery_hits: 0
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 11.947555
+      damage_by_type: {}
+      hits_by_type: {}
+      received_by_type:
+        damage_main_ap: 41303
+        damage_main_he: 3185
+      interactions:
+        - account: 1035753883
+          damage_dealt: 0
+          damage_received: 24343
+        - account: 1025031331
+          damage_dealt: 0
+          damage_received: 19435
+        - account: 1058780873
+          damage_dealt: 0
+          damage_received: 710
+    observed_damage: 0
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 137
+      nanos: 0
+    death:
+      clock: 167.13872
+      killer: 375951
+      cause:
+        Known: ApShell
+  - name: Corum4547
+    clan: R-BRO
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1047365996
+    ship_entity: 375947
+    avatar_entity: 375946
+    division: ~
+    ship:
+      name: Carnot
+      index: PFSC509
+      param_id: 3761157968
+      tier: 9
+      class: Cruiser
+      nation: France
+    results:
+      base_xp: 821
+      raw_xp: 821
+      damage: 43698
+      kills: 0
+      spotting_damage: 42854
+      potential_damage: 1047850
+      received_damage: 95437
+      main_battery_hits: 53
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 1
+      distance: 30.06574
+      damage_by_type:
+        damage_atba_he: 231
+        damage_main_ap: 43467
+      hits_by_type:
+        hits_atba_he: 1
+        hits_main_ap: 53
+      received_by_type:
+        damage_fire: 13107
+        damage_main_ap: 64561
+        damage_main_he: 17769
+      interactions:
+        - account: 1075357120
+          damage_dealt: 20198
+          damage_received: 46998
+        - account: 1058780873
+          damage_dealt: 9640
+          damage_received: 27559
+        - account: 1025031331
+          damage_dealt: 8379
+          damage_received: 14296
+        - account: 1015328880
+          damage_dealt: 5481
+          damage_received: 0
+        - account: 1022594435
+          damage_dealt: 0
+          damage_received: 4455
+        - account: 1011195825
+          damage_dealt: 0
+          damage_received: 1931
+        - account: 1010384123
+          damage_dealt: 0
+          damage_received: 198
+    observed_damage: 43699
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 452
+      nanos: 0
+    death:
+      clock: 482.96344
+      killer: 375973
+      cause:
+        Known: HeShell
+  - name: VITORRITIELIBR
+    clan: WYL
+    side: enemy
+    team_id: 0
+    is_bot: false
+    account: 1056416878
+    ship_entity: 375959
+    avatar_entity: 375958
+    division: ~
+    ship:
+      name: C. Colombo
+      index: PISB110
+      param_id: 4179572464
+      tier: 10
+      class: Battleship
+      nation: Italy
+    results:
+      base_xp: 830
+      raw_xp: 830
+      damage: 70067
+      kills: 2
+      spotting_damage: 21232
+      potential_damage: 2368000
+      received_damage: 129289
+      main_battery_hits: 36
+      fires: 0
+      floods: 0
+      citadels: 0
+      crits: 0
+      distance: 53.558704
+      damage_by_type:
+        damage_main_ap: 26058
+        damage_main_cs: 44009
+      hits_by_type:
+        hits_main_ap: 12
+        hits_main_cs: 24
+      received_by_type:
+        damage_atba_he: 4700
+        damage_fire: 14783
+        damage_main_ap: 96833
+        damage_main_he: 12973
+      interactions:
+        - account: 1022126193
+          damage_dealt: 21182
+          damage_received: 37301
+        - account: 1035753883
+          damage_dealt: 18241
+          damage_received: 23461
+        - account: 1021904849
+          damage_dealt: 2655
+          damage_received: 29569
+        - account: 1022594435
+          damage_dealt: 14702
+          damage_received: 14273
+        - account: 1001584611
+          damage_dealt: 0
+          damage_received: 17152
+        - account: 1075357120
+          damage_dealt: 13287
+          damage_received: 0
+        - account: 1025031331
+          damage_dealt: 0
+          damage_received: 5553
+        - account: 1010384123
+          damage_dealt: 0
+          damage_received: 1980
+    observed_damage: 56547
+    observed_kills: 2
+    survived: false
+    time_lived:
+      secs: 886
+      nanos: 0
+    death:
+      clock: 916.8177
+      killer: 375957
+      cause:
+        Known: ApShell
+  - name: pancakesandradar
+    clan: 1-
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1058780873
+    ship_entity: 375977
+    avatar_entity: 375976
+    division: ~
+    ship:
+      name: Almte. Grau
+      index: PVSC508
+      param_id: 3762206032
+      tier: 8
+      class: Cruiser
+      nation: Pan_America
+    results:
+      base_xp: 1476
+      raw_xp: 984
+      damage: 41910
+      kills: 1
+      spotting_damage: 28152
+      potential_damage: 838900
+      received_damage: 48512
+      main_battery_hits: 85
+      fires: 5
+      floods: 0
+      citadels: 0
+      crits: 1
+      distance: 31.856203
+      damage_by_type:
+        damage_fire: 13165
+        damage_main_he: 28745
+      hits_by_type:
+        hits_main_ap: 1
+        hits_main_he: 84
+      received_by_type:
+        damage_atba_he: 231
+        damage_main_ap: 38047
+        damage_main_he: 10234
+      interactions:
+        - account: 1047365996
+          damage_dealt: 27559
+          damage_received: 9640
+        - account: 1021211697
+          damage_dealt: 0
+          damage_received: 22607
+        - account: 1020584259
+          damage_dealt: 4472
+          damage_received: 12363
+        - account: 1019877248
+          damage_dealt: 2838
+          damage_received: 3902
+        - account: 1001810134
+          damage_dealt: 5621
+          damage_received: 0
+        - account: 1021043409
+          damage_dealt: 710
+          damage_received: 0
+        - account: 1041386601
+          damage_dealt: 710
+          damage_received: 0
+    observed_damage: 37056
+    observed_kills: 1
+    survived: false
+    time_lived:
+      secs: 579
+      nanos: 0
+    death:
+      clock: 609.9881
+      killer: 375933
+      cause:
+        Known: ApShell
+  - name: Caferata
+    clan: PIBE
+    side: ally
+    team_id: 1
+    is_bot: false
+    account: 1075357120
+    ship_entity: 375965
+    avatar_entity: 375964
+    division: ~
+    ship:
+      name: Ignis Purgatio
+      index: PJSB878
+      param_id: 3374266064
+      tier: 8
+      class: Battleship
+      nation: Japan
+    results:
+      base_xp: 1176
+      raw_xp: 784
+      damage: 46998
+      kills: 0
+      spotting_damage: 7095
+      potential_damage: 1877584
+      received_damage: 83596
+      main_battery_hits: 10
+      fires: 0
+      floods: 0
+      citadels: 3
+      crits: 0
+      distance: 21.080017
+      damage_by_type:
+        damage_main_ap: 46998
+      hits_by_type:
+        hits_main_ap: 10
+      received_by_type:
+        damage_fire: 796
+        damage_main_ap: 82800
+      interactions:
+        - account: 1047365996
+          damage_dealt: 46998
+          damage_received: 20198
+        - account: 1020584259
+          damage_dealt: 0
+          damage_received: 49315
+        - account: 1056416878
+          damage_dealt: 0
+          damage_received: 13287
+        - account: 1019877248
+          damage_dealt: 0
+          damage_received: 796
+    observed_damage: 46998
+    observed_kills: 0
+    survived: false
+    time_lived:
+      secs: 321
+      nanos: 0
+    death:
+      clock: 351.83173
+      killer: 375933
+      cause:
+        Known: ApShell
+kills:
+  - clock: 167.13872
+    killer: 375951
+    victim: 375937
+    cause:
+      Known: ApShell
+  - clock: 236.10782
+    killer: 375931
+    victim: 375975
+    cause:
+      Known: HeShell
+  - clock: 306.66977
+    killer: 375957
+    victim: 375969
+    cause:
+      Known: ApShell
+  - clock: 315.38947
+    killer: 375951
+    victim: 375971
+    cause:
+      Known: ApShell
+  - clock: 320.10568
+    killer: 375941
+    victim: 375949
+    cause:
+      Known: HeShell
+  - clock: 351.83173
+    killer: 375933
+    victim: 375965
+    cause:
+      Known: ApShell
+  - clock: 396.8515
+    killer: 375977
+    victim: 375943
+    cause:
+      Known: HeShell
+  - clock: 470.2735
+    killer: 375973
+    victim: 375931
+    cause:
+      Known: Torpedo
+  - clock: 482.96344
+    killer: 375973
+    victim: 375947
+    cause:
+      Known: HeShell
+  - clock: 499.38788
+    killer: 375957
+    victim: 375955
+    cause:
+      Known: ApShell
+  - clock: 532.6873
+    killer: 375961
+    victim: 375973
+    cause:
+      Known: ApShell
+  - clock: 532.83545
+    killer: 375935
+    victim: 375945
+    cause:
+      Known: HeShell
+  - clock: 609.9881
+    killer: 375933
+    victim: 375977
+    cause:
+      Known: ApShell
+  - clock: 613.24695
+    killer: 375935
+    victim: 375941
+    cause:
+      Known: HeShell
+  - clock: 668.2614
+    killer: 375939
+    victim: 375933
+    cause:
+      Known: Fire
+  - clock: 709.4066
+    killer: 375959
+    victim: 375939
+    cause:
+      Known: CsShell
+  - clock: 733.6797
+    killer: 375951
+    victim: 375961
+    cause:
+      Known: ApShell
+  - clock: 841.66125
+    killer: 375959
+    victim: 375953
+    cause:
+      Known: CsShell
+  - clock: 916.8177
+    killer: 375957
+    victim: 375959
+    cause:
+      Known: ApShell
+chat:
+  - clock: 63.12356
+    sender: Alpine_Mustache
+    side: recorder
+    channel: Global
+    text: "Y'all got any radar?"
+  - clock: 79.128265
+    sender: nastypatty21
+    side: enemy
+    channel: Global
+    text: "depends. who's asking?"
+  - clock: 89.967834
+    sender: Alpine_Mustache
+    side: recorder
+    channel: Global
+    text: "jus' lil ol' me"
+  - clock: 101.40909
+    sender: nastypatty21
+    side: enemy
+    channel: Global
+    text: you a fed?
+  - clock: 283.14252
+    sender: Alpine_Mustache
+    side: recorder
+    channel: Team
+    text: "i can't hold them off at B"
+  - clock: 660.6613
+    sender: Alpine_Mustache
+    side: recorder
+    channel: Team
+    text: much excite
+  - clock: 793.0747
+    sender: Thatdidinthurt
+    side: ally
+    channel: Global
+    text: "Why you want to smoke up. It's over dude"
+  - clock: 822.23773
+    sender: Elk310
+    side: ally
+    channel: Team
+    text: he is escaping to the eastern map next to ours
+  - clock: 864.5039
+    sender: Kitty_Mel
+    side: ally
+    channel: Global
+    text: he playing rankeds
+  - clock: 877.5182
+    sender: Kitty_Mel
+    side: ally
+    channel: Global
+    text: he saving the star
+  - clock: 882.0847
+    sender: Elk310
+    side: ally
+    channel: Team
+    text: lo
+  - clock: 884.5179
+    sender: Elk310
+    side: ally
+    channel: Team
+    text: l

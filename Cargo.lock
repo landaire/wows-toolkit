@@ -15801,6 +15801,7 @@ dependencies = [
  "jaq-json",
  "jaq-std",
  "landlock",
+ "replayshark",
  "reqwest 0.12.28",
  "rootcause",
  "rustix 1.1.5",

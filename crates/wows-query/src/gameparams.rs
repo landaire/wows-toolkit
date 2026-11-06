@@ -18,6 +18,7 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::GameData;
+use crate::data::BuildNumber;
 use crate::data::GAME_PARAMS_DATA;
 use crate::error::QueryError;
 use crate::error::RawParamsError;
@@ -160,13 +161,13 @@ pub struct ParamFailure {
 pub(crate) struct RawParamsSlot {
     dump_dir: PathBuf,
     cache_root: Option<PathBuf>,
-    build: u32,
+    build: BuildNumber,
     /// Locked while opening or building, so one process builds a store once.
     state: Mutex<SlotState>,
 }
 
 impl RawParamsSlot {
-    pub(crate) fn new(dump_dir: &Path, cache_root: Option<&Path>, build: u32) -> Self {
+    pub(crate) fn new(dump_dir: &Path, cache_root: Option<&Path>, build: BuildNumber) -> Self {
         Self {
             dump_dir: dump_dir.to_path_buf(),
             cache_root: cache_root.map(Path::to_path_buf),
@@ -196,7 +197,7 @@ impl RawParamsSlot {
             SlotState::Open(_) | SlotState::Failed { .. } | SlotState::Empty => {}
         }
 
-        match RawParams::open_or_build(cache_root, self.build, || read_game_params(&self.dump_dir)) {
+        match RawParams::open_or_build(cache_root, self.build.raw(), || read_game_params(&self.dump_dir)) {
             Ok(store) => {
                 let store = Arc::new(store);
                 *state = SlotState::Open(Arc::clone(&store));
