@@ -718,6 +718,7 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    index_revision_checked: bool,
     recent_crash_report: Option<String>,
     update_status: UpdateStatus,
     /// The board already open, so the menu brings it forward rather than
@@ -961,6 +962,7 @@ impl App {
             download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            index_revision_checked: false,
             recent_crash_report: None,
             update_status: UpdateStatus::Idle,
             tactics_board: None,
@@ -1582,6 +1584,37 @@ impl App {
         self.poll_constants_check(window, cx);
     }
 
+    fn poll_replay_index_revision(&mut self, cx: &mut Context<Self>) {
+        if self.index_revision_checked || self.replay_inspector.read(cx).game_data().is_none() {
+            return;
+        }
+        let Some(wows_dir) = self.settings().map(|settings| settings.wows_dir.clone()) else { return };
+        if wows_dir.is_empty() {
+            return;
+        }
+        let Some(pool) = settings_store::pool(cx) else { return };
+        let Some(runtime) = runtime::runtime(cx) else { return };
+        self.index_revision_checked = true;
+        let root = std::path::Path::new(&wows_dir).join("replays");
+
+        cx.spawn(async move |this, cx| {
+            let stale = cx
+                .background_spawn(async move {
+                    runtime.block_on(wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root))
+                })
+                .await;
+            match stale {
+                Ok(true) => {
+                    let _ = this
+                        .update(cx, |this, cx| this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx));
+                }
+                Ok(false) => {}
+                Err(error) => tracing::warn!(%error, "replay index revision could not be checked"),
+            }
+        })
+        .detach();
+    }
+
     fn poll_constants_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.constants_checked {
             return;
@@ -1706,6 +1739,7 @@ impl App {
     fn poll_armor_game_data(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_stats_game_data(cx);
         self.poll_constants_check(window, cx);
+        self.poll_replay_index_revision(cx);
         self.poll_cache_maintenance(cx);
         self.poll_cap_layouts(cx);
         if self.armor_game_data_requested {

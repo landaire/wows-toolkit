@@ -1192,8 +1192,16 @@ impl ReplayInspectorView {
                         Ok(source) => source,
                         Err(err) => return Err(err.to_string()),
                     };
-                    crate::replay_index::index_one(&runtime, &pool, &path, &game_data, source, now)
-                        .map_err(|err| err.to_string())
+                    crate::replay_index::index_one(
+                        &runtime,
+                        &pool,
+                        &path,
+                        &game_data,
+                        source,
+                        now,
+                        wows_toolkit_config::index::rows::IndexWriteMode::Incremental,
+                    )
+                    .map_err(|err| err.to_string())
                 })
                 .await;
             if let Err(err) = indexed {

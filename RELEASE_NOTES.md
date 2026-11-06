@@ -9,6 +9,7 @@ per-commit history lives in `CHANGELOG.md`.
 ### Replay analysis
 
 - Replays from newer client builds use their matching roster layout when an exact constants file is unavailable. This keeps the application from failing while opening a replay with older fallback constants.
+- Replay rows indexed by an earlier parser refresh once, so a corrected victory or loss remains correct after leaving the inspector.
 - Player action menus can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
 - The command palette can copy application, game-data, constants-fetch, and recent-crash information for bug reports.
 

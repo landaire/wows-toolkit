@@ -2,6 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
+use sqlx::Row;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use wows_core::game_types::AccountId;
@@ -9,10 +10,12 @@ use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::rows::VehicleRelation;
@@ -213,6 +216,99 @@ async fn single_live_source_read_write_round_trips_after_migration_008() {
 
     let paths = query::record_paths_in_source(&pool, src).await.unwrap();
     assert!(paths.contains("a.wowsreplay"));
+}
+
+#[tokio::test]
+async fn an_old_index_revision_is_reparsed_once_within_the_scanned_directory() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let root = Path::new("C:/wows/replays");
+    let source = query::ensure_default_source(&pool, root, now).await.unwrap();
+    let record = sample_record(100, source, "C:/wows/replays/a.wowsreplay");
+    let elsewhere = sample_record(200, source, "D:/old/replays/b.wowsreplay");
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_match(&pool, &sample_match(200)).await.unwrap();
+    query::upsert_record(&pool, &record).await.unwrap();
+    query::upsert_record(&pool, &elsewhere).await.unwrap();
+    sqlx::query("UPDATE replay_record SET index_revision = 0").execute(&pool).await.unwrap();
+
+    assert!(query::record_paths_in_source(&pool, source).await.unwrap().is_empty());
+    assert!(query::has_stale_replay_records(&pool, root).await.unwrap());
+
+    query::upsert_record(&pool, &record).await.unwrap();
+    assert!(query::record_paths_in_source(&pool, source).await.unwrap().contains("C:/wows/replays/a.wowsreplay"));
+    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
+
+    sqlx::query("UPDATE replay_record SET index_revision = 0").execute(&pool).await.unwrap();
+    query::mark_replay_records_current(&pool, source, root).await.unwrap();
+    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
+    let current = query::record_paths_in_source(&pool, source).await.unwrap();
+    assert!(!current.contains("D:/old/replays/b.wowsreplay"), "a directory that was not scanned stays stale");
+}
+
+async fn store_stale_ship(pool: &SqlitePool) {
+    query::upsert_match(pool, &sample_match(100)).await.unwrap();
+    let mut stale = sample_vehicle(100);
+    stale.ship_id = GameParamId::from(111u64);
+    stale.ship_index = "STALE".to_owned();
+    stale.is_stream_sniper = Some(true);
+    stale.sniper_twitch_login = Some("viewer".to_owned());
+    query::upsert_vehicles(pool, &[stale]).await.unwrap();
+}
+
+async fn write_corrected(pool: &SqlitePool, vehicle: IndexedVehicleRow, mode: IndexWriteMode, results: ResultsWrite) {
+    let source = query::ensure_default_source(pool, Path::new("C:/wows/replays"), Timestamp::now()).await.unwrap();
+    let record = sample_record(100, source, "C:/wows/replays/a.wowsreplay");
+    query::write_indexed_replay(pool, &sample_match(100), &[vehicle], &record, mode, results).await.unwrap();
+}
+
+#[tokio::test]
+async fn an_untrusted_rewrite_moves_stored_results_to_a_corrected_ship() {
+    let pool = mem_pool().await;
+    store_stale_ship(&pool).await;
+
+    let mut corrected = sample_vehicle(100);
+    corrected.damage = None;
+    corrected.kills = None;
+    corrected.pr = None;
+    write_corrected(&pool, corrected, IndexWriteMode::Replace, ResultsWrite::Keep).await;
+
+    let rows =
+        sqlx::query("SELECT ship_id, damage, kills, pr, is_stream_sniper FROM indexed_vehicle WHERE arena_id = 100")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<i64, _>("ship_id"), 999);
+    assert_eq!(rows[0].get::<i64, _>("damage"), 123_456);
+    assert_eq!(rows[0].get::<i64, _>("kills"), 2);
+    assert_eq!(rows[0].get::<f64, _>("pr"), 1500.0);
+    assert_eq!(rows[0].get::<Option<bool>, _>("is_stream_sniper"), Some(true));
+}
+
+#[tokio::test]
+async fn an_incremental_write_replaces_a_corrected_ship_and_keeps_its_rating() {
+    let pool = mem_pool().await;
+    store_stale_ship(&pool).await;
+
+    let mut corrected = sample_vehicle(100);
+    corrected.damage = Some(5);
+    corrected.pr = Some(900.0);
+    corrected.is_stream_sniper = Some(false);
+    write_corrected(&pool, corrected, IndexWriteMode::Incremental, ResultsWrite::Store).await;
+
+    let rows = sqlx::query(
+        "SELECT ship_id, damage, pr, is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = 100",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<i64, _>("ship_id"), 999);
+    assert_eq!(rows[0].get::<i64, _>("damage"), 5);
+    assert_eq!(rows[0].get::<f64, _>("pr"), 1500.0, "a stored rating is not restamped");
+    assert_eq!(rows[0].get::<Option<bool>, _>("is_stream_sniper"), Some(false));
+    assert_eq!(rows[0].get::<Option<String>, _>("sniper_twitch_login"), None);
 }
 
 #[tokio::test]

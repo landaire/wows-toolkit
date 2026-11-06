@@ -42,6 +42,8 @@ use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::VehicleRelation;
 
+const REPLAY_INDEX_REVISION: i64 = 1;
+
 /// The column list every query mapped by [`row_to_match_hit`] selects, so the
 /// two callers cannot drift apart.
 ///
@@ -331,8 +333,8 @@ pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), I
 /// and a re-index must not restamp it. [`IndexWriteMode::Replace`] does restamp
 /// it, because a pass that decoded it through constants from another build had
 /// no fact to record.
-pub async fn upsert_match_with_mode(
-    pool: &SqlitePool,
+pub async fn upsert_match_with_mode<'e>(
+    executor: impl sqlx::Executor<'e, Database = Sqlite>,
     m: &ObjectiveMatch,
     mode: IndexWriteMode,
 ) -> Result<(), IndexError> {
@@ -357,7 +359,7 @@ pub async fn upsert_match_with_mode(
         .bind(&m.game_type)
         .bind(&m.match_group)
         .bind(m.version_build.map(|v| v as i64))
-        .execute(pool)
+        .execute(executor)
         .await?;
     Ok(())
 }
@@ -452,6 +454,129 @@ pub async fn upsert_vehicles_with_mode(
     Ok(())
 }
 
+#[derive(Clone)]
+struct StoredVehicleFacts {
+    damage: Option<u64>,
+    kills: Option<i64>,
+    spotting: Option<u64>,
+    potential: Option<u64>,
+    received: Option<u64>,
+    pr: Option<f64>,
+    is_stream_sniper: Option<bool>,
+    sniper_twitch_login: Option<String>,
+}
+
+/// Replaces one replay's match, roster, and record rows in one transaction.
+///
+/// A parser revision can correct a ship identity, which changes the roster's
+/// primary key. Each account's stored facts are read by account before its
+/// rows are deleted, so retained facts move onto the corrected identity
+/// instead of leaving a stale row behind.
+pub async fn write_indexed_replay(
+    pool: &SqlitePool,
+    objective: &ObjectiveMatch,
+    vehicles: &[IndexedVehicleRow],
+    record: &ReplayRecord,
+    mode: IndexWriteMode,
+    results: ResultsWrite,
+) -> Result<(), IndexError> {
+    let arena_id = record.arena_id;
+    debug_assert_eq!(objective.arena_id, arena_id);
+    debug_assert!(vehicles.iter().all(|row| row.arena_id == arena_id));
+
+    let mut tx = pool.begin().await?;
+    // A write first, so the transaction holds the write lock before it reads
+    // the facts it carries over.
+    upsert_match_with_mode(&mut *tx, objective, mode).await?;
+
+    let old_rows = sqlx::query(
+        "SELECT account_id, damage, kills, spotting, potential, received, pr, \
+         is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = ?1",
+    )
+    .bind(arena_id.raw())
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut stored: HashMap<AccountId, StoredVehicleFacts> = HashMap::with_capacity(old_rows.len());
+    for old in old_rows {
+        let facts = StoredVehicleFacts {
+            damage: old.try_get::<Option<i64>, _>("damage")?.and_then(|value| u64::try_from(value).ok()),
+            kills: old.try_get("kills")?,
+            spotting: old.try_get::<Option<i64>, _>("spotting")?.and_then(|value| u64::try_from(value).ok()),
+            potential: old.try_get::<Option<i64>, _>("potential")?.and_then(|value| u64::try_from(value).ok()),
+            received: old.try_get::<Option<i64>, _>("received")?.and_then(|value| u64::try_from(value).ok()),
+            pr: old.try_get("pr")?,
+            is_stream_sniper: old.try_get("is_stream_sniper")?,
+            sniper_twitch_login: old.try_get("sniper_twitch_login")?,
+        };
+        stored.insert(AccountId::from(old.try_get::<i64, _>("account_id")?), facts);
+    }
+
+    for vehicle in vehicles {
+        let mut vehicle = vehicle.clone();
+        if let Some(old) = stored.get(&vehicle.account_id) {
+            match (results, mode) {
+                (ResultsWrite::Keep, _) => {
+                    vehicle.damage = old.damage.or(vehicle.damage);
+                    vehicle.kills = old.kills.or(vehicle.kills);
+                    vehicle.spotting = old.spotting.or(vehicle.spotting);
+                    vehicle.potential = old.potential.or(vehicle.potential);
+                    vehicle.received = old.received.or(vehicle.received);
+                    vehicle.pr = old.pr.or(vehicle.pr);
+                }
+                (ResultsWrite::Store, IndexWriteMode::Incremental) => vehicle.pr = old.pr.or(vehicle.pr),
+                (ResultsWrite::Store, IndexWriteMode::Replace) => {}
+            }
+            if vehicle.is_stream_sniper.is_none() {
+                vehicle.is_stream_sniper = old.is_stream_sniper;
+                vehicle.sniper_twitch_login.clone_from(&old.sniper_twitch_login);
+            }
+        }
+
+        sqlx::query("DELETE FROM indexed_vehicle WHERE arena_id = ?1 AND account_id = ?2")
+            .bind(arena_id.raw())
+            .bind(vehicle.account_id.raw())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO indexed_vehicle \
+             (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
+              tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
+              disconnected, is_stream_sniper, sniper_twitch_login) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+        )
+        .bind(vehicle.arena_id.raw())
+        .bind(vehicle.account_id.raw())
+        .bind(&vehicle.player_name)
+        .bind(&vehicle.clan)
+        .bind(vehicle.realm.as_deref())
+        .bind(vehicle.ship_id.raw() as i64)
+        .bind(&vehicle.ship_index)
+        .bind(&vehicle.ship_name)
+        .bind(&vehicle.nation)
+        .bind(&vehicle.species)
+        .bind(vehicle.tier as i64)
+        .bind(vehicle.relation.as_db_str())
+        .bind(vehicle.division_id)
+        .bind(vehicle.survived)
+        .bind(vehicle.damage.map(|damage| damage as i64))
+        .bind(vehicle.kills)
+        .bind(vehicle.spotting.map(|damage| damage as i64))
+        .bind(vehicle.potential.map(|damage| damage as i64))
+        .bind(vehicle.received.map(|damage| damage as i64))
+        .bind(vehicle.pr)
+        .bind(vehicle.is_test_ship)
+        .bind(vehicle.disconnected)
+        .bind(vehicle.is_stream_sniper)
+        .bind(&vehicle.sniper_twitch_login)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    upsert_record_with_mode(&mut *tx, record, mode, results).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Record Twitch chat observations (login, seen_at unix seconds). Duplicate
 /// (login, seen_at) pairs are silently ignored via the unique index.
 pub async fn record_twitch_observations(pool: &SqlitePool, observations: &[(String, i64)]) -> Result<(), IndexError> {
@@ -508,8 +633,8 @@ pub async fn upsert_record(pool: &SqlitePool, r: &ReplayRecord) -> Result<(), In
 /// value rather than assigned, so a row that already had results is never
 /// downgraded to results-absent, while a row that did not can still be
 /// upgraded by a later trusted pass.
-pub async fn upsert_record_with_mode(
-    pool: &SqlitePool,
+pub async fn upsert_record_with_mode<'e>(
+    executor: impl sqlx::Executor<'e, Database = Sqlite>,
     r: &ReplayRecord,
     mode: IndexWriteMode,
     results: ResultsWrite,
@@ -529,11 +654,11 @@ pub async fn upsert_record_with_mode(
     let sql = format!(
         "INSERT INTO replay_record \
          (arena_id, source_id, replay_path, file_mtime, outcome, self_account_id, self_ship_id, self_survived, \
-          self_damage, self_kills, self_pr, results_available, indexed_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) \
+          self_damage, self_kills, self_pr, results_available, indexed_at, index_revision) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) \
          ON CONFLICT(source_id, replay_path) DO UPDATE SET \
            arena_id=?1, file_mtime=?4, outcome=?5, self_account_id=?6, self_ship_id=?7, self_survived=?8, \
-           {results_cols}, indexed_at=?13"
+           {results_cols}, indexed_at=?13, index_revision=?14"
     );
     sqlx::query(&sql)
         .bind(r.arena_id.raw())
@@ -549,7 +674,8 @@ pub async fn upsert_record_with_mode(
         .bind(r.self_pr)
         .bind(r.results_available)
         .bind(r.indexed_at.as_second())
-        .execute(pool)
+        .bind(REPLAY_INDEX_REVISION)
+        .execute(executor)
         .await?;
     Ok(())
 }
@@ -562,15 +688,51 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
     Ok(rows.into_iter().map(|(a,)| ArenaId::new(a)).collect())
 }
 
-/// Absolute replay paths already recorded for `source`. The startup reconciliation
-/// pass uses this as the per-path index-membership ledger so already-indexed files
-/// are skipped instead of re-parsed on every launch.
+/// Absolute replay paths current enough for the startup pass to skip.
+///
+/// An indexer revision change leaves existing rows readable but causes replay
+/// files still on disk to be parsed and upserted once.
 pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Result<HashSet<String>, IndexError> {
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1")
-        .bind(source.0)
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1 AND index_revision = ?2")
+            .bind(source.0)
+            .bind(REPLAY_INDEX_REVISION)
+            .fetch_all(pool)
+            .await?;
     Ok(rows.into_iter().map(|(p,)| p).collect())
+}
+
+async fn stale_paths_under(pool: &SqlitePool, source: SourceId, root: &Path) -> Result<Vec<String>, IndexError> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1 AND index_revision != ?2")
+            .bind(source.0)
+            .bind(REPLAY_INDEX_REVISION)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|(path,)| path).filter(|path| Path::new(path).parent() == Some(root)).collect())
+}
+
+/// Whether a live replay directly in `root` needs the current parser to refresh it.
+pub async fn has_stale_replay_records(pool: &SqlitePool, root: &Path) -> Result<bool, IndexError> {
+    let Some(source) = live_source_id(pool).await? else { return Ok(false) };
+    Ok(!stale_paths_under(pool, source, root).await?.is_empty())
+}
+
+/// Marks the rows under a completely scanned `root` as handled by the current
+/// parser, so a replay that could not be reparsed does not start the scan again.
+pub async fn mark_replay_records_current(pool: &SqlitePool, source: SourceId, root: &Path) -> Result<(), IndexError> {
+    let stale = stale_paths_under(pool, source, root).await?;
+    let mut tx = pool.begin().await?;
+    for path in stale {
+        sqlx::query("UPDATE replay_record SET index_revision = ?1 WHERE source_id = ?2 AND replay_path = ?3")
+            .bind(REPLAY_INDEX_REVISION)
+            .bind(source.0)
+            .bind(path)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Row summaries for every record in `source`, keyed by replay path.

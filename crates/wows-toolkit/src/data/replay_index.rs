@@ -193,9 +193,7 @@ pub async fn write_index(
     mode: IndexWriteMode,
     results: ResultsWrite,
 ) -> Result<(), IndexError> {
-    query::upsert_match_with_mode(pool, &rows.objective, mode).await?;
-    query::upsert_vehicles_with_mode(pool, &rows.vehicles, mode, results).await?;
-    query::upsert_record_with_mode(pool, &rows.record, mode, results).await?;
+    query::write_indexed_replay(pool, &rows.objective, &rows.vehicles, &rows.record, mode, results).await?;
     INDEX_GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }

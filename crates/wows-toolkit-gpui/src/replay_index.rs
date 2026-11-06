@@ -90,6 +90,15 @@ pub enum IndexMode {
     RefreshAll,
 }
 
+impl IndexMode {
+    fn write_mode(self) -> IndexWriteMode {
+        match self {
+            Self::FillGaps => IndexWriteMode::Incremental,
+            Self::RefreshAll => IndexWriteMode::Replace,
+        }
+    }
+}
+
 /// Why a replay contributed nothing.
 #[derive(Debug, thiserror::Error)]
 pub enum IndexOneError {
@@ -110,6 +119,7 @@ pub fn index_one(
     game_data: &GameDataCache,
     source_id: SourceId,
     indexed_at: Timestamp,
+    mode: IndexWriteMode,
 ) -> Result<(), IndexOneError> {
     let parsed = parse_replay(path, game_data, None).map_err(|err| IndexOneError::Parse(err.to_string()))?;
     let battle = &parsed.indexable;
@@ -135,15 +145,18 @@ pub fn index_one(
     };
 
     let rows = map_rows(&battle.normalized, &context);
-    runtime.block_on(async {
-        // Incremental so a rating an earlier pass computed is not thrown
-        // away by one that had no rating table to hand.
-        query::upsert_match_with_mode(pool, &rows.objective, IndexWriteMode::Incremental).await?;
-        query::upsert_vehicles_with_mode(pool, &rows.vehicles, IndexWriteMode::Incremental, ResultsWrite::Store)
-            .await?;
-        query::upsert_record_with_mode(pool, &rows.record, IndexWriteMode::Incremental, ResultsWrite::Store).await?;
-        Ok::<(), wows_toolkit_config::index::rows::IndexError>(())
-    })?;
+    let results = match battle.constants_fit {
+        wows_toolkit_viewmodel::index_rows::ConstantsFit::Matched => ResultsWrite::Store,
+        wows_toolkit_viewmodel::index_rows::ConstantsFit::Mismatched => ResultsWrite::Keep,
+    };
+    runtime.block_on(query::write_indexed_replay(
+        pool,
+        &rows.objective,
+        &rows.vehicles,
+        &rows.record,
+        mode,
+        results,
+    ))?;
     Ok(())
 }
 
@@ -196,7 +209,7 @@ pub fn build_index(
             continue;
         }
 
-        match index_one(runtime, pool, &path, game_data, source_id, Timestamp::now()) {
+        match index_one(runtime, pool, &path, game_data, source_id, Timestamp::now(), mode.write_mode()) {
             Ok(()) => progress.indexed += 1,
             Err(err) => {
                 tracing::warn!("replay index: {} contributed nothing: {err}", path.display());
@@ -210,6 +223,9 @@ pub fn build_index(
 
     if ledger_grew && let Err(err) = runtime.block_on(unindexable.save(pool)) {
         tracing::warn!("replay index: the unreadable-file ledger was not written: {err}");
+    }
+    if !cancel.load(Ordering::Relaxed) {
+        runtime.block_on(query::mark_replay_records_current(pool, source_id, root))?;
     }
 
     Ok(progress)
