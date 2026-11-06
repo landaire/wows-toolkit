@@ -15813,6 +15813,7 @@ dependencies = [
  "tracing",
  "wows-core",
  "wows-data-mgr",
+ "wows-ship-stats",
  "wows_replays",
  "wowsunpack",
 ]
@@ -15835,6 +15836,16 @@ dependencies = [
  "wows-core",
  "wows-data-mgr",
  "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
+name = "wows-ship-stats"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.20",
+ "wows-core",
  "wowsunpack",
 ]
 

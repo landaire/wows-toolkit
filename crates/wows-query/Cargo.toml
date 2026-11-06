@@ -10,6 +10,7 @@ description = "Query World of Warships game data: ships, armor, shells, stat car
 [dependencies]
 wowsunpack = { workspace = true, features = ["arc", "json", "models", "rkyv", "serde", "vfs"] }
 wows-core = { workspace = true, features = ["arc", "schemars", "serde"] }
+wows-ship-stats = { workspace = true }
 wows-data-mgr = { workspace = true }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 replayshark = { workspace = true }

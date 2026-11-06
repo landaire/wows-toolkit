@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde::Serializer;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
+use wows_ship_stats::mounts::selected_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::translations::translate_unit;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -200,10 +201,10 @@ impl GameData {
             }
         }
 
-        let main = selected_mounts(ship, selection, ComponentType::Artillery);
-        let secondaries = selected_mounts(ship, selection, ComponentType::Atba);
-        let torpedoes = selected_mounts(ship, selection, ComponentType::Torpedoes);
-        let depth_charges = selected_mounts(ship, selection, ComponentType::DepthCharges).len();
+        let main = selected_mounts(&ship.param, selection, ComponentType::Artillery);
+        let secondaries = selected_mounts(&ship.param, selection, ComponentType::Atba);
+        let torpedoes = selected_mounts(&ship.param, selection, ComponentType::Torpedoes);
+        let depth_charges = selected_mounts(&ship.param, selection, ComponentType::DepthCharges).len();
         let depth_charge_launchers = match u32::try_from(depth_charges).expect("a hull has fewer than 2^32 mounts") {
             0 => Equipped::None,
             count => Equipped::Some(MountCount(count)),
@@ -377,49 +378,4 @@ fn squadron_line(squadron: &Squadron) -> SquadronLine {
         squadron_size: squadron.squadron_size,
         ordnance: ordnance_kind(squadron),
     }
-}
-
-/// Every mount of one component type for the selected hull and modules. Guns
-/// and torpedoes are modules of their own; the hull lists the components
-/// they may mount.
-pub(crate) fn selected_mounts<'a>(
-    ship: &'a Ship,
-    selection: &ShipUpgradeSelection,
-    component_type: ComponentType,
-) -> &'a [MountPoint] {
-    let Some(vehicle) = ship.param.vehicle() else {
-        return &[];
-    };
-    let Some(hull) = selection.hull.as_deref().and_then(|name| vehicle.hull_upgrade(name)) else {
-        return &[];
-    };
-    let Some(component) = selected_component(ship, selection, component_type) else {
-        return &[];
-    };
-
-    if hull.component_name(component_type) == Some(component) {
-        hull.mounts(component_type).unwrap_or_default()
-    } else {
-        hull.alternative_mounts.get(component).map(|mounts| mounts.mounts()).unwrap_or_default()
-    }
-}
-
-/// Name of the component of one type the selected hull and modules mount,
-/// e.g. `B_Torpedoes`.
-pub(crate) fn selected_component<'a>(
-    ship: &'a Ship,
-    selection: &ShipUpgradeSelection,
-    component_type: ComponentType,
-) -> Option<&'a str> {
-    let vehicle = ship.param.vehicle()?;
-    let hull = vehicle.hull_upgrade(selection.hull.as_deref()?)?;
-    let upgrade = match component_type {
-        ComponentType::Artillery => selection.artillery.as_deref(),
-        ComponentType::Torpedoes => selection.torpedoes.as_deref(),
-        _ => None,
-    };
-
-    upgrade
-        .and_then(|name| vehicle.ttx_components()?.component_on_hull(name, hull, component_type))
-        .or_else(|| hull.component_name(component_type))
 }

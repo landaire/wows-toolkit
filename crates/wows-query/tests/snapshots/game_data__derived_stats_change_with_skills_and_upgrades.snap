@@ -1,0 +1,83 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: stats.changes
+---
+- stat: Main Battery Reload Time
+  from: 5.5 s
+  to: 4.8 s
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)
+- stat: Maximum Dispersion
+  from: 142 m
+  to: 132 m
+  because:
+    - Aiming Systems Modification 1 x0.93 (-9.956)
+- stat: Artillery Dispersion Vertical
+  from: 85 m
+  to: 79 m
+  because:
+    - Aiming Systems Modification 1 x0.93 (-5.974)
+- stat: Minimum Shell Type Switching Time
+  from: 5.5 s
+  to: 4.8 s
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)
+- stat: Main Turret Traverse Speed
+  from: 6.0 deg/s
+  to: 5.2 deg/s
+  because:
+    - Main Battery Modification 3 x0.87 (-0.78)
+- stat: 180° Turn Time
+  from: 30.0 s
+  to: 34.5 s
+  because:
+    - Main Battery Modification 3 x0.87 (-0.78) via Main Turret Traverse Speed
+- stat: Firing Range
+  from: 7.3 km
+  to: 7.7 km
+  because:
+    - Aiming Systems Modification 1 x1.05 (+0.365)
+- stat: Secondary Dispersion (127 mm)
+  from: 446 m
+  to: 444 m
+  because:
+    - Aiming Systems Modification 1 x0.95 (-23.345)
+    - Aiming Systems Modification 1 x1.05 (+0.365) via Firing Range
+- stat: Secondary Dispersion Vertical (127 mm)
+  from: 446 m
+  to: 444 m
+  because:
+    - Aiming Systems Modification 1 x0.95 (-23.345)
+    - Aiming Systems Modification 1 x1.05 (+0.365) via Firing Range
+- stat: Main battery damage per minute (HE)
+  from: 274909 hp/min
+  to: 312397 hp/min
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)
+- stat: Main battery damage per minute (AP)
+  from: 490909 hp/min
+  to: 557851 hp/min
+  because:
+    - Main Battery Modification 3 x0.88 (-0.66)
+- stat: Main battery horizontal dispersion at stock firing range
+  from: 142 m
+  to: 132 m
+  because:
+    - Aiming Systems Modification 1 x0.93 (-9.956)
+- stat: Main battery vertical dispersion at stock firing range
+  from: 85 m
+  to: 79 m
+  because:
+    - Aiming Systems Modification 1 x0.93 (-5.974)
+- stat: Secondary horizontal dispersion at stock secondary range (127 mm)
+  from: 446 m
+  to: 424 m
+  because:
+    - Aiming Systems Modification 1 x0.95 (-23.345)
+    - Aiming Systems Modification 1 x1.05 (+0.365) via Firing Range
+- stat: Secondary vertical dispersion at stock secondary range (127 mm)
+  from: 446 m
+  to: 414 m
+  because:
+    - Aiming Systems Modification 1 x0.95 (-23.345)
+    - Aiming Systems Modification 1 x1.05 (+0.365) via Firing Range

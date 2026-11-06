@@ -2,6 +2,7 @@
 //! or with the fewest modules, upgrades and captain skills that make every
 //! condition hold.
 
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -10,6 +11,13 @@ use std::collections::HashSet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_ship_stats::Derivation;
+use wows_ship_stats::DerivedRow;
+use wows_ship_stats::DerivedStat;
+use wows_ship_stats::Direction;
+use wows_ship_stats::StockRanges;
+use wows_ship_stats::Triggers;
+use wows_ship_stats::Unit;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::skill_grid_data::skill_grid;
 use wowsunpack::game_params::ttx::InputId;
@@ -32,7 +40,7 @@ use crate::error::QueryError;
 use crate::fuzzy;
 use crate::fuzzy::Fuzzy;
 use crate::loadout::ResolvedLoadout;
-use crate::loadout::Triggers;
+use crate::loadout::build_failed;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::search_key;
@@ -102,12 +110,6 @@ impl Comparison {
             Self::Equal | Self::NotEqual => None,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Direction {
-    Lower,
-    Higher,
 }
 
 /// One condition on a stat.
@@ -257,8 +259,8 @@ enum SearchStat {
         bound: Bound,
     },
 
-    /// Barrels of every main battery mount together.
-    MainBatteryBarrels,
+    /// A stat computed from the card.
+    Derived(DerivedStat),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,83 +290,15 @@ enum Bound {
     Max,
 }
 
-/// The unit a stat is compared in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Unit {
-    Hp,
-    Knots,
-    Seconds,
-    Meters,
-    MetersPerSecond,
-    Km,
-    Millimeters,
-    Percent,
-    DegreesPerSecond,
-    Count,
-    Ratio,
-
-    /// Yes or no; not searchable.
-    Flag,
-}
-
-impl Unit {
-    #[cfg(test)]
-    fn of_value(value: &StatValue) -> Self {
-        match value {
-            StatValue::Hp(_) => Self::Hp,
-            StatValue::Knots(_) => Self::Knots,
-            StatValue::Seconds(_) => Self::Seconds,
-            StatValue::Meters(_) => Self::Meters,
-            StatValue::MetersPerSecond(_) => Self::MetersPerSecond,
-            StatValue::Km(_) => Self::Km,
-            StatValue::Millimeters(_) => Self::Millimeters,
-            StatValue::Percent(_) => Self::Percent,
-            StatValue::DegreesPerSecond(_) => Self::DegreesPerSecond,
-            StatValue::Count(_) | StatValue::Ammo(_) => Self::Count,
-            StatValue::Float(_) => Self::Ratio,
-            StatValue::Bool(_) => Self::Flag,
-        }
-    }
-
-    /// Suffix after a value; empty for plain numbers.
-    fn suffix(self) -> &'static str {
-        match self {
-            Self::Hp => " hp",
-            Self::Knots => " kn",
-            Self::Seconds => " s",
-            Self::Meters => " m",
-            Self::MetersPerSecond => " m/s",
-            Self::Km => " km",
-            Self::Millimeters => " mm",
-            Self::Percent => "%",
-            Self::DegreesPerSecond => " deg/s",
-            Self::Count | Self::Ratio | Self::Flag => "",
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Hp => "hp",
-            Self::Knots => "kn",
-            Self::Seconds => "s",
-            Self::Meters => "m",
-            Self::MetersPerSecond => "m/s",
-            Self::Km => "km",
-            Self::Millimeters => "mm",
-            Self::Percent => "percent 0-100",
-            Self::DegreesPerSecond => "deg/s",
-            Self::Count => "count",
-            Self::Ratio => "ratio",
-            Self::Flag => "yes/no",
-        }
-    }
-}
-
 impl SearchStat {
     fn all() -> Vec<Self> {
-        let mut stats: Vec<Self> =
-            TtxStat::ALL.iter().copied().filter(|stat| card_unit(*stat) != Unit::Flag).map(Self::Card).collect();
-        stats.push(Self::MainBatteryBarrels);
+        let mut stats: Vec<Self> = TtxStat::ALL
+            .iter()
+            .copied()
+            .filter(|stat| wows_ship_stats::stat::unit(*stat) != Unit::Flag)
+            .map(Self::Card)
+            .collect();
+        stats.extend(DerivedStat::ALL.iter().copied().map(Self::Derived));
         for zone in ARMOR_ZONES {
             stats.push(Self::Armor { zone, bound: Bound::Min });
             stats.push(Self::Armor { zone, bound: Bound::Max });
@@ -378,15 +312,15 @@ impl SearchStat {
             Self::Card(stat) => stat.field_key().to_owned(),
             Self::Armor { zone, bound: Bound::Min } => format!("armor.{}.min", zone.key),
             Self::Armor { zone, bound: Bound::Max } => format!("armor.{}.max", zone.key),
-            Self::MainBatteryBarrels => "artillery.barrels".to_owned(),
+            Self::Derived(stat) => stat.field_key().to_owned(),
         }
     }
 
     fn unit(self) -> Unit {
         match self {
-            Self::Card(stat) => card_unit(stat),
+            Self::Card(stat) => wows_ship_stats::stat::unit(stat),
             Self::Armor { .. } => Unit::Millimeters,
-            Self::MainBatteryBarrels => Unit::Count,
+            Self::Derived(stat) => stat.unit(),
         }
     }
 
@@ -399,20 +333,21 @@ impl SearchStat {
             Self::Armor { zone, bound: Bound::Max } => {
                 format!("Thickest {} plate above the waterline", zone.key.replace('_', " "))
             }
-            Self::MainBatteryBarrels => "Main battery barrels, all mounts".to_owned(),
+            Self::Derived(stat) => stat.label().to_owned(),
         }
     }
 
     /// What one row of a multi-row stat stands for.
     fn item(self) -> Option<&'static str> {
-        let Self::Card(stat) = self else {
-            return None;
+        let key = match self {
+            Self::Card(TtxStat::SecondaryRange) | Self::Armor { .. } => return None,
+            Self::Card(stat) => stat.field_key(),
+            Self::Derived(stat) => stat.field_key(),
         };
 
-        let key = stat.field_key();
         if key.starts_with("artillery.shells.") {
             Some("per ammo type")
-        } else if key.starts_with("secondary.") && stat != TtxStat::SecondaryRange {
+        } else if key.starts_with("secondary.") {
             Some("per secondary mount")
         } else if key.starts_with("torpedoes.launchers.") {
             Some("per launcher")
@@ -428,84 +363,6 @@ impl SearchStat {
     /// Captain skills, upgrades and modules never change it.
     fn is_fixed(self) -> bool {
         matches!(self, Self::Armor { .. })
-    }
-}
-
-/// The unit `ShipStats::rows` reports a stat in.
-fn card_unit(stat: TtxStat) -> Unit {
-    match stat {
-        TtxStat::Health | TtxStat::ShellDamage | TtxStat::SecondaryShellDamage | TtxStat::TorpedoDamage => Unit::Hp,
-        TtxStat::Speed | TtxStat::TorpedoSpeed => Unit::Knots,
-        TtxStat::RudderTime
-        | TtxStat::ArtilleryReloadTime
-        | TtxStat::ArtilleryAmmoSwitchTime
-        | TtxStat::GunRotationTime
-        | TtxStat::SecondaryReloadTime
-        | TtxStat::SecondaryGunRotationTime
-        | TtxStat::TorpedoReloadTime
-        | TtxStat::LauncherRotationTime
-        | TtxStat::ConsumableReloadTime
-        | TtxStat::ConsumableWorkTime
-        | TtxStat::ConsumablePreparationTime
-        | TtxStat::ConsumableSmokeLifetime
-        | TtxStat::ConsumableCallFightersTimeDelay
-        | TtxStat::ConsumableCallFightersTimeFromHeaven => Unit::Seconds,
-        TtxStat::TurningRadius
-        | TtxStat::ArtilleryDispersion
-        | TtxStat::ArtilleryDispersionVertical
-        | TtxStat::SecondaryDispersion
-        | TtxStat::SecondaryDispersionVertical
-        | TtxStat::ConsumableDetectionRadius => Unit::Meters,
-        TtxStat::ShellSpeed | TtxStat::SecondaryShellSpeed => Unit::MetersPerSecond,
-        TtxStat::ArtilleryRange
-        | TtxStat::SecondaryRange
-        | TtxStat::TorpedoRange
-        | TtxStat::TorpedoVisibility
-        | TtxStat::TorpedoDistanceOfMaxDamage
-        | TtxStat::FireControlMaxDist
-        | TtxStat::ConsumableSmokeRadius
-        | TtxStat::ConsumableCallFightersRadius
-        | TtxStat::SeaDetection
-        | TtxStat::SeaDetectionOnFire
-        | TtxStat::AirDetection
-        | TtxStat::AirDetectionOnFire
-        | TtxStat::DetectionInSmoke
-        | TtxStat::MainGunRangeDetection
-        | TtxStat::SecondaryRangeDetection
-        | TtxStat::PeriscopeDepthDetection => Unit::Km,
-        TtxStat::ArmorMin
-        | TtxStat::ArmorMax
-        | TtxStat::GunCaliber
-        | TtxStat::ShellCaliber
-        | TtxStat::ShellPenetration
-        | TtxStat::SecondaryGunCaliber
-        | TtxStat::SecondaryShellCaliber
-        | TtxStat::SecondaryShellPenetration => Unit::Millimeters,
-        TtxStat::TorpedoProtection
-        | TtxStat::ShellBurnChance
-        | TtxStat::ShellFloodChance
-        | TtxStat::SecondaryShellBurnChance
-        | TtxStat::SecondaryShellFloodChance => Unit::Percent,
-        TtxStat::GunRotationSpeed | TtxStat::SecondaryGunRotationSpeed | TtxStat::LauncherRotationSpeed => {
-            Unit::DegreesPerSecond
-        }
-        TtxStat::GunNumBarrels
-        | TtxStat::GunNumGuns
-        | TtxStat::SecondaryGunNumBarrels
-        | TtxStat::SecondaryGunNumGuns
-        | TtxStat::LauncherNumBarrels
-        | TtxStat::ShellMaxAmmo
-        | TtxStat::SecondaryShellMaxAmmo
-        | TtxStat::ConsumableCharges => Unit::Count,
-        TtxStat::BatteryCapacity
-        | TtxStat::BatteryRegeneration
-        | TtxStat::ConsumableMaxCapacity
-        | TtxStat::ConsumableRegenerationHpSpeed
-        | TtxStat::ConsumableFightersCount
-        | TtxStat::ConsumablePlaneRegenerationRate => Unit::Ratio,
-        TtxStat::ShellDisabledUnderwater | TtxStat::TorpedoIsDamageIncreasing | TtxStat::TorpedoDisabledUnderwater => {
-            Unit::Flag
-        }
     }
 }
 
@@ -577,7 +434,7 @@ struct Reading {
 /// The stats of one ship configuration that conditions read.
 struct View {
     rows: Vec<StatRow>,
-    barrels: Option<u32>,
+    derived: Vec<DerivedRow>,
 
     /// Internal names of conditional skills counted as triggered.
     triggered: Vec<String>,
@@ -614,9 +471,17 @@ impl View {
                 })
                 .into_iter()
                 .collect(),
-            SearchStat::MainBatteryBarrels => {
-                self.barrels.map(|barrels| Reading { qualifier: None, value: barrels as f32 }).into_iter().collect()
-            }
+            SearchStat::Derived(stat) => self
+                .derived
+                .iter()
+                .filter(|row| row.stat == stat)
+                .filter(|row| {
+                    condition.qualifier.as_deref().is_none_or(|wanted| {
+                        row.qualifier.as_deref().is_some_and(|qualifier| qualifier.eq_ignore_ascii_case(wanted.trim()))
+                    })
+                })
+                .map(|row| Reading { qualifier: row.qualifier.clone(), value: row.value.as_f32() })
+                .collect(),
         }
     }
 }
@@ -719,6 +584,9 @@ struct ShipSearch<'a> {
 
     /// Per condition, whether any configuration read had a row for it.
     rows_seen: RefCell<Vec<bool>>,
+
+    /// Computed on first use.
+    stock_ranges: OnceCell<StockRanges>,
 }
 
 impl GameData {
@@ -856,6 +724,7 @@ impl<'a> ShipSearch<'a> {
             has_skill_grid: skill_grid(&game.version(), ship.class.species()).is_some(),
             failures: RefCell::default(),
             rows_seen: RefCell::new(vec![false; conditions.len()]),
+            stock_ranges: OnceCell::new(),
         }
     }
 
@@ -1244,22 +1113,37 @@ impl<'a> ShipSearch<'a> {
     fn view(&self, items: &[Item<'_>]) -> Result<View, QueryError> {
         let (selection, loadout) = self.configuration(items);
         let effects = self.game.effective_modifiers(self.ship, &loadout)?;
-        let stats = effects.modifiers.stats(&self.ship.param, &selection, self.ship.tier.0, self.game.provider());
+        let stats =
+            effects.build.stats(&self.ship.param, &selection, self.game.provider()).map_err(build_failed(self.ship))?;
+        let derived = Derivation {
+            ship: &self.ship.param,
+            selection: &selection,
+            stats: &stats,
+            modifiers: effects.build.modifiers.bundle(),
+            stock_ranges: self.stock_ranges()?,
+        }
+        .rows();
 
-        Ok(View {
-            rows: stats.rows(),
-            barrels: main_battery_barrels(self.ship, &selection),
-            triggered: effects.active_conditions,
-        })
+        Ok(View { rows: stats.rows(), derived, triggered: effects.active_conditions })
+    }
+
+    fn stock_ranges(&self) -> Result<StockRanges, QueryError> {
+        if let Some(ranges) = self.stock_ranges.get() {
+            return Ok(*ranges);
+        }
+
+        let ranges = self.game.stock_ranges(self.ship)?;
+
+        Ok(*self.stock_ranges.get_or_init(|| ranges))
     }
 
     fn explain(&self, items: &[Item<'_>]) -> Result<ShipStatsProvenance, QueryError> {
         let (selection, loadout) = self.configuration(items);
         let effects = self.game.effective_modifiers(self.ship, &loadout)?;
-        let (_, provenance) =
-            effects.modifiers.stats_explained(&self.ship.param, &selection, self.ship.tier.0, self.game.provider());
+        let card =
+            effects.build.card(&self.ship.param, &selection, self.game.provider()).map_err(build_failed(self.ship))?;
 
-        Ok(provenance)
+        Ok(card.provenance)
     }
 
     fn configuration(&self, items: &[Item<'_>]) -> (ShipUpgradeSelection, ResolvedLoadout) {
@@ -1416,15 +1300,17 @@ fn relevant_inputs<'c>(
 
     let mut pending: Vec<usize> = Vec::new();
     for condition in failing {
-        let SearchStat::Card(stat) = condition.stat else {
-            continue;
+        let stats: &[TtxStat] = match &condition.stat {
+            SearchStat::Card(stat) => std::slice::from_ref(stat),
+            SearchStat::Derived(stat) => stat.sources(),
+            SearchStat::Armor { .. } => continue,
         };
         pending.extend(
             provenance
                 .attributions
                 .iter()
                 .enumerate()
-                .filter(|(_, attribution)| attribution.stat == stat)
+                .filter(|(_, attribution)| stats.contains(&attribution.stat))
                 .map(|(index, _)| index),
         );
     }
@@ -1459,17 +1345,6 @@ fn input_id(item: &Item<'_>) -> InputId {
         Item::Upgrade(upgrade) => InputId::Upgrade { name: upgrade.param.name().to_owned() },
         Item::Skill { skill, .. } => InputId::Skill { name: skill.internal_name().clone() },
     }
-}
-
-/// Barrels of every main battery mount of the selected guns.
-fn main_battery_barrels(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<u32> {
-    let components = ship.param.vehicle()?.ttx_components()?;
-    let artillery = components.artillery(selection.artillery.as_deref()?)?;
-    if artillery.guns.is_empty() {
-        return None;
-    }
-
-    artillery.guns.iter().map(|gun| gun.num_barrels.map(|barrels| barrels.round() as u32)).sum()
 }
 
 /// A skill needs a learned skill on the tier below it
@@ -1541,11 +1416,34 @@ mod tests {
                 continue;
             };
             for row in &view.rows {
-                assert_eq!(Unit::of_value(&row.value), card_unit(row.stat), "{:?} on {}", row.stat, ship.name);
+                assert_eq!(
+                    unit_of_value(&row.value),
+                    wows_ship_stats::stat::unit(row.stat),
+                    "{:?} on {}",
+                    row.stat,
+                    ship.name
+                );
                 checked += 1;
             }
         }
         assert!(checked > 10_000, "only {checked} rows checked");
+    }
+
+    fn unit_of_value(value: &StatValue) -> Unit {
+        match value {
+            StatValue::Hp(_) => Unit::Hp,
+            StatValue::Knots(_) => Unit::Knots,
+            StatValue::Seconds(_) => Unit::Seconds,
+            StatValue::Meters(_) => Unit::Meters,
+            StatValue::MetersPerSecond(_) => Unit::MetersPerSecond,
+            StatValue::Km(_) => Unit::Km,
+            StatValue::Millimeters(_) => Unit::Millimeters,
+            StatValue::Percent(_) => Unit::Percent,
+            StatValue::DegreesPerSecond(_) => Unit::DegreesPerSecond,
+            StatValue::Count(_) | StatValue::Ammo(_) => Unit::Count,
+            StatValue::Float(_) => Unit::Ratio,
+            StatValue::Bool(_) => Unit::Flag,
+        }
     }
 
     fn test_game() -> GameData {

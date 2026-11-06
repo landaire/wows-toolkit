@@ -16,6 +16,7 @@ WOWS_QUERY_DEPS = [
     "//crates/wows-core:wows_core",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replays:wows_replays",
+    "//crates/wows-ship-stats:wows_ship_stats",
     "//crates/wowsunpack:wowsunpack",
     "//third-party/rust:deunicode",
     "//third-party/rust:flate2",

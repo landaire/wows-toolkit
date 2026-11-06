@@ -2,16 +2,13 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 use wows_core::units::Percent;
-use wowsunpack::game_params::ttx::EffectActivation;
-use wowsunpack::game_params::ttx::EffectId;
-use wowsunpack::game_params::ttx::EffectKind;
-use wowsunpack::game_params::ttx::EffectiveModifiers;
-use wowsunpack::game_params::ttx::EffectsState;
+use wows_ship_stats::Build;
+use wows_ship_stats::BuildEffects;
+use wows_ship_stats::BuildError;
+use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::HealthFraction;
-use wowsunpack::game_params::ttx::Loadout;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::CrewSkillModifier;
-use wowsunpack::game_params::types::CrewSkillName;
 
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -45,16 +42,6 @@ pub struct AppliedUpgrade {
     pub slot: u8,
 }
 
-/// Conditional skill triggers counted as met.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Triggers {
-    Unmet,
-    All,
-
-    /// Only the triggers of this skill, by internal name.
-    Skill(CrewSkillName),
-}
-
 /// A loadout resolved against one ship.
 pub(crate) struct ResolvedLoadout {
     pub(crate) skills: Vec<CrewSkill>,
@@ -79,9 +66,10 @@ impl ResolvedLoadout {
     }
 }
 
-/// Effective modifiers plus the conditional effects that were switched on.
+/// Effective modifiers plus the conditional effects that were switched on,
+/// by English name.
 pub(crate) struct ResolvedEffects {
-    pub(crate) modifiers: EffectiveModifiers,
+    pub(crate) build: BuildEffects,
     pub(crate) active_conditions: Vec<String>,
 }
 
@@ -150,50 +138,21 @@ impl GameData {
         ship: &Ship,
         loadout: &ResolvedLoadout,
     ) -> Result<ResolvedEffects, QueryError> {
-        let version = self.version();
-        let effects = Loadout { skills: &loadout.skills, modernizations: &loadout.modernizations, ship: &ship.param }
-            .effects(self.provider(), version);
+        let build = Build {
+            ship: &ship.param,
+            skills: &loadout.skills,
+            modernizations: &loadout.modernizations,
+            triggers: &loadout.triggers,
+            health: loadout.hp_percent.map(|percent| HealthFraction::new(percent.to_fraction())),
+        };
+        let effects = build.effects(self.provider(), self.version()).map_err(build_failed(ship))?;
+        let active_conditions = effects
+            .active_conditions
+            .iter()
+            .map(|name| loadout.labels.get(name.as_str()).cloned().unwrap_or_else(|| name.as_str().to_owned()))
+            .collect();
 
-        let mut state = EffectsState::default();
-        let mut active_conditions = Vec::new();
-        for effect in effects.iter() {
-            let met = match &loadout.triggers {
-                Triggers::Unmet => false,
-                Triggers::All => true,
-                Triggers::Skill(skill) => matches!(effect.id(), EffectId::Skill(name) if name == skill),
-            };
-            let activation = match effect.kind() {
-                EffectKind::Binary { .. } if met => Some(EffectActivation::On),
-                EffectKind::StackingPerCount { .. } if met => Some(EffectActivation::Stacks(u32::MAX)),
-                EffectKind::Heat { heat_interpolator } if met => {
-                    Some(EffectActivation::Heat(heat_interpolator.max_x()))
-                }
-                EffectKind::HealthScaledReload | EffectKind::InnateAdrenaline { .. } => loadout
-                    .hp_percent
-                    .map(|percent| EffectActivation::Health(HealthFraction::new(percent.to_fraction()))),
-                _ => None,
-            };
-            let Some(activation) = activation else {
-                continue;
-            };
-
-            if let EffectId::Skill(name) = effect.id()
-                && matches!(
-                    effect.kind(),
-                    EffectKind::Binary { .. } | EffectKind::StackingPerCount { .. } | EffectKind::Heat { .. }
-                )
-            {
-                active_conditions
-                    .push(loadout.labels.get(name.as_str()).cloned().unwrap_or_else(|| name.as_str().to_owned()));
-            }
-            state = state.set(effect.id().clone(), activation);
-        }
-
-        let modifiers = effects
-            .resolve(&state, ship.class.species(), version)
-            .map_err(|source| QueryError::Modifiers { ship: ship.name.clone(), source })?;
-
-        Ok(ResolvedEffects { modifiers, active_conditions })
+        Ok(ResolvedEffects { build: effects, active_conditions })
     }
 
     /// The same path with nothing chosen, for diffs against the stock card.
@@ -208,4 +167,9 @@ impl GameData {
             labels: HashMap::new(),
         }
     }
+}
+
+/// Names `ship` in a failure to compute its stats.
+pub(crate) fn build_failed(ship: &Ship) -> impl FnOnce(BuildError) -> QueryError + '_ {
+    move |source| QueryError::Build { ship: ship.name.clone(), source }
 }

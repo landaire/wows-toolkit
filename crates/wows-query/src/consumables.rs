@@ -178,7 +178,7 @@ impl GameData {
         };
         let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let effects = self.effective_modifiers(ship, &loadout)?;
-        let bundle = effects.modifiers.bundle();
+        let bundle = effects.build.modifiers.bundle();
         let planner = loadout.is_empty().then(|| Planner::new(self, ship));
 
         let mut slots = Vec::new();

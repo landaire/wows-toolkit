@@ -16,18 +16,20 @@ use wows_core::units::DamagePerSecond;
 use wows_core::units::Degrees;
 use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
+use wows_ship_stats::mount_salvo;
+use wows_ship_stats::mounts::selected_component;
+use wows_ship_stats::mounts::selected_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::components::LauncherDirection;
 use wowsunpack::game_params::ttx::components::LoaderCount;
 use wowsunpack::game_params::ttx::model::Hp;
+use wowsunpack::game_params::ttx::model::ShellStats;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::MountPoint;
 
 use crate::armament::BarrelCount;
 use crate::armament::MountCount;
-use crate::armament::selected_component;
-use crate::armament::selected_mounts;
 use crate::builds::Better;
 use crate::builds::BuildStat;
 use crate::builds::Outcome;
@@ -479,7 +481,7 @@ fn battery(
 }
 
 fn torpedo_layout(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<TorpedoLayout> {
-    let mounts: Vec<(&str, u32)> = selected_mounts(ship, selection, ComponentType::Torpedoes)
+    let mounts: Vec<(&str, u32)> = selected_mounts(&ship.param, selection, ComponentType::Torpedoes)
         .iter()
         .filter_map(|mount| Some((mount.hp_name(), mount.num_barrels()?)))
         .collect();
@@ -487,7 +489,7 @@ fn torpedo_layout(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<Torpe
         return None;
     }
 
-    let loading = selected_component(ship, selection, ComponentType::Torpedoes)
+    let loading = selected_component(&ship.param, selection, ComponentType::Torpedoes)
         .and_then(|component| ship.param.vehicle()?.ttx_components()?.torpedo_loading(component));
     let mut grouped: HashSet<&str> = HashSet::new();
     let mut groups = Vec::new();
@@ -535,21 +537,16 @@ fn torpedo_layout(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<Torpe
 fn main_battery_rate(outcome: &Outcome, battery: &Battery, kind: &str) -> Option<DamageRate> {
     let artillery = outcome.stats.artillery.as_ref()?;
     let reload = Seconds::new(artillery.reload_time?.value());
-    let damage: HashMap<&str, f32> = artillery
+    let shells: Vec<&ShellStats> = artillery
         .shells
         .iter()
         .filter(|shell| shell.ammo_kind.as_deref().and_then(ammo_label).as_deref() == Some(kind))
-        .filter_map(|shell| Some((shell.name.as_str(), shell.damage?.value())))
         .collect();
 
-    // A mount fires the first shell of the kind it lists.
     let per_gun: Vec<DamagePerMinute> = battery
         .guns
         .iter()
-        .map(|gun| {
-            let shell = gun.ammo.iter().find_map(|name| damage.get(name.as_str())).copied().unwrap_or(0.0);
-            DamagePerMinute::from_reload(gun.barrels.0 as f32 * shell, reload)
-        })
+        .map(|gun| DamagePerMinute::from_reload(mount_salvo(&gun.ammo, gun.barrels.0, &shells).value(), reload))
         .collect();
 
     battery.rate(&per_gun)

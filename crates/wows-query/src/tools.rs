@@ -182,7 +182,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_stats",
-        description: "Port stat card of one ship with stock modules. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, and the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
+        description: "Port stat card of one ship with stock modules, followed by stats computed from it: main battery barrels, salvo damage and damage per minute per ammo type, dispersion at the stock firing range, torpedo tubes, and time to use every charge of a consumable. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, and the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
         schema: input_schema::<ShipStatsArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_stats(args)),
     },
@@ -194,7 +194,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "stat_names",
-        description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness and total main battery barrels.",
+        description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness and stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range.",
         schema: input_schema::<StatNamesArgs>,
         call: |game, arguments| run(arguments, |args| Ok(game.stat_names(args))),
     },

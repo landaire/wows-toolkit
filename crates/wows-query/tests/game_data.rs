@@ -29,6 +29,7 @@ use wows_query::ships::ShipOverviewArgs;
 use wows_query::ships::Tier;
 use wows_query::skills::CaptainSkillArgs;
 use wows_query::skills::SkillTreeArgs;
+use wows_query::stat_search::StatNamesArgs;
 use wows_query::stats::ShipStatsArgs;
 use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::TechTreeLinesArgs;
@@ -1324,4 +1325,165 @@ fn find_ships_reaches_replicas() {
         ..Default::default()
     });
     assert!(pan_asia.iter().any(|name| name == "Xuan Wu"), "{pan_asia:?}");
+}
+
+/// Where a stat shipbuilds.com shows is found here.
+enum Coverage {
+    /// Compared by stat_search under this stat_names name.
+    Searchable(&'static str),
+
+    /// Shown on the ship_stats card but not compared, for this reason.
+    CardOnly(&'static str),
+}
+
+/// Every stat the wowsbuilds code shows on build and compare pages
+/// (`ShipStats::rows` through `analysis/stat_delta.rs`) or ranks in build
+/// analysis (`analysis/reference.rs` `extract_stat`, `analysis/rules.rs`).
+const SHIPBUILDS_STATS: &[(&str, Coverage)] = &[
+    ("durability.health", Coverage::Searchable("durability.health")),
+    ("durability.torpedo_protection", Coverage::Searchable("durability.torpedo_protection")),
+    ("mobility.speed", Coverage::Searchable("mobility.speed")),
+    ("mobility.turning_radius", Coverage::Searchable("mobility.turning_radius")),
+    ("mobility.rudder_time", Coverage::Searchable("mobility.rudder_time")),
+    ("armor.min", Coverage::Searchable("armor.min")),
+    ("armor.max", Coverage::Searchable("armor.max")),
+    ("battery.capacity", Coverage::Searchable("battery.capacity")),
+    ("battery.regeneration", Coverage::Searchable("battery.regeneration")),
+    ("artillery.reload_time", Coverage::Searchable("artillery.reload_time")),
+    ("artillery.range", Coverage::Searchable("artillery.range")),
+    ("artillery.dispersion", Coverage::Searchable("artillery.dispersion")),
+    ("artillery.dispersion_vertical", Coverage::Searchable("artillery.dispersion_vertical")),
+    ("artillery.dispersion_at_base", Coverage::Searchable("artillery.dispersion_at_stock_range")),
+    ("artillery.dispersion_vertical_at_base", Coverage::Searchable("artillery.dispersion_vertical_at_stock_range")),
+    ("artillery.ammo_switch_time", Coverage::Searchable("artillery.ammo_switch_time")),
+    ("artillery.gun.caliber", Coverage::Searchable("artillery.gun.caliber")),
+    ("artillery.gun.num_barrels", Coverage::Searchable("artillery.gun.num_barrels")),
+    ("artillery.gun.num_guns", Coverage::Searchable("artillery.gun.num_guns")),
+    ("artillery.gun.rotation_speed", Coverage::Searchable("artillery.gun.rotation_speed")),
+    ("artillery.gun.rotation_time", Coverage::Searchable("artillery.gun.rotation_time")),
+    ("artillery.shells.damage", Coverage::Searchable("artillery.shells.damage")),
+    ("artillery.shells.caliber", Coverage::Searchable("artillery.shells.caliber")),
+    ("artillery.shells.speed", Coverage::Searchable("artillery.shells.speed")),
+    ("artillery.shells.penetration", Coverage::Searchable("artillery.shells.penetration")),
+    ("artillery.shells.burn_chance", Coverage::Searchable("artillery.shells.burn_chance")),
+    ("artillery.shells.flood_chance", Coverage::Searchable("artillery.shells.flood_chance")),
+    ("artillery.shells.max_ammo", Coverage::Searchable("artillery.shells.max_ammo")),
+    ("artillery.shells.disabled_underwater", Coverage::CardOnly("yes or no")),
+    ("secondary.range", Coverage::Searchable("secondary.range")),
+    ("secondary.reload_time", Coverage::Searchable("secondary.reload_time")),
+    ("secondary.dispersion", Coverage::Searchable("secondary.dispersion")),
+    ("secondary.dispersion_vertical", Coverage::Searchable("secondary.dispersion_vertical")),
+    ("secondary.dispersion_at_base", Coverage::Searchable("secondary.dispersion_at_stock_range")),
+    ("secondary.dispersion_vertical_at_base", Coverage::Searchable("secondary.dispersion_vertical_at_stock_range")),
+    ("secondary.gun.caliber", Coverage::Searchable("secondary.gun.caliber")),
+    ("secondary.gun.num_barrels", Coverage::Searchable("secondary.gun.num_barrels")),
+    ("secondary.gun.num_guns", Coverage::Searchable("secondary.gun.num_guns")),
+    ("secondary.gun.rotation_speed", Coverage::Searchable("secondary.gun.rotation_speed")),
+    ("secondary.gun.rotation_time", Coverage::Searchable("secondary.gun.rotation_time")),
+    ("secondary.shells.damage", Coverage::Searchable("secondary.shells.damage")),
+    ("secondary.shells.caliber", Coverage::Searchable("secondary.shells.caliber")),
+    ("secondary.shells.speed", Coverage::Searchable("secondary.shells.speed")),
+    ("secondary.shells.penetration", Coverage::Searchable("secondary.shells.penetration")),
+    ("secondary.shells.burn_chance", Coverage::Searchable("secondary.shells.burn_chance")),
+    ("secondary.shells.flood_chance", Coverage::Searchable("secondary.shells.flood_chance")),
+    ("secondary.shells.max_ammo", Coverage::Searchable("secondary.shells.max_ammo")),
+    ("torpedoes.reload_time", Coverage::Searchable("torpedoes.reload_time")),
+    ("torpedoes.launchers.rotation_speed", Coverage::Searchable("torpedoes.launchers.rotation_speed")),
+    ("torpedoes.launchers.rotation_time", Coverage::Searchable("torpedoes.launchers.rotation_time")),
+    ("torpedoes.launchers.num_barrels", Coverage::Searchable("torpedoes.launchers.num_barrels")),
+    ("torpedoes.torpedoes.damage", Coverage::Searchable("torpedoes.torpedoes.damage")),
+    ("torpedoes.torpedoes.speed", Coverage::Searchable("torpedoes.torpedoes.speed")),
+    ("torpedoes.torpedoes.range", Coverage::Searchable("torpedoes.torpedoes.range")),
+    ("torpedoes.torpedoes.visibility", Coverage::Searchable("torpedoes.torpedoes.visibility")),
+    ("torpedoes.torpedoes.distance_of_max_damage", Coverage::Searchable("torpedoes.torpedoes.distance_of_max_damage")),
+    ("torpedoes.torpedoes.is_damage_increasing", Coverage::CardOnly("yes or no")),
+    ("torpedoes.torpedoes.disabled_underwater", Coverage::CardOnly("yes or no")),
+    ("fire_control.max_dist", Coverage::Searchable("fire_control.max_dist")),
+    ("consumable.reload_time", Coverage::Searchable("consumable.reload_time")),
+    ("consumable.work_time", Coverage::Searchable("consumable.work_time")),
+    ("consumable.charges", Coverage::Searchable("consumable.charges")),
+    ("consumable.preparation_time", Coverage::Searchable("consumable.preparation_time")),
+    ("consumable.max_capacity", Coverage::Searchable("consumable.max_capacity")),
+    ("consumable.detection_radius", Coverage::Searchable("consumable.detection_radius")),
+    ("consumable.regeneration_hp_speed", Coverage::Searchable("consumable.regeneration_hp_speed")),
+    ("consumable.smoke_radius", Coverage::Searchable("consumable.smoke_radius")),
+    ("consumable.smoke_lifetime", Coverage::Searchable("consumable.smoke_lifetime")),
+    ("consumable.fighters_count", Coverage::Searchable("consumable.fighters_count")),
+    ("consumable.call_fighters_radius", Coverage::Searchable("consumable.call_fighters_radius")),
+    ("consumable.call_fighters_time_delay", Coverage::Searchable("consumable.call_fighters_time_delay")),
+    ("consumable.call_fighters_time_from_heaven", Coverage::Searchable("consumable.call_fighters_time_from_heaven")),
+    ("consumable.plane_regeneration_rate", Coverage::Searchable("consumable.plane_regeneration_rate")),
+    ("visibility.sea_detection", Coverage::Searchable("visibility.sea_detection")),
+    ("visibility.sea_detection_on_fire", Coverage::Searchable("visibility.sea_detection_on_fire")),
+    ("visibility.air_detection", Coverage::Searchable("visibility.air_detection")),
+    ("visibility.air_detection_on_fire", Coverage::Searchable("visibility.air_detection_on_fire")),
+    ("visibility.detection_in_smoke", Coverage::Searchable("visibility.detection_in_smoke")),
+    ("visibility.main_gun_range_detection", Coverage::Searchable("visibility.main_gun_range_detection")),
+    ("visibility.secondary_range_detection", Coverage::Searchable("visibility.secondary_range_detection")),
+    ("visibility.periscope_depth_detection", Coverage::Searchable("visibility.periscope_depth_detection")),
+    ("reference GunDpm", Coverage::Searchable("artillery.shells.damage_per_minute")),
+    ("reference GunAlphaSalvo", Coverage::Searchable("artillery.shells.salvo_damage")),
+    ("reference GunFireChance", Coverage::Searchable("artillery.shells.burn_chance")),
+    ("reference HePenetration", Coverage::Searchable("artillery.shells.penetration")),
+    ("reference MainBatteryCaliber", Coverage::Searchable("artillery.gun.caliber")),
+    ("reference TorpedoTubes", Coverage::Searchable("torpedoes.tubes")),
+    ("reference TorpedoDetectability", Coverage::Searchable("torpedoes.torpedoes.visibility")),
+    ("reference TorpedoRange", Coverage::Searchable("torpedoes.torpedoes.range")),
+    ("reference TorpedoDamage", Coverage::Searchable("torpedoes.torpedoes.damage")),
+    ("reference TorpedoSpeed", Coverage::Searchable("torpedoes.torpedoes.speed")),
+    ("reference submarine_surveil_radius", Coverage::Searchable("consumable.detection_radius")),
+    ("rules unburnable_consumable_charge cycle", Coverage::Searchable("consumable.all_charges_time")),
+];
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_names_cover_the_shipbuilds_stats() {
+    let output = game().stat_names(&StatNamesArgs {});
+    let names: Vec<&str> =
+        output.stats.iter().map(|line| line.split_once(" (").map_or(line.as_str(), |(name, _)| name)).collect();
+
+    let table: Vec<String> = SHIPBUILDS_STATS
+        .iter()
+        .map(|(stat, coverage)| match coverage {
+            Coverage::Searchable(name) => {
+                assert!(names.contains(name), "{stat}: {name} is not in stat_names");
+                format!("{stat}: {name}")
+            }
+            Coverage::CardOnly(reason) => {
+                assert!(!names.contains(stat), "{stat} is in stat_names");
+                format!("{stat}: ship_stats card only, {reason}")
+            }
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(table);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_stats_of_each_class() {
+    for (ship, snapshot) in [
+        ("Shimakaze", "ship_stats_shimakaze"),
+        ("Des Moines", "ship_stats_des_moines"),
+        ("Yamato", "ship_stats_yamato"),
+        ("Midway", "ship_stats_midway"),
+        ("Balao", "ship_stats_balao"),
+    ] {
+        let stats = game()
+            .ship_stats(&ShipStatsArgs { ship: ship.to_owned(), full_card: Some(true), ..Default::default() })
+            .expect("ship exists");
+        insta::assert_yaml_snapshot!(snapshot, stats.stats);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn derived_stats_change_with_skills_and_upgrades() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs {
+            ship: "Des Moines".to_owned(),
+            upgrades: Some(vec!["Main Battery Modification 3".to_owned(), "Aiming Systems Modification 1".to_owned()]),
+            ..Default::default()
+        })
+        .expect("Des Moines takes both upgrades");
+    insta::assert_yaml_snapshot!(stats.changes);
 }

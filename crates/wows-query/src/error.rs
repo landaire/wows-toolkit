@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_core::units::Km;
-use wowsunpack::game_params::ttx::modifiers::ModifierError;
+use wows_ship_stats::BuildError;
 
 use crate::armor_trace::TraceWeapon;
 use crate::armor_trace::WeaponAmmo;
@@ -147,11 +147,11 @@ pub enum QueryError {
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 
-    #[error("failed to apply modifiers to {ship}")]
-    Modifiers {
+    #[error("failed to compute the stats of {ship}")]
+    Build {
         ship: String,
         #[source]
-        source: ModifierError,
+        source: BuildError,
     },
 
     #[error("not a readable World of Warships replay")]

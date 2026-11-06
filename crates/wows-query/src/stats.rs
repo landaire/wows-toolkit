@@ -6,6 +6,10 @@ use serde::Serialize;
 use wows_core::units::Km;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
+use wows_ship_stats::Derivation;
+use wows_ship_stats::DerivedRow;
+use wows_ship_stats::DerivedStat;
+use wows_ship_stats::StockRanges;
 use wowsunpack::game_params::ttx::AttributionLine;
 use wowsunpack::game_params::ttx::ContributorLine;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -27,6 +31,7 @@ use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::LoadoutRequest;
 use crate::loadout::ResolvedLoadout;
+use crate::loadout::build_failed;
 use crate::names::Interpretations;
 use crate::rates::Rates;
 use crate::ships::Ship;
@@ -127,10 +132,11 @@ pub struct StatChange {
     pub because: Vec<String>,
 }
 
-/// A computed stat card and its provenance.
+/// A computed stat card, its provenance and the stats derived from it.
 pub(crate) struct Card {
     pub(crate) stats: ShipStats,
     pub(crate) provenance: ShipStatsProvenance,
+    pub(crate) derived: Vec<DerivedRow>,
     pub(crate) active_conditions: Vec<String>,
 }
 
@@ -155,12 +161,14 @@ impl GameData {
         let changes = if modified {
             let baseline = self.card(ship, &self.stock_loadout())?;
             let attributions = render_attributions(&card.provenance, &rows, self.provider(), self.provider());
-            changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true)
+            let mut changes = changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true);
+            changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout));
+            changes
         } else {
             Vec::new()
         };
 
-        let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card.stats, self) } else { Vec::new() };
+        let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card, self) } else { Vec::new() };
 
         let build_stats = if loadout.is_empty() { Some(self.weapon_builds(ship)?) } else { None };
 
@@ -218,10 +226,34 @@ impl GameData {
         selection: &ShipUpgradeSelection,
     ) -> Result<Card, QueryError> {
         let effects = self.effective_modifiers(ship, loadout)?;
-        let (stats, provenance) =
-            effects.modifiers.stats_explained(&ship.param, selection, ship.tier.0, self.provider());
+        let card = effects.build.card(&ship.param, selection, self.provider()).map_err(build_failed(ship))?;
+        let derived = Derivation {
+            ship: &ship.param,
+            selection,
+            stats: &card.stats,
+            modifiers: effects.build.modifiers.bundle(),
+            stock_ranges: self.stock_ranges(ship)?,
+        }
+        .rows();
 
-        Ok(Card { stats, provenance, active_conditions: effects.active_conditions })
+        Ok(Card {
+            stats: card.stats,
+            provenance: card.provenance,
+            derived,
+            active_conditions: effects.active_conditions,
+        })
+    }
+
+    /// Firing ranges of the stock card, where the derived dispersions are
+    /// measured.
+    pub(crate) fn stock_ranges(&self, ship: &Ship) -> Result<StockRanges, QueryError> {
+        let effects = self.effective_modifiers(ship, &self.stock_loadout())?;
+        let stock = effects
+            .build
+            .stats(&ship.param, &ShipUpgradeSelection::stock(&ship.param), self.provider())
+            .map_err(build_failed(ship))?;
+
+        Ok(StockRanges::from_stock_card(&stock))
     }
 }
 
@@ -232,11 +264,18 @@ pub(crate) fn stat_label(label: &str, qualifier: Option<&str>) -> String {
     }
 }
 
-fn stat_lines(stats: &ShipStats, game: &GameData) -> Vec<String> {
-    render_stat_rows(&stats.rows(), game.provider())
+fn stat_lines(card: &Card, game: &GameData) -> Vec<String> {
+    let mut lines: Vec<String> = render_stat_rows(&card.stats.rows(), game.provider())
         .into_iter()
         .map(|line| format!("{}: {}", stat_label(&line.label, line.qualifier.as_deref()), line.value))
-        .collect()
+        .collect();
+    lines.extend(
+        card.derived
+            .iter()
+            .map(|row| format!("{}: {}", stat_label(row.stat.label(), row.qualifier.as_deref()), row.value)),
+    );
+
+    lines
 }
 
 /// Stats `keep` accepts that differ between the cards, with the loadout
@@ -267,6 +306,51 @@ pub(crate) fn changes(
                 to: delta.to,
                 because,
             }
+        })
+        .collect()
+}
+
+/// Derived stats that differ between the cards, with the loadout inputs that
+/// moved the card stats they are computed from.
+fn derived_changes(
+    baseline: &[DerivedRow],
+    candidate: &[DerivedRow],
+    attributions: &[AttributionLine],
+    loadout: &ResolvedLoadout,
+) -> Vec<StatChange> {
+    let mut keys: Vec<(DerivedStat, Option<&str>)> = Vec::new();
+    for row in baseline.iter().chain(candidate) {
+        let key = (row.stat, row.qualifier.as_deref());
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    let value = |rows: &[DerivedRow], (stat, qualifier): (DerivedStat, Option<&str>)| {
+        rows.iter().find(|row| row.stat == stat && row.qualifier.as_deref() == qualifier).map(|row| row.value)
+    };
+
+    keys.into_iter()
+        .filter_map(|key| {
+            let (from, to) = (value(baseline, key), value(candidate, key));
+            let (from, to) = (from.map(|value| value.to_string()), to.map(|value| value.to_string()));
+            if from == to {
+                return None;
+            }
+
+            let (stat, qualifier) = key;
+            let mut because: Vec<String> = Vec::new();
+            for line in attributions.iter().filter(|line| {
+                stat.sources().contains(&line.stat)
+                    && (line.qualifier.is_none() || line.qualifier.as_deref() == qualifier)
+            }) {
+                for cause in causes(line, loadout) {
+                    if !because.contains(&cause) {
+                        because.push(cause);
+                    }
+                }
+            }
+
+            Some(StatChange { stat: stat_label(stat.label(), qualifier), from, to, because })
         })
         .collect()
 }

@@ -17,6 +17,7 @@ use wows_core::units::Meters;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
+use wows_ship_stats::mounts::aiming_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::labels::TtxStat;
@@ -29,7 +30,6 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::HullUpgradeConfig;
 use wowsunpack::game_params::types::MountPoint;
 
-use crate::armament::selected_mounts;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AppliedSkill;
@@ -738,7 +738,7 @@ impl GameData {
             return Err(QueryError::InvalidArguments { reason: "range_km must be 0 or more" });
         }
 
-        let modifiers = self.effective_modifiers(ship, loadout)?.modifiers;
+        let modifiers = self.effective_modifiers(ship, loadout)?.build.modifiers;
         let Some(profile) = artillery_dispersion(&ship.param, selection, modifiers.bundle()) else {
             return Ok(None);
         };
@@ -767,13 +767,7 @@ pub(crate) fn weapon_mounts<'a>(
         Weapon::Torpedoes => ComponentType::Torpedoes,
     };
 
-    let mut mounts: Vec<(&MountPoint, u32)> = selected_mounts(ship, selection, component_type)
-        .iter()
-        .filter(|mount| mount.traverse().is_some())
-        .filter_map(|mount| Some((mount, mount.num_barrels()?)))
-        .collect();
-    mounts.sort_by(|(left, _), (right, _)| left.hp_name().cmp(right.hp_name()));
-    mounts
+    aiming_mounts(&ship.param, selection, component_type)
 }
 
 /// The aiming mounts of one weapon, each with the facing of its hardpoint.

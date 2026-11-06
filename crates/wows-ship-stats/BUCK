@@ -1,0 +1,25 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+WOWS_SHIP_STATS_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+]
+
+workspace_library(
+    name = "wows_ship_stats",
+    crate = "wows_ship_stats",
+    package = "wows-ship-stats",
+    version = "0.1.0",
+    deps = WOWS_SHIP_STATS_DEPS,
+)
+
+workspace_test(
+    name = "wows_ship_stats_test",
+    crate = "wows_ship_stats",
+    crate_root = "src/lib.rs",
+    package = "wows-ship-stats",
+    version = "0.1.0",
+    deps = WOWS_SHIP_STATS_DEPS,
+)

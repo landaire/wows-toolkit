@@ -34,6 +34,7 @@ use wows_core::units::Meters;
 use wows_core::units::Millimeters;
 use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
+use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
@@ -45,7 +46,7 @@ use crate::error::QueryError;
 use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::ResolvedLoadout;
-use crate::loadout::Triggers;
+use crate::loadout::build_failed;
 use crate::modules::ModuleKind;
 use crate::ships::Ship;
 use crate::stat_search::skills_fit;
@@ -409,13 +410,11 @@ impl<'a> Planner<'a> {
 
         let loadout = self.loadout(&key.items, triggered);
         let effects = self.game.effective_modifiers(self.ship, &loadout)?;
-        let stats = effects.modifiers.stats(
-            &self.ship.param,
-            &self.selections[selection].0,
-            self.ship.tier.0,
-            self.game.provider(),
-        );
-        let outcome = Rc::new(Outcome { stats, bundle: effects.modifiers.bundle().clone(), selection });
+        let stats = effects
+            .build
+            .stats(&self.ship.param, &self.selections[selection].0, self.game.provider())
+            .map_err(build_failed(self.ship))?;
+        let outcome = Rc::new(Outcome { stats, bundle: effects.build.modifiers.bundle().clone(), selection });
         self.outcomes.borrow_mut().insert(key, Rc::clone(&outcome));
         Ok(outcome)
     }
