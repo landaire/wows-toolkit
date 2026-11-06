@@ -43351,6 +43351,7 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    rustc_link_lib = True,
     version = "0.6.0",
 )
 

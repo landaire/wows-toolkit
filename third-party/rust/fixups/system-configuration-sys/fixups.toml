@@ -1,1 +1,4 @@
-buildscript.run = true
+[buildscript.run]
+# The build script links the SystemConfiguration framework on Apple targets;
+# without it hyper-util's macOS system proxy lookup fails to link.
+rustc_link_lib = true
