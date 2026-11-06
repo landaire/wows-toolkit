@@ -11,6 +11,8 @@ pub mod table;
 
 pub mod chart;
 
+pub mod replay_set;
+
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::battle_report::NormalizedBattleReport;

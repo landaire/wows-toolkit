@@ -139,6 +139,38 @@ impl PerGameStat {
         }
     }
 
+    /// A game the shared viewmodel read, as the stats tab renders it.
+    pub fn from_shared(game: &wows_toolkit_viewmodel::stats::PerGameStat) -> Self {
+        Self {
+            ship_name: game.ship_name.clone(),
+            ship_id: game.ship_id,
+            game_time: game.game_time.clone(),
+            sort_key: game.sort_key.clone(),
+            player_id: game.player_id,
+            damage: game.damage,
+            spotting_damage: game.spotting_damage,
+            frags: game.frags,
+            raw_xp: game.raw_xp,
+            base_xp: game.base_xp,
+            is_win: game.is_win,
+            is_loss: game.is_loss,
+            is_draw: game.is_draw,
+            is_div: game.is_div,
+            match_group: game.match_group.clone(),
+            achievements: game
+                .achievements
+                .iter()
+                .map(|achievement| SerializableAchievement {
+                    game_param_id: achievement.game_param_id,
+                    display_name: achievement.display_name.clone(),
+                    description: achievement.description.clone(),
+                    icon_key: achievement.icon_key.clone(),
+                    count: achievement.count,
+                })
+                .collect(),
+        }
+    }
+
     /// Create a PerGameStat from a replay
     pub fn from_replay(replay: &Replay, metadata_provider: &GameMetadataProvider) -> Option<Self> {
         if replay.battle_results_are_pending() {

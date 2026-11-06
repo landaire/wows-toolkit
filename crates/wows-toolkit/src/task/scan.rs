@@ -179,6 +179,16 @@ pub fn scan_paths(
     DirectoryScan { root, by_build, unreadable, missing_builds, total }
 }
 
+/// The client version a replay's header reports. Only the plaintext header is
+/// read: no decrypt, no inflate, no packet stream. A header that will not
+/// parse costs this file. The borrowed parse keeps the bulk of the metadata
+/// strings unowned when all the caller wants is the client version.
+pub(crate) fn read_header_version(path: &Path) -> Option<Version> {
+    let blob = wows_replays::ReplayFile::read_meta_blob(path).ok()?;
+    let meta = wows_replays::ReplayMetaRef::from_slice(&blob).ok()?;
+    Version::try_from_client_exe(&meta.clientVersionFromExe)
+}
+
 /// Walk `root` and read each replay's header, without reading any packet
 /// stream. The result is retained by the caller so the read stage does not walk
 /// the directory a second time.
@@ -206,15 +216,7 @@ pub fn start_scan_directory(
         let scan = scan_paths(
             root,
             paths,
-            |path| {
-                // Only the plaintext header is read: no decrypt, no inflate, no
-                // packet stream. A header that will not parse costs this file.
-                // The borrowed parse keeps the bulk of the metadata strings
-                // unowned when all the scan wants is the client version.
-                let blob = wows_replays::ReplayFile::read_meta_blob(path).ok()?;
-                let meta = wows_replays::ReplayMetaRef::from_slice(&blob).ok()?;
-                Version::try_from_client_exe(&meta.clientVersionFromExe)
-            },
+            read_header_version,
             |request| deps.build_cache.has_data_for(request),
             |progress| {
                 let sent = update_tx.send(crate::task::replays::IngestUpdate::Stage {

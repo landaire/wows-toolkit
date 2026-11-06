@@ -3678,12 +3678,31 @@ impl ToolkitTabViewer<'_> {
     fn build_file_listing(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         let grouping = self.tab_state.persisted.read().settings.replay.grouping;
 
+        if ws_id != WorkspaceId::LIVE {
+            self.directory_stats_button(ui, ws_id);
+        }
         self.show_ingest_progress(ui, ws_id);
 
         match grouping {
             ReplayGrouping::None => self.build_file_listing_ungrouped(ui, ws_id),
             ReplayGrouping::Date => self.build_file_listing_grouped(ui, ws_id, GroupedListing::Date),
             ReplayGrouping::Ship => self.build_file_listing_grouped(ui, ws_id, GroupedListing::Ship),
+        }
+    }
+
+    /// Asks for a stats tab over every replay under this listing's directory.
+    /// The app opens it after the dock has drawn.
+    fn directory_stats_button(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let can_parse = self.tab_state.build_cache.is_some();
+        let button = egui::Button::new(wt_translations::icon_t(icons::CHART_BAR, &t!("ui.stats.open_directory_stats")));
+        let response = ui.add_enabled(can_parse, button);
+        let response = if can_parse {
+            response.on_hover_text(t!("ui.stats.open_directory_stats_tooltip"))
+        } else {
+            response.on_disabled_hover_text(t!("ui.stats.directory_stats_unavailable"))
+        };
+        if response.clicked() {
+            self.tab_state.pending_directory_stats = Some(ws_id);
         }
     }
 

@@ -563,6 +563,19 @@ pub struct TabState {
     /// it can only be set through [`Self::set_active_workspace`], which
     /// refuses to point it at a workspace that is not open.
     active_workspace_id: WorkspaceId,
+    /// Stats panes over the replays under one directory each, keyed by the
+    /// handle their `Tab::DirectoryStats` carries.
+    pub directory_stats: std::collections::BTreeMap<
+        crate::data::directory_stats::DirectoryStatsId,
+        crate::data::directory_stats::DirectoryStatsPane,
+    >,
+    /// The next id a directory stats pane is handed. Only ever increases, so a
+    /// closed pane's id is never reused by a later one.
+    pub(crate) next_directory_stats_id: u64,
+    /// A workspace whose listing asked for a stats pane over its directory.
+    /// Consumed by the app loop after the dock has drawn, which is the only
+    /// place the outer dock can be written.
+    pub pending_directory_stats: Option<WorkspaceId>,
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
@@ -739,6 +752,9 @@ impl Default for TabState {
             workspaces: std::collections::BTreeMap::new(),
             next_workspace_id: 1,
             active_workspace_id: WorkspaceId::LIVE,
+            directory_stats: std::collections::BTreeMap::new(),
+            next_directory_stats_id: 0,
+            pending_directory_stats: None,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),

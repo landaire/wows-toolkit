@@ -1,4 +1,5 @@
 pub mod build_request;
+pub mod directory_stats;
 pub mod game_data_download;
 pub mod live_match_stats;
 pub mod networking;
@@ -218,6 +219,12 @@ pub enum BackgroundTaskKind {
     ScanningDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
         rx: UiInbox<replays::IngestUpdate>,
+    },
+    /// Parsing every replay under a directory for the stats pane `pane`. `rx`
+    /// carries one update per replay so the pane fills as the read runs.
+    ReadingDirectoryStats {
+        pane: crate::data::directory_stats::DirectoryStatsId,
+        rx: UiInbox<directory_stats::DirectoryStatsUpdate>,
     },
 }
 
@@ -475,6 +482,10 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label(t!("ui.messages.reading_replay_directory"));
                     }
+                    BackgroundTaskKind::ReadingDirectoryStats { .. } => {
+                        ui.spinner();
+                        ui.label(t!("ui.stats.directory_reading_task"));
+                    }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)
                     | BackgroundTaskKind::OpenFileViewer(_) => {
@@ -587,6 +598,11 @@ pub enum BackgroundTaskCompletion {
         /// enum is moved through the task channel by value.
         scan: Box<crate::task::scan::DirectoryScan>,
     },
+    /// A directory stats read finished. Its games arrived as
+    /// [`directory_stats::DirectoryStatsUpdate`]s while it ran.
+    DirectoryStatsRead {
+        pane: crate::data::directory_stats::DirectoryStatsId,
+    },
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -657,6 +673,7 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::DirectoryScanned { workspace, scan } => {
                 f.debug_struct("DirectoryScanned").field("workspace", workspace).field("total", &scan.total).finish()
             }
+            Self::DirectoryStatsRead { pane } => f.debug_struct("DirectoryStatsRead").field("pane", pane).finish(),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {
                 f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion))

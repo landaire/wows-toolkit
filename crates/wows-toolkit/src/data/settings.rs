@@ -277,6 +277,7 @@ impl Default for GameSettings {
 }
 
 /// Session stats display filters.
+#[derive(Clone, PartialEq)]
 pub struct StatsFilterSettings {
     pub limit_enabled: bool,
     pub game_count: usize,

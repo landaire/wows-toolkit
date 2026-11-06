@@ -137,6 +137,8 @@ pub enum Tab {
     ModManager,
     ArmorViewer,
     Stats,
+    /// Stats over the replays under one directory, identified by its pane.
+    DirectoryStats(crate::data::directory_stats::DirectoryStatsId),
     Search,
     #[cfg(feature = "launcher")]
     Launcher,
@@ -228,6 +230,20 @@ impl ToolkitTabViewer<'_> {
             };
             return wt_translations::icon_t(icons::FOLDER_OPEN, &title);
         }
+        if let Tab::DirectoryStats(id) = tab {
+            // A tab outlives its pane by a frame on the close path.
+            let named = self
+                .tab_state
+                .directory_stats
+                .get(id)
+                .map(|pane| crate::ui::replay_parser::shorten_root(&pane.root))
+                .filter(|dir| !dir.is_empty());
+            let title = match named {
+                Some(dir) => t!("ui.tabs.directory_stats", dir = dir).into_owned(),
+                None => t!("ui.tabs.stats").into_owned(),
+            };
+            return wt_translations::icon_t(icons::CHART_BAR, &title);
+        }
         let (icon, key) = match tab {
             Tab::Unpacker => (icons::ARCHIVE, "ui.tabs.unpacker"),
             Tab::Settings => (icons::GEAR_FINE, "ui.tabs.settings"),
@@ -235,7 +251,7 @@ impl ToolkitTabViewer<'_> {
             Tab::PlayerTracker => (icons::DETECTIVE, "ui.tabs.player_tracker"),
             Tab::ModManager => (icons::WRENCH, "ui.tabs.mod_manager"),
             Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
-            Tab::Stats => (icons::CHART_BAR, "ui.tabs.stats"),
+            Tab::Stats | Tab::DirectoryStats(_) => (icons::CHART_BAR, "ui.tabs.stats"),
             Tab::Search => (icons::MAGNIFYING_GLASS, "ui.tabs.search"),
             #[cfg(feature = "launcher")]
             Tab::Launcher => (icons::ROCKET_LAUNCH, "ui.tabs.launcher"),
@@ -288,6 +304,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ModManager => self.build_mod_manager_tab(ui),
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
             Tab::Stats => self.build_stats_tab(ui),
+            Tab::DirectoryStats(id) => self.build_directory_stats_tab(ui, *id),
             Tab::Search => self.build_search_tab(ui),
             #[cfg(feature = "launcher")]
             Tab::Launcher => self.build_launcher_tab(ui),
@@ -302,9 +319,10 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 
     /// Right-clicking a replay tab offers a search over just that tab's own
-    /// replays. egui_dock 0.20.1 calls this hook from its leaf tab-bar
-    /// (`show/leaf.rs`) whenever `DockArea::tab_context_menus` is on, which it
-    /// is by default and which this app leaves alone.
+    /// replays, and for a directory tab a stats tab over them. egui_dock
+    /// 0.20.1 calls this hook from its leaf tab-bar (`show/leaf.rs`) whenever
+    /// `DockArea::tab_context_menus` is on, which it is by default and which
+    /// this app leaves alone.
     fn context_menu(&mut self, ui: &mut Ui, tab: &mut Self::Tab, _path: egui_dock::NodePath) {
         let Tab::Replays(id) = *tab else {
             return;
@@ -316,11 +334,22 @@ impl TabViewer for ToolkitTabViewer<'_> {
             self.search_replay_source(source);
             ui.close();
         }
+        if id != WorkspaceId::LIVE
+            && ui
+                .add_enabled(
+                    self.tab_state.build_cache.is_some(),
+                    egui::Button::new(t!("ui.stats.open_directory_stats")),
+                )
+                .clicked()
+        {
+            self.tab_state.pending_directory_stats = Some(id);
+            ui.close();
+        }
     }
 
     fn is_closeable(&self, tab: &Self::Tab) -> bool {
         match tab {
-            Tab::Search => true,
+            Tab::Search | Tab::DirectoryStats(_) => true,
             Tab::Replays(id) => *id != WorkspaceId::LIVE,
             Tab::Unpacker | Tab::Settings | Tab::PlayerTracker | Tab::ModManager | Tab::ArmorViewer | Tab::Stats => {
                 false
@@ -330,15 +359,16 @@ impl TabViewer for ToolkitTabViewer<'_> {
         }
     }
 
-    // Closing a non-live `Replays` tab also drops its workspace. Runs twice
-    // on egui_dock's context-menu close path (once from the menu action, once
-    // from the deferred removal), so `close_workspace` must tolerate being
-    // called again for an id it already removed.
+    // Closing a non-live `Replays` tab also drops its workspace, and closing a
+    // `DirectoryStats` tab drops its pane. Runs twice on egui_dock's
+    // context-menu close path (once from the menu action, once from the
+    // deferred removal), so both must tolerate being called again for an id
+    // already removed.
     fn on_close(&mut self, tab: &mut Self::Tab) -> egui_dock::tab_viewer::OnCloseResponse {
-        if let Tab::Replays(id) = tab
-            && *id != WorkspaceId::LIVE
-        {
-            self.tab_state.close_workspace(*id);
+        match tab {
+            Tab::Replays(id) if *id != WorkspaceId::LIVE => self.tab_state.close_workspace(*id),
+            Tab::DirectoryStats(id) => self.tab_state.close_directory_stats(*id),
+            _ => {}
         }
         egui_dock::tab_viewer::OnCloseResponse::Close
     }
@@ -1698,6 +1728,7 @@ impl WowsToolkitApp {
             let mut shown_download_progress = false;
 
             self.drain_ingest_updates();
+            self.drain_directory_stats_updates();
 
             // Snapshotted before the loop: a completion handler inside it can
             // push follow-up tasks, and those are not drawn (or wake-registered)
@@ -1845,6 +1876,15 @@ impl WowsToolkitApp {
                                 let offered = self.finish_directory_reingest(workspace_id);
                                 self.finished_reingest_offer = offered.map(|offered| (workspace_id, offered));
                             }
+                            // Finished here rather than in the completion arm
+                            // so an errored or disconnected read also lets the
+                            // pane be reloaded.
+                            BackgroundTaskKind::ReadingDirectoryStats { pane, rx } => {
+                                let pane = *pane;
+                                let tail: Vec<_> = rx.read_without_ctx().collect();
+                                self.tab_state.apply_directory_stats_updates(tail);
+                                self.tab_state.finish_directory_stats(pane);
+                            }
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1911,6 +1951,20 @@ impl WowsToolkitApp {
         }
         for update in updates {
             self.tab_state.apply_ingest_update(update);
+        }
+    }
+
+    /// Move whatever every running directory stats read has sent since the
+    /// last frame into the panes those reads belong to.
+    fn drain_directory_stats_updates(&mut self) {
+        let mut updates = Vec::new();
+        for task in &self.tab_state.background_tasks {
+            if let BackgroundTaskKind::ReadingDirectoryStats { rx, .. } = &task.kind {
+                updates.extend(rx.read_without_ctx());
+            }
+        }
+        if !updates.is_empty() {
+            self.tab_state.apply_directory_stats_updates(updates);
         }
     }
 
@@ -2463,6 +2517,9 @@ impl WowsToolkitApp {
                         }
                     }
                 }
+                // The games arrived while the read ran, and the task's removal
+                // marked the pane finished.
+                BackgroundTaskCompletion::DirectoryStatsRead { .. } => {}
                 BackgroundTaskCompletion::RowSummariesLoaded { summaries, workspace, .. } => {
                     if let Some(target) = self.tab_state.workspace_mut(workspace) {
                         target.set_row_summaries(summaries);
@@ -4534,8 +4591,9 @@ impl WowsToolkitApp {
     }
 
     /// Focus the given dock tab, opening it first if it isn't currently docked.
-    /// Only closeable tabs (`Tab::Search`, non-live `Tab::Replays`) need a
-    /// fallback push: every other variant is always docked.
+    /// Only closeable tabs (`Tab::Search`, non-live `Tab::Replays`,
+    /// `Tab::DirectoryStats`) need a fallback push: every other variant is
+    /// always docked.
     fn focus_tab(&mut self, tab: &Tab) {
         if let Some(loc) = self.dock_state.find_tab(tab) {
             let _ = self.dock_state.set_active_tab(loc);
@@ -4544,6 +4602,7 @@ impl WowsToolkitApp {
         match tab {
             Tab::Search => self.dock_state.push_to_focused_leaf(Tab::Search),
             Tab::Replays(id) => self.dock_state.push_to_focused_leaf(Tab::Replays(*id)),
+            Tab::DirectoryStats(id) => self.dock_state.push_to_focused_leaf(Tab::DirectoryStats(*id)),
             _ => return,
         }
         if let Some(loc) = self.dock_state.find_tab(tab) {
@@ -4573,6 +4632,21 @@ impl WowsToolkitApp {
         let id = self.tab_state.open_directory_workspace(root.clone());
         self.focus_tab(&Tab::Replays(id));
         self.start_directory_scan(id, root);
+    }
+
+    /// Open a stats tab over every replay under `workspace`'s directory, or
+    /// focus the one already open for it. The stats come from parsing the
+    /// directory's replays, never from the session's recorded games.
+    fn open_directory_stats(&mut self, workspace: WorkspaceId) {
+        let Some(root) = self.tab_state.workspace(workspace).and_then(|workspace| workspace.root.clone()) else {
+            return;
+        };
+        match self.tab_state.open_directory_stats(root) {
+            Some(id) => self.focus_tab(&Tab::DirectoryStats(id)),
+            None => {
+                self.tab_state.toasts.lock().warning(t!("ui.stats.directory_stats_unavailable"));
+            }
+        }
     }
 
     /// Acts on a replay the search results table asked to open.
@@ -5005,6 +5079,10 @@ impl eframe::App for WowsToolkitApp {
 
         if std::mem::take(&mut self.tab_state.pending_focus_search) {
             self.focus_tab(&Tab::Search);
+        }
+
+        if let Some(workspace) = self.tab_state.pending_directory_stats.take() {
+            self.open_directory_stats(workspace);
         }
 
         self.handle_pending_search_open();
