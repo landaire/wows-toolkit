@@ -9,6 +9,7 @@ use std::path::PathBuf;
 mod download;
 mod steam;
 
+use wows_data_mgr::armor;
 use wows_data_mgr::detect;
 use wows_data_mgr::dump;
 use wows_data_mgr::manifest;
@@ -192,7 +193,11 @@ enum Commands {
 
     /// Print the VFS path globs the dump extracts, one per line. Feed these to
     /// `wowsunpack pkgs` to resolve the minimal set of .pkg files to download.
-    RequiredPaths,
+    RequiredPaths {
+        /// Print only the globs `extract-armor` reads.
+        #[arg(long)]
+        armor: bool,
+    },
 
     /// Add missing assets (maps, and with --with-gui the gui/ dirs) to an
     /// existing build without re-extracting data it already has.
@@ -832,9 +837,15 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             dump::gc_cas(output)?;
             return Ok(None);
         }
-        Commands::RequiredPaths => {
-            for glob in dump::required_path_globs() {
-                println!("{glob}");
+        Commands::RequiredPaths { armor } => {
+            if *armor {
+                for glob in armor::SOURCE_GLOBS {
+                    println!("{glob}");
+                }
+            } else {
+                for glob in dump::required_path_globs() {
+                    println!("{glob}");
+                }
             }
             return Ok(None);
         }
@@ -1150,7 +1161,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         | Commands::Relink { .. }
         | Commands::PruneMaterialized { .. }
         | Commands::Gc { .. }
-        | Commands::RequiredPaths
+        | Commands::RequiredPaths { .. }
         | Commands::Update { .. }
         | Commands::Verify { .. }
         | Commands::MigrateCas { .. }
