@@ -124,6 +124,67 @@ impl TabViewer for ArmorPaneViewer<'_> {
     }
 }
 
+fn update_trajectory_isolation(pane: &mut ArmorPane) -> bool {
+    let any_plates = pane.trajectories.iter().any(|trajectory| trajectory.show_plates_active);
+    let any_zones = pane.trajectories.iter().any(|trajectory| trajectory.show_zones_active);
+    if !any_plates && !any_zones {
+        pane.part_visibility.clear();
+        pane.plate_visibility.clear();
+        return false;
+    }
+
+    let mut hit_zones = std::collections::HashSet::new();
+    let mut hit_plates = std::collections::HashSet::new();
+    for trajectory in &pane.trajectories {
+        if trajectory.show_zones_active {
+            for hit in &trajectory.result.hits {
+                hit_zones.insert(hit.zone.clone());
+            }
+        }
+        if trajectory.show_plates_active {
+            for hit in &trajectory.result.hits {
+                hit_plates.insert((
+                    hit.zone.clone(),
+                    hit.material.clone(),
+                    (hit.thickness.value() * 10.0).round() as i32,
+                ));
+            }
+        }
+    }
+
+    let Some(armor) = pane.loaded_armor.as_ref() else {
+        return true;
+    };
+    pane.plate_visibility.clear();
+    for zone in &armor.zone_part_plates {
+        let zone_hit = hit_zones.contains(&zone.name);
+        for part in &zone.parts {
+            let part_key = (zone.name.clone(), part.name.clone());
+            if zone_hit {
+                pane.part_visibility.insert(part_key, true);
+                continue;
+            }
+
+            let part_has_hit = part
+                .plates
+                .iter()
+                .any(|&thickness| hit_plates.contains(&(zone.name.clone(), part.name.clone(), thickness)));
+            pane.part_visibility.insert(part_key, part_has_hit);
+            if part_has_hit {
+                for &thickness in &part.plates {
+                    let plate_key = (zone.name.clone(), part.name.clone(), thickness);
+                    if hit_plates.contains(&plate_key) {
+                        pane.plate_visibility.remove(&plate_key);
+                    } else {
+                        pane.plate_visibility.insert(plate_key, false);
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
         let armor_defaults = self.tab_state.persisted.read().armor_viewer_defaults.clone();
@@ -948,12 +1009,13 @@ impl ToolkitTabViewer<'_> {
                 // Apply per-arc range changes
                 let cam_dist = pane.viewport.camera.distance;
                 let mo = pane.marker_opacity;
+                let mut trajectory_hits_changed = false;
                 for (ti, new_range) in &traj_actions.per_arc_range_changes {
                     if *ti < pane.trajectories.len()
                         && (pane.trajectories[*ti].meta.range.value() - new_range.value()).abs() > 0.01
                     {
                         pane.trajectories[*ti].meta.range = *new_range;
-                        recompute_trajectory_for_range(
+                        trajectory_hits_changed |= recompute_trajectory_for_range(
                             &mut pane.trajectories[*ti],
                             comparison_ships_snapshot,
                             &mut pane.viewport,
@@ -1029,73 +1091,23 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 // Apply plate/zone isolation visibility
-                let any_isolation_changed = !traj_actions.arc_plate_toggles.is_empty()
+                let isolation_controls_changed = !traj_actions.arc_plate_toggles.is_empty()
                     || !traj_actions.arc_zone_toggles.is_empty()
                     || traj_actions.show_all_hit_plates
                     || traj_actions.show_all_hit_zones;
-                if any_isolation_changed {
-                    pane.undo_stack.push(VisibilitySnapshot {
-                        part_visibility: pane.part_visibility.clone(),
-                        plate_visibility: pane.plate_visibility.clone(),
-                    });
-
-                    let any_plates = pane.trajectories.iter().any(|t| t.show_plates_active);
-                    let any_zones = pane.trajectories.iter().any(|t| t.show_zones_active);
-
-                    if any_plates || any_zones {
-                        let mut hit_zones: std::collections::HashSet<String> = std::collections::HashSet::new();
-                        let mut hit_plates: std::collections::HashSet<PlateKey> = std::collections::HashSet::new();
-                        for traj in &pane.trajectories {
-                            if traj.show_zones_active {
-                                for hit in &traj.result.hits {
-                                    hit_zones.insert(hit.zone.clone());
-                                }
-                            }
-                            if traj.show_plates_active {
-                                for hit in &traj.result.hits {
-                                    hit_plates.insert((
-                                        hit.zone.clone(),
-                                        hit.material.clone(),
-                                        (hit.thickness.value() * 10.0).round() as i32,
-                                    ));
-                                }
-                            }
-                        }
-
-                        if let Some(ref armor) = pane.loaded_armor {
-                            pane.plate_visibility.clear();
-                            for zone in &armor.zone_part_plates {
-                                let zone_hit = hit_zones.contains(&zone.name);
-                                for part in &zone.parts {
-                                    let part_key = (zone.name.clone(), part.name.clone());
-                                    if zone_hit {
-                                        pane.part_visibility.insert(part_key, true);
-                                    } else {
-                                        let part_has_hit = part
-                                            .plates
-                                            .iter()
-                                            .any(|&t| hit_plates.contains(&(zone.name.clone(), part.name.clone(), t)));
-                                        if part_has_hit {
-                                            pane.part_visibility.insert(part_key, true);
-                                            for &t in &part.plates {
-                                                let pk: PlateKey = (zone.name.clone(), part.name.clone(), t);
-                                                if hit_plates.contains(&pk) {
-                                                    pane.plate_visibility.remove(&pk);
-                                                } else {
-                                                    pane.plate_visibility.insert(pk, false);
-                                                }
-                                            }
-                                        } else {
-                                            pane.part_visibility.insert(part_key, false);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        pane.part_visibility.clear();
-                        pane.plate_visibility.clear();
+                let isolation_needs_refresh = trajectory_hits_changed
+                    && pane
+                        .trajectories
+                        .iter()
+                        .any(|trajectory| trajectory.show_plates_active || trajectory.show_zones_active);
+                if isolation_controls_changed || isolation_needs_refresh {
+                    if isolation_controls_changed {
+                        pane.undo_stack.push(VisibilitySnapshot {
+                            part_visibility: pane.part_visibility.clone(),
+                            plate_visibility: pane.plate_visibility.clone(),
+                        });
                     }
+                    update_trajectory_isolation(pane);
                     // Re-upload armor + overlays after visibility change
                     let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
                     crate::armor_viewer::common::reupload_after_zone_change(
@@ -1720,6 +1732,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
         // Undo/redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z / Ctrl+R)
         let mut zone_changed = crate::armor_viewer::common::handle_undo_redo(vp_ui, pane);
+        let mut trajectory_isolation_needs_refresh = false;
 
         // Ctrl+T toggles trajectory mode
         if vp_ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::T)) {
@@ -2007,13 +2020,13 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         let new_roll = pane.viewport.model_roll;
                         let cam_dist = pane.viewport.camera.distance;
                         let mo = pane.marker_opacity;
+                        let mut trajectory_hits_changed = false;
                         for ti in 0..pane.trajectories.len() {
-                            recompute_trajectory_for_roll(
+                            trajectory_hits_changed |= recompute_trajectory_for_roll(
                                 &mut pane.trajectories[ti],
                                 new_roll,
                                 comparison_ships,
                                 &mut pane.viewport,
-                                &pane.mesh_triangle_info,
                                 Some(&armor),
                                 &render_state.device,
                                 cam_dist,
@@ -2022,6 +2035,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 pane.continue_on_ricochet,
                             );
                         }
+                        trajectory_isolation_needs_refresh = trajectory_hits_changed
+                            && pane
+                                .trajectories
+                                .iter()
+                                .any(|trajectory| trajectory.show_plates_active || trajectory.show_zones_active);
                     }
                 });
                 vp_ui.separator();
@@ -2053,6 +2071,10 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 pane.display_window_open = open;
             }
             pane.loaded_armor = Some(armor);
+        }
+        if trajectory_isolation_needs_refresh {
+            update_trajectory_isolation(pane);
+            zone_changed = true;
         }
         if zone_changed {
             let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
@@ -2509,8 +2531,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     pane.comparison_ships_version = comparison_ships_version;
                     let cam_dist = pane.viewport.camera.distance;
                     let mo = pane.marker_opacity;
+                    let mut trajectory_hits_changed = false;
                     for ti in 0..pane.trajectories.len() {
-                        recompute_trajectory_for_range(
+                        trajectory_hits_changed |= recompute_trajectory_for_range(
                             &mut pane.trajectories[ti],
                             comparison_ships,
                             &mut pane.viewport,
@@ -2521,6 +2544,15 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             comparison_ships_version,
                             pane.continue_on_ricochet,
                         );
+                    }
+                    if trajectory_hits_changed
+                        && pane
+                            .trajectories
+                            .iter()
+                            .any(|trajectory| trajectory.show_plates_active || trajectory.show_zones_active)
+                    {
+                        update_trajectory_isolation(pane);
+                        zone_changed = true;
                     }
                 }
                 pane.comparison_ships_version = comparison_ships_version;
@@ -3827,6 +3859,90 @@ fn traj_marker(
     }
 }
 
+struct ArmorRayHit<'a> {
+    distance: f32,
+    position: Vec3,
+    normal: Vec3,
+    info: &'a wowsunpack::export::gltf_export::ArmorTriangleInfo,
+}
+
+fn cast_armor_trajectory(
+    armor: &crate::armor_viewer::state::LoadedShipArmor,
+    viewport: &crate::viewport_3d::Viewport3D,
+    impact_anchor: Vec3,
+    direction: Vec3,
+) -> (Vec3, Vec<crate::armor_viewer::penetration::TrajectoryHit>) {
+    let ray_origin = impact_anchor - direction * 50.0;
+    let (model_origin, model_direction) = viewport.ray_to_model_space(ray_origin, direction);
+    let mut raw_hits = Vec::new();
+
+    for mesh in &armor.meshes {
+        for (triangle_index, info) in mesh.triangle_info.iter().enumerate() {
+            let index_offset = triangle_index * 3;
+            let Some(indices) = mesh.indices.get(index_offset..index_offset + 3) else {
+                continue;
+            };
+            let Some(mut p0) = mesh.positions.get(indices[0] as usize).copied() else {
+                continue;
+            };
+            let Some(mut p1) = mesh.positions.get(indices[1] as usize).copied() else {
+                continue;
+            };
+            let Some(mut p2) = mesh.positions.get(indices[2] as usize).copied() else {
+                continue;
+            };
+            if let Some(transform) = &mesh.transform {
+                p0 = transform_point(transform, p0);
+                p1 = transform_point(transform, p1);
+                p2 = transform_point(transform, p2);
+            }
+
+            let p0 = Vec3::from(p0);
+            let p1 = Vec3::from(p1);
+            let p2 = Vec3::from(p2);
+            let Some(distance) =
+                crate::viewport_3d::picking::ray_triangle_intersect(&model_origin, &model_direction, &p0, &p1, &p2)
+            else {
+                continue;
+            };
+            let model_position = model_origin + model_direction * distance;
+            let model_normal = (p1 - p0).cross(&(p2 - p0)).normalize();
+            raw_hits.push(ArmorRayHit {
+                distance,
+                position: viewport.pos_to_world_space(model_position),
+                normal: viewport.pos_to_world_space(model_normal).normalize(),
+                info,
+            });
+        }
+    }
+
+    raw_hits.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+    let start_index = raw_hits
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let a_distance = (a.position - impact_anchor).norm_squared();
+            let b_distance = (b.position - impact_anchor).norm_squared();
+            a_distance.partial_cmp(&b_distance).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    let relevant_hits = &raw_hits[start_index..];
+    let first_distance = relevant_hits.first().map_or(0.0, |hit| hit.distance);
+    let hits = relevant_hits
+        .iter()
+        .map(|hit| crate::armor_viewer::penetration::TrajectoryHit {
+            position: hit.position,
+            thickness: Millimeters::from(hit.info.thickness_mm),
+            zone: hit.info.zone.clone(),
+            material: hit.info.material_name.clone(),
+            angle_from_normal: crate::armor_viewer::penetration::impact_angle_from_normal(&direction, &hit.normal),
+            distance_from_start: ShipModelDistance::from(hit.distance - first_distance),
+        })
+        .collect();
+    (ray_origin, hits)
+}
+
 /// Recompute a trajectory's arc, impact data, detonation points, and 3D mesh for a new range.
 #[allow(clippy::too_many_arguments)]
 fn recompute_trajectory_for_range(
@@ -3839,9 +3955,11 @@ fn recompute_trajectory_for_range(
     marker_opacity: f32,
     comparison_ships_version: u64,
     continue_on_ricochet: bool,
-) {
+) -> bool {
     let range_meters = traj.meta.range.to_meters();
     let result = &mut traj.result;
+    let impact_anchor = result.hits.first().map(|hit| hit.position);
+    let mut hits_changed = false;
 
     // Derive horizontal approach direction from the existing shell direction
     let dir = result.direction;
@@ -3865,7 +3983,17 @@ fn recompute_trajectory_for_range(
         let horiz_angle = impact.impact_angle_horizontal;
         let cos_h = horiz_angle.cos();
         let sin_h = horiz_angle.sin();
-        result.direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
+        let new_direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
+        if (new_direction - result.direction).norm_squared() > 1e-12 {
+            result.direction = new_direction;
+            if let (Some(impact_anchor), Some(armor)) = (impact_anchor, loaded_armor) {
+                let (ray_origin, hits) = cast_armor_trajectory(armor, viewport, impact_anchor, new_direction);
+                result.origin = ray_origin;
+                result.hits = hits;
+                result.total_armor = result.hits.iter().map(|hit| hit.thickness).sum();
+                hits_changed = true;
+            }
+        }
     }
 
     // Recompute per-ship arcs
@@ -3954,6 +4082,7 @@ fn recompute_trajectory_for_range(
 
     // Update the shell sim cache for the analysis panel.
     update_shell_sim_cache(traj, comparison_ships, comparison_ships_version, continue_on_ricochet);
+    hits_changed
 }
 
 /// Recompute a trajectory after the ship's roll changes.
@@ -3967,84 +4096,43 @@ fn recompute_trajectory_for_roll(
     new_roll: f32,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     viewport: &mut crate::viewport_3d::Viewport3D,
-    mesh_triangle_info: &[(crate::viewport_3d::MeshId, Vec<crate::armor_viewer::state::ArmorTriangleTooltip>)],
     loaded_armor: Option<&crate::armor_viewer::state::LoadedShipArmor>,
     device: &wgpu::Device,
     cam_distance: f32,
     marker_opacity: f32,
     comparison_ships_version: u64,
     continue_on_ricochet: bool,
-) {
-    let old_roll = traj.created_at_roll;
-    let delta = old_roll - new_roll;
+) -> bool {
+    let delta = traj.created_at_roll - new_roll;
+    let rotation = Rotation3::from_axis_angle(&Vector3::z_axis(), delta);
+    let rotated_direction = (rotation * traj.result.direction).normalize();
+    let rotated_anchor = traj.result.hits.first().map(|hit| rotation * hit.position);
+    let mut hits_changed = false;
 
-    // Rotate origin and direction around Z by delta to transform from old model space to new.
-    let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), delta);
-
-    let rotated_origin = rz * traj.result.origin;
-    let rotated_dir = (rz * traj.result.direction).normalize();
-
-    // Re-ray-cast against armor meshes
-    let ray_origin = rotated_origin - rotated_dir * 50.0;
-    let all_hits = viewport.pick_all_ray(ray_origin, rotated_dir);
-
-    // Find the hit closest to the rotated origin (same logic as initial trajectory creation)
-    let start_idx = all_hits
-        .iter()
-        .enumerate()
-        .min_by(|(_, (a, _)), (_, (b, _))| {
-            let da = (a.world_position - rotated_origin).norm_squared();
-            let db = (b.world_position - rotated_origin).norm_squared();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    let relevant_hits = &all_hits[start_idx..];
-
-    // Rebuild trajectory hits
-    let mut traj_hits = Vec::new();
-    let first_dist = relevant_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
-    for (hit, normal) in relevant_hits {
-        let tooltip = mesh_triangle_info
-            .iter()
-            .find(|(id, _)| *id == hit.mesh_id)
-            .and_then(|(_, infos)| infos.get(hit.triangle_index));
-
-        if let Some(info) = tooltip {
-            let angle = crate::armor_viewer::penetration::impact_angle_from_normal(&rotated_dir, normal);
-            traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
-                position: hit.world_position,
-                thickness: Millimeters::from(info.thickness_mm),
-                zone: info.zone.clone(),
-                material: info.material_name.clone(),
-                angle_from_normal: angle,
-                distance_from_start: ShipModelDistance::from(hit.distance - first_dist),
-            });
-        }
+    traj.result.direction = rotated_direction;
+    if let (Some(impact_anchor), Some(armor)) = (rotated_anchor, loaded_armor) {
+        let (ray_origin, hits) = cast_armor_trajectory(armor, viewport, impact_anchor, rotated_direction);
+        traj.result.origin = ray_origin;
+        traj.result.hits = hits;
+        traj.result.total_armor = traj.result.hits.iter().map(|hit| hit.thickness).sum();
+        hits_changed = true;
+    } else {
+        traj.result.origin = rotation * traj.result.origin;
     }
-
-    let total_armor: Millimeters = traj_hits.iter().map(|h| h.thickness).sum();
-
-    // Update stored result with new hits and direction
-    traj.result.origin = rotated_origin;
-    traj.result.direction = rotated_dir;
-    traj.result.hits = traj_hits;
-    traj.result.total_armor = total_armor;
     traj.created_at_roll = new_roll;
 
-    // Recompute arcs, detonation points, visualization mesh, and shell sim cache
-    // (reuses the existing range-based recomputation which handles all of these)
-    recompute_trajectory_for_range(
-        traj,
-        comparison_ships,
-        viewport,
-        loaded_armor,
-        device,
-        cam_distance,
-        marker_opacity,
-        comparison_ships_version,
-        continue_on_ricochet,
-    );
+    hits_changed
+        | recompute_trajectory_for_range(
+            traj,
+            comparison_ships,
+            viewport,
+            loaded_armor,
+            device,
+            cam_distance,
+            marker_opacity,
+            comparison_ships_version,
+            continue_on_ricochet,
+        )
 }
 
 /// Recompute and cache per-shell simulation results for the analysis panel.

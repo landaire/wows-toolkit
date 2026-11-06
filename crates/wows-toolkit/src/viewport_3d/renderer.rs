@@ -1338,7 +1338,7 @@ impl Viewport3D {
 
     /// Transform a world-space ray into model space (inverse of model matrix).
     /// The model matrix is Ry(yaw) * Rz(-roll), so the inverse is Rz(+roll) * Ry(-yaw).
-    fn ray_to_model_space(&self, origin: Vec3, dir: Vec3) -> (Vec3, Vec3) {
+    pub(crate) fn ray_to_model_space(&self, origin: Vec3, dir: Vec3) -> (Vec3, Vec3) {
         let has_roll = self.model_roll.abs() > 1e-6;
         let has_yaw = self.model_yaw.abs() > 1e-6;
         if !has_roll && !has_yaw {
