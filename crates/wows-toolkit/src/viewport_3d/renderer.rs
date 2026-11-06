@@ -918,11 +918,8 @@ impl Viewport3D {
             // sRGB view would decode the stored bytes back to linear and show them
             // too dark, so egui gets a non-sRGB view of the same encoded bytes.
             // Backends without view reinterpretation (GLES) keep the sRGB view.
-            let reinterpret = render_state
-                .adapter
-                .get_downlevel_capabilities()
-                .flags
-                .contains(wgpu::DownlevelFlags::VIEW_FORMATS);
+            let reinterpret =
+                render_state.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::VIEW_FORMATS);
             let view_formats: &[wgpu::TextureFormat] = if reinterpret { &[DISPLAY_FORMAT] } else { &[] };
             let color_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("viewport_3d_color"),

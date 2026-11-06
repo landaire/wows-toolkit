@@ -18,15 +18,6 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedSender;
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::Button;
-use gpui_kit::component::h_flex;
-use gpui_kit::component::progress::Progress;
-use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::v_flex;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::App;
 use gpui_kit::Context;
 use gpui_kit::Entity;
@@ -38,7 +29,16 @@ use gpui_kit::StatefulInteractiveElement as _;
 use gpui_kit::Styled as _;
 use gpui_kit::Task;
 use gpui_kit::Window;
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::h_flex;
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::v_flex;
 use gpui_kit::div;
+use gpui_kit::prelude::FluentBuilder as _;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetGames;
@@ -301,19 +301,14 @@ fn read_directory(root: &Path, game_data: &GameDataCache, tx: &UnboundedSender<D
 
     let mut versions: Vec<Option<Version>> = vec![None; total];
     let mut scanned = 0;
-    let scan = for_each_path(
-        &paths,
-        workers,
-        read_header_version,
-        |index, version| {
-            scanned += 1;
-            // A header read that panicked leaves the slot empty, which counts
-            // the file unreadable.
-            versions[index] = version.flatten();
-            let progress = ReplaySetProgress { done: scanned, total };
-            to_flow(tx.unbounded_send(DirectoryStatsUpdate::Scanning(progress)))
-        },
-    );
+    let scan = for_each_path(&paths, workers, read_header_version, |index, version| {
+        scanned += 1;
+        // A header read that panicked leaves the slot empty, which counts
+        // the file unreadable.
+        versions[index] = version.flatten();
+        let progress = ReplaySetProgress { done: scanned, total };
+        to_flow(tx.unbounded_send(DirectoryStatsUpdate::Scanning(progress)))
+    });
     if scan.is_break() {
         return;
     }

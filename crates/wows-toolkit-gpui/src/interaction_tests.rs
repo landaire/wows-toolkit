@@ -291,7 +291,11 @@ fn a_grouping_chosen_in_the_listing_options_reaches_the_browser(cx: &mut TestApp
 
         window.click(grouping_choice(ReplayGrouping::Ship), cx);
         assert_eq!(window.find(grouping_choice(ReplayGrouping::Ship)).selected(), Some(true));
-        assert_eq!(window.find(grouping_choice(ReplayGrouping::Date)).selected(), Some(false), "the choices are exclusive");
+        assert_eq!(
+            window.find(grouping_choice(ReplayGrouping::Date)).selected(),
+            Some(false),
+            "the choices are exclusive"
+        );
     })
     .expect("the test window stays open");
 
@@ -603,7 +607,11 @@ fn the_loaded_grouping_reaches_the_browser_and_the_listing_options(cx: &mut Test
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
         window.click(LISTING_OPTIONS, cx);
-        assert_eq!(window.find(grouping_choice(ReplayGrouping::Ship)).selected(), Some(true), "and the options show it");
+        assert_eq!(
+            window.find(grouping_choice(ReplayGrouping::Ship)).selected(),
+            Some(true),
+            "and the options show it"
+        );
     })
     .expect("the test window stays open");
 }
@@ -812,7 +820,10 @@ fn a_restored_closed_left_chart_dock_reopens_from_its_rail(cx: &mut TestAppConte
                 let mut state = stats.dock_area().read(cx).dump(cx);
                 let right = state.right_dock.take().expect("the default layout holds the chart in the right dock");
                 state.left_dock = Some(DockState::new(right.panel().clone(), DockPlacement::Left, right.size(), false));
-                assert!(stats.restore_layout(state, window, cx), "a closed left chart dock is a layout restore accepts");
+                assert!(
+                    stats.restore_layout(state, window, cx),
+                    "a closed left chart dock is a layout restore accepts"
+                );
             });
         })
         .expect("the test window stays open");

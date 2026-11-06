@@ -1151,7 +1151,13 @@ impl ToolkitTabViewer<'_> {
         };
         show_results_table(ui, &mut delegate);
         let ResultsTable {
-            sort_clicked, open_path, copy_path, render_path, render_clipboard_path, preview_icon_hovered, ..
+            sort_clicked,
+            open_path,
+            copy_path,
+            render_path,
+            render_clipboard_path,
+            preview_icon_hovered,
+            ..
         } = delegate;
 
         // No row's preview icon was hovered this frame, whether the pointer

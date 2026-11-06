@@ -1,7 +1,7 @@
-#[path = "replay_directories.rs"]
-mod replay_directories;
 #[path = "directory_stats.rs"]
 mod directory_stats;
+#[path = "replay_directories.rs"]
+mod replay_directories;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;

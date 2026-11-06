@@ -861,7 +861,12 @@ impl ReplayInspectorView {
     /// The egui app's own batch to clipboard (`video_export.rs:488`): the videos
     /// go to a temporary directory this process does not clean up, because the
     /// clipboard holds paths into it until the reader pastes them.
-    pub(crate) fn render_many_to_clipboard(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn render_many_to_clipboard(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if paths.is_empty() {
             return;
         }
@@ -1809,11 +1814,7 @@ fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorVie
                 .font_weight(FontWeight::BOLD)
                 .child(t!("ui.replay.listing_caption").to_string()),
         )
-        .child(listing_options_popover(
-            entity.clone(),
-            view.replay_settings.clone(),
-            view.auto_load_latest_replay,
-        ))
+        .child(listing_options_popover(entity.clone(), view.replay_settings.clone(), view.auto_load_latest_replay))
         .child(listing_open_menu(entity))
 }
 
@@ -1842,12 +1843,10 @@ fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
         .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
             let file = opening.clone();
             let directory = opening.clone();
-            menu.item(PopupMenuItem::new(t!("ui.replay.open_file").into_owned()).on_click(
-                move |_event, window, cx| {
-                    let Some(view) = file.upgrade() else { return };
-                    view.update(cx, |view, cx| view.open_manually(window, cx));
-                },
-            ))
+            menu.item(PopupMenuItem::new(t!("ui.replay.open_file").into_owned()).on_click(move |_event, window, cx| {
+                let Some(view) = file.upgrade() else { return };
+                view.update(cx, |view, cx| view.open_manually(window, cx));
+            }))
             .item(PopupMenuItem::new(t!("ui.replay.open_directory").into_owned()).on_click(
                 move |_event, window, cx| {
                     let Some(view) = directory.upgrade() else { return };
@@ -2109,9 +2108,7 @@ impl Render for ReplayInspectorView {
                                                 v_flex()
                                                     .size_full()
                                                     .child(listing_header(entity.clone(), self, cx))
-                                                    .child(
-                                                        div().flex_1().min_h(px(0.)).child(self.browser.clone()),
-                                                    ),
+                                                    .child(div().flex_1().min_h(px(0.)).child(self.browser.clone())),
                                             ),
                                     )
                                     .child(resizable_panel().child(dock_content)),
