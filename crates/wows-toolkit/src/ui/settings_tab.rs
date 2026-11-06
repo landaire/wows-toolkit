@@ -19,6 +19,16 @@ use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
+
+/// Folder pickers opened from the settings tab.
+#[derive(Default)]
+pub struct SettingsDialogs {
+    wows_dir: FileDialogSlot,
+    cache_dir: FileDialogSlot,
+    auto_export_dir: FileDialogSlot,
+}
 
 /// What the stored twitch token is currently worth. `Absent` is not an error:
 /// nothing has been configured yet.
@@ -211,18 +221,22 @@ impl ToolkitTabViewer<'_> {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let wows_dir_dialog = &mut self.tab_state.settings_dialogs.wows_dir;
                         if ui
-                            .add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new(t!("ui.buttons.choose")))
+                            .add_enabled(
+                                self.tab_state.can_change_wows_dir && !wows_dir_dialog.is_pending(),
+                                egui::Button::new(t!("ui.buttons.choose")),
+                            )
                             .clicked()
                         {
-                            let folder = rfd::FileDialog::new().pick_folder();
-                            if let Some(folder) = folder {
-                                self.tab_state.prevent_changing_wows_dir();
-                                update_background_task!(
-                                    self.tab_state.background_tasks,
-                                    Some(self.tab_state.load_game_data(folder))
-                                );
-                            }
+                            wows_dir_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                        }
+                        if let Some(folder) = self.tab_state.settings_dialogs.wows_dir.poll_path() {
+                            self.tab_state.prevent_changing_wows_dir();
+                            update_background_task!(
+                                self.tab_state.background_tasks,
+                                Some(self.tab_state.load_game_data(folder))
+                            );
                         }
 
                         let show_text_error = self.tab_state.wows_dir_invalid;
@@ -276,9 +290,17 @@ impl ToolkitTabViewer<'_> {
                     if response.changed() {
                         self.tab_state.set_game_data_cache_dir(cache_dir);
                     }
-                    if ui.button(t!("ui.settings.wows.cache.browse")).clicked()
-                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                    let cache_dir_dialog = &mut self.tab_state.settings_dialogs.cache_dir;
+                    if ui
+                        .add_enabled(
+                            !cache_dir_dialog.is_pending(),
+                            egui::Button::new(t!("ui.settings.wows.cache.browse")),
+                        )
+                        .clicked()
                     {
+                        cache_dir_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                    }
+                    if let Some(folder) = self.tab_state.settings_dialogs.cache_dir.poll_path() {
                         self.tab_state.set_game_data_cache_dir(folder.to_string_lossy().into_owned());
                     }
                 });
@@ -396,13 +418,17 @@ impl ToolkitTabViewer<'_> {
                 ui.horizontal(|ui| {
                     let mut alert_data_export_change = false;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(t!("ui.buttons.choose")).clicked() {
-                            let folder = rfd::FileDialog::new().pick_folder();
-                            if let Some(folder) = folder {
-                                self.tab_state.persisted.write().settings.replay.auto_export_path =
-                                    folder.to_string_lossy().to_string();
-                                alert_data_export_change = true;
-                            }
+                        let auto_export_dialog = &mut self.tab_state.settings_dialogs.auto_export_dir;
+                        if ui
+                            .add_enabled(!auto_export_dialog.is_pending(), egui::Button::new(t!("ui.buttons.choose")))
+                            .clicked()
+                        {
+                            auto_export_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                        }
+                        if let Some(folder) = self.tab_state.settings_dialogs.auto_export_dir.poll_path() {
+                            self.tab_state.persisted.write().settings.replay.auto_export_path =
+                                folder.to_string_lossy().to_string();
+                            alert_data_export_change = true;
                         }
 
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {

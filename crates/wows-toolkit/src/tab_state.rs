@@ -693,6 +693,10 @@ pub struct TabState {
 
 impl Default for TabState {
     fn default() -> Self {
+    pub settings_dialogs: crate::ui::settings_tab::SettingsDialogs,
+    /// Locked because replay views and windows draw through `&self`.
+    pub replay_dialogs: parking_lot::Mutex<crate::ui::replay_parser::ReplayDialogs>,
+
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = egui_inbox::UiInbox::channel();
         #[cfg(feature = "launcher")]
@@ -702,6 +706,8 @@ impl Default for TabState {
             player_tracker: Default::default(),
             sent_replays: Default::default(),
             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+    #[cfg(feature = "launcher")]
+    pub launcher_dialogs: crate::ui::launcher_tab::LauncherDialogs,
             // Bootstrap client, built before settings (and so the manual proxy
             // override) are known. `app.rs` rebuilds it with the resolved
             // proxy before any real request is sent.
@@ -804,6 +810,8 @@ impl Default for TabState {
 /// string does not even parse a major component; nothing can be requested for
 /// those. A build the remote resolves through a fallback still needs an entry
 /// here to trigger the request, not to name the exact build fetched.
+            settings_dialogs: Default::default(),
+            replay_dialogs: Default::default(),
 fn build_requests_from_updates(
     updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
 ) -> Vec<crate::task::BuildRequest> {
@@ -812,6 +820,8 @@ fn build_requests_from_updates(
         .filter_map(|update| {
             let mut parts = update.version.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
             let version = Version {
+            #[cfg(feature = "launcher")]
+            launcher_dialogs: Default::default(),
                 major: parts.next()?,
                 minor: parts.next().unwrap_or(0),
                 patch: parts.next().unwrap_or(0),

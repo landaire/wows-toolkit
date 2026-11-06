@@ -60,6 +60,9 @@ use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::ui::file_unpacker::UNPACKER_STOP;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::util::error::ToolkitError;
+use crate::util::file_dialog;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -384,6 +387,13 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     show_about_window: bool,
     #[serde(skip)]
+/// Command palette action waiting on a native dialog.
+enum PaletteDialog {
+    OpenReplayFile,
+    OpenReplayDirectory,
+    ImportConstantsFile,
+}
+
     show_error_window: bool,
     #[serde(skip)]
     error_to_show: Option<String>,
@@ -518,6 +528,10 @@ enum DirectoryReingest {
 
 impl DirectoryReingest {
     /// The builds the user was shown in the offer that led to this walk, so
+    /// Native dialog opened from the command palette.
+    #[serde(skip)]
+    palette_dialog: FileDialogSlot<PaletteDialog>,
+
     /// the walk does not re-raise the offer it came from.
     fn offered(&self) -> &BTreeSet<u32> {
         match self {
@@ -1068,6 +1082,7 @@ fn should_arm_wows_dir_error(invalid: bool, field_focused: bool, already_shown: 
 }
 
 /// Whether a `VersionedConstantsFetched` reply is worth a full rebuild
+            palette_dialog: FileDialogSlot::new(),
 /// (icon reloads plus a `GameConstants` rebuild, then invalidating every
 /// open replay's report).
 ///
@@ -4779,19 +4794,16 @@ impl WowsToolkitApp {
             PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
             PaletteAction::OpenReplay { path } => self.open_replay_path(path),
             PaletteAction::OpenReplayFile => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
-                    self.open_replay_path(path);
-                }
+                let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+                self.palette_dialog.open(ctx, DialogKind::PickFile, dialog, PaletteDialog::OpenReplayFile);
             }
             PaletteAction::OpenReplayDirectory => {
-                if let Some(root) = rfd::FileDialog::new().pick_folder() {
-                    self.open_replay_directory(root);
-                }
+                let dialog = rfd::AsyncFileDialog::new();
+                self.palette_dialog.open(ctx, DialogKind::PickFolder, dialog, PaletteDialog::OpenReplayDirectory);
             }
             PaletteAction::ImportConstantsFile => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Constants", &["json"]).pick_file() {
-                    self.import_constants_file(&path);
-                }
+                let dialog = rfd::AsyncFileDialog::new().add_filter("Constants", &["json"]);
+                self.palette_dialog.open(ctx, DialogKind::PickFile, dialog, PaletteDialog::ImportConstantsFile);
             }
             PaletteAction::RefreshPersistedReplayData => {
                 self.refresh_persisted_data_window_open = true;
@@ -4920,6 +4932,18 @@ impl eframe::App for WowsToolkitApp {
                         SubKind::Players => "Search players",
                         SubKind::MyShips => "Search ships you've played",
                         SubKind::ArmorShips => "Search ships to view armor",
+
+    fn poll_palette_dialog(&mut self) {
+        let Some((request, path)) = self.palette_dialog.poll() else {
+            return;
+        };
+
+        match request {
+            PaletteDialog::OpenReplayFile => self.open_replay_path(path),
+            PaletteDialog::OpenReplayDirectory => self.open_replay_directory(path),
+            PaletteDialog::ImportConstantsFile => self.import_constants_file(&path),
+        }
+    }
                     };
                     (palette.sub_entries(kind, db_pool, rt, ship_catalog), hint)
                 }
@@ -5042,6 +5066,8 @@ fn build_about_window(ui: &mut egui::Ui) {
             ui.label(".");
         });
     });
+        self.poll_palette_dialog();
+
 }
 
 fn build_error_window(ui: &mut egui::Ui, error: &str) {
