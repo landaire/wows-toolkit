@@ -2462,3 +2462,107 @@ fn a_palette_entry_does_what_it_says(cx: &mut TestAppContext) {
     })
     .expect("the test window stays open");
 }
+
+/// The header of the palette's second layer, which the root list lacks.
+const PALETTE_BACK: &str = "palette-back";
+
+/// Draws `window`, lets deferred work and spawned focus run, then draws again.
+fn settle(cx: &mut TestAppContext, window: WindowHandle<gpui_kit::component::Root>) {
+    cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+}
+
+/// Ctrl+P, the ship entry, a ship's name and Enter open that ship in the Armor
+/// Viewer. On the Armor Viewer, ctrl+p goes straight to the ship list, and
+/// Escape or Backspace in its empty field goes back to the root list.
+#[gpui_kit::test]
+fn the_palette_opens_any_ship_in_the_armor_viewer(cx: &mut TestAppContext) {
+    use crate::palette::ArmorShipRow;
+    use crate::palette::TestArmorShips;
+    use wowsunpack::game_params::types::Species;
+
+    let (window, _app) = open_app_in_root(cx);
+    cx.update(|cx| {
+        cx.set_global(TestArmorShips {
+            rows: vec![
+                ArmorShipRow::new("PASB018".into(), "Montana".into(), 10, Species::Battleship, "U.S.A."),
+                ArmorShipRow::new("PJSB018".into(), "Yamato".into(), 10, Species::Battleship, "Japan"),
+                ArmorShipRow::new("PZSD109".into(), "Sm\u{e5}land".into(), 10, Species::Destroyer, "Europe"),
+            ],
+            opened: Vec::new(),
+        })
+    });
+    // Each step ends its own update: a typed query reaches the list when
+    // effects flush, which is after the closure returns.
+    let step = |cx: &mut TestAppContext, act: &dyn Fn(&mut gpui_kit::Window, &mut gpui_kit::App)| {
+        cx.update_window(window.into(), |_, window, cx| act(window, cx)).expect("the test window stays open");
+        settle(cx, window);
+    };
+
+    step(cx, &|window, cx| window.press("ctrl-p", cx));
+    step(cx, &|window, cx| {
+        assert!(window.try_find(PALETTE_BACK).is_none(), "ctrl+p elsewhere opens the root list");
+        window.input("open ship", cx);
+    });
+    step(cx, &|window, cx| window.press("enter", cx));
+
+    step(cx, &|window, cx| {
+        assert_eq!(palettes_open(window), 1, "the ship list replaces the root list");
+        assert!(window.try_find(PALETTE_BACK).is_some(), "the ship entry opens the second layer");
+        assert!(window.try_find(IndexPath::new(2)).is_some(), "an empty search lists every ship");
+        window.input("smal", cx);
+    });
+    step(cx, &|window, cx| {
+        assert!(
+            window.find(IndexPath::new(0)).label().is_some_and(|label| label.starts_with("Sm\u{e5}land")),
+            "the search folds diacritics"
+        );
+        assert!(window.try_find(IndexPath::new(1)).is_none(), "and lists only the match");
+        // Escape clears a typed query before it leaves the layer.
+        window.press("escape", cx);
+    });
+    step(cx, &|window, cx| {
+        assert!(window.try_find(PALETTE_BACK).is_some(), "clearing the query stays in the ship list");
+        window.input("yamat", cx);
+    });
+    step(cx, &|window, cx| window.press("enter", cx));
+
+    step(cx, &|window, cx| {
+        assert_eq!(palettes_open(window), 0, "choosing a ship closes the palette");
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::ArmorViewer)).selected(),
+            Some(true),
+            "the Armor Viewer is brought forward"
+        );
+        assert_eq!(cx.global::<TestArmorShips>().opened, ["PJSB018"], "the chosen ship is the one opened");
+        window.press("ctrl-p", cx);
+    });
+    step(cx, &|window, cx| {
+        assert!(window.try_find(PALETTE_BACK).is_some(), "on the Armor Viewer ctrl+p opens the ship list");
+        window.press("escape", cx);
+    });
+    step(cx, &|window, cx| {
+        assert_eq!(palettes_open(window), 1, "Escape leaves a palette up");
+        assert!(window.try_find(PALETTE_BACK).is_none(), "Escape in the ship list returns to the root list");
+        window.press("escape", cx);
+    });
+    step(cx, &|window, cx| {
+        assert_eq!(palettes_open(window), 0, "Escape in the root list closes it");
+        window.press("ctrl-k", cx);
+    });
+    step(cx, &|window, cx| {
+        assert_eq!(palettes_open(window), 1);
+        assert!(window.try_find(PALETTE_BACK).is_none(), "ctrl+k opens the root list on any tab");
+        window.press("escape", cx);
+    });
+    step(cx, &|window, cx| window.press("ctrl-p", cx));
+    step(cx, &|window, cx| {
+        assert!(window.try_find(PALETTE_BACK).is_some());
+        window.press("backspace", cx);
+    });
+    step(cx, &|window, _cx| {
+        assert_eq!(palettes_open(window), 1);
+        assert!(window.try_find(PALETTE_BACK).is_none(), "Backspace in an empty ship search returns to the root list");
+    });
+}

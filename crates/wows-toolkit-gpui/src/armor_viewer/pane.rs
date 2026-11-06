@@ -120,6 +120,14 @@ enum BundleState {
     Failed(String),
 }
 
+/// The ship catalogue as a reader outside the pane sees it.
+pub(crate) enum CatalogStatus<'a> {
+    /// Not loaded yet; it arrives once the build's assets have been read.
+    Pending,
+    Ready(&'a crate::armor_viewer::catalog::ShipCatalog),
+    Failed(&'a str),
+}
+
 /// Load status of the currently selected ship's armor model.
 enum ShipLoadState {
     Idle,
@@ -473,13 +481,20 @@ impl ArmorViewerPane {
     }
 
     /// The catalogue of ships this pane can open, once it has loaded.
-    ///
-    /// `None` while the assets are still being read, which is what the palette's
-    /// armor mode says rather than opening an empty list.
     pub(crate) fn catalog(&self) -> Option<&crate::armor_viewer::catalog::ShipCatalog> {
+        match self.catalog_status() {
+            CatalogStatus::Ready(catalog) => Some(catalog),
+            CatalogStatus::Pending | CatalogStatus::Failed(_) => None,
+        }
+    }
+
+    /// Where the catalogue load stands, so a list waiting on it can say why
+    /// it is empty.
+    pub(crate) fn catalog_status(&self) -> CatalogStatus<'_> {
         match &self.bundle {
-            BundleState::Ready(bundle) => Some(&bundle.catalog),
-            _ => None,
+            BundleState::NotStarted | BundleState::Loading => CatalogStatus::Pending,
+            BundleState::Ready(bundle) => CatalogStatus::Ready(&bundle.catalog),
+            BundleState::Failed(reason) => CatalogStatus::Failed(reason),
         }
     }
 
@@ -905,6 +920,11 @@ impl ArmorViewerPane {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_ship(event.param_index.clone(), event.display_name.clone(), cx);
+    }
+
+    /// Opens a ship picked from the catalogue in the active pane.
+    pub(crate) fn open_ship(&mut self, param_index: String, display_name: String, cx: &mut Context<Self>) {
         // Mirrors egui's `already_selected` guard (`ui/tab.rs:520-521`): a
         // re-click on the ship already loaded in the ACTIVE pane must not
         // re-trigger `start_ship_load`, which resets part/plate/hull
@@ -913,11 +933,11 @@ impl ArmorViewerPane {
         // is a legitimate, distinct load.
         let active = self.dock.read(cx).active_viewport();
         let loaded = active.read(cx).loaded_param_index();
-        if is_ship_already_loaded(loaded, &event.param_index) {
+        if is_ship_already_loaded(loaded, &param_index) {
             return;
         }
         self.forget_incoming();
-        self.start_ship_load(event.param_index.clone(), event.display_name.clone(), cx);
+        self.start_ship_load(param_index, display_name, cx);
     }
 
     /// Sidebar per-ship "Export model" context-menu handler

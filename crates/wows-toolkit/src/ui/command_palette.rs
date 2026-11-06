@@ -130,7 +130,10 @@ impl CommandPalette {
 
         entries.push(egui_palette::Entry::new("Search players...", PaletteAction::EnterSub(SubKind::Players)));
         entries.push(egui_palette::Entry::new("My matches in ship...", PaletteAction::EnterSub(SubKind::MyShips)));
-        entries.push(egui_palette::Entry::new("View armor for ship...", PaletteAction::EnterSub(SubKind::ArmorShips)));
+        entries.push(egui_palette::Entry::new(
+            "Open ship in Armor Viewer...",
+            PaletteAction::EnterSub(SubKind::ArmorShips),
+        ));
 
         entries
             .push(egui_palette::Entry::new("Games I died in", PaletteAction::OpenSearchWith(seed::games_i_died_in())));
