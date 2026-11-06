@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: ap.to_string()
+---
+Aki has no AP bombs; its Aichi M6A2 Seiran dive bombers carry HE bombs, its main battery fires AP and HE, its secondary battery fires HE; call again with ammo HE or without ammo

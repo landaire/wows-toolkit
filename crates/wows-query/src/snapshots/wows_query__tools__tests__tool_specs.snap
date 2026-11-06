@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/src/tools.rs
-assertion_line: 349
 expression: specs()
 ---
 - name: find_ships
@@ -161,7 +160,7 @@ expression: specs()
         type: boolean
         description: "Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is never searched."
 - name: armor_trace
-  description: "Trace a shooter's shell or bomb through a target ship's 3D armor model, e.g. whether Sekiryu's AP bombs can citadel Yamato or Des Moines AP can citadel a broadside cruiser at 10 km. Casts a grid of parallel rays along the line of fire (gun range and target angle, or the bomber's dive) and runs AP through every plate with the armor viewer's simulation; HE and SAP are tested against the first plate. Returns the fraction of rays over the citadel that detonate inside it, a summary per struck zone, example rays with their plates, a verdict, and the assumptions behind it."
+  description: "Trace a shooter's shell or bomb through a target ship's 3D armor model, e.g. whether Sekiryu's AP bombs can citadel Yamato or Des Moines AP can citadel a broadside cruiser at 10 km. Casts a grid of parallel rays along the line of fire (gun range and target angle, or the bomber's dive) and runs AP through every plate with the armor viewer's simulation; HE and SAP are tested against the first plate. Without ammo, traces each shell or bomb type the weapon fires or carries. Returns one trace per type: the fraction of rays over the citadel that detonate inside it, a summary per struck zone, example rays with their plates, a verdict, and the assumptions behind it."
   input_schema:
     type: object
     additionalProperties: false
@@ -188,7 +187,7 @@ expression: specs()
           - AP
           - HE
           - SAP
-        description: Shell or bomb type. Defaults to AP when the weapon has it.
+        description: Shell or bomb type. Omit to trace each type the weapon fires or carries.
       range_km:
         type: number
         description: "Gun range in km, 0 or more; 0 is point blank, flat at muzzle velocity. Required for guns, not used for bombs."
@@ -206,7 +205,7 @@ expression: specs()
         description: "Distance between neighbouring rays in m, 0.25 to 10. Defaults to 1."
       aircraft:
         type: string
-        description: "Aircraft name when the shooter carries several bomb-carrying squadrons, e.g. \"Ryusei\". Without it, squadrons with AP bombs come first, then stock dive bombers before researched or jet dive bombers, and those before the air strike."
+        description: "Aircraft name when the shooter carries several bomb-carrying squadrons, e.g. \"Ryusei\". Without it, each bomb type comes from stock dive bombers before researched or jet dive bombers, and those before the air strike."
     required:
       - shooter
       - target_ship

@@ -785,13 +785,44 @@ fn sekiryu_ap_bombs_citadel_yamato_from_the_deck() {
             shooter: "Sekiryu".to_owned(),
             target_ship: "Yamato".to_owned(),
             weapon: Some(TraceWeapon::Bombs),
+            ammo: Some(Ammo::Ap),
             ..Default::default()
         })
         .expect("Sekiryu carries AP dive bombers");
 
-    let citadel = &trace.citadel;
-    assert!(citadel.detonating_inside > 0);
+    let [ap] = trace.traces.as_slice() else {
+        panic!("one trace for the ammo asked for");
+    };
+    assert!(ap.citadel.detonating_inside > 0);
     insta::assert_yaml_snapshot!(trace);
+}
+
+/// Aki's dive bombers carry HE bombs only.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn aki_bombs_are_traced_with_the_ordnance_it_carries() {
+    let trace = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Aki".to_owned(),
+            target_ship: "Vermont".to_owned(),
+            weapon: Some(TraceWeapon::Bombs),
+            ..Default::default()
+        })
+        .expect("Aki carries bombs");
+    assert!(trace.traces.iter().all(|trace| trace.weapon.ammo == Ammo::He));
+    insta::assert_yaml_snapshot!(trace);
+
+    let ap = game()
+        .armor_trace(&ArmorTraceArgs {
+            shooter: "Aki".to_owned(),
+            target_ship: "Vermont".to_owned(),
+            weapon: Some(TraceWeapon::Bombs),
+            ammo: Some(Ammo::Ap),
+            ..Default::default()
+        })
+        .expect_err("Aki carries no AP bombs");
+    assert!(matches!(ap, QueryError::AmmoNotCarried { .. }), "{ap:?}");
+    insta::assert_snapshot!("aki_ap_bombs_error", ap.to_string());
 }
 
 #[test]
@@ -801,12 +832,13 @@ fn des_moines_ap_citadels_a_broadside_hindenburg_at_10_km() {
         .armor_trace(&ArmorTraceArgs {
             shooter: "Des Moines".to_owned(),
             target_ship: "Hindenburg".to_owned(),
+            ammo: Some(Ammo::Ap),
             range_km: Some(Km::new(10.0)),
             ..Default::default()
         })
         .expect("Des Moines fires AP");
 
-    assert!(trace.citadel.detonating_inside > 0);
+    assert!(trace.traces[0].citadel.detonating_inside > 0);
     insta::assert_yaml_snapshot!(trace);
 }
 
@@ -818,12 +850,13 @@ fn friedrich_der_grosse_turtleback_stops_des_moines_ap_at_10_km() {
         .armor_trace(&ArmorTraceArgs {
             shooter: "Des Moines".to_owned(),
             target_ship: "Friedrich der Grosse".to_owned(),
+            ammo: Some(Ammo::Ap),
             range_km: Some(Km::new(10.0)),
             ..Default::default()
         })
         .expect("Des Moines fires AP");
 
-    let citadel = &trace.citadel;
+    let citadel = &trace.traces[0].citadel;
     assert!(citadel.rays_over_citadel > 0);
     assert_eq!(citadel.detonating_inside, 0);
     insta::assert_yaml_snapshot!(trace);
@@ -893,6 +926,9 @@ fn sap_traces_ignore_ifhe_and_destroyers_have_no_citadel() {
             ..Default::default()
         })
         .expect("Venezia fires SAP");
+    let [sap] = sap.traces.as_slice() else {
+        panic!("one trace for the ammo asked for");
+    };
     assert_eq!(sap.weapon.ammo, Ammo::Sap);
     assert!(sap.weapon.penetration_mm.is_some());
     assert!(sap.verdict.starts_with("Main battery SAP"), "{}", sap.verdict);

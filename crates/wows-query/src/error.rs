@@ -6,7 +6,10 @@ use serde::Serialize;
 use wows_core::units::Km;
 use wowsunpack::game_params::ttx::modifiers::ModifierError;
 
+use crate::armor_trace::TraceWeapon;
+use crate::armor_trace::WeaponAmmo;
 use crate::replay_worker::ByteCount;
+use crate::shells::Ammo;
 
 /// Failure to load a game data build.
 #[derive(Debug, thiserror::Error)]
@@ -182,6 +185,19 @@ pub enum QueryError {
 
     #[error("{ship} has no {weapon}")]
     WeaponNotFound { ship: String, weapon: String },
+
+    #[error("{}", ammo_not_carried(ship, *weapon, aircraft.as_deref(), *ammo, fitting, available))]
+    AmmoNotCarried {
+        ship: String,
+        weapon: TraceWeapon,
+        /// The aircraft asked for, when bombs were limited to one.
+        aircraft: Option<String>,
+        ammo: Ammo,
+        /// Ammo types of `weapon`, to ask for instead.
+        fitting: Vec<Ammo>,
+        /// Every traceable weapon of `ship`.
+        available: Vec<WeaponAmmo>,
+    },
 
     #[error("projectile {projectile} is not in this game data")]
     ProjectileNotFound { projectile: String },
@@ -389,6 +405,37 @@ fn did_you_mean(suggestions: &[String], hint: &str) -> String {
     }
 
     format!("did you mean: {}?", suggestions.join(", "))
+}
+
+/// "Aki has no AP bombs; its Suisei dive bombers carry HE bombs, its main
+/// battery fires AP and HE; call again with ammo HE or without ammo". The
+/// weapon asked for is described first.
+fn ammo_not_carried(
+    ship: &str,
+    weapon: TraceWeapon,
+    aircraft: Option<&str>,
+    ammo: Ammo,
+    fitting: &[Ammo],
+    available: &[WeaponAmmo],
+) -> String {
+    let missing = match (weapon, aircraft) {
+        (TraceWeapon::Bombs, Some(aircraft)) => format!("{aircraft} with {} bombs", ammo.label()),
+        (TraceWeapon::Bombs, None) => format!("{} bombs", ammo.label()),
+        (battery, _) => format!("{} {}", battery.label(), ammo.label()),
+    };
+    let (asked, others): (Vec<&WeaponAmmo>, Vec<&WeaponAmmo>) =
+        available.iter().partition(|weapon_ammo| weapon_ammo.source.weapon() == weapon);
+    // Another squadron carries the ammo the named aircraft lacks.
+    let other_aircraft = aircraft.is_some() && asked.iter().any(|weapon_ammo| weapon_ammo.ammo.contains(&ammo));
+    let weapons: Vec<String> = asked.into_iter().chain(others).map(WeaponAmmo::describe).collect();
+    let fitting: Vec<&str> = fitting.iter().map(|ammo| ammo.label()).collect();
+    let retry = if other_aircraft {
+        format!("call again with ammo {}, without ammo, or without aircraft", fitting.join(" or "))
+    } else {
+        format!("call again with ammo {} or without ammo", fitting.join(" or "))
+    };
+
+    format!("{ship} has no {missing}; {}; {retry}", weapons.join(", "))
 }
 
 /// Why an armor extract object could not be read from a dump.

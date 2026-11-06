@@ -2,6 +2,7 @@
 //! shell or bomb run through the toolkit's plate-by-plate simulation.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -58,6 +59,58 @@ pub enum TraceWeapon {
     Bombs,
 }
 
+impl TraceWeapon {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MainBattery => "main battery",
+            Self::SecondaryBattery => "secondary battery",
+            Self::Bombs => "bombs",
+        }
+    }
+}
+
+/// A weapon of the shooter that armor_trace can trace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AmmoSource {
+    MainBattery,
+    SecondaryBattery,
+    /// A squadron that drops bombs.
+    Squadron { aircraft: String, role: SquadronRole },
+}
+
+impl AmmoSource {
+    pub fn weapon(&self) -> TraceWeapon {
+        match self {
+            Self::MainBattery => TraceWeapon::MainBattery,
+            Self::SecondaryBattery => TraceWeapon::SecondaryBattery,
+            Self::Squadron { .. } => TraceWeapon::Bombs,
+        }
+    }
+}
+
+/// The ammo types one weapon fires or carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeaponAmmo {
+    pub source: AmmoSource,
+    pub ammo: Vec<Ammo>,
+}
+
+impl WeaponAmmo {
+    /// "its main battery fires AP and HE", "its Suisei dive bombers carry HE bombs".
+    pub(crate) fn describe(&self) -> String {
+        let ammo = self.ammo.iter().map(|ammo| ammo.label()).collect::<Vec<_>>().join(" and ");
+
+        match &self.source {
+            AmmoSource::MainBattery => format!("its main battery fires {ammo}"),
+            AmmoSource::SecondaryBattery => format!("its secondary battery fires {ammo}"),
+            AmmoSource::Squadron { aircraft, role: SquadronRole::AirStrike } => {
+                format!("its {aircraft} air strike carries {ammo} bombs")
+            }
+            AmmoSource::Squadron { aircraft, role } => format!("its {aircraft} {} carry {ammo} bombs", role.label()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArmorTraceArgs {
@@ -70,7 +123,7 @@ pub struct ArmorTraceArgs {
     /// Defaults to main_battery.
     pub weapon: Option<TraceWeapon>,
 
-    /// Shell or bomb type. Defaults to AP when the weapon has it.
+    /// Shell or bomb type. Omit to trace each type the weapon fires or carries.
     pub ammo: Option<Ammo>,
 
     /// Gun range in km, 0 or more; 0 is point blank, flat at muzzle velocity. Required for guns, not used for bombs.
@@ -88,7 +141,7 @@ pub struct ArmorTraceArgs {
     /// Distance between neighbouring rays in m, 0.25 to 10. Defaults to 1.
     pub spacing_m: Option<Meters>,
 
-    /// Aircraft name when the shooter carries several bomb-carrying squadrons, e.g. "Ryusei". Without it, squadrons with AP bombs come first, then stock dive bombers before researched or jet dive bombers, and those before the air strike.
+    /// Aircraft name when the shooter carries several bomb-carrying squadrons, e.g. "Ryusei". Without it, each bomb type comes from stock dive bombers before researched or jet dive bombers, and those before the air strike.
     pub aircraft: Option<String>,
 }
 
@@ -101,9 +154,27 @@ pub struct ArmorTraceOutput {
     pub shooter: String,
     pub target: String,
     pub target_hull: String,
+    pub target_angle_deg: Degrees,
+
+    /// One trace per ammo type: the one asked for, or each the weapon fires or carries.
+    pub traces: Vec<AmmoTrace>,
+
+    /// Ammo types the weapon has that could not be traced, when ammo was not given.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<SkippedAmmo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedAmmo {
+    pub ammo: Ammo,
+    pub reason: String,
+}
+
+/// The rays of one ammo type through the target.
+#[derive(Debug, Clone, Serialize)]
+pub struct AmmoTrace {
     pub weapon: TracedWeapon,
     pub arrival: Arrival,
-    pub target_angle_deg: Degrees,
     pub rays: RayCounts,
 
     /// Rays whose path crosses a citadel plate, and how many of them reach it:
@@ -297,7 +368,7 @@ pub(crate) enum WeaponModel {
 /// The gun a trace fires and from how far.
 pub(crate) struct GunRequest {
     pub(crate) battery: Battery,
-    pub(crate) ammo: Option<Ammo>,
+    pub(crate) ammo: Ammo,
     pub(crate) range_km: Option<Km>,
     pub(crate) ifhe: bool,
 }
@@ -357,6 +428,16 @@ struct KeptPlate {
     distance: ShipModelDistance,
 }
 
+/// The target side of a trace, shared by every ammo type traced.
+struct TraceTarget<'a> {
+    ship: &'a Ship,
+    meshes: &'a [InteractiveArmorMesh],
+    angle: Degrees,
+    spacing: Meters,
+    bow: ShipModelDistance,
+    names: &'a PlateNames<'a>,
+}
+
 impl GameData {
     /// Casts a grid of parallel rays at `target` along the line of fire and
     /// runs `shooter`'s projectile through the armor each ray crosses.
@@ -374,72 +455,125 @@ impl GameData {
             return Err(QueryError::InvalidArguments { reason: "target_angle_deg must be between -180 and 180" });
         }
 
-        let weapon = match args.weapon.unwrap_or_default() {
-            TraceWeapon::MainBattery => self.gun_weapon(shooter, &gun_request(Battery::Main, args))?,
-            TraceWeapon::SecondaryBattery => self.gun_weapon(shooter, &gun_request(Battery::Secondary, args))?,
-            TraceWeapon::Bombs => self.bomb_weapon(shooter, args)?,
-        };
+        let weapon = args.weapon.unwrap_or_default();
+        let mut weapons = Vec::new();
+        let mut failures = Vec::new();
+        for ammo in self.trace_ammo(shooter, weapon, args)? {
+            let built = match weapon {
+                TraceWeapon::MainBattery => self.gun_weapon(shooter, &gun_request(Battery::Main, ammo, args)),
+                TraceWeapon::SecondaryBattery => self.gun_weapon(shooter, &gun_request(Battery::Secondary, ammo, args)),
+                TraceWeapon::Bombs => self.bomb_weapon(shooter, ammo, args),
+            };
+            match built {
+                Ok(built) => weapons.push(built),
+                Err(error) => failures.push((ammo, error)),
+            }
+        }
+        // Without traces, the failure of the first type is the answer.
+        if weapons.is_empty() && !failures.is_empty() {
+            return Err(failures.swap_remove(0).1);
+        }
+        let skipped =
+            failures.into_iter().map(|(ammo, error)| SkippedAmmo { ammo, reason: error.to_string() }).collect();
 
         let TargetHull { param: hull_param, name: hull_name } =
             self.target_hull(target, args.target_hull.as_deref())?;
         let meshes = self.target_meshes(target, &hull_param)?;
-
-        let direction = line_of_fire(target_angle, weapon.arrival.fall_angle_deg);
-        let grid = cast_grid(&meshes, direction, spacing)?;
-        let bow = bow_position(&meshes);
-        let shell = match &weapon.model {
-            WeaponModel::ArmorPiercing { params, .. } => Some(ShellFlags { params }),
-            WeaponModel::FirstPlate { .. } => None,
-        };
         let materials = meshes.iter().flat_map(|mesh| mesh.triangle_info.iter().map(|info| info.material));
         let names = self.plate_names(target, materials);
-        let citadel_face = citadel::approach(
-            &grid.rays,
-            weapon.arrival.fall_angle_deg,
-            weapon.arrival.range_km,
-            shell.as_ref(),
-            bow,
-            &names,
-        );
-
-        let struck = grid.rays.len();
-        let underwater = grid.rays.iter().filter(|ray| ray.underwater).count();
-        let traced: Vec<TracedRay> = grid
-            .rays
-            .into_iter()
-            .filter(|ray| !ray.underwater)
-            .map(|ray| trace_ray(&weapon.model, ray.plates))
-            .collect();
-
-        let citadel = citadel_summary(&traced);
-        let zones = zone_summaries(&traced);
-        let examples = examples(&traced, &weapon.model, bow, &names);
-        let verdict = verdict(&weapon, &citadel, &zones, target);
-
-        let mut assumptions = weapon.assumptions.clone();
-        assumptions.extend(common_assumptions(&weapon.model).into_iter().map(str::to_owned));
+        let trace_target = TraceTarget {
+            ship: target,
+            meshes: &meshes,
+            angle: target_angle,
+            spacing,
+            bow: bow_position(&meshes),
+            names: &names,
+        };
+        let traces =
+            weapons.into_iter().map(|weapon| trace_weapon(weapon, &trace_target)).collect::<Result<Vec<_>, _>>()?;
 
         Ok(ArmorTraceOutput {
             interpretations,
             shooter: shooter.label(),
             target: target.label(),
             target_hull: hull_name,
-            weapon: weapon.traced,
-            arrival: weapon.arrival,
             target_angle_deg: target_angle,
-            rays: RayCounts {
-                spacing_m: spacing,
-                cast: grid.cast,
-                struck_ship: struck,
-                entered_water_first: underwater,
-            },
-            citadel,
-            citadel_face,
-            zones,
-            examples,
-            verdict,
-            assumptions,
+            traces,
+            skipped,
         })
+    }
+
+    /// The ammo types to trace: `args.ammo` when `weapon` fires or carries
+    /// it, else every type it does.
+    fn trace_ammo(&self, shooter: &Ship, weapon: TraceWeapon, args: &ArmorTraceArgs) -> Result<Vec<Ammo>, QueryError> {
+        let squadrons = self.squadrons(shooter);
+        let available = self.weapon_ammo(shooter, &squadrons);
+        let wanted = args.aircraft.as_deref().map(search_key);
+        let fitting: BTreeSet<Ammo> = available
+            .iter()
+            .filter(|weapon_ammo| weapon_ammo.source.weapon() == weapon)
+            .filter(|weapon_ammo| match (&weapon_ammo.source, wanted.as_deref()) {
+                (AmmoSource::Squadron { aircraft, .. }, Some(wanted)) => search_key(aircraft).contains(wanted),
+                _ => true,
+            })
+            .flat_map(|weapon_ammo| weapon_ammo.ammo.iter().copied())
+            .collect();
+        if fitting.is_empty() {
+            let untyped = bomb_squadrons(&squadrons)
+                .filter(|(squadron, _)| {
+                    wanted.as_deref().is_none_or(|wanted| search_key(&squadron.aircraft).contains(wanted))
+                })
+                .find(|(_, ordnance)| ordnance.ammo.is_none());
+            if let Some((squadron, _)) = untyped.filter(|_| weapon == TraceWeapon::Bombs) {
+                return Err(QueryError::OrdnanceNotTraceable {
+                    aircraft: squadron.aircraft.clone(),
+                    reason: "the bomb has no known shell type",
+                });
+            }
+
+            return Err(QueryError::WeaponNotFound { ship: shooter.name.clone(), weapon: weapon.label().to_owned() });
+        }
+
+        match args.ammo {
+            None => Ok(fitting.into_iter().collect()),
+            Some(ammo) if fitting.contains(&ammo) => Ok(vec![ammo]),
+            Some(ammo) => Err(QueryError::AmmoNotCarried {
+                ship: shooter.name.clone(),
+                weapon,
+                aircraft: args.aircraft.clone().filter(|_| weapon == TraceWeapon::Bombs),
+                ammo,
+                fitting: fitting.into_iter().collect(),
+                available,
+            }),
+        }
+    }
+
+    /// Every weapon of `shooter` that armor_trace can trace, with its ammo.
+    fn weapon_ammo(&self, shooter: &Ship, squadrons: &[Squadron]) -> Vec<WeaponAmmo> {
+        let shells = self.shells(shooter);
+        let mut weapons = Vec::new();
+
+        for (battery, source) in [(Battery::Main, AmmoSource::MainBattery), (Battery::Secondary, AmmoSource::SecondaryBattery)]
+        {
+            let ammo: BTreeSet<Ammo> =
+                shells.iter().filter(|shell| shell.battery == battery).map(|shell| shell.ammo).collect();
+            if !ammo.is_empty() {
+                weapons.push(WeaponAmmo { source, ammo: ammo.into_iter().collect() });
+            }
+        }
+
+        for (squadron, ordnance) in bomb_squadrons(squadrons) {
+            let Some(ammo) = ordnance.ammo else {
+                continue;
+            };
+
+            weapons.push(WeaponAmmo {
+                source: AmmoSource::Squadron { aircraft: squadron.aircraft.clone(), role: squadron.role },
+                ammo: vec![ammo],
+            });
+        }
+
+        weapons
     }
 
     pub(crate) fn gun_weapon(&self, shooter: &Ship, request: &GunRequest) -> Result<Weapon, QueryError> {
@@ -449,14 +583,7 @@ impl GameData {
             Battery::Main => "main battery",
             Battery::Secondary => "secondary battery",
         };
-        let ammo = match request.ammo {
-            Some(ammo) => ammo,
-            None if shells.iter().any(|shell| shell.ammo == Ammo::Ap) => Ammo::Ap,
-            None => shells
-                .first()
-                .map(|shell| shell.ammo)
-                .ok_or_else(|| QueryError::WeaponNotFound { ship: shooter.name.clone(), weapon: source.to_owned() })?,
-        };
+        let ammo = request.ammo;
 
         // Gun modules of one ship can fire different shells of one type; the
         // largest caliber is the one a trace is usually asked about.
@@ -533,39 +660,27 @@ impl GameData {
         })
     }
 
-    fn bomb_weapon(&self, shooter: &Ship, args: &ArmorTraceArgs) -> Result<Weapon, QueryError> {
+    fn bomb_weapon(&self, shooter: &Ship, ammo: Ammo, args: &ArmorTraceArgs) -> Result<Weapon, QueryError> {
         let wanted = args.aircraft.as_deref().map(search_key);
         let squadrons = self.squadrons(shooter);
-        let bombers: Vec<(&Squadron, &Ordnance)> = squadrons
-            .iter()
-            .filter_map(|squadron| squadron.ordnance.as_ref().map(|ordnance| (squadron, ordnance)))
-            .filter(|(_, ordnance)| ordnance.kind == OrdnanceKind::Bomb)
-            .filter(|(_, ordnance)| args.ammo.is_none_or(|ammo| ordnance.ammo == Some(ammo)))
+        // The squadron a stock ship flies is the expected one.
+        let chosen = bomb_squadrons(&squadrons)
+            .filter(|(_, ordnance)| ordnance.ammo == Some(ammo))
             .filter(|(squadron, _)| {
                 wanted.as_deref().is_none_or(|wanted| search_key(&squadron.aircraft).contains(wanted))
             })
-            .collect();
-        // AP is what a citadel question is about; after that the squadron a
-        // stock ship flies is the expected one.
-        let chosen = bombers.iter().min_by_key(|(squadron, ordnance)| {
-            (
-                ordnance.ammo != Some(Ammo::Ap),
-                squadron.role == SquadronRole::AirStrike,
-                squadron.module_upgrade,
-                squadron.alternative,
-            )
-        });
-        let Some(&(squadron, ordnance)) = chosen else {
-            let weapon = match args.ammo {
-                Some(ammo) => format!("{} bombs", ammo.label()),
-                None => "bombs".to_owned(),
-            };
-            return Err(QueryError::WeaponNotFound { ship: shooter.name.clone(), weapon });
+            .min_by_key(|(squadron, _)| {
+                (squadron.role == SquadronRole::AirStrike, squadron.module_upgrade, squadron.alternative)
+            });
+        let Some((squadron, ordnance)) = chosen else {
+            return Err(QueryError::WeaponNotFound {
+                ship: shooter.name.clone(),
+                weapon: format!("{} bombs", ammo.label()),
+            });
         };
 
         let not_traceable =
             |reason: &'static str| QueryError::OrdnanceNotTraceable { aircraft: squadron.aircraft.clone(), reason };
-        let ammo = ordnance.ammo.ok_or_else(|| not_traceable("the bomb has no known shell type"))?;
         let projectile = self.projectile(&ordnance.projectile)?;
         let dive = self
             .provider()
@@ -740,8 +855,60 @@ pub(crate) fn cast_grid(
     Ok(grid)
 }
 
-fn gun_request(battery: Battery, args: &ArmorTraceArgs) -> GunRequest {
-    GunRequest { battery, ammo: args.ammo, range_km: args.range_km, ifhe: args.ifhe.unwrap_or(false) }
+fn gun_request(battery: Battery, ammo: Ammo, args: &ArmorTraceArgs) -> GunRequest {
+    GunRequest { battery, ammo, range_km: args.range_km, ifhe: args.ifhe.unwrap_or(false) }
+}
+
+/// Squadrons that drop bombs, with their bombs.
+fn bomb_squadrons(squadrons: &[Squadron]) -> impl Iterator<Item = (&Squadron, &Ordnance)> {
+    squadrons
+        .iter()
+        .filter_map(|squadron| squadron.ordnance.as_ref().map(|ordnance| (squadron, ordnance)))
+        .filter(|(_, ordnance)| ordnance.kind == OrdnanceKind::Bomb)
+}
+
+/// Casts the grid along `weapon`'s line of fire and runs its projectile
+/// through each ray.
+fn trace_weapon(weapon: Weapon, target: &TraceTarget) -> Result<AmmoTrace, QueryError> {
+    let direction = line_of_fire(target.angle, weapon.arrival.fall_angle_deg);
+    let grid = cast_grid(target.meshes, direction, target.spacing)?;
+    let shell = match &weapon.model {
+        WeaponModel::ArmorPiercing { params, .. } => Some(ShellFlags { params }),
+        WeaponModel::FirstPlate { .. } => None,
+    };
+    let citadel_face = citadel::approach(
+        &grid.rays,
+        weapon.arrival.fall_angle_deg,
+        weapon.arrival.range_km,
+        shell.as_ref(),
+        target.bow,
+        target.names,
+    );
+
+    let struck = grid.rays.len();
+    let underwater = grid.rays.iter().filter(|ray| ray.underwater).count();
+    let traced: Vec<TracedRay> =
+        grid.rays.into_iter().filter(|ray| !ray.underwater).map(|ray| trace_ray(&weapon.model, ray.plates)).collect();
+
+    let citadel = citadel_summary(&traced);
+    let zones = zone_summaries(&traced);
+    let examples = examples(&traced, &weapon.model, target.bow, target.names);
+    let verdict = verdict(&weapon, &citadel, &zones, target.ship);
+
+    let mut assumptions = weapon.assumptions;
+    assumptions.extend(common_assumptions(&weapon.model).into_iter().map(str::to_owned));
+
+    Ok(AmmoTrace {
+        weapon: weapon.traced,
+        arrival: weapon.arrival,
+        rays: RayCounts { spacing_m: target.spacing, cast: grid.cast, struck_ship: struck, entered_water_first: underwater },
+        citadel,
+        citadel_face,
+        zones,
+        examples,
+        verdict,
+        assumptions,
+    })
 }
 
 /// The plates a ray crosses, in strike order.
@@ -1140,8 +1307,7 @@ mod tests {
         let hull = game.target_hull(target, None).expect("a stock hull");
         let meshes = game.target_meshes(target, &hull.param).expect("the dump carries Hindenburg's armor");
         let shooter = game.resolve_ship("Des Moines", &mut Interpretations::default()).expect("Des Moines exists");
-        let request =
-            GunRequest { battery: Battery::Main, ammo: Some(Ammo::Ap), range_km: Some(Km::new(10.0)), ifhe: false };
+        let request = GunRequest { battery: Battery::Main, ammo: Ammo::Ap, range_km: Some(Km::new(10.0)), ifhe: false };
         let weapon = game.gun_weapon(shooter, &request).expect("Des Moines fires AP at 10 km");
         let WeaponModel::ArmorPiercing { params, impact_velocity } = &weapon.model else {
             panic!("AP is simulated plate by plate");

@@ -1,0 +1,219 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: trace
+---
+shooter: "T10 Aki (battleship, Japan)"
+target: "T10 Vermont (battleship, USA)"
+target_hull: Vermont
+target_angle_deg: 0
+traces:
+  - weapon:
+      source: Aichi M6A2 Seiran
+      projectile: PJPB750_AKI_STOCK
+      ammo: HE
+      caliber_mm: 40
+      penetration_mm: 61
+    arrival:
+      velocity_mps: 300
+      fall_angle_deg: 75
+      basis: "assumed: bulletSpeed and the aircraft's angleOfDive"
+    rays:
+      spacing_m: 1
+      cast: 12452
+      struck_ship: 8561
+      entered_water_first: 280
+    citadel:
+      rays_over_citadel: 4882
+      detonating_inside: 0
+      fraction: 0
+      through_random_ricochet_band: 0
+    citadel_face:
+      fall_angle_deg: 75
+      rays_over_citadel: 4882
+      glancing_rays: 90
+      armor_before_citadel_mm:
+        min: 184.3
+        median: 203.9
+        max: 3357.4
+      citadel_plate_mm:
+        min: 39.3
+        median: 39.3
+        max: 161.9
+      bands:
+        - band: below -2 m
+          rays: 338
+          median_angle_deg: 75
+          doubled_pct: 100
+        - band: "-2 to 0 m"
+          rays: 123
+          median_angle_deg: 75
+          doubled_pct: 100
+        - band: 0 to 2 m
+          rays: 4421
+          median_angle_deg: 15
+          doubled_pct: 0.5
+      stacks:
+        - label: least
+          from_bow_m: 98.5
+          height_m: 0.7
+          plates:
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 51
+              angle_deg: 15
+              effective_mm: 52.8
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "casemate: Deck"
+              zone: Casemate
+              thickness_mm: 127
+              angle_deg: 15
+              effective_mm: 131.5
+            - plate: "casemate: Deck"
+              zone: Casemate
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "citadel: Deck"
+              zone: Citadel
+              thickness_mm: 38
+              angle_deg: 15
+              effective_mm: 39.3
+          total_effective_mm: 223.6
+        - label: median
+          from_bow_m: 187.5
+          height_m: 0.7
+          plates:
+            - plate: "superstructure: Plating (roof)"
+              zone: Superstructure
+              thickness_mm: 19
+              angle_deg: 15
+              effective_mm: 19.7
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 51
+              angle_deg: 15
+              effective_mm: 52.8
+            - plate: "superstructure: Plating (roof)"
+              zone: Superstructure
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "casemate: Deck"
+              zone: Casemate
+              thickness_mm: 127
+              angle_deg: 15
+              effective_mm: 131.5
+            - plate: "casemate: Deck"
+              zone: Casemate
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "citadel: Deck"
+              zone: Citadel
+              thickness_mm: 38
+              angle_deg: 15
+              effective_mm: 39.3
+          total_effective_mm: 243.3
+        - label: most
+          from_bow_m: 63.5
+          height_m: 0.7
+          plates:
+            - plate: "turret: Side Plate"
+              zone: Turret
+              thickness_mm: 305
+              angle_deg: 71.5
+              effective_mm: 959.8
+            - plate: "turret: Bottom Plate"
+              zone: Turret
+              thickness_mm: 127
+              angle_deg: 15
+              effective_mm: 131.5
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 51
+              angle_deg: 15
+              effective_mm: 52.8
+            - plate: "turret 1: Barbette Armor (barbette)"
+              zone: Turret
+              thickness_mm: 381
+              angle_deg: 79.5
+              effective_mm: 2081.8
+            - plate: "casemate: Deck"
+              zone: Casemate
+              thickness_mm: 127
+              angle_deg: 15
+              effective_mm: 131.5
+            - plate: "auxiliary room: Deck"
+              zone: Superstructure
+              thickness_mm: 0
+              angle_deg: 15
+              effective_mm: 0
+            - plate: "citadel: Deck"
+              zone: Citadel
+              thickness_mm: 38
+              angle_deg: 15
+              effective_mm: 39.3
+          total_effective_mm: 3396.7
+    zones:
+      - zone: Superstructure
+        rays: 4906
+        outcomes:
+          penetration: 4875
+          shatter: 31
+      - zone: Turret
+        rays: 983
+        outcomes:
+          penetration: 174
+          shatter: 809
+      - zone: Stern
+        rays: 906
+        outcomes:
+          penetration: 906
+      - zone: Bow
+        rays: 839
+        outcomes:
+          penetration: 839
+      - zone: TorpedoProtection
+        rays: 647
+        outcomes:
+          penetration: 647
+    examples:
+      - outcome: penetration
+        from_bow_m: 249.5
+        above_waterline_m: 8.9
+        plates:
+          - plate: "stern: Aft End Deck"
+            zone: Stern
+            thickness_mm: 32
+            angle_deg: 15
+            result: penetrate
+        more_plates: 2
+      - outcome: shatter
+        from_bow_m: 89.5
+        above_waterline_m: 17.5
+        plates:
+          - plate: "turret: Top Plate"
+            zone: Turret
+            thickness_mm: 254
+            angle_deg: 15.5
+            result: shatter
+        more_plates: 9
+    verdict: "Aichi M6A2 Seiran HE damages only behind the first plate it defeats. It defeats the first plate on 7441 of 8281 rays (90%); zones it damages: Superstructure, Turret, Stern, Bow, TorpedoProtection. It reaches Vermont's citadel only where citadel armor is the first plate struck, and defeats none."
+    assumptions:
+      - "Bomb impact speed is assumed to be its bulletSpeed (300 m/s) and its fall angle the aircraft's angleOfDive (75 deg). The client does not define bomb impact kinematics; the server does."
+      - "Each ray stands for an equal area of the target seen along the line of fire; fractions are by area, not weighted by dispersion or aim."
+      - Rays whose first armor contact is below the waterline entered the water first and are not modelled.
+      - "Target hull level and stationary, turrets at their default heading, and the projectile travels straight through the ship."
+      - "Penetration, ricochet and fuse behaviour are resolved by the game server; the client data holds only the inputs."
+      - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
+      - "HE and SAP defeat the first plate when penetration >= its nominal thickness, at any angle. SAP ricochets past its always-ricochet angle; HE does not ricochet."
+      - Damage behind the first plate is not modelled.
