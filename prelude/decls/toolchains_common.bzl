@@ -6,7 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//android:android_toolchain.bzl", "AndroidPlatformInfo", "AndroidToolchainInfo")
+load("@prelude//android:android_toolchain.bzl", "AidlToolchainInfo", "AndroidPlatformInfo", "AndroidToolchainInfo")
 load("@prelude//csharp:toolchain.bzl", "CSharpToolchainInfo")
 load("@prelude//go:toolchain.bzl", "GoToolchainInfo")
 load("@prelude//go_bootstrap:go_bootstrap.bzl", "GoBootstrapToolchainInfo")
@@ -23,6 +23,7 @@ load(
     "@prelude//kotlin:kotlin_toolchain.bzl",
     "KotlinToolchainInfo",
 )
+load("@prelude//nodejs:nodejs_toolchain.bzl", "NodejsToolchainInfo")
 load("@prelude//python:python_wheel_toolchain.bzl", "PythonWheelToolchainInfo")
 load("@prelude//python:toolchain.bzl", "PythonPlatformInfo", "PythonToolchainInfo")
 load("@prelude//python/cython:cython_toolchain.bzl", "CythonToolchainInfo")
@@ -38,6 +39,9 @@ def _toolchain(lang: str, providers: list[typing.Any], *, default: typing.Any = 
 
 def _android_toolchain():
     return _toolchain("android", [AndroidToolchainInfo, AndroidPlatformInfo, TestListingInfo])
+
+def _android_aidl_toolchain():
+    return _toolchain("android_aidl", [AidlToolchainInfo])
 
 def _csharp_toolchain():
     return _toolchain("csharp", [CSharpToolchainInfo])
@@ -90,6 +94,9 @@ def _kotlin_toolchain():
 def _kotlin_for_android_toolchain():
     return _toolchain("kotlin_for_android", [KotlinToolchainInfo])
 
+def _nodejs_toolchain():
+    return _toolchain("nodejs", [NodejsToolchainInfo])
+
 def _prebuilt_jar_toolchain():
     # Override is allowed for bootstrapping prebuilt jar toolchains
     return _toolchain("prebuilt_jar", [PrebuiltJarToolchainInfo])
@@ -117,6 +124,7 @@ def _test_toolchain():
 
 toolchains_common = struct(
     android = _android_toolchain,
+    android_aidl = _android_aidl_toolchain,
     csharp = _csharp_toolchain,
     cxx = _cxx_toolchain,
     cython = _cython_toolchain,
@@ -131,6 +139,7 @@ toolchains_common = struct(
     java_test = _java_test_toolchain,
     kotlin = _kotlin_toolchain,
     kotlin_for_android = _kotlin_for_android_toolchain,
+    nodejs = _nodejs_toolchain,
     prebuilt_jar = _prebuilt_jar_toolchain,
     python = _python_toolchain,
     python_bootstrap = _python_bootstrap_toolchain,

@@ -33,6 +33,7 @@ CompileWithArgsFileCmdOutput = record(
     argsfile = field(Artifact),
     argsfile_cmd_form = field(cmd_args),
     shell_quoted_args = field(cmd_args),
+    dep_file_fingerprints = field(list[typing.Any]),
     error_outputs = field(list[OutputArtifact]),
     output_file_map_artifact = field(Artifact | None),
     error_deserializer = field(RunInfo | None),
@@ -53,23 +54,37 @@ ENFORCED_CATEGORIES = [
 #
 #     return expect_eligible_for_dedupe
 
-def _is_swift_module_category(category: str) -> bool:
+def _is_swiftmodule_emit_category(category: str) -> bool:
+    return "swiftmodule" in category
+
+def _is_swiftmodule_or_pcm_category(category: str) -> bool:
     # Matches swiftmodule_compile[_with_explicit_mods] and every *pcm_compile
     # category (swift_pcm_compile, swift_underlying_pcm_compile,
     # swift_prebuilt_framework_pcm_compile).
-    return "swiftmodule" in category or "pcm_compile" in category
+    return _is_swiftmodule_emit_category(category) or "pcm_compile" in category
 
 def _is_swift_object_category(category: str) -> bool:
     # Bulk Swift object compiles (not swiftmodule/pcm).
     return category in (SWIFT_COMPILE_CATEGORY, SWIFT_COMPILE_CATEGORY + EXPLICIT_MODULES_CATEGORY_SUFFIX)
 
 def _low_pass_filter_for_category(category: str, prioritized: bool) -> bool:
-    # When prioritizing latency-critical Swift path, swiftmodule/pcm
-    # actions escape the low-pass filter (return False) so they stay local
-    # rather than being shed to RE. Everything else keeps the default.
-    if prioritized and _is_swift_module_category(category):
+    # Disable low-pass gating for prioritized swiftmodule and PCM actions.
+    if prioritized and _is_swiftmodule_or_pcm_category(category):
         return False
     return True
+
+def _prefer_local_for_category(
+    category: str,
+    prioritized: bool,
+    local_only: bool,
+    prefer_local: bool,
+) -> bool:
+    if local_only:
+        return prefer_local
+
+    if prioritized and _is_swiftmodule_emit_category(category):
+        return True
+    return prefer_local
 
 def compile_with_argsfile_cmd(
     ctx: AnalysisContext,
@@ -110,25 +125,16 @@ def compile_with_argsfile_cmd(
     # input tracking.
     shell_quoted_args = cmd_args(shared_flags, quote = "shell")
 
+    dep_file_fingerprints = []
     if artifact_tag != None and uses_content_based_paths:
-        # This is a little bit convoluted due to the way that content-based paths affect argfiles.
-        # If an unused tagged input changes, we don't want to re-run the action, but if it is a
-        # content-based input that is written to the argfile, then the argfile will also change
-        # and that would cause a re-run.
-        #
-        # We therefore write the argfile twice: the "real" argfile, which is used in the action
-        # and tagged as unused so that it is not used for dep-file comparison, and an argfile
-        # that uses placeholders instead of content-based paths, which is not tagged for dep-files
-        # and therefore causes a dep-file miss if it changes.
-        argsfile, _ = ctx.actions.write(".{}_argsfile".format(category), shell_quoted_args, allow_args = True, has_content_based_path = uses_content_based_paths)
-        placeholder_argsfile, _ = ctx.actions.write(
-            ".{}_argsfile_placeholder".format(category),
+        (argsfile, fingerprint), _ = ctx.actions.write(
+            ".{}_argsfile".format(category),
             shell_quoted_args,
             allow_args = True,
-            use_dep_files_placeholder_for_content_based_paths = True,
+            dep_files_fingerprint_using_canonical_paths = True,
             has_content_based_path = uses_content_based_paths,
         )
-        cmd.add(cmd_args(hidden = placeholder_argsfile))
+        dep_file_fingerprints.append(fingerprint)
         argsfile_cmd_form = cmd_args(artifact_tag.tag_artifacts(argsfile), format = "@{}", delimiter = "", hidden = shared_flags)
     else:
         argsfile, _ = ctx.actions.write(".{}_argsfile".format(category), shell_quoted_args, allow_args = True, has_content_based_path = uses_content_based_paths)
@@ -199,6 +205,7 @@ def compile_with_argsfile_cmd(
         argsfile = argsfile,
         argsfile_cmd_form = argsfile_cmd_form,
         shell_quoted_args = shell_quoted_args,
+        dep_file_fingerprints = dep_file_fingerprints,
         error_outputs = error_outputs,
         output_file_map_artifact = output_file_map_artifact,
         error_deserializer = error_deserializer,
@@ -247,7 +254,9 @@ def compile_with_argsfile(
     # leak into .swiftmodule files, breaking @_implementationOnly blast radius.
     expect_eligible_for_dedupe = False  # _get_should_expect_eligible_for_dedupe(ctx, category)
     if toolchain.prioritize_swift_critical_path and _is_swift_object_category(category):
-        weight = num_threads * 3
+        # Empirically tuned to preserve local capacity for prioritized swiftmodule
+        # emits. Re-benchmark builds before changing.
+        weight = num_threads * 4
     else:
         weight = num_threads
     ctx.actions.run(
@@ -256,13 +265,14 @@ def compile_with_argsfile(
         allow_dep_file_cache_upload = (len(dep_files) > 0),
         category = category,
         dep_files = dep_files,
+        dep_file_fingerprints = cmd_output.dep_file_fingerprints,
         error_handler = swift_error_handler if cmd_output.error_deserializer else apple_build_error_handler,
         local_only = local_only,
         low_pass_filter = _low_pass_filter_for_category(category, toolchain.prioritize_swift_critical_path),
         no_outputs_cleanup = no_outputs_cleanup,
         incremental_remote_outputs = incremental_remote_outputs,
         outputs_for_error_handler = cmd_output.error_outputs,
-        prefer_local = prefer_local,
+        prefer_local = _prefer_local_for_category(category, toolchain.prioritize_swift_critical_path, local_only, prefer_local),
         unique_input_inodes = True,
         weight = weight,
         expect_eligible_for_dedupe = expect_eligible_for_dedupe,

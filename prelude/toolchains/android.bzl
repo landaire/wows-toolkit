@@ -6,7 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//android:android_toolchain.bzl", "AndroidPlatformInfo", "AndroidToolchainInfo")
+load("@prelude//android:android_toolchain.bzl", "AidlToolchainInfo", "AndroidPlatformInfo", "AndroidToolchainInfo")
 load("@prelude//target_stats:target_stats_tools.bzl", "TargetStatsToolsInfo")
 load("@prelude//tests:test_listing.bzl", "TestListingInfo")
 
@@ -17,7 +17,7 @@ def _android_sdk_tools_impl(ctx):
     sub_targets["aidl"] = [RunInfo(args = ["{}/build-tools/{}/aidl".format(ctx.attrs.android_sdk_path, ctx.attrs.build_tools_version)])]
     sub_targets["zipalign"] = [RunInfo(args = ["{}/build-tools/{}/zipalign".format(ctx.attrs.android_sdk_path, ctx.attrs.build_tools_version)])]
 
-    sub_targets["adb"] = [RunInfo(args = ["{}/build-tools/platform-tools/adb".format(ctx.attrs.android_sdk_path)])]
+    sub_targets["adb"] = [RunInfo(args = ["{}/platform-tools/adb".format(ctx.attrs.android_sdk_path)])]
 
     android_jar = ctx.actions.declare_output("android.jar", has_content_based_path = False)
     ctx.actions.run(
@@ -49,23 +49,21 @@ def _android_sdk_tools_impl(ctx):
 
     optimized_proguard_config = ctx.actions.declare_output("proguard-android-optimize.txt", has_content_based_path = False)
     ctx.actions.run(
-        cmd_args(
-            ["ln", "-s", "{}/platforms/tools/proguard/proguard-android-optimize.txt".format(ctx.attrs.android_sdk_path), optimized_proguard_config.as_output()]
-        ),
+        cmd_args(["ln", "-s", "{}/tools/proguard/proguard-android-optimize.txt".format(ctx.attrs.android_sdk_path), optimized_proguard_config.as_output()]),
         category = "optimized_proguard_config_symlink",
     )
     sub_targets["optimized_proguard_config"] = [DefaultInfo(default_output = optimized_proguard_config)]
 
     proguard_config = ctx.actions.declare_output("proguard-android.txt", has_content_based_path = False)
     ctx.actions.run(
-        cmd_args(["ln", "-s", "{}/platforms/tools/proguard/proguard-android.txt".format(ctx.attrs.android_sdk_path), proguard_config.as_output()]),
+        cmd_args(["ln", "-s", "{}/tools/proguard/proguard-android.txt".format(ctx.attrs.android_sdk_path), proguard_config.as_output()]),
         category = "proguard_config_symlink",
     )
     sub_targets["proguard_config"] = [DefaultInfo(default_output = proguard_config)]
 
     proguard_jar = ctx.actions.declare_output("proguard.jar", has_content_based_path = False)
     ctx.actions.run(
-        cmd_args(["ln", "-s", "{}/platforms/tools/proguard/lib/proguard.jar".format(ctx.attrs.android_sdk_path), proguard_jar.as_output()]),
+        cmd_args(["ln", "-s", "{}/tools/proguard/lib/proguard.jar".format(ctx.attrs.android_sdk_path), proguard_jar.as_output()]),
         category = "proguard_jar_symlink",
     )
     sub_targets["proguard.jar"] = [DefaultInfo(default_output = proguard_jar)]
@@ -83,12 +81,34 @@ android_sdk_tools = rule(
     },
 )
 
+def system_android_aidl_toolchain(name, android_sdk_tools_target, **kwargs):
+    kwargs["aidl"] = "{}[aidl]".format(android_sdk_tools_target)
+    kwargs["framework_aidl_file"] = "{}[framework.aidl]".format(android_sdk_tools_target)
+    _system_android_aidl_toolchain_rule(name = name, **kwargs)
+
+def _system_android_aidl_toolchain_rule_impl(ctx):
+    return [
+        DefaultInfo(),
+        AidlToolchainInfo(
+            aidl = ctx.attrs.aidl[RunInfo],
+            framework_aidl_file = ctx.attrs.framework_aidl_file,
+        ),
+    ]
+
+_system_android_aidl_toolchain_rule = rule(
+    attrs = {
+        "aidl": attrs.exec_dep(providers = [RunInfo]),
+        "framework_aidl_file": attrs.source(),
+    },
+    impl = _system_android_aidl_toolchain_rule_impl,
+    is_toolchain_rule = True,
+)
+
 def system_android_toolchain(name, android_sdk_tools_target, jdk_system_image, **kwargs):
     kwargs["aapt2_filter_resources"] = "prelude//android/tools:filter_extra_resources"
     kwargs["aapt2"] = "{}[aapt2]".format(android_sdk_tools_target)
     kwargs["aar_builder"] = "prelude//toolchains/android/src/com/facebook/buck/android/aar:aar_builder_binary"
     kwargs["adb"] = "{}[adb]".format(android_sdk_tools_target)
-    kwargs["aidl"] = "{}[aidl]".format(android_sdk_tools_target)
     kwargs["android_jar"] = "{}[android.jar]".format(android_sdk_tools_target)
     kwargs["android_optional_jars"] = []
     kwargs["apk_builder"] = "prelude//toolchains/android/src/com/facebook/buck/android/apk:apk_builder_binary"
@@ -106,7 +126,6 @@ def system_android_toolchain(name, android_sdk_tools_target, jdk_system_image, *
     kwargs["filter_dex_class_names"] = "prelude//android/tools:filter_dex"
     kwargs["filter_prebuilt_native_library_dir"] = "prelude//android/tools:filter_prebuilt_native_library_dir"
     kwargs["filter_resources"] = "prelude//toolchains/android/src/com/facebook/buck/android/resources/filter:filter_resources_binary"
-    kwargs["framework_aidl_file"] = "{}[framework.aidl]".format(android_sdk_tools_target)
     # @oss-disable[end= ]: kwargs["gatorade_mergemap_tool"] = "prelude//android/tools/meta_only:gatorade_mergemap_tool"
     kwargs["generate_build_config"] = "prelude//toolchains/android/src/com/facebook/buck/android/build_config:generate_build_config_binary"
     kwargs["generate_manifest"] = "prelude//toolchains/android/src/com/facebook/buck/android/manifest:generate_manifest_binary"
@@ -149,8 +168,6 @@ def system_android_toolchain(name, android_sdk_tools_target, jdk_system_image, *
     )
     kwargs["secondary_dex_compression_command"] = "prelude//toolchains/android/src/com/facebook/buck/android/dex:secondary_dex_compression_binary"
     kwargs["secondary_dex_weight_limit"] = 1024
-    kwargs["set_application_id_to_specified_package"] = True
-    kwargs["should_run_sanity_check_for_placeholders"] = True
     kwargs["unpack_aar"] = "prelude//android/tools:unpack_aar"
     kwargs["zipalign"] = "{}[zipalign]".format(android_sdk_tools_target)
 
@@ -171,7 +188,6 @@ def system_android_toolchain_rule_impl(ctx):
             aapt2_filter_resources = ctx.attrs.aapt2_filter_resources[RunInfo],
             aar_builder = ctx.attrs.aar_builder[RunInfo],
             adb = ctx.attrs.adb[RunInfo],
-            aidl = ctx.attrs.aidl[RunInfo],
             android_bootclasspath = [ctx.attrs.android_jar],
             android_jar = ctx.attrs.android_jar,
             android_optional_jars = ctx.attrs.android_optional_jars,
@@ -190,7 +206,6 @@ def system_android_toolchain_rule_impl(ctx):
             filter_dex_class_names = ctx.attrs.filter_dex_class_names,
             filter_prebuilt_native_library_dir = ctx.attrs.filter_prebuilt_native_library_dir,
             filter_resources = ctx.attrs.filter_resources,
-            framework_aidl_file = ctx.attrs.framework_aidl_file,
             # @oss-disable[end= ]: gatorade_mergemap_tool = ctx.attrs.gatorade_mergemap_tool[RunInfo],
             generate_build_config = ctx.attrs.generate_build_config,
             generate_manifest = ctx.attrs.generate_manifest,
@@ -201,6 +216,7 @@ def system_android_toolchain_rule_impl(ctx):
             instrumentation_test_runner_main_class = ctx.attrs.instrumentation_test_runner_main_class,
             jar_splitter_command = ctx.attrs.jar_splitter_command,
             jdk_system_image = ctx.attrs.jdk_system_image,
+            jni_onload_check = ctx.attrs.jni_onload_check,
             manifest_utils = ctx.attrs.manifest_utils,
             merge_android_resource_sources = ctx.attrs.merge_android_resource_sources,
             merge_android_resources = ctx.attrs.merge_android_resources,
@@ -219,8 +235,6 @@ def system_android_toolchain_rule_impl(ctx):
             replace_application_id_placeholders = ctx.attrs.replace_application_id_placeholders,
             secondary_dex_compression_command = ctx.attrs.secondary_dex_compression_command,
             secondary_dex_weight_limit = ctx.attrs.secondary_dex_weight_limit,
-            set_application_id_to_specified_package = ctx.attrs.set_application_id_to_specified_package,
-            should_run_sanity_check_for_placeholders = ctx.attrs.should_run_sanity_check_for_placeholders,
             sort_pre_dexed_files = ctx.attrs.sort_pre_dexed_files,
             unpack_aar = ctx.attrs.unpack_aar,
             zipalign = ctx.attrs.zipalign,
@@ -233,7 +247,6 @@ system_android_toolchain_rule = rule(
         "aapt2_filter_resources": attrs.dep(providers = [RunInfo]),
         "aar_builder": attrs.dep(providers = [RunInfo]),
         "adb": attrs.dep(providers = [RunInfo]),
-        "aidl": attrs.dep(providers = [RunInfo]),
         "android_jar": attrs.source(),
         "android_optional_jars": attrs.list(attrs.source()),
         "apk_builder": attrs.dep(providers = [RunInfo]),
@@ -252,7 +265,6 @@ system_android_toolchain_rule = rule(
         "filter_dex_class_names": attrs.dep(providers = [RunInfo]),
         "filter_prebuilt_native_library_dir": attrs.dep(providers = [RunInfo]),
         "filter_resources": attrs.dep(providers = [RunInfo]),
-        "framework_aidl_file": attrs.source(),
         # @oss-disable[end= ]: "gatorade_mergemap_tool": attrs.dep(providers = [RunInfo]),
         "generate_build_config": attrs.dep(providers = [RunInfo]),
         "generate_manifest": attrs.dep(providers = [RunInfo]),
@@ -262,6 +274,7 @@ system_android_toolchain_rule = rule(
         "instrumentation_test_runner_main_class": attrs.string(),
         "jar_splitter_command": attrs.dep(providers = [RunInfo]),
         "jdk_system_image": attrs.source(),
+        "jni_onload_check": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
         "list_tests": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
         "manifest_utils": attrs.dep(providers = [RunInfo]),
         "merge_android_resource_sources": attrs.dep(providers = [RunInfo]),
@@ -280,9 +293,7 @@ system_android_toolchain_rule = rule(
         "replace_application_id_placeholders": attrs.dep(providers = [RunInfo]),
         "secondary_dex_compression_command": attrs.dep(providers = [RunInfo]),
         "secondary_dex_weight_limit": attrs.int(),
-        "set_application_id_to_specified_package": attrs.bool(),
-        "should_run_sanity_check_for_placeholders": attrs.bool(),
-        "sort_pre_dexed_files": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
+        "sort_pre_dexed_files": attrs.dep(providers = [RunInfo]),
         "target_stats_tools": attrs.option(attrs.dep(providers = [TargetStatsToolsInfo]), default = None),
         "unpack_aar": attrs.dep(providers = [RunInfo]),
         "zipalign": attrs.dep(providers = [RunInfo]),

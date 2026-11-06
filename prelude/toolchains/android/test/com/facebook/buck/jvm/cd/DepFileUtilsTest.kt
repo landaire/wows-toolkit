@@ -15,7 +15,6 @@ import com.fasterxml.jackson.core.type.TypeReference
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.Optional
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -32,14 +31,14 @@ class DepFileUtilsTest {
             "/path/to/C.jar" to setOf("Class3.class", "Class1.class"),
             "/path/to/A.jar" to setOf("ClassA.class"),
             "/path/to/B.jar" to setOf("ClassB.class"),
-        )
+        ),
     )
     val depFileOutput = tempFolder.newFile("dep-file.txt").toPath()
 
     DepFileUtils.usedClassesToDepFile(
         listOf(usedClassesMapPath),
         depFileOutput,
-        Optional.empty(),
+        emptyMap(),
         false,
     )
 
@@ -62,7 +61,7 @@ class DepFileUtilsTest {
     DepFileUtils.usedClassesToDepFile(
         listOf(prevUsedClassesMapPath),
         depFileOutput,
-        Optional.empty(),
+        emptyMap(),
         false,
     )
 
@@ -71,13 +70,13 @@ class DepFileUtilsTest {
             "/path/to/C.jar" to setOf("Class3.class", "Class1.class"),
             "/path/to/A.jar" to setOf("ClassA.class"),
             "/path/to/D.jar" to setOf("ClassD.class"),
-        )
+        ),
     )
 
     DepFileUtils.usedClassesToDepFile(
         listOf(usedClassesMapPath),
         depFileOutput,
-        Optional.empty(),
+        emptyMap(),
         true,
     )
 
@@ -94,19 +93,18 @@ class DepFileUtilsTest {
             "/path/to/C.jar" to setOf("Class3.class", "Class1.class"),
             "/path/to/A.jar" to setOf("ClassZ.class"),
             "/path/to/B.jar" to setOf("ClassB.class"),
-        )
+        ),
     )
-    val jarToJarDirMapPath = tempFolder.newFile("jar-to-dir-map.txt").toPath()
-    Files.write(
-        jarToJarDirMapPath,
-        listOf("/path/to/C.jar /expanded/C", "/path/to/A.jar /expanded/A"),
+    val jarToJarDirMap = mapOf(
+        Paths.get("/path/to/C.jar") to Paths.get("/expanded/C"),
+        Paths.get("/path/to/A.jar") to Paths.get("/expanded/A"),
     )
     val depFileOutput = tempFolder.newFile("dep-file.txt").toPath()
 
     DepFileUtils.usedClassesToDepFile(
         listOf(usedClassesMapPath),
         depFileOutput,
-        Optional.of(jarToJarDirMapPath),
+        jarToJarDirMap,
         false,
     )
 
@@ -127,7 +125,7 @@ class DepFileUtilsTest {
             "/path/to/C.jar" to setOf("Class3.class", "Class1.class"),
             "/path/to/A.jar" to setOf("ClassA.class"),
             "/path/to/B.jar" to setOf("ClassB.class"),
-        )
+        ),
     )
     val usedJarsOutput = tempFolder.newFile("used-jars.txt").toPath()
 
@@ -154,7 +152,7 @@ class DepFileUtilsTest {
             "/path/to/C.jar" to setOf("Class3.class", "Class2.class"),
             "/path/to/A.jar" to setOf("ClassA.class"),
             "/path/to/B.jar" to setOf("ClassB.class"),
-        )
+        ),
     )
     val usedJarsOutput = tempFolder.newFile("used-jars.txt").toPath()
 

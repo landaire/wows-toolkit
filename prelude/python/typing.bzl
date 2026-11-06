@@ -8,6 +8,7 @@
 
 load("@prelude//python:python.bzl", "PythonLibraryInfo")
 # @oss-disable[end= ]: load("@prelude//python/meta_only:config.bzl", "DEFAULT_PY_VERSION")
+load(":internal_tools.bzl", "PythonInternalToolsInfo")
 load(
     ":manifest.bzl",
     "ManifestInfo",  # @unused Used as a type
@@ -147,7 +148,7 @@ def _create_sharded_type_check(
 
     return commands
 
-def create_type_check_validation(ctx: AnalysisContext, executable: RunInfo, type_check_result: Artifact) -> Artifact:
+def create_type_check_validation(ctx: AnalysisContext, type_check_result: Artifact) -> Artifact:
     """Create a separate action converting type check result to ValidationSpec JSON.
 
     This must be a separate action because ValidationSpec requires the validation
@@ -155,9 +156,8 @@ def create_type_check_validation(ctx: AnalysisContext, executable: RunInfo, type
     """
     validation_output = ctx.actions.declare_output("type_check_validation.json", has_content_based_path = False)
     cmd = cmd_args(
-        executable,
+        ctx.attrs._python_internal_tools[PythonInternalToolsInfo].type_check_result_to_validation,
         type_check_result,
-        "--convert-validation",
         "--output",
         validation_output.as_output(),
     )
@@ -176,16 +176,11 @@ def create_per_target_type_check(
 ) -> DefaultInfo:
     if not typing_enabled:
         # Use empty dict to signal that no type checking was performed.
-        output_file = ctx.actions.write_json("type_check_result.json", {}, has_content_based_path = False)
-        sharded_output_file = ctx.actions.write_json(
-            "sharded_type_check_result.json",
-            {},
-            has_content_based_path = False,
-        )
+        empty_result = ctx.attrs._python_internal_tools[PythonInternalToolsInfo].empty_typing_result
         return DefaultInfo(
-            default_output = output_file,
+            default_output = empty_result,
             sub_targets = {
-                "shard_default": [DefaultInfo(default_output = sharded_output_file)],
+                "shard_default": [DefaultInfo(default_output = empty_result)],
             },
         )
 

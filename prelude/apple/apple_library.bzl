@@ -15,6 +15,7 @@ load("@prelude//:paths.bzl", "paths")
 load("@prelude//:validation_deps.bzl", "get_validation_deps_outputs")
 load("@prelude//apple:apple_dsym.bzl", "DSYM_SUBTARGET", "get_apple_dsym")
 load("@prelude//apple:apple_stripping.bzl", "apple_strip_args")
+load("@prelude//apple:xcassets_asset_symbols.bzl", "meta_xcassets_asset_symbol_usage_providers_and_subtargets")
 # @oss-disable[end= ]: load("@prelude//apple/meta_only:apple_library_meta_validation.bzl", "apple_library_validate_for_meta_restrictions")
 # @oss-disable[end= ]: load(
     # @oss-disable[end= ]: "@prelude//apple/meta_only:linker_outputs.bzl",
@@ -60,6 +61,7 @@ load(
     "IndexStoreFactory",
 )
 load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
+load("@prelude//cxx:cxx_flags.bzl", "cxx_attr_flags")
 load(
     "@prelude//cxx:cxx_library.bzl",
     "CxxLibraryOutput",  # @unused Used as a type
@@ -87,6 +89,7 @@ load(
     "CxxRuleConstructorParams",
     "CxxRuleProviderParams",
     "CxxRuleSubTargetParams",
+    "xcode_data_enabled",
 )
 load("@prelude//cxx:cxx_utility.bzl", "cxx_attrs_get_allow_cache_upload")
 load("@prelude//cxx:headers.bzl", "cxx_attr_exported_headers", "cxx_attr_headers_list")
@@ -104,6 +107,7 @@ load(
     "@prelude//cxx:preprocessor.bzl",
     "CPreprocessor",
     "CPreprocessorInfo",  # @unused Used as a type
+    "EMPTY_CPREPROCESSOR",
 )
 load("@prelude//cxx:target_sdk_version.bzl", "get_unversioned_target_triple")
 load("@prelude//graphql:graphql.bzl", "graphql_providers")
@@ -129,7 +133,7 @@ load(":apple_library_types.bzl", "AppleLibraryInfo")
 load(":apple_modular_utility.bzl", "MODULE_CACHE_PATH")
 load(":apple_rpaths.bzl", "get_rpath_flags_for_library")
 load(":apple_target_sdk_version.bzl", "get_min_deployment_version_for_node")
-load(":apple_utility.bzl", "get_apple_cxx_headers_layout", "get_apple_stripped_attr_value_with_default_fallback", "get_module_name")
+load(":apple_utility.bzl", "get_apple_cxx_headers_layout", "get_apple_stripped_attr_value_with_default_fallback", "get_module_name", "target_stats_header_name")
 load(
     ":debug.bzl",
     "AppleDebuggableInfo",
@@ -204,6 +208,7 @@ def apple_library_impl(ctx: AnalysisContext) -> [Promise, list[Provider]]:
             ctx,
             AppleLibraryAdditionalParams(
                 rule_type = "apple_library",
+                generate_sub_targets = CxxRuleSubTargetParams(xcode_data = xcode_data_enabled()),
                 generate_providers = CxxRuleProviderParams(
                     java_packaging_info = False,
                     java_global_code_info = False,
@@ -330,18 +335,19 @@ def _make_mockingbird_library_info_provider(ctx: AnalysisContext) -> list[Mockin
     if len(swift_sources) == 0:
         return []
 
+    mockingbird_module_name = get_module_name(ctx)
     deps_mockingbird_infos = filter(None, [dep.get(MockingbirdLibraryInfo) for dep in cxx_attr_deps(ctx)])
     exported_deps_mockingbird_infos = filter(None, [dep.get(MockingbirdLibraryInfo) for dep in cxx_attr_exported_deps(ctx)])
 
     children = []
-    dep_names = []
-    exported_dep_names = []
+    dep_module_names = []
+    exported_dep_module_names = []
     for info in deps_mockingbird_infos:
-        dep_names.append(info.name)
+        dep_module_names.append(info.name)
         children.append(info.tset)
 
     for info in exported_deps_mockingbird_infos:
-        exported_dep_names.append(info.name)
+        exported_dep_module_names.append(info.name)
         children.append(info.tset)
 
     mockingbird_srcs_folder = ctx.actions.declare_output("mockingbird_srcs_" + ctx.attrs.name, dir = True, has_content_based_path = False)
@@ -352,10 +358,10 @@ def _make_mockingbird_library_info_provider(ctx: AnalysisContext) -> list[Mockin
     )
 
     mockingbird_record = MockingbirdLibraryRecord(
-        name = ctx.attrs.name,
+        name = mockingbird_module_name,
         srcs = [src.file for src in swift_sources],
-        dep_names = dep_names,
-        exported_dep_names = exported_dep_names,
+        dep_names = dep_module_names,
+        exported_dep_names = exported_dep_module_names,
         type = MockingbirdTargetType("library"),
         src_dir = mockingbird_srcs_folder,
     )
@@ -364,7 +370,7 @@ def _make_mockingbird_library_info_provider(ctx: AnalysisContext) -> list[Mockin
 
     return [
         MockingbirdLibraryInfo(
-            name = ctx.attrs.name,
+            name = mockingbird_module_name,
             tset = mockingbird_tset,
         )
     ]
@@ -420,7 +426,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
     objc_swift_interface = swift_compile_result.objc_swift_interface
     swift_object_files = swift_compile.object_files if swift_compile else []
 
-    swift_pre = CPreprocessor()
+    swift_pre = EMPTY_CPREPROCESSOR
     if swift_compile:
         # If we have Swift we export the extended modulemap that includes
         # the ObjC exported headers and the -Swift.h header.
@@ -495,6 +501,10 @@ def apple_library_rule_constructor_params_and_swift_providers(
         extra_apple_providers = _make_apple_library_info_provider(ctx, swift_objc_header) + _make_apple_library_for_distribution_info_provider(
             ctx, swift_library_for_distribution_output
         )
+    meta_xcassets_usage_providers, meta_xcassets_usage_subtargets = (
+        ([], {}) if is_test_target else meta_xcassets_asset_symbol_usage_providers_and_subtargets(ctx, cxx_srcs, swift_srcs)
+    )
+    extra_apple_providers += meta_xcassets_usage_providers
 
     # Always provide a valid JSON object, so that tooling can depend on its existance
     modulemap_info_json = {"modulemap": exported_pre.modulemap_artifact} if (exported_pre and exported_pre.modulemap_artifact) else {}
@@ -503,6 +513,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
     modulemap_info_providers = [DefaultInfo(default_output = modulemap_info_json_file, other_outputs = [modulemap_info_json_cmd_args])]
 
     subtargets = {
+        "ast": [DefaultInfo(default_output = swift_compile_result.ast)],
         "modulemap-info": modulemap_info_providers,
         "objc-swift-interface": [objc_swift_interface],
         "swift-compilation-database": [DefaultInfo(default_output = None)],
@@ -510,6 +521,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
         "swiftinterface": [DefaultInfo(default_output = swift_compile_result.swiftinterface)],
         "swiftmodule": [DefaultInfo(default_output = None)],
     }
+    subtargets.update(meta_xcassets_usage_subtargets)
     if swift_compile and swift_compile.compiled_underlying_pcm_artifact:
         subtargets["underlying-pcm"] = [DefaultInfo(default_output = swift_compile.compiled_underlying_pcm_artifact)]
 
@@ -542,7 +554,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
             ]
 
         subtargets["swiftmodule"] = [DefaultInfo(default_output = swift_compile.swiftmodule)]
-        subtargets["modularization-dependency-graph"] = [DefaultInfo(default_output = swift_compile.modularization_dependency_graph)]
+        subtargets["swift-objc-header"] = [DefaultInfo(default_output = swift_compile.exported_swift_header)]
 
     # Always provide the subtarget, so that clients don't need to handle conditional existence
     subtargets["swift.check"] = [DefaultInfo(default_output = swift_compile.typecheck_file if swift_compile else None)]
@@ -573,6 +585,12 @@ def apple_library_rule_constructor_params_and_swift_providers(
         extra_preprocessors = [swift_pre, modular_pre],
         extra_exported_preprocessors = filter(None, [exported_pre]),
         srcs = cxx_srcs,
+        target_stats_cycle_mode = "file",
+        target_stats_module_name = get_module_name(ctx),
+        target_stats_extra_srcs = {
+            target_stats_header_name(header): header.artifact for header in cxx_attr_headers_list(ctx, ctx.attrs.headers, header_layout) + exported_hdrs
+        },
+        target_stats_swift_dot = swift_compile.modularization_dependency_graph if swift_compile else None,
         additional = CxxRuleAdditionalParams(
             srcs = swift_srcs,
             argsfiles = swift_compile.argsfiles if swift_compile else CompileArgsfiles(),
@@ -607,6 +625,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
         extra_distributed_thin_lto_opt_outputs_merger = _extra_distributed_thin_lto_opt_outputs_merger,
         swiftmodule_linkable = get_swiftmodule_linkable(swift_compile),
         compiler_flags = ctx.attrs.compiler_flags,
+        cxx_flags = cxx_attr_flags(ctx),
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
@@ -614,6 +633,7 @@ def apple_library_rule_constructor_params_and_swift_providers(
         error_handler = cxx_error_handler if cxx_error_deserializer(ctx) else apple_build_error_handler,
         index_store_factory = IndexStoreFactory(declare = _declare_index_store, compile = _compile_index_store),
         index_stores = [swift_compile.index_store] if swift_compile else None,
+        modularization_dependency_graph = swift_compile.modularization_dependency_graph if swift_compile else None,
         extra_transitive_diagnostics = [swift_compile.typecheck_file] if swift_compile else [],
         extra_diagnostics = {"swift": swift_compile.typecheck_file} if swift_compile else None,
         allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs, get_cxx_toolchain_info(ctx).cxx_compiler_info.allow_cache_upload),

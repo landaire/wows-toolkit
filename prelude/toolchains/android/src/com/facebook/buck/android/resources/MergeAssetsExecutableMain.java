@@ -68,15 +68,11 @@ public class MergeAssetsExecutableMain {
   @Option(name = "--binary-type", usage = "either 'apk' or 'aab'")
   private @Nullable String binaryType = null;
 
-  @Option(name = "--optimized-processing", usage = "enable optimized resource processing")
-  private boolean optimizedProcessing = false;
-
   public static void main(String[] args) throws IOException {
     MergeAssetsExecutableMain main = new MergeAssetsExecutableMain();
     CmdLineParser parser = new CmdLineParser(main);
     try {
       parser.parseArgument(args);
-      ResourceProcessingConfig.setOptimizationsEnabled(main.optimizedProcessing);
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
@@ -87,13 +83,14 @@ public class MergeAssetsExecutableMain {
   }
 
   private void run() throws IOException {
+    // readValue only yields null for a literal JSON `null` document.
     ImmutableMap<String, ImmutableSet<Path>> rawDirs =
-        ObjectMappers.READER.readValue(
-            ObjectMappers.createParser(Paths.get(assetsDirs)),
-            new TypeReference<ImmutableMap<String, ImmutableSet<Path>>>() {});
+        Objects.requireNonNull(
+            ObjectMappers.READER.readValue(
+                ObjectMappers.createParser(Paths.get(assetsDirs)),
+                new TypeReference<ImmutableMap<String, ImmutableSet<Path>>>() {}));
 
     ImmutableMap<String, ImmutableSet<RelPath>> dirs =
-        // NULLSAFE_FIXME[Nullable Dereference]
         rawDirs.entrySet().stream()
             .collect(
                 ImmutableMap.toImmutableMap(

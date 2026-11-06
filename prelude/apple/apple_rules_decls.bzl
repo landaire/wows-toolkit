@@ -16,7 +16,6 @@ load("@prelude//:validation_deps.bzl", "VALIDATION_DEPS_ATTR_NAME", "VALIDATION_
 load("@prelude//apple:apple_common.bzl", "apple_common")
 load("@prelude//apple:apple_info_plist.bzl", "MergeOperations", "RestrictedMergeOperations", "UpdateOperations", "apple_info_plist_impl")
 load("@prelude//apple:apple_metal_library.bzl", "apple_metal_library_impl")
-load("@prelude//apple:apple_platforms.bzl", "APPLE_PLATFORMS_KEY")
 load("@prelude//apple:apple_provisioning_profile_sources.bzl", "apple_provisioning_profile_sources_impl")
 load("@prelude//apple:apple_resource_dedupe_alias.bzl", "apple_resource_dedupe_alias_impl")
 load("@prelude//apple:apple_resource_types.bzl", "AppleResourceDestination")
@@ -92,6 +91,7 @@ load(
     "get_swift_incremental_file_hashing_attrs",
     "get_swift_incremental_logging_attrs",
     "get_swift_incremental_remote_outputs_attrs",
+    "get_versioned_macos_bundle_attr",
 )
 load(":apple_test.bzl", "apple_test_impl")
 load(":apple_toolchain.bzl", "apple_toolchain_impl")
@@ -144,9 +144,6 @@ def apple_bundle_default_attrs():
     attributes = {}
     attributes.update(apple_bundle_base_attrs())
     attributes.update(apple_bundle_extra_attrs())
-    attributes.update({
-        APPLE_PLATFORMS_KEY: attrs.dict(key = attrs.string(), value = attrs.dep(), sorted = False, default = {}),
-    })
     return attributes
 
 def apple_macos_bundle_attrs():
@@ -305,6 +302,7 @@ apple_binary = prelude_rule(
         | cxx_common.preprocessor_flags_arg()
         | cxx_common.exported_preprocessor_flags_arg(exported_preprocessor_flags_type = attrs.list(attrs.arg(), default = []))
         | cxx_common.compiler_flags_arg()
+        | cxx_common.flags_arg()
         | cxx_common.linker_extra_outputs_arg()
         | cxx_common.linker_flags_arg()
         | cxx_common.exported_linker_flags_arg()
@@ -617,6 +615,7 @@ apple_library = prelude_rule(
         | cxx_common.preprocessor_flags_arg()
         | cxx_common.exported_preprocessor_flags_arg(exported_preprocessor_flags_type = attrs.list(attrs.arg(), default = []))
         | cxx_common.compiler_flags_arg()
+        | cxx_common.flags_arg()
         | cxx_common.linker_extra_outputs_arg()
         | cxx_common.linker_flags_arg()
         | cxx_common.exported_linker_flags_arg()
@@ -707,6 +706,7 @@ apple_library = prelude_rule(
             "supports_shlib_interfaces": attrs.bool(default = True),
             "swift_compilation_mode": attrs.enum(SwiftCompilationMode.values(), default = "wmo"),
             "swift_compiler_flags": attrs.list(attrs.arg(), default = []),
+            "swift_dump_ast_subtarget_enabled": attrs.bool(default = read_bool("apple", "swift_dump_ast_subtarget_enabled", default = False, root_cell = True)),
             "swift_interface_compilation_enabled": attrs.bool(default = True),
             "swift_macro_deps": attrs.list(attrs.plugin_dep(kind = SwiftMacroPlugin), default = []),
             "swift_version": attrs.enum(SwiftVersion, default = SwiftVersion[0]),
@@ -1042,6 +1042,7 @@ apple_test = prelude_rule(
         | apple_common.frameworks_arg()
         | cxx_common.preprocessor_flags_arg()
         | cxx_common.compiler_flags_arg()
+        | cxx_common.flags_arg()
         | cxx_common.linker_flags_arg()
         | apple_common.target_sdk_version()
         | buck.run_test_separately_arg(run_test_separately_type = attrs.bool(default = False))
@@ -1395,8 +1396,9 @@ swift_toolchain = prelude_rule(
             # which requires setting up separate platform-specific aliases with the correct constraints.
             "placeholder_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
             "platform_path": attrs.option(attrs.source(), default = None),
-            # Rollout flag (buckconfig-driven, mode-independent) that prioritizes
-            # latency-critical Swift module builds.
+            # Prioritizes the Swift critical path by preferring swiftmodule emits
+            # locally, disabling low-pass gating for swiftmodule and PCM actions,
+            # and increasing bulk Swift object-compile weight.
             "prioritize_swift_critical_path": attrs.bool(default = False),
             "provide_swift_debug_info": attrs.bool(default = True),
             "resource_dir": attrs.option(attrs.source(), default = None),
@@ -1408,6 +1410,9 @@ swift_toolchain = prelude_rule(
             "serialized_diags_to_json": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
             "supports_explicit_module_debug_serialization": attrs.bool(default = False),
             "supports_incremental_file_hashing": attrs.bool(default = False),
+            # Only the Pika toolchain's swiftc understands
+            # -emit-modularization-dependency-dot-graph.
+            "supports_modularization_dependency_graph": attrs.bool(default = False),
             "supports_modulemaps_with_hmaps": attrs.bool(default = False),
             "supports_relative_resource_dir": attrs.bool(default = False),
             "swift_experimental_features": attrs.dict(
@@ -1555,12 +1560,15 @@ apple_tools = prelude_rule(
         "ipa_package_maker": attrs.exec_dep(providers = [RunInfo]),
         "make_modulemap": attrs.exec_dep(providers = [RunInfo]),
         "make_vfsoverlay": attrs.exec_dep(providers = [RunInfo]),
+        "provisioning_manifest": attrs.exec_dep(providers = [RunInfo]),
+        "resolve_signing_context": attrs.exec_dep(providers = [RunInfo]),
         "selective_debugging_scrubber": attrs.exec_dep(providers = [RunInfo]),
-        "signing_context": attrs.exec_dep(providers = [RunInfo]),
         "signing_context_tree_postprocessor": attrs.exec_dep(providers = [RunInfo]),
+        "signing_info": attrs.exec_dep(providers = [RunInfo]),
         "split_arch_combine_dsym_bundles_tool": attrs.exec_dep(providers = [RunInfo]),
         "spm_packager": attrs.exec_dep(providers = [RunInfo]),
         "static_archive_linker": attrs.exec_dep(providers = [RunInfo]),
+        "swiftmodule_change_analysis": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "xcframework_maker": attrs.exec_dep(providers = [RunInfo]),
     },
 )
@@ -1757,6 +1765,8 @@ apple_resource_bundle = prelude_rule(
             "product_name_from_module_name": attrs.bool(default = False),
             "resource_group_map": RESOURCE_GROUP_MAP_ATTR,
             "universal": attrs.option(attrs.bool(), default = None),
+            "versioned_macos_bundle": get_versioned_macos_bundle_attr(),
+            "xcassets_usage_targets": attrs.list(attrs.dep(), default = []),
             # Only include macOS hosted toolchains, so we compile resources directly on Mac RE
             "_apple_toolchain": get_apple_resources_toolchain_attr(),
             # Because `apple_resource_bundle` is a proxy for `apple_bundle`, we need to get `name`

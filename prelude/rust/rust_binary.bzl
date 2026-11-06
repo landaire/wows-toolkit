@@ -10,12 +10,16 @@ load(
     "@prelude//:artifact_tset.bzl",
     "project_artifacts",
 )
+load("@prelude//:command_alias.bzl", "command_alias")
+load("@prelude//:content_based_dist.bzl", "make_content_based_dist")
 load(
     "@prelude//:resources.bzl",
     "create_relocatable_resources_info",
     "create_resource_db",
     "gather_resources",
 )
+load("@prelude//cxx:cxx_bolt.bzl", "cxx_use_bolt")
+load("@prelude//cxx:cxx_executable.bzl", "get_cxx_post_link_suffix")
 load(
     "@prelude//cxx:cxx_library_utility.bzl",
     "cxx_attr_deps",
@@ -42,12 +46,15 @@ load(
     "@prelude//dist:dist_info.bzl",
     "DistInfo",
 )
+load("@prelude//linking:add_elf_sections.bzl", "get_elf_sections")
+load("@prelude//linking:generated_build_info.bzl", "compile_generated_build_info", "generate_build_info")
 load(
     "@prelude//linking:link_info.bzl",
     "LibOutputStyle",
     "LinkStrategy",
     "get_lib_output_style",
     "process_link_strategy_for_pic_behavior",
+    "unpack_link_args",
 )
 load(
     "@prelude//linking:linkable_graph.bzl",
@@ -74,16 +81,18 @@ load("@prelude//utils:utils.bzl", "flatten_dict")
 load(
     ":build.bzl",
     "generate_rustdoc",
+    "get_inherited_link_args",
+    "miri_command",
     "rust_compile",
+    "rust_compile_invalidation_inputs",
+    "rust_link_binary",
 )
 load(
     ":build_params.bzl",
     "BuildParams",  # @unused Used as a type
     "Emit",
-    "LinkageLang",
     "ProfileMode",  # @unused Used as a type
-    "RuleType",
-    "build_params",
+    "binary_build_params",
 )
 load(
     ":context.bzl",
@@ -104,6 +113,7 @@ load(":named_deps.bzl", "write_named_deps_names")
 load(":outputs.bzl", "RustcExtraOutputsInfo", "output_as_diag_subtargets")
 load(":profile.bzl", "make_profile_providers")
 load(":resources.bzl", "rust_attr_resources")
+load(":rust_toolchain.bzl", "PanicRuntime", "RustToolchainInfo", "toolchain_supports_miri")
 
 def _get_runtime_dependency_handling(ctx: AnalysisContext, compile_ctx: CompileContext) -> RuntimeDependencyHandling:
     """Read runtime_dependency_handling from attribute, falling back to CXX toolchain default."""
@@ -122,20 +132,190 @@ def _strategy_params(ctx: AnalysisContext, compile_ctx: CompileContext) -> dict[
 
     params = {}
     for link_strategy in LinkStrategy:
-        params[link_strategy] = build_params(
-            rule = RuleType("binary"),
+        params[link_strategy] = binary_build_params(
             proc_macro = False,
             link_strategy = link_strategy,
-            lib_output_style = None,
-            lang = LinkageLang("rust"),
             linker_type = linker_type,
             target_os_type = target_os_type,
         )
     return params
 
+def _create_content_based_dist(
+    ctx: AnalysisContext,
+    name: str,
+    exe: Artifact,
+    relocatable_resources_json: Artifact | None,
+    relocatable_resources_contents: Artifact | None,
+    shlib_tree: Artifact | list | None,
+) -> (Artifact, Artifact):
+    """
+    Build the content-based `assembled_dir` bundle for a `rust_binary` that opts
+    into `has_content_based_path` and has adjacent files: the relocatable resource
+    DB (copied) + the content-based `__resources` dir (symlinked), and the shlib
+    symlink-tree (symlinked). The exe and the copy/symlink contract are handled by
+    `make_content_based_dist`. Returns `(bundle_dir, projected exe)`.
+    """
+    exe_rel = exe.short_path
+    copies = {}
+    symlinks = {}
+
+    # Resources: reuse the relocatable DB + `__<name>__resources` symlink dir
+    # from `create_relocatable_resources_info` -- which is CONTENT-BASED for this
+    # binary (rust_binary threads `has_content_based_path` through). Copy the DB
+    # (its bytes are captured in the bundle); symlink the content-based resource
+    # dir. The dir being content-based is load-bearing: its path is immutable and
+    # re-hashes when a content-based resource changes, so the bundle's symlink to
+    # it is trample-safe -- unlike the config-based default, which would be
+    # rewritten in place under a running bundle.
+    if relocatable_resources_json != None:
+        copies[exe_rel + ".resources.json"] = relocatable_resources_json
+        symlinks[relocatable_resources_contents.short_path] = relocatable_resources_contents
+
+    # Shared libraries: symlink the whole prebuilt shlib symlink-tree into the
+    # bundle at the `$ORIGIN/<tree>`-relative offset the exe's RPATH already
+    # encodes (`get_rpath_origin` => `$ORIGIN` for the gnu linker). Symlinking
+    # the tree the linker already targets -- rather than reconstructing it
+    # per-soname -- reuses the tree tool's exact layout, so binaries with
+    # computed (non-string) sonames are handled too, and the loader follows the
+    # symlinked dir like any RPATH entry.
+    if isinstance(shlib_tree, list) and shlib_tree:
+        # Windows produces a list of per-DLL symlink artifacts (no `$ORIGIN`
+        # RPATH); co-locating them here is unimplemented. Fail loudly rather
+        # than ship a bundle that silently can't find its DLLs at runtime.
+        fail(
+            "content-based `assembled_dir` bundle does not support a Windows shared-library tree; a content-based rust_binary with shared libraries is not supported on Windows yet"
+        )
+    if isinstance(shlib_tree, Artifact):
+        symlinks[shlib_tree.short_path] = shlib_tree
+
+    return make_content_based_dist(ctx, name, exe, copies = copies, symlinks = symlinks)
+
+def _native_test_info(
+    ctx: AnalysisContext,
+    args: cmd_args,
+    re_executors,
+) -> list[Provider]:
+    """Default (native) test execution for a test rule."""
+    return inject_test_run_info(
+        ctx,
+        ExternalRunnerTestInfo(
+            type = "rust",
+            command = [args],
+            env = ctx.attrs.env | ctx.attrs.run_env,
+            labels = ctx.attrs.labels,
+            contacts = ctx.attrs.contacts,
+            default_executor = re_executors.default_executor,
+            executor_overrides = re_executors.executor_overrides,
+            run_from_project_root = True,
+            use_project_relative_paths = True,
+        ),
+    )
+
+def _miri_test_info(
+    ctx: AnalysisContext,
+    miri_direct_cmd: cmd_args,
+    re_executors,
+) -> ExternalRunnerTestInfo:
+    """Miri test execution for the `[miri]` sub-target, or the target itself when `miri_interpreted`."""
+    # Compile-time env rides inside the wrapped command (`--env`/`--path-env`),
+    # so no test-info env is needed.
+    labels = list(ctx.attrs.labels or [])
+    if "miri" not in labels:
+        labels.append("miri")
+    return ExternalRunnerTestInfo(
+        type = "rust",
+        command = [miri_direct_cmd],
+        env = {},
+        labels = labels,
+        contacts = ctx.attrs.contacts,
+        default_executor = re_executors.default_executor,
+        executor_overrides = re_executors.executor_overrides,
+        run_from_project_root = True,
+        use_project_relative_paths = True,
+    )
+
+def _miri_direct_command(
+    ctx: AnalysisContext,
+    compile_ctx: CompileContext,
+    toolchain_info: RustToolchainInfo,
+    default_roots: list[str],
+    extra_flags: list[str | ResolvedStringWithMacros | Artifact],
+    runtime_env: dict[str, str | ResolvedStringWithMacros | Artifact],
+    is_test: bool,
+    strategy_params: dict[LinkStrategy, BuildParams],
+) -> cmd_args | None:
+    """Wrapped Miri driver command, or `None` without a Miri toolchain."""
+    if not toolchain_supports_miri(toolchain_info):
+        return None
+    return miri_command(
+        ctx = ctx,
+        compile_ctx = compile_ctx,
+        params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
+        default_roots = default_roots,
+        extra_flags = extra_flags,
+        runtime_env = runtime_env,
+        is_test = is_test,
+    )
+
+def _miri_launcher(
+    ctx: AnalysisContext,
+    compile_ctx: CompileContext,
+    miri_direct_cmd: cmd_args,
+) -> list[Provider]:
+    """Executable launcher for a Miri run: the `[miri]` sub-target, or the target itself when `miri_interpreted`."""
+    # Env rides inside the wrapped command, so the launcher is just the command.
+    base = RunInfo(args = miri_direct_cmd)
+    args = cmd_args()
+    launcher = command_alias(
+        actions = ctx.actions,
+        path = "miri_launcher",
+        target_os = compile_ctx.exec_os_type,
+        base = base,
+        args = args,
+        env = {},
+        labels = [],
+        has_content_based_path = False,
+    )
+    return [
+        launcher.output,
+        RunInfo(args = launcher.cmd),
+    ]
+
+def _miri_test_sub_targets(
+    ctx: AnalysisContext,
+    compile_ctx: CompileContext,
+    toolchain_info: RustToolchainInfo,
+    miri_direct_cmd: cmd_args,
+    re_executors,
+) -> list[Provider]:
+    """Launcher plus test info for an interpreted test run: the `[miri]` sub-target, or the target itself when `miri_interpreted`."""
+    # The launcher serves `buck2 run`, where no runner adds
+    # `-Zunstable-options` to unlock `--force-run-in-process`; the test
+    # info omits it because TPX supplies it.
+    launcher_cmd = miri_direct_cmd
+    if toolchain_info.panic_runtime == PanicRuntime("abort"):
+        launcher_cmd = cmd_args(miri_direct_cmd, "-Zunstable-options")
+    return _miri_launcher(ctx, compile_ctx, launcher_cmd) + [
+        _miri_test_info(ctx, miri_direct_cmd, re_executors),
+    ]
+
+# Native link outputs shared by the binary and test impls.
+NativeBinary = record(
+    providers = field(list[Provider]),
+    default_info = field(DefaultInfo),
+    args = field(cmd_args),
+    sub_targets = field(dict[str, list[Provider]]),
+)
+
 def _rust_binary_common(
-    ctx: AnalysisContext, compile_ctx: CompileContext, default_roots: list[str], extra_flags: list[str], allow_cache_upload: bool
-) -> (list[Provider], cmd_args):
+    ctx: AnalysisContext,
+    compile_ctx: CompileContext,
+    default_roots: list[str],
+    extra_flags: list[str | ResolvedStringWithMacros | Artifact],
+    allow_cache_upload: bool,
+    strategy_params: dict[LinkStrategy, BuildParams],
+    miri_sub_targets = None,
+) -> NativeBinary:
     toolchain_info = compile_ctx.toolchain_info
 
     simple_crate = attr_simple_crate_for_filenames(ctx)
@@ -144,6 +324,12 @@ def _rust_binary_common(
     link_strategy = process_link_strategy_for_pic_behavior(link_strategy, compile_ctx.cxx_toolchain_info.pic_behavior)
 
     cxx_deps = cxx_attr_deps(ctx)
+    generated_build_info_enabled = getattr(ctx.attrs, "_generated_build_info_enabled", False)
+    generated_build_info_args = ctx.attrs._generated_build_info_args if generated_build_info_enabled else []
+
+    generated_build_info_link_args = []
+    generated_build_info_link_objects = []
+
     resources = flatten_dict(
         gather_resources(
             label = ctx.label,
@@ -152,23 +338,37 @@ def _rust_binary_common(
         ).values()
     )
 
-    extra_flags = toolchain_info.rustc_binary_flags + (extra_flags or [])
-
-    strategy_param = _strategy_params(ctx, compile_ctx)
-
-    params = strategy_param[link_strategy]
+    params = strategy_params[link_strategy]
     name = output_filename(compile_ctx, simple_crate, Emit("link"), params)
 
+    # Under advanced_unstable_linking, the binary is compiled via
+    # `Emit("rlib")` and linked through cxx below (`rust_link_binary`),
+    # mirroring how rust_library produces dylibs via `rust_link_shared`.
+    links_via_cxx = toolchain_info.advanced_unstable_linking
+    bin_emit = Emit("rlib") if links_via_cxx else Emit("link")
+
+    use_bolt = cxx_use_bolt(ctx)
+    if use_bolt and not links_via_cxx:
+        fail(
+            "`bolt_profile` is set, but BOLT runs as part of the cxx link. "
+            + "This target links via rustc; BOLT requires `advanced_unstable_linking` on the Rust toolchain."
+        )
+    elf_sections = get_elf_sections(ctx)
+    if elf_sections and not links_via_cxx:
+        fail(
+            "`elf_sections` is set, but the sections are added as part of the cxx link. "
+            + "This target links via rustc; `elf_sections` requires `advanced_unstable_linking` on the Rust toolchain."
+        )
     enable_late_build_info_stamping = cxx_stamp_build_info(ctx)
+    content_based_output = getattr(ctx.attrs, "has_content_based_path", False)
+    unstamped_name = None
     if enable_late_build_info_stamping:
         allow_cache_upload = True
         unstamped_name = output_filename(compile_ctx, simple_crate, Emit("link"), params, "-unstamped")
-        predeclared_output = ctx.actions.declare_output(unstamped_name, has_content_based_path = False)
-        final_output = ctx.actions.declare_output(name, has_content_based_path = False)
-    else:
-        # If not using late build info stamping, then the output will be stamped eagerly in rust_compile
-        predeclared_output = ctx.actions.declare_output(name, has_content_based_path = False)
-        final_output = predeclared_output
+
+    # The exe output is declared below, once we know whether it ships in a
+    # content-based `copied_dir` bundle (see the `will_bundle` decision after
+    # `shared_libs` is computed).
 
     build_graph_info = new_build_graph_info(ctx, cxx_deps)
     transformation_spec_context = build_transformation_spec_context(ctx, build_graph_info)
@@ -179,6 +379,14 @@ def _rust_binary_common(
         link_strategy = link_strategy,
         transformation_spec_context = transformation_spec_context,
     )
+
+    # Link groups repartition the dependency graph's code — including the
+    # Rust code — into group libraries, filtering the main link accordingly.
+    # Without advanced_unstable_linking, rustc links the full dep rlib set no
+    # matter what, so the grouped code would be linked twice; this cannot be
+    # made correct.
+    if rust_cxx_link_group_info != None and not toolchain_info.advanced_unstable_linking:
+        fail("link groups on Rust binaries require `advanced_unstable_linking`")
     if rust_cxx_link_group_info != None:
         link_group_mappings = rust_cxx_link_group_info.link_group_info.mappings
         link_group_libs = rust_cxx_link_group_info.link_group_libs
@@ -193,6 +401,14 @@ def _rust_binary_common(
         labels_to_links_map = {}
         targets_consumed_by_link_groups = {}
         filtered_targets = []
+
+    native_link_args = get_inherited_link_args(
+        ctx,
+        compile_ctx,
+        params.dep_link_strategy,
+        rust_cxx_link_group_info,
+        transformation_spec_context,
+    )
 
     runtime_dep_handling = _get_runtime_dependency_handling(ctx, compile_ctx)
 
@@ -235,33 +451,158 @@ def _rust_binary_common(
         extra_shared_libraries = [],
     )
 
+    # Decide whether the content-based output ships as a bare exe or a
+    # `assembled_dir` bundle (see `_create_content_based_dist`). A binary with
+    # adjacent files -- resources and/or a shared-lib tree -- goes in a bundle,
+    # and its exe must stay config-based: a content-based exe sits at a deep
+    # content-hash path, so the linker bakes a long buck-out-relative `$ORIGIN`
+    # RPATH that no longer points at the shlib tree once the exe is copied into
+    # the bundle. A config-based exe is a direct sibling of the tree, yielding a
+    # clean `$ORIGIN/<tree>` RPATH that survives co-location; the bundle dir
+    # provides the content-addressing instead.
+    # `needs_shlib_tree` = a shlib symlink-tree (and a baked `$ORIGIN/<tree>`
+    # RPATH) was produced for this exe. That is exactly when `shared_libs` is
+    # non-empty: `link_strategy == shared`, a link-group binary (auto link groups
+    # are on by DEFAULT, so `link_strategy == shared` alone is NOT sufficient --
+    # a static_pic link-group binary still gets a tree + RPATH), or
+    # `runtime_dependency_handling = "symlink"` dlopen deps. In every such case
+    # the exe carries an `$ORIGIN/<tree>` RPATH, so a content-based (deep-hash)
+    # exe would bake a dangling RPATH; bundle, and keep the exe config-based, so
+    # the RPATH resolves against the co-located tree. A binary with NO shared
+    # libs (e.g. the fully-static node) has no tree/RPATH and stays a bare
+    # content-based exe.
+    needs_shlib_tree = bool(shared_libs)
+    will_bundle = content_based_output and (bool(resources) or needs_shlib_tree)
+
+    # The bare exe stays content-based -- so it is trample-safe when consumed by
+    # path or as another target's resource (e.g. clio's `:web-server` embeds the
+    # node) -- EXCEPT when it needs a shlib tree at startup. A content-based exe
+    # sits at a deep content-hash path, so the linker bakes a long
+    # buck-out-relative `$ORIGIN` RPATH that no longer points at the tree once
+    # the exe is copied into the bundle. Dynamic binaries therefore use a
+    # config-based exe (a direct sibling of the tree => clean `$ORIGIN/<tree>`
+    # RPATH that survives co-location) and get content-addressing from the
+    # bundle dir instead. Static binaries reuse their content-based exe in the
+    # bundle directly (no RPATH to break).
+    exe_content_based = content_based_output and not needs_shlib_tree and not use_bolt
+    if links_via_cxx:
+        # cxx performs the terminal link (see `rust_link_binary` below) and its
+        # own post-link processing, so the output has to be named the way those
+        # stages expect; we must not stamp again here.
+        predeclared_output = ctx.actions.declare_output(
+            output_filename(compile_ctx, simple_crate, Emit("link"), params, get_cxx_post_link_suffix(ctx)),
+            has_content_based_path = exe_content_based,
+        )
+
+        # final_output is whatever cxx returns, set after the link below.
+        final_output = None
+        # rpath and symlink-tree are computed against the pre-stamped output
+        shlib_args_output = predeclared_output
+    elif enable_late_build_info_stamping:
+        predeclared_output = ctx.actions.declare_output(unstamped_name, has_content_based_path = exe_content_based)
+        final_output = ctx.actions.declare_output(name, has_content_based_path = exe_content_based)
+        shlib_args_output = final_output
+    else:
+        # If not using late build info stamping, then the output will be stamped eagerly in rust_compile
+        predeclared_output = ctx.actions.declare_output(name, has_content_based_path = exe_content_based)
+        final_output = predeclared_output
+        shlib_args_output = final_output
+
     # link groups shared libraries link args are directly added to the link command,
     # we don't have to add them here
     executable_shlib_args = executable_shared_lib_arguments(
         ctx,
         compile_ctx.cxx_toolchain_info,
-        final_output,
+        shlib_args_output,
         shared_libs,
     )
+    if generated_build_info_enabled and not links_via_cxx:
+        generated_build_info = generate_build_info(
+            ctx,
+            generator_args = generated_build_info_args,
+            invalidation_inputs = [
+                rust_compile_invalidation_inputs(
+                    ctx = ctx,
+                    compile_ctx = compile_ctx,
+                    emit = bin_emit,
+                    params = params,
+                    default_roots = default_roots,
+                    incremental_enabled = ctx.attrs.incremental_enabled,
+                ),
+                unpack_link_args(native_link_args),
+                executable_shlib_args.extra_link_args,
+            ],
+        )
+        if generated_build_info:
+            generated_build_info_link_args.extend(generated_build_info.linker_flags)
+            generated_build_info_link_args.extend(compile_generated_build_info(ctx, generated_build_info).objects)
+    extra_link_args = executable_shlib_args.extra_link_args + generated_build_info_link_args
 
-    # Compile rust binary.
+    # Compile rust binary. Under `Emit("rlib")`, this only compiles: rustc's
+    # synthesized objects are extracted and linked below.
     link = rust_compile(
         ctx = ctx,
         compile_ctx = compile_ctx,
-        emit = Emit("link"),
+        emit = bin_emit,
         params = params,
         default_roots = default_roots,
-        extra_link_args = executable_shlib_args.extra_link_args,
-        predeclared_output = predeclared_output,
+        extra_link_args = extra_link_args,
+        predeclared_output = None if links_via_cxx else predeclared_output,
+        predeclared_output_has_content_based_path = exe_content_based,
         extra_flags = extra_flags,
         allow_cache_upload = allow_cache_upload,
-        rust_cxx_link_group_info = rust_cxx_link_group_info,
         transformation_spec_context = transformation_spec_context,
         incremental_enabled = ctx.attrs.incremental_enabled,
+        precomputed_inherited_link_args = native_link_args,
     )
 
-    if enable_late_build_info_stamping:
-        stamp_build_info(ctx, link.output, final_output)
+    prebolt_output = None
+    if links_via_cxx:
+        extraction = link.product
+        rust_link_inputs = [
+            extraction.out_argsfile,
+            extraction.out_artifacts_dir,
+            extraction.out_manifest,
+        ]
+        if extraction.out_archive != None:
+            rust_link_inputs.append(extraction.out_archive)
+        if generated_build_info_enabled:
+            generated_build_info = generate_build_info(
+                ctx,
+                generator_args = generated_build_info_args,
+                invalidation_inputs = rust_link_inputs
+                + [
+                    unpack_link_args(native_link_args),
+                    executable_shlib_args.extra_link_args,
+                ],
+            )
+            if generated_build_info:
+                generated_build_info_link_args.extend(generated_build_info.linker_flags)
+                generated_build_info_link_objects.extend(compile_generated_build_info(ctx, generated_build_info).objects)
+        link_result = rust_link_binary(
+            ctx = ctx,
+            compile_ctx = compile_ctx,
+            extraction = extraction,
+            dep_link_strategy = params.dep_link_strategy,
+            reloc_model = params.reloc_model,
+            extra_link_args = executable_shlib_args.extra_link_args,
+            binary_link_args = generated_build_info_link_objects + generated_build_info_link_args,
+            inherited_link_args = native_link_args,
+            dwo_output_directory = link.compile_output.dwo_output_directory,
+            output = predeclared_output,
+            output_has_content_based_path = exe_content_based,
+            identifier = name,
+            allow_cache_upload = allow_cache_upload,
+        )
+        final_output = link_result.linked_object.output
+        dwp_output = link_result.linked_object.dwp
+        pdb_output = link_result.linked_object.pdb
+        prebolt_output = link_result.linked_object.prebolt_output
+    else:
+        dwp_output = link.product.dwp_output
+        pdb_output = link.product.pdb
+        if enable_late_build_info_stamping:
+            stamp_build_info(ctx, link.product.output, final_output)
 
     args = cmd_args(final_output, hidden = executable_shlib_args.runtime_files)
     external_debug_info = project_artifacts(
@@ -299,7 +640,31 @@ def _rust_binary_common(
             ctx = ctx,
             name = name,
             resources = resources,
+            has_content_based_path = content_based_output,
         )
+
+    # If opted into content-based output and the binary has adjacent files
+    # (resources and/or a shared-lib tree), package everything into a single
+    # content-based `assembled_dir` and point both the run command and
+    # `DefaultInfo.default_output` at the exe projected out of the bundle, so
+    # by-path and resource consumers get the self-contained, co-located form.
+    dist_bundle = None
+    dist_exe = None
+    if will_bundle:
+        dist_bundle, dist_exe = _create_content_based_dist(
+            ctx = ctx,
+            name = name,
+            exe = final_output,
+            relocatable_resources_json = relocatable_resources_json,
+            relocatable_resources_contents = relocatable_resources_contents,
+            shlib_tree = executable_shlib_args.shared_libs_symlink_tree,
+        )
+        # Run the bundled exe (projected out of the content-based bundle). The
+        # bundle carries the co-located resources / shlib tree; `runtime_files`
+        # is still added so a resource's own `other_outputs` (e.g. a resource
+        # that is itself a dynamic exe) materialize too, mirroring the
+        # non-bundle contract.
+        args = cmd_args(dist_exe, hidden = [dist_bundle] + runtime_files)
 
     # A simple dict of sub-target key to artifact, which we'll convert to
     # DefaultInfo providers at the end
@@ -373,7 +738,7 @@ def _rust_binary_common(
             ctx = ctx,
             compile_ctx = compile_ctx,
             emit = Emit("metadata-fast"),
-            params = strategy_param[DEFAULT_STATIC_LINK_STRATEGY],
+            params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
             default_roots = default_roots,
             extra_flags = extra_flags,
             infallible_diagnostics = True,
@@ -384,7 +749,7 @@ def _rust_binary_common(
             ctx = ctx,
             compile_ctx = compile_ctx,
             emit = Emit("clippy"),
-            params = strategy_param[DEFAULT_STATIC_LINK_STRATEGY],
+            params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
             default_roots = default_roots,
             extra_flags = extra_flags,
             infallible_diagnostics = True,
@@ -410,9 +775,10 @@ def _rust_binary_common(
     remarks = rust_compile(
         ctx = ctx,
         compile_ctx = compile_ctx,
-        emit = Emit("link"),
+        emit = bin_emit,
         params = params,
         default_roots = default_roots,
+        extra_link_args = extra_link_args,
         extra_flags = extra_flags,
         incremental_enabled = False,
         profile_mode = ProfileMode("remarks"),
@@ -429,43 +795,41 @@ def _rust_binary_common(
             ctx = ctx,
             compile_ctx = compile_ctx,
             emit = Emit("expand"),
-            params = strategy_param[DEFAULT_STATIC_LINK_STRATEGY],
+            params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
             default_roots = default_roots,
             extra_flags = extra_flags,
             incremental_enabled = ctx.attrs.incremental_enabled,
-        ).output
+        ).product.output
 
     llvm_ir_noopt = rust_compile(
         ctx = ctx,
         compile_ctx = compile_ctx,
         emit = Emit("llvm-ir-noopt"),
-        params = strategy_param[DEFAULT_STATIC_LINK_STRATEGY],
+        params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
         default_roots = default_roots,
         extra_flags = extra_flags,
         incremental_enabled = ctx.attrs.incremental_enabled,
-    ).output
+    ).product.output
     if compile_ctx.toolchain_info.nightly_features:
         llvm_time_trace = rust_compile(
             ctx = ctx,
             compile_ctx = compile_ctx,
-            emit = Emit("link"),
+            emit = bin_emit,
             params = params,
             default_roots = default_roots,
-            extra_link_args = executable_shlib_args.extra_link_args,
+            extra_link_args = extra_link_args,
             extra_flags = extra_flags,
-            rust_cxx_link_group_info = rust_cxx_link_group_info,
             incremental_enabled = ctx.attrs.incremental_enabled,
             profile_mode = ProfileMode("llvm-time-trace"),
         )
         self_profile = rust_compile(
             ctx = ctx,
             compile_ctx = compile_ctx,
-            emit = Emit("link"),
+            emit = bin_emit,
             params = params,
             default_roots = default_roots,
-            extra_link_args = executable_shlib_args.extra_link_args,
+            extra_link_args = extra_link_args,
             extra_flags = extra_flags,
-            rust_cxx_link_group_info = rust_cxx_link_group_info,
             incremental_enabled = ctx.attrs.incremental_enabled,
             profile_mode = ProfileMode("self-profile"),
         )
@@ -491,12 +855,12 @@ def _rust_binary_common(
             default_roots = default_roots,
             extra_flags = extra_flags,
             incremental_enabled = ctx.attrs.incremental_enabled,
-        ).output
+        ).product.output
 
     doc_output = generate_rustdoc(
         ctx = ctx,
         compile_ctx = compile_ctx,
-        params = strategy_param[DEFAULT_STATIC_LINK_STRATEGY],
+        params = strategy_params[DEFAULT_STATIC_LINK_STRATEGY],
         default_roots = default_roots,
         document_private_items = True,
     )
@@ -506,17 +870,20 @@ def _rust_binary_common(
     if named_deps_names:
         extra_compiled_targets["named_deps"] = named_deps_names
 
-    if link.link_output.dwp_output:
+    if dwp_output:
         sub_targets["dwp"] = [
             DefaultInfo(
-                default_output = link.link_output.dwp_output,
+                default_output = dwp_output,
                 other_outputs = [shlib.lib.dwp for shlib in shared_libs if shlib.lib.dwp]
                 + ([executable_shlib_args.dwp_symlink_tree] if executable_shlib_args.dwp_symlink_tree else []),
             ),
         ]
 
-    if link.link_output.pdb:
-        sub_targets[PDB_SUB_TARGET] = get_pdb_providers(pdb = link.link_output.pdb, binary = final_output)
+    if pdb_output:
+        sub_targets[PDB_SUB_TARGET] = get_pdb_providers(pdb = pdb_output, binary = final_output)
+
+    if use_bolt and prebolt_output:
+        sub_targets["prebolt"] = [DefaultInfo(default_output = prebolt_output)]
 
     dupmbin_toolchain = compile_ctx.cxx_toolchain_info.dumpbin_toolchain_path
     if dupmbin_toolchain:
@@ -524,16 +891,28 @@ def _rust_binary_common(
 
     sub_targets.update({k: [DefaultInfo(default_output = v)] for (k, v) in extra_compiled_targets.items()})
 
+    if dist_bundle:
+        sub_targets["dist"] = [DefaultInfo(default_output = dist_bundle)]
+
+    # Caller-built `[miri]` content, attached so sub-targets package together.
+    if miri_sub_targets != None:
+        sub_targets["miri"] = miri_sub_targets
+
+    default_info = DefaultInfo(
+        default_output = dist_exe if dist_bundle else final_output,
+        other_outputs = runtime_files
+        + (executable_shlib_args.external_debug_info + external_debug_info if compile_ctx.cxx_toolchain_info.materialize_external_debug_info else [])
+        + ([dist_bundle] if dist_bundle else []),
+        sub_targets = sub_targets,
+    )
     providers += [
-        DefaultInfo(
-            default_output = final_output,
-            other_outputs = runtime_files
-            + (executable_shlib_args.external_debug_info + external_debug_info if compile_ctx.cxx_toolchain_info.materialize_external_debug_info else []),
-            sub_targets = sub_targets,
-        ),
         DistInfo(
             shared_libs = shlib_info.set,
-            nondebug_runtime_files = runtime_files,
+            # The bundle is load-bearing at runtime for a bundled binary: the
+            # projected exe resolves its manifest / shlib tree as bundle
+            # siblings, so dist consumers that materialize only
+            # `nondebug_runtime_files` must get the bundle too.
+            nondebug_runtime_files = runtime_files + ([dist_bundle] if dist_bundle else []),
             relocatable_resources_contents = relocatable_resources_contents,
             relocatable_resources_json = relocatable_resources_json,
         ),
@@ -545,20 +924,59 @@ def _rust_binary_common(
             default_roots = default_roots,
         )
     )
-    return (providers, args)
+    return NativeBinary(
+        providers = providers,
+        default_info = default_info,
+        args = args,
+        sub_targets = sub_targets,
+    )
+
+def _miri_interpreted_cmd(ctx: AnalysisContext, miri: cmd_args | None) -> cmd_args:
+    """Miri driver command for a `miri_interpreted` target, failing without a Miri toolchain."""
+    if miri == None:
+        fail("`miri_interpreted = True` on `{}` requires a toolchain providing the Miri driver".format(ctx.label))
+    return miri
 
 def rust_binary_impl(ctx: AnalysisContext) -> list[Provider]:
     compile_ctx = compile_context(ctx, binary = True)
+    toolchain_info = compile_ctx.toolchain_info
 
-    providers, args = _rust_binary_common(
+    default_roots = ["main.rs"]
+    extra_flags = toolchain_info.rustc_binary_flags
+    strategy_params = _strategy_params(ctx, compile_ctx)
+
+    miri = _miri_direct_command(
         ctx = ctx,
         compile_ctx = compile_ctx,
-        default_roots = ["main.rs"],
-        extra_flags = [],
-        allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs),
+        toolchain_info = toolchain_info,
+        default_roots = default_roots,
+        extra_flags = extra_flags,
+        runtime_env = {},
+        is_test = False,
+        strategy_params = strategy_params,
     )
 
-    return providers + [RunInfo(args = args)]
+    if ctx.attrs.miri_interpreted:
+        # A Miri-only binary: the target itself is the interpreted run,
+        # so its own providers are the launcher, with no native link
+        # and no `[miri]` sub-target.
+        return _miri_launcher(ctx, compile_ctx, _miri_interpreted_cmd(ctx, miri))
+
+    miri_sub_targets = None
+    if miri != None:
+        miri_sub_targets = _miri_launcher(ctx, compile_ctx, miri)
+
+    native = _rust_binary_common(
+        ctx = ctx,
+        compile_ctx = compile_ctx,
+        default_roots = default_roots,
+        extra_flags = extra_flags,
+        allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs),
+        strategy_params = strategy_params,
+        miri_sub_targets = miri_sub_targets,
+    )
+
+    return native.providers + [native.default_info, RunInfo(args = native.args)]
 
 def rust_test_impl(ctx: AnalysisContext) -> list[Provider]:
     compile_ctx = compile_context(ctx, binary = True)
@@ -567,35 +985,44 @@ def rust_test_impl(ctx: AnalysisContext) -> list[Provider]:
     extra_flags = toolchain_info.rustc_test_flags or []
     if ctx.attrs.framework:
         extra_flags += ["--test"]
+    extra_flags = toolchain_info.rustc_binary_flags + (extra_flags or [])
 
-    providers, args = _rust_binary_common(
+    # A test may cover a binary or a library: consider both roots.
+    default_roots = ctx.attrs.default_roots or ["main.rs", "lib.rs"]
+
+    re_executors = get_re_executors_from_props(ctx)
+    strategy_params = _strategy_params(ctx, compile_ctx)
+    # Every test provides `[miri]`, unless `miri_interpreted` makes the target
+    # itself the Miri run; omitted without a Miri toolchain.
+    miri = _miri_direct_command(
         ctx = ctx,
         compile_ctx = compile_ctx,
-        # Unless default_roots are provided, it is ambiguous whether this test rule is invoked
-        # to test a binary, or to test a library. As such, we must consider both main.rs and
-        # lib.rs as potential candidates.
-        default_roots = ctx.attrs.default_roots or ["main.rs", "lib.rs"],
+        toolchain_info = toolchain_info,
+        default_roots = default_roots,
         extra_flags = extra_flags,
+        runtime_env = ctx.attrs.env | ctx.attrs.run_env,
+        is_test = True,
+        strategy_params = strategy_params,
+    )
+
+    if ctx.attrs.miri_interpreted:
+        # A Miri test: the target itself is the interpreted run, so its
+        # own providers are the launcher and test info, with no native
+        # link and no `[miri]` sub-target.
+        return _miri_test_sub_targets(ctx, compile_ctx, toolchain_info, _miri_interpreted_cmd(ctx, miri), re_executors)
+
+    miri_sub_targets = None
+    if miri != None:
+        miri_sub_targets = _miri_test_sub_targets(ctx, compile_ctx, toolchain_info, miri, re_executors)
+
+    native = _rust_binary_common(
+        ctx = ctx,
+        compile_ctx = compile_ctx,
+        default_roots = default_roots,
+        extra_flags = extra_flags,
+        strategy_params = strategy_params,
         allow_cache_upload = False,
+        miri_sub_targets = miri_sub_targets,
     )
 
-    # Setup RE executors based on the `remote_execution` param.
-    re_executors = get_re_executors_from_props(ctx)
-
-    return (
-        inject_test_run_info(
-            ctx,
-            ExternalRunnerTestInfo(
-                type = "rust",
-                command = [args],
-                env = ctx.attrs.env | ctx.attrs.run_env,
-                labels = ctx.attrs.labels,
-                contacts = ctx.attrs.contacts,
-                default_executor = re_executors.default_executor,
-                executor_overrides = re_executors.executor_overrides,
-                run_from_project_root = True,
-                use_project_relative_paths = True,
-            ),
-        )
-        + providers
-    )
+    return _native_test_info(ctx, native.args, re_executors) + native.providers + [native.default_info]

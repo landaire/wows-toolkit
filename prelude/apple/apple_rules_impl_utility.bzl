@@ -80,6 +80,9 @@ def _versioned_macos_bundle_default_value():
         "config//features/apple/constraints:versioned_macos_bundle_true": True,
     })
 
+def get_versioned_macos_bundle_attr():
+    return attrs.bool(default = _versioned_macos_bundle_default_value())
+
 def _include_build_info_file_default_value():
     return select({
         "DEFAULT": select({
@@ -155,7 +158,7 @@ def _apple_bundle_like_common_attrs():
         "provisioning_profile_filter": attrs.option(attrs.string(), default = None),
         "skip_adhoc_resigning_scrubbed_frameworks": attrs.option(attrs.bool(), default = None),
         "strict_provisioning_profile_search": attrs.option(attrs.bool(), default = None),
-        "versioned_macos_bundle": attrs.bool(default = _versioned_macos_bundle_default_value()),
+        "versioned_macos_bundle": get_versioned_macos_bundle_attr(),
         "_apple_xctoolchain": get_apple_xctoolchain_attr(),
         "_apple_xctoolchain_bundle_id": get_apple_xctoolchain_bundle_id_attr(),
         "_bundling_cache_buster": attrs.option(attrs.string(), default = None),
@@ -167,7 +170,7 @@ def _apple_bundle_like_common_attrs():
         "_codesign_type": attrs.option(attrs.enum(CodeSignType.values()), default = None),
         "_compile_resources_locally_override": attrs.option(attrs.bool(), default = None),
         "_fast_adhoc_signing_enabled_default": _fast_adhoc_signing_enabled_default_attr(),
-        "_fast_adhoc_signing_probe_enabled": attrs.bool(default = False),
+        "_fast_adhoc_signing_probe_enabled": attrs.bool(default = True),
         "_fast_provisioning_profile_parsing_enabled": attrs.bool(default = False),
         "_incremental_bundling_enabled": attrs.bool(default = False),
         "_no_check_certificates": attrs.bool(default = False),
@@ -280,7 +283,7 @@ def _embed_xctest_frameworks_default_value():
         "DEFAULT": False,
         # Xcode copies XCTest frameworks to test host apps, required when the
         # selected Xcode version != Xcode version used to build an app under test
-        "config//marker/apple/constraints:embed_xctest_frameworks_enabled": True,
+        "config//marker/apple/constraints:embed_xctest_frameworks[enabled]": True,
     })
 
 def apple_bundle_extra_attrs():
@@ -295,6 +298,7 @@ def apple_bundle_extra_attrs():
         "split_arch_dsym": attrs.bool(default = False),
         "universal": attrs.option(attrs.bool(), default = None),
         "validate_rrapi_usage": attrs.bool(default = False),
+        "xcassets_usage_targets": attrs.list(attrs.dep(), default = []),
         "_apple_toolchain": get_apple_bundle_toolchain_attr(),
         "_codesign_entitlements": attrs.option(attrs.source(), default = None),
     }

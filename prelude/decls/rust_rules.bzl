@@ -51,6 +51,18 @@ def _rust_analyzer_target_kind(kind: str) -> dict[str, Attr]:
         ),
     }
 
+def _miri_interpreted_attr() -> dict[str, Attr]:
+    return {
+        "miri_interpreted": attrs.bool(
+            default = False,
+            doc = """
+                Makes this target itself the Miri-interpreted run: no
+                native artifact and no `[miri]` sub-target. Requires a
+                toolchain providing the Miri driver.
+            """,
+        ),
+    }
+
 def _rust_binary_attrs_group(prefix: str) -> dict[str, Attr]:
     attrs = rust_common.deps_arg(is_binary = True) | rust_common.named_deps_arg(is_binary = True) | rust_common.linker_flags_arg() | native_common.link_style()
     return {prefix + name: v for name, v in attrs.items()}
@@ -60,9 +72,30 @@ _RUST_EXECUTABLE_ATTRIBUTES = {
     # Unlike cxx which supports pre-defined link groups, we only support
     # auto_link_groups in rust
     "auto_link_groups": attrs.bool(default = True),
-    # TODO: enable distributed thinlto
+    # BOLT post-link optimization only applies when cxx performs the link
+    # (advanced_unstable_linking toolchains; see rust_link_binary).
+    "bolt_flags": attrs.list(attrs.arg(), default = []),
+    "bolt_profile": attrs.option(attrs.source(), default = None),
+    # Contents to embed into the linked executable as named ELF sections, added
+    # after BOLT and before build info stamping. Only applies when cxx performs
+    # the link (advanced_unstable_linking toolchains; see rust_link_binary).
+    "elf_sections": attrs.dict(
+        key = attrs.string(),
+        value = attrs.source(),
+        sorted = True,
+        default = {},
+    ),
     "enable_distributed_thinlto": attrs.bool(default = False),
     "extra_dwp_flags": attrs.list(attrs.string(), default = []),
+    # Opt the final executable output into content-based (immutable) buck-out
+    # pathing (default off). A bare static binary becomes a content-based exe.
+    # A binary with adjacent files (`resources` and/or a shared-lib tree)
+    # ships as a content-addressed `assembled_dir` dist bundle instead (exe
+    # copied in, adjacent files symlinked; `[dist]` subtarget). Bundle
+    # immutability is per-entry: copied entries always; symlinked entries only
+    # when their target is itself content-based -- config-based resources and
+    # the (deliberately config-based) shlib tree remain rewrite-in-place.
+    "has_content_based_path": attrs.bool(default = False),
     # Required by the rules but not supported, since Rust is auto-link groups only
     "link_group": attrs.default_only(attrs.option(attrs.string(), default = None)),
     "link_group_map": LINK_GROUP_MAP_ATTR,
@@ -142,9 +175,11 @@ rust_binary = prelude_rule(
         | rust_common.edition_arg()
         | rust_common.features_arg()
         | rust_common.rustc_flags_arg()
+        | rust_common.miri_flags_arg()
         | rust_common.crate(crate_type = attrs.option(attrs.string(), default = None))
         | rust_common.crate_root()
         | rust_common.env_arg()
+        | _miri_interpreted_attr()
         | _rust_binary_attrs_group(prefix = "")
         | _rust_common_attributes(is_binary = True)
         | _rust_analyzer_target_kind("bin")
@@ -226,6 +261,19 @@ rust_library = prelude_rule(
             "supports_python_dlopen": attrs.option(attrs.bool(), default = None),
         }
         | _rust_binary_attrs_group(prefix = "doc_")
+        | {
+            "doc_remote_execution": attrs.option(
+                re_test_common.opts_for_tests_arg(),
+                default = None,
+                doc = """
+                Remote execution properties for this library's rustdoc test. Only a
+                property dict is accepted, not the name of a profile on the remote test
+                execution toolchain, so that `rust_library` does not have to depend on
+                that toolchain. When unset, the rustdoc test carries no executor and
+                runs wherever the test framework would otherwise place it.
+            """,
+            ),
+        }
         | rust_common.cxx_toolchain_arg()
         | rust_common.rust_toolchain_arg()
         | rust_common.workspaces_arg()
@@ -286,6 +334,7 @@ rust_test = prelude_rule(
         | rust_common.edition_arg()
         | rust_common.features_arg()
         | rust_common.rustc_flags_arg()
+        | rust_common.miri_flags_arg()
         | rust_common.crate(crate_type = attrs.option(attrs.string(), default = None))
         | rust_common.crate_root()
         | rust_common.default_roots_arg()
@@ -305,6 +354,7 @@ rust_test = prelude_rule(
             """,
             ),
         }
+        | _miri_interpreted_attr()
         | re_test_common.test_args()
         | rust_common.cxx_toolchain_arg()
         | rust_common.rust_toolchain_arg()

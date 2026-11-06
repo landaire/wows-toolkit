@@ -10,12 +10,17 @@
 
 package com.facebook.buck.android.dex;
 
+import com.android.tools.r8.ByteDataView;
 import com.android.tools.r8.CompilationFailedException;
 import com.android.tools.r8.CompilationMode;
 import com.android.tools.r8.D8Command;
+import com.android.tools.r8.DexIndexedConsumer;
 import com.android.tools.r8.Diagnostic;
 import com.android.tools.r8.DiagnosticsHandler;
-import com.android.tools.r8.OutputMode;
+import com.android.tools.r8.SyntheticInfoConsumer;
+import com.android.tools.r8.SyntheticInfoConsumerData;
+import com.android.tools.r8.graph.DexItemFactory;
+import com.android.tools.r8.utils.FileUtils;
 import com.android.tools.r8.utils.InternalOptions;
 import com.facebook.buck.android.apkmodule.APKModule;
 import com.facebook.buck.util.zip.CustomZipOutputStream;
@@ -23,6 +28,8 @@ import com.facebook.buck.util.zip.ZipOutputStreams;
 import com.facebook.buck.util.zip.ZipScrubber;
 import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteStreams;
 import java.io.BufferedInputStream;
@@ -41,9 +48,12 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -71,7 +81,6 @@ public class D8Utils {
         androidJarPath,
         classpathFiles,
         minSdkVersion,
-        // NULLSAFE_FIXME[Not Vetted Third-Party]
         OptionalInt.empty());
   }
 
@@ -85,6 +94,55 @@ public class D8Utils {
       Collection<Path> classpathFiles,
       Optional<Integer> minSdkVersion,
       OptionalInt threadCount)
+      throws CompilationFailedException, IOException {
+    return runD8Command(
+        diagnosticsHandler,
+        outputDexFile,
+        filesToDex,
+        options,
+        primaryDexClassNamesPath,
+        androidJarPath,
+        classpathFiles,
+        minSdkVersion,
+        threadCount,
+        ImmutableSet.of());
+  }
+
+  public static D8Output runD8CommandWithOutputClassDescriptors(
+      D8DiagnosticsHandler diagnosticsHandler,
+      Path outputDexFile,
+      Iterable<Path> filesToDex,
+      Set<D8Options> options,
+      Optional<Path> primaryDexClassNamesPath,
+      Path androidJarPath,
+      Collection<Path> classpathFiles,
+      Optional<Integer> minSdkVersion,
+      OptionalInt threadCount)
+      throws CompilationFailedException, IOException {
+    return runD8Command(
+        diagnosticsHandler,
+        outputDexFile,
+        filesToDex,
+        options,
+        primaryDexClassNamesPath,
+        androidJarPath,
+        classpathFiles,
+        minSdkVersion,
+        threadCount,
+        ImmutableSet.of(D8OutputOption.CLASS_DESCRIPTORS));
+  }
+
+  private static D8Output runD8Command(
+      D8DiagnosticsHandler diagnosticsHandler,
+      Path outputDexFile,
+      Iterable<Path> filesToDex,
+      Set<D8Options> options,
+      Optional<Path> primaryDexClassNamesPath,
+      Path androidJarPath,
+      Collection<Path> classpathFiles,
+      Optional<Integer> minSdkVersion,
+      OptionalInt threadCount,
+      Set<D8OutputOption> outputOptions)
       throws CompilationFailedException, IOException {
     Set<Path> inputs = new HashSet<>();
     for (Path toDex : filesToDex) {
@@ -102,28 +160,60 @@ public class D8Utils {
     boolean outputToDex = outputDexFile.getFileName().toString().endsWith(".dex");
     Path output = outputToDex ? Files.createTempDirectory("buck-d8") : outputDexFile;
 
+    // Wrap the consumer that setOutput() would have installed so we can record which classes D8
+    // actually wrote.
+    Set<String> writtenDescriptors = Collections.synchronizedSet(new HashSet<>());
+    // Picks the consumer the same way setOutput() would, using the same predicate it uses.
+    DexIndexedConsumer outputConsumer =
+        FileUtils.isArchive(output)
+            ? new DexIndexedConsumer.ArchiveConsumer(output)
+            : new DexIndexedConsumer.DirectoryConsumer(output);
+    DexIndexedConsumer recordingConsumer =
+        new DexIndexedConsumer.ForwardingConsumer(outputConsumer) {
+          @Override
+          public void accept(
+              int fileIndex,
+              ByteDataView data,
+              Set<String> descriptors,
+              DiagnosticsHandler handler) {
+            if (descriptors != null) {
+              writtenDescriptors.addAll(descriptors);
+            }
+            super.accept(fileIndex, data, descriptors, handler);
+          }
+        };
+
+    // Ask D8 which class each synthetic was synthesized from. Synthetics have to be placed in the
+    // same dex as their context class, and their names are mangled in a format D8 does not treat
+    // as stable (see setEnableVerboseSyntheticNames), so the names cannot be parsed for this.
+    // D8 invokes acceptSyntheticInfo from its worker threads, so this has to be thread safe.
+    Map<String, String> syntheticToSynthesizingContext = new ConcurrentHashMap<>();
+    SyntheticInfoConsumer syntheticInfoConsumer =
+        new SyntheticInfoConsumer() {
+          @Override
+          public void acceptSyntheticInfo(SyntheticInfoConsumerData data) {
+            syntheticToSynthesizingContext.put(
+                data.getSyntheticClass().getBinaryName(),
+                data.getSynthesizingContextClass().getBinaryName());
+          }
+
+          @Override
+          public void finished() {}
+        };
+
     D8Command.Builder builder =
-        // NULLSAFE_FIXME[Not Vetted Third-Party]
         D8Command.builder(diagnosticsHandler)
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
+            .setSyntheticInfoConsumer(syntheticInfoConsumer)
             .addProgramFiles(inputs)
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
             .setIntermediate(options.contains(D8Options.INTERMEDIATE))
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
             .addLibraryFiles(androidJarPath)
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
             .setMode(
                 options.contains(D8Options.NO_OPTIMIZE)
                     ? CompilationMode.DEBUG
                     : CompilationMode.RELEASE)
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
-            .setOutput(output, OutputMode.DexIndexed)
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
             .setDisableDesugaring(options.contains(D8Options.NO_DESUGAR))
-            // NULLSAFE_FIXME[Not Vetted Third-Party]
             .setInternalOptionsModifier(
                 (InternalOptions opt) -> {
-                  // NULLSAFE_FIXME[Not Vetted Third-Party]
                   opt.testing.forceJumboStringProcessing = options.contains(D8Options.FORCE_JUMBO);
                   if (options.contains(D8Options.MINIMIZE_PRIMARY_DEX)) {
                     opt.minimalMainDex = true;
@@ -134,6 +224,14 @@ public class D8Utils {
                     opt.threadCount = threadCount.getAsInt();
                   }
                 });
+
+    OutputClassDescriptorConsumer outputClassDescriptorConsumer = null;
+    if (outputOptions.contains(D8OutputOption.CLASS_DESCRIPTORS)) {
+      outputClassDescriptorConsumer = new OutputClassDescriptorConsumer(recordingConsumer);
+      builder.setProgramConsumer(outputClassDescriptorConsumer);
+    } else {
+      builder.setProgramConsumer(recordingConsumer);
+    }
 
     minSdkVersion.ifPresent(builder::setMinApiLevel);
     if (minSdkVersion.orElse(0) <= 21) {
@@ -146,7 +244,6 @@ public class D8Utils {
       builder.addClasspathFiles(classpathFiles);
     }
 
-    // NULLSAFE_FIXME[Not Vetted Third-Party]
     D8Command d8Command = builder.build();
     com.android.tools.r8.D8.run(d8Command);
 
@@ -154,11 +251,38 @@ public class D8Utils {
       moveSingleDexOutput(output, outputDexFile, options);
     }
 
+    // Only null for the help/version commands produced by D8Command.parse, never for a built one.
+    DexItemFactory dexItemFactory = Objects.requireNonNull(d8Command.getDexItemFactory());
     return new D8Output(
-        // NULLSAFE_FIXME[Not Vetted Third-Party]
-        d8Command.getDexItemFactory().computeReferencedResources(),
-        // NULLSAFE_FIXME[Not Vetted Third-Party]
-        d8Command.getDexItemFactory().computeSynthesizedTypes());
+        dexItemFactory.computeReferencedResources(),
+        writtenDescriptors,
+        outputClassDescriptorConsumer == null
+            ? ImmutableMap.of()
+            : outputClassDescriptorConsumer.getOutputClassDescriptors(),
+        syntheticToSynthesizingContext);
+  }
+
+  private static class OutputClassDescriptorConsumer extends DexIndexedConsumer.ForwardingConsumer {
+    private final Map<Integer, ImmutableSet<String>> outputClassDescriptors =
+        new ConcurrentHashMap<>();
+
+    private OutputClassDescriptorConsumer(DexIndexedConsumer consumer) {
+      super(consumer);
+    }
+
+    @Override
+    public void accept(
+        int fileIndex, ByteDataView data, Set<String> descriptors, DiagnosticsHandler handler) {
+      Preconditions.checkState(
+          outputClassDescriptors.putIfAbsent(fileIndex, ImmutableSet.copyOf(descriptors)) == null,
+          "D8 reported output index %s more than once",
+          fileIndex);
+      super.accept(fileIndex, data, descriptors, handler);
+    }
+
+    private ImmutableMap<Integer, ImmutableSet<String>> getOutputClassDescriptors() {
+      return ImmutableMap.copyOf(outputClassDescriptors);
+    }
   }
 
   static void writeSecondaryDexJarAndMetadataFile(
@@ -174,7 +298,7 @@ public class D8Utils {
             new BufferedInputStream(new FileInputStream(rawSecondaryDexPath.toFile()))) {
 
       ZipEntry customEntry = new ZipEntry("classes.dex");
-      if (compression.equals("xz") || compression.equals("xzs")) {
+      if (compression.equals("xzs")) {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
           ByteStreams.copy(secondaryDexInputStream, bos);
           byte[] bytes = bos.toByteArray();
@@ -219,10 +343,10 @@ public class D8Utils {
       }
 
       long jarSize = Files.size(secondaryDexOutputJarPath);
-      if (compression.equals("xz") || compression.equals("xzs")) {
+      if (compression.equals("xzs")) {
         Preconditions.checkState(
             uncompressedSize + 120 == jarSize,
-            "For xz and xzs compression, we expect the .dex to be stored uncompressed and the "
+            "For xzs compression, we expect the .dex to be stored uncompressed and the "
                 + "overhead of the .jar itself to be 120 bytes!");
       }
 

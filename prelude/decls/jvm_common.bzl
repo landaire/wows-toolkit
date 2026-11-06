@@ -200,20 +200,10 @@ def _k2():
 def _incremental():
     return {
         "incremental": attrs.bool(
-            default = True,
+            default = False,
             doc = """
                 Enables Kotlin incremental compilation.
             """,
-        ),
-    }
-
-def _enable_used_classes():
-    return {
-        "enable_used_classes": attrs.bool(
-            default = True,
-            doc = """
-    Deprecated: for an experiment only, will be removed
-    """,
         ),
     }
 
@@ -314,6 +304,13 @@ def _annotation_processors():
         "annotation_processor_deps": attrs.list(attrs.exec_dep(), default = []),
         "annotation_processor_params": attrs.list(attrs.string(), default = []),
         "annotation_processors": attrs.list(attrs.string(), default = []),
+        "source_only_abi_annotation_processor_param_overrides": attrs.dict(
+            key = attrs.string(),
+            value = attrs.option(attrs.string()),
+            sorted = False,
+            default = {},
+            doc = "Parameter overrides for source-only ABI; `None` removes a parameter.",
+        ),
     }
 
 def _content_based_path_attr():
@@ -327,11 +324,6 @@ def _content_based_path_attr():
             # @oss-disable[end= ]: "config//runtime/constraints:android-unit-test": True,
         })
     )
-
-def _kotlincd_content_based_paths():
-    return {
-        "uses_content_based_paths_for_kotlincd": attrs.bool(default = True),
-    }
 
 def _classic_java_content_based_paths():
     return {
@@ -352,8 +344,22 @@ def _javac():
         ),
     }
 
+def _friend_paths_attr():
+    return attrs.list(
+        attrs.one_of(attrs.dep(), attrs.string()),
+        default = [],
+        doc = """
+    Modules whose `internal` declarations this rule may access, passed to the Kotlin compiler as
+     friend-paths.
+
+    An entry is either a target (`//foo/bar:baz`) or a build target pattern covering more than one
+     target (`//foo/bar/...` recursively, or `//foo/bar:` for a single package).
+""",
+    )
+
 jvm_common = struct(
     test_env = _test_env,
+    friend_paths_attr = _friend_paths_attr,
     resources_arg = _resources_arg,
     remove_classes_arg = _remove_classes_arg,
     provided_deps = _provided_deps,
@@ -368,9 +374,7 @@ jvm_common = struct(
     kotlin_compiler_plugins = _kotlin_compiler_plugins,
     annotation_processors = _annotation_processors,
     javac = _javac,
-    enable_used_classes = _enable_used_classes,
     multi_release_jar = _multi_release_jar,
     classic_java_content_based_paths = _classic_java_content_based_paths,
-    kotlincd_content_based_paths = _kotlincd_content_based_paths,
     content_based_path_attr = _content_based_path_attr,
 )

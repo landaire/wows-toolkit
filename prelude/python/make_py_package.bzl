@@ -39,7 +39,6 @@ load("@prelude//python:manifest.bzl", "create_manifest_for_entries")
 load("@prelude//python:python.bzl", "python_attr_preload_deps")
 load("@prelude//unix:providers.bzl", "UnixEnv", "create_unix_env_info")
 load("@prelude//utils:arglike.bzl", "ArgLike")
-load(":compile.bzl", "PycInvalidationMode")
 load(":interface.bzl", "EntryPoint", "EntryPointKind", "PythonLibraryManifestsInterface")
 load(":internal_tools.bzl", "PythonInternalToolsInfo")
 load(":manifest.bzl", "ManifestInfo")  # @unused Used as a type
@@ -253,6 +252,7 @@ def make_py_package(
     allow_cache_upload: bool,
     link_args: list[LinkArgs] = [],
     debuginfo_files: list[(str | (str, SharedLibrary, str), Artifact)] = [],
+    manifest_entries_overlay: Artifact | None = None,
 ) -> PexProviders:
     """
     Passes a standardized set of flags to a `make_py_package` binary to create a python
@@ -303,7 +303,7 @@ def make_py_package(
     )
     generated_files.append((startup_functions_loader, "__par__/__startup_function_loader__.py"))
 
-    manifest_module = _generate_manifest_module(ctx, manifest_module_entries, python_toolchain, python_internal_tools, srcs)
+    manifest_module = _generate_manifest_module(ctx, manifest_module_entries, manifest_entries_overlay, python_toolchain, python_internal_tools, srcs)
     if manifest_module:
         generated_files.append((manifest_module.artifacts[1], "__manifest__.py"))
         generated_files.append((manifest_module.artifacts[0], "__manifest__.json"))
@@ -450,6 +450,7 @@ def _make_py_package_wrapper(
             python_internal_tools,
             output_suffix,
             package_style,
+            allow_cache_upload,
         )
     return _make_py_package_impl(
         ctx,
@@ -489,6 +490,7 @@ def _make_py_package_impl(
     name = "{}{}".format(ctx.attrs.name, output_suffix)
     standalone = package_style == PackageStyle("standalone")
     inplace = package_style == PackageStyle("inplace")
+    include_bytecode = pex_modules.compile and not inplace
 
     runtime_files = []
     sub_targets = {}
@@ -500,14 +502,12 @@ def _make_py_package_impl(
     elif pex_modules.manifests.has_hidden_resources(mode = package_style.value):
         hidden_resources = pex_modules.manifests.hidden_resources(mode = package_style.value)
 
-    pyc_mode = PycInvalidationMode("checked_hash") if inplace else PycInvalidationMode("unchecked_hash")
-
     # Accumulate all of the artifacts required by the build
     runtime_artifacts = []
     runtime_artifacts.extend(dep_artifacts)
     runtime_artifacts.extend(pex_modules.manifests.resource_artifacts(mode = package_style.value))
-    if pex_modules.compile:
-        runtime_artifacts.extend(pex_modules.manifests.bytecode_artifacts(pyc_mode))
+    if include_bytecode:
+        runtime_artifacts.extend(pex_modules.manifests.bytecode_artifacts())
     if manifest_module:
         runtime_artifacts.extend(manifest_module.artifacts)
 
@@ -529,7 +529,7 @@ def _make_py_package_impl(
         runtime_artifacts,
         debug_artifacts,
         package_style,
-        pyc_mode,
+        include_bytecode,
         symlink_tree_path,
         manifest_module,
         pex_modules,
@@ -591,7 +591,12 @@ def _make_py_package_impl(
         modules.add(modules_args)
         if package_style == PackageStyle("outplace"):
             modules.add(cmd_args("--copy-files", hidden = runtime_artifacts))
-        ctx.actions.run(modules, category = "par", identifier = "modules{}".format(output_suffix))
+        ctx.actions.run(
+            modules,
+            category = "par",
+            identifier = "modules{}".format(output_suffix),
+            allow_cache_upload = allow_cache_upload,
+        )
 
         bootstrap = cmd_args(python_internal_tools.make_py_package_inplace)
         bootstrap.add(bootstrap_args)
@@ -604,7 +609,12 @@ def _make_py_package_impl(
         for flag in ctx.attrs.interpreter_args:
             bootstrap.add(cmd_args(["--python-interpreter-flags={}".format(flag)]))
 
-        ctx.actions.run(bootstrap, category = "par", identifier = "bootstrap{}".format(output_suffix))
+        ctx.actions.run(
+            bootstrap,
+            category = "par",
+            identifier = "bootstrap{}".format(output_suffix),
+            allow_cache_upload = allow_cache_upload,
+        )
 
     run_args = []
 
@@ -647,6 +657,7 @@ def _make_py_package_live(
     python_internal_tools: PythonInternalToolsInfo,
     output_suffix: str,
     package_style: PackageStyle,
+    allow_cache_upload: bool,
 ) -> PexProviders:
     """
     Bundle contents of par into symlink dir
@@ -753,11 +764,11 @@ def _make_py_package_live(
         cmd.add(cmd_args(resource_manifests_path, format = "--resources={}", hidden = [resources]))
         runtime_files.extend(resource_artifacts)
 
-    if pex_modules.compile:
+    if pex_modules.compile and is_outplace:
         # bytecode is compiled per library so the actual bytecode artifacts are directories
         # the compile command outputs json manifest in the form
         # [(src, dst, origin),]
-        bytecode_manifests = pex_modules.manifests.bytecode_manifests(PycInvalidationMode("checked_hash"))
+        bytecode_manifests = pex_modules.manifests.bytecode_manifests()
         bytecode_manifests_path = ctx.actions.write(
             "__bytecode_manifests{}.txt".format(output_suffix),
             bytecode_manifests,
@@ -765,7 +776,7 @@ def _make_py_package_live(
         )
         cmd.add(cmd_args(bytecode_manifests_path, format = "--bytecode={}", hidden = bytecode_manifests))
 
-        bytecode_artifacts = pex_modules.manifests.bytecode_artifacts(PycInvalidationMode("checked_hash"))
+        bytecode_artifacts = pex_modules.manifests.bytecode_artifacts()
         runtime_files.extend(bytecode_artifacts)
 
         # Pass resolved bytecode artifact paths so the Rust builder can replace
@@ -822,8 +833,8 @@ def _make_py_package_live(
     cmd.add(cmd_args(generated_manifest.without_associated_artifacts(), format = "--generated={}"))
     runtime_files.extend([a for a, _ in generated_files])
 
-    allow_cache_upload = None
     if ctx.attrs._exec_os_type[OsLookup].os == Os("windows"):
+        # Windows can't produce these pars in a cache-portable form.
         allow_cache_upload = False
 
     if is_outplace:
@@ -850,7 +861,11 @@ def _make_py_package_live(
             category = "par",
             identifier = "make_live_par_incremental{}".format(output_suffix),
             no_outputs_cleanup = True,
-            allow_cache_upload = allow_cache_upload,
+            # Incremental action: its output is a function of the prior on-disk
+            # state, not solely of its inputs, so uploading it to the cache is
+            # never sound. Keep it off regardless of the rule/toolchain
+            # `allow_cache_upload`, mirroring how cxx excludes incremental links.
+            allow_cache_upload = False,
         )
 
     runtime_files.append(symlink_tree_path)
@@ -1088,7 +1103,7 @@ def _pex_modules_args(
     dep_artifacts: list[ArgLike],
     debug_artifacts: list[(str | (str, SharedLibrary, str), ArgLike)],
     package_style: PackageStyle,
-    pyc_mode: PycInvalidationMode,
+    include_bytecode: bool,
     symlink_tree_path: Artifact | None,
     manifest_module: ManifestModule | None,
     pex_modules: PexModules,
@@ -1107,8 +1122,8 @@ def _pex_modules_args(
     if manifest_module != None:
         cmd.append(cmd_args(manifest_module.manifest, format = "--module-manifest={}"))
 
-    if pex_modules.compile:
-        bytecode_manifests = pex_modules.manifests.bytecode_manifests(pyc_mode)
+    if include_bytecode:
+        bytecode_manifests = pex_modules.manifests.bytecode_manifests()
 
         bytecode_manifests_path = ctx.actions.write(
             "__bytecode_manifests{}.txt".format(output_suffix),
@@ -1124,7 +1139,7 @@ def _pex_modules_args(
         # To support content-based path hashing, we need to pass in the actual
         # bytecode artifacts alongside the manifest in order to replace the
         # placeholder "output_artifacts" portion of the path with the resolved hash.
-        bytecode_artifacts = pex_modules.manifests.bytecode_artifacts(pyc_mode)
+        bytecode_artifacts = pex_modules.manifests.bytecode_artifacts()
 
         bytecode_artifacts_path = ctx.actions.write(
             "__bytecode_artifacts{}.txt".format(output_suffix),
@@ -1337,6 +1352,7 @@ def load_startup_functions():
 def _generate_manifest_module(
     ctx: AnalysisContext,
     manifest_module_entries: dict[str, typing.Any] | None,
+    manifest_entries_overlay: Artifact | None,
     python_toolchain: PythonToolchainInfo,
     python_internal_tools: PythonInternalToolsInfo,
     src_manifests: list[ArgLike],
@@ -1351,13 +1367,14 @@ def _generate_manifest_module(
     if manifest_module_entries == None:
         return None
     module = ctx.actions.declare_output("manifest/__manifest__.py", has_content_based_path = False)
+    json_entries_output = ctx.actions.declare_output("manifest/__manifest__.json", has_content_based_path = False)
     entries_json = ctx.actions.write_json("manifest/entries.json", manifest_module_entries, has_content_based_path = False)
     src_manifests_path = ctx.actions.write(
         "__module_manifests.txt",
         src_manifests,
         has_content_based_path = False,
     )
-    if ctx.attrs.use_rust_make_par:
+    if ctx.attrs.use_rust_make_par and manifest_entries_overlay == None:
         cmd = cmd_args(
             python_toolchain.make_py_package_live[RunInfo],
             "manifest-module",
@@ -1366,18 +1383,19 @@ def _generate_manifest_module(
             ["--output", module.as_output()],
             hidden = src_manifests,
         )
+        ctx.actions.run(cmd, category = "par", identifier = "manifest-module")
+        ctx.actions.copy_file(json_entries_output.as_output(), entries_json)
     else:
         cmd = cmd_args(
             python_internal_tools.make_py_package_manifest_module,
             ["--manifest-entries", entries_json],
+            ["--manifest-entries-overlay", manifest_entries_overlay] if manifest_entries_overlay else [],
             ["--module-manifests", src_manifests_path],
             ["--output", module.as_output()],
+            ["--output-json", json_entries_output.as_output()],
             hidden = src_manifests,
         )
-    ctx.actions.run(cmd, category = "par", identifier = "manifest-module")
-
-    json_entries_output = ctx.actions.declare_output("manifest/__manifest__.json", has_content_based_path = False)
-    ctx.actions.copy_file(json_entries_output.as_output(), entries_json)
+        ctx.actions.run(cmd, category = "par", identifier = "manifest-module")
 
     src_manifest = ctx.actions.write_json(
         "manifest/module_manifest.json",

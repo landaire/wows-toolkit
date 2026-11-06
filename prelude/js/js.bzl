@@ -23,11 +23,11 @@ def _select_platform():
             "config//os/constraints:windows": "windows",
         }),
         "config//react-native:macos": "macos",
-        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:android": "android",
-        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:ios": "ios",
-        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:macos": "macos",
-        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:vr": "vr",
-        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:windows": "windows",
+        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:metro_js_platform_override[android]": "android",
+        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:metro_js_platform_override[ios]": "ios",
+        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:metro_js_platform_override[macos]": "macos",
+        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:metro_js_platform_override[vr]": "vr",
+        "fbsource//tools/build_defs/js/constraints/metro_js_platform_override:metro_js_platform_override[windows]": "windows",
     })
 
 def _is_release():
@@ -48,8 +48,8 @@ def _is_release():
 def _select_asset_dest_path_resolver():
     return select({
         "DEFAULT": None,
-        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:android": "android",
-        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:generic": "generic",
+        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:asset_dest_path_resolver[android]": "android",
+        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:asset_dest_path_resolver[generic]": "generic",
     })
 
 implemented_rules = {

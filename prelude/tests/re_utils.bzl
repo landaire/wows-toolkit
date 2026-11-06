@@ -35,9 +35,29 @@ def _network_access_kwargs(network_access: str | None) -> dict[str, str]:
         return {}
     return {"network_access": network_access}
 
+_FORCE_RUN_AS_BUNDLE = read_root_config("tpx", "force_run_as_bundle", "False")
+
+def _force_local_re_tests() -> bool:
+    # Must agree with the `read_bool` of this key in
+    # `tools/build_defs/fb_native_wrapper.bzl`, which strips `remote_execution` off
+    # test targets: when the two disagree a target keeps its RE props but loses its
+    # executor, or vice versa. `read_bool` itself is not reusable here because its
+    # `read_config` binding is unavailable during analysis, so mirror its coercion —
+    # including rejecting values it cannot coerce rather than guessing.
+    value = read_root_config("fbcode", "disable_re_tests", "")
+
+    # An empty value means "unset", so that a later config can clear an earlier one.
+    if value == "":
+        return False
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    fail("`fbcode:disable_re_tests`: cannot coerce {!r} to bool".format(value))
+
 def _get_re_arg(ctx: AnalysisContext) -> ReArg:
-    force_local = read_config("fbcode", "disable_re_tests", default = False)
-    if force_local or not hasattr(ctx.attrs, "remote_execution"):
+    if _force_local_re_tests() or not hasattr(ctx.attrs, "remote_execution"):
         # NOTE: this is kinda weird, we take this path if the attr is missing completely
         # Even if the value is None we still follow. Adding force.local to give users
         # some means of bypassing.
@@ -72,7 +92,7 @@ def maybe_add_run_as_bundle_label(ctx: AnalysisContext, labels: list[str]) -> No
     if "re_ignore_force_run_as_bundle" in labels:
         return
     re_arg = _get_re_arg(ctx)
-    if re_arg.default_run_as_bundle or read_config("tpx", "force_run_as_bundle") == "True":
+    if re_arg.default_run_as_bundle or _FORCE_RUN_AS_BUNDLE == "True":
         labels.extend(["run_as_bundle"])
 
 def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [dict, None] = None) -> RemoteTestExecutorConfig:
@@ -81,10 +101,11 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
 
     The target's `network_access` policy (if any) is attached to the returned
     `CommandExecutorConfig`(s) so it is enforced for both local and remote test
-    execution. When a target has no RE profile but does request a `network_access`
-    policy, a local-only executor is synthesized solely to carry that policy; it is
-    reported with `run_from_project_root = False` so the test keeps running in-place
-    rather than being switched to project-root/RE-style execution.
+    execution. When a target has no RE profile, a local-only executor is synthesized
+    so Buck does not fall back to a remote-only build execution platform for a test
+    whose cell-relative paths make it ineligible for RE. The executor is reported with
+    `run_from_project_root = False` so the test keeps running in-place rather than
+    being switched to project-root/RE-style execution.
 
     Args:
         ctx: The analysis context.
@@ -95,7 +116,37 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
     Returns a `RemoteTestExecutorConfig`.
     """
 
-    re_arg = _get_re_arg(ctx)
+    return _get_re_executors(ctx, _get_re_arg(ctx), dynamic_image_override)
+
+def get_re_executors_from_explicit_props(ctx: AnalysisContext, re_props: dict | None) -> RemoteTestExecutorConfig:
+    """
+    Like `get_re_executors_from_props`, but for a rule that carries RE properties in
+    some attribute other than `remote_execution`.
+
+    `re_props` must already be a resolved property dict. The string form of
+    `remote_execution` — the name of a profile on the remote test execution toolchain —
+    is deliberately not accepted here: resolving one requires
+    `_remote_test_execution_toolchain`, and a rule that runs RE only for a secondary
+    test (a rustdoc doctest, say) should not have to take a toolchain dependency to
+    express that.
+
+    Returns a `RemoteTestExecutorConfig`.
+    """
+
+    if _force_local_re_tests():
+        re_props = None
+
+    return _get_re_executors(
+        ctx,
+        ReArg(re_props = re_props, default_run_as_bundle = False),
+        None,
+    )
+
+def _get_re_executors(
+    ctx: AnalysisContext,
+    re_arg: ReArg,
+    dynamic_image_override: [dict, None],
+) -> RemoteTestExecutorConfig:
     network_access = getattr(ctx.attrs, "network_access", None)
 
     if re_arg.disabled:
@@ -106,20 +157,21 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
 
     re_props = re_arg.re_props
     if re_props == None:
-        if network_access != None:
-            # No RE profile, but the target requests a network policy. Synthesize a
-            # local-only executor purely to carry it. Crucially this executor is NOT
-            # marked as needing the project root, so the test still runs in-place
-            # (from the cell root) just as it would with no executor at all.
-            #
-            # `remote_cache_enabled = False` keeps this a plain `Executor::Local`
-            # (parity: the unset default is True in fbcode but False in OSS), and
-            # nothing is uploaded from here anyway (`allow_cache_uploads` is False).
-            executor = CommandExecutorConfig(local_enabled = True, remote_enabled = False, remote_cache_enabled = False, **_network_access_kwargs(network_access))
-            return RemoteTestExecutorConfig(default_executor = executor)
-        return RemoteTestExecutorConfig()
+        # A test without an RE profile uses cell-relative paths, which makes the test
+        # action local-only. Give it an explicit local executor instead of inheriting
+        # the rule's build execution platform: that platform may be remote-only when
+        # cross-building, even though the target binary must run on the local host.
+        #
+        # `remote_cache_enabled = False` keeps this a plain `Executor::Local`
+        # (parity: the unset default is True in fbcode but False in OSS), and nothing
+        # is uploaded from here anyway (`allow_cache_uploads` is False).
+        executor = CommandExecutorConfig(local_enabled = True, remote_enabled = False, remote_cache_enabled = False, **_network_access_kwargs(network_access))
+        return RemoteTestExecutorConfig(default_executor = executor)
 
     re_props_copy = dict(re_props)
+    missing_props = [name for name in ("capabilities", "use_case") if name not in re_props_copy]
+    if missing_props:
+        fail("{}: re props are missing required fields: {}".format(ctx.label, ", ".join(missing_props)))
     capabilities = re_props_copy.pop("capabilities")
     use_case = re_props_copy.pop("use_case")
     listing_capabilities = re_props_copy.pop("listing_capabilities", None)
@@ -137,7 +189,7 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
         re_dynamic_image = dynamic_image_override
     if re_props_copy:
         unexpected_props = ", ".join(re_props_copy.keys())
-        fail("found unexpected re props: " + unexpected_props)
+        fail("{}: found unexpected re props: {}".format(ctx.label, unexpected_props))
 
     if re_gang != None:
         meta_internal_extra_params = dict(meta_internal_extra_params or {})

@@ -28,4 +28,10 @@ object K2JvmAbiConfigurationKeys {
 
   val ENABLE_COMPOSE_ABI_EMULATION: CompilerConfigurationKey<Boolean> =
       CompilerConfigurationKey.create("enable Compose ABI emulation for K2 JVM ABI generation")
+
+  val ABI_VALIDATION_MODE: CompilerConfigurationKey<String> =
+      CompilerConfigurationKey.create("ABI validation mode for K2 JVM ABI generation")
+
+  val SHALLOW_CLASS_USAGE: CompilerConfigurationKey<Boolean> =
+      CompilerConfigurationKey.create("shallow class usage for K2 JVM ABI dep files")
 }

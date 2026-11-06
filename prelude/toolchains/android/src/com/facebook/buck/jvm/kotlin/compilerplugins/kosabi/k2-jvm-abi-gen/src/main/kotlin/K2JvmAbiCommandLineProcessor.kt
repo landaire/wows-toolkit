@@ -58,6 +58,25 @@ class K2JvmAbiCommandLineProcessor : CommandLineProcessor {
         "Enable Compose ABI emulation. Default is false.",
         false,
     )
+
+    val ABI_VALIDATION_MODE_OPTION: CliOption = CliOption(
+        "abiValidationMode",
+        "off|warn|error",
+        "How to report ABI content that had to be repaired because a dependency was not on " +
+            "the source-only ABI classpath. `warn` reports each repair as a compiler warning, " +
+            "`error` fails the compilation instead of emitting a knowingly-wrong ABI. " +
+            "Default is off: fbsource builds Kotlin with `-Werror`, so `warn` also fails the " +
+            "compile and has to be opted into per target.",
+        false,
+    )
+
+    val SHALLOW_CLASS_USAGE_OPTION: CliOption = CliOption(
+        "shallowClassUsage",
+        "<boolean>",
+        "Record only directly-referenced classes in dep files, recursing into supertypes " +
+            "for the target's own supertype chain only. Default is false.",
+        false,
+    )
   }
 
   override val pluginId: String
@@ -70,6 +89,8 @@ class K2JvmAbiCommandLineProcessor : CommandLineProcessor {
         ENABLE_MIXED_COMPILATION,
         DEBUG_OUTPUT_OPTION,
         ENABLE_COMPOSE_ABI_EMULATION_OPTION,
+        ABI_VALIDATION_MODE_OPTION,
+        SHALLOW_CLASS_USAGE_OPTION,
     )
 
   override fun processOption(
@@ -90,6 +111,10 @@ class K2JvmAbiCommandLineProcessor : CommandLineProcessor {
               K2JvmAbiConfigurationKeys.ENABLE_COMPOSE_ABI_EMULATION,
               value == "true",
           )
+      ABI_VALIDATION_MODE_OPTION ->
+          configuration.put(K2JvmAbiConfigurationKeys.ABI_VALIDATION_MODE, value)
+      SHALLOW_CLASS_USAGE_OPTION ->
+          configuration.put(K2JvmAbiConfigurationKeys.SHALLOW_CLASS_USAGE, value == "true")
       else -> throw CliOptionProcessingException("Unknown option: ${option.optionName}")
     }
   }

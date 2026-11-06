@@ -34,9 +34,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -65,7 +63,6 @@ public class MergeAndroidResources {
       boolean forceFinalResourceIds,
       EnumSet<RType> bannedDuplicateResourceTypes,
       Optional<Path> duplicateResourceWhitelistPath,
-      Optional<String> unionPackage,
       ImmutableList<Path> overrideSymbolsPath,
       Path outputDir,
       Optional<Path> stringsOutputDir,
@@ -122,25 +119,7 @@ public class MergeAndroidResources {
 
     ImmutableSet.Builder<String> requiredPackages = ImmutableSet.builder();
 
-    // Create a temporary list as the multimap
-    // will be concurrently modified below.
-    ArrayList<Entry<String, RDotTxtEntry>> entries =
-        new ArrayList<>(rDotJavaPackageToResources.entries());
-
     requiredPackages.addAll(symbolsFileToRDotJavaPackage.values());
-
-    // If a resource_union_package was specified, copy all resource into that package,
-    // unless they are already present.
-    if (unionPackage.isPresent()) {
-      String unionPackageName = unionPackage.get();
-      requiredPackages.add(unionPackageName);
-
-      for (Entry<String, RDotTxtEntry> entry : entries) {
-        if (!rDotJavaPackageToResources.containsEntry(unionPackageName, entry.getValue())) {
-          rDotJavaPackageToResources.put(unionPackageName, entry.getValue());
-        }
-      }
-    }
 
     Preconditions.checkState(
         stringsOutputDir.isPresent() == idsOutputDir.isPresent(),
@@ -240,23 +219,6 @@ public class MergeAndroidResources {
     }
   }
 
-  private static void writePackagePrivateArrayHolderClass(
-      Path outputFile,
-      String packageName,
-      String className,
-      String fieldName,
-      ImmutableList<Integer> arrayContents)
-      throws IOException {
-    try (ThrowingPrintWriter writer =
-        new ThrowingPrintWriter(new FileOutputStream(outputFile.toFile()))) {
-      writer.format("package %s;\n\n", packageName);
-      writer.format("final class %s {\n", className);
-      writer.format("  static final int[] %s = ", fieldName);
-      writer.format("{ %s };\n", Joiner.on(",").join(arrayContents));
-      writer.println("}");
-    }
-  }
-
   private static void writePerPackageRDotJava(
       Path outputDir,
       SortedSetMultimap<String, RDotTxtEntry> packageToResources,
@@ -264,8 +226,6 @@ public class MergeAndroidResources {
       ImmutableSet<String> referencedResources)
       throws IOException {
     Files.createDirectories(outputDir);
-    ImmutableList.Builder<Integer> allCustomDrawablesBuilder = ImmutableList.builder();
-    ImmutableList.Builder<Integer> allGrayscaleImagesBuilder = ImmutableList.builder();
     for (String rDotJavaPackage : packageToResources.keySet()) {
       Path outputFile = getPathToRDotJava(outputDir, rDotJavaPackage);
       Files.createDirectories(Objects.requireNonNull(outputFile.getParent()));
@@ -274,16 +234,14 @@ public class MergeAndroidResources {
         writer.format("package %s;\n\n", rDotJavaPackage);
         writer.write("public class R {\n");
 
-        ImmutableList.Builder<Integer> customDrawablesBuilder = ImmutableList.builder();
-        ImmutableList.Builder<Integer> grayscaleImagesBuilder = ImmutableList.builder();
         RType lastType = null;
 
         for (RDotTxtEntry res : packageToResources.get(rDotJavaPackage)) {
           boolean isUsed =
               referencedResources.isEmpty()
                   || referencedResources.contains(rDotJavaPackage + "." + res.name);
-          RType type = res.type;
           if (isUsed) {
+            RType type = res.type;
             if (!Objects.equals(type, lastType)) {
               // If the previous type needs to be closed, close it.
               if (lastType != null) {
@@ -301,13 +259,6 @@ public class MergeAndroidResources {
                 "    public static%s%s %s=%s;\n",
                 forceFinalResourceIds ? " final " : " ", res.idType, res.name, res.idValue);
           }
-
-          if (type == RType.DRAWABLE && res.customType == RDotTxtEntry.CustomDrawableType.CUSTOM) {
-            customDrawablesBuilder.add(Integer.decode(res.idValue));
-          } else if (type == RType.DRAWABLE
-              && res.customType == RDotTxtEntry.CustomDrawableType.GRAYSCALE_IMAGE) {
-            grayscaleImagesBuilder.add(Integer.decode(res.idValue));
-          }
         }
 
         // If some type was written (e.g., the for loop was entered), then the last type needs to be
@@ -316,129 +267,7 @@ public class MergeAndroidResources {
           writer.println("  }\n");
         }
 
-        ImmutableList<Integer> customDrawables = customDrawablesBuilder.build();
-        if (customDrawables.size() > 0) {
-          Path customDrawablesAuxFile =
-              getPathToJavaFile(outputDir, rDotJavaPackage, "RCustom.java");
-          writePackagePrivateArrayHolderClass(
-              customDrawablesAuxFile,
-              rDotJavaPackage,
-              "RCustom",
-              "custom_drawables",
-              customDrawables);
-          // Add a new field for the custom drawables.
-          writer.format(
-              "  public static final int[] custom_drawables = %s.RCustom.custom_drawables;",
-              rDotJavaPackage);
-          writer.format("\n");
-        }
-
-        ImmutableList<Integer> grayscaleImages = grayscaleImagesBuilder.build();
-        if (grayscaleImages.size() > 0) {
-          Path grayscaleDrawablesAuxFile =
-              getPathToJavaFile(outputDir, rDotJavaPackage, "RGrayscale.java");
-          writePackagePrivateArrayHolderClass(
-              grayscaleDrawablesAuxFile,
-              rDotJavaPackage,
-              "RGrayscale",
-              "grayscale_images",
-              grayscaleImages);
-          // Add a new field for the grayscale drawables.
-          writer.format(
-              "  public static final int[] grayscale_images = %s.RGrayscale.grayscale_images;",
-              rDotJavaPackage);
-          writer.format("\n");
-        }
-
-        allCustomDrawablesBuilder.addAll(customDrawables);
-        allGrayscaleImagesBuilder.addAll(grayscaleImages);
-
         // Close the class definition.
-        writer.println("}");
-      }
-    }
-
-    ImmutableList<Integer> allCustomDrawables = allCustomDrawablesBuilder.build();
-    ImmutableList<Integer> allGrayscaleImages = allGrayscaleImagesBuilder.build();
-    if (!allCustomDrawables.isEmpty() || !allGrayscaleImages.isEmpty()) {
-      String drawablesPackage = "com.facebook.buck.android.drawables";
-      String drawablesPackageReplaced = drawablesPackage.replace('.', '/');
-
-      // To lessen the likelihood of generating too large static initializer,
-      // generate 1 class per array. Further class splitting into chunks holding
-      // subarrays could be done if problems continue. Please note that int[]
-      // array construction may have ramifications on dead resource elimination.
-      String arrayHolderClassCustom = "CustomDrawablesAux";
-      Path customOutputFile =
-          outputDir
-              .resolve(drawablesPackageReplaced)
-              .resolve(String.format("%s.java", arrayHolderClassCustom));
-      Files.createDirectories(Objects.requireNonNull(customOutputFile.getParent()));
-      writePackagePrivateArrayHolderClass(
-          customOutputFile,
-          drawablesPackage,
-          arrayHolderClassCustom,
-          "customDrawables",
-          ImmutableList.sortedCopyOf(Comparator.naturalOrder(), allCustomDrawables));
-
-      String arrayHolderClassGrayscale = "GrayscaleDrawablesAux";
-      Path grayscaleOutputFile =
-          outputDir
-              .resolve(drawablesPackageReplaced)
-              .resolve(String.format("%s.java", arrayHolderClassGrayscale));
-      writePackagePrivateArrayHolderClass(
-          grayscaleOutputFile,
-          drawablesPackage,
-          arrayHolderClassGrayscale,
-          "grayscaleDrawables",
-          ImmutableList.sortedCopyOf(Comparator.naturalOrder(), allGrayscaleImages));
-
-      String drawablesClass = "CustomDrawables";
-      Path outputFile =
-          outputDir
-              .resolve(drawablesPackageReplaced)
-              .resolve(String.format("%s.java", drawablesClass));
-      try (ThrowingPrintWriter writer =
-          new ThrowingPrintWriter(new FileOutputStream(outputFile.toFile()))) {
-        writer.format("package %s;\n\n", drawablesPackage);
-        writer.format("import java.util.Arrays;\n\n");
-        writer.format("public final class %s {\n", drawablesClass);
-
-        writer.format("  private %s() {\n", drawablesClass);
-        writer.format("    throw new RuntimeException();\n");
-        writer.format("  }\n");
-        writer.format("\n");
-
-        writer.format(
-            "  private static final int[] customDrawables = %s.%s.customDrawables;",
-            drawablesPackage, arrayHolderClassCustom);
-        writer.format("\n");
-
-        writer.format(
-            "  private static final int[] grayscaleDrawables = %s.%s.grayscaleDrawables;",
-            drawablesPackage, arrayHolderClassGrayscale);
-        writer.format("\n");
-
-        writer.format("  public static boolean isCustomDrawable(int resourceId) {\n");
-        writer.format("    return Arrays.binarySearch(customDrawables, resourceId) >= 0;\n");
-        writer.format("  }\n");
-        writer.format("\n");
-
-        writer.format("  public static boolean isGrayscaleDrawable(int resourceId) {\n");
-        writer.format("    return Arrays.binarySearch(grayscaleDrawables, resourceId) >= 0;\n");
-        writer.format("  }\n");
-        writer.format("\n");
-
-        writer.format("  public static int[] getCustomDrawableIds() {\n");
-        writer.format("    return customDrawables;\n");
-        writer.format("  }\n");
-        writer.format("\n");
-
-        writer.format("  public static int[] getGrayscaleDrawableIds() {\n");
-        writer.format("    return grayscaleDrawables;\n");
-        writer.format("  }\n");
-        writer.format("\n");
-
         writer.println("}");
       }
     }

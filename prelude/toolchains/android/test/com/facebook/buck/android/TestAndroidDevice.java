@@ -32,7 +32,9 @@ public class TestAndroidDevice implements AndroidDevice {
       boolean quiet,
       boolean verifyTempWritable,
       boolean stagedInstallMode,
-      @Nullable String userId) {
+      @Nullable String userId,
+      boolean allowFastDeploy,
+      String packageName) {
     throw new UnsupportedOperationException();
   }
 
@@ -72,6 +74,17 @@ public class TestAndroidDevice implements AndroidDevice {
   }
 
   @Override
+  public String getContentHash(String path) throws Exception {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public InstalledApk compareInstalledApk(String packageName, File apk, boolean exact)
+      throws Exception {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public ImmutableSortedSet<Path> listDirRecursive(Path dirPath) throws Exception {
     throw new UnsupportedOperationException();
   }
@@ -82,12 +95,13 @@ public class TestAndroidDevice implements AndroidDevice {
   }
 
   @Override
-  public AutoCloseable createForward() throws Exception {
+  public void rmStaleFiles(String packageName) {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public void installFiles(String filesType, Map<Path, Path> installPaths) throws Exception {
+  public void installFiles(String filesType, Map<Path, Path> installPaths, String packageName)
+      throws Exception {
     throw new UnsupportedOperationException();
   }
 
@@ -144,11 +158,6 @@ public class TestAndroidDevice implements AndroidDevice {
 
   @Override
   public boolean uninstallApkFromDevice(String packageName, boolean keepData) throws Exception {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public String getInstallerMethodName() {
     throw new UnsupportedOperationException();
   }
 

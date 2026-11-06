@@ -40,6 +40,7 @@ _VALID_ATTRS = [
     "discard_group",
     "linker_flags",
     "linker_script",
+    "version_script",
     "exported_linker_flags",
     "link_execution_preference",
     "no_as_needed",
@@ -114,6 +115,7 @@ def parse_groups_definitions(
             discard_group = attrs.get("discard_group", False),
             linker_flags = attrs.get("linker_flags", []),
             linker_script = attrs.get("linker_script", None),
+            version_script = attrs.get("version_script", None),
             exported_linker_flags = attrs.get("exported_linker_flags", []),
             link_execution_preference = attrs.get("link_execution_preference", None),
             no_as_needed = attrs.get("no_as_needed", False),
@@ -171,10 +173,7 @@ def _parse_filter(entry: str) -> GroupFilterInfo:
             regex_expr = regex("^{}$".format(label_regex), fancy = False)
 
             def matches_regex(_r, _t, labels):
-                for label in labels:
-                    if regex_expr.match(label):
-                        return True
-                return False
+                return regex_expr.any_match(labels)
 
             return GroupFilterInfo(
                 matches = matches_regex,

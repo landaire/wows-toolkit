@@ -12,20 +12,20 @@ load("@prelude//android:android_providers.bzl", "merge_android_packageable_info"
 load(
     "@prelude//java:java_library.bzl",
     "build_java_library",
+    "jvm_target_stats",
     "split_on_archives_and_plain_files",
 )
 load(
     "@prelude//java:java_providers.bzl",
     "JavaClasspathEntry",
-    "JavaCompilingDepsTSet",
+    "JavaCompilingDepsTSet",  # @unused Used as a type
     "JavaLibraryInfo",
     "JavaPackagingDepTSet",
     "JavaPackagingInfo",
     "JavaProviders",
     "create_java_library_providers",
     "create_native_providers",
-    "derive_compiling_deps",
-    "single_library_compiling_deps",
+    "get_compiling_deps_tset",
     "to_list",
 )
 load(
@@ -55,7 +55,7 @@ load(
     "@prelude//kotlin:kotlin_toolchain.bzl",
     "KotlinToolchainInfo",
 )
-load("@prelude//kotlin:kotlin_utils.bzl", "get_kotlinc_compatible_target")
+load("@prelude//kotlin:kotlin_utils.bzl", "get_friend_paths", "get_kotlinc_compatible_target")
 load("@prelude//kotlin:kotlincd_jar_creator.bzl", "create_jar_artifact_kotlincd")
 load("@prelude//utils:argfile.bzl", "at_argfile")
 load("@prelude//utils:expect.bzl", "expect")
@@ -110,7 +110,7 @@ def _create_kotlin_sources(
     # kotlic doesn't support -bootclasspath param, so adding `bootclasspath_entries` into kotlin classpath
     compiling_classpath.add(bootclasspath_entries)
 
-    compiling_deps_tset = derive_compiling_deps(ctx.actions, None, deps + [kotlin_toolchain.kotlin_stdlib])
+    compiling_deps_tset = get_compiling_deps_tset(ctx.actions, deps + [kotlin_toolchain.kotlin_stdlib])
     if compiling_deps_tset:
         compiling_classpath.add(compiling_deps_tset.project_as_args("args_for_compiling"))
 
@@ -135,6 +135,7 @@ def _create_kotlin_sources(
     kotlinc_cmd_args.add(["-Xjspecify-annotations=strict"])
 
     jdk_release = getattr(ctx.attrs, "jdk_release", None) or ctx.attrs.java_version
+    jvm_target = None
     if jdk_release and not ctx.attrs.no_x_jdk_release:
         kotlinc_cmd_args.add(["-Xjdk-release=" + jdk_release])
     else:
@@ -194,7 +195,7 @@ def _create_kotlin_sources(
         if jvm_target:
             compile_kotlin_cmd_args.append(["--kapt_jvm_target", jvm_target])
 
-    friend_paths = ctx.attrs.friend_paths
+    friend_paths = get_friend_paths(ctx)
     if friend_paths:
         concat_friends_paths = cmd_args(
             [friend_path.library_output.abi for friend_path in map_idx(JavaLibraryInfo, friend_paths) if friend_path.library_output], delimiter = ","
@@ -382,11 +383,14 @@ def kotlin_library_impl(ctx: AnalysisContext) -> list[Provider]:
             android_packageable_info,
         ]
 
+    target_stats_providers, target_stats_subtargets = jvm_target_stats(ctx)
+
     java_providers = build_kotlin_library(
         ctx = ctx,
         validation_deps_outputs = get_validation_deps_outputs(ctx),
+        extra_sub_targets = target_stats_subtargets,
     )
-    return to_list(java_providers) + [android_packageable_info]
+    return to_list(java_providers) + [android_packageable_info] + target_stats_providers
 
 def _check_exported_deps(exported_deps: list[Dependency], attr_name: str):
     for exported_dep in exported_deps:
@@ -443,7 +447,7 @@ def build_kotlin_library(
         bootclasspath_for_kotlinc = custom_jdk_info.bootclasspath if custom_jdk_info else []
         bootclasspath_jar_snapshots_for_kotlinc = custom_jdk_info.bootclasspath_jar_snapshots if custom_jdk_info and ctx.attrs.incremental else []
 
-        javac_tool = derive_javac(ctx.attrs.javac) if ctx.attrs.javac else None
+        javac_tool = derive_javac(ctx.attrs.javac) if getattr(ctx.attrs, "javac", None) else None
         source_level, target_level = get_java_version_attributes(ctx)
 
         kotlin_toolchain = ctx.attrs._kotlin_toolchain[KotlinToolchainInfo]
@@ -481,24 +485,18 @@ def build_kotlin_library(
                 srcs.append(kapt_generated_sources)
             if ksp_generated_sources:
                 srcs.append(ksp_generated_sources)
-            kotlinc_classes_classpath = [
-                single_library_compiling_deps(
-                    ctx.actions,
-                    JavaClasspathEntry(
-                        full_library = kotlinc_classes,
-                        abi = kotlinc_classes,
-                        abi_as_dir = None,
-                        required_for_source_only_abi = True,
-                        abi_jar_snapshot = None,
-                    ),
-                )
-            ]
-            children = (
-                kotlinc_classes_classpath
-                + ([additional_classpath_entries] if additional_classpath_entries else [])
-                + [kotlin_toolchain.kotlin_stdlib[JavaLibraryInfo].compiling_deps]
+            all_additional_classpath_entries = get_compiling_deps_tset(
+                ctx.actions,
+                value = JavaClasspathEntry(
+                    full_library = kotlinc_classes,
+                    abi = kotlinc_classes,
+                    abi_as_dir = None,
+                    required_for_source_only_abi = True,
+                    abi_jar_snapshot = None,
+                ),
+                additional_classpath_entries = ([additional_classpath_entries] if additional_classpath_entries else [])
+                + [kotlin_toolchain.kotlin_stdlib[JavaLibraryInfo].compiling_deps],
             )
-            all_additional_classpath_entries = ctx.actions.tset(JavaCompilingDepsTSet, children = children)
             java_lib = build_java_library(
                 ctx,
                 srcs,
@@ -525,23 +523,28 @@ def build_kotlin_library(
                 hidden = validation_deps_outputs or [],
             )
 
+            abi_generation_mode = get_abi_generation_mode(ctx.attrs.abi_generation_mode)
+            kosabi_applicability_runs = abi_generation_mode == AbiGenerationMode("source_only") and kotlin_toolchain.kosabi_applicability_plugin != None
+            # Applicability verdicts need whole-target analysis; incremental frontends can omit findings from unchanged files.
+            incremental = ctx.attrs.incremental and not kosabi_applicability_runs
+
             common_kotlincd_kwargs = {
-                "abi_generation_mode": get_abi_generation_mode(ctx.attrs.abi_generation_mode),
+                "abi_generation_mode": abi_generation_mode,
                 "actions": ctx.actions,
                 "additional_classpath_entries": additional_classpath_entries,
                 "annotation_processor_properties": AnnotationProcessorProperties(
                     annotation_processors = annotation_processor_properties.annotation_processors + ksp_annotation_processor_properties.annotation_processors,
                     annotation_processor_params = annotation_processor_properties.annotation_processor_params
                     + ksp_annotation_processor_properties.annotation_processor_params,
+                    source_only_abi_annotation_processor_param_overrides = annotation_processor_properties.source_only_abi_annotation_processor_param_overrides,
                 ),
                 "bootclasspath_entries": bootclasspath_for_kotlinc,
                 "custom_jdk_info": custom_jdk_info,
                 "debug_port": getattr(ctx.attrs, "debug_port", None),
                 "deps": deps + [kotlin_toolchain.kotlin_stdlib],
                 "enable_depfiles": getattr(ctx.attrs, "enable_depfiles", True),
-                "enable_used_classes": ctx.attrs.enable_used_classes,
                 "extra_kotlinc_arguments": filter_out_language_version(ctx.attrs.extra_kotlinc_arguments or []),
-                "friend_paths": ctx.attrs.friend_paths,
+                "friend_paths": get_friend_paths(ctx),
                 "is_building_android_binary": ctx.attrs._is_building_android_binary,
                 "jar_postprocessor": ctx.attrs.jar_postprocessor[RunInfo] if hasattr(ctx.attrs, "jar_postprocessor") and ctx.attrs.jar_postprocessor else None,
                 "java_toolchain": ctx.attrs._java_toolchain[JavaToolchainInfo],
@@ -564,9 +567,8 @@ def build_kotlin_library(
                 plugin_params = create_plugin_params(ctx, ctx.attrs.plugins + ctx.attrs.non_exec_dep_plugins_deprecated),
                 extra_arguments = extra_arguments,
                 actions_identifier = "",
-                incremental = ctx.attrs.incremental,
-                uses_content_based_paths = ctx.attrs.uses_content_based_paths_for_kotlincd,
-                bootclasspath_snapshot_entries = bootclasspath_jar_snapshots_for_kotlinc,
+                incremental = incremental,
+                bootclasspath_snapshot_entries = bootclasspath_jar_snapshots_for_kotlinc if incremental else [],
                 track_files_which_skipped_compilation = kotlin_toolchain.track_files_which_skipped_compilation,
                 **common_kotlincd_kwargs,
             )
@@ -577,13 +579,6 @@ def build_kotlin_library(
                 extra_sub_targets = extra_sub_targets | {
                     "incremental_state_dir": [
                         DefaultInfo(default_output = outputs.incremental_state_dir),
-                    ]
-                }
-
-            if outputs and outputs.kotlin_classes:
-                extra_sub_targets = extra_sub_targets | {
-                    "kotlin_classes": [
-                        DefaultInfo(default_output = outputs.kotlin_classes),
                     ]
                 }
 
@@ -610,6 +605,18 @@ def build_kotlin_library(
                 if lazy.is_any(lambda src: src.extension == ".java", srcs):
                     extra_sub_targets = _nullsafe_subtarget(ctx, extra_sub_targets, common_kotlincd_kwargs)
                 extra_sub_targets = _semanticdb_subtarget(ctx, extra_sub_targets, kotlin_toolchain, java_toolchain, common_kotlincd_kwargs)
+                extra_sub_targets = _typecheck_subtarget(
+                    ctx,
+                    extra_sub_targets,
+                    kotlin_toolchain,
+                    srcs,
+                    deps,
+                    additional_classpath_entries,
+                    bootclasspath_for_kotlinc,
+                    generated_sources,
+                    annotation_processor_properties,
+                    ksp_annotation_processor_properties,
+                )
 
             class_to_src_map, sources_jar, class_to_src_map_sub_targets = get_class_to_source_map_info(
                 ctx,
@@ -637,7 +644,6 @@ def build_kotlin_library(
                 provided_deps = ctx.attrs.provided_deps + provided_deps_query,
                 exported_provided_deps = ctx.attrs.exported_provided_deps,
                 runtime_deps = ctx.attrs.runtime_deps,
-                needs_desugar = source_level > 7 or target_level > 7,
                 generated_sources = generated_sources,
                 has_srcs = bool(srcs),
                 sources_jar = sources_jar,
@@ -683,7 +689,6 @@ def _nullsafe_subtarget(ctx: AnalysisContext, extra_sub_targets: dict, common_ko
             optional_dirs = [nullsafe_info.output.as_output()],
             is_creating_subtarget = True,
             incremental = False,
-            uses_content_based_paths = ctx.attrs.uses_content_based_paths_for_kotlincd,
             bootclasspath_snapshot_entries = [],
             **common_kotlincd_kwargs,
         )
@@ -757,7 +762,6 @@ def _semanticdb_subtarget(
             optional_dirs = [],
             is_creating_subtarget = True,
             incremental = False,
-            uses_content_based_paths = ctx.attrs.uses_content_based_paths_for_kotlincd,
             bootclasspath_snapshot_entries = [],
             **kwargs,
         )
@@ -767,3 +771,102 @@ def _semanticdb_subtarget(
             ]
         }
     return extra_sub_targets
+
+def _typecheck_subtarget(
+    ctx: AnalysisContext,
+    extra_sub_targets: dict,
+    kotlin_toolchain: KotlinToolchainInfo,
+    srcs: list[Artifact],
+    deps: list[Dependency],
+    additional_classpath_entries: JavaCompilingDepsTSet | None,
+    bootclasspath_entries: list[Artifact],
+    generated_sources: list[Artifact],
+    annotation_processor_properties,
+    ksp_annotation_processor_properties,
+) -> dict:
+    if not kotlin_toolchain.typechecker_enabled:
+        return extra_sub_targets
+    typechecker_cli = kotlin_toolchain.typechecker_cli
+    typechecker_wrapper = kotlin_toolchain.typechecker_wrapper
+    if not typechecker_cli or not typechecker_wrapper:
+        return extra_sub_targets
+
+    # Sources: plain .kt plus kotlinc-style source archives (the wrapper unzips;
+    # suffixes mirror _ARCHIVE_SUFFIXES in typechecker.py).
+    # Mixed .java sources ride along as declaration stubs (the checker
+    # scans their top-level types for import resolution but never checks
+    # them); java_sources_skipped stays 0 (report-schema compat).
+    kt_srcs = [s for s in srcs if s.extension == ".kt"]
+    zip_srcs = [s for s in srcs if s.basename.endswith(".src.zip") or s.basename.endswith("-sources.jar")]
+    java_srcs = [s for s in srcs if s.extension == ".java"]
+
+    # Compiling classpath: same recipe as the kotlinc action (ABI jars).
+    compiling_classpath = cmd_args()
+    if additional_classpath_entries:
+        compiling_classpath.add(additional_classpath_entries.project_as_args("args_for_compiling"))
+    compiling_classpath.add(bootclasspath_entries)
+    compiling_deps_tset = get_compiling_deps_tset(ctx.actions, deps + [kotlin_toolchain.kotlin_stdlib])
+    if compiling_deps_tset:
+        compiling_classpath.add(compiling_deps_tset.project_as_args("args_for_compiling"))
+    friend_jars = [friend_path.library_output.abi for friend_path in map_idx(JavaLibraryInfo, get_friend_paths(ctx)) if friend_path.library_output]
+    compiling_classpath.add(friend_jars)
+    java_toolchain = ctx.attrs._java_toolchain[JavaToolchainInfo]
+    needs_jdk = not bootclasspath_entries
+    jdk_base_jar = java_toolchain.java_base_jar if needs_jdk else None
+    if needs_jdk:
+        compiling_classpath.add(filter(None, [java_toolchain.java_compiler_jar, java_toolchain.jdk_compiler_jar]))
+    classpath_args = cmd_args(compiling_classpath, delimiter = get_path_separator_for_exec_os(ctx))
+    classpath_file, _ = ctx.actions.write("typecheck_classpath", classpath_args, allow_args = True, has_content_based_path = False)
+
+    # D4 plugin detection: any compiler plugin, kapt/ksp processor, or
+    # processor dep marks the target (WARN, never error; recorded below).
+    has_plugins = bool(
+        ctx.attrs.kotlin_compiler_plugins
+        or annotation_processor_properties.annotation_processors
+        or ksp_annotation_processor_properties.annotation_processors
+        or ctx.attrs.annotation_processor_deps
+    )
+
+    # extra_kotlinc_arguments holds attrs.arg() objects, not strings (compare
+    # the str(arg) inspection in get_language_version above). Normalize each
+    # element (strip whitespace/quotes) and compare exactly: a substring
+    # test would false-match -Werror inside unrelated values.
+    def has_flag(*names):
+        return lazy.is_any(
+            lambda a: str(a).strip().strip('"') in names,
+            ctx.attrs.extra_kotlinc_arguments or [],
+        )
+
+    werror = has_flag("-Werror")
+    nowarn = has_flag("-nowarn", "-W")
+
+    report = ctx.actions.declare_output("typecheck_report.json")
+    args = cmd_args([
+        typechecker_wrapper[RunInfo],
+        "--typechecker-binary",
+        typechecker_cli[RunInfo],
+        "--classpath-file",
+        classpath_file,
+        "--srcs",
+    ])
+    args.add(kt_srcs + zip_srcs + java_srcs)
+    args.add(["--output", report.as_output()])
+    args.add(["--java-sources-skipped", "0"])
+    for generated in generated_sources:
+        args.add(["--generated", generated])
+    if werror:
+        args.add("--werror")
+    if nowarn:
+        args.add("--nowarn")
+    if has_plugins:
+        args.add("--plugins")
+    args.add(["--language-version", get_language_version(ctx)])
+    if needs_jdk:
+        args.add("--jdk-required")
+    if jdk_base_jar:
+        args.add(["--jdk-base", jdk_base_jar])
+    hidden = cmd_args([compiling_classpath, kt_srcs, zip_srcs, java_srcs, generated_sources, classpath_file])
+    ctx.actions.run(cmd_args(args, hidden = hidden), category = "typecheck")
+    return extra_sub_targets | {
+        "typecheck": [DefaultInfo(default_output = report)],
+    }

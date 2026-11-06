@@ -1,5 +1,5 @@
-Expanded from the bundled prelude of: buck2 2026-07-31-1d7bb93c093b0c31530ef8d92dd2da73de1784de
-Buck2 release: 2026-08-01
+Expanded from the bundled prelude of: buck2 633192cdaf9f1e14a6c9062a5db195b8bd70196ccd96e8011c92e93ad7698c78 <exe-hash>
+Buck2 release: 2026-10-15
 
 Regenerate with `nu scripts/vendor-prelude.nu`, which reapplies the patches in
 that script. Do not hand-edit files under prelude/.

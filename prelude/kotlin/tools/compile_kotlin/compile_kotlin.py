@@ -372,13 +372,16 @@ def _encode_kapt_ap_options(
 
 
 def _encode_javac_arguments(
-    jvm_target: str,
+    jvm_target: str | None,
     kapt_base64_encoder_cmd: List[str],
     temp_dir: TemporaryDirectory,
 ) -> str:
     javac_arguments_file = os.path.join(temp_dir, "javac_arguments.txt")
     with open(javac_arguments_file, "w") as file:
-        file.write("-source={}\n-target={}".format(jvm_target, jvm_target))
+        # An empty file encodes to an empty option map, which leaves KAPT's javac
+        # on its own defaults. Writing a blank line instead would crash the encoder.
+        if jvm_target:
+            file.write("-source={}\n-target={}".format(jvm_target, jvm_target))
 
     encoded_javac_arguments_file = os.path.join(temp_dir, "encoded_javac_arguments.txt")
     return _encode_options(
@@ -437,7 +440,7 @@ def _get_kapt_cmd(
     kapt_stubs: pathlib.Path,
     kapt_base64_encoder: pathlib.Path,
     kapt_generated_kotlin_output: pathlib.Path,
-    kapt_jvm_target: str,
+    kapt_jvm_target: str | None,
     temp_dir: TemporaryDirectory,
 ) -> List[str]:
     if not kapt_annotation_processors:
@@ -538,7 +541,8 @@ def _zip_recursive(archive_path: pathlib.Path, source_path: pathlib.Path):
         archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
     ) as z:
         z.write(source_path)
-        for f in source_path.glob("**/*"):
+        # Listing order differs between file systems, and the archive is content hashed.
+        for f in sorted(source_path.glob("**/*")):
             z.write(f)
 
 

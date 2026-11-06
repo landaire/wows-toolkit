@@ -10,6 +10,8 @@ load("@prelude//cxx:cxx_apple_linker_flags.bzl", "apple_extra_darwin_linker_flag
 load("@prelude//cxx:debug.bzl", "SplitDebugMode")
 load("@prelude//target_stats:target_stats_tools.bzl", "TargetStatsToolsInfo")
 
+CXX_COMPILER_TYPES = ["clang", "clang_cl", "clang_windows", "gcc", "windows", "windows_ml64"]
+
 LinkerType = enum("gnu", "darwin", "windows", "wasm")
 
 IncrementalLinkingMode = enum("disabled", "supported", "enabled")
@@ -63,6 +65,8 @@ LinkerInfo = provider(
         # "o" on Unix, "obj" on Windows
         "object_file_extension": provider_field(typing.Any, default = None),  # str
         "post_linker_flags": provider_field(typing.Any, default = None),
+        # `LinkInfo`s (list[LinkInfo]) of the runtime libraries the toolchain provides.
+        "runtime_library_files": provider_field(list[typing.Any], default = []),
         "sanitizer_runtime_enabled": provider_field(bool, default = False),
         "sanitizer_runtime_files": provider_field(list[Artifact], default = []),
         "shlib_interfaces": provider_field(ShlibInterfacesMode),
@@ -97,9 +101,9 @@ LinkerInfo = provider(
 BinaryUtilitiesInfo = provider(
     fields = {
         "bolt": provider_field(typing.Any, default = None),
-        "bolt_msdk": provider_field(typing.Any, default = None),
         "custom_tools": provider_field(dict[str, RunInfo], default = {}),
         "dwp": provider_field(typing.Any, default = None),
+        "elf_stamp": provider_field([RunInfo, None], default = None),
         "nm": provider_field(typing.Any, default = None),
         "objcopy": provider_field(typing.Any, default = None),
         "objdump": provider_field(typing.Any, default = None),
@@ -145,11 +149,14 @@ _compiler_fields = [
     "compiler",
     "compiler_type",
     "compiler_flags",
-    # An optional @argsfile `Artifact` that contains the preprocessor flags and the compiler flags.
-    "argsfile",  # `Artifact | None`
-    # An optional @argsfile `Artifact` that contains the preprocessor flags and the compiler flags
+    # An optional argsfile that contains the preprocessor flags and the compiler flags.
+    "argsfile",  # `cmd_args | None`
+    # An optional argsfile that contains the preprocessor flags and the compiler flags,
     # formatted for xcode.
-    "argsfile_xcode",  # `Artifact | None`
+    "argsfile_xcode",  # `cmd_args | None`
+    # An optional copy of `argsfile` filtered for C++20 module precompilation,
+    # as an `argsfile_with_artifacts()` value.
+    "argsfile_precompile",  # `cmd_args | None`
     "preprocessor",
     "preprocessor_type",
     "preprocessor_flags",
@@ -163,13 +170,27 @@ _compiler_fields = [
 AsCompilerInfo = provider(fields = _compiler_fields)
 AsmCompilerInfo = provider(fields = _compiler_fields)
 CCompilerInfo = provider(fields = _compiler_fields)
-CudaCompilerInfo = provider(fields = _compiler_fields)
+CudaCompilerInfo = provider(fields = _compiler_fields + ["compiler_for_dryrun"])
 CvtresCompilerInfo = provider(fields = _compiler_fields)
 CxxCompilerInfo = provider(fields = _compiler_fields)
 HipCompilerInfo = provider(fields = _compiler_fields)
 ObjcCompilerInfo = provider(fields = _compiler_fields)
 ObjcxxCompilerInfo = provider(fields = _compiler_fields)
 RcCompilerInfo = provider(fields = _compiler_fields)
+
+def compiler_info_with_argsfiles(
+    compiler_info: typing.Any, ctor: typing.Callable, argsfile: cmd_args, argsfile_xcode: cmd_args, argsfile_precompile: cmd_args | None = None
+) -> typing.Any:
+    fields = {k: getattr(compiler_info, k) for k in _compiler_fields}
+    fields["argsfile"] = argsfile
+    fields["argsfile_xcode"] = argsfile_xcode
+    fields["argsfile_precompile"] = argsfile_precompile
+
+    # CudaCompilerInfo carries fields beyond the shared set.
+    compiler_for_dryrun = getattr(compiler_info, "compiler_for_dryrun", None)
+    if compiler_for_dryrun != None:
+        fields["compiler_for_dryrun"] = compiler_for_dryrun
+    return ctor(**fields)
 
 DistLtoToolsInfo = provider(
     fields = dict(
@@ -245,6 +266,9 @@ RuntimeDependencyHandling = enum(
 # only depend on the compilers it actually needs.
 CxxToolchainInfo = provider(
     fields = {
+        # Upload remote dep-file cache entries for compile actions that declare
+        # dep files (and look them up on a regular action-cache miss).
+        "allow_dep_file_cache_upload": provider_field(bool, default = False),
         "as_compiler_info": provider_field(typing.Any, default = None),
         "asm_compiler_info": provider_field(typing.Any, default = None),
         "binary_utilities_info": provider_field(typing.Any, default = None),
@@ -346,6 +370,7 @@ def cxx_toolchain_infos(
     object_format = CxxObjectFormat("native"),
     use_distributed_thinlto = False,
     use_dep_files = False,
+    allow_dep_file_cache_upload = False,
     clang_remarks = None,
     clang_llvm_statistics = False,
     gcno_files = None,
@@ -437,6 +462,7 @@ def cxx_toolchain_infos(
         strip_flags_info = strip_flags_info,
         minimum_os_version = minimum_os_version,
         use_dep_files = use_dep_files,
+        allow_dep_file_cache_upload = allow_dep_file_cache_upload,
         use_distributed_thinlto = use_distributed_thinlto,
         cxx_error_handler = cxx_error_handler,
         supported_compile_flavors = supported_compile_flavors,

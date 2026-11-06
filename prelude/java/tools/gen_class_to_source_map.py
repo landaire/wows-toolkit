@@ -66,13 +66,15 @@ def _load_debug_class_to_source_map(path: str | None) -> dict[str, str]:
 def _legacy_source_for_class(class_name: str, sources: dict[str, str]) -> str | None:
     base_class_name = class_name.replace(".", "/")
     for source_base, source_path in sources.items():
-        if _base_class_name_matches_base_source_path(base_class_name, source_base) or (
-            base_class_name.endswith("Kt")
-            and _base_class_name_matches_base_source_path(
-                base_class_name[:-2], source_base
-            )
-        ):
+        if _base_class_name_matches_base_source_path(base_class_name, source_base):
             return source_path
+    # Only a class with no source of its own is a Kotlin file facade (`Foo.kt` -> `FooKt`).
+    if base_class_name.endswith("Kt"):
+        for source_base, source_path in sources.items():
+            if _base_class_name_matches_base_source_path(
+                base_class_name[:-2], source_base
+            ):
+                return source_path
     return None
 
 
@@ -159,13 +161,21 @@ def _build_class_entries(
 
 
 def _write_sources_jar(classes: Iterable[dict[str, str]], output: str) -> None:
+    # Several classes can share one source file, so entries are keyed by source path
+    # and named after the file rather than the class to avoid source duplication.
+    written_sources: set[str] = set()
     with zipfile.ZipFile(output, "w") as sources_jar:
         for entry in classes:
             source_path = entry.get("srcPath")
-            if source_path is None:
+            if source_path is None or source_path in written_sources:
                 continue
-            source_extension = os.path.splitext(source_path)[1]
-            archive_path = entry["className"].replace(".", "/") + source_extension
+            written_sources.add(source_path)
+            package, _, _ = entry["className"].rpartition(".")
+            package_dir = package.replace(".", "/")
+            source_name = os.path.basename(source_path)
+            archive_path = (
+                package_dir + "/" + source_name if package_dir else source_name
+            )
             sources_jar.write(source_path, archive_path)
 
 
@@ -176,6 +186,7 @@ def generate_class_to_source_map(
     *,
     debuginfo: str | None = None,
     include_classes_prefixes: Iterable[str] = (),
+    owner_target: str | None = None,
     sources_jar: str | None = None,
 ) -> None:
     classes = _build_class_entries(
@@ -187,7 +198,10 @@ def generate_class_to_source_map(
     if sources_jar is not None:
         _write_sources_jar(classes, sources_jar)
 
-    json.dump({"jarPath": jar, "classes": classes}, output)
+    result = {"jarPath": jar, "classes": classes}
+    if owner_target is not None:
+        result["ownerTarget"] = owner_target
+    json.dump(result, output)
     output.write("\n")
 
 
@@ -198,6 +212,7 @@ def main(argv: list[str]) -> int:
         "-i",
         default=[],
         nargs="*",
+        action="extend",
         help="Prefixes of classes to include in the output, even if their source isn't present",
     )
     parser.add_argument(
@@ -205,6 +220,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--sources_jar", required=False)
     parser.add_argument("--debuginfo", required=False)
+    parser.add_argument("--owner-target", required=False)
     parser.add_argument("jar")
     parser.add_argument("sources", nargs="*")
     args = parser.parse_args(argv[1:])
@@ -215,6 +231,7 @@ def main(argv: list[str]) -> int:
         args.output,
         debuginfo=args.debuginfo,
         include_classes_prefixes=args.include_classes_prefixes,
+        owner_target=args.owner_target,
         sources_jar=args.sources_jar,
     )
     return 0

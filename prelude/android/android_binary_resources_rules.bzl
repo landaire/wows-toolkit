@@ -26,11 +26,8 @@ load(
     "@prelude//java:java_providers.bzl",
     "JavaPackagingDep",  # @unused Used as type
 )
-load("@prelude//utils:buckconfig.bzl", "read_bool")
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:utils.bzl", "flatten")
-
-_optimized_resource_processing = read_bool("android", "optimized_resource_processing", default = False, root_cell = True)
 
 _FilteredResourcesOutput = record(
     resource_infos = list[AndroidResourceInfo],
@@ -122,26 +119,21 @@ def get_android_binary_resources_info(
         exo_resources = ctx.actions.declare_output("exo_resources.apk", has_content_based_path = False)
         exo_resources_hash = ctx.actions.declare_output("exo_resources.apk.hash", has_content_based_path = False)
         ctx.actions.run(
-            cmd_args(
-                [
-                    android_toolchain.exo_resources_rewriter[RunInfo],
-                    "--original-r-dot-txt",
-                    aapt2_link_info.r_dot_txt,
-                    "--new-r-dot-txt",
-                    r_dot_txt.as_output(),
-                    "--original-primary-apk-resources",
-                    aapt2_link_info.primary_resources_apk,
-                    "--new-primary-apk-resources",
-                    primary_resources_apk.as_output(),
-                    "--exo-resources",
-                    exo_resources.as_output(),
-                    "--exo-resources-hash",
-                    exo_resources_hash.as_output(),
-                    "--zipalign-tool",
-                    android_toolchain.zipalign[RunInfo],
-                ]
-                + (["--optimized-processing"] if _optimized_resource_processing else [])
-            ),
+            cmd_args([
+                android_toolchain.exo_resources_rewriter[RunInfo],
+                "--original-r-dot-txt",
+                aapt2_link_info.r_dot_txt,
+                "--new-r-dot-txt",
+                r_dot_txt.as_output(),
+                "--original-primary-apk-resources",
+                aapt2_link_info.primary_resources_apk,
+                "--new-primary-apk-resources",
+                primary_resources_apk.as_output(),
+                "--exo-resources",
+                exo_resources.as_output(),
+                "--exo-resources-hash",
+                exo_resources_hash.as_output(),
+            ]),
             category = "write_exo_resources",
             allow_cache_upload = True,
         )
@@ -170,7 +162,6 @@ def get_android_binary_resources_info(
         [r_dot_txt],
         override_symbols_paths,
         getattr(ctx.attrs, "duplicate_resource_whitelist", None),
-        getattr(ctx.attrs, "resource_union_package", None),
         referenced_resources_lists,
         generate_strings_and_ids_separately = generate_strings_and_ids_separately,
         remove_classes = ["{}.R".format(r_dot_java_package) for r_dot_java_package in r_dot_java_packages_to_exclude],
@@ -359,6 +350,7 @@ def _maybe_filter_resources(ctx: AnalysisContext, resources: list[AndroidResourc
             r_dot_java_package = resource.r_dot_java_package,
             res = filtered_res,
             text_symbols = resource.text_symbols,
+            unused_resource_dep_validation_has_non_xml_resources = resource.unused_resource_dep_validation_has_non_xml_resources,
         )
         filtered_resource_infos.append(filtered_resource)
 
@@ -481,7 +473,7 @@ def get_manifest(
             manifest_entries.get("placeholders", {}),
         )
 
-    if android_toolchain.set_application_id_to_specified_package and should_replace_application_id_placeholders:
+    if should_replace_application_id_placeholders:
         android_manifest_with_replaced_application_id = ctx.actions.declare_output("replaced/AndroidManifest.xml", has_content_based_path = False)
         replace_application_id_placeholders_cmd = cmd_args([
             ctx.attrs._android_toolchain[AndroidToolchainInfo].replace_application_id_placeholders[RunInfo],
@@ -489,9 +481,8 @@ def get_manifest(
             android_manifest,
             "--output",
             android_manifest_with_replaced_application_id.as_output(),
+            "--sanity-check-placeholders",
         ])
-        if android_toolchain.should_run_sanity_check_for_placeholders:
-            replace_application_id_placeholders_cmd.add("--sanity-check-placeholders")
 
         ctx.actions.run(replace_application_id_placeholders_cmd, category = "replace_application_id_placeholders", allow_cache_upload = True)
         return android_manifest_with_replaced_application_id
@@ -609,9 +600,6 @@ def _merge_assets(
             merged_assets_output_hash = None
 
         merge_assets_cmd.add("--binary-type", "aab" if is_bundle_build else "apk")
-
-        if _optimized_resource_processing:
-            merge_assets_cmd.add("--optimized-processing")
 
         return merge_assets_cmd, merged_assets_output_hash
 

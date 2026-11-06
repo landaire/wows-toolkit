@@ -44,7 +44,7 @@ def wasm_select(wasm, native):
     ones the desktop applications ask for.
     """
     return select({
-        "config//cpu/constraints:wasm32": wasm,
+        "config//cpu/constraints:cpu[wasm32]": wasm,
         "DEFAULT": native,
     })
 

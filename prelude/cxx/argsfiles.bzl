@@ -14,10 +14,17 @@ CompileArgsfile = record(
     file = field(Artifact),
     # This argsfile as a command form that would use the argsfile (includes dependent inputs).
     cmd_form = field(cmd_args),
+    # Command form for the NVCC dry run: the argsfile, the argsfiles it
+    # references and the header maps the flags name, but not the header trees
+    # or other artifacts behind the flags. Only built for CUDA sources.
+    cmd_form_cuda_dryrun = field(cmd_args | None, None),
     # Args as written to the argsfile (with shell quoting applied).
     args = field(cmd_args),
     # Args aggregated for the argsfile excluding file prefix args (excludes shell quoting).
     args_without_file_prefix_args = field(cmd_args),
+    # The generated GCC specs file carrying the file-prefix-map flags, when the
+    # compiler takes them that way. None for compilers given the flags directly.
+    file_prefix_specs = field(Artifact | None, None),
 )
 
 CompileArgsfiles = record(

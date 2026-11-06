@@ -62,7 +62,7 @@ def _generate_sources(ctx, src, build_results) -> list:
         target = src.configured_target()
         deps = ctx.cquery().deps(target)
         inputs = ctx.cquery().inputs(deps)
-        return [f.cell() + "//" + f.path() for f in inputs]
+        return [f.cell + "//" + f.path for f in inputs]
 
     else:
         return []
@@ -178,6 +178,10 @@ def _elp_config(ctx):
         if deps:
             deps_list = [_resolve_target_label(tgt.raw_target(), alias_map) for tgt in deps.value()]
 
+        test_binary_lib = attrs.get("_test_binary_lib")
+        if test_binary_lib:
+            deps_list.append(_resolve_target_label(test_binary_lib.value().raw_target(), alias_map))
+
         apps = attrs.get("applications")
         if apps:
             apps_list = [_resolve_target_label(tgt.raw_target(), alias_map) for tgt in apps.value()]
@@ -185,6 +189,15 @@ def _elp_config(ctx):
         included_apps = attrs.get("included_applications")
         if included_apps:
             included_apps_list = [_resolve_target_label(tgt.raw_target(), alias_map) for tgt in included_apps.value()]
+
+        # These end up verbatim in the generated `.app` file, so unlike the
+        # attributes above they hold application names, not target labels.
+        extra_properties_map = {}
+        extra_properties = attrs.get("extra_properties")
+        if extra_properties:
+            # Absent on target types that do not declare the attribute at all,
+            # and `None` on those that declare it and leave it unset.
+            extra_properties_map = extra_properties.value() or {}
 
         is_generated = "generated" in attrs.get("labels").value()
         gen_srcs = []
@@ -223,6 +236,7 @@ def _elp_config(ctx):
             apps = apps_list,
             included_apps = included_apps_list,
             extra_includes = extra_includes_list,
+            extra_properties = extra_properties_map,
             origin = typ,
         )
 

@@ -32,6 +32,7 @@ load(
 )
 load("@prelude//cxx:argsfiles.bzl", "CompileArgsfile", "CompileArgsfiles")
 load("@prelude//cxx:cxx_context.bzl", "get_cxx_platform_info", "get_cxx_toolchain_info")
+load("@prelude//cxx:cxx_library_utility.bzl", "cxx_attr_deps", "cxx_attr_exported_deps")
 load(
     "@prelude//cxx:cxx_sources.bzl",
     "CxxSrcWithFlags",  # @unused Used as a type
@@ -174,6 +175,7 @@ SwiftCompileResult = record(
     swift_compilation = field(SwiftCompilationOutput | None),
     objc_swift_interface = field(DefaultInfo),
     swiftinterface = field(Artifact | None),
+    ast = field(Artifact | None),
 )
 
 SwiftDebugInfo = record(
@@ -445,7 +447,7 @@ def compile_swift(
     objc_swift_interface_info = _create_objc_swift_interface(ctx, shared_flags, module_name)
 
     if not srcs:
-        return SwiftCompileResult(swift_compilation = None, objc_swift_interface = objc_swift_interface_info, swiftinterface = None)
+        return SwiftCompileResult(swift_compilation = None, objc_swift_interface = objc_swift_interface_info, swiftinterface = None, ast = None)
 
     # Content-based path hashing and Swift incremental compilation are incompatible.
     if uses_content_based_paths and should_build_swift_incrementally(ctx):
@@ -456,6 +458,8 @@ def compile_swift(
     output_swiftmodule = ctx.actions.declare_output(module_name + SWIFTMODULE_EXTENSION, has_content_based_path = uses_content_based_paths)
 
     swift_framework_output = None
+    output_swiftinterface = None
+    swiftinterface_subtarget_enabled = getattr(ctx.attrs, "swiftinterface_subtarget_enabled", False)
 
     if _should_compile_with_evolution(ctx):
         swift_framework_output = SwiftLibraryForDistributionOutput(
@@ -465,9 +469,9 @@ def compile_swift(
                 module_name + ".swiftdoc", has_content_based_path = uses_content_based_paths
             ),  # this is generated automatically once we pass -emit-module-info, so must have this name
         )
-
-    output_swiftinterface = None
-    if getattr(ctx.attrs, "swiftinterface_subtarget_enabled", False):
+        if swiftinterface_subtarget_enabled:
+            output_swiftinterface = swift_framework_output.swiftinterface
+    elif swiftinterface_subtarget_enabled:
         output_swiftinterface = ctx.actions.declare_output(module_name + ".swiftinterface", has_content_based_path = uses_content_based_paths)
         _compile_swiftinterface(
             ctx,
@@ -475,6 +479,17 @@ def compile_swift(
             shared_flags,
             srcs,
             output_swiftinterface,
+        )
+
+    output_ast = None
+    if getattr(ctx.attrs, "swift_dump_ast_subtarget_enabled", False):
+        output_ast = ctx.actions.declare_output(module_name + "-ast-dump", dir = True, has_content_based_path = uses_content_based_paths)
+        _compile_dump_ast(
+            ctx,
+            toolchain,
+            shared_flags,
+            srcs,
+            output_ast,
         )
 
     # When compiling with WMO or incremental with split actions enabled, we compile
@@ -574,7 +589,13 @@ def compile_swift(
             swiftmodule = output_swiftmodule,
             typecheck_file = typecheck_file,
             compiled_underlying_pcm_artifact = exported_compiled_underlying_pcm.output_artifact if exported_compiled_underlying_pcm else None,
-            dependency_info = get_swift_dependency_info(ctx, output_swiftmodule, deps_providers, is_macro),
+            dependency_info = get_swift_dependency_info(
+                ctx,
+                output_swiftmodule,
+                deps_providers,
+                is_macro,
+                swift_ast_dump_artifacts = filter(None, [output_ast]),
+            ),
             pre = pre,
             exported_pre = exported_pp_info,
             exported_swift_header = exported_swift_header.artifact,
@@ -593,6 +614,7 @@ def compile_swift(
         ),
         objc_swift_interface = objc_swift_interface_info,
         swiftinterface = output_swiftinterface,
+        ast = output_ast,
     )
 
 def _compile_swiftinterface(
@@ -622,6 +644,49 @@ def _compile_swiftinterface(
         additional_flags = swiftinterface_cmd,
         toolchain = toolchain,
         supports_serialized_errors = False,
+    )
+
+def _compile_dump_ast(ctx: AnalysisContext, toolchain: SwiftToolchainInfo, shared_flags: cmd_args, srcs: list[CxxSrcWithFlags], output_ast_dir: Artifact):
+    ast_output = output_ast_dir.as_output()
+    output_file_map = {}
+    for src in srcs:
+        # safe_name includes path in case basenames clash
+        safe_name = src.file.short_path.replace("/", "_")
+        output_file_map[src.file] = {
+            "ast-dump": cmd_args(ast_output, format = "{}/" + safe_name + ".ast", delimiter = ""),
+        }
+
+    argfile_cmd = cmd_args(shared_flags)
+    if ctx.attrs.swift_module_skip_function_bodies:
+        argfile_cmd.add([
+            "-Xfrontend",
+            "-experimental-skip-non-inlinable-function-bodies-without-types",
+        ])
+
+    additional_flags = cmd_args(["-dump-ast"])
+    additional_flags.add(cmd_args(hidden = ast_output))
+
+    # `-dump-ast` disables `-wmo`. Without an explicit `-j`, those jobs run
+    # serially over each file in larger modules, becoming potential bottlenecks.
+    additional_flags.add([
+        "-enable-batch-mode",
+        "-driver-batch-size-limit",
+        str(INCREMENTAL_SWIFT_COMPILE_BATCH_SIZE),
+        "-j",
+        str(INCREMENTAL_SWIFT_COMPILE_MAX_NUM_THREADS),
+    ])
+
+    _compile_with_argsfile(
+        ctx = ctx,
+        category = "dump_ast",
+        shared_flags = argfile_cmd,
+        srcs = srcs,
+        additional_flags = additional_flags,
+        toolchain = toolchain,
+        num_threads = INCREMENTAL_SWIFT_COMPILE_MAX_NUM_THREADS,
+        output_file_map = output_file_map,
+        supports_serialized_errors = False,
+        incremental_build_allowed = False,
     )
 
 # We use separate actions for swiftmodule and object file output. This
@@ -817,7 +882,7 @@ def _compile_object(
     else:
         num_threads = 1
         swiftdeps = []
-        output_object = ctx.actions.declare_output(module_name + ".o", has_content_based_path = uses_content_based_paths)
+        output_object = ctx.actions.declare_output(module_name + SWIFT_EXTENSION + ".o", has_content_based_path = uses_content_based_paths)
         objects = [output_object]
         object_format = toolchain.object_format.value
         embed_bitcode = False
@@ -869,7 +934,12 @@ def _compile_object(
 
 def _compile_modularization_dependency_graph(
     ctx: AnalysisContext, toolchain: SwiftToolchainInfo, shared_flags: cmd_args, srcs: list[CxxSrcWithFlags]
-) -> Artifact:
+) -> Artifact | None:
+    # -emit-modularization-dependency-dot-graph is only understood by the Pika
+    # toolchain's swiftc; Xcode's fails the action with "unknown argument".
+    if not toolchain.supports_modularization_dependency_graph:
+        return None
+
     modularization_dependecy_graph_output = ctx.actions.declare_output(
         "__modularization_dependency_graph__/swift_{}.dot".format(get_module_name(ctx)), has_content_based_path = False
     )
@@ -1372,6 +1442,12 @@ def _get_swift_paths_tsets(is_macro: bool, deps: list[Dependency]) -> list[Swift
 def get_external_debug_info_tsets(is_macro: bool, deps: list[Dependency]) -> list[ArtifactTSet]:
     return [d.debug_info_tset for d in _get_swift_dependency_info(is_macro, deps)]
 
+def get_external_swiftmodule_change_analysis_tsets(is_macro: bool, deps: list[Dependency]) -> list[ArtifactTSet]:
+    return [d.swiftmodule_change_analysis_tset for d in _get_swift_dependency_info(is_macro, deps)]
+
+def get_external_swift_ast_dump_tsets(is_macro: bool, deps: list[Dependency]) -> list[ArtifactTSet]:
+    return [d.swift_ast_dump_tset for d in _get_swift_dependency_info(is_macro, deps)]
+
 def get_swift_pcm_uncompile_info(
     ctx: AnalysisContext, propagated_exported_preprocessor_info: [CPreprocessorInfo, None], exported_pre: [CPreprocessor, None]
 ) -> [SwiftPCMUncompiledInfo, None]:
@@ -1410,7 +1486,14 @@ def get_swift_pcm_uncompile_info(
     return None
 
 def create_swift_dependency_info(
-    ctx: AnalysisContext, deps, deps_providers: list, compiled_info: [SwiftCompiledModuleInfo, None], debug_info_tset: ArtifactTSet, is_macro: bool
+    ctx: AnalysisContext,
+    deps,
+    deps_providers: list,
+    compiled_info: [SwiftCompiledModuleInfo, None],
+    debug_info_tset: ArtifactTSet,
+    swiftmodule_change_analysis_tset: ArtifactTSet,
+    swift_ast_dump_tset: ArtifactTSet,
+    is_macro: bool,
 ):
     # We pass through the SDK swiftmodules here to match Buck 1 behaviour. This is
     # pretty loose, but it matches Buck 1 behavior so cannot be improved until
@@ -1430,9 +1513,17 @@ def create_swift_dependency_info(
         has_exported_headers = len(getattr(ctx.attrs, "exported_headers", [])) > 0,
         is_modular = ctx.attrs.modular,
         is_macro = is_macro,
+        swift_ast_dump_tset = swift_ast_dump_tset,
+        swiftmodule_change_analysis_tset = swiftmodule_change_analysis_tset,
     )
 
-def get_swift_dependency_info(ctx: AnalysisContext, output_module: Artifact | None, deps_providers: list, is_macro: bool) -> SwiftDependencyInfo:
+def get_swift_dependency_info(
+    ctx: AnalysisContext,
+    output_module: Artifact | None,
+    deps_providers: list,
+    is_macro: bool,
+    swift_ast_dump_artifacts: list[Artifact] = [],
+) -> SwiftDependencyInfo:
     exported_deps = _exported_deps(ctx)
 
     if output_module:
@@ -1446,12 +1537,36 @@ def get_swift_dependency_info(ctx: AnalysisContext, output_module: Artifact | No
     else:
         compiled_info = None
 
+    all_deps = ctx.attrs.deps + getattr(ctx.attrs, "exported_deps", [])
+
     debug_info_tset = make_artifact_tset(
         actions = ctx.actions,
         artifacts = filter(None, [output_module]),
-        children = get_external_debug_info_tsets(is_macro, ctx.attrs.deps + getattr(ctx.attrs, "exported_deps", [])),
+        children = get_external_debug_info_tsets(is_macro, all_deps),
         label = ctx.label,
         tags = [ArtifactInfoTag("swift_debug_info")],
+    )
+
+    # Deliberately broader than `all_deps` above (also covers toolchain
+    # `default_deps` and `deps_query`, via `cxx_attr_deps`/`cxx_attr_exported_deps`):
+    # this tset is new, so widening it to match the rest of the codebase's
+    # convention has no existing behavior to preserve. `debug_info_tset` and
+    # `swift_ast_dump_tset` predate this and keep the narrower `all_deps` to
+    # avoid changing their already-shipped output.
+    swiftmodule_change_analysis_deps = cxx_attr_deps(ctx) + cxx_attr_exported_deps(ctx)
+
+    swiftmodule_change_analysis_tset = make_artifact_tset(
+        actions = ctx.actions,
+        artifacts = filter(None, [output_module]),
+        children = get_external_swiftmodule_change_analysis_tsets(is_macro, swiftmodule_change_analysis_deps),
+        label = ctx.label,
+    )
+
+    swift_ast_dump_tset = make_artifact_tset(
+        actions = ctx.actions,
+        artifacts = swift_ast_dump_artifacts,
+        children = get_external_swift_ast_dump_tsets(is_macro, all_deps),
+        label = ctx.label,
     )
 
     return create_swift_dependency_info(
@@ -1460,6 +1575,8 @@ def get_swift_dependency_info(ctx: AnalysisContext, output_module: Artifact | No
         deps_providers,
         compiled_info,
         debug_info_tset,
+        swiftmodule_change_analysis_tset,
+        swift_ast_dump_tset,
         is_macro,
     )
 

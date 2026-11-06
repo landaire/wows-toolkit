@@ -15,8 +15,8 @@ load("@prelude//:attrs_validators.bzl", "get_attrs_validation_specs")
 load("@prelude//:paths.bzl", "paths")
 load(
     "@prelude//:resources.bzl",
-    "ResourceInfo",
     "gather_resources",
+    "make_resource_info",
 )
 load("@prelude//cxx:cxx_link_utility.bzl", "shared_libs_symlink_tree_name")
 load(
@@ -35,7 +35,6 @@ load(
     "create_linkable_graph_node",
 )
 load("@prelude//linking:shared_libraries.bzl", "SharedLibraryInfo", "merge_shared_libraries")
-load("@prelude//linking:stamp_build_info.bzl", "PRE_STAMPED_SUFFIX")
 load(
     "@prelude//python/linking:native_python_util.bzl",
     "merge_cxx_extension_info",
@@ -51,7 +50,7 @@ load("@prelude//unix:providers.bzl", "UnixEnv", "create_unix_env_info")
 load("@prelude//utils:arglike.bzl", "ArgLike")  # @unused Used as a type
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:utils.bzl", "from_named_set")
-load(":compile.bzl", "PycInvalidationMode", "compile_manifests")
+load(":compile.bzl", "compile_manifests")
 load(":lazy_imports.bzl", "get_lazy_imports_analyzer", "run_lazy_imports_library_analyzer")
 load(
     ":manifest.bzl",
@@ -116,7 +115,7 @@ def create_python_library_info(
     is_native_dep: bool,
     srcs: [ManifestInfo, None] = None,
     src_types: [ManifestInfo, None] = None,
-    bytecode: [dict[PycInvalidationMode, ManifestInfo], None] = None,
+    bytecode: [ManifestInfo, None] = None,
     default_resources: [(ManifestInfo, list[ArgLike]), None] = None,
     standalone_resources: [(ManifestInfo, list[ArgLike]), None] = None,
     outplace_resources: [(ManifestInfo, list[ArgLike]), None] = None,
@@ -266,6 +265,37 @@ def py_attr_resources(ctx: AnalysisContext) -> (dict[str, ArtifactOutputs], dict
 
     return default_resources, standalone_resources, outplace_resources
 
+def py_resources_deduped(ctx: AnalysisContext, keyed_resources: list[(str, dict[str, ArtifactOutputs])]) -> list[[(ManifestInfo, list[ArgLike]), None]]:
+    """
+    Build one resource manifest per entry, aliasing entries whose resource
+    maps are identical to a single manifest (the maps only diverge when a
+    resource dep exposes style-specific subtargets). Returns one result per
+    entry, None for empty maps.
+    """
+    built = []
+    results = []
+    for suffix, resources in keyed_resources:
+        if not resources:
+            results.append(None)
+            continue
+        result = None
+        for seen_resources, seen_result in built:
+            if resources == seen_resources:
+                result = seen_result
+                break
+        if result == None:
+            result = py_resources(ctx, resources, suffix)
+            built.append((resources, result))
+        results.append(result)
+    return results
+
+def _is_shared_libs_symlink_tree_of(o: Artifact, binary: Artifact) -> bool:
+    # The tree is named after the linker output, which carries a suffix for
+    # each post-link stage (BOLT, build info stamping, etc.) that later renames
+    # the binary. See `get_cxx_post_link_suffix`.
+    prefix, _, suffix = shared_libs_symlink_tree_name(binary.short_path).partition(binary.short_path)
+    return o.basename.startswith(prefix + binary.short_path) and o.basename.endswith(suffix)
+
 def py_resources(ctx: AnalysisContext, resources: dict[str, ArtifactOutputs], suffix: str = "") -> (ManifestInfo, list[ArgLike]):
     """
     Generate a manifest to wrap this rules resources.
@@ -275,24 +305,7 @@ def py_resources(ctx: AnalysisContext, resources: dict[str, ArtifactOutputs], su
     for name, resource in resources.items():
         for o in resource.nondebug_runtime_files:
             # HACK: this is a heuristic to detect shared libs emitted from cpp_binary rules.
-            if isinstance(o, Artifact) and (
-                (
-                    o.basename
-                    == (
-                        shared_libs_symlink_tree_name(
-                            resource.default_output.short_path,
-                        )
-                    )
-                )
-                or (
-                    o.basename
-                    == (
-                        shared_libs_symlink_tree_name(
-                            resource.default_output.short_path + PRE_STAMPED_SUFFIX,
-                        )
-                    )
-                )
-            ):
+            if isinstance(o, Artifact) and _is_shared_libs_symlink_tree_of(o, resource.default_output):
                 # Package the binary's shared libs next to the binary
                 # (the path is stored in RPATH relative to the binary).
                 d[paths.join(paths.dirname(name), o.basename)] = o
@@ -342,23 +355,36 @@ def python_library_impl(ctx: AnalysisContext) -> list[Provider]:
 
     src_manifest = create_manifest_for_source_map(ctx, "srcs", qualified_srcs) if qualified_srcs else None
     python_toolchain = ctx.attrs._python_toolchain[PythonToolchainInfo]
-    src_type_manifest = create_manifest_for_source_map(ctx, "type_stubs", src_types) if src_types else None
+
+    # For the common all-`.py`, no-stub-override case the type manifest lists
+    # exactly the srcs, so reuse that manifest instead of writing a copy.
+    if src_types == qualified_srcs:
+        src_type_manifest = src_manifest
+    elif src_types:
+        src_type_manifest = create_manifest_for_source_map(ctx, "type_stubs", src_types)
+    else:
+        src_type_manifest = None
 
     # Compile bytecode.
     bytecode = None
     if src_manifest != None and python_toolchain.pyc_compilation_enabled:
         bytecode = compile_manifests(ctx, [src_manifest])
-        sub_targets["compile"] = [DefaultInfo(default_output = bytecode[PycInvalidationMode("unchecked_hash")].artifacts[0][0])]
+        sub_targets["compile"] = [DefaultInfo(default_output = bytecode.artifacts[0][0])]
         sub_targets["src-manifest"] = [DefaultInfo(default_output = src_manifest.manifest, other_outputs = [a for a, _ in src_manifest.artifacts])]
 
     raw_deps = ctx.attrs.deps
-    default_resource_manifest = py_resources(ctx, default_resources) if default_resources else None
-    standalone_resource_manifest = py_resources(ctx, standalone_resources, "_standalone") if standalone_resources else None
-    outplace_resource_manifest = py_resources(ctx, outplace_resources, "_outplace") if outplace_resources else None
+    default_resource_manifest, standalone_resource_manifest, outplace_resource_manifest = py_resources_deduped(
+        ctx,
+        [
+            ("", default_resources),
+            ("_standalone", standalone_resources),
+            ("_outplace", outplace_resources),
+        ],
+    )
     deps, shared_libraries = gather_dep_libraries(raw_deps, resolve_versioned_deps = False)
     providers.append(gather_versioned_dependencies(raw_deps))
 
-    native_deps = merge_native_deps(ctx, raw_deps)
+    native_deps = merge_native_deps(ctx, raw_deps, shared_deps = raw_deps)
 
     lazy_imports_analyzer = get_lazy_imports_analyzer(ctx)
     lazy_imports_cache_output = None
@@ -381,7 +407,6 @@ def python_library_impl(ctx: AnalysisContext) -> list[Provider]:
         lazy_imports_cache = lazy_imports_cache_output,
     )
     providers.append(library_info)
-
     providers.append(
         create_unix_env_info(
             actions = ctx.actions,
@@ -469,7 +494,7 @@ def python_library_impl(ctx: AnalysisContext) -> list[Provider]:
 
         # Build-time type check validation (separate action for sole-output constraint)
         if ctx.attrs.typing and ctx.attrs.typing_validation:
-            validation_output = create_type_check_validation(ctx, type_checker, type_check_info.default_outputs[0])
+            validation_output = create_type_check_validation(ctx, type_check_info.default_outputs[0])
             pyre_validation_spec = ValidationSpec(name = "pyre", validation_result = validation_output)
 
     providers.append(DefaultInfo(sub_targets = sub_targets))
@@ -508,12 +533,12 @@ def python_library_impl(ctx: AnalysisContext) -> list[Provider]:
 
     # C++ resources.
     providers.append(
-        ResourceInfo(
-            resources = gather_resources(
+        make_resource_info(
+            gather_resources(
                 label = ctx.label,
                 deps = raw_deps,
-            )
-        )
+            ),
+        ),
     )
 
     # Attrs validators (combined with optional pyre type-check validation spec).

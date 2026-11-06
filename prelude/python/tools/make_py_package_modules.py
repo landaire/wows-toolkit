@@ -7,7 +7,6 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-# pyre-strict
 
 """
 Create the link tree for inplace Python binaries.
@@ -75,9 +74,7 @@ _CONTENT_HASH_PLACEHOLDER: str = "/output_artifacts/"
 def create_pyc_hash_dict(args: argparse.Namespace) -> dict[str, str]:
     """Construct a map of bytecode artifact path prefixes to content hashes."""
     pyc_hash_dict: dict[str, str] = {}
-    pattern = re.compile(
-        r"(.*)/([a-fA-F0-9]{16})/(?:bytecode_CHECKED_HASH|bytecode_UNCHECKED_HASH)"
-    )
+    pattern = re.compile(r"(.*)/([a-fA-F0-9]{16})/bytecode_UNCHECKED_HASH")
     for bytecode_artifact in args.bytecode_artifacts:
         with open(bytecode_artifact) as f:
             for line in f:

@@ -7,6 +7,7 @@
 # above-listed licenses.
 
 load("@prelude//:is_full_meta_repo.bzl", "is_full_meta_repo")
+load("@prelude//cxx:compile.bzl", "compiler_info_with_toolchain_argsfiles")
 load(
     "@prelude//cxx:cxx_toolchain_types.bzl",
     "AsCompilerInfo",
@@ -38,9 +39,11 @@ load("@prelude//cxx:linker.bzl", "LINKERS", "is_pdb_generated")
 load("@prelude//decls:cxx_rules.bzl", "cxx_rules")
 load(
     "@prelude//linking:link_info.bzl",
+    "LibOutputStyle",
     "LinkOrdering",
     "LinkStyle",
 )
+load("@prelude//linking:linkable_graph.bzl", "LinkableGraph")
 load("@prelude//linking:lto.bzl", "LtoMode", "lto_compiler_flags")
 load(
     "@prelude//linking:shared_libraries.bzl",
@@ -127,6 +130,7 @@ def cxx_toolchain_impl(ctx):
     cuda_info = (
         CudaCompilerInfo(
             compiler = ctx.attrs.cuda_compiler[RunInfo],
+            compiler_for_dryrun = ctx.attrs.cuda_compiler_for_dryrun[RunInfo] if ctx.attrs.cuda_compiler_for_dryrun else None,
             compiler_type = ctx.attrs.cuda_compiler_type or ctx.attrs.compiler_type,
             compiler_flags = cmd_args(ctx.attrs.cuda_compiler_flags),
             preprocessor_flags = cmd_args(ctx.attrs.cuda_preprocessor_flags),
@@ -167,6 +171,24 @@ def cxx_toolchain_impl(ctx):
         else None
     )
 
+    c_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "c", CCompilerInfo, c_info)
+    objc_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "objc", ObjcCompilerInfo, objc_info)
+    cxx_info = compiler_info_with_toolchain_argsfiles(
+        ctx.actions,
+        "cxx",
+        CxxCompilerInfo,
+        cxx_info,
+        # Only the cxx info can be precompiled for C++20 modules.
+        precompile_filter = ctx.attrs.internal_tools[CxxInternalTools].filter_argsfile,
+    )
+    objcxx_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "objcxx", ObjcxxCompilerInfo, objcxx_info)
+    asm_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "asm", AsmCompilerInfo, asm_info)
+    as_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "as", AsCompilerInfo, as_info)
+    cuda_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "cuda", CudaCompilerInfo, cuda_info)
+    hip_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "hip", HipCompilerInfo, hip_info)
+    cvtres_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "cvtres", CvtresCompilerInfo, cvtres_info)
+    rc_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "rc", RcCompilerInfo, rc_info)
+
     linker_type = LinkerType(ctx.attrs.linker_type)
     linker_info = LinkerInfo(
         archiver = ctx.attrs.archiver[RunInfo],
@@ -203,6 +225,9 @@ def cxx_toolchain_impl(ctx):
         requires_objects = value_or(ctx.attrs.requires_objects, False),
         sanitizer_runtime_enabled = ctx.attrs.sanitizer_runtime_enabled,
         sanitizer_runtime_files = flatten([runtime_file[DefaultInfo].default_outputs for runtime_file in ctx.attrs.sanitizer_runtime_files]),
+        runtime_library_files = [
+            dep[LinkableGraph].nodes.value.linkable.link_infos[LibOutputStyle("pic_archive")].default for dep in ctx.attrs.runtime_library_files
+        ],
         supports_distributed_thinlto = ctx.attrs.supports_distributed_thinlto,
         shared_dep_runtime_ld_flags = ctx.attrs.shared_dep_runtime_ld_flags,
         shared_library_name_default_prefix = _get_shared_library_name_default_prefix(ctx),
@@ -223,13 +248,13 @@ def cxx_toolchain_impl(ctx):
     utilities_info = BinaryUtilitiesInfo(
         bolt = ctx.attrs.bolt[RunInfo] if ctx.attrs.bolt else None,
         custom_tools = {name: dep[RunInfo] for name, dep in ctx.attrs.custom_tools.items()},
+        elf_stamp = ctx.attrs.elf_stamp[RunInfo] if ctx.attrs.elf_stamp else None,
         nm = ctx.attrs.nm[RunInfo],
         objcopy = ctx.attrs.objcopy_for_shared_library_interface[RunInfo],
         objdump = ctx.attrs.objdump[RunInfo] if ctx.attrs.objdump else None,
         ranlib = ctx.attrs.ranlib[RunInfo] if ctx.attrs.ranlib else None,
         strip = ctx.attrs.strip[RunInfo],
         dwp = ctx.attrs.dwp[RunInfo] if ctx.attrs.dwp else None,
-        bolt_msdk = None,
     )
 
     strip_flags_info = StripFlagsInfo(
@@ -284,6 +309,7 @@ def cxx_toolchain_impl(ctx):
         minimum_os_version = ctx.attrs.minimum_os_version,
         # TODO(T138705365): Turn on dep files by default
         use_dep_files = value_or(ctx.attrs.use_dep_files, _get_default_use_dep_files(platform_name)),
+        allow_dep_file_cache_upload = ctx.attrs.allow_dep_file_cache_upload,
         default_deps = ctx.attrs.default_deps,
         target_stats_tools = ctx.attrs.target_stats_tools[TargetStatsToolsInfo] if ctx.attrs.target_stats_tools else None,
     )
@@ -291,6 +317,7 @@ def cxx_toolchain_impl(ctx):
 def cxx_toolchain_extra_attributes(is_toolchain_rule):
     dep_type = attrs.exec_dep if is_toolchain_rule else attrs.dep
     return {
+        "allow_dep_file_cache_upload": attrs.bool(default = False),
         "archive_symbol_table": attrs.bool(default = True),
         "archiver": dep_type(providers = [RunInfo]),
         "archiver_reads_inputs": attrs.bool(default = True),
@@ -309,12 +336,14 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "compiler_flavor_flags": attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), default = {}),
         "cpp_dep_tracking_mode": attrs.enum(DepTrackingMode.values(), default = "makefile"),
         "cuda_compiler": attrs.option(dep_type(providers = [RunInfo]), default = None),
+        "cuda_compiler_for_dryrun": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "cuda_dep_tracking_mode": attrs.enum(DepTrackingMode.values(), default = "makefile"),
         "custom_tools": attrs.dict(key = attrs.string(), value = dep_type(providers = [RunInfo]), default = {}),
         "cvtres_compiler": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "cxx_compiler": dep_type(providers = [RunInfo]),
         "default_deps": attrs.list(dep_type(), default = []),
         "dwp": attrs.option(dep_type(providers = [RunInfo]), default = None),
+        "elf_stamp": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "gcno_files": attrs.bool(default = False),
         "generate_gc_sections": attrs.bool(default = False),
         "generate_linker_maps": attrs.bool(default = False),
@@ -352,6 +381,7 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "rc_compiler": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "remap_cwd": attrs.bool(default = False),
         "requires_objects": attrs.bool(default = False),
+        "runtime_library_files": attrs.set(attrs.dep(), sorted = True, default = []),  # Use `attrs.dep()` as it's not a tool, always propagate target platform
         "sanitizer_runtime_enabled": attrs.bool(default = False),
         "sanitizer_runtime_files": attrs.set(attrs.dep(), sorted = True, default = []),  # Use `attrs.dep()` as it's not a tool, always propagate target platform
         "shared_library_interface_mode": attrs.enum(ShlibInterfacesMode.values(), default = "disabled"),

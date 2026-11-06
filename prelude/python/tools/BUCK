@@ -81,6 +81,12 @@ prelude.python_bootstrap_binary(
     visibility = ["PUBLIC"],
 )
 
+prelude.export_file(
+    name = "gen_bytecode_bundle.py",
+    src = "gen_bytecode_bundle.py",
+    visibility = ["PUBLIC"],
+)
+
 # Main file used for native python binaries
 prelude.export_file(
     name = "embedded_main.cpp",
@@ -114,17 +120,37 @@ prelude.python_bootstrap_binary(
 )
 
 prelude.python_bootstrap_binary(
+    name = "type_check_result_to_validation",
+    main = "type_check_result_to_validation.py",
+    visibility = ["PUBLIC"],
+)
+
+# Shared by every target whose typing is disabled, in place of writing the
+# same empty result per target.
+prelude.export_file(
+    name = "empty_typing_result.json",
+    src = "empty_typing_result.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+prelude.python_bootstrap_binary(
     name = "wheel",
     main = "wheel.py",
     visibility = ["PUBLIC"],
 )
 
 # Run the test suite with this command:
-# buck2 run prelude//python/tools:wheel_tests --target-platforms prelude//platforms:default
+# buck2 run prelude//python/tools:tool_tests --target-platforms prelude//platforms:default
 prelude.sh_binary(
-    name = "wheel_tests",
+    name = "tool_tests",
     main = "tests/main.sh",
     resources = [
+        "gen_bytecode_bundle.py",
+        "make_py_package_inplace.py",
+        "make_py_package_manifest_module.py",
+        "run_inplace.py.in",
+        "type_check_result_to_validation.py",
         "wheel.py",
     ]
     + glob(["tests/**/*.py"]),
@@ -157,4 +183,55 @@ prelude.python_bootstrap_binary(
     name = "gather_libpython_symbols",
     main = "gather_libpython_symbols.py",
     visibility = ["PUBLIC"],
+)
+
+# Type checking target for Python tool scripts.
+prelude.python_library(
+    name = "scripts-typing",
+    srcs = [
+        "__test_main__.py",
+        "compile.py",
+        "create_link_tree.py",
+        "create_manifest_for_source_dir.py",
+        "extract.py",
+        "fail_with_message.py",
+        "gather_libpython_symbols.py",
+        "gen_bytecode_bundle.py",
+        "generate_static_extension_info.py",
+        "make_py_package_inplace.py",
+        "make_py_package_manifest_module.py",
+        "make_py_package_modules.py",
+        "make_source_db.py",
+        "make_source_db_no_deps.py",
+        "patchelf.py",
+        "static_extension_finder.py",
+        "type_check_result_to_validation.py",
+        "wheel.py",
+    ]
+    + glob(
+        ["tests/**/*.py"],
+        # Imports `__test_main__.py` under the name its test target gives it.
+        exclude = ["tests/test_main_test.py"],
+    ),
+    base_module = "",
+    typing = True,
+    deps = [
+        "fbsource//third-party/pypi/colorama:colorama",
+    ],
+)
+
+prelude.python_test(
+    name = "test_main_test",
+    srcs = {
+        "buck_test_main.py": "__test_main__.py",
+        "tests/test_main_test.py": "tests/test_main_test.py",
+    },
+    base_module = "",
+)
+
+prelude.python_test(
+    name = "compile_test",
+    srcs = ["tests/compile_test.py"],
+    base_module = "",
+    resources = ["compile.py"],
 )

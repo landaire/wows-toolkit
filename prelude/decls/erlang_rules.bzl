@@ -10,11 +10,7 @@ load("@prelude//erlang:erlang_application.bzl", "StartTypeValues")
 load("@prelude//erlang:erlang_info.bzl", "ErlangAppIncludeInfo", "ErlangAppInfo", "ErlangAppOrTestInfo")
 load(":common.bzl", "buck", "prelude_rule")
 load(":re_test_common.bzl", "re_test_common")
-
-def re_test_args():
-    # remove reference to fbcode targets
-    args = re_test_common.test_args()
-    return {"remote_execution": args["remote_execution"]}
+load(":test_common.bzl", "test_common")
 
 common_attributes = (
     buck.labels_arg()
@@ -363,12 +359,32 @@ rules_attributes = {
             default = {},
             doc = """
                 The mapping listed here maps from boot script name (e.g. "start.boot") to a binary (e.g. "$(location ...)") generating the boot script.
-                The binary receives three input arguments:
+                The binary receives four input arguments:
                 1. path of to a json file containing the applications, i.e. `["app1", ("app2", "load"), ...]`
                 2. the location of the lib dir containing the `<app>_<version>` folders
                 3. the output location of the boot script
                 4. the output location of the script file
+                followed by the values of `extra_bootscript_builder_args`, if any.
                 """,
+        ),
+        "default_bootscript_name": attrs.string(
+            default = "start",
+            doc = """
+                The boot script a runnable release boots, named without its `.boot` extension and looked up in
+                `releases/<version>/`. The default is `start`, the release's default boot script, produced by
+                `generate_default_bootscript`. When the release also contains
+                `releases/<version>/<default_bootscript_name>.vm.args`, the launcher passes it as `-args_file`.
+            """,
+        ),
+        "extra_bootscript_builder_args": attrs.list(
+            attrs.arg(),
+            default = [],
+            doc = """
+                Additional arguments that are appended, in order, to every `bootscript_builders` invocation
+                after the four positional arguments. This lets a custom boot script builder be parameterised
+                by the release that uses it. Macros such as `$(location //some:target)` are expanded, and the
+                targets they name are made available to the invocation.
+            """,
         ),
         "generate_default_bootscript": attrs.bool(
             default = True,
@@ -381,6 +397,16 @@ rules_attributes = {
             doc = """
                 This field controls whether OTP applications and the Erlang runtime system should be included as part of the release.
                 Please note, that at the moment the erts folder is just `erts/`.
+            """,
+        ),
+        "is_executable": attrs.bool(
+            default = False,
+            doc = """
+                This field controls whether the release is runnable. If set, a launcher is generated at
+                `bin/<release_name>` that boots the release with the bundled emulator, which is why it
+                requires `include_erts = True`. The boot script it uses is `default_bootscript_name`.
+
+                When the release contains `releases/<version>/sys.config`, the launcher passes it as `-config`.
             """,
         ),
         "overlays": attrs.dict(
@@ -513,7 +539,8 @@ rules_attributes = {
         ),
     }
     | common_shell_attributes
-    | re_test_args(),
+    | test_common.attributes()
+    | re_test_common.test_args(),
 }
 
 attributes = {name: dict(rules_attributes[name], **common_attributes) for name in rules_attributes}

@@ -14,21 +14,29 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.facebook.buck.android.device.TargetDeviceOptions;
+import com.facebook.buck.android.exopackage.AdbCommandFailedException;
 import com.facebook.buck.android.exopackage.AdbUtils;
 import com.facebook.buck.android.exopackage.AndroidDevice;
 import com.facebook.buck.android.exopackage.AndroidDeviceImpl;
 import com.facebook.buck.android.exopackage.SetDebugAppMode;
+import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.installer.android.IsolatedAndroidInstallerPrinter;
 import com.facebook.buck.testutil.MoreAsserts;
+import com.facebook.buck.testutil.TemporaryPaths;
 import com.facebook.buck.testutil.TestLogSink;
-import com.facebook.buck.util.Console;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -54,8 +62,8 @@ public class AdbHelperTest {
 
   @Rule public ExpectedException exceptionRule = ExpectedException.none();
   @Rule public TestLogSink testLogSink = new TestLogSink(AdbHelperTest.class);
+  @Rule public final TemporaryPaths tmpDir = new TemporaryPaths();
 
-  private Console testConsole;
   private TestAdbExecutionContext adbExecutionContext;
   private AdbHelper basicAdbHelper;
 
@@ -63,8 +71,7 @@ public class AdbHelperTest {
 
   @Before
   public void setUp() {
-    adbExecutionContext = new TestAdbExecutionContext(Console.createNullConsole());
-    testConsole = adbExecutionContext.getConsole();
+    adbExecutionContext = new TestAdbExecutionContext();
     basicAdbHelper = createAdbHelper(createAdbOptions(), new TargetDeviceOptions());
   }
 
@@ -106,7 +113,6 @@ public class AdbHelperTest {
         adbExecutionContext,
         new IsolatedAndroidInstallerPrinter(LOGGER),
         /* restartAdbOnFailure */ true,
-        /* skipMetadataIfNoInstalls */ false,
         SetDebugAppMode.SET);
   }
 
@@ -230,7 +236,6 @@ public class AdbHelperTest {
       AdbHelper myAdbHelper =
           createAdbHelper(
               new TestAdbExecutionContext(
-                  testConsole,
                   ImmutableMap.of(AdbHelper.SERIAL_NUMBER_ENV, device.getSerialNumber())),
               createAdbOptions(),
               new TargetDeviceOptions());
@@ -415,6 +420,110 @@ public class AdbHelperTest {
     helper.adbCall("test", d -> true, true);
   }
 
+  @Test
+  public void testPlainInstallSkipsAnApkTheDeviceAlreadyHas() throws Exception {
+    AndroidDeviceImpl device = deviceWithInstalledApk(/* sameApk= */ true);
+
+    installPlainApk(/* restartApp= */ false);
+
+    verify(device, never())
+        .installApkOnDevice(any(File.class), anyBoolean(), anyBoolean(), anyBoolean(), anyString());
+    verify(device, never()).stopPackage(anyString());
+  }
+
+  @Test
+  public void testPlainInstallRestartsAnUnchangedAppWhenAnActivityWillBeStarted() throws Exception {
+    AndroidDeviceImpl device = deviceWithInstalledApk(/* sameApk= */ true);
+
+    installPlainApk(/* restartApp= */ true);
+
+    verify(device, never())
+        .installApkOnDevice(any(File.class), anyBoolean(), anyBoolean(), anyBoolean(), anyString());
+    verify(device).stopPackage("com.example.app");
+  }
+
+  @Test
+  public void testPlainInstallInstallsAChangedApk() throws Exception {
+    AndroidDeviceImpl device = deviceWithInstalledApk(/* sameApk= */ false);
+
+    installPlainApk(/* restartApp= */ true);
+
+    verify(device)
+        .installApkOnDevice(
+            any(File.class), anyBoolean(), anyBoolean(), anyBoolean(), eq("com.example.app"));
+    verify(device, never()).stopPackage(anyString());
+  }
+
+  @Test
+  public void testPlainInstallInstallsWhenTheInstalledApkCannotBeRead() throws Exception {
+    AndroidDeviceImpl device = deviceWithInstalledApk(/* sameApk= */ true);
+    when(device.compareInstalledApk(eq("com.example.app"), any(File.class), eq(false)))
+        .thenThrow(new AdbCommandFailedException("md5sum: base.apk: Permission denied"));
+
+    installPlainApk(/* restartApp= */ false);
+
+    verify(device)
+        .installApkOnDevice(
+            any(File.class), anyBoolean(), anyBoolean(), anyBoolean(), eq("com.example.app"));
+  }
+
+  @Test
+  public void testPlainStagedInstallInstallsEvenWhenTheApkMatches() throws Exception {
+    AndroidDeviceImpl device = deviceWithInstalledApk(/* sameApk= */ true);
+
+    installPlainApk(
+        createAdbHelper(
+            createAdbOptions(
+                /* multiInstallMode= */ false,
+                /* stagedInstallMode= */ true,
+                /* ignoreMissingDevices= */ false)),
+        /* restartApp= */ false);
+
+    verify(device)
+        .installApkOnDevice(
+            any(File.class), anyBoolean(), anyBoolean(), eq(true), eq("com.example.app"));
+  }
+
+  private File plainApk() throws Exception {
+    File apk = tmpDir.getRoot().resolve("app.apk").toFile();
+    if (!apk.exists()) {
+      Files.write(apk.toPath(), new byte[] {1, 2, 3});
+    }
+    return apk;
+  }
+
+  /** A device whose installed apk for com.example.app is the local apk or a different one. */
+  private AndroidDeviceImpl deviceWithInstalledApk(boolean sameApk) throws Exception {
+    AndroidDeviceImpl device = createRealDevice("one", "device");
+    when(device.setDebugAppPackageName("com.example.app")).thenReturn(true);
+    when(device.compareInstalledApk(eq("com.example.app"), any(File.class), eq(false)))
+        .thenReturn(
+            sameApk ? AndroidDevice.InstalledApk.SAME : AndroidDevice.InstalledApk.DIFFERENT);
+    when(device.installApkOnDevice(
+            any(File.class), anyBoolean(), anyBoolean(), anyBoolean(), anyString()))
+        .thenReturn(true);
+    when(adbUtils.getDevices()).thenReturn(Collections.singletonList(device));
+    return device;
+  }
+
+  private void installPlainApk(boolean restartApp) throws Exception {
+    installPlainApk(createAdbHelper(), restartApp);
+  }
+
+  private void installPlainApk(AdbHelper adbHelper, boolean restartApp) throws Exception {
+    File apk = plainApk();
+    adbHelper.installApk(
+        new IsolatedApkInfo(
+            tmpDir.getRoot().resolve("AndroidManifest.xml"), AbsPath.of(apk.toPath())),
+        Optional.empty(),
+        tmpDir.getRoot(),
+        /* installViaSd= */ false,
+        /* quiet= */ true,
+        "//:app",
+        "com.example.app",
+        restartApp);
+  }
+
   private AdbHelper createAdbHelper() {
     return createAdbHelper(createAdbOptions());
   }
@@ -427,7 +536,6 @@ public class AdbHelperTest {
         adbExecutionContext,
         new IsolatedAndroidInstallerPrinter(LOGGER),
         /* restartAdbOnFailure */ true,
-        /* skipMetadataIfNoInstalls= */ false,
         SetDebugAppMode.SET) {};
   }
 
@@ -446,7 +554,6 @@ public class AdbHelperTest {
         adbExecutionContext,
         new IsolatedAndroidInstallerPrinter(LOGGER),
         /* restartAdbOnFailure */ true,
-        /* skipMetadataIfNoInstalls= */ false,
         SetDebugAppMode.SET);
   }
 

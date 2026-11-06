@@ -7,23 +7,60 @@
 
 %% % @format
 -module(common_util).
+-compile(warn_missing_spec_all).
 
 -export([
     unicode_characters_to_list/1,
     unicode_characters_to_binary/1,
+
+    qualified_name/2,
+    parse_test_name/2,
 
     filename_all_to_filename/1,
 
     get_env/1,
     set_env/2
 ]).
--compile(warn_missing_spec_all).
+
+-include_lib("common/include/buck_ct_records.hrl").
 
 -spec unicode_characters_to_list(unicode:chardata()) -> string().
 unicode_characters_to_list(CharData) ->
     case unicode:characters_to_list(CharData) of
         R when not is_tuple(R) -> R
     end.
+
+-doc """
+Gets the name for a testcase in a given group-path
+The groups order expected here is [leaf_group, ...., root_group]
+""".
+-spec qualified_name(Groups, TestCase) -> string() when
+    Groups :: [atom()],
+    TestCase :: string() | atom().
+qualified_name(Groups, TestCase) ->
+    StringGroups = [atom_to_list(Group) || Group <- Groups],
+    JoinedGroups = string:join(lists:reverse(StringGroups), ":"),
+    Raw = io_lib:format("~ts.~ts", [JoinedGroups, TestCase]),
+    unicode_characters_to_list(Raw).
+
+-doc """
+Parse the test name, and decompose it into the test, group and suite atoms
+""".
+-spec parse_test_name(string(), atom()) -> #ct_test{}.
+parse_test_name(Test, Suite) ->
+    [Groups0, TestName] = string:split(Test, ".", all),
+    Groups1 =
+        case Groups0 of
+            [] -> [];
+            _ -> string:split(Groups0, ":", all)
+        end,
+    Groups = [list_to_atom(GroupStr) || GroupStr <:- Groups1],
+    #ct_test{
+        suite = Suite,
+        groups = Groups,
+        test_name = list_to_atom(TestName),
+        canonical_name = Test
+    }.
 
 -spec unicode_characters_to_binary(unicode:chardata()) -> binary().
 unicode_characters_to_binary(Chars) ->

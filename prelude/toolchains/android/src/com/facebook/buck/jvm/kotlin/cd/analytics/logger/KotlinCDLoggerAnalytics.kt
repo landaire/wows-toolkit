@@ -44,7 +44,7 @@ constructor(
   override fun log(context: KotlinCDLoggingContext) {
     if (buildUuid == null) {
       LOG.debug(
-          "No operation performed. This is expected when running an action downloaded from RE."
+          "No operation performed. This is expected when running an action downloaded from RE.",
       )
       return
     }
@@ -66,13 +66,13 @@ constructor(
       LOG.info(
           "Successfully wrote KotlinCD logs to scribe. Total time: " +
               duration.toMillis() +
-              " milliseconds"
+              " milliseconds",
       )
     } else {
       LOG.warn(
           (("Failed to write KotlinCD logs to scribe. Total time: " +
               duration.toMillis() +
-              " milliseconds"))
+              " milliseconds")),
       )
     }
   }
@@ -106,6 +106,7 @@ constructor(
         removedFiles = removedFiles,
         numKotlinTokens = context.numKotlinTokens.takeIf { it > 0 },
         numJavaTokens = context.numJavaTokens.takeIf { it > 0 },
+        durationMs = context.durationMs,
     )
   }
 

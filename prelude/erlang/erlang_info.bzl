@@ -9,6 +9,23 @@
 # This file contains the specification for all the providers the Erlang
 # integration uses.
 
+CodePathEntry = record(
+    dir = field(Artifact),
+    # application directories contribute `<dir>/ebin`, test output directories contribute `<dir>`
+    ebin = field(bool),
+)
+
+def _code_path_projection(entry: CodePathEntry) -> cmd_args:
+    if entry.ebin:
+        return cmd_args(entry.dir, format = "{}/ebin")
+    return cmd_args(entry.dir)
+
+CodePathTSet = transitive_set(args_projections = {"code_path": _code_path_projection})
+
+def code_path_args(code_path_tset: CodePathTSet) -> TransitiveSetArgsProjection:
+    """The directories of a `CodePathTSet`, as they are passed to `erl -pa`."""
+    return code_path_tset.project_as_args("code_path")
+
 # Information about an Erlang application and its dependencies.
 
 ErlangAppCommonFields = [
@@ -43,6 +60,8 @@ ErlangAppInfo = provider(
         "private_include_dir",
         # mapping from name to dependency for all Erlang dependencies
         "dependencies",
+        # CodePathTSet rooted at this application, None for virtual applications
+        "code_path_tset",
         # Transitive Set for calculating the start order
         "start_dependencies",
         # additional targets that the application depends on, the
@@ -82,7 +101,8 @@ DepsMapping = dict[str, Artifact]
 ErlangDependencyInfo = provider(
     fields = {
         "beams": provider_field(EbinMapping, default = {}),
-        "code_path": provider_field(cmd_args),
+        # code path of the transitive closure of the dependencies
+        "code_path_tset": provider_field(CodePathTSet),
         "dependencies": provider_field(dict[str, Dependency], default = {}),
         "header_deps_files": provider_field(DepsMapping, default = {}),
         "include_dirs": provider_field(PathArtifactMapping, default = {}),
@@ -117,27 +137,22 @@ Tools = record(
     escript = field(Tool),
 )
 
-ErtsToolchainApplicationInfo = provider(
-    fields = {
-        "name": provider_field(str),
-        "version": provider_field(str),
-    },
-)
-
 ErtsToolchainInfo = provider(
     fields = {
-        "applications": provider_field(list[ErtsToolchainApplicationInfo]),
-        "erts_version": provider_field(str),
+        # the directory each OTP application ships as, by application name
+        "applications": provider_field(dict[str, Artifact]),
+        # directory holding `erts-<version>`
+        "erts": provider_field(Artifact),
         "headers": provider_field(Artifact),
         "otp_no_dot_erlang_boot": provider_field(Artifact),
         "otp_start_boot": provider_field(Artifact),
-        "output": provider_field(Artifact),
+        # json, `{"erts_version": ..., "applications": {<application>: <version>}}`
+        "versions": provider_field(Artifact),
     },
 )
 
 ErlangErrorHandlers = record(
     erlc = field(typing.Callable[[ActionErrorCtx], list[ActionSubError]]),
-    extract_otp_app = field(typing.Callable[[ActionErrorCtx], list[ActionSubError]]),
 )
 
 # toolchain provider
@@ -174,14 +189,12 @@ ErlangToolchainInfo = provider(
         "boot_script_builder": provider_field(Tool),
         # build release_variables
         "release_variables_builder": provider_field(Tool),
-        # copying erts
-        "extract_from_otp": provider_field(Tool),
         # beams we need for various reasons
         "utility_modules": provider_field(Artifact),
         # env to be set for toolchain invocations
         "env": provider_field(dict[str, str]),
         # Erlang Runtime System (ERTS) toolchain metadata
-        "erts_toolchain_info": provider_field(ErtsToolchainInfo),
+        "erts_toolchain_info": provider_field(ErtsToolchainInfo | None, default = None),
         # error handler
         "error_handler": provider_field(ErlangErrorHandlers),
     },
@@ -211,6 +224,8 @@ ErlangTestInfo = provider(
     fields = {
         # mapping from name to dependency for all Erlang dependencies
         "dependencies": provider_field(dict[str, Dependency]),
+        # CodePathTSet rooted at this test
+        "code_path_tset": provider_field(CodePathTSet),
         # The name of the suite
         "name": provider_field(str),
         # anchor to the output_dir

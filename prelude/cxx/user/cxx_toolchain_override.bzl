@@ -6,6 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
+load("@prelude//cxx:compile.bzl", "compiler_info_with_toolchain_argsfiles")
 load(
     "@prelude//cxx:cxx_toolchain_types.bzl",
     "AsCompilerInfo",
@@ -112,6 +113,23 @@ def _cxx_toolchain_override(ctx):
         allow_cache_upload = _pick_raw(ctx.attrs.cxx_compiler_allow_cache_upload, base_cxx_info.allow_cache_upload),
         supports_content_based_paths = base_cxx_info.supports_content_based_paths,
     )
+
+    # The base toolchain's argsfiles don't reflect the overridden flags, so
+    # write fresh ones for every compiler info this rule reconstructs.
+    as_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "as", AsCompilerInfo, as_info)
+    asm_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "asm", AsmCompilerInfo, asm_info)
+    c_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "c", CCompilerInfo, c_info)
+    objc_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "objc", ObjcCompilerInfo, objc_info)
+    cxx_info = compiler_info_with_toolchain_argsfiles(
+        ctx.actions,
+        "cxx",
+        CxxCompilerInfo,
+        cxx_info,
+        # Only the cxx info can be precompiled for C++20 modules.
+        precompile_filter = ctx.attrs.internal_tools[CxxInternalTools].filter_argsfile,
+    )
+    objcxx_info = compiler_info_with_toolchain_argsfiles(ctx.actions, "objcxx", ObjcxxCompilerInfo, objcxx_info)
+
     base_linker_info = base_toolchain.linker_info
     linker_type = LinkerType(ctx.attrs.linker_type) if ctx.attrs.linker_type != None else base_linker_info.type
     pdb_expected = is_pdb_generated(linker_type, ctx.attrs.linker_flags) if ctx.attrs.linker_flags != None else base_linker_info.is_pdb_generated
@@ -167,6 +185,7 @@ def _cxx_toolchain_override(ctx):
         mk_shlib_intf = _pick_dep(ctx.attrs.mk_shlib_intf, base_linker_info.mk_shlib_intf),
         requires_archives = base_linker_info.requires_archives,
         requires_objects = base_linker_info.requires_objects,
+        runtime_library_files = base_linker_info.runtime_library_files,
         supports_distributed_thinlto = base_linker_info.supports_distributed_thinlto,
         independent_shlib_interface_linker_flags = base_linker_info.independent_shlib_interface_linker_flags,
         sanitizer_runtime_enabled = value_or(ctx.attrs.sanitizer_runtime_enabled, base_linker_info.sanitizer_runtime_enabled),
@@ -198,13 +217,13 @@ def _cxx_toolchain_override(ctx):
     base_binary_utilities_info = base_toolchain.binary_utilities_info
     binary_utilities_info = BinaryUtilitiesInfo(
         bolt = _pick_bin(ctx.attrs.bolt, base_binary_utilities_info.bolt),
+        elf_stamp = _pick_bin(ctx.attrs.elf_stamp, base_binary_utilities_info.elf_stamp),
         nm = _pick_bin(ctx.attrs.nm, base_binary_utilities_info.nm),
         objcopy = _pick_bin(ctx.attrs.objcopy, base_binary_utilities_info.objcopy),
         objdump = _pick_bin(ctx.attrs.objdump, base_binary_utilities_info.objdump),
         ranlib = _pick_bin(ctx.attrs.ranlib, base_binary_utilities_info.ranlib),
         strip = _pick_bin(ctx.attrs.strip, base_binary_utilities_info.strip),
         dwp = _pick_bin(ctx.attrs.dwp, base_binary_utilities_info.dwp),
-        bolt_msdk = base_binary_utilities_info.bolt_msdk,
     )
 
     base_strip_flags_info = base_toolchain.strip_flags_info
@@ -235,6 +254,8 @@ def _cxx_toolchain_override(ctx):
         libclang = value_or(ctx.attrs.libclang, base_toolchain.libclang),
         llvm_link = ctx.attrs.llvm_link[RunInfo] if ctx.attrs.llvm_link != None else base_toolchain.llvm_link,
         # the rest are used without overrides
+        target_stats_tools = base_toolchain.target_stats_tools,
+        default_deps = base_toolchain.default_deps,
         cuda_compiler_info = base_toolchain.cuda_compiler_info,
         hip_compiler_info = base_toolchain.hip_compiler_info,
         hip_debug_extract = base_toolchain.hip_debug_extract,
@@ -286,6 +307,7 @@ cxx_toolchain_override_registration_spec = RuleRegistrationSpec(
         "cxx_compiler_flags": attrs.option(attrs.list(attrs.arg()), default = None),
         "cxx_preprocessor_flags": attrs.option(attrs.list(attrs.arg()), default = None),
         "dwp": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
+        "elf_stamp": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "force_full_hybrid_if_capable": attrs.option(attrs.bool(), default = None),
         "generate_gc_sections": attrs.option(attrs.bool(), default = None),
         "generate_linker_maps": attrs.option(attrs.bool(), default = None),

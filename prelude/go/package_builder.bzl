@@ -21,6 +21,7 @@ load(
 )
 load(":go_error_handler.bzl", "go_build_error_handler")
 load(":go_list.bzl", "GoListOut", "go_list", "parse_go_list_out")
+load(":package_root.bzl", "strip_package_root")
 load(":packages.bzl", "GoPackageInfo", "GoPkg", "GoStdlib", "GoStdlibDynamicValue", "implicit_imports", "make_compile_importcfg", "merge_pkgs")
 load(":toolchain.bzl", "GoToolchainInfo", "get_toolchain_env_vars")
 
@@ -355,9 +356,14 @@ def build_package(
     if params.standard and params.pkg_import_path in _incomplete_pkgs_allow_list:
         complete_flag = False
 
+    go_files_to_compile = covered_go_files + transformed_cgo_files
+
+    # Use argsfile to avoid command length limit on Windows. The source list
+    # is identical for the shared and non-shared variants, so they share it.
+    srcs_argsfile = actions.write("srcs.go_package_argsfile", go_files_to_compile, has_content_based_path = True) if go_files_to_compile else None
+
     def build_variant(shared: bool) -> (Artifact, Artifact):
         build_variant_id = "shared" if shared else "non-shared"  # use  tomake artifacts and actions unique
-        go_files_to_compile = covered_go_files + transformed_cgo_files
 
         required_imports = go_list.imports | implicit_imports(
             pkg_name = go_list.pkg_name,
@@ -382,6 +388,7 @@ def build_package(
             pkg_import_path = params.pkg_import_path,
             main = params.main,
             go_srcs = go_files_to_compile,
+            srcs_argsfile = srcs_argsfile,
             importcfg = importcfg,
             compiler_flags = params.compiler_flags,
             shared = shared,
@@ -436,6 +443,7 @@ def _compile(
     pkg_import_path: str,
     main: bool,
     go_srcs: list[Artifact],
+    srcs_argsfile: Artifact | None,
     importcfg: Artifact,
     compiler_flags: list[str],
     shared: bool,
@@ -459,9 +467,6 @@ def _compile(
         return out_x, out_a, None
 
     asmhdr = actions.declare_output("__asmhdr__{}/go_asm.h".format(build_variant_id), has_content_based_path = True) if gen_asmhdr else None
-
-    # Use argsfile to avoid command length limit on Windows
-    srcs_argsfile = actions.write(build_variant_id + "_srcs.go_package_argsfile", go_srcs, has_content_based_path = True)
 
     compile_cmd = cmd_args(
         [
@@ -628,7 +633,7 @@ def _embedcfg(
 
     srcs_dir = actions.copied_dir(
         "__embed_srcs_dir__",
-        {name.removeprefix(package_root).lstrip("/"): src for name, src in embed_srcs.items()},
+        {strip_package_root(name, package_root): src for name, src in embed_srcs.items()},
         has_content_based_path = True,
     )
 

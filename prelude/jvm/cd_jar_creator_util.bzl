@@ -7,14 +7,19 @@
 # above-listed licenses.
 
 load(
+    "@prelude//java:compiler_depth.bzl",
+    "JavaCompilerDepth",  # @unused Used as a type
+    "compiler_depth_for_action",
+    "max_compiler_depth",
+)
+load(
     "@prelude//java:java_providers.bzl",
     "JavaClasspathEntry",
-    "JavaCompilingDepsTSet",
+    "JavaCompilingDepsTSet",  # @unused Used as type
     "JavaLibraryInfo",
     "create_abi",
-    "derive_compiling_deps",
 )
-load("@prelude//java:java_toolchain.bzl", "AbiGenerationMode", "JavaToolchainInfo")
+load("@prelude//java:java_toolchain.bzl", "AbiGenerationMode", "JavaToolchainInfo", "unsafe_memory_access_jvm_args")
 load("@prelude//java/plugins:java_annotation_processor.bzl", "AnnotationProcessorProperties")  # @unused Used as type
 load(
     "@prelude//java/plugins:java_plugin.bzl",
@@ -89,8 +94,7 @@ def encode_target_type(target_type: TargetType) -> str:
 
 OutputPaths = record(
     jar = Artifact,
-    classes = Artifact,
-    annotations = Artifact,
+    annotations = Artifact | None,
 )
 
 def qualified_name_with_subtarget(label: Label) -> str:
@@ -110,21 +114,25 @@ def get_qualified_name(label: Label, target_type: TargetType) -> str:
         TargetType("source_only_abi"): base_qualified_name(label) + "[source-only-abi]",
     }[target_type]
 
-def define_output_paths(actions: AnalysisActions, prefix: [str, None], label: Label, uses_content_based_paths: bool) -> OutputPaths:
+def define_output_paths(
+    actions: AnalysisActions,
+    prefix: [str, None],
+    label: Label,
+    uses_content_based_paths: bool,
+    declare_annotations: bool = True,
+) -> OutputPaths:
     # currently, javacd requires that at least some outputs are in the root
     # output dir. so we put all of them there. If javacd is updated we
     # could consolidate some of these into one subdir.
     return OutputPaths(
         jar = declare_prefixed_output(actions, prefix, "jar/{}.jar".format(label.name), uses_content_based_paths),
-        classes = declare_prefixed_output(actions, prefix, "__classes__", uses_content_based_paths, dir = True),
-        annotations = declare_prefixed_output(actions, prefix, "__gen__", uses_content_based_paths, dir = True),
+        annotations = declare_prefixed_output(actions, prefix, "__gen__", uses_content_based_paths, dir = True) if declare_annotations else None,
     )
 
 def encode_output_paths(label: Label, paths: OutputPaths, target_type: TargetType) -> struct:
     paths = struct(
-        classesDir = paths.classes.as_output(),
         outputJarDirPath = cmd_args(paths.jar.as_output(), parent = 1),
-        annotationPath = paths.annotations.as_output(),
+        annotationPath = paths.annotations.as_output() if paths.annotations else None,
         outputJarPath = paths.jar.as_output(),
     )
 
@@ -141,9 +149,7 @@ def encode_jar_params(remove_classes: list[str], output_paths: OutputPaths, mani
         removeEntryPredicate = struct(
             patterns = remove_classes,
         ),
-        entriesToJar = [output_paths.classes.as_output()],
         manifestFile = manifest_file,
-        duplicatesLogLevel = "FINE",
     )
 
 def command_abi_generation_mode(target_type: TargetType, abi_generation_mode: [AbiGenerationMode, None]) -> [AbiGenerationMode, None]:
@@ -155,19 +161,30 @@ def command_abi_generation_mode(target_type: TargetType, abi_generation_mode: [A
         return AbiGenerationMode("source_only")
     return abi_generation_mode
 
-def get_compiling_deps_tset(
-    actions: AnalysisActions, deps: list[Dependency], additional_classpath_entries: JavaCompilingDepsTSet | None
-) -> [JavaCompilingDepsTSet, None]:
-    compiling_deps_tset = derive_compiling_deps(actions, None, deps)
-    if additional_classpath_entries:
-        if compiling_deps_tset == None:
-            compiling_deps_tset = additional_classpath_entries
-        else:
-            compiling_deps_tset = actions.tset(JavaCompilingDepsTSet, children = [compiling_deps_tset, additional_classpath_entries])
+def _source_only_abi_jars(entries: list[JavaClasspathEntry]):
+    return [entry.abi for entry in entries]
 
-    return compiling_deps_tset
+def _source_only_abi_and_dir(entries: list[JavaClasspathEntry]):
+    return [path for entry in entries for path in (entry.abi, entry.abi_as_dir or "")]
 
-def get_source_only_abi_compiling_deps(compiling_deps_tset: [JavaCompilingDepsTSet, None], source_only_abi_deps: list[Dependency]) -> list[JavaClasspathEntry]:
+def _source_only_abi_compiler_depth(children, entries):
+    return max_compiler_depth(children + [entry.abi_compiler_depth for entry in (entries or [])])
+
+SourceOnlyAbiCompilingDepsTSet = transitive_set(
+    args_projections = {
+        "source_only_abi_and_dir": _source_only_abi_and_dir,
+        "source_only_abi_jars": _source_only_abi_jars,
+    },
+    reductions = {"source_only_abi_compiler_depth": _source_only_abi_compiler_depth},
+)
+
+def get_source_only_abi_compiling_deps(
+    actions: AnalysisActions,
+    compiling_deps_tset: [JavaCompilingDepsTSet, None],
+    source_only_abi_deps: list[Dependency],
+) -> JavaCompilingDepsTSet | SourceOnlyAbiCompilingDepsTSet:
+    if not source_only_abi_deps and compiling_deps_tset != None:
+        return compiling_deps_tset
     source_only_abi_compiling_deps = []
     if compiling_deps_tset:
         source_only_abi_deps_filter = {}
@@ -182,7 +199,14 @@ def get_source_only_abi_compiling_deps(compiling_deps_tset: [JavaCompilingDepsTS
             return dep.abi in source_only_abi_deps_filter or dep.required_for_source_only_abi
 
         source_only_abi_compiling_deps = [compiling_dep for compiling_dep in list(compiling_deps_tset.traverse()) if filter_compiling_deps(compiling_dep)]
-    return source_only_abi_compiling_deps
+    return actions.tset(SourceOnlyAbiCompilingDepsTSet, value = source_only_abi_compiling_deps)
+
+def _apply_ap_param_overrides(params: list[str], overrides: dict[str, [str, None]]) -> list[str]:
+    result = [param for param in params if param.split("=", 1)[0].removeprefix("-A") not in overrides]
+    for key, value in overrides.items():
+        if value != None:
+            result.append(key + "=" + value)
+    return result
 
 # buildifier: disable=unused-variable
 def encode_ap_params(annotation_processor_properties: AnnotationProcessorProperties, target_type: TargetType) -> [struct, None]:
@@ -191,8 +215,14 @@ def encode_ap_params(annotation_processor_properties: AnnotationProcessorPropert
     # support the flags. we apply it to both.
     encoded_ap_params = None
     if annotation_processor_properties.annotation_processors:
+        parameters = annotation_processor_properties.annotation_processor_params
+        if target_type == TargetType("source_only_abi"):
+            parameters = _apply_ap_param_overrides(
+                parameters,
+                annotation_processor_properties.source_only_abi_annotation_processor_param_overrides,
+            )
         encoded_ap_params = struct(
-            parameters = annotation_processor_properties.annotation_processor_params,
+            parameters = parameters,
             pluginProperties = [],
         )
         for ap in annotation_processor_properties.annotation_processors:
@@ -208,7 +238,6 @@ def encode_ap_params(annotation_processor_properties: AnnotationProcessorPropert
                         runsOnJavaOnly = ap.runs_on_java_only,
                         processorNames = ap.processors,
                         classpath = ap.deps.project_as_json("javacd_json") if ap.deps else [],
-                        pathParams = {},
                     ),
                 )
     return encoded_ap_params
@@ -217,7 +246,6 @@ def encode_plugin_params(plugin_params: [PluginParams, None]) -> [struct, None]:
     encoded_plugin_params = None
     if plugin_params:
         encoded_plugin_params = struct(
-            parameters = [],
             pluginProperties = [encode_plugin_properties(processor, arguments, plugin_params) for processor, arguments in plugin_params.processors],
         )
     return encoded_plugin_params
@@ -252,40 +280,47 @@ def encode_base_jar_command(
     plugin_params: [PluginParams, None],
     manifest_file: Artifact | None,
     extra_arguments: cmd_args,
-    source_only_abi_compiling_deps: list[JavaClasspathEntry],
+    source_only_abi_compiling_deps: JavaCompilingDepsTSet | SourceOnlyAbiCompilingDepsTSet | None,
     track_class_usage: bool,
     provide_classpath_snapshot: bool = False,
+    use_abi_dirs: bool = False,
+    incremental_metadata_ignored_inputs_tag: ArtifactTag | None = None,
 ) -> struct:
     jar_parameters = encode_jar_params(remove_classes, output_paths, manifest_file)
     qualified_name = get_qualified_name(label, target_type)
     if target_type == TargetType("source_only_abi"):
-        compiling_classpath = classpath_jars_tag.tag_artifacts([dep.abi for dep in source_only_abi_compiling_deps])
+        expect(source_only_abi_compiling_deps != None)
+        # A list-valued JSON projection would introduce an extra array level.
+        compiling_classpath = cmd_args(source_only_abi_compiling_deps.project_as_args("source_only_abi_and_dir" if use_abi_dirs else "source_only_abi_jars"))
         compiling_classpath_snapshot = []
     else:
-        expect(len(source_only_abi_compiling_deps) == 0)
+        expect(source_only_abi_compiling_deps == None)
 
+        if use_abi_dirs:
+            compiling_classpath = cmd_args(compiling_deps_tset.project_as_args("abi_and_dir", ordering = "topological")) if compiling_deps_tset else []
+        else:
+            compiling_classpath = compiling_deps_tset.project_as_json("javacd_json", ordering = "topological") if compiling_deps_tset else []
         # The snapshot inputs are tagged for association with dep_files, but they are not marked as used,
         # as they serve the incremental compiler's internal needs,
         # which are utilized after the build system has determined whether a rebuild is necessary.
-        compiling_classpath = classpath_jars_tag.tag_artifacts(
-            compiling_deps_tset.project_as_json("javacd_json", ordering = "topological") if compiling_deps_tset else []
-        )
         compiling_classpath_snapshot = classpath_jars_tag.tag_artifacts(
             compiling_deps_tset.project_as_json("abi_snapshot_json", ordering = "topological") if provide_classpath_snapshot and compiling_deps_tset else []
         )
+
+    compiling_classpath = classpath_jars_tag.tag_artifacts(compiling_classpath)
+    if use_abi_dirs and incremental_metadata_ignored_inputs_tag:
+        compiling_classpath = incremental_metadata_ignored_inputs_tag.tag_artifacts(compiling_classpath)
 
     build_target_value = struct(
         fullyQualifiedName = qualified_name,
         type = encode_target_type(target_type),
     )
-    resolved_javac = {"jsr199Javac": {}}
     resolved_java_options = struct(
         bootclasspathList = bootclasspath_entries,
         languageLevelOptions = struct(
             sourceLevel = source_level,
             targetLevel = target_level,
         ),
-        debug = True,
         javaAnnotationProcessorParams = encode_ap_params(annotation_processor_properties, target_type),
         standardJavacPluginParams = encode_plugin_params(plugin_params),
         extraArguments = extra_arguments,
@@ -294,27 +329,23 @@ def encode_base_jar_command(
 
     return struct(
         outputPathsValue = encode_output_paths(label, output_paths, target_type),
-        compileTimeClasspathPaths = compiling_classpath,
+        compileTimeClasspathPaths = [] if use_abi_dirs else compiling_classpath,
+        compileTimeClasspathAbiAndDirPaths = compiling_classpath if use_abi_dirs else [],
         compileTimeClasspathSnapshotPaths = compiling_classpath_snapshot,
         javaSrcs = srcs,
-        # We use "class" abi compatibility to match buck1 (other compatibility modes are used for abi verification.
-        abiCompatibilityMode = encode_abi_generation_mode(AbiGenerationMode("class")),
         abiGenerationMode = encode_abi_generation_mode(command_abi_generation_mode(target_type, abi_generation_mode)),
         trackClassUsage = track_class_usage,
-        configuredBuckOut = "buck-out/v2",
         buildTargetValue = build_target_value,
         resourcesMap = [
             {
                 "key": v,
-                "value": cmd_args([output_paths.classes.as_output(), "/", k], delimiter = ""),
+                "value": k,
             }
             for (k, v) in resources_map.items()
         ],
-        resolvedJavac = resolved_javac,
         resolvedJavacOptions = resolved_java_options,
         jarParameters = jar_parameters,
-        pathToClasses = output_paths.jar.as_output(),
-        annotationsPath = output_paths.annotations.as_output(),
+        annotationsPath = output_paths.annotations.as_output() if output_paths.annotations else None,
     )
 
 def setup_dep_files(
@@ -323,20 +354,15 @@ def setup_dep_files(
     post_build_params: dict,
     classpath_jars_tag: ArtifactTag,
     used_classes_json_outputs: list[cmd_args],
-    used_jars_json_output: Artifact,
-    abi_to_abi_dir_map: [TransitiveSetArgsProjection, list[cmd_args], None],
+    used_jars_json_output: Artifact | None,
     uses_content_based_paths: bool,
 ):
     dep_file = declare_prefixed_output(actions, actions_identifier, "jar/dep-file.txt", uses_content_based_paths)
 
     post_build_params["usedClasses"] = used_classes_json_outputs
     post_build_params["depFile"] = classpath_jars_tag.tag_artifacts(dep_file.as_output())
-    post_build_params["usedJarsFile"] = used_jars_json_output.as_output()
-
-    if abi_to_abi_dir_map:
-        abi_to_abi_dir_map_file = declare_prefixed_output(actions, actions_identifier, "abi_to_abi_dir_map", uses_content_based_paths)
-        actions.write(abi_to_abi_dir_map_file, abi_to_abi_dir_map)
-        post_build_params["jarToJarDirMap"] = classpath_jars_tag.tag_artifacts(abi_to_abi_dir_map_file)
+    if used_jars_json_output != None:
+        post_build_params["usedJarsFile"] = used_jars_json_output.as_output()
 
 FORCE_PERSISTENT_WORKERS = read_root_config("build", "require_persistent_workers", "false").lower() == "true"
 
@@ -353,9 +379,10 @@ def prepare_cd_exe(
     toolchain_specified_debug_target: [Label, None],
     extra_jvm_args: list[str],
     extra_jvm_args_target: list[Label],
+    java_runtime_version: [int, None],
 ) -> tuple:
     local_only = False
-    jvm_args = ["-XX:-MaxFDLimit"]
+    jvm_args = ["-XX:-MaxFDLimit"] + unsafe_memory_access_jvm_args(java_runtime_version)
 
     # The variables 'extra_jvm_args' and 'extra_jvm_args_target' are generally used, but they are primarily designed for profiling use-cases.
     # The following section is configured with the profiling use-case in mind.
@@ -511,8 +538,10 @@ def encode_command(
     target_type: TargetType,
     output_paths: OutputPaths,
     classpath_jars_tag: ArtifactTag,
-    source_only_abi_compiling_deps: list[JavaClasspathEntry],
+    source_only_abi_compiling_deps: JavaCompilingDepsTSet | SourceOnlyAbiCompilingDepsTSet | None,
     track_class_usage: bool,
+    use_abi_dirs: bool = False,
+    incremental_metadata_ignored_inputs_tag: ArtifactTag | None = None,
 ) -> struct:
     base_jar_command = encode_base_jar_command(
         target_type,
@@ -535,6 +564,8 @@ def encode_command(
         source_only_abi_compiling_deps = source_only_abi_compiling_deps,
         track_class_usage = track_class_usage,
         provide_classpath_snapshot = provide_classpath_snapshot,
+        use_abi_dirs = use_abi_dirs,
+        incremental_metadata_ignored_inputs_tag = incremental_metadata_ignored_inputs_tag,
     )
 
     if kotlin_extra_params:
@@ -567,13 +598,18 @@ def generate_abi_jars(
     encode_abi_command: typing.Callable,
     define_action: typing.Callable,
     uses_content_based_paths: bool,
+    compiler_category: str,
+    full_library_compiler_depth: JavaCompilerDepth | None,
+    additional_compiler_depth: JavaCompilerDepth | None = None,
     kotlin_extra_params_builder: typing.Callable | None = None,
+    source_only_abi_compiling_deps: JavaCompilingDepsTSet | SourceOnlyAbiCompilingDepsTSet | None = None,
 ) -> tuple:
     class_abi = None
     source_abi = None
     source_only_abi = None
     classpath_abi = None
     classpath_abi_dir = None
+    classpath_compiler_depth = full_library_compiler_depth
 
     # If we are merging additional compiled_srcs, we can't produce source/source-only abis. Otherwise we
     # always generation the source/source-only abis and setup the classpath entry to use the appropriate
@@ -583,19 +619,12 @@ def generate_abi_jars(
             source_abi_identifier = declare_prefixed_name("source_abi", actions_identifier)
             source_abi_target_type = TargetType("source_abi")
             source_abi_qualified_name = get_qualified_name(label, source_abi_target_type)
-            source_abi_output_paths = define_output_paths(actions, source_abi_identifier, label, uses_content_based_paths)
+            source_abi_output_paths = define_output_paths(actions, source_abi_identifier, label, uses_content_based_paths, declare_annotations = False)
             source_abi_classpath_jars_tag = actions.artifact_tag()
             source_abi_dir = declare_prefixed_output(actions, source_abi_identifier, "source-abi-dir", uses_content_based_paths, dir = True)
 
             if kotlin_extra_params_builder:
-                source_abi_kotlin_classes = declare_prefixed_output(
-                    actions,
-                    source_abi_identifier,
-                    "__kotlin_classes__",
-                    uses_content_based_paths,
-                    dir = True,
-                )
-                source_abi_kotlin_extra_params = kotlin_extra_params_builder(kotlin_classes = source_abi_kotlin_classes)
+                source_abi_kotlin_extra_params = kotlin_extra_params_builder()
                 source_abi_encode_abi_command = encode_abi_command(kotlin_extra_params = source_abi_kotlin_extra_params, provide_classpath_snapshot = False)
             else:
                 source_abi_encode_abi_command = encode_abi_command
@@ -605,7 +634,7 @@ def generate_abi_jars(
                 target_type = source_abi_target_type,
                 output_paths = source_abi_output_paths,
                 classpath_jars_tag = source_abi_classpath_jars_tag,
-                source_only_abi_compiling_deps = [],
+                source_only_abi_compiling_deps = None,
                 track_class_usage = track_class_usage,
             )
             define_action(
@@ -623,25 +652,26 @@ def generate_abi_jars(
             if abi_generation_mode == AbiGenerationMode("source"):
                 classpath_abi = source_abi
                 classpath_abi_dir = source_abi_dir
+                classpath_compiler_depth = compiler_depth_for_action(
+                    label,
+                    "source_abi_" + compiler_category,
+                    compiling_deps_tset,
+                    identifier = source_abi_identifier,
+                    additional_depth = additional_compiler_depth,
+                )
 
         if abi_generation_mode == AbiGenerationMode("source_only") or not is_building_android_binary:
             source_only_abi_identifier = declare_prefixed_name("source_only_abi", actions_identifier)
             source_only_abi_target_type = TargetType("source_only_abi")
             source_only_abi_qualified_name = get_qualified_name(label, source_only_abi_target_type)
-            source_only_abi_output_paths = define_output_paths(actions, source_only_abi_identifier, label, uses_content_based_paths)
+            source_only_abi_output_paths = define_output_paths(actions, source_only_abi_identifier, label, uses_content_based_paths, declare_annotations = False)
             source_only_abi_classpath_jars_tag = actions.artifact_tag()
             source_only_abi_dir = declare_prefixed_output(actions, source_only_abi_identifier, "dir", uses_content_based_paths, dir = True)
-            source_only_abi_compiling_deps = get_source_only_abi_compiling_deps(compiling_deps_tset, source_only_abi_deps)
+            if source_only_abi_compiling_deps == None:
+                source_only_abi_compiling_deps = get_source_only_abi_compiling_deps(actions, compiling_deps_tset, source_only_abi_deps)
 
             if kotlin_extra_params_builder:
-                source_only_abi_kotlin_classes = declare_prefixed_output(
-                    actions,
-                    source_only_abi_identifier,
-                    "__kotlin_classes__",
-                    uses_content_based_paths,
-                    dir = True,
-                )
-                source_only_abi_kotlin_extra_params = kotlin_extra_params_builder(kotlin_classes = source_only_abi_kotlin_classes)
+                source_only_abi_kotlin_extra_params = kotlin_extra_params_builder()
                 source_only_abi_encode_abi_command = encode_abi_command(
                     kotlin_extra_params = source_only_abi_kotlin_extra_params, provide_classpath_snapshot = False
                 )
@@ -665,13 +695,20 @@ def generate_abi_jars(
                 source_only_abi_classpath_jars_tag,
                 source_only_abi_dir,
                 source_only_abi_target_type,
-                source_only_abi_compiling_deps = source_only_abi_compiling_deps,
             )
             source_only_abi = source_only_abi_output_paths.jar
 
             if abi_generation_mode == AbiGenerationMode("source_only"):
                 classpath_abi = source_only_abi
                 classpath_abi_dir = source_only_abi_dir
+                classpath_compiler_depth = compiler_depth_for_action(
+                    label,
+                    "source_only_abi_" + compiler_category,
+                    source_only_abi_compiling_deps,
+                    identifier = source_only_abi_identifier,
+                    source_only = True,
+                    additional_depth = additional_compiler_depth,
+                )
 
         if abi_generation_mode == AbiGenerationMode("none"):
             classpath_abi = final_jar
@@ -683,7 +720,7 @@ def generate_abi_jars(
             if class_abi_output_dir:
                 classpath_abi_dir = class_abi_output_dir
 
-    return class_abi, source_abi, source_only_abi, classpath_abi, classpath_abi_dir
+    return class_abi, source_abi, source_only_abi, classpath_abi, classpath_abi_dir, classpath_compiler_depth
 
 def postprocess_jar(
     actions: AnalysisActions,

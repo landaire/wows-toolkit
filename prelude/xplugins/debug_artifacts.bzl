@@ -11,6 +11,7 @@ load(
     "XPluginsDebugArtifactsEntry",
     "XPluginsDebugArtifactsInfo",
     "XPluginsDebugArtifactsTSet",
+    "XPluginsFunctionMappingManifestInfo",
     "XPluginsManifestInfo",
 )
 
@@ -39,42 +40,51 @@ def xplugins_get_debug_artifacts_info(ctx: AnalysisContext, deps: list[Dependenc
         return XPluginsDebugArtifactsInfo(tset = tset)
     return None
 
-def xplugins_get_debug_artifacts_subtargets(actions: AnalysisActions, info: XPluginsDebugArtifactsInfo | None) -> list[Provider]:
+def xplugins_get_function_mapping_manifest_info(
+    actions: AnalysisActions, app_target: Label | None, info: XPluginsDebugArtifactsInfo | None
+) -> XPluginsFunctionMappingManifestInfo:
     if not info:
         info = XPluginsDebugArtifactsInfo(tset = actions.tset(XPluginsDebugArtifactsTSet))
 
-    dir_contents = {}
-    manifest = {}
+    function_mappings = []
+    function_mapping_artifacts = []
+    function_mapping_targets = []
 
-    name_counts = {}
     for entry in info.tset.traverse():
         if entry:
-            raw_target = str(entry.target.raw_target())
-            name = entry.target.name
-            count = name_counts.get(name, 0)
-            name_counts[name] = count + 1
-            filename = "{}.json".format(name) if count == 0 else "{}{}.json".format(name, count)
-            dir_contents[filename] = entry.manifest_info.function_mapping
-            if raw_target not in manifest:
-                manifest[raw_target] = []
-            manifest[raw_target].append({
-                "configured_target": entry.target,
-                "path": filename,
+            function_mapping_artifacts.append(entry.manifest_info.function_mapping)
+            function_mapping_targets.append(entry.target)
+            function_mappings.append({
+                "path": entry.manifest_info.function_mapping,
+                "target": entry.target,
             })
 
-    manifest_file = actions.write_json("manifest.json", manifest, pretty = True, has_content_based_path = False)
-    dir_contents["MANIFEST.json"] = manifest_file
+    if app_target != None and app_target not in function_mapping_targets:
+        fail("App target {} is not listed in the XPlugins function mappings: {}".format(app_target, function_mapping_targets))
 
-    directory = actions.copied_dir(
-        "XPluginsFunctionMappings",
-        dir_contents,
+    function_mapping_manifest_file = actions.write_json(
+        "function_mapping_manifest.json",
+        {
+            "app_target": app_target,
+            "mappings": function_mappings,
+        },
         has_content_based_path = False,
+        pretty = True,
+    ).with_associated_artifacts(function_mapping_artifacts)
+
+    return XPluginsFunctionMappingManifestInfo(
+        manifest = function_mapping_manifest_file,
     )
 
+def xplugins_get_debug_artifacts_subtargets(info: XPluginsFunctionMappingManifestInfo) -> list[Provider]:
     return [
         DefaultInfo(
             sub_targets = {
-                "function_mappings": [DefaultInfo(default_output = directory)],
+                "function_mapping_manifest": [
+                    DefaultInfo(
+                        default_output = info.manifest,
+                    ),
+                ],
             },
         ),
     ]

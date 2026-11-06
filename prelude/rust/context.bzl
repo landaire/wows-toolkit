@@ -17,7 +17,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy")
 load("@prelude//os_lookup:defs.bzl", "Os", "OsLookup")
 load("@prelude//rust/tools:attrs.bzl", "RustInternalToolsInfo")
 load("@prelude//utils:cmd_script.bzl", "cmd_script")
-load(":build_params.bzl", "BuildParams", "CrateType", "Emit", "ProfileMode")
+load(":build_params.bzl", "BuildParams", "CrateType", "Emit", "MetadataKind", "ProfileMode")
 load(
     ":crate_name.bzl",
     "CrateName",  # @unused Used as a type
@@ -47,16 +47,25 @@ CommonArgsInfo = record(
     crate_map = field(list[(CrateName, Label)]),
 )
 
+DependencyArgsInfo = record(
+    args = field(cmd_args),
+    crate_map = field(list[(CrateName, Label)]),
+)
+
 # Compile info which is reusable between multiple compilation command performed
 # by the same rule.
 CompileContext = record(
     # Clippy wrapper (wrapping clippy-driver so it has the same CLI as rustc).
     clippy_wrapper = field(cmd_args),
     # Memoized common args for reuse.
-    common_args = field(dict[(CrateType, Emit, LinkStrategy, bool, bool, bool, ProfileMode), CommonArgsInfo]),
+    common_args = field(dict[(CrateType, Emit, LinkStrategy, bool, bool, bool, bool, ProfileMode), CommonArgsInfo]),
+    # Memoized dependency args for reuse across emits with the same inputs.
+    dependency_args = field(dict[(CrateType, LinkStrategy, MetadataKind, bool), DependencyArgsInfo]),
     cxx_toolchain_info = field(CxxToolchainInfo),
     dep_ctx = field(DepCollectionContext),
     exec_is_windows = field(bool),
+    # Exec-platform OS lookup, for tools that branch on script flavor.
+    exec_os_type = field(OsLookup),
     internal_tools_info = field(RustInternalToolsInfo),
     # The linker that we pass to `-Clinker`. This needs to be a wrapper script for two reasons:
     #  1. The `linker` in the cxx toolchain is a `cmd_args` which might have multiple args, we need
@@ -65,8 +74,6 @@ CompileContext = record(
     #     unstable `-Zpre-link-arg` for that, but until that stabilizes, we pass them from within
     #     this script.
     linker_with_pre_args = field(cmd_args),
-    # The same pre-args, not wrapped in a script
-    linker_pre_args = field(cmd_args),
     path_sep = field(str),
     # Dylib name override, if any was provided by the target's `soname` attribute.
     soname = field(str | None),
@@ -88,7 +95,7 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
 
     srcs = symlinked_srcs(ctx)
 
-    linker_with_pre_args, linker_pre_args = _linker(ctx, cxx_toolchain_info.linker_info, binary = binary)
+    linker_with_pre_args = _linker(ctx, cxx_toolchain_info.linker_info, binary = binary)
     clippy_wrapper = _clippy_wrapper(ctx, toolchain_info)
 
     dep_ctx = DepCollectionContext(
@@ -125,18 +132,20 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
     else:
         sysroot_args = cmd_args()
 
-    exec_is_windows = ctx.attrs._exec_os_type[OsLookup].os == Os("windows")
+    exec_os_type = ctx.attrs._exec_os_type[OsLookup]
+    exec_is_windows = exec_os_type.os == Os("windows")
     path_sep = "\\" if exec_is_windows else "/"
 
     return CompileContext(
         clippy_wrapper = clippy_wrapper,
         common_args = {},
+        dependency_args = {},
         cxx_toolchain_info = cxx_toolchain_info,
         dep_ctx = dep_ctx,
         exec_is_windows = exec_is_windows,
+        exec_os_type = exec_os_type,
         internal_tools_info = internal_tools_info,
         linker_with_pre_args = linker_with_pre_args,
-        linker_pre_args = linker_pre_args,
         path_sep = path_sep,
         soname = _attr_soname(ctx),
         symlinked_srcs = srcs,
@@ -171,28 +180,30 @@ def _validate_nightly_features(toolchain_info: RustToolchainInfo):
                 )
             )
 
-def _linker(ctx: AnalysisContext, linker_info: LinkerInfo, binary: bool = False) -> (cmd_args, cmd_args):
-    pre_args = cmd_args(
-        linker_info.linker_flags or [],
-        # For "binary" rules, add C++ toolchain binary-specific linker flags.
-        # TODO(agallagher): This feels a bit wrong -- it might be better to have
-        # the Rust toolchain have it's own `binary_linker_flags` instead of
-        # implicitly using the one from the C++ toolchain.
-        linker_info.binary_linker_flags if binary else [],
-        ctx.attrs._rust_toolchain[RustToolchainInfo].linker_flags,
-        ctx.attrs.linker_flags,
-    )
-
+def _linker(ctx: AnalysisContext, linker_info: LinkerInfo, binary: bool = False) -> cmd_args:
+    linker_flags = ctx.attrs.linker_flags
+    if getattr(ctx.attrs, "_generated_build_info_enabled", False):
+        linker_flags = strip_build_info_linker_flags(linker_flags)
     return cmd_script(
         actions = ctx.actions,
         name = "linker_wrapper",
         cmd = cmd_args(
             linker_info.linker,
-            pre_args,
+            linker_info.linker_flags or [],
+            # For "binary" rules, add C++ toolchain binary-specific linker flags.
+            # TODO(agallagher): This feels a bit wrong -- it might be better to have
+            # the Rust toolchain have it's own `binary_linker_flags` instead of
+            # implicitly using the one from the C++ toolchain.
+            linker_info.binary_linker_flags if binary else [],
+            ctx.attrs._rust_toolchain[RustToolchainInfo].linker_flags,
+            linker_flags,
         ),
         language = ctx.attrs._exec_os_type[OsLookup].script,
         has_content_based_path = True,
-    ), pre_args
+    )
+
+def strip_build_info_linker_flags(linker_flags):
+    return [flag for flag in linker_flags if not flag.startswith("--build-info")]
 
 # Return wrapper script for clippy-driver to make sure sysroot is set right
 # We need to make sure clippy is using the same sysroot - compiler, std libraries -
@@ -286,10 +297,15 @@ _EMIT_PREFIX_SUFFIX = {
     Emit("metadata-fast"): ("lib", ".rmeta"),  # even binaries get called 'libfoo.rmeta'
     Emit("metadata-full"): (None, None),  # Hollow rlibs, so they get the same name
     Emit("link"): (None, None),  # crate type and reloc model dependent
+    Emit("rlib"): (None, None),  # crate type dependent, like `link`
     Emit("dep-info"): ("", ".d"),
     Emit("mir"): (None, ".mir"),
     Emit("expand"): (None, ".rs"),
     Emit("clippy"): ("lib", ".rmeta"),  # Treated like metadata-fast
+    # Same naming as `link` (build_param prefix/suffix); the `miri`
+    # subdir keeps the interpreter artifact distinct. Consumed by the
+    # interpreter, never linked.
+    Emit("miri"): (None, None),
 }
 
 # Return the filename for a particular emitted artifact type

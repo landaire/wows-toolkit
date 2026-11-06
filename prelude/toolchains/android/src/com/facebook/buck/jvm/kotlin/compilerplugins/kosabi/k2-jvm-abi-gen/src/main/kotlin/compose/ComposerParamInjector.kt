@@ -14,18 +14,24 @@
 package com.facebook
 
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
+import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.ir.IrElement
+import org.jetbrains.kotlin.ir.builders.irCallConstructor
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
+import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.makeNullable
+import org.jetbrains.kotlin.ir.util.constructors
 import org.jetbrains.kotlin.ir.util.hasAnnotation
+import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
@@ -36,12 +42,13 @@ import org.jetbrains.kotlin.name.Name
  * For every @Composable function (excluding constructors and expect functions), this adds:
  * - `$composer: Composer?` — the Composer instance threaded through composable calls
  * - `$changed: Int` (1 or more) — bitmask tracking parameter change state
- * - `$default: Int` (0 or more) — bitmask for default parameter values, only when defaults exist
+ * - `$default: Int` (0 or more) — bitmask for default parameter values, only on a concrete function
+ *   that has defaults
  *
  * Parameter counting follows the Compose compiler spec:
- * - changedParamCount = max(1, ceil((realValueParams + thisParams + 1) / SLOTS_PER_INT)) where +1
- *   accounts for the force bit in slot 0
- * - defaultParamCount = ceil(valueParams / BITS_PER_DEFAULT_INT), only if any param has a default
+ * - changedParamCount = max(1, ceil((realValueParams + thisParams) / SLOTS_PER_INT))
+ * - defaultParamCount = ceil(valueParams / BITS_PER_DEFAULT_INT), only if the function is concrete
+ *   and any param has a default
  * - thisParams = count of dispatch receiver + extension receiver (context receivers are value
  *   params)
  */
@@ -52,6 +59,8 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
     val COMPOSABLE_FQ_NAME = FqName("androidx.compose.runtime.Composable")
     private val COMPOSER_CLASS_ID =
         ClassId(FqName("androidx.compose.runtime"), Name.identifier("Composer"))
+    private val JVM_NAME_CLASS_ID = ClassId(FqName("kotlin.jvm"), Name.identifier("JvmName"))
+    private val JVM_NAME_FQ_NAME = FqName("kotlin.jvm.JvmName")
 
     /** Each parameter uses 3 bits in the $changed bitmask. 32 / 3 = 10 slots per Int. */
     private const val SLOTS_PER_INT = 10
@@ -65,6 +74,10 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
     pluginContext.referenceClass(COMPOSER_CLASS_ID)?.defaultType?.makeNullable()
   }
 
+  private val jvmNameClass: IrClassSymbol? by lazy {
+    pluginContext.referenceClass(JVM_NAME_CLASS_ID)
+  }
+
   /** Run the transform on the entire module. */
   fun transform(moduleFragment: IrModuleFragment) {
     val composerIrType = composerType ?: return // Compose runtime not on classpath; skip.
@@ -72,6 +85,9 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
         ComposerParamVisitor(pluginContext, composerIrType),
         null,
     )
+    // This must run after every in-module composable has been transformed, so links between two
+    // transformed declarations are preserved while stale links to dependency declarations are not.
+    moduleFragment.accept(OverrideLinkRepairVisitor(), null)
   }
 
   private inner class ComposerParamVisitor(
@@ -117,6 +133,12 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
     private fun shouldTransform(function: IrSimpleFunction): Boolean {
       if (!function.hasAnnotation(COMPOSABLE_FQ_NAME)) return false
       if (function.isExpect) return false
+      // Idempotence guard. A @Composable property getter is reached TWICE: once explicitly via
+      // visitProperty below, and again when super.visitProperty descends into the getter as an
+      // IrSimpleFunction. Without this check the synthetic params are injected twice, producing
+      // (..., Composer, int, Composer, int) -- a descriptor no consumer can link against. Only
+      // fires when @Composable is on the getter rather than the property, which is why it is rare.
+      if (function.valueParameters.any { it.name.asString() == "\$composer" }) return false
       return true
     }
 
@@ -137,13 +159,19 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
       val realValueParamCount = existingValueParams.size
       val totalSlottedParams = realValueParamCount + thisParamCount
 
-      // $changed count: ceil((totalSlottedParams + 1) / SLOTS_PER_INT), minimum 1.
-      // The +1 accounts for the force bit in slot 0.
-      val changedCount = maxOf(1, ceilDiv(totalSlottedParams + 1, SLOTS_PER_INT))
+      // Deliberately no "+1": the force bit shares int 0 with slots 0..9 rather than consuming a
+      // slot, and adding one emits a trailing `I` at every exact multiple of SLOTS_PER_INT.
+      val changedCount = maxOf(1, ceilDiv(totalSlottedParams, SLOTS_PER_INT))
 
-      // $default count: only present if any parameter has a default value.
+      // An abstract @Composable member gets no $default: Compose puts defaults handling in a
+      // nested ComposeDefaultImpls, so injecting it here adds a trailing `I` and changes the
+      // value-class mangled name, leaving a cross-target implementer overriding a signature the
+      // real ABI does not have. Keyed on having a body, not on modality, so bodiless fake
+      // overrides are treated alike.
+      val hasBody = function.body != null
       val hasDefaults = existingValueParams.any { it.defaultValue != null }
-      val defaultCount = if (hasDefaults) ceilDiv(realValueParamCount, BITS_PER_DEFAULT_INT) else 0
+      val defaultCount =
+          if (hasDefaults && hasBody) ceilDiv(realValueParamCount, BITS_PER_DEFAULT_INT) else 0
 
       // Build the new parameter list: existing + $composer + $changed[N] + $default[N]
       val newParams = mutableListOf<IrValueParameter>()
@@ -221,7 +249,66 @@ internal class ComposerParamInjector(private val pluginContext: IrPluginContext)
       }
 
       function.valueParameters = newParams
+      stampAccessorJvmName(function)
     }
+
+    // A @Composable PROPERTY ACCESSOR must keep the plain JVM name of the accessor.
+    //
+    // ComposerParamTransformer.copyWithComposerParam stamps @JvmName(getterName(property)) on every
+    // accessor it rewrites, and @JvmName suppresses both the value-class mangle and the $module
+    // suffix the JVM backend would otherwise apply. Injecting the synthetic params in place leaves
+    // neither suppressed, so the stub advertises a name the real jar does not have. Measured on
+    // MdsButton$Type:
+    //
+    //   real: getMinHeight(Composer, int)F
+    //   stub: getMinHeight-chRvn1I$fbandroid_java_com_facebook_mds_compose_button_button(
+    //             Composer, int)F
+    //
+    // A consumer compiled against the stub links the mangled name -> NoSuchMethodError. A
+    // @Composable FUNCTION has no corresponding property, gets no @JvmName from the real
+    // transformer either, and must keep both manglings -- which is why this is scoped to accessors.
+    private fun stampAccessorJvmName(function: IrSimpleFunction) {
+      val property = function.correspondingPropertySymbol?.owner ?: return
+      if (function.hasAnnotation(JVM_NAME_FQ_NAME)) return
+      val constructor = jvmNameClass?.constructors?.singleOrNull() ?: return
+      val propertyName = property.name.identifier
+      val accessorName =
+          if (property.setter == function) JvmAbi.setterName(propertyName)
+          else JvmAbi.getterName(propertyName)
+      val annotation =
+          pluginContext.irBuiltIns.createIrBuilder(function.symbol).run {
+            irCallConstructor(constructor, emptyList()).apply {
+              putValueArgument(
+                  0,
+                  IrConstImpl.string(-1, -1, pluginContext.irBuiltIns.stringType, accessorName),
+              )
+            }
+          }
+      function.annotations = function.annotations + annotation
+    }
+  }
+
+  /**
+   * Removes override links whose source-level dependency declarations lack Compose's synthetic
+   * parameters. The transformed JVM descriptor still matches the dependency's real Compose-lowered
+   * descriptor, so no bridge is needed to preserve the override in bytecode.
+   */
+  private inner class OverrideLinkRepairVisitor : IrElementVisitorVoidCompat() {
+    override fun visitElement(element: IrElement) {
+      element.acceptChildren(this, null)
+    }
+
+    override fun visitSimpleFunction(declaration: IrSimpleFunction) {
+      if (declaration.hasInjectedComposerParam() && declaration.overriddenSymbols.isNotEmpty()) {
+        declaration.overriddenSymbols =
+            declaration.overriddenSymbols.filter { it.owner.hasInjectedComposerParam() }
+      }
+      super.visitSimpleFunction(declaration)
+    }
+  }
+
+  private fun IrSimpleFunction.hasInjectedComposerParam(): Boolean = valueParameters.any {
+    it.name.asString() == "\$composer"
   }
 }
 

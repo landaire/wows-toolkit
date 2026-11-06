@@ -9,6 +9,7 @@
 load("@prelude//:paths.bzl", "paths")
 load("@prelude//cxx:compile_types.bzl", "HeadersDepFiles")
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo", "LinkerType")
+load("@prelude//cxx:hmap.bzl", "write_hmap")
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:lazy.bzl", "lazy")
 load("@prelude//utils:utils.bzl", "value_or")
@@ -73,6 +74,8 @@ HeaderStyle = enum(
 
 Headers = record(
     include_path = field(cmd_args),
+    # The header map on the include path, when the header mode uses one.
+    header_map = field(Artifact | None, None),
     # NOTE(agallagher): Used for module hack replacement.
     symlink_tree = field(Artifact | None, None),
     # -fdebug-prefix-map args that map symlinked headers to source path
@@ -264,10 +267,11 @@ def prepare_headers(
     output_name = name
 
     if header_mode == HeaderMode("header_map_only"):
-        headers = {h: (a, "{}") for h, a in srcs.items()}
+        headers = {h: (a, "") for h, a in srcs.items()}
         hmap = _mk_hmap(actions, cxx_toolchain_info, output_name, headers, allow_cache_upload, uses_content_based_paths)
         return Headers(
             include_path = cmd_args(hmap, hidden = srcs.values()),
+            header_map = hmap,
         )
     symlink_dir = actions.symlinked_dir(
         output_name,
@@ -287,7 +291,7 @@ def prepare_headers(
             file_prefix_args = file_prefix_args,
         )
     if header_mode == HeaderMode("symlink_tree_with_header_map"):
-        headers = {h: (symlink_dir, "{}/" + h) for h in srcs}
+        headers = {h: (symlink_dir, h) for h in srcs}
         hmap = _mk_hmap(actions, cxx_toolchain_info, output_name, headers, allow_cache_upload, uses_content_based_paths)
         include_prefix = _infer_include_prefix(srcs, header_namespace, package = symlink_dir.owner.package)
         replacement = _get_prefix_map_replacement(cxx_toolchain_info, symlink_dir, header_namespace, include_prefix)
@@ -298,6 +302,7 @@ def prepare_headers(
             coverage_prefix_args = cmd_args(cmd_args(symlink_dir, format = "-fcoverage-prefix-map={}=" + replacement))
         return Headers(
             include_path = cmd_args(hmap, hidden = symlink_dir),
+            header_map = hmap,
             symlink_tree = symlink_dir,
             file_prefix_args = file_prefix_args,
             coverage_prefix_args = coverage_prefix_args,
@@ -486,10 +491,15 @@ def _mk_hmap(
         has_content_based_path = uses_content_based_paths,
     )
 
+    if read_root_config("buck2", "native_hmap", "false") == "true":
+        native_hmap = write_hmap(actions, output, headers)
+        if native_hmap != None:
+            return native_hmap
+
     header_args = cmd_args()
-    for n, (path, fmt) in headers.items():
+    for n, (path, subpath) in headers.items():
         header_args.add(n)
-        header_args.add(cmd_args(path, format = fmt))
+        header_args.add(cmd_args(path, format = "{}/" + subpath) if subpath else cmd_args(path, format = "{}"))
 
     hmap_args_file = actions.write(
         output.basename + ".cxx_hmap_argsfile",

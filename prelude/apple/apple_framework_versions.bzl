@@ -647,6 +647,7 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "macosx": (10, 9, 0),
         "watchos": (2, 0, 0),
     },
+    "MarketplaceKit": {"iphoneos": (17, 4, 0)},
     "Matter": {
         "appletvos": (16, 0, 0),
         "iphoneos": (16, 0, 0),
@@ -957,6 +958,13 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "maccatalyst": (13, 0, 0),
         "macosx": (10, 9, 0),
         "watchos": (3, 0, 0),
+    },
+    "StateReporting": {
+        "appletvos": (27, 0, 0),
+        "iphoneos": (27, 0, 0),
+        "macosx": (27, 0, 0),
+        "visionos": (27, 0, 0),
+        "watchos": (27, 0, 0),
     },
     "StickerKit": {
         "iphoneos": (18, 0, 0),

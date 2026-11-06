@@ -10,9 +10,6 @@ load(":link_info.bzl", "TransitiveDeps")
 
 # Outputs that are generally associated with object code compilation, as opposed to linking
 RustcCompileOutput = record(
-    # A stripped version of the output, only available if the main output is not linked and
-    # stripping makes sense for it
-    stripped_output = Artifact | None,
     diag_txt = field(Artifact),
     diag_json = field(Artifact),
     # Zero or more Split DWARF debug info files are emitted into this directory
@@ -27,25 +24,61 @@ RustcCompileOutput = record(
     remarks_json = field(Artifact | None),
 )
 
-RustcLinkOutput = record(
+# What rustc wrote when it did not link: an rmeta, rlib, object, staticlib, ...
+RustcUnlinkedOutput = record(
+    output = field(Artifact),
+    # `output`, wrapped in a 1-element transitive set.
+    singleton_tset = field(TransitiveDeps),
+    # `output` with its debug info stripped. Only the archive-shaped artifacts
+    # get one: `Emit("rlib")`, and `Emit("link")` of an rlib or staticlib crate.
+    stripped_output = field(Artifact | None),
+)
+
+# What rustc produced when it also drove the link: a binary, dylib, cdylib or
+# proc macro.
+RustcLinkedOutput = record(
+    output = field(Artifact),
+    # `output`, wrapped in a 1-element transitive set.
+    singleton_tset = field(TransitiveDeps),
+    # `output` with its debug info stripped.
+    stripped_output = field(Artifact),
     # Windows .lib artifact for linking against .dll
     import_library = field(Artifact | None),
     pdb = field(Artifact | None),
     dwp_output = field(Artifact | None),
 )
 
+# The link inputs rustc synthesized for a bin crate, captured by the linker
+# wrapper rustc was handed in place of a linker. The executable is produced
+# from these by `rust_link_binary`.
+LinkExtraction = record(
+    # cmd_script set via `-Clinker=`.
+    linker_wrapper = field(cmd_args),
+    # The retained linker args. Contains no paths, only flags, and so is safe
+    # to pass along verbatim even under content-based paths.
+    out_argsfile = field(Artifact),
+    # Extracted link inputs directory.
+    out_artifacts_dir = field(Artifact),
+    # Basenames of the extracted objects, one per line, in link order.
+    out_manifest = field(Artifact),
+    # Archive of the rustc-produced objects. Only built when used by
+    # distributed thinlto.
+    out_archive = field(Artifact | None),
+)
+
+# Output of `rust_compile`.
 RustcOutput = record(
-    output = Artifact,
-    singleton_tset = TransitiveDeps,
     compile_output = RustcCompileOutput,
-    # As expected, only available when the combination of params actually
-    # requires linking.
-    link_output = RustcLinkOutput | None,
+    # What the compile produced beyond its diagnostics: a `RustcLinkedOutput`
+    # exactly when rustc performed a link (see `crate_type_linked`), a
+    # `LinkExtraction` exactly for bin crates compiled with `Emit("rlib")`, and
+    # a `RustcUnlinkedOutput` otherwise.
+    product = RustcUnlinkedOutput | RustcLinkedOutput | LinkExtraction,
 )
 
 def output_as_diag_subtargets(o: RustcOutput, clippy: RustcOutput) -> dict[str, Artifact]:
     return {
-        "check": o.output,
+        "check": o.product.output,
         "clippy.json": clippy.compile_output.diag_json,
         "clippy.txt": clippy.compile_output.diag_txt,
         "diag.json": o.compile_output.diag_json,

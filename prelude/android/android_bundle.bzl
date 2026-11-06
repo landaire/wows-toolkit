@@ -17,12 +17,13 @@ load(
     "AndroidBinaryResourcesInfo",
     "AndroidDerivedApkInfo",
     "DexFilesInfo",
+    "KeystoreInfo",
 )
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
 load("@prelude//android:bundletool_util.bzl", "derive_universal_apk")
 load("@prelude//android:util.bzl", "package_validators_decorator")
-load("@prelude//java:java_providers.bzl", "KeystoreInfo")
 load("@prelude//java/utils:java_more_utils.bzl", "get_path_separator_for_exec_os")
+load("@prelude//target_stats:target_stats.bzl", "target_stats_aggregate_providers_and_subtargets")
 load("@prelude//utils:argfile.bzl", "argfile")
 
 def android_bundle_impl(ctx: AnalysisContext) -> list[Provider]:
@@ -43,11 +44,13 @@ def android_bundle_impl(ctx: AnalysisContext) -> list[Provider]:
         native_library_info = native_library_info,
         resources_info = android_binary_info.resources_info,
         bundle_config = ctx.attrs.bundle_config_file,
-        validation_deps_outputs = get_validation_deps_outputs(ctx),
+        validation_deps_outputs = get_validation_deps_outputs(ctx) + native_library_info.validation_outputs,
         packaging_options = ctx.attrs.packaging_options,
     )
 
     extra_providers = []
+    if android_binary_info.preprocessed_java_classes_info:
+        extra_providers.append(android_binary_info.preprocessed_java_classes_info)
     sub_targets = {}
     sub_targets.update(android_binary_info.sub_targets)
     if ctx.attrs.use_derived_apk:
@@ -75,27 +78,37 @@ def android_bundle_impl(ctx: AnalysisContext) -> list[Provider]:
     else:
         default_output = output_bundle
 
+    target_stats_providers, target_stats_subtargets = target_stats_aggregate_providers_and_subtargets(
+        ctx,
+        deps = android_binary_info.deps_by_platform[android_binary_info.primary_platform],
+    )
+    sub_targets.update(target_stats_subtargets)
+
     java_packaging_deps = android_binary_info.java_packaging_deps
-    return [
-        DefaultInfo(default_output = default_output, other_outputs = android_binary_info.materialized_artifacts, sub_targets = sub_targets),
-        AndroidAabInfo(
-            aab = output_bundle,
-            manifest = android_binary_info.resources_info.manifest,
-            materialized_artifacts = android_binary_info.materialized_artifacts,
-            unstripped_shared_libraries = native_library_info.unstripped_shared_libraries,
-        ),
-        AndroidBinaryPrimaryPlatformInfo(
-            primary_platform = android_binary_info.primary_platform,
-        ),
-        TemplatePlaceholderInfo(
-            keyed_variables = {
-                "classpath": cmd_args([dep.jar for dep in java_packaging_deps if dep.jar], delimiter = get_path_separator_for_exec_os(ctx)),
-                "classpath_including_targets_with_no_output": cmd_args(
-                    [dep.output_for_classpath_macro for dep in java_packaging_deps], delimiter = get_path_separator_for_exec_os(ctx)
-                ),
-            },
-        ),
-    ] + extra_providers
+    return (
+        [
+            DefaultInfo(default_output = default_output, other_outputs = android_binary_info.materialized_artifacts, sub_targets = sub_targets),
+            AndroidAabInfo(
+                aab = output_bundle,
+                manifest = android_binary_info.resources_info.manifest,
+                materialized_artifacts = android_binary_info.materialized_artifacts,
+                unstripped_shared_libraries = native_library_info.unstripped_shared_libraries,
+            ),
+            AndroidBinaryPrimaryPlatformInfo(
+                primary_platform = android_binary_info.primary_platform,
+            ),
+            TemplatePlaceholderInfo(
+                keyed_variables = {
+                    "classpath": cmd_args([dep.jar for dep in java_packaging_deps if dep.jar], delimiter = get_path_separator_for_exec_os(ctx)),
+                    "classpath_including_targets_with_no_output": cmd_args(
+                        [dep.output_for_classpath_macro for dep in java_packaging_deps], delimiter = get_path_separator_for_exec_os(ctx)
+                    ),
+                },
+            ),
+        ]
+        + extra_providers
+        + target_stats_providers
+    )
 
 def build_bundle(
     output_filename: str,

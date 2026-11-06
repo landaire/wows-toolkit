@@ -74,7 +74,7 @@ selected_toolchain(
         "config//os/constraints:macos": ":nix_cxx_macos",
         "config//os/constraints:windows": "//windows:cxx",
         # wt-web. The Nix toolchain builds it, so it needs a Linux or macOS host.
-        "config//cpu/constraints:wasm32": ":nix_cxx_wasm32",
+        "config//cpu/constraints:cpu[wasm32]": ":nix_cxx_wasm32",
     }),
     visibility = ["PUBLIC"],
 )
@@ -85,7 +85,7 @@ selected_toolchain(
         "config//os/constraints:linux": ":nix_rust_linux",
         "config//os/constraints:macos": ":nix_rust_macos",
         "config//os/constraints:windows": "//windows:rust",
-        "config//cpu/constraints:wasm32": ":nix_rust_wasm32",
+        "config//cpu/constraints:cpu[wasm32]": ":nix_rust_wasm32",
     }),
     visibility = ["PUBLIC"],
 )

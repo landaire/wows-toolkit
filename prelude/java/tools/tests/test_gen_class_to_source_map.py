@@ -27,6 +27,7 @@ class GenClassToSourceMapTest(unittest.TestCase):
         sources: list[pathlib.Path],
         debuginfo: list[dict] | None,
         include_prefixes: tuple[str, ...] = (),
+        sources_jar: str | None = None,
     ) -> list[dict[str, str]]:
         jar_path = directory / "library.jar"
         with zipfile.ZipFile(jar_path, "w") as jar:
@@ -46,6 +47,7 @@ class GenClassToSourceMapTest(unittest.TestCase):
             output,
             debuginfo=debuginfo_path,
             include_classes_prefixes=include_prefixes,
+            sources_jar=sources_jar,
         )
         return json.loads(output.getvalue())["classes"]
 
@@ -292,6 +294,52 @@ class GenClassToSourceMapTest(unittest.TestCase):
             [{"className": "com.example.Legacy", "srcPath": str(source)}],
         )
 
+    def test_sources_jar_writes_one_entry_per_source_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            shared = directory / "DatError.kt"
+            shared.write_text("interface DatError\ninternal class DatErrorImpl\n")
+            other = directory / "Feature.kt"
+            other.write_text("class Feature\n")
+            sources_jar = directory / "library-sources.jar"
+            self._generate(
+                directory,
+                jar_classes=[
+                    "com.example.DatError",
+                    "com.example.DatErrorImpl",
+                    "com.example.Feature",
+                ],
+                sources=[shared, other],
+                debuginfo=[
+                    {
+                        "file_path": str(shared),
+                        "classes": [
+                            {"name": "com.example.DatError"},
+                            {"name": "com.example.DatErrorImpl"},
+                        ],
+                    },
+                    {
+                        "file_path": str(other),
+                        "classes": [{"name": "com.example.Feature"}],
+                    },
+                ],
+                sources_jar=str(sources_jar),
+            )
+
+            with zipfile.ZipFile(sources_jar) as jar:
+                entries = jar.namelist()
+                shared_contents = jar.read("com/example/DatError.kt").decode()
+
+        # `DatErrorImpl` shares `DatError.kt`, so the file is written once under its
+        # own name instead of once per class.
+        self.assertCountEqual(
+            entries,
+            ["com/example/DatError.kt", "com/example/Feature.kt"],
+        )
+        self.assertEqual(
+            shared_contents, "interface DatError\ninternal class DatErrorImpl\n"
+        )
+
     def test_defaults_output_to_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             jar_path = pathlib.Path(temp_dir) / "library.jar"
@@ -306,4 +354,86 @@ class GenClassToSourceMapTest(unittest.TestCase):
         self.assertEqual(
             json.loads(output.getvalue()),
             {"jarPath": str(jar_path), "classes": []},
+        )
+
+    def test_serializes_owner_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            jar_path = pathlib.Path(temp_dir) / "library.jar"
+            with zipfile.ZipFile(jar_path, "w"):
+                pass
+
+            output = io.StringIO()
+            generate_class_to_source_map(
+                str(jar_path),
+                [],
+                output,
+                owner_target="cell//package:library",
+            )
+
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {
+                "jarPath": str(jar_path),
+                "classes": [],
+                "ownerTarget": "cell//package:library",
+            },
+        )
+
+    def test_real_class_with_kt_suffix_keeps_its_source_next_to_a_file_facade(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = pathlib.Path(temp_dir)
+            package_dir = directory / "com" / "example"
+            package_dir.mkdir(parents=True)
+            facade_source = package_dir / "Foo.kt"
+            facade_source.write_text("fun foo() = 1\n")
+            class_source = package_dir / "FooKt.kt"
+            class_source.write_text("class FooKt\n")
+            sources_jar = directory / "library-sources.jar"
+            classes = self._generate(
+                directory,
+                jar_classes=["com.example.Foo", "com.example.FooKt"],
+                sources=[facade_source, class_source],
+                debuginfo=None,
+                sources_jar=str(sources_jar),
+            )
+            with zipfile.ZipFile(sources_jar) as jar:
+                entries = jar.namelist()
+
+        self.assertEqual(
+            classes,
+            [
+                {"className": "com.example.Foo", "srcPath": str(facade_source)},
+                {"className": "com.example.FooKt", "srcPath": str(class_source)},
+            ],
+        )
+        self.assertEqual(entries, ["com/example/Foo.kt", "com/example/FooKt.kt"])
+
+    def test_repeated_include_prefix_flags_accumulate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            jar_path = pathlib.Path(temp_dir) / "library.jar"
+            with zipfile.ZipFile(jar_path, "w") as jar:
+                jar.writestr("androidx/databinding/DataBinderMapperImpl.class", b"")
+                jar.writestr("com/generated/Generated.class", b"")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                main(
+                    [
+                        "gen_class_to_source_map",
+                        str(jar_path),
+                        "-i",
+                        "androidx.databinding",
+                        "-i",
+                        "com.generated",
+                    ]
+                )
+
+        self.assertEqual(
+            json.loads(output.getvalue())["classes"],
+            [
+                {"className": "androidx.databinding.DataBinderMapperImpl"},
+                {"className": "com.generated.Generated"},
+            ],
         )

@@ -9,7 +9,6 @@
 load("@prelude//:is_full_meta_repo.bzl", "is_full_meta_repo")
 # Combine the attributes we generate, we the custom implementations we have.
 load("@prelude//:rules_impl.bzl", "categorized_extra_attributes", "categorized_rule_decl_records", "extra_implemented_rules", "toolchain_rule_names")
-load("@prelude//apple:apple_platforms.bzl", "APPLE_PLATFORMS_KEY")
 load("@prelude//configurations:rules.bzl", _config_implemented_rules = "implemented_rules")
 load("@prelude//decls:common.bzl", "prelude_rule")
 
@@ -48,16 +47,11 @@ def _mk_rule(rule_spec: typing.Any, extra_attrs: dict[str, typing.Any] = dict(),
         # copy so we don't try change the passed in object
         attributes["_cxx_toolchain_target_configuration"] = attrs.dep(default = "prelude//platforms:fat_platform_incompatible")
 
-    # Add _apple_platforms to all rules so that we may query the target platform to use until we support configuration
-    # modifiers and can use them to set the configuration to use for operations.
-    # Map of string identifier to platform.
-    attributes[APPLE_PLATFORMS_KEY] = attrs.dict(key = attrs.string(), value = attrs.dep(), sorted = False, default = {})
-
     cfg = rule_spec.cfg
 
-    extra_args = dict(kwargs)
     if cfg != None:
-        extra_args["cfg"] = cfg
+        # Allow clone_rule callers to set their own cfg, if it exists
+        kwargs.setdefault("cfg", cfg)
 
     if rule_spec.docs:
         doc = rule_spec.docs
@@ -73,7 +67,7 @@ def _mk_rule(rule_spec: typing.Any, extra_attrs: dict[str, typing.Any] = dict(),
         if rule_spec.further:
             doc += "\n{}Additional notes:\n{}".format(" " * 8, rule_spec.further)
 
-        extra_args["doc"] = doc
+        kwargs["doc"] = doc
 
     impl = rule_spec.impl
     extra_impl = getattr(extra_implemented_rules, name, None)
@@ -86,9 +80,9 @@ def _mk_rule(rule_spec: typing.Any, extra_attrs: dict[str, typing.Any] = dict(),
     if impl_override != None:
         impl = impl_override
     if rule_spec.uses_plugins != None:
-        extra_args["uses_plugins"] = rule_spec.uses_plugins
+        kwargs["uses_plugins"] = rule_spec.uses_plugins
     if rule_spec.supports_incoming_transition != None:
-        extra_args["supports_incoming_transition"] = rule_spec.supports_incoming_transition
+        kwargs["supports_incoming_transition"] = rule_spec.supports_incoming_transition
 
     is_toolchain_rule = rule_spec.is_toolchain_rule
     is_toolchain_rule_via_rule_name = name in toolchain_rule_names
@@ -97,9 +91,9 @@ def _mk_rule(rule_spec: typing.Any, extra_attrs: dict[str, typing.Any] = dict(),
     elif is_toolchain_rule_via_rule_name:
         fail("Cannot set `is_toolchain_rule` on `prelude_rule` and also via `toolchain_rule_names`")
 
-    extra_args.setdefault("is_configuration_rule", name in _config_implemented_rules)
-    extra_args.setdefault("is_toolchain_rule", is_toolchain_rule)
-    return rule(impl = impl, attrs = attributes, **extra_args)
+    kwargs.setdefault("is_configuration_rule", name in _config_implemented_rules)
+    kwargs.setdefault("is_toolchain_rule", is_toolchain_rule)
+    return rule(impl = impl, attrs = attributes, **kwargs)
 
 def _categorized_decls():
     grouped_decls = {}

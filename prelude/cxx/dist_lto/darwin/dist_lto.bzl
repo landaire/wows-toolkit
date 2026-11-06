@@ -135,10 +135,12 @@ def complete_distributed_link_with_expanded_archive_link_data(
     lto_opt = cxx_toolchain.internal_tools.dist_lto.opt[LinkerType("darwin")]
     lto_archive_mapper = cxx_toolchain.internal_tools.dist_lto.archive_mapper
 
+    normalized_identifier = link_options.identifier.replace("[", "_").replace("]", "_").replace(" ", "_") if link_options.identifier != None else None
+
     def make_id(i: str) -> str:
         """Used to make sure identifiers for our actions include the provided identifier"""
-        if link_options.identifier != None:
-            return link_options.identifier + "_" + i
+        if normalized_identifier != None:
+            return normalized_identifier + "_" + i
         return i
 
     recorded_outputs = {}
@@ -146,14 +148,15 @@ def complete_distributed_link_with_expanded_archive_link_data(
     def name_for_obj(link_name: str, object_artifact: Artifact) -> str:
         """Creates a unique name/path we can use for a particular object file input"""
         prefix = "{}/{}".format(link_name, object_artifact.short_path)
-
-        # it's possible (though unlikely) that we can get duplicate name/short_path, so just uniquify them
-        if prefix in recorded_outputs:
-            recorded_outputs[prefix] += 1
-            extra = recorded_outputs[prefix]
+        case_insensitive_prefix = prefix.lower()
+        # it's possible (though unlikely) that we can get duplicate name/short_path, so just uniquify them.
+        # Make sure we case normalize before to avoid collisions on case in-sensitive file systems.
+        if case_insensitive_prefix in recorded_outputs:
+            recorded_outputs[case_insensitive_prefix] += 1
+            extra = recorded_outputs[case_insensitive_prefix]
             prefix = "{}-{}".format(prefix, extra)
         else:
-            recorded_outputs[prefix] = 1
+            recorded_outputs[case_insensitive_prefix] = 1
         return prefix
 
     names = {}
@@ -787,11 +790,13 @@ def cxx_darwin_dist_link(
             if isinstance(linkable, ArchiveLinkable) and not linkable.archive.external_objects:
                 link_name = link.name or "unknown"
                 archive_name_candidate = "{}-{}".format(link_name, linkable.archive.artifact.short_path)
-                if archive_name_candidate in recorded_artifact_names:
-                    recorded_artifact_names[archive_name_candidate] += 1
-                    archive_name = "{}-{}".format(archive_name_candidate, recorded_artifact_names[archive_name_candidate])
+                # On case in-sensitive file systems, we need to make sure that, we normalize case before checking for duplicates
+                case_insensitive_archive_name_candidate = archive_name_candidate.lower()
+                if case_insensitive_archive_name_candidate in recorded_artifact_names:
+                    recorded_artifact_names[case_insensitive_archive_name_candidate] += 1
+                    archive_name = "{}-{}".format(archive_name_candidate, recorded_artifact_names[case_insensitive_archive_name_candidate])
                 else:
-                    recorded_artifact_names[archive_name_candidate] = 1
+                    recorded_artifact_names[case_insensitive_archive_name_candidate] = 1
                     archive_name = archive_name_candidate
 
                 archive_manifest = ctx.actions.declare_output(

@@ -8,26 +8,43 @@
 
 load("@prelude//:genrule.bzl", "process_genrule")
 load("@prelude//android:android_apk.bzl", "get_install_info")
-load("@prelude//android:android_providers.bzl", "AndroidAabInfo", "AndroidApkInfo", "AndroidApkUnderTestInfo", "AndroidDerivedApkInfo")
+load(
+    "@prelude//android:android_providers.bzl",
+    "AndroidAabInfo",
+    "AndroidApkInfo",
+    "AndroidApkUnderTestInfo",
+    "AndroidDerivedApkInfo",
+    "AndroidPreprocessedJavaClassesInfo",
+    "KeystoreInfo",
+)
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
 load("@prelude//android:bundletool_util.bzl", "derive_universal_apk")
+load("@prelude//android:native_build_commands.bzl", "GATORADE_PHASE_SUBTARGETS")
 load("@prelude//java:class_to_srcs.bzl", "JavaClassToSourceMapInfo")
-load("@prelude//java:java_providers.bzl", "KeystoreInfo")
 load("@prelude//utils:expect.bzl", "expect")
 
-# Native-library debug sub-targets that the wrapped android_apk/android_aab only
-# exposes in some configurations (e.g. relinker or native merging enabled).
-# Forward whichever happen to be present so they stay reachable through the
-# apk_genrule wrapper.
+# Native-library debug sub-targets forwarded through the apk_genrule wrapper only if present on the
+# wrapped android_apk/android_aab. These exist only in certain configurations (e.g. native_merge_debug
+# requires the relinker or native merging); relinked_libs and relinked_libs_manifest are always
+# present on an android_binary, and empty unless it defers a relink. Always-present
+# sub-targets like native_libs, linker_commands and native_build_commands are forwarded in the
+# required set below.
 _OPTIONAL_NATIVE_LIB_SUBTARGETS = [
+    "gatorade_phase_evidence",
     "native_merge_debug",
     "relinked_libs",
     "relinked_libs_manifest",
+    "relinker_extra_outputs",
     "unrelinked_libs",
 ]
 
 def _forward_optional_native_lib_subtargets(input_subtargets: dict) -> dict:
     return {name: [input_subtargets[name][DefaultInfo]] for name in _OPTIONAL_NATIVE_LIB_SUBTARGETS if name in input_subtargets}
+
+# The top-level Gatorade-phase sub-targets (`TARGET[early_gatorade]` etc.) are always present on the
+# wrapped android_apk/android_aab, so forward them in the required set at every wrapper site.
+def _forward_gatorade_phase_subtargets(input_subtargets: dict) -> dict:
+    return {name: [input_subtargets[name][DefaultInfo]] for name in GATORADE_PHASE_SUBTARGETS}
 
 def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
     expect((ctx.attrs.apk == None) != (ctx.attrs.aab == None), "Exactly one of 'apk' and 'aab' must be specified")
@@ -36,6 +53,7 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
     input_android_apk_subtargets = None
     input_android_apk_template_placeholder_info = None
     input_android_aab_subtargets = None
+    input_preprocessed_java_classes_info = None
     if ctx.attrs.apk != None:
         # TODO(T104150125) The underlying APK should not have exopackage enabled
         input_android_apk_info = ctx.attrs.apk[AndroidApkInfo]
@@ -47,6 +65,8 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
         input_android_apk_under_test_info = ctx.attrs.apk[AndroidApkUnderTestInfo]
         input_android_apk_subtargets = ctx.attrs.apk[DefaultInfo].sub_targets
         input_android_apk_template_placeholder_info = ctx.attrs.apk[TemplatePlaceholderInfo].keyed_variables
+        if AndroidPreprocessedJavaClassesInfo in ctx.attrs.apk:
+            input_preprocessed_java_classes_info = ctx.attrs.apk[AndroidPreprocessedJavaClassesInfo]
 
         env_vars = {
             "APK": cmd_args(input_apk),
@@ -61,6 +81,8 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
         input_materialized_artifacts = input_android_aab_info.materialized_artifacts
         input_android_aab_subtargets = ctx.attrs.aab[DefaultInfo].sub_targets
         input_unstripped_shared_libraries = input_android_aab_info.unstripped_shared_libraries
+        if AndroidPreprocessedJavaClassesInfo in ctx.attrs.aab:
+            input_preprocessed_java_classes_info = ctx.attrs.aab[AndroidPreprocessedJavaClassesInfo]
 
         env_vars = {
             "AAB": cmd_args(input_apk),
@@ -127,11 +149,13 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
                         ],
                         "linker_argsfiles": [input_android_aab_subtargets["linker_argsfiles"][DefaultInfo]],
                         "linker_commands": [input_android_aab_subtargets["linker_commands"][DefaultInfo]],
+                        "native_build_commands": [input_android_aab_subtargets["native_build_commands"][DefaultInfo]],
                         "native_libs": [input_android_aab_subtargets["native_libs"][DefaultInfo]],
                         "unstripped_native_libraries": [input_android_aab_subtargets["unstripped_native_libraries"][DefaultInfo]],
                         "unstripped_native_libraries_files": [input_android_aab_subtargets["unstripped_native_libraries_files"][DefaultInfo]],
                         "unstripped_native_libraries_json": [input_android_aab_subtargets["unstripped_native_libraries_json"][DefaultInfo]],
                     }
+                    | _forward_gatorade_phase_subtargets(input_android_aab_subtargets)
                     | _forward_optional_native_lib_subtargets(input_android_aab_subtargets),
                 ),
                 AndroidDerivedApkInfo(
@@ -144,11 +168,13 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
                 {
                     "linker_argsfiles": [input_android_aab_subtargets["linker_argsfiles"][DefaultInfo]],
                     "linker_commands": [input_android_aab_subtargets["linker_commands"][DefaultInfo]],
+                    "native_build_commands": [input_android_aab_subtargets["native_build_commands"][DefaultInfo]],
                     "native_libs": [input_android_aab_subtargets["native_libs"][DefaultInfo]],
                     "unstripped_native_libraries": [input_android_aab_subtargets["unstripped_native_libraries"][DefaultInfo]],
                     "unstripped_native_libraries_files": [input_android_aab_subtargets["unstripped_native_libraries_files"][DefaultInfo]],
                     "unstripped_native_libraries_json": [input_android_aab_subtargets["unstripped_native_libraries_json"][DefaultInfo]],
                 }
+                | _forward_gatorade_phase_subtargets(input_android_aab_subtargets)
                 | _forward_optional_native_lib_subtargets(input_android_aab_subtargets)
             )
             default_providers = [
@@ -168,11 +194,13 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
                 "linker_argsfiles": [input_android_apk_subtargets["linker_argsfiles"][DefaultInfo]],
                 "linker_commands": [input_android_apk_subtargets["linker_commands"][DefaultInfo]],
                 "manifest": [input_android_apk_subtargets["manifest"][DefaultInfo]],
+                "native_build_commands": [input_android_apk_subtargets["native_build_commands"][DefaultInfo]],
                 "native_libs": [input_android_apk_subtargets["native_libs"][DefaultInfo]],
                 "unstripped_native_libraries": [input_android_apk_subtargets["unstripped_native_libraries"][DefaultInfo]],
                 "unstripped_native_libraries_files": [input_android_apk_subtargets["unstripped_native_libraries_files"][DefaultInfo]],
                 "unstripped_native_libraries_json": [input_android_apk_subtargets["unstripped_native_libraries_json"][DefaultInfo]],
             }
+            | _forward_gatorade_phase_subtargets(input_android_apk_subtargets)
             | _forward_optional_native_lib_subtargets(input_android_apk_subtargets)
         )
         expect(
@@ -220,4 +248,6 @@ def apk_genrule_impl(ctx: AnalysisContext) -> list[Provider]:
     aab_providers = filter(None, [output_aab_info])
     apk_under_test_providers = filter(None, [input_android_apk_under_test_info])
 
-    return default_providers + apk_providers + aab_providers + apk_under_test_providers + class_to_src_map
+    preprocessed_java_classes_providers = filter(None, [input_preprocessed_java_classes_info])
+
+    return default_providers + apk_providers + aab_providers + apk_under_test_providers + preprocessed_java_classes_providers + class_to_src_map

@@ -21,13 +21,13 @@ NAMED_CONSTRAINT_SETTINGS = {
     "ovr_config//cpu/constraints:cpu": None,
     "ovr_config//runtime/constraints:runtime": None,
     "ovr_config//runtime/constraints:runtime_version": None,
-    "ovr_config//os/sdk/apple/constraints:_": None,
+    "ovr_config//os/sdk/apple/constraints:_": (lambda label: str(label.sub_target[0])),
     "ovr_config//os/sdk/android/ndk/constraints:version": None,
     "ovr_config//os/version/android/constraints:api-level": (lambda label: "api" + str(label.name).split("-")[-1]),
     "ovr_config//toolchain/clang/constraints:clang-toolchain-version": (lambda label: "clang" + str(label.name)),
     "ovr_config//build_mode:sanitizer_type": (lambda label: str(label.sub_target[0])),
     "fbcode//fdo/constraints:fdo": (lambda label: str(label.name)),
-    "ovr_config//build_mode/default_opt_cxx:default_opt_cxx_setting": (lambda label: "opt-by-default" if str(label.name) == "enabled" else None),
+    "ovr_config//build_mode/default_opt_cxx:default_opt_cxx_setting": (lambda label: "opt-by-default" if str(label.sub_target[0]) == "enabled" else None),
     "ovr_config//build_mode:arvr_mode": (lambda label: "arvr" if str(label.sub_target[0]) == "enabled" else None),
 }
 

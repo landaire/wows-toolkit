@@ -13,17 +13,17 @@ Used by TPX to upload diagnostic reports.
 """.
 -compile(warn_missing_spec_all).
 
+%% Public API
+-export([prepare/3, link_to_artifact_dir/3, find_log_private/1]).
+
+-export_type([dir_path/0]).
+
 -include_lib("common/include/buck_ct_records.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -import(common_util, [unicode_characters_to_list/1]).
 
 -define(raw_file_access, prim_file).
-
-%% Public API
--export([prepare/3, link_to_artifact_dir/3, find_log_private/1]).
-
--export_type([dir_path/0]).
 
 -type dir_path() :: file:filename() | undefined.
 
@@ -84,9 +84,14 @@ prepare(ExecutionDir, Tests, ArtifactAnnotationFunction) ->
     with_artifact_dir(
         fun(_ArtifactDir) ->
             link_tar_ball(ExecutionDir),
-            link_to_artifact_dir(
-                join_paths(ExecutionDir, "result_exec.json"), ExecutionDir, ArtifactAnnotationFunction
-            ),
+            case os:getenv("TEST_RESULTS_OUTPUT_FILE") of
+                false ->
+                    ok;
+                OutputFile ->
+                    link_to_artifact_dir(
+                        OutputFile, filename:dirname(OutputFile), fun artifact_annotations:default_annotation/1
+                    )
+            end,
             case coverage_tmp_dir() of
                 undefined ->
                     ok;
@@ -120,6 +125,17 @@ prepare(ExecutionDir, Tests, ArtifactAnnotationFunction) ->
         end
     ).
 
+-doc """
+Use hardlinks inside RE which doesn't follow symlinks like local execution uploads.
+""".
+-spec make_artifact_link(file:filename_all(), file:filename_all()) ->
+    ok | {error, badarg | file:posix()}.
+make_artifact_link(File, ArtifactPath) ->
+    case os:getenv("INSIDE_RE_WORKER") of
+        "1" -> file:make_link(File, ArtifactPath);
+        _ -> file:make_symlink(filename:absname(File), ArtifactPath)
+    end.
+
 -spec link_to_artifact_dir(File, Root, ArtifactAnnotationMFA) -> ok when
     File :: file:filename_all(),
     Root :: file:filename_all(),
@@ -139,7 +155,7 @@ link_to_artifact_dir(File, Root, ArtifactAnnotationMFA) ->
                 unicode_characters_to_list(string:replace(RelativePath, "/", ".", all)),
             case filelib:is_file(File, ?raw_file_access) of
                 true ->
-                    file:make_symlink(filename:absname(File), join_paths(ArtifactDir, FullFileName)),
+                    make_artifact_link(File, join_paths(ArtifactDir, FullFileName)),
                     Annotation = artifact_annotations:create_artifact_annotation(FullFileName, ArtifactAnnotationMFA),
                     dump_annotation(Annotation, FullFileName);
                 _ ->

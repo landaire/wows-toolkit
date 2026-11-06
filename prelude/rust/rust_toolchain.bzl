@@ -75,6 +75,19 @@ rust_toolchain_attrs = {
     "rustdoc": provider_field(RunInfo | None, default = None),
     # Clippy (linter) version of the compiler
     "clippy_driver": provider_field(RunInfo | None, default = None),
+    # The Miri driver. Compiles `miri`-kind dependency rlibs (running as rustc
+    # via `MIRI_BE_RUSTC=target`) and interprets `[miri]` sub-targets, so it
+    # must be exec-configured like `compiler`.
+    "miri_driver": provider_field(RunInfo | None, default = None),
+    # Default Miri flags (e.g. ["-Zmiri-disable-isolation"])
+    "miri_flags": provider_field(list[typing.Any], default = []),
+    # Extra rustc flags for `miri`-kind compiles, on top of the defaults the
+    # driver applies itself (`--cfg=miri`, `-Zalways-encode-mir`, ...). Never
+    # seen by native compiles; `miri_flags` is for interpreter execution.
+    "miri_rustc_flags": provider_field(list[typing.Any], default = []),
+    # Miri flags from configuration, applied to override the toolchain's
+    # and target's flags
+    "extra_miri_flags": provider_field(list[typing.Any], default = []),
     # The default edition to use, if not specified.
     "default_edition": provider_field(str | None, default = None),
     # Lints
@@ -106,6 +119,8 @@ rust_toolchain_attrs = {
     # FIXME(JakobDegen): This should require `explicit_sysroot_deps` in the
     # future.
     "advanced_unstable_linking": provider_field(bool, default = False),
+    # Codegen flags for the distributed ThinLTO opt actions.
+    "dist_thin_lto_codegen_flags": provider_field(list[typing.Any], default = []),
     # Override the implicit sysroot with the provided Artifact containing a directory to
     # a prebuilt sysroot. Will be forwarded to rustc as `--sysroot=<sysroot_path>`. Only
     # one of this and `explicit_sysroot_deps` may be set.
@@ -174,6 +189,25 @@ rust_toolchain_attrs = {
     # "target-feature" will block both "-Ctarget-feature=..." and the split
     # form "-C" followed by "target-feature=...".
     "restricted_rustc_flags": provider_field(list[typing.Any], default = []),
+    # Under `-Csplit-debuginfo=unpacked`, which the rules pass for the cxx
+    # toolchain's `single` and `split` debug modes, rustc writes each codegen
+    # unit's `.dwo` to `--out-dir` and also packs a copy of it into the rlib or
+    # staticlib, so that a downstream `-Csplit-debuginfo=packed` link could
+    # build a dwp from the archive alone. The rules never link that way: `dwp`
+    # reads the `--out-dir` files, which are tracked as external debug info,
+    # and linkers never pull archive members that define no symbols. The
+    # copies only add to what every dependent compile downloads and every
+    # link materializes, and in debug-heavy builds they are a large share of
+    # rlib bytes. When set, the compile action deletes the `.dwo` members from
+    # rlibs and staticlibs right after rustc writes them, using the cxx
+    # toolchain's archiver (`gnu`, `llvm` or `bsd` archiver types; others keep
+    # the members). No effect when the cxx toolchain's split debug mode is
+    # `none`, or for Apple and Windows targets, whose archives never carry
+    # `.dwo` members.
+    "strip_dwo_from_rlibs": provider_field(bool, default = False),
 }
 
 RustToolchainInfo = provider(fields = rust_toolchain_attrs)
+
+def toolchain_supports_miri(toolchain_info: RustToolchainInfo) -> bool:
+    return toolchain_info.miri_driver != None

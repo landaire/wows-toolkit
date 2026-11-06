@@ -14,6 +14,7 @@ load(
 load("@prelude//:paths.bzl", "paths")
 load(
     "@prelude//cxx:cxx_bolt.bzl",
+    "PRE_BOLT_SUFFIX",
     "bolt",
     "cxx_use_bolt",
 )
@@ -30,16 +31,17 @@ load(
     "@prelude//cxx:dwp.bzl",
     "run_dwp_action",
 )
-load("@prelude//cxx:link_types.bzl", "LinkOptions")
+load("@prelude//cxx:link_types.bzl", "LinkOptions", "get_dwp_execution_preference")
 load("@prelude//linking:execution_preference.bzl", "get_action_execution_attributes")
 load(
     "@prelude//linking:link_info.bzl",
     "ArchiveLinkable",
-    "FrameworksLinkable",  # @unused Used as a type
+    "FrameworksLinkable",
     "LinkInfo",
     "LinkedObject",
     "ObjectsLinkable",
     "SharedLibLinkable",  # @unused Used as a type
+    "SwiftmoduleLinkable",
     "append_linkable_args",
     "map_to_link_infos",
     "serialize_linkable_for_thinlto",
@@ -109,7 +111,9 @@ _LinkDataVariant = record(
     link_data = list[_BitcodeLinkData] | _ArchiveLinkData | None,
     # The linkable that this is derived from.
     # This field is used to get the `cmd_args` form.
-    origin = ArchiveLinkable | SharedLibLinkable | ObjectsLinkable | FrameworksLinkable,
+    # FrameworksLinkable / SwiftmoduleLinkable are skipped before a variant is
+    # built, so they never appear here.
+    origin = ArchiveLinkable | SharedLibLinkable | ObjectsLinkable,
 )
 
 # `_ThinLinkInfo` groups together pre/post flags and a list of LinkData.
@@ -129,6 +133,7 @@ def cxx_gnu_dist_link(
     # This action will only happen if split_dwarf is enabled via the toolchain.
     dwp_tool_available: bool = True,
     executable_link: bool = True,
+    build_info_json: Artifact | None = None,
 ) -> LinkedObject:
     """
     Perform a distributed thin-lto link into the supplied output
@@ -155,9 +160,18 @@ def cxx_gnu_dist_link(
     # differentiating multiple link actions in the same rule.
     identifier = opts.identifier
 
+    # Names derived from the identifier below become artifact paths, and callers
+    # pass identifiers containing spaces and brackets.
+    normalized_identifier = identifier.replace("[", "_").replace("]", "_").replace(" ", "_") if identifier != None else None
+
     enable_late_build_info_stamping = executable_link and cxx_stamp_build_info(ctx)
 
+    # Unlike the plain link, a `None` (no preference) narrows to `False` here,
+    # because this also feeds `bolt` and `strip_object`, which take a plain bool.
+    enable_cache_upload = opts.allow_cache_upload or enable_late_build_info_stamping
+
     link_action_execution_properties = get_action_execution_attributes(opts.link_execution_preference)
+    dwp_action_execution_properties = get_action_execution_attributes(get_dwp_execution_preference(opts))
     enable_bolt = executable_link and cxx_use_bolt(ctx)
 
     def make_cat(c: str) -> str:
@@ -168,8 +182,8 @@ def cxx_gnu_dist_link(
 
     def make_id(i: str) -> str:
         """Used to make sure identifiers for our actions include the provided identifier"""
-        if identifier != None:
-            return identifier + "_" + i
+        if normalized_identifier != None:
+            return normalized_identifier + "_" + i
         return i
 
     recorded_outputs = {}
@@ -325,6 +339,13 @@ def cxx_gnu_dist_link(
                 archive_opt_manifests.append(archive_opt_manifest)
                 plan_inputs.extend([archive_manifest, archive_objects])
                 plan_outputs.extend([archive_indexes.as_output(), archive_plan.as_output()])
+            elif isinstance(linkable, FrameworksLinkable) or isinstance(linkable, SwiftmoduleLinkable):
+                # These add no linker inputs on GNU: append_linkable_args no-ops them
+                # and serialize_linkable_for_thinlto rejects them, so there is nothing
+                # to emit here (the Darwin planner skips them likewise). Use `continue`,
+                # not `pass`: link_data_variants is appended below the if/elif/else, so
+                # falling through would emit a variant from the previous linkable.
+                continue
             else:
                 data_type = _DataType("cmd_args")
                 link_data = None
@@ -403,7 +424,6 @@ def cxx_gnu_dist_link(
                             # as a string rather than a single-element list.
                             "archive_opt_objects_dir": cmd_args(link_data.opt_objects_dir, delimiter = "", ignore_artifacts = True),
                             "archive_plan": outputs[link_data.plan].as_output(),
-                            "link_whole": link_data.link_whole,
                             "objects": [] if manifest["objects"] else None,
                             "prepend": link_data.prepend,
                             "type": "archive",
@@ -542,10 +562,14 @@ def cxx_gnu_dist_link(
         opt_cmd_parts = cxx_link_cmd_parts(cxx_toolchain, executable_link)
         opt_args = opt_cmd_parts.link_cmd
 
+        if cxx_toolchain.linker_info.dist_thin_lto_codegen_flags != None:
+            opt_args.add(cxx_toolchain.linker_info.dist_thin_lto_codegen_flags)
+
         # buildifier: disable=uninitialized
         for link in link_infos:
             for raw_flag in link.pre_flags + link.post_flags:
                 opt_args.add(raw_flag)
+            opt_args.add(link.dist_thin_lto_codegen_flags)
 
         opt_args.add(opt_cmd_parts.post_linker_flags)
         return opt_args
@@ -777,7 +801,7 @@ def cxx_gnu_dist_link(
             local_only = link_action_execution_properties.local_only,
             weight = opts.link_weight,
             force_full_hybrid_if_capable = link_action_execution_properties.full_hybrid,
-            allow_cache_upload = enable_late_build_info_stamping,
+            allow_cache_upload = enable_cache_upload,
         )
 
     final_link_inputs = [link_plan_out, final_link_index] + archive_opt_manifests
@@ -796,7 +820,7 @@ def cxx_gnu_dist_link(
     )
 
     if enable_bolt:
-        bolt_output = bolt(ctx, output, external_debug_info, identifier, dwp_tool_available, allow_cache_upload = enable_late_build_info_stamping)
+        bolt_output = bolt(ctx, output, external_debug_info, identifier, dwp_tool_available, allow_cache_upload = enable_cache_upload)
         final_output = bolt_output.output
         split_debug_output = bolt_output.dwo_output
     else:
@@ -804,7 +828,7 @@ def cxx_gnu_dist_link(
         split_debug_output = None
 
     if dwp_tool_available:
-        dwp_output = ctx.actions.declare_output(output.short_path.removesuffix("-wrapper") + ".dwp", has_content_based_path = False)
+        dwp_output = ctx.actions.declare_output(output.short_path.removesuffix(PRE_BOLT_SUFFIX) + ".dwp", has_content_based_path = False)
 
         def dynamic_run_dwp_action(ctx: AnalysisContext, artifacts, outputs):
             plan = artifacts[link_plan_out].read_json()
@@ -842,8 +866,10 @@ def cxx_gnu_dist_link(
                 dwp_output = outputs[dwp_output],
                 # Mirror the link action's execution preference so dwp runs
                 # alongside the link (avoids round-tripping dwo files when link
-                # is local).
-                action_execution_properties = link_action_execution_properties,
+                # is local) -- unless the caller asked for dwp to be scheduled
+                # separately, e.g. because the link is only local for
+                # build-info stamping.
+                action_execution_properties = dwp_action_execution_properties,
             )
 
         ctx.actions.dynamic_output(
@@ -858,9 +884,18 @@ def cxx_gnu_dist_link(
     unstripped_output = final_output
     if opts.strip:
         strip_args = opts.strip_args_factory(ctx) if opts.strip_args_factory else cmd_args()
-        final_output = strip_object(ctx, cxx_toolchain, final_output, strip_args, category_suffix, allow_cache_upload = enable_late_build_info_stamping)
+        final_output = strip_object(ctx, cxx_toolchain, final_output, strip_args, category_suffix, allow_cache_upload = enable_cache_upload)
 
-    final_output = stamp_build_info(ctx, final_output, links = opts.links) if executable_link else final_output
+    final_output = (
+        stamp_build_info(
+            ctx,
+            final_output,
+            links = opts.links,
+            build_info_json = build_info_json,
+        )
+        if executable_link
+        else final_output
+    )
 
     return LinkedObject(
         output = final_output,

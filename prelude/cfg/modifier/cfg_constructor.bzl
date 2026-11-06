@@ -39,6 +39,12 @@ def _get_buckconfig_backed_modifiers(extra_data: struct, configuring_exec_dep: b
         return None
     return getattr(extra_data, "buckconfig_backed_modifiers", None)
 
+def _has_buckconfig_backed_modifiers(refs: dict[str, ProviderCollection], target: str | None) -> bool:
+    if not target:
+        return False
+    info = refs[target][BuckconfigBackedModifierInfo]
+    return bool(info.pre_platform_modifiers or info.post_platform_modifiers or info.pre_cli_modifiers)
+
 def cfg_constructor_pre_constraint_analysis(
     *,
     legacy_platform: PlatformInfo | None,
@@ -124,7 +130,8 @@ def cfg_constructor_post_constraint_analysis(*, refs: dict[str, ProviderCollecti
     Returns a PlatformInfo
     """
 
-    if not (params.package_modifiers or params.target_modifiers or params.cli_modifiers):
+    buckconfig_backed_modifiers = _get_buckconfig_backed_modifiers(params.extra_data, params.configuring_exec_dep)
+    if not (params.package_modifiers or params.target_modifiers or params.cli_modifiers or _has_buckconfig_backed_modifiers(refs, buckconfig_backed_modifiers)):
         # If there is no modifier and legacy platform is specified,
         # then return the legacy platform as is without changing the label or
         # configuration.
@@ -138,8 +145,6 @@ def cfg_constructor_post_constraint_analysis(*, refs: dict[str, ProviderCollecti
         )
 
     constraint_setting_to_modifier_infos = {}
-    cli_modifier_validation = getattr(params.extra_data, "cli_modifier_validation", None)
-    buckconfig_backed_modifiers = _get_buckconfig_backed_modifiers(params.extra_data, params.configuring_exec_dep)
 
     if buckconfig_backed_modifiers:
         apply_buckconfig_backed_modifiers(
@@ -181,19 +186,11 @@ def cfg_constructor_post_constraint_analysis(*, refs: dict[str, ProviderCollecti
 
     for modifier in params.cli_modifiers:
         if modifier:
-            constraint_setting_label, _ = get_and_insert_modifier_info(
+            get_and_insert_modifier_info(
                 constraint_setting_to_modifier_infos = constraint_setting_to_modifier_infos,
                 refs = refs,
                 modifier = modifier,
                 location = ModifierCliLocation(),
             )
-
-            # Exclude CLI modifier allowlist validation when evaluating the exec configuration,
-            # because modifiers from CLI are not applied to exec dependencies.
-            # Instead, we treat the original platform constraints as "CLI modifiers" so they take precedence.
-            if params.configuring_exec_dep:
-                continue
-            if cli_modifier_validation:
-                cli_modifier_validation(constraint_setting_label, modifier)
 
     return resolve_configuration(constraint_setting_to_modifier_infos)

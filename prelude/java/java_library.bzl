@@ -11,6 +11,7 @@ load("@prelude//:paths.bzl", "paths")
 load("@prelude//:validation_deps.bzl", "get_validation_deps_outputs")
 load("@prelude//android:android_providers.bzl", "merge_android_packageable_info")
 load("@prelude//graphql:graphql.bzl", "graphql_providers")
+load("@prelude//java:compiler_depth.bzl", "compiler_depth_for_action")
 load(
     "@prelude//java:java_providers.bzl",
     "ClasspathSnapshotGranularity",
@@ -22,8 +23,8 @@ load(
     "create_abi",
     "create_java_library_providers",
     "create_native_providers",
-    "derive_compiling_deps",
     "generate_java_classpath_snapshot",
+    "get_compiling_deps_tset",
     "make_compile_outputs",
     "to_list",
 )
@@ -52,6 +53,8 @@ load(
 load("@prelude//jvm:cd_jar_creator_util.bzl", "postprocess_jar")
 load("@prelude//jvm:nullsafe.bzl", "get_nullsafe_info")
 load("@prelude//linking:shared_libraries.bzl", "SharedLibraryInfo")
+load("@prelude//target_stats:target_stats.bzl", "CycleMode", "target_stats_providers_and_subtargets")
+load("@prelude//target_stats:target_stats_config.bzl", "TARGET_STATS_ENABLED")
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:label_provider.bzl", "LabelInfo")
 
@@ -165,7 +168,7 @@ def _build_classpath(
     classpath_args_projection: str,
     additional_classpath_entries_list: list[Artifact],
 ) -> [cmd_args, None]:
-    compiling_deps_tset = derive_compiling_deps(actions, None, deps)
+    compiling_deps_tset = get_compiling_deps_tset(actions, deps)
 
     if additional_classpath_entries or compiling_deps_tset or additional_classpath_entries_list:
         args = cmd_args()
@@ -562,6 +565,12 @@ def _create_jar_artifact(
     jar_snapshot = generate_java_classpath_snapshot(
         ctx.actions, java_toolchain.cp_snapshot_generator, ClasspathSnapshotGranularity("CLASS_MEMBER_LEVEL"), abi or final_jar, actions_identifier
     )
+    # Classic javac is not counted, but preserve compiler depth through its inputs.
+    compiler_depth = compiler_depth_for_action(
+        label,
+        "javac_and_jar",
+        get_compiling_deps_tset(ctx.actions, deps, [additional_classpath_entries] if additional_classpath_entries else []) if not skip_javac else None,
+    )
     return make_compile_outputs(
         full_library = final_jar,
         preprocessed_library = jar_out,
@@ -569,6 +578,8 @@ def _create_jar_artifact(
         required_for_source_only_abi = required_for_source_only_abi,
         annotation_processor_output = generated_sources_dir,
         abi_jar_snapshot = jar_snapshot,
+        full_library_compiler_depth = compiler_depth,
+        abi_compiler_depth = compiler_depth,
     )
 
 def _check_dep_types(deps: list[Dependency]):
@@ -598,6 +609,28 @@ def _check_exported_deps(exported_deps: list[Dependency], attr_name: str):
 # TODO(T145137403) remove need for this
 def _skip_java_library_dep_checks(ctx: AnalysisContext) -> bool:
     return "skip_buck2_java_library_dep_checks" in ctx.attrs.labels
+
+def jvm_target_stats(ctx: AnalysisContext) -> (list[Provider], dict[str, list[Provider]]):
+    """target_stats for a JVM library rule (java_library, kotlin_library).
+
+    JVM sources get package cycles, as android_library does; the tools come from
+    the java toolchain, which is the one both rules have. A no-op unless the
+    config is enabled and that toolchain carries the tools.
+    """
+    if not TARGET_STATS_ENABLED:
+        return [], {}
+    tools = ctx.attrs._java_toolchain[JavaToolchainInfo].target_stats_tools
+    if tools == None:
+        return [], {}
+    return target_stats_providers_and_subtargets(
+        ctx,
+        tools = tools,
+        srcs = {src.short_path: src for src in ctx.attrs.srcs},
+        # Target stats cover the compile graph, including non-packaged provided deps.
+        deps = (ctx.attrs.deps + ctx.attrs.exported_deps + ctx.attrs.runtime_deps + ctx.attrs.provided_deps + ctx.attrs.exported_provided_deps),
+        cycle_mode = CycleMode("package"),
+        module_name = ctx.label.name,
+    )
 
 def java_library_impl(ctx: AnalysisContext) -> list[Provider]:
     """
@@ -635,13 +668,16 @@ def java_library_impl(ctx: AnalysisContext) -> list[Provider]:
         _check_dep_types(ctx.attrs.exported_provided_deps)
         _check_dep_types(ctx.attrs.runtime_deps)
 
+    target_stats_providers, target_stats_subtargets = jvm_target_stats(ctx)
+
     java_providers = build_java_library(
         ctx = ctx,
         srcs = ctx.attrs.srcs,
         validation_deps_outputs = get_validation_deps_outputs(ctx),
+        extra_sub_targets = target_stats_subtargets,
     )
 
-    return to_list(java_providers) + [android_packageable_info] + [LabelInfo(labels = ctx.attrs.labels)] + graphql_providers(ctx)
+    return to_list(java_providers) + [android_packageable_info] + [LabelInfo(labels = ctx.attrs.labels)] + graphql_providers(ctx) + target_stats_providers
 
 def build_java_library(
     ctx: AnalysisContext,
@@ -704,7 +740,7 @@ def build_java_library(
             "debug_port": getattr(ctx.attrs, "debug_port", None),
             "deps": first_order_deps,
             "enable_depfiles": getattr(ctx.attrs, "enable_depfiles", True),
-            "javac_tool": derive_javac(ctx.attrs.javac) if ctx.attrs.javac else None,
+            "javac_tool": derive_javac(ctx.attrs.javac) if getattr(ctx.attrs, "javac", None) else None,
             "manifest_file": manifest_file,
             "remove_classes": ctx.attrs.remove_classes,
             "required_for_source_only_abi": ctx.attrs.required_for_source_only_abi,
@@ -790,7 +826,6 @@ def build_java_library(
         provided_deps = ctx.attrs.provided_deps + provided_deps_query,
         exported_provided_deps = ctx.attrs.exported_provided_deps,
         runtime_deps = ctx.attrs.runtime_deps,
-        needs_desugar = source_level > 7 or target_level > 7,
         generated_sources = all_generated_sources,
         has_srcs = has_srcs,
         sources_jar = sources_jar,

@@ -81,13 +81,13 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         res = res,
         res_priority = RESOURCE_PRIORITY_LOW,
         text_symbols = r_dot_txt,
+        unused_resource_dep_validation_has_non_xml_resources = True,
     )
 
     dummy_r_dot_java_info = get_dummy_r_dot_java(
         ctx,
         android_toolchain.merge_android_resources[RunInfo],
         [resource_info],
-        None,
     )
 
     android_resource_r_dot_info = AndroidResourceRDotInfo(
@@ -122,7 +122,6 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         global_code_config = java_toolchain.global_code_config,
         exported_deps = ctx.attrs.deps,
         provided_deps = ctx.attrs.desugar_deps,
-        needs_desugar = True,
         is_prebuilt_jar = True,
         annotation_jars_dir = annotation_jars_dir,
         proguard_config = proguard_config,

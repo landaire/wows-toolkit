@@ -11,11 +11,23 @@ load(
     "OCamlPlatformInfo",
     "OCamlToolchainInfo",
 )
+load("@prelude//os_lookup:defs.bzl", "Os", "OsLookup")
 
-def _system_ocaml_toolchain_impl(_ctx):
+_EXEC_OS_TYPE = attrs.default_only(attrs.exec_dep(default = "prelude//os_lookup/targets:os_lookup"))
+
+def _system_ocaml_toolchain_impl(ctx):
     """
     A very simple toolchain that is hardcoded to the current environment.
     """
+
+    runtime_dep_link_flags = ["-ldl", "-lpthread"]
+    exec_os = ctx.attrs._exec_os_type[OsLookup].os
+    if exec_os == Os("macos"):
+        runtime_dep_link_flags.extend(["-L/opt/homebrew/lib", "-lzstd"])
+    elif exec_os == Os("linux"):
+        # OCaml 5.3's runtime archive uses zstd for marshalled data. Linux
+        # finds the system library without an explicit -L flag.
+        runtime_dep_link_flags.append("-lzstd")
 
     return [
         DefaultInfo(),
@@ -46,10 +58,7 @@ def _system_ocaml_toolchain_impl(_ctx):
             ocaml_compiler_flags = [],  # e.g. "-opaque"
             ocamlc_flags = [],
             ocamlopt_flags = [],
-            # We don't expect /opt/homebrew/lib to exist on Linux but that's not
-            # a problem. On macOS (aarch64 at least) we expect zstd to live in
-            # /opt/homebrew/lib.
-            runtime_dep_link_flags = ["-ldl", "-lpthread", "-L/opt/homebrew/lib", "-lzstd"],
+            runtime_dep_link_flags = runtime_dep_link_flags,
             runtime_dep_link_extras = [],
         ),
         OCamlPlatformInfo(name = "x86_64"),
@@ -57,6 +66,8 @@ def _system_ocaml_toolchain_impl(_ctx):
 
 system_ocaml_toolchain = rule(
     impl = _system_ocaml_toolchain_impl,
-    attrs = {},
+    attrs = {
+        "_exec_os_type": _EXEC_OS_TYPE,
+    },
     is_toolchain_rule = True,
 )

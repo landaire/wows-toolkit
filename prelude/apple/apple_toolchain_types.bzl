@@ -55,7 +55,9 @@ AppleToolsInfo = provider(
     # @unsorted-dict-items
     fields = {
         "assemble_bundle": provider_field(RunInfo),
-        "signing_context": provider_field(RunInfo),
+        "provisioning_manifest": provider_field(RunInfo),
+        "resolve_signing_context": provider_field(RunInfo),
+        "signing_info": provider_field(RunInfo),
         "split_arch_combine_dsym_bundles_tool": provider_field(RunInfo),
         "dry_codesign_tool": provider_field(RunInfo),
         "adhoc_codesign_tool": provider_field(RunInfo),
@@ -72,5 +74,6 @@ AppleToolsInfo = provider(
         "static_archive_linker": provider_field(RunInfo),
         "spm_packager": provider_field(RunInfo),
         "bundle_telemetry_logger": provider_field(RunInfo | None, default = None),
+        "swiftmodule_change_analysis": provider_field(RunInfo | None, default = None),
     },
 )

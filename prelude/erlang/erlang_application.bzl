@@ -14,15 +14,17 @@ load(
 )
 load(
     ":erlang_dependencies.bzl",
-    "ErlAppDependencies",
     "erlang_deps_rule",
 )
 load(
     ":erlang_info.bzl",
+    "CodePathEntry",
+    "CodePathTSet",
     "ErlangAppIncludeInfo",
     "ErlangAppInfo",
     "ErlangAppOrTestInfo",
     "ErlangDependencyInfo",
+    "code_path_args",
 )
 load(":erlang_shell.bzl", "erlang_shell")
 load(
@@ -93,7 +95,7 @@ def build_application(ctx: AnalysisContext, name: str, toolchain: Toolchain, dep
 
     app_info = build_app_info(
         ctx,
-        dep_info.dependencies,
+        dep_info,
         build_environment,
         app_folder,
         start_dependencies,
@@ -120,7 +122,7 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
             )
         if include_info.name != name:
             fail("includes_target must have the same name as the application, got {} and {}".format(include_info.name, name))
-    build_environment = erlang_build.prepare_build_environment(dep_info, include_info)
+    build_environment = erlang_build.prepare_build_environment(dep_info, include_info, ctx.attrs.peek_private_includes)
 
     # build generated inputs
     generated_source_artifacts = erlang_build.build_steps.generated_source_artifacts(ctx, toolchain)
@@ -155,12 +157,6 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
         name,
         private_header_artifacts,
         is_private = True,
-    )
-
-    # maybe peek private includes
-    erlang_build.utils.peek_private_includes(
-        ctx,
-        build_environment,
     )
 
     # doc files
@@ -334,8 +330,9 @@ def link_output(ctx: AnalysisContext, link_path: str, built: BuiltApplication) -
     if ctx.attrs.include_src:
         link_spec["src"] = built.src_dir
     link_spec["priv"] = built.priv_dir
-    if name in build_environment.include_dirs:
-        link_spec["include"] = build_environment.include_dirs[name]
+    include_dir = erlang_build.own_or_dep(build_environment.include_dirs, build_environment.dep_include_dirs, name)
+    if include_dir != None:
+        link_spec["include"] = include_dir
 
     return ctx.actions.symlinked_dir(link_path, link_spec, has_content_based_path = False)
 
@@ -372,14 +369,14 @@ def _link_src_dir(ctx: AnalysisContext, *, extra_srcs: list[Artifact]) -> Artifa
 
 def _build_start_dependencies(ctx: AnalysisContext) -> list[StartDependencySet]:
     return build_apps_start_dependencies(
-        ctx,
+        ctx.actions,
         [(app, StartType("permanent")) for app in ctx.attrs.applications],
     ) + build_apps_start_dependencies(
-        ctx,
+        ctx.actions,
         [(app, StartType("load")) for app in ctx.attrs.included_applications],
     )
 
-def build_apps_start_dependencies(ctx: AnalysisContext, apps: list[(Dependency, StartType)]) -> list[StartDependencySet]:
+def build_apps_start_dependencies(actions: AnalysisActions, apps: list[(Dependency, StartType)]) -> list[StartDependencySet]:
     start_dependencies = []
     for app, start_type in apps[::-1]:
         app_spec = _build_start_spec(app[ErlangAppInfo], start_type)
@@ -389,7 +386,7 @@ def build_apps_start_dependencies(ctx: AnalysisContext, apps: list[(Dependency, 
         else:
             children = app[ErlangAppInfo].start_dependencies
 
-        app_set = ctx.actions.tset(
+        app_set = actions.tset(
             StartDependencySet,
             value = app_spec,
             children = children,
@@ -412,29 +409,36 @@ def _build_default_info(dep_info: ErlangDependencyInfo, app_dir: Artifact) -> Pr
 
     # We depend on the code path of all dependencies to force them to be compiled
     # and emit errors when users compile just this one application
-    return DefaultInfo(default_output = app_dir, other_outputs = [dep_info.code_path])
+    return DefaultInfo(default_output = app_dir, other_outputs = [code_path_args(dep_info.code_path_tset)])
 
 def build_app_info(
     ctx: AnalysisContext,
-    dependencies: ErlAppDependencies,
+    dep_info: ErlangDependencyInfo,
     build_environment: BuildEnvironment,
     app_folder: Artifact,
     start_dependencies: list[StartDependencySet],
 ) -> Provider:
     name = app_name(ctx)
 
+    code_path_tset = ctx.actions.tset(
+        CodePathTSet,
+        value = CodePathEntry(dir = app_folder, ebin = True),
+        children = [dep_info.code_path_tset],
+    )
+
     # build application info
     return ErlangAppInfo(
         name = name,
         version = ctx.attrs.version,
         beams = build_environment.beams.get(name),
-        dependencies = dependencies,
+        dependencies = dep_info.dependencies,
+        code_path_tset = code_path_tset,
         start_dependencies = start_dependencies,
-        includes = build_environment.includes.get(name),
-        include_dir = build_environment.include_dirs.get(name),
+        includes = erlang_build.own_or_dep(build_environment.includes, build_environment.dep_includes, name),
+        include_dir = erlang_build.own_or_dep(build_environment.include_dirs, build_environment.dep_include_dirs, name),
         private_includes = build_environment.private_includes.get(name),
         private_include_dir = build_environment.private_include_dirs.get(name),
-        header_deps_file = build_environment.header_deps_files.get(name),
+        header_deps_file = erlang_build.own_or_dep(build_environment.header_deps_files, build_environment.dep_header_deps_files, name),
         virtual = False,
         app_folder = app_folder,
     )

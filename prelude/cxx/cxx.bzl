@@ -9,8 +9,8 @@
 load("@prelude//:paths.bzl", "paths")
 load(
     "@prelude//:resources.bzl",
-    "ResourceInfo",
     "gather_resources",
+    "make_resource_info",
 )
 load(
     "@prelude//android:android_providers.bzl",
@@ -25,6 +25,7 @@ load(
     "@prelude//cxx:cuda.bzl",
     "CudaCompileStyle",
 )
+load("@prelude//cxx:cxx_flags.bzl", "cxx_attr_flags")
 load("@prelude//cxx:cxx_sources.bzl", "get_srcs_with_flags")
 load(
     "@prelude//cxx:cxx_toolchain_types.bzl",
@@ -66,6 +67,7 @@ load(
 )
 load(
     "@prelude//linking:linkable_graph.bzl",
+    "DLOPENABLE_LIBRARY_INFO_MARKER",
     "DlopenableLibraryInfo",
     "LinkableGraph",
     "create_linkable_graph",
@@ -89,6 +91,8 @@ load("@prelude//linking:strip.bzl", "strip_debug_info")
 load("@prelude//linking:types.bzl", "Linkage")
 load("@prelude//os_lookup:defs.bzl", "Os", "OsLookup")
 load("@prelude//python:manifest.bzl", "create_manifest_for_entries")
+load("@prelude//target_stats:target_stats.bzl", "CycleMode", "target_stats_providers_and_subtargets")
+load("@prelude//target_stats:target_stats_config.bzl", "TARGET_STATS_ENABLED")
 load("@prelude//test:inject_test_run_info.bzl", "inject_test_run_info")
 load(
     "@prelude//tests:re_utils.bzl",
@@ -135,6 +139,7 @@ load(
     "CxxRuleProviderParams",
     "CxxRuleSubTargetParams",
     "LinkPreference",
+    "xcode_data_enabled",
 )
 load(":gcno.bzl", "GcnoFilesInfo")
 load(
@@ -146,6 +151,7 @@ load(
 load(
     ":headers.bzl",
     "CPrecompiledHeaderInfo",
+    "cxx_attr_headers_list",
     "cxx_get_regular_cxx_headers_layout",
 )
 load(
@@ -241,7 +247,7 @@ def cxx_library_generate(ctx: AnalysisContext, rule_type: str) -> list[Provider]
     if ctx.attrs._is_building_android_binary:
         sub_target_params, provider_params = _get_params_for_android_binary_cxx_library()
     else:
-        sub_target_params = CxxRuleSubTargetParams()
+        sub_target_params = CxxRuleSubTargetParams(xcode_data = xcode_data_enabled())
         provider_params = CxxRuleProviderParams(
             third_party_build = True,
         )
@@ -254,6 +260,7 @@ def cxx_library_generate(ctx: AnalysisContext, rule_type: str) -> list[Provider]
         generate_sub_targets = sub_target_params,
         generate_providers = provider_params,
         compiler_flags = ctx.attrs.compiler_flags,
+        cxx_flags = cxx_attr_flags(ctx),
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
@@ -324,6 +331,7 @@ def cxx_binary_impl(ctx: AnalysisContext) -> list[Provider]:
     )
     params = CxxRuleConstructorParams(
         rule_type = "cxx_binary",
+        generate_sub_targets = CxxRuleSubTargetParams(xcode_data = xcode_data_enabled()),
         executable_name = ctx.attrs.executable_name,
         headers_layout = cxx_get_regular_cxx_headers_layout(ctx),
         srcs = get_srcs_with_flags(ctx),
@@ -333,6 +341,7 @@ def cxx_binary_impl(ctx: AnalysisContext) -> list[Provider]:
         exe_allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs),
         extra_link_roots = linkables(ctx.attrs.link_group_deps),
         compiler_flags = ctx.attrs.compiler_flags,
+        cxx_flags = cxx_attr_flags(ctx),
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
@@ -353,6 +362,8 @@ def cxx_binary_impl(ctx: AnalysisContext) -> list[Provider]:
         separate_debug_info = ctx.attrs.separate_debug_info,
         cuda_compile_style = CudaCompileStyle(ctx.attrs.cuda_compile_style),
         link_preference = LinkPreference(ctx.attrs.link_preference),
+        # @oss-disable[end= ]: extra_linker_outputs_factory = get_extra_linker_outputs,
+        # @oss-disable[end= ]: extra_linker_outputs_flags_factory = get_extra_linker_output_flags,
     )
     output = cxx_executable(ctx, params)
 
@@ -411,17 +422,23 @@ def cxx_binary_impl(ctx: AnalysisContext) -> list[Provider]:
     # by another rule, such as by $(exe ...) or exec_dep.
     other_outputs = output.runtime_files + (output.external_debug_info_artifacts if get_cxx_toolchain_info(ctx).materialize_external_debug_info else [])
 
-    return [
-        DefaultInfo(
-            default_output = output.binary,
-            other_outputs = other_outputs,
-            sub_targets = output.sub_targets,
-        ),
-        RunInfo(args = cmd_args(output.binary, hidden = output.runtime_files)),
-        output.compilation_db,
-        output.xcode_data,
-        output.dist_info,
-    ] + extra_providers
+    return (
+        filter(
+            None,
+            [
+                DefaultInfo(
+                    default_output = output.binary,
+                    other_outputs = other_outputs,
+                    sub_targets = output.sub_targets,
+                ),
+                RunInfo(args = cmd_args(output.binary, hidden = output.runtime_files)),
+                output.compilation_db,
+                output.xcode_data,
+                output.dist_info,
+            ],
+        )
+        + extra_providers
+    )
 
 def _prebuilt_item(_ctx: AnalysisContext, item: [typing.Any, None]) -> [typing.Any, None]:
     """
@@ -797,7 +814,10 @@ def _create_prebuilt_library_providers(
 
         # Mark libraries that support `dlopen`.
         if ctx.attrs.supports_python_dlopen:
-            providers.append(DlopenableLibraryInfo())
+            if ctx.attrs.shared_lib != None and LibOutputStyle("shared_lib") in libraries:
+                providers.append(DlopenableLibraryInfo(prebuilt_shared_lib = True))
+            else:
+                providers.append(DLOPENABLE_LIBRARY_INFO_MARKER)
 
     linkable_graph = create_linkable_graph(
         ctx,
@@ -994,12 +1014,12 @@ def prebuilt_cxx_library_impl(ctx: AnalysisContext) -> list[Provider]:
     )
 
     providers.append(
-        ResourceInfo(
-            resources = gather_resources(
+        make_resource_info(
+            gather_resources(
                 label = ctx.label,
                 deps = first_order_deps + exported_first_order_deps,
-            )
-        )
+            ),
+        ),
     )
 
     return providers
@@ -1027,15 +1047,19 @@ def cxx_test_impl(ctx: AnalysisContext) -> list[Provider]:
     )
 
     # TODO(T110378115): have the runinfo contain the correct test running args
+    headers_layout = cxx_get_regular_cxx_headers_layout(ctx)
+    srcs = get_srcs_with_flags(ctx)
     params = CxxRuleConstructorParams(
         rule_type = "cxx_test",
-        headers_layout = cxx_get_regular_cxx_headers_layout(ctx),
-        srcs = get_srcs_with_flags(ctx),
+        generate_sub_targets = CxxRuleSubTargetParams(xcode_data = xcode_data_enabled()),
+        headers_layout = headers_layout,
+        srcs = srcs,
         link_group_info = link_group_info,
         auto_link_group_specs = get_auto_link_group_specs(ctx, link_group_info),
         prefer_stripped_objects = ctx.attrs.prefer_stripped_objects,
         extra_link_roots = linkables(ctx.attrs.link_group_deps),
         compiler_flags = ctx.attrs.compiler_flags,
+        cxx_flags = cxx_attr_flags(ctx),
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
@@ -1059,6 +1083,28 @@ def cxx_test_impl(ctx: AnalysisContext) -> list[Provider]:
     )
     output = cxx_executable(ctx, params, is_cxx_test = True)
 
+    target_stats_providers = []
+    if TARGET_STATS_ENABLED:
+        target_stats_tools = get_cxx_toolchain_info(ctx).target_stats_tools
+        if target_stats_tools != None:
+            target_stats_srcs = {src.file.short_path: src.file for src in srcs}
+            target_stats_srcs.update({
+                # Named headers use the dict key; list headers retain their
+                # package-relative path. This matches the collector and avoids
+                # collisions between headers with the same basename.
+                (header.name if header.named else header.artifact.short_path): header.artifact
+                for header in cxx_attr_headers_list(ctx, ctx.attrs.headers, headers_layout)
+            })
+            target_stats_providers, target_stats_subtargets = target_stats_providers_and_subtargets(
+                ctx,
+                tools = target_stats_tools,
+                srcs = target_stats_srcs,
+                deps = cxx_attr_deps(ctx),
+                cycle_mode = CycleMode("file"),
+                module_name = ctx.label.name,
+            )
+            output.sub_targets.update(target_stats_subtargets)
+
     command = [cmd_args(output.binary, hidden = output.runtime_files)] + ctx.attrs.args
 
     # Setup RE executors based on the `remote_execution` param.
@@ -1071,9 +1117,10 @@ def cxx_test_impl(ctx: AnalysisContext) -> list[Provider]:
             sub_targets = output.sub_targets,
         ),
         output.compilation_db,
-        output.xcode_data,
         output.dist_info,
     ]
+    if output.xcode_data:
+        providers.append(output.xcode_data)
     providers.extend(
         inject_test_run_info(
             ctx,
@@ -1099,6 +1146,8 @@ def cxx_test_impl(ctx: AnalysisContext) -> list[Provider]:
 
     if get_cxx_toolchain_info(ctx).gcno_files and output.gcno_files:
         providers.append(GcnoFilesInfo(gcno_files = output.gcno_files))
+
+    providers.extend(target_stats_providers)
 
     return providers
 

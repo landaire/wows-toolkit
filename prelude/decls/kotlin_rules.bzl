@@ -16,7 +16,7 @@ load("@prelude//:validation_deps.bzl", "VALIDATION_DEPS_ATTR_NAME")
 load("@prelude//android:build_only_native_code.bzl", "is_build_only_native_code")
 load("@prelude//android:configuration.bzl", "is_building_android_binary_attr")
 load("@prelude//decls:test_common.bzl", "test_common")
-load(":common.bzl", "AnnotationProcessingTool", "SourceAbiVerificationMode", "TestType", "buck", "prelude_rule")
+load(":common.bzl", "TestType", "buck", "prelude_rule")
 load(":java_rules.bzl", "dex_min_sdk_version")
 load(":jvm_common.bzl", "jvm_common")
 load(":re_test_common.bzl", "re_test_common")
@@ -103,17 +103,6 @@ kotlin_library = prelude_rule(
         }
         | jvm_common.resources_arg()
         | {
-            "annotation_processing_tool": attrs.option(
-                attrs.enum(AnnotationProcessingTool),
-                default = None,
-                doc = """
-                Specifies the tool to use for annotation processing. Possible values: "kapt" or "javac".
-                 "kapt" allows running Java annotation processors against Kotlin sources while backporting
-                 it for Java sources too.
-                 "javac" works only against Java sources, Kotlin sources won't have access to generated
-                 classes at compile time.
-            """,
-            ),
             "deps": attrs.list(
                 attrs.dep(),
                 default = [],
@@ -129,14 +118,7 @@ kotlin_library = prelude_rule(
                 List of additional arguments to pass into the Kotlin compiler.
             """,
             ),
-            "friend_paths": attrs.list(
-                attrs.dep(),
-                default = [],
-                doc = """
-                List of source paths to pass into the Kotlin compiler as friend-paths, that is, modules
-                 you can have access to internal methods.
-            """,
-            ),
+            "friend_paths": jvm_common.friend_paths_attr(),
         }
         | jvm_common.annotation_processors()
         | jvm_common.remove_classes_arg()
@@ -146,10 +128,8 @@ kotlin_library = prelude_rule(
         | jvm_common.k2()
         | jvm_common.kotlin_compiler_plugins()
         | jvm_common.incremental()
-        | jvm_common.kotlincd_content_based_paths()
         | jvm_common.plugins()
         | jvm_common.javac()
-        | jvm_common.enable_used_classes()
         | jvm_common.classic_java_content_based_paths()
         | buck.labels_arg()
         | jvm_common.abi_generation_mode()
@@ -167,10 +147,8 @@ kotlin_library = prelude_rule(
             "resources_root": attrs.option(attrs.string(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source": attrs.option(attrs.string(), default = None),
-            "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
             "target": attrs.option(attrs.string(), default = None),
-            "use_jvm_abi_gen": attrs.option(attrs.bool(), default = None),
             VALIDATION_DEPS_ATTR_NAME: attrs.set(attrs.dep(), sorted = True, default = []),
             "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
             "_dex_min_sdk_version": attrs.option(attrs.int(), default = dex_min_sdk_version()),
@@ -257,10 +235,8 @@ kotlin_test = prelude_rule(
             ),
         }
         | jvm_common.annotation_processors()
-        | jvm_common.enable_used_classes()
         | jvm_common.incremental()
         | jvm_common.classic_java_content_based_paths()
-        | jvm_common.kotlincd_content_based_paths()
         | jvm_common.javac()
         | jvm_common.k2()
         | jvm_common.kotlin_compiler_plugins()
@@ -268,7 +244,6 @@ kotlin_test = prelude_rule(
         | jvm_common.test_env()
         | jvm_common.abi_generation_mode()
         | {
-            "annotation_processing_tool": attrs.option(attrs.enum(AnnotationProcessingTool), default = None),
             "cxx_library_allowlist": attrs.list(
                 attrs.dep(),
                 default = [],
@@ -283,7 +258,7 @@ kotlin_test = prelude_rule(
             "exported_provided_deps": attrs.list(attrs.dep(), default = []),
             "extra_arguments": attrs.list(attrs.string(), default = []),
             "extra_kotlinc_arguments": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
-            "friend_paths": attrs.list(attrs.dep(), default = []),
+            "friend_paths": jvm_common.friend_paths_attr(),
             "java": attrs.option(attrs.dep(), default = None),
             "java_agents": attrs.list(attrs.source(), default = []),
             "java_version": attrs.option(attrs.string(), default = None),
@@ -298,7 +273,6 @@ kotlin_test = prelude_rule(
             "resources_root": attrs.option(attrs.string(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source": attrs.option(attrs.string(), default = None),
-            "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
             "supports_test_execution_caching": attrs.bool(default = False),
             "target": attrs.option(attrs.string(), default = None),
@@ -307,8 +281,6 @@ kotlin_test = prelude_rule(
             "test_info_type": attrs.option(attrs.string(), default = None),
             "unbundled_resources_root": attrs.option(attrs.source(allow_directory = True), default = None),
             "use_cxx_libraries": attrs.option(attrs.bool(), default = None),
-            "use_dependency_order_classpath": attrs.option(attrs.bool(), default = None),
-            "use_jvm_abi_gen": attrs.option(attrs.bool(), default = None),
             "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
             "_exec_os_type": buck.exec_os_type_arg(),
             "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),

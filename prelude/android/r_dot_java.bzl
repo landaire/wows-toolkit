@@ -11,9 +11,6 @@ load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
 load("@prelude//java:java_library.bzl", "compile_to_jar")
 load("@prelude//java:java_providers.bzl", "JavaLibraryInfo", "single_library_compiling_deps")
 load("@prelude//utils:argfile.bzl", "argfile")
-load("@prelude//utils:buckconfig.bzl", "read_bool")
-
-_optimized_resource_processing = read_bool("android", "optimized_resource_processing", default = False, root_cell = True)
 
 RDotJavaSourceCode = record(
     r_dot_java_source_code_dir = Artifact,
@@ -24,12 +21,8 @@ RDotJavaSourceCode = record(
     ids_source_code_zipped = Artifact | None,
 )
 
-def get_dummy_r_dot_java(
-    ctx: AnalysisContext, merge_android_resources_tool: RunInfo, android_resources: list[AndroidResourceInfo], union_package: [str, None]
-) -> JavaLibraryInfo:
-    r_dot_java_source_code = _generate_r_dot_java_source_code(
-        ctx, merge_android_resources_tool, android_resources, "dummy_r_dot_java", union_package = union_package
-    )
+def get_dummy_r_dot_java(ctx: AnalysisContext, merge_android_resources_tool: RunInfo, android_resources: list[AndroidResourceInfo]) -> JavaLibraryInfo:
+    r_dot_java_source_code = _generate_r_dot_java_source_code(ctx, merge_android_resources_tool, android_resources, "dummy_r_dot_java")
     return _compile_r_dot_java(
         ctx,
         r_dot_java_source_code.r_dot_java_source_code_zipped,
@@ -44,7 +37,6 @@ def generate_r_dot_javas(
     uber_r_dot_txt_files: list[Artifact],
     override_symbols_paths: list[Artifact],
     duplicate_resources_allowlist: Artifact | None,
-    union_package: [str, None],
     referenced_resources_lists: list[Artifact],
     generate_strings_and_ids_separately: [bool, None] = True,
     remove_classes: list[str] = [],
@@ -72,7 +64,6 @@ def generate_r_dot_javas(
         uber_r_dot_txt_files = uber_r_dot_txt_files,
         override_symbols_paths = override_symbols_paths,
         duplicate_resources_allowlist = duplicate_resources_allowlist,
-        union_package = union_package,
         referenced_resources_lists = referenced_resources_lists,
     )
 
@@ -113,7 +104,6 @@ def _generate_r_dot_java_source_code(
     uber_r_dot_txt_files: list[Artifact] = [],
     override_symbols_paths: list[Artifact] = [],
     duplicate_resources_allowlist: Artifact | None = None,
-    union_package: [str, None] = None,
     referenced_resources_lists: list[Artifact] = [],
 ) -> RDotJavaSourceCode:
     merge_resources_cmd = cmd_args(merge_android_resources_tool)
@@ -174,17 +164,11 @@ def _generate_r_dot_java_source_code(
     if duplicate_resources_allowlist != None:
         merge_resources_cmd.add(["--duplicate-resource-allowlist-path", duplicate_resources_allowlist])
 
-    if union_package != None:
-        merge_resources_cmd.add(["--union-package", union_package])
-
     if referenced_resources_lists:
         referenced_resources_file = argfile(
             actions = ctx.actions, name = "referenced_resources_lists", args = referenced_resources_lists, has_content_based_path = True
         )
         merge_resources_cmd.add(["--referenced-resources-lists", referenced_resources_file])
-
-    if _optimized_resource_processing:
-        merge_resources_cmd.add("--optimized-processing")
 
     ctx.actions.run(merge_resources_cmd, category = "r_dot_java_merge_resources", identifier = identifier)
 

@@ -13,13 +13,13 @@ package com.facebook.buck.jvm.kotlin.ksp
 import com.facebook.buck.core.build.execution.context.IsolatedExecutionContext
 import com.facebook.buck.core.filesystems.AbsPath
 import com.facebook.buck.core.filesystems.RelPath
+import com.facebook.buck.core.util.log.Logger
 import com.facebook.buck.io.file.GlobPatternMatcher
 import com.facebook.buck.jvm.cd.command.kotlin.LanguageVersion
 import com.facebook.buck.jvm.core.BuildTargetValue
 import com.facebook.buck.jvm.java.CompilerOutputPaths
 import com.facebook.buck.jvm.kotlin.cd.analytics.KotlinCDAnalytics
 import com.facebook.buck.jvm.kotlin.cd.analytics.KotlinCDLoggingContext
-import com.facebook.buck.jvm.kotlin.ksp.incremental.Ksp2Mode
 import com.facebook.buck.jvm.kotlin.util.getExpandedSourcePaths
 import com.facebook.buck.step.StepExecutionResult
 import com.facebook.buck.step.StepExecutionResults
@@ -40,6 +40,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.Optional
 import java.util.ServiceLoader
+import kotlin.time.measureTimedValue
 
 class Ksp2Step(
     private val invokingRule: BuildTargetValue,
@@ -62,15 +63,45 @@ class Ksp2Step(
     private val jvmDefaultMode: String,
     private val javaBinary: Optional<String>,
     private val kotlinCDAnalytics: KotlinCDAnalytics,
-    private val ksp2Mode: Ksp2Mode,
+    private val kspCachesOutput: RelPath,
 ) : IsolatedStep {
+
+  private val noOpDetector = Ksp2NoOpDetector()
 
   @Throws(IOException::class, InterruptedException::class)
   override fun executeIsolatedStep(context: IsolatedExecutionContext): StepExecutionResult {
     CapturingPrintStream().use { stderr ->
       try {
-        val exitCode: KotlinSymbolProcessing.ExitCode = executeKsp2(stderr, context)
-        kotlinCDAnalytics.log(KotlinCDLoggingContext(languageVersion, ksp2Mode))
+        val (exitCode, elapsed) = measureTimedValue { executeKsp2(stderr, context) }
+        val durationMs = elapsed.inWholeMilliseconds
+        // Same shape KotlincStep already emits, so the two steps are greppable together.
+        LOG.info(
+            "KOTLINCD_STEP_DURATION|%s|%s|%d|%d",
+            invokingRule.fullyQualifiedName,
+            this::class.java.simpleName,
+            durationMs,
+            sourceFilePaths.size,
+        )
+        kotlinCDAnalytics.log(
+            KotlinCDLoggingContext(languageVersion, durationMs).apply {
+              addExtras(
+                  this@Ksp2Step::class.java.simpleName,
+                  "Ksp2 step duration: $durationMs ms",
+              )
+              val counts = noOpDetector.countsByProcessor
+              if (
+                  shouldRecordProcessorCounts(
+                      exitCode == KotlinSymbolProcessing.ExitCode.OK,
+                      counts.isNotEmpty(),
+                  )
+              ) {
+                addExtras(
+                    PROCESSOR_OUTPUT_EXTRAS_KEY,
+                    counts.entries.joinToString(",") { "${it.key}=${it.value}" },
+                )
+              }
+            },
+        )
         return when (exitCode) {
           KotlinSymbolProcessing.ExitCode.OK -> StepExecutionResults.SUCCESS
           KotlinSymbolProcessing.ExitCode.PROCESSING_ERROR ->
@@ -83,14 +114,14 @@ class Ksp2Step(
         return StepExecutionResult(
             StepExecutionResults.ERROR_EXIT_CODE,
             Optional.of(
-                "${stderr.getContentsAsString(StandardCharsets.UTF_8)}\n${e.stackTraceToString()}For URLClassLoader LinkError similar to P1626402598, try adding affected class to FilteringClassLoader's allowlist. See D63143327"
+                "${stderr.getContentsAsString(StandardCharsets.UTF_8)}\n${e.stackTraceToString()}For URLClassLoader LinkError similar to P1626402598, try adding affected class to FilteringClassLoader's allowlist. See D63143327",
             ),
         )
       } catch (e: Throwable) {
         return StepExecutionResult(
             StepExecutionResults.ERROR_EXIT_CODE,
             Optional.of(
-                "${stderr.getContentsAsString(StandardCharsets.UTF_8)}\n${e.stackTraceToString()}"
+                "${stderr.getContentsAsString(StandardCharsets.UTF_8)}\n${e.stackTraceToString()}",
             ),
         )
       }
@@ -111,7 +142,7 @@ class Ksp2Step(
     val processorProviders =
         ServiceLoader.load(
                 processorClassloader.loadClass(
-                    "com.google.devtools.ksp.processing.SymbolProcessorProvider"
+                    "com.google.devtools.ksp.processing.SymbolProcessorProvider",
                 ),
                 processorClassloader,
             )
@@ -155,19 +186,7 @@ class Ksp2Step(
               jvmDefaultMode = this@Ksp2Step.jvmDefaultMode
               resolveJdkHome(this@Ksp2Step.javaBinary)?.let { jdkHome = it }
 
-              when (ksp2Mode) {
-                is Ksp2Mode.NonIncremental -> {
-                  cachesDir = rootPath.resolve(ksp2Mode.kspCachesOutput).toFile()
-                }
-                is Ksp2Mode.Incremental -> {
-                  incremental = true
-                  cachesDir = ksp2Mode.cachesDir.toFile()
-                  incrementalLog = ksp2Mode.incrementalLog
-                  modifiedSources = ksp2Mode.modifiedSources.map { it.toFile() }
-                  removedSources = ksp2Mode.removedSources.map { it.toFile() }
-                  changedClasses = ksp2Mode.changedClasses
-                }
-              }
+              cachesDir = rootPath.resolve(kspCachesOutput).toFile()
             }
             .build()
 
@@ -193,16 +212,12 @@ class Ksp2Step(
               |  libraries = ${kspConfig.libraries}
               |  jvmDefaultMode = ${kspConfig.jvmDefaultMode}
               |  jdkHome = ${kspConfig.jdkHome}
-              |  incremental = ${kspConfig.incremental}
-              |  incrementalLog = ${kspConfig.incrementalLog}
-              |  modifiedSources = ${kspConfig.modifiedSources.joinToString()}
-              |  removedSources = ${kspConfig.removedSources.joinToString()}
-              |  changedClasses = ${kspConfig.changedClasses.joinToString()}
               |]"""
-            .trimMargin()
+            .trimMargin(),
     )
     // Run!
-    val kotlinSymbolProcessing = KotlinSymbolProcessing(kspConfig, processorProviders, logger)
+    val kotlinSymbolProcessing =
+        KotlinSymbolProcessing(kspConfig, noOpDetector.wrap(processorProviders), logger)
     return kotlinSymbolProcessing.execute()
   }
 
@@ -257,11 +272,24 @@ class Ksp2Step(
       } catch (exception: IOException) {
         logger.exception(exception)
         throw RuntimeException(
-            "Unable to expand sources for ${invokingRule.fullyQualifiedName} into $workingDirectory"
+            "Unable to expand sources for ${invokingRule.fullyQualifiedName} into $workingDirectory",
         )
       }
 
   companion object {
+    private val LOG: Logger = Logger.get(Ksp2Step::class.java)
+
+    private const val PROCESSOR_OUTPUT_EXTRAS_KEY = "ksp2_processor_generated_files"
+
+    /**
+     * Telemetry records only successful runs that produced counts: an aborted run leaves never-ran
+     * processors reading zero.
+     */
+    fun shouldRecordProcessorCounts(
+        succeeded: Boolean,
+        hasCounts: Boolean,
+    ): Boolean = succeeded && hasCounts
+
     private val jdkHomeCache = java.util.concurrent.ConcurrentHashMap<String, File>()
     private val JAVA_HOME_REGEX = Regex("""java\.home\s*=\s*(.+)""")
 
@@ -305,7 +333,7 @@ class Ksp2Step(
       val output = outputFuture.get()
       if (exitCode != 0) {
         throw RuntimeException(
-            "java binary exited with code $exitCode: $binary\n" + "Output: ${output.take(500)}"
+            "java binary exited with code $exitCode: $binary\n" + "Output: ${output.take(500)}",
         )
       }
       val match = JAVA_HOME_REGEX.find(output)
@@ -313,7 +341,7 @@ class Ksp2Step(
           match?.groupValues?.get(1)?.trim()
               ?: throw RuntimeException(
                   "Could not parse java.home from java binary output: $binary\n" +
-                      "Output (first 500 chars): ${output.take(500)}"
+                      "Output (first 500 chars): ${output.take(500)}",
               )
       return File(path)
     }

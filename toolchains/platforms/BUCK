@@ -27,8 +27,8 @@ alias(
 platform(
     name = "wasm32",
     constraint_values = [
-        "config//os/constraints:none",
-        "config//cpu/constraints:wasm32",
+        "config//os/constraints:os[none]",
+        "config//cpu/constraints:cpu[wasm32]",
     ],
     visibility = ["PUBLIC"],
 )

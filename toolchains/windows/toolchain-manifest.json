@@ -69,11 +69,11 @@
     {
       "name": "buck2",
       "comment": "Must stay on the release the vendored prelude came from; see prelude/VENDORED_FROM.",
-      "url": "https://github.com/facebook/buck2/releases/download/2026-08-01/buck2-x86_64-pc-windows-msvc.exe.zst",
-      "sha256": "5c727b170b9ed1dc089ad732668c8fcc454f3268f16cf8a2717c7202d634edf6",
-      "path": "archives/buck2-2026-08-01-x86_64-pc-windows-msvc.exe.zst",
-      "version": "2026-07-31",
-      "install_path": "Buck2/2026-07-31"
+      "url": "https://github.com/facebook/buck2/releases/download/2026-10-15/buck2-x86_64-pc-windows-msvc.exe.zst",
+      "sha256": "21aebf84920fbedee296509f9c253b2b28b5da5fc48912211b4d9506dff26625",
+      "path": "archives/buck2-2026-10-15-x86_64-pc-windows-msvc.exe.zst",
+      "version": "2026-10-15",
+      "install_path": "Buck2/2026-10-15"
     },
     {
       "name": "wix_extensions",
@@ -136,8 +136,7 @@
       "version_output": "NASM version 3.01"
     },
     "buck2": {
-      "path": "Buck2/2026-07-31/buck2.exe",
-      "version_output": "2026-07-31"
+      "path": "Buck2/2026-10-15/buck2.exe"
     },
     "zstd": {
       "path": "Zstd/1.5.7/zstd-v1.5.7-win64/zstd.exe",

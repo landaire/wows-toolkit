@@ -7,29 +7,16 @@
 # above-listed licenses.
 
 # Per-target codebase statistics, propagated across the dependency graph.
-#
-# A supporting rule (apple_library, cxx_library, android_library, ...) that has
-# target_stats enabled builds a per-target manifest JSON (aggregate metrics +
-# cycles + file->json mapping) and returns a TargetStatsInfo. The provider
-# carries a transitive set whose value is this target's TargetStatsRecord and
-# whose children are the tsets of its dependencies, so a consumer can request
-# the whole dependency graph's stats from a single top-level target.
 
 TargetStatsRecord = record(
-    # The (unconfigured) label of the target these stats are for.
     label = field(str),
-    # The per-target manifest JSON: aggregate info, the cycles output, and the
-    # mapping of source file -> its file_stats JSON. Produced with
-    # ctx.actions.write_json(..., with_inputs = True) so it carries the per-file
-    # JSONs + cycles artifact as inputs.
     manifest = field(Artifact),
+    manifest_with_inputs = field(typing.Any),
 )
 
-def _project_manifests(record: TargetStatsRecord) -> list[Artifact]:
-    return [record.manifest]
+def _project_manifests(record: TargetStatsRecord) -> typing.Any:
+    return record.manifest_with_inputs
 
-# Transitive set of TargetStatsRecord. The "manifests" projection yields every
-# transitive target's manifest, used to build the [all_target_stats] subtarget.
 TargetStatsInfoTSet = transitive_set(
     args_projections = {
         "manifests": _project_manifests,
@@ -38,10 +25,7 @@ TargetStatsInfoTSet = transitive_set(
 
 TargetStatsInfo = provider(
     fields = {
-        # The (unconfigured) label of the target.
         "label": provider_field(str),
-        # tset with this target's TargetStatsRecord as the value and its
-        # dependencies' tsets as the children.
         "tset": provider_field(TargetStatsInfoTSet),
     },
 )

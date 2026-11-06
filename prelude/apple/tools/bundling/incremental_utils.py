@@ -120,7 +120,14 @@ def _codesigned_on_copy_paths_from_previous_build_which_are_present_in_current_b
     }
 
 
-def _get_new_digest(action_metadata: Dict[Path, str], path: Path) -> str:
+def _get_new_digest(action_metadata: Dict[str, str], path: Path) -> str:
+    # A spec source is normally an action input recorded under exactly this
+    # path, and this runs once per file in the bundle, so try the lookup before
+    # resolving: `Path.resolve()` walks and stats every component of the path.
+    digest = action_metadata.get(str(path))
+    if digest is not None:
+        return digest
+
     # While a resource file can be in a symlinked folder, like the `ghi/def` example below,
     # ```
     # project_root
@@ -144,8 +151,10 @@ def _get_new_digest(action_metadata: Dict[Path, str], path: Path) -> str:
         # cannot be relativized against the cwd
         path_relative_to_cwd = None
 
-    if path_relative_to_cwd and path_relative_to_cwd in action_metadata:
-        return action_metadata[path_relative_to_cwd]
+    if path_relative_to_cwd is not None:
+        digest = action_metadata.get(str(path_relative_to_cwd))
+        if digest is not None:
+            return digest
 
     # The bundler synthesizes some files itself (e.g. build info) rather than
     # them being action inputs, so they have no entry in the action metadata.
@@ -157,7 +166,7 @@ def _get_new_digest(action_metadata: Dict[Path, str], path: Path) -> str:
 
 
 def calculate_incremental_state(
-    spec: List[BundleSpecItem], action_metadata: Dict[Path, str]
+    spec: List[BundleSpecItem], action_metadata: Dict[str, str]
 ) -> List[IncrementalStateItem]:
     """
     `action_metadata` maps Buck project relative paths to hash digest
@@ -199,10 +208,7 @@ def _source_with_destination_files(
             result.append((file_or_dir, Path(spec_item.dst)))
         elif file_or_dir.is_dir():
             result.extend(
-                [
-                    (file, spec_item.dst / file.relative_to(file_or_dir))
-                    for file in _list_directory_deterministically(file_or_dir)
-                ]
+                _list_directory_deterministically(spec_item.src, spec_item.dst)
             )
         else:
             raise RuntimeError(
@@ -212,10 +218,20 @@ def _source_with_destination_files(
     return [(src, dst) for src, dst in result if src.name not in FILES_TO_BE_IGNORED]
 
 
-def _list_directory_deterministically(directory: Path) -> List[Path]:
+def _list_directory_deterministically(
+    directory: str, destination_prefix: str
+) -> List[Tuple[Path, Path]]:
     result = []
     for current_dir_path, dir_names, file_names in os.walk(directory):
-        result += [Path(os.path.join(current_dir_path, f)) for f in sorted(file_names)]
+        relative_dir = os.path.relpath(current_dir_path, directory)
+        destination_dir = os.path.join(destination_prefix, relative_dir)
+        result += [
+            (
+                Path(os.path.join(current_dir_path, file_name)),
+                Path(os.path.join(destination_dir, file_name)),
+            )
+            for file_name in sorted(file_names)
+        ]
         # Sort in order for walk to be deterministic.
         dir_names.sort()
     return result
@@ -229,7 +245,7 @@ def codesigned_on_copy_item(
     extra_codesign_paths: Optional[List[str]],
 ) -> CodesignedOnCopy:
     if entitlements is not None:
-        digest = incremental_context.metadata.get(entitlements)
+        digest = incremental_context.metadata.get(str(entitlements))
         if digest is None:
             raise RuntimeError(
                 f"Expected digest for entitlements file path `{entitlements}` to be present in action metadata."

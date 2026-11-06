@@ -9,8 +9,8 @@
 # Implementation of the `genrule` build rule.
 
 load("@prelude//:cache_mode.bzl", "CacheModeInfo")
-load("@prelude//:genrule_local_labels.bzl", "genrule_labels_require_local")
-load("@prelude//:genrule_prefer_local_labels.bzl", "genrule_labels_prefer_local")
+load("@prelude//:genrule_local_labels.bzl", "resolved_genrule_labels_require_local")
+load("@prelude//:genrule_prefer_local_labels.bzl", "resolved_genrule_labels_prefer_local")
 load("@prelude//:genrule_toolchain.bzl", "GenruleToolchainInfo")
 load("@prelude//:is_full_meta_repo.bzl", "is_full_meta_repo")
 load("@prelude//android:build_only_native_code.bzl", "is_build_only_native_code")
@@ -71,10 +71,10 @@ def _requires_build_root(ctx: AnalysisContext) -> bool:
     return False
 
 def _requires_local(ctx: AnalysisContext) -> bool:
-    return genrule_labels_require_local(ctx.attrs.labels)
+    return resolved_genrule_labels_require_local(ctx.attrs.labels)
 
 def _prefers_local(ctx: AnalysisContext) -> bool:
-    return genrule_labels_prefer_local(ctx.attrs.labels)
+    return resolved_genrule_labels_prefer_local(ctx.attrs.labels)
 
 def _ignore_artifacts(ctx: AnalysisContext) -> bool:
     return "buck2_ignore_artifacts" in ctx.attrs.labels
@@ -166,6 +166,7 @@ _HEADER_EXTENSIONS = [
     ".hxx",
     ".cuh",
     ".inc",
+    ".tcc",
 ]
 
 def _is_header(path: str) -> bool:
@@ -308,15 +309,17 @@ def process_genrule(
         delimiter = " "
 
     # Setup environment variables.
-    srcs = cmd_args(delimiter = delimiter)
-    for symlink in symlinks:
-        srcs.add(cmd_args(srcs_artifact, format = path_sep.join([".", "{}", symlink.replace("/", path_sep)])))
+    no_srcs_environment = _requires_no_srcs_environment(ctx)
     env_vars = {
-        "GEN_DIR": "GEN_DIR_DEPRECATED",
         "OUT": out_env.as_output(),
         "SRCDIR": cmd_args(srcs_artifact, format = path_sep.join([".", "{}"])),
-        "SRCS": srcs,
-    } | {k: cmd_args(v) for k, v in getattr(ctx.attrs, "env", {}).items()}
+    }
+    if not no_srcs_environment:
+        srcs = cmd_args(delimiter = delimiter)
+        for symlink in symlinks:
+            srcs.add(cmd_args(srcs_artifact, format = path_sep.join([".", "{}", symlink.replace("/", path_sep)])))
+        env_vars["SRCS"] = srcs
+    env_vars |= {k: cmd_args(v) for k, v in getattr(ctx.attrs, "env", {}).items()}
 
     # RE will cache successful actions that don't produce the desired outptuts,
     # so if that happens and _then_ we add a local-only label, we'll get a
@@ -335,9 +338,6 @@ def process_genrule(
 
     if cacheable and cache_bust:
         env_vars["__BUCK2_ALLOW_CACHE_UPLOADS_CACHE_BUSTER"] = ""
-
-    if _requires_no_srcs_environment(ctx):
-        env_vars.pop("SRCS")
 
     for key, value in extra_env_vars.items():
         env_vars[key] = value

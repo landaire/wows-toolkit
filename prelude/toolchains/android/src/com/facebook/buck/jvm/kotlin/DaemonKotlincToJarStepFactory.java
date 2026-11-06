@@ -20,7 +20,6 @@ import com.facebook.buck.io.file.FileExtensionMatcher;
 import com.facebook.buck.io.file.GlobPatternMatcher;
 import com.facebook.buck.io.file.PathMatcher;
 import com.facebook.buck.io.filesystem.CopySourceMode;
-import com.facebook.buck.jvm.cd.command.kotlin.AnnotationProcessingTool;
 import com.facebook.buck.jvm.cd.command.kotlin.KotlinExtraParams;
 import com.facebook.buck.jvm.core.BuildTargetValue;
 import com.facebook.buck.jvm.core.BuildTargetValueExtraParams;
@@ -46,7 +45,6 @@ import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -92,7 +90,11 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
     ImmutableSortedSet<RelPath> sourceFilePaths = parameters.getSourceFilePaths();
     RelPath outputDirectory = compilerOutputPaths.getClassesDir();
     RelPath kotlinOutputDirectory = buildCellRootPath.relativize(extraParams.getKotlinClassesDir());
-    steps.add(new MkdirIsolatedStep(kotlinOutputDirectory));
+    if (!extraParams.getShouldActionRunIncrementally()) {
+      steps.addAll(MakeCleanDirectoryIsolatedStep.of(kotlinOutputDirectory));
+    } else {
+      steps.add(new MkdirIsolatedStep(kotlinOutputDirectory));
+    }
     RelPath annotationGenFolder = compilerOutputPaths.getAnnotationPath();
     Path pathToSrcsList = compilerOutputPaths.getPathToSourcesList().getPath();
 
@@ -163,7 +165,6 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
       ImmutableList<AbsPath> kotlinHomeLibraries = extraParams.getKotlinHomeLibraries();
 
       KaptStepsBuilder.prepareKaptProcessorsIfNeeded(
-          extraParams.getAnnotationProcessingTool(),
           invokingRule,
           buildCellRootPath,
           steps,
@@ -219,7 +220,6 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
           extraParams.getLanguageVersion());
 
       prepareKspProcessorsIfNeeded(
-          Optional.ofNullable(actionMetadata),
           extraParams,
           invokingRule,
           buildCellRootPath,
@@ -279,8 +279,7 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
     }
 
     ResolvedJavacOptions resolvedJavacOptions = extraParams.getResolvedJavacOptions();
-    if (hasKotlinSources
-        && extraParams.getAnnotationProcessingTool() == AnnotationProcessingTool.KAPT) {
+    if (hasKotlinSources) {
       // Most of the time, KotlinC have ran annotation processing,
       // so only run "java on mix" processors (very uncommon) on Javac
       resolvedJavacOptions =

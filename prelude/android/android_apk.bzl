@@ -18,14 +18,15 @@ load(
     "AndroidBinaryResourcesInfo",
     "DexFilesInfo",
     "ExopackageInfo",
+    "KeystoreInfo",
 )
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
 load("@prelude//android:util.bzl", "package_validators_decorator")
 load("@prelude//java:class_to_srcs.bzl", "merge_class_to_source_map_from_jar")
-load("@prelude//java:java_providers.bzl", "KeystoreInfo")
 load("@prelude//java:java_toolchain.bzl", "JavaToolchainInfo")
 load("@prelude//java/utils:java_more_utils.bzl", "get_path_separator_for_exec_os")
 load("@prelude//java/utils:java_utils.bzl", "get_class_to_source_map_info")
+load("@prelude//target_stats:target_stats.bzl", "target_stats_aggregate_providers_and_subtargets")
 load("@prelude//utils:argfile.bzl", "argfile")
 load("@prelude//utils:utils.bzl", "flatten")
 
@@ -107,6 +108,13 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
         )
     ]
 
+    # ctx.attrs.deps is split-transitioned here (one Dependency per ABI).
+    target_stats_providers, target_stats_subtargets = target_stats_aggregate_providers_and_subtargets(
+        ctx,
+        deps = android_binary_info.deps_by_platform[android_binary_info.primary_platform],
+    )
+    sub_targets.update(target_stats_subtargets)
+
     providers = [
         AndroidApkInfo(
             apk = output_apk,
@@ -156,7 +164,10 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
             },
         ),
         class_to_srcs,
-    ]
+    ] + target_stats_providers
+
+    if android_binary_info.preprocessed_java_classes_info:
+        providers.append(android_binary_info.preprocessed_java_classes_info)
 
     # Expose the exopackage secondary-dex dir so android_instrumentation_test can push it to the device.
     if exopackage_info != None and exopackage_info.secondary_dex_info != None:
@@ -314,7 +325,6 @@ def get_install_config(apex_mode: bool) -> dict[str, typing.Any]:
         "adb_restart_on_failure": read_root_config("adb", "adb_restart_on_failure", "true"),
         "apex_mode": apex_mode,
         "multi_install_mode": read_root_config("adb", "multi_install_mode", "false"),
-        "skip_install_metadata": read_root_config("adb", "skip_install_metadata", "false"),
         "staged_install_mode": read_root_config("adb", "staged_install_mode", None),
     }
 

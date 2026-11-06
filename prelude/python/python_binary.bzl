@@ -70,7 +70,7 @@ load(
     "create_python_library_info",
     "gather_dep_libraries",
     "py_attr_resources",
-    "py_resources",
+    "py_resources_deduped",
     "qualify_srcs",
 )
 load(":python_runtime_bundle.bzl", "PythonRuntimeBundleInfo")
@@ -155,7 +155,7 @@ def python_executable(
         src_manifest = create_manifest_for_source_map(ctx, "srcs", srcs)
 
         python_toolchain = ctx.attrs._python_toolchain[PythonToolchainInfo]
-        if get_package_style(ctx) != PackageStyle("inplace") and python_toolchain.pyc_compilation_enabled:
+        if python_toolchain.pyc_compilation_enabled:
             bytecode_manifest = compile_manifests(ctx, [src_manifest])
 
     all_default_resources = {}
@@ -176,18 +176,27 @@ def python_executable(
     if outplace_resources:
         all_outplace_resources.update(outplace_resources)
 
+    binary_default_resources, binary_standalone_resources, binary_outplace_resources = py_resources_deduped(
+        ctx,
+        [
+            ("", all_default_resources),
+            ("_standalone", all_standalone_resources),
+            ("_outplace", all_outplace_resources),
+        ],
+    )
+
     library_info = create_python_library_info(
         ctx.actions,
         ctx.label,
         srcs = src_manifest,
         src_types = src_manifest,
-        default_resources = py_resources(ctx, all_default_resources) if all_default_resources else None,
-        standalone_resources = py_resources(ctx, all_standalone_resources, "_standalone") if all_standalone_resources else None,
-        outplace_resources = py_resources(ctx, all_outplace_resources, "_outplace") if all_outplace_resources else None,
+        default_resources = binary_default_resources,
+        standalone_resources = binary_standalone_resources,
+        outplace_resources = binary_outplace_resources,
         bytecode = bytecode_manifest,
         deps = python_deps,
         shared_libraries = shared_deps,
-        native_deps = merge_native_deps(ctx, raw_deps),
+        native_deps = merge_native_deps(ctx, raw_deps, shared_deps = ctx.attrs.deps + preload_deps),
         is_native_dep = False,
         par_style = ctx.attrs.par_style,
         package_style = get_package_style(ctx).value,
@@ -258,7 +267,7 @@ def _add_executable_subtargets(
         exe.sub_targets.update({"typecheck": [type_check_info]})
 
         if ctx.attrs.typing and ctx.attrs.typing_validation:
-            validation_output = create_type_check_validation(ctx, type_checker, type_check_info.default_outputs[0])
+            validation_output = create_type_check_validation(ctx, type_check_info.default_outputs[0])
 
     return exe, validation_output
 
@@ -280,6 +289,7 @@ def _compute_pex_providers(
     linker_map_data = None,
     gc_sections_data = None,
     native_runtime_files = [],
+    build_info_manifest_entries = None,
 ) -> list[Provider] | Promise:
     dbg_source_db_output = ctx.actions.declare_output("dbg-db.json", has_content_based_path = True)
     dbg_source_db = create_dbg_source_db(ctx, dbg_source_db_output, src_manifest, python_deps)
@@ -460,6 +470,7 @@ def _compute_pex_providers(
         allow_cache_upload = allow_cache_upload,
         debuginfo_files = debuginfo_files,
         link_args = link_args,
+        manifest_entries_overlay = build_info_manifest_entries,
     )
 
     pex.sub_targets.update(extra)
@@ -543,19 +554,32 @@ def _convert_python_library_to_executable(
     native_runtime_files = []
 
     if link_strategy == NativeLinkStrategy("native"):
+        invalidate_build_info_on_python_sources = getattr(ctx.attrs, "_generated_build_info_enabled", False) and ctx.attrs._generated_build_info_mode == "full"
+        generated_build_info_invalidation_deps = deps if invalidate_build_info_on_python_sources else []
+        generated_build_info_invalidation_sources = (
+            [artifact for artifact, _ in src_manifest.artifacts] if invalidate_build_info_on_python_sources and src_manifest != None else []
+        )
+
         use_anon_target = getattr(ctx.attrs, "use_anon_target_for_analysis", False)
         if use_anon_target:
-            # For caching link groups, we just need to pass cxx_deps
             native_deps = {}
-            for dep in library.native_deps.traverse():
-                native_deps.update(dep.native_deps)
+            dlopen_deps = {}
+            shared_only_deps = {}
+            for info in library.native_deps.traverse():
+                native_deps.update(info.native_deps)
+                dlopen_deps.update(info.dlopen_deps)
+                shared_only_deps.update(info.shared_only_deps)
 
             explicit_attrs = {
                 "allow_cache_upload": allow_cache_upload,
                 "deps": list(native_deps.values()),
+                "dlopen_deps": list(dlopen_deps.values()),
+                "generated_build_info_invalidation_deps": generated_build_info_invalidation_deps,
+                "generated_build_info_invalidation_sources": generated_build_info_invalidation_sources,
                 "name": "python_linking:" + ctx.attrs.name,
                 "package_style": package_style,
                 "rpath": ctx.attrs.name,
+                "shared_only_deps": list(shared_only_deps.values()),
                 "static_extension_utils": ctx.attrs.static_extension_utils,
                 "transformation_spec": ctx.attrs.transformation_spec,
                 "_cxx_toolchain": ctx.attrs._cxx_toolchain,
@@ -587,16 +611,21 @@ def _convert_python_library_to_executable(
                     providers[LinkProviders].linker_map_data,
                     providers[LinkProviders].gc_sections_data,
                     native_runtime_files = providers[LinkProviders].runtime_files,
+                    build_info_manifest_entries = providers[LinkProviders].build_info_manifest_entries,
                 )
             )
         else:
-            shared_libs, extensions, link_args, extra, extra_artifacts, linker_map_data, gc_sections_data, native_runtime_files = process_native_linking(
-                ctx,
-                deps,
-                python_toolchain,
-                python_internal_tools,
-                package_style,
-                allow_cache_upload,
+            shared_libs, extensions, link_args, extra, extra_artifacts, linker_map_data, gc_sections_data, native_runtime_files, build_info_manifest_entries = (
+                process_native_linking(
+                    ctx,
+                    deps,
+                    python_toolchain,
+                    python_internal_tools,
+                    package_style,
+                    allow_cache_upload,
+                    generated_build_info_invalidation_deps = generated_build_info_invalidation_deps,
+                    generated_build_info_invalidation_sources = generated_build_info_invalidation_sources,
+                )
             )
             if ctx.attrs.runtime_bundle:
                 runtime_bundle = ctx.attrs.runtime_bundle[PythonRuntimeBundleInfo]
@@ -619,6 +648,7 @@ def _convert_python_library_to_executable(
                     )
 
     else:
+        build_info_manifest_entries = None
         linker_map_data = None
         gc_sections_data = None
         extensions = {}
@@ -655,6 +685,7 @@ def _convert_python_library_to_executable(
         linker_map_data = linker_map_data if link_strategy == NativeLinkStrategy("native") else None,
         gc_sections_data = gc_sections_data if link_strategy == NativeLinkStrategy("native") else None,
         native_runtime_files = native_runtime_files,
+        build_info_manifest_entries = build_info_manifest_entries,
     )
 
 def python_binary_impl(ctx: AnalysisContext) -> list[Provider] | Promise:

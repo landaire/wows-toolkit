@@ -20,7 +20,7 @@ load("@prelude//utils:expect.bzl", "expect")
 load(
     ":java_providers.bzl",
     "create_template_info",
-    "derive_compiling_deps",
+    "get_compiling_deps_tset",
     "get_java_packaging_info",
 )
 
@@ -65,6 +65,10 @@ def _create_fat_jar(
         expect(
             java_toolchain.is_bootstrap_toolchain == False,
             "Bootstrap java toolchain could not be used for java_binary() with native code.",
+        )
+        expect(
+            not (generate_wrapper and do_not_create_inner_jar),
+            "`generate_wrapper` cannot be combined with `do_not_create_inner_jar` for a java_binary() with native code: a wrapper script has nowhere to put the native libraries.",
         )
         args += [
             "--native_libs_file",
@@ -171,7 +175,7 @@ def java_binary_impl(ctx: AnalysisContext) -> list[Provider]:
 
     packaging_info = get_java_packaging_info(ctx, ctx.attrs.deps, None)
 
-    first_order_deps = derive_compiling_deps(ctx.actions, None, ctx.attrs.deps)
+    first_order_deps = get_compiling_deps_tset(ctx.actions, ctx.attrs.deps)
     first_order_libs = [dep.full_library for dep in (list(first_order_deps.traverse()) if first_order_deps else [])]
 
     shared_library_info = merge_shared_libraries(

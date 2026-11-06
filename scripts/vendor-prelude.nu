@@ -62,42 +62,31 @@ for file in ["prelude/utils/cmd_script.bzl", "prelude/rust/context.bzl"] {
     patch $file '"#!/usr/bin/env bash",' '"#!{}/bin/bash".format(read_root_config("nix_toolchain", "root")),'
 }
 
-# `--env-set=KEY=VALUE` used to lose its split when VALUE contains `=`, which
-# several crates' `cargo:rustc-env` output does. Fixed upstream since 2026-07-31.
-patch "prelude/rust/tools/rustc_action.py" 'flag, key, value = arg.split("=", 3)' 'flag, key, value = arg.split("=", 2)'
-
 # MSVC link.exe does not expand a response file referenced from inside another
 # response file, and rustc spills long linker command lines into one of its own.
-patch "prelude/rust/build.bzl" ("        else:
-            rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
-            linker = compile_ctx.linker_with_pre_args") ("        elif compile_ctx.exec_is_windows:
+patch "prelude/rust/build.bzl" ("        rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
+        rustc_cmd.add(cmd_args(compile_ctx.linker_with_pre_args, format = \"-Clinker={}\"))") ("        if compile_ctx.exec_is_windows:
             # MSVC link.exe does not expand a response file referenced from
             # inside another response file, and rustc spills long linker command
             # lines into one of its own. Passing the arguments inline leaves
             # rustc's spill as the only response file, so nothing nests.
             rustc_cmd.add(cmd_args(link_args_output.link_args, separate_debug_info_args, format = \"-Clink-arg={}\"))
             rustc_cmd.add(cmd_args(hidden = [link_args_output.hidden, separate_debug_info_args]))
-            linker = compile_ctx.linker_with_pre_args
         else:
             rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
-            linker = compile_ctx.linker_with_pre_args")
+        rustc_cmd.add(cmd_args(compile_ctx.linker_with_pre_args, format = \"-Clinker={}\"))")
 
-# Archive extraction invokes mkdir, tar and unzip by bare name, which resolves
-# them through PATH. Direct the POSIX branch to the pinned toolchain and the
-# Windows branch to the System32 bsdtar that the zip and zstd branches name
-# explicitly. A .crate file is a tar.gz, so this branch extracts every vendored
-# crate.
+# The POSIX unpack script invokes sh, mkdir, tar and unzip by bare name, which
+# resolves them through PATH. Direct it to the pinned toolchain. A .crate file
+# is a tar.gz, so this branch extracts every vendored crate.
 let unarchive = "prelude/http_archive/unarchive.bzl"
-patch $unarchive "def _unarchive_cmd(" ('def _nix_tool(name):
+patch $unarchive "# Returns a two-element tuple:\n" ('def _nix_tool(name):
     root = read_root_config("nix_toolchain", "root")
     if root == None:
         fail("Missing [nix_toolchain] root. Run `nu scripts/refresh-buck-toolchain.nu` before invoking Buck2.")
     return root + "/bin/" + name
 
-def _unarchive_cmd(')
-patch $unarchive '            "tar",' '            "%WINDIR%\\System32\\tar.exe" if exec_is_windows else _nix_tool("tar"),'
-patch $unarchive "            _TAR_FLAGS[ext_type],\n" "            _TAR_FLAGS[ext_type] if exec_is_windows else _nix_tar_flags(ext_type),\n"
-patch $unarchive "def _unarchive_cmd(" ('# GNU tar spawns its decompressor through PATH, which the actions clear.
+# GNU tar spawns its decompressor through PATH, which the actions clear.
 _NIX_TAR_DECOMPRESSORS = {
     "tar.bz2": "bzip2",
     "tar.gz": "gzip",
@@ -111,11 +100,14 @@ def _nix_tar_flags(ext_type: str) -> list[str]:
         return []
     return ["--use-compress-program=" + _nix_tool(decompressor)]
 
-def _unarchive_cmd(')
-patch $unarchive 'return cmd_args(archive, format = "unzip {}"), bool(strip_prefix)' ('unzip = "unzip" if exec_is_windows else _nix_tool("unzip")
-        return cmd_args(archive, format = unzip + " {}"), bool(strip_prefix)')
-patch $unarchive 'mkdir = "mkdir -p {}"' 'mkdir = _nix_tool("mkdir") + " -p {}"'
-patch $unarchive 'interpreter = ["/bin/sh"]' 'interpreter = [_nix_tool("bash")]'
+# Returns a two-element tuple:
+')
+patch $unarchive '            "tar",' '            _nix_tool("tar"),'
+patch $unarchive "            _TAR_FLAGS[ext_type],\n" "            _nix_tar_flags(ext_type),\n"
+patch $unarchive 'format = "unzip {}"' 'format = _nix_tool("unzip") + " {}"'
+patch $unarchive 'format = "mkdir -p {}"' 'format = _nix_tool("mkdir") + " -p {}"'
+patch $unarchive 'listing_interpreter = ["/bin/sh"]' 'listing_interpreter = [_nix_tool("bash")]'
+patch $unarchive 'unpack_interpreter = ["/bin/sh"]' 'unpack_interpreter = [_nix_tool("bash")]'
 
 # Two configured targets of one rule produce byte-identical outputs for several
 # of these files, and a content-based path is then the same path for both. On

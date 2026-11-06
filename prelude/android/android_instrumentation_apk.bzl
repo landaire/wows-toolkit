@@ -19,6 +19,7 @@ load("@prelude//java:class_to_srcs.bzl", "merge_class_to_source_map_from_jar")
 load("@prelude//java:java_providers.bzl", "create_java_packaging_dep", "get_all_java_packaging_deps")
 load("@prelude//java:java_toolchain.bzl", "JavaToolchainInfo")
 load("@prelude//java/utils:java_utils.bzl", "get_class_to_source_map_info")
+load("@prelude//target_stats:target_stats.bzl", "target_stats_aggregate_providers_and_subtargets")
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:utils.bzl", "flatten")
 
@@ -62,10 +63,16 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
 
     is_self_instrumenting = ctx.attrs.is_self_instrumenting
 
+    all_java_packaging_deps = [packaging_dep for packaging_dep in get_all_java_packaging_deps(ctx, deps) if packaging_dep.dex]
     java_packaging_deps = [
         packaging_dep
-        for packaging_dep in get_all_java_packaging_deps(ctx, deps)
-        if packaging_dep.dex and (is_self_instrumenting or packaging_dep.label.raw_target() not in apk_under_test_info.java_packaging_deps)
+        for packaging_dep in all_java_packaging_deps
+        if is_self_instrumenting or packaging_dep.label.raw_target() not in apk_under_test_info.java_packaging_deps
+    ]
+    desugar_classpath_jars = [
+        packaging_dep.jar
+        for packaging_dep in all_java_packaging_deps
+        if not is_self_instrumenting and packaging_dep.label.raw_target() in apk_under_test_info.java_packaging_deps
     ]
 
     android_packageable_info = merge_android_packageable_info(ctx.label, ctx.actions, deps)
@@ -94,6 +101,7 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
     enhance_ctx = create_enhancement_context(ctx)
     sub_targets = enhance_ctx.get_sub_targets()
     materialized_artifacts = []
+    preprocessed_java_classes_info = None
     if not disable_pre_dex:
         pre_dexed_libs = [java_packaging_dep.dex for java_packaging_dep in java_packaging_deps]
         if ctx.attrs.use_split_dex:
@@ -110,9 +118,9 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
     else:
         jars_to_owners = {packaging_dep.jar: packaging_dep.jar.owner.raw_target() for packaging_dep in java_packaging_deps}
         if ctx.attrs.preprocess_java_classes_bash:
-            jars_to_owners, materialized_artifacts_dir = get_preprocessed_java_classes(enhance_ctx, jars_to_owners)
-            if materialized_artifacts_dir:
-                materialized_artifacts.append(materialized_artifacts_dir)
+            jars_to_owners, preprocessed_java_classes_info = get_preprocessed_java_classes(enhance_ctx, jars_to_owners)
+            if preprocessed_java_classes_info:
+                materialized_artifacts.append(preprocessed_java_classes_info.materialized_artifacts_dir)
         if ctx.attrs.use_split_dex:
             dex_files_info = get_multi_dex(
                 ctx,
@@ -121,12 +129,14 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
                 ctx.attrs.primary_dex_patterns,
                 enable_bootstrap_dexes = ctx.attrs.enable_bootstrap_dexes,
                 multidex_min_api = ctx.attrs.multidex_min_api,
+                classpath_jars = desugar_classpath_jars,
             )
         else:
             dex_files_info = get_single_primary_dex(
                 ctx,
                 ctx.attrs._android_toolchain[AndroidToolchainInfo],
                 jars_to_owners.keys(),
+                classpath_jars = desugar_classpath_jars,
             )
     native_library_info = get_android_binary_native_library_info(
         enhance_ctx,
@@ -168,9 +178,16 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
     )
     sub_targets["transitive_class_to_src_map"] = [DefaultInfo(default_output = transitive_class_to_src_map)]
 
-    return [
-        AndroidApkInfo(apk = output_apk, materialized_artifacts = materialized_artifacts, manifest = resources_info.manifest),
-        AndroidInstrumentationApkInfo(apk_under_test = ctx.attrs.apk[AndroidApkInfo].apk, is_self_instrumenting = is_self_instrumenting),
-        DefaultInfo(default_output = output_apk, other_outputs = materialized_artifacts, sub_targets = sub_targets | class_to_srcs_subtargets),
-        class_to_srcs,
-    ]
+    target_stats_providers, target_stats_subtargets = target_stats_aggregate_providers_and_subtargets(ctx, deps = deps)
+    sub_targets.update(target_stats_subtargets)
+
+    return (
+        [
+            AndroidApkInfo(apk = output_apk, materialized_artifacts = materialized_artifacts, manifest = resources_info.manifest),
+            AndroidInstrumentationApkInfo(apk_under_test = ctx.attrs.apk[AndroidApkInfo].apk, is_self_instrumenting = is_self_instrumenting),
+            DefaultInfo(default_output = output_apk, other_outputs = materialized_artifacts, sub_targets = sub_targets | class_to_srcs_subtargets),
+            class_to_srcs,
+        ]
+        + ([preprocessed_java_classes_info] if preprocessed_java_classes_info else [])
+        + target_stats_providers
+    )

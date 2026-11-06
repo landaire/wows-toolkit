@@ -113,6 +113,7 @@ def key_value_arg(s: str) -> tuple[str, str]:
 class Args(NamedTuple):
     diag_json: Optional[IO[bytes]]
     diag_txt: Optional[IO[bytes]]
+    passthrough_stderr: bool
     env: Optional[list[tuple[str, str]]]
     path_env: Optional[list[tuple[str, str]]]
     remap_cwd_prefix: Optional[str]
@@ -121,10 +122,13 @@ class Args(NamedTuple):
     failure_filter: Optional[IO[bytes]]
     required_output: Optional[list[tuple[str, str]]]
     echo: Optional[IO[bytes]]
+    strip_dwo_members: Optional[str]
+    archiver: Optional[list[str]]
+    archiver_deterministic: bool
     rustc: list[str]
 
 
-def arg_parse() -> Args:
+def arg_parse(argv: Optional[list[str]] = None) -> Args:
     # Command line is <action.py> [args] -- rustc command line
     parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
     parser.add_argument(
@@ -137,6 +141,12 @@ def arg_parse() -> Args:
         "--diag-txt",
         type=argparse.FileType("wb"),
         help="Rendered text diagnostic output (also streamed to stderr)",
+    )
+    parser.add_argument(
+        "--passthrough-stderr",
+        action="store_true",
+        help="Copy stderr through verbatim without diagnostic parsing "
+        "(for commands whose output is not rustc JSON diagnostics)",
     )
     parser.add_argument(
         "--env",
@@ -187,13 +197,32 @@ def arg_parse() -> Args:
         help="Write the input command line to this file, without running it",
     )
     parser.add_argument(
+        "--strip-dwo-members",
+        metavar="ARCHIVE",
+        help="Archive (rlib or staticlib) written by the compiler from which "
+        "to delete every `.dwo` member after a successful compile",
+    )
+    parser.add_argument(
+        "--archiver",
+        action="append",
+        metavar="ARG",
+        help="Archiver command used by --strip-dwo-members, one argument per occurrence",
+    )
+    parser.add_argument(
+        "--archiver-deterministic",
+        action="store_true",
+        help="Pass the `D` modifier to the archiver so the rewritten archive carries no timestamps",
+    )
+    parser.add_argument(
         "rustc",
         nargs=argparse.REMAINDER,
-        type=arg_eval,
         help="Compiler command line",
     )
 
-    return Args(**vars(parser.parse_args()))
+    args = Args(**vars(parser.parse_args(argv)))
+    if args.strip_dwo_members is not None and not args.archiver:
+        parser.error("--strip-dwo-members requires --archiver")
+    return args
 
 
 def arg_eval(arg: str) -> str:
@@ -237,6 +266,67 @@ def inherited_env() -> dict[str, str]:
     return env
 
 
+# The archiver's `d` operation names each member to delete and rewrites the
+# whole archive, so all members should go in one invocation. Keep each
+# invocation's argv under the smallest command-line limit of the hosts the
+# rules run on (Windows: 32767 characters).
+ARCHIVER_ARGV_BUDGET = 30_000
+
+
+def strip_dwo_members(
+    archiver: list[str], archive: str, deterministic: bool, env: dict[str, str]
+) -> int:
+    """Delete the `.dwo` members the compiler packed into an rlib or staticlib.
+
+    Under `-Csplit-debuginfo=unpacked`, rustc writes each codegen unit's `.dwo`
+    to `--out-dir` and also copies it into the archive, so that a downstream
+    `-Csplit-debuginfo=packed` link could build a dwp from the archive alone.
+    The rules never link that way: `dwp` reads the `--out-dir` files, and
+    linkers never pull archive members that define no symbols. The copies are
+    dead weight for every consumer of the archive. The archive is left
+    untouched when it has no `.dwo` members.
+    """
+    # Apple's archiver takes its deterministic mode from the environment.
+    env = {**env, "ZERO_AR_DATE": "1"}
+
+    def members() -> list[str]:
+        listing = subprocess.run(
+            [*archiver, "t", archive], stdout=subprocess.PIPE, env=env, check=True
+        )
+        return [m for m in listing.stdout.decode().splitlines() if m.endswith(".dwo")]
+
+    try:
+        dwo_members = members()
+        if not dwo_members:
+            return 0
+
+        # GNU-style archivers delete one member per name given, so a name that
+        # occurs twice must be given twice. rustc never produces duplicates
+        # within one archive; the check below catches it if that changes.
+        delete = [*archiver, "dD" if deterministic else "d", archive]
+        budget = ARCHIVER_ARGV_BUDGET - sum(len(arg) + 1 for arg in delete)
+        chunks: list[list[str]] = [[]]
+        used = 0
+        for member in dwo_members:
+            if chunks[-1] and used + len(member) + 1 > budget:
+                chunks.append([])
+                used = 0
+            chunks[-1].append(member)
+            used += len(member) + 1
+        for chunk in chunks:
+            subprocess.run([*delete, *chunk], env=env, check=True)
+
+        remaining = members()
+        if remaining:
+            eprint(f"{archive} still has .dwo members after deleting them: {remaining}")
+            return 1
+    except subprocess.CalledProcessError as e:
+        eprint(f"failed to strip .dwo members from {archive}: {e}")
+        return e.returncode or 1
+
+    return 0
+
+
 async def handle_output(  # noqa: C901
     proc: asyncio.subprocess.Process,
     args: Args,
@@ -252,6 +342,10 @@ async def handle_output(  # noqa: C901
 
         if line is None or line == b"":
             break
+
+        if args.passthrough_stderr:
+            sys.stderr.buffer.write(line)
+            continue
 
         try:
             diag = json.loads(line)
@@ -319,10 +413,33 @@ async def handle_output(  # noqa: C901
 
 
 async def main() -> int:  # noqa: C901
-    args = arg_parse()
+    # `--program-args` is a raw argv boundary, split off before argparse's
+    # response-file expansion so the tail is never inspected or rewritten.
+    # First raw occurrence wins; absence (None) means ordinary behavior,
+    # while an empty tail still emits a literal `--`. No wrapper option
+    # takes a separate value that could equal this token.
+    raw_argv = sys.argv[1:]
+    program_args = None
+    if "--program-args" in raw_argv:
+        split = raw_argv.index("--program-args")
+        program_args = raw_argv[split + 1 :]
+        raw_argv = raw_argv[:split]
+    args = arg_parse(raw_argv)
+
+    if program_args is None:
+        # No boundary: historical behavior; expand everything.
+        positional = [arg_eval(arg) for arg in args.rustc]
+    else:
+        # With a boundary only compiler arguments expand; the prefix stays
+        # raw apart from OUT_DIR resolution below.
+        positional = list(args.rustc)
+    args = args._replace(rustc=positional)
 
     if args.echo:
-        args.echo.write("".join(arg + "\n" for arg in args.rustc).encode("utf-8"))
+        echo_argv = list(args.rustc)
+        if program_args is not None:
+            echo_argv += ["--program-args"] + program_args
+        args.echo.write("".join(arg + "\n" for arg in echo_argv).encode("utf-8"))
         return 0
 
     # Inherit a very limited initial environment, then add the new things
@@ -341,10 +458,20 @@ async def main() -> int:  # noqa: C901
     if DEBUG:
         print(f"args {repr(args)} env {env} crate_map {crate_map}", end="\n")
 
+    out_dir = env.get("OUT_DIR")
+
     separator = args.rustc.index("--rustc-action-separator")
     rustc_cmd, rustc_args_orig = args.rustc[:separator], args.rustc[separator + 1 :]
-
-    out_dir = env.get("OUT_DIR")
+    if program_args is not None:
+        # Expansion applies to compiler arguments only.
+        rustc_args_orig = [arg_eval(arg) for arg in rustc_args_orig]
+        if out_dir is not None:
+            rustc_cmd = [
+                arg.replace(OUT_DIR_SENTINEL, out_dir)
+                if OUT_DIR_SENTINEL in arg
+                else arg
+                for arg in rustc_cmd
+            ]
 
     rustc_args = []
     for arg in rustc_args_orig:
@@ -385,6 +512,12 @@ async def main() -> int:  # noqa: C901
             )
         )
 
+    # The tail travels as raw argv past the response file; Miri scans raw
+    # argv itself, so the separator must not hide inside the file.
+    prog_tail_argv = []
+    if program_args is not None:
+        prog_tail_argv = ["--", *program_args]
+
     with tempfile.NamedTemporaryFile(
         mode="wb",
         prefix="rustc-args-",
@@ -401,11 +534,12 @@ async def main() -> int:  # noqa: C901
         proc = await asyncio.create_subprocess_exec(
             *rustc_cmd,
             "@" + args_file.name,
+            *prog_tail_argv,
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=None,  # Inherit
             stderr=subprocess.PIPE,
-            limit=1_000_000,
+            limit=20_000_000,
         )
         got_error_diag = await handle_output(proc, args, crate_map)
         res = await proc.wait()
@@ -425,6 +559,12 @@ async def main() -> int:  # noqa: C901
     # If rustc is reporting a silent error, make it loud
     if res == 0 and got_error_diag:
         res = 1
+
+    if res == 0 and args.strip_dwo_members is not None:
+        assert args.archiver is not None
+        res = strip_dwo_members(
+            args.archiver, args.strip_dwo_members, args.archiver_deterministic, env
+        )
 
     # Check for death by signal - this is always considered a failure
     if res < 0:
@@ -464,4 +604,5 @@ async def main() -> int:  # noqa: C901
     return res
 
 
-sys.exit(asyncio.run(main()))
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))

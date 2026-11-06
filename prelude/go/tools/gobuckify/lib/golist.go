@@ -13,16 +13,20 @@ package gobuckifylib
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 )
+
+// moduleDirective matches the `module` directive of a go.mod file, whose module
+// path may be double-quoted.
+var moduleDirective = regexp.MustCompile(`^\s*module\s+"?([^\s"]+)"?`)
 
 // Module represents a Go module from go list output
 type Module struct {
@@ -40,7 +44,11 @@ type Package struct {
 	Module     *Module
 }
 
-func QueryGoList(workDir, rootModuleName, goOS, goArch string, extraArgs ...string) (chan *Package, chan error) {
+func QueryGoList(
+	workDir, rootModuleName, goOS, goArch string,
+	cgoEnabled bool,
+	extraArgs ...string,
+) (chan *Package, chan error) {
 	pkgChan := make(chan *Package, 1000) // 1000 is a guess, but should be enough
 	errChan := make(chan error, 1)
 	go func() {
@@ -56,9 +64,12 @@ func QueryGoList(workDir, rootModuleName, goOS, goArch string, extraArgs ...stri
 		// filename suffixes (e.g. `*_darwin.go`) and `//go:build` expressions (e.g.
 		// `!linux`). Passing the platform only via `-tags` is insufficient -- the host's
 		// own GOOS/GOARCH tags stay set, so negative and file-suffix constraints are
-		// mis-evaluated and platform-specific deps get silently dropped. CGO_ENABLED is
-		// forced on for consistent behaviour across host machines.
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=1", "GOOS="+goOS, "GOARCH="+goArch)
+		// mis-evaluated and platform-specific deps get silently dropped.
+		cgoEnabledValue := "0"
+		if cgoEnabled {
+			cgoEnabledValue = "1"
+		}
+		cmd.Env = append(os.Environ(), "CGO_ENABLED="+cgoEnabledValue, "GOOS="+goOS, "GOARCH="+goArch)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -89,8 +100,8 @@ func QueryGoList(workDir, rootModuleName, goOS, goArch string, extraArgs ...stri
 			if pkg.Module == nil {
 				continue // that's not a ligit third-party package
 			}
-			if strings.HasPrefix(pkg.ImportPath, rootModuleName) {
-				continue // skip the root module packages
+			if isRootModulePackage(pkg.ImportPath, rootModuleName) {
+				continue
 			}
 			pkgChan <- &pkg
 		}
@@ -110,6 +121,14 @@ func QueryGoList(workDir, rootModuleName, goOS, goArch string, extraArgs ...stri
 	return pkgChan, errChan
 }
 
+// isRootModulePackage reports whether importPath belongs to the root module, whose
+// packages get no generated BUCK files.
+func isRootModulePackage(importPath, rootModuleName string) bool {
+	return importPath == rootModuleName || strings.HasPrefix(importPath, rootModuleName+"/")
+}
+
+// ReadModuleName returns the module path declared by the `module` directive of the
+// go.mod file at path.
 func ReadModuleName(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -117,16 +136,17 @@ func ReadModuleName(path string) (string, error) {
 	}
 	defer f.Close()
 
-	reader := bufio.NewReader(f)
-	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", fmt.Errorf("failed to read first line: %w", err)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line, _, _ := strings.Cut(scanner.Text(), "//")
+		if m := moduleDirective.FindStringSubmatch(line); m != nil {
+			return m[1], nil
+		}
 	}
-	parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("failed to parse first line: %s", line)
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", path, err)
 	}
-	return parts[1], nil
+	return "", fmt.Errorf("no module directive in %s", path)
 }
 
 // CollectPackagesResult contains the results of collecting packages from go list
@@ -135,46 +155,46 @@ type CollectPackagesResult struct {
 	Modules     map[string]*Module
 }
 
-// CollectPackages queries go list for all platforms and collects packages into BuckTargets and unique Modules
+// CollectPackages queries go list for all platform and CGO configurations and
+// collects packages into BuckTargets and unique Modules.
 func CollectPackages(cfg *Config, thirdPartyDir, rootModuleName string) (*CollectPackagesResult, error) {
 	type result struct {
-		pkg      *Package
-		buckOS   string
-		buckArch string
+		pkg        *Package
+		buckOS     string
+		buckArch   string
+		cgoEnabled bool
 	}
 
-	results := make(chan *result, 1000*len(cfg.Platforms))
+	results := make(chan *result, 2*1000*len(cfg.Platforms))
 	mainErrChan := make(chan error)
 
 	// Limit concurrency to avoid OOMs as `go list` can use a lot of memory
-	maxConcurrency := 10
-	semaphore := make(chan struct{}, maxConcurrency)
+	semaphore := make(chan struct{}, 10)
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	for _, p := range cfg.Platforms {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		for _, cgoEnabled := range []bool{false, true} {
+			wg.Go(func() {
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
 
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			// GOOS/GOARCH are passed via the environment (see QueryGoList), not as
-			// build tags, so `go list` evaluates each platform's constraints correctly.
-			pkgChan, errChan := QueryGoList(
-				thirdPartyDir, rootModuleName, p.GoOS, p.GoArch,
-				fmt.Sprintf("-tags=%s", strings.Join(cfg.DefaultTags, ",")),
-			)
-			pkgCount := 0
-			for pkg := range pkgChan {
-				pkgCount++
-				results <- &result{pkg: pkg, buckOS: p.BuckOS, buckArch: p.BuckArch}
-			}
-			slog.Info("Found packages", "count", pkgCount, "os", p.GoOS, "arch", p.GoArch)
-			for err := range errChan {
-				mainErrChan <- fmt.Errorf("error querying golist for %s: %w", p, err)
-			}
-		}()
+				// GOOS/GOARCH and CGO_ENABLED are passed via the environment (see
+				// QueryGoList), so `go list` evaluates each configuration correctly.
+				pkgChan, errChan := QueryGoList(
+					thirdPartyDir, rootModuleName, p.GoOS, p.GoArch, cgoEnabled,
+					fmt.Sprintf("-tags=%s", strings.Join(cfg.DefaultTags, ",")),
+				)
+				pkgCount := 0
+				for pkg := range pkgChan {
+					pkgCount++
+					results <- &result{pkg: pkg, buckOS: p.BuckOS, buckArch: p.BuckArch, cgoEnabled: cgoEnabled}
+				}
+				slog.Info("Found packages", "count", pkgCount, "os", p.GoOS, "arch", p.GoArch, "cgo_enabled", cgoEnabled)
+				for err := range errChan {
+					mainErrChan <- fmt.Errorf("error querying golist for %v with cgo_enabled=%t: %w", p, cgoEnabled, err)
+				}
+			})
+		}
 	}
 
 	go func() {
@@ -197,7 +217,7 @@ func CollectPackages(cfg *Config, thirdPartyDir, rootModuleName string) (*Collec
 				resultsClosed = true
 				continue
 			}
-			buckTargets.AddPackage(res.pkg, res.buckOS, res.buckArch)
+			buckTargets.AddPackage(res.pkg, res.buckOS, res.buckArch, res.cgoEnabled)
 			if res.pkg.Module != nil {
 				modules[res.pkg.Module.Path] = res.pkg.Module
 			}

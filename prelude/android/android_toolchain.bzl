@@ -12,13 +12,19 @@ AndroidPlatformInfo = provider(
     }
 )
 
+AidlToolchainInfo = provider(
+    fields = {
+        "aidl": provider_field(typing.Any, default = None),
+        "framework_aidl_file": provider_field(typing.Any, default = None),
+    }
+)
+
 AndroidToolchainInfo = provider(
     fields = {
         "aapt2": provider_field(typing.Any, default = None),
         "aapt2_filter_resources": provider_field(typing.Any, default = None),
         "aar_builder": provider_field(typing.Any, default = None),
         "adb": provider_field(typing.Any, default = None),
-        "aidl": provider_field(typing.Any, default = None),
         "android_bootclasspath": provider_field(typing.Any, default = None),
         "android_bootclasspath_snapshots": provider_field(typing.Any, default = []),
         "android_error_handler": provider_field(typing.Any, default = None),
@@ -41,7 +47,6 @@ AndroidToolchainInfo = provider(
         "filter_dex_class_names": provider_field(typing.Any, default = None),
         "filter_prebuilt_native_library_dir": provider_field(typing.Any, default = None),
         "filter_resources": provider_field(typing.Any, default = None),
-        "framework_aidl_file": provider_field(typing.Any, default = None),
         # @oss-disable[end= ]: "gatorade_mergemap_tool": provider_field(typing.Any, default = None),
         "generate_build_config": provider_field(typing.Any, default = None),
         "generate_manifest": provider_field(typing.Any, default = None),
@@ -51,6 +56,7 @@ AndroidToolchainInfo = provider(
         "instrumentation_test_runner_main_class": provider_field(typing.Any, default = None),
         "jar_splitter_command": provider_field(typing.Any, default = None),
         "jdk_system_image": provider_field(typing.Any, default = None),
+        "jni_onload_check": provider_field(typing.Any, default = None),
         "manifest_utils": provider_field(typing.Any, default = None),
         "merge_android_resource_sources": provider_field(typing.Any, default = None),
         "merge_android_resources": provider_field(typing.Any, default = None),
@@ -69,9 +75,7 @@ AndroidToolchainInfo = provider(
         "replace_application_id_placeholders": provider_field(typing.Any, default = None),
         "secondary_dex_compression_command": provider_field(typing.Any, default = None),
         "secondary_dex_weight_limit": provider_field(typing.Any, default = None),
-        "set_application_id_to_specified_package": provider_field(typing.Any, default = None),
-        "should_run_sanity_check_for_placeholders": provider_field(typing.Any, default = None),
-        "sort_pre_dexed_files": provider_field(typing.Any, default = None),
+        "sort_pre_dexed_files": provider_field(typing.Any),
         "target_stats_tools": provider_field(typing.Any, default = None),
         "unpack_aar": provider_field(typing.Any, default = None),
         "zipalign": provider_field(typing.Any, default = None),

@@ -126,6 +126,11 @@ def _python_executable_attrs():
             "_cxx_hacks": attrs.default_only(attrs.dep(default = "prelude//cxx/tools:cxx_hacks")),
             "_cxx_toolchain": toolchains_common.cxx(),
             "_exec_os_type": buck.exec_os_type_arg(),
+            "_gen_build_info": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
+            "_generated_build_info_enabled": attrs.bool(default = False),
+            "_generated_build_info_mode": attrs.enum(["full", "stable"], default = "stable"),
+            "_generated_build_info_spec": BUILD_INFO_ATTR,
+            "_late_build_info_stamping": attrs.any(default = None),
             "_python_internal_tools": python_common.internal_tools_arg(),
             "_python_toolchain": toolchains_common.python(),
             "_target_os_type": buck.target_os_type_arg(),
@@ -366,13 +371,26 @@ prebuilt_python_library = prelude_rule(
         # @unsorted-dict-items
         buck.labels_arg()
         | {
-            "binary_src": attrs.source(
+            "binary_src": attrs.option(
+                attrs.source(),
+                default = None,
                 doc = """
-                The path to the `.whl` or `.egg` to use.
+                The path to the `.whl`, `.egg`, or `.tar.gz` archive to extract.
 
-                 Note: `.egg` files have a very particular naming convention
-                 that must be followed - otherwise it will not be found at runtime!
-            """
+                 Exactly one of `binary_src` and `source_dir` must be set. Note:
+                 `.egg` files have a very particular naming convention that must
+                 be followed, otherwise they will not be found at runtime.
+            """,
+            ),
+            "source_dir": attrs.option(
+                attrs.source(allow_directory = True),
+                default = None,
+                doc = """
+                A directory containing an already-materialized Python package.
+
+                 The directory is manifested in place without being copied or
+                 archived. Exactly one of `binary_src` and `source_dir` must be set.
+            """,
             ),
         }
         | python_common.deps_arg()

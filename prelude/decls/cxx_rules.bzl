@@ -14,6 +14,8 @@
 load("@prelude//:attrs_validators.bzl", "validation_common")
 load("@prelude//apple:apple_common.bzl", "apple_common")
 load("@prelude//cxx:cuda.bzl", "CudaCompileStyle")
+load("@prelude//cxx:cxx_flags.bzl", "CxxFlagsInfo")
+load("@prelude//cxx:cxx_toolchain_types.bzl", "CXX_COMPILER_TYPES")
 load("@prelude//cxx:cxx_types.bzl", "LinkPreference")
 load("@prelude//cxx:headers.bzl", "CPrecompiledHeaderInfo")
 load("@prelude//cxx:link_groups_types.bzl", "LINK_GROUP_MAP_ATTR")
@@ -38,47 +40,49 @@ BUILD_INFO_ATTR = attrs.dict(
 )
 
 def _cxx_binary_and_test_attrs():
-    ret = {
-        "anonymous_link_groups": attrs.bool(default = False),
-        "auto_link_groups": attrs.bool(default = False),
-        # Linker flags that only apply to the executable link, used for link
-        # strategies (e.g. link groups) which may link shared libraries from
-        # top-level binary context.
-        "binary_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
-        "bolt_flags": attrs.list(attrs.arg(), default = []),
-        "bolt_profile": attrs.option(attrs.source(), default = None),
-        # These flags will only be used to instrument a target
-        # when coverage for that target is enabled by a header
-        # selected for coverage either in the target or in one
-        # of the target's dependencies.
-        "coverage_instrumentation_compiler_flags": attrs.list(attrs.string(), default = []),
-        # Optional clang_profile_list target for selective coverage instrumentation via -fprofile-list.
-        "coverage_profile_list": attrs.option(attrs.dep(), default = None),
-        "cuda_compile_style": attrs.enum(CudaCompileStyle.values(), default = "mono"),
-        "enable_distributed_thinlto": attrs.bool(default = False),
-        "exported_needs_coverage_instrumentation": attrs.bool(default = False),
-        "extra_dwp_flags": attrs.list(attrs.string(), default = []),
-        "link_execution_preference": link_execution_preference_attr(),
-        "link_group_map": LINK_GROUP_MAP_ATTR,
-        "link_group_min_binary_node_count": attrs.option(attrs.int(), default = None),
-        "link_ordering": attrs.option(attrs.enum(LinkOrdering.values()), default = None),
-        "link_preference": attrs.enum(LinkPreference.values(), default = "default"),
-        "link_whole": attrs.default_only(attrs.bool(default = False)),
-        "precompiled_header": attrs.option(attrs.dep(providers = [CPrecompiledHeaderInfo]), default = None),
-        "resources": attrs.named_set(attrs.one_of(attrs.dep(), attrs.source(allow_directory = True)), sorted = True, default = []),
-        "separate_debug_info": attrs.bool(default = False),
-        "_build_info": BUILD_INFO_ATTR,
-        "_cxx_hacks": attrs.dep(default = "prelude//cxx/tools:cxx_hacks"),
-        "_cxx_toolchain": toolchains_common.cxx(),
-    } | validation_common.attrs_validators_arg()
+    ret = (
+        {
+            "anonymous_link_groups": attrs.bool(default = False),
+            "auto_link_groups": attrs.bool(default = False),
+            # Linker flags that only apply to the executable link, used for link
+            # strategies (e.g. link groups) which may link shared libraries from
+            # top-level binary context.
+            "binary_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "bolt_flags": attrs.list(attrs.arg(), default = []),
+            "bolt_profile": attrs.option(attrs.source(), default = None),
+            # These flags will only be used to instrument a target
+            # when coverage for that target is enabled by a header
+            # selected for coverage either in the target or in one
+            # of the target's dependencies.
+            "coverage_instrumentation_compiler_flags": attrs.list(attrs.string(), default = []),
+            # Optional clang_profile_list target for selective coverage instrumentation via -fprofile-list.
+            "coverage_profile_list": attrs.option(attrs.dep(), default = None),
+            "cuda_compile_style": attrs.enum(CudaCompileStyle.values(), default = "mono"),
+            "enable_distributed_thinlto": attrs.bool(default = False),
+            "exported_needs_coverage_instrumentation": attrs.bool(default = False),
+            "extra_dwp_flags": attrs.list(attrs.string(), default = []),
+            "link_execution_preference": link_execution_preference_attr(),
+            "link_group_map": LINK_GROUP_MAP_ATTR,
+            "link_group_min_binary_node_count": attrs.option(attrs.int(), default = None),
+            "link_ordering": attrs.option(attrs.enum(LinkOrdering.values()), default = None),
+            "link_preference": attrs.enum(LinkPreference.values(), default = "default"),
+            "link_whole": attrs.default_only(attrs.bool(default = False)),
+            "precompiled_header": attrs.option(attrs.dep(providers = [CPrecompiledHeaderInfo]), default = None),
+            "resources": attrs.named_set(attrs.one_of(attrs.dep(), attrs.source(allow_directory = True)), sorted = True, default = []),
+            "separate_debug_info": attrs.bool(default = False),
+            "_build_info": BUILD_INFO_ATTR,
+            "_cxx_hacks": attrs.dep(default = "prelude//cxx/tools:cxx_hacks"),
+            "_cxx_toolchain": toolchains_common.cxx(),
+        }
+        | cxx_common.flags_arg()
+        | validation_common.attrs_validators_arg()
+    )
     ret.update(constraint_overrides.attributes)
     return ret
 
 ArchiverProviderType = ["bsd", "gnu", "llvm", "windows", "windows_clang"]
 
 CxxTestType = ["gtest", "boost"]
-
-CxxToolProviderType = ["clang", "clang_cl", "clang_windows", "gcc", "windows", "windows_ml64"]
 
 LinkerProviderType = ["darwin", "gnu", "windows", "unknown", "wasm"]
 
@@ -394,6 +398,7 @@ cxx_genrule = prelude_rule(
 library_attrs = (
     # @unsorted-dict-items
     cxx_common.srcs_arg()
+    | cxx_common.flags_arg()
     | cxx_common.headers_arg()
     | cxx_common.exported_headers_arg()
     | cxx_common.exported_header_style_arg()
@@ -458,6 +463,7 @@ library_attrs = (
     | validation_common.attrs_validators_arg()
     | {
         "archive_allow_cache_upload": attrs.bool(default = False),
+        "archive_contents": attrs.option(attrs.enum(ArchiveContentsType.values()), default = None),
         "bridging_header": attrs.option(attrs.source(), default = None),
         "can_be_asset": attrs.option(attrs.bool(), default = None),
         "cxx_runtime_type": attrs.option(attrs.enum(CxxRuntimeType), default = None),
@@ -758,6 +764,47 @@ cxx_precompiled_header = prelude_rule(
     ),
 )
 
+cxx_flags = prelude_rule(
+    name = "cxx_flags",
+    docs = """
+        A `cxx_flags()` target holds flags that C++ targets pull in through their
+        `flags` attribute. Its `deps` can reference other `cxx_flags`
+        targets; nested flags apply before the including target's flags, and all
+        shared flags apply before the consuming C++ target's own flags.
+
+        Consumers share a compiler argsfile for the transitive flag set.
+
+        Write-to-file macros (`$(@...)`) are unsupported in all flag attributes.
+    """,
+    examples = """
+        ```
+        cxx_flags(
+          name = "common_warnings",
+          compiler_flags = ["-Wall", "-Wextra"],
+        )
+
+        cxx_library(
+          name = "lib",
+          srcs = ["lib.cpp"],
+          flags = [":common_warnings"],
+        )
+        ```
+    """,
+    further = None,
+    attrs = (
+        {
+            "compiler_flags": attrs.list(attrs.arg(), default = []),
+            "deps": attrs.list(attrs.dep(providers = [CxxFlagsInfo]), default = []),
+            "lang_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "lang_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "preprocessor_flags": attrs.list(attrs.arg(), default = []),
+        }
+        | buck.labels_arg()
+        | buck.contacts_arg()
+    ),
+)
+
 windows_resource = prelude_rule(
     name = "windows_resource",
     docs = """
@@ -983,16 +1030,16 @@ cxx_toolchain = prelude_rule(
             "archiver_type": attrs.enum(ArchiverProviderType),
             "asm_compiler": attrs.option(attrs.source(), default = None),
             "asm_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "asm_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "asm_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "asm_preprocessor": attrs.option(attrs.source(), default = None),
             "asm_preprocessor_flags": attrs.list(attrs.arg(), default = []),
-            "asm_preprocessor_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "asm_preprocessor_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "assembler": attrs.source(),
             "assembler_flags": attrs.list(attrs.arg(), default = []),
             "assembler_preprocessor": attrs.option(attrs.source(), default = None),
             "assembler_preprocessor_flags": attrs.list(attrs.arg(), default = []),
-            "assembler_preprocessor_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
-            "assembler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "assembler_preprocessor_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
+            "assembler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "binary_extension": attrs.option(attrs.string(), default = None),
             "binary_linker_flags": attrs.list(
                 attrs.arg(anon_target_compatible = True),
@@ -1008,22 +1055,22 @@ cxx_toolchain = prelude_rule(
             "bolt": attrs.source(),
             "c_compiler": attrs.source(),
             "c_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "c_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "c_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "c_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "cache_links": attrs.bool(default = False),
-            "compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "cuda_compiler": attrs.option(attrs.source(), default = None),
             "cuda_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "cuda_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "cuda_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "cuda_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "custom_tools": attrs.dict(key = attrs.string(), value = attrs.source(), default = {}),
             "cvtres_compiler": attrs.option(attrs.source(), default = None),
             "cvtres_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "cvtres_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "cvtres_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "cvtres_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "cxx_compiler": attrs.source(),
             "cxx_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "cxx_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "cxx_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "cxx_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "debug_path_prefix_map_sanitizer_format": attrs.option(attrs.string(), default = None),
             "dist_thin_lto_codegen_flags": attrs.list(attrs.arg(), default = []),
@@ -1038,7 +1085,7 @@ cxx_toolchain = prelude_rule(
             "headers_as_raw_headers_mode": attrs.option(attrs.enum(HeadersAsRawHeadersMode), default = None),
             "hip_compiler": attrs.option(attrs.source(), default = None),
             "hip_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "hip_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "hip_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "hip_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "link_metadata_flag": attrs.option(attrs.string(), default = None),
             "link_style": attrs.enum(
@@ -1064,7 +1111,7 @@ cxx_toolchain = prelude_rule(
             "ranlib_flags": attrs.list(attrs.arg(), default = []),
             "rc_compiler": attrs.option(attrs.source(), default = None),
             "rc_compiler_flags": attrs.list(attrs.arg(), default = []),
-            "rc_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
+            "rc_compiler_type": attrs.option(attrs.enum(CXX_COMPILER_TYPES), default = None),
             "rc_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "requires_archives": attrs.bool(default = False),
             "shared_dep_runtime_ld_flags": attrs.list(attrs.arg(), default = []),
@@ -1413,6 +1460,7 @@ cxx_rules = struct(
     cxx_binary = cxx_binary,
     cxx_genrule = cxx_genrule,
     cxx_library = cxx_library,
+    cxx_flags = cxx_flags,
     cxx_precompiled_header = cxx_precompiled_header,
     windows_resource = windows_resource,
     cxx_test = cxx_test,

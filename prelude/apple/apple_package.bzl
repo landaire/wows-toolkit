@@ -7,11 +7,13 @@
 # above-listed licenses.
 
 load("@prelude//apple:apple_toolchain_types.bzl", "AppleToolsInfo")
+load("@prelude//xplugins:types.bzl", "XPluginsFunctionMappingManifestInfo")
 load(
     ":apple_bundle_types.bzl",
     "AppleBundleInfo",
     "AppleBundleLinkerMapInfo",
     "AppleInfoPlistInfo",
+    "ApplePackageExtension",
 )
 load(":apple_package_config.bzl", "IpaCompressionLevel")
 load(":apple_package_types.bzl", "ApplePackageInfo")
@@ -57,7 +59,7 @@ def apple_package_impl(ctx: AnalysisContext) -> list[Provider]:
 
     ctx.actions.run(process_ipa_cmd, category = category)
 
-    return [
+    providers = [
         DefaultInfo(
             default_output = package,
             sub_targets = sub_targets,
@@ -65,7 +67,7 @@ def apple_package_impl(ctx: AnalysisContext) -> list[Provider]:
         ApplePackageInfo(
             name = package_name,
             bundle_info = ctx.attrs.bundle[AppleBundleInfo],
-            extension = ctx.attrs.ext,
+            extension = ApplePackageExtension(ctx.attrs.ext),
             package = package,
             dsyms = ctx.attrs.bundle[AppleDebuggableInfo].dsyms,
             info_plist = ctx.attrs.bundle[AppleInfoPlistInfo].info_plist,
@@ -73,6 +75,10 @@ def apple_package_impl(ctx: AnalysisContext) -> list[Provider]:
             unstripped_binaries = ctx.attrs.bundle[AppleDebuggableInfo].binaries,
         ),
     ]
+    xplugins_function_mapping_manifest_info = ctx.attrs.bundle.get(XPluginsFunctionMappingManifestInfo)
+    if xplugins_function_mapping_manifest_info:
+        providers.append(xplugins_function_mapping_manifest_info)
+    return providers
 
 def _get_ipa_contents(ctx: AnalysisContext) -> Artifact:
     ipa_package_dep = ctx.attrs._ipa_package
@@ -96,13 +102,13 @@ def _get_default_package_cmd(ctx: AnalysisContext, unprocessed_ipa_contents: Art
     return process_ipa_cmd
 
 def _compression_level_arg(compression_level: IpaCompressionLevel) -> str:
-    if compression_level.value == "none":
+    if compression_level == IpaCompressionLevel("none"):
         return "0"
-    elif compression_level.value == "default":
+    elif compression_level == IpaCompressionLevel("default"):
         return "6"
-    elif compression_level.value == "min":
+    elif compression_level == IpaCompressionLevel("min"):
         return "1"
-    elif compression_level.value == "max":
+    elif compression_level == IpaCompressionLevel("max"):
         return "9"
     else:
         fail("Unknown .ipa compression level: " + str(compression_level))

@@ -19,7 +19,7 @@ load("@prelude//android:configuration.bzl", "is_building_android_binary_attr")
 load("@prelude//android:min_sdk_version.bzl", "get_min_sdk_version_constraint_value_name", "get_min_sdk_version_range")
 load("@prelude//decls:test_common.bzl", "test_common")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
-load(":common.bzl", "SourceAbiVerificationMode", "TestType", "buck", "prelude_rule")
+load(":common.bzl", "TestType", "buck", "prelude_rule")
 load(":jvm_common.bzl", "jvm_common")
 load(":re_test_common.bzl", "re_test_common")
 load(":toolchains_common.bzl", "toolchains_common")
@@ -223,8 +223,23 @@ java_binary = prelude_rule(
             ),
             "concat_deps": attrs.bool(default = False, doc = "Use zip concatenation instead of repacking all dependency jars, which is faster"),
             "default_cxx_platform": attrs.option(attrs.string(), default = None),
-            "generate_wrapper": attrs.bool(default = False),
-            "do_not_create_inner_jar": attrs.bool(default = False),
+            "generate_wrapper": attrs.bool(
+                default = False,
+                doc = """
+                Produce a shell script that runs the classes from a classpath file instead of
+                packing them into a fat jar. With native libraries the output is still a fat
+                jar, since a script has nowhere to put them.
+            """,
+            ),
+            "do_not_create_inner_jar": attrs.bool(
+                default = False,
+                doc = """
+                With native libraries, place them in a `nativelibs/` directory of the fat jar
+                and load them from resources, instead of nesting the classes in an `inner.jar`
+                behind a launcher main class. Entries then pass through `blocklist`. Cannot be
+                combined with `generate_wrapper`.
+            """,
+            ),
             "incremental_target_prefix": attrs.option(attrs.string(), default = None),
             "java_version": attrs.option(attrs.string(), default = None, doc = "Expected java version used at compile time"),
             "java_runtime": attrs.option(attrs.string(), default = None, doc = "Expected java version used at runtime"),
@@ -390,7 +405,6 @@ java_library = prelude_rule(
             "proguard_config": attrs.option(attrs.source(), default = None),
             "resources_root": attrs.option(attrs.string(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
-            "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             VALIDATION_DEPS_ATTR_NAME: attrs.set(attrs.dep(), sorted = True, default = []),
             "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
             "_dex_min_sdk_version": attrs.option(attrs.int(), default = dex_min_sdk_version()),
@@ -562,14 +576,11 @@ java_test = prelude_rule(
             "resources_root": attrs.option(attrs.string(), default = None),
             "runner": attrs.option(attrs.dep(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
-            "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
-            "specs": attrs.option(attrs.arg(json = True), default = None),
             "supports_test_execution_caching": attrs.bool(default = False),
             "test_case_timeout_ms": attrs.option(attrs.int(), default = None),
             "test_class_names_file": attrs.option(attrs.source(), default = None),
             "unbundled_resources_root": attrs.option(attrs.source(allow_directory = True), default = None),
-            "use_dependency_order_classpath": attrs.option(attrs.bool(), default = None),
             "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
             "_exec_os_type": buck.exec_os_type_arg(),
             "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),
@@ -587,50 +598,6 @@ java_test = prelude_rule(
     | test_common.attributes()
     | jvm_common.classic_java_content_based_paths(),
     cfg = constraint_overrides.transition,
-)
-
-java_test_runner = prelude_rule(
-    name = "java_test_runner",
-    docs = """
-        A `java_test_runner()` rule defines a custom test runner JAR
-        (with a `main_class`) that can be referenced by `java_test()`
-        targets via their `runner` attribute, replacing the default
-        JUnit/TestNG runner.
-    """,
-    examples = None,
-    further = None,
-    attrs = (
-        # @unsorted-dict-items
-        {
-            "deps": attrs.list(attrs.dep(), default = []),
-            "exported_deps": attrs.list(attrs.dep(), default = []),
-            "exported_provided_deps": attrs.list(attrs.dep(), default = []),
-            "extra_arguments": attrs.list(attrs.string(), default = []),
-            "java_version": attrs.option(attrs.string(), default = None),
-            "main_class": attrs.string(default = ""),
-            "manifest_file": attrs.option(attrs.source(), default = None),
-            "maven_coords": attrs.option(attrs.string(), default = None),
-            "proguard_config": attrs.option(attrs.source(), default = None),
-            "provided_deps": attrs.list(attrs.dep(), default = []),
-            "remove_classes": attrs.list(attrs.regex(), default = []),
-            "required_for_source_only_abi": attrs.bool(default = False),
-            "resources": attrs.list(attrs.source(), default = []),
-            "resources_root": attrs.option(attrs.string(), default = None),
-            "runtime_deps": attrs.list(attrs.dep(), default = []),
-            "source": attrs.option(attrs.string(), default = None),
-            "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
-            "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
-            "srcs": attrs.list(attrs.source(), default = []),
-            "target": attrs.option(attrs.string(), default = None),
-        }
-        | buck.licenses_arg()
-        | buck.labels_arg()
-        | buck.contacts_arg()
-        | jvm_common.abi_generation_mode()
-        | jvm_common.annotation_processors()
-        | jvm_common.plugins()
-        | jvm_common.javac()
-    ),
 )
 
 prebuilt_jar = prelude_rule(
@@ -724,6 +691,5 @@ java_rules = struct(
     java_library = java_library,
     java_plugin = java_plugin,
     java_test = java_test,
-    java_test_runner = java_test_runner,
     prebuilt_jar = prebuilt_jar,
 )

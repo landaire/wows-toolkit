@@ -187,7 +187,6 @@ def _cxx_toolchain_from_cxx_tools_info(ctx: AnalysisContext, cxx_tools_info: Cxx
                 ranlib = RunInfo(args = ["ranlib"]),
                 strip = RunInfo(args = ["strip"]),
                 dwp = None,
-                bolt_msdk = None,
             ),
             cxx_compiler_info = CxxCompilerInfo(
                 compiler = _run_info(cxx_tools_info.cxx_compiler),
@@ -244,7 +243,7 @@ system_cxx_toolchain = rule(
         "archiver": attrs.option(attrs.string(), default = None),
         "c_flags": attrs.list(attrs.arg(), default = []),
         "compiler": attrs.option(attrs.string(), default = None),
-        "compiler_type": attrs.option(attrs.string(), default = None),  # one of CxxToolProviderType
+        "compiler_type": attrs.option(attrs.string(), default = None),  # One of the supported C++ compiler types.
         "cpp_dep_tracking_mode": attrs.string(default = "makefile"),
         "cvtres_compiler": attrs.option(attrs.string(), default = None),
         "cvtres_flags": attrs.list(attrs.arg(), default = []),

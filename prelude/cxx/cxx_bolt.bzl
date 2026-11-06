@@ -16,6 +16,8 @@ load(
 )
 load(":cxx_context.bzl", "get_cxx_toolchain_info")
 
+PRE_BOLT_SUFFIX = "-wrapper"
+
 CxxBoltOutput = record(
     output = field(Artifact),
     dwo_output = field(Artifact | None),
@@ -33,22 +35,21 @@ def bolt(
     generate_dwp: bool,
     allow_cache_upload: bool = False,
 ) -> CxxBoltOutput:
-    output_name = prebolt_output.short_path.removesuffix("-wrapper")
+    output_name = prebolt_output.short_path.removesuffix(PRE_BOLT_SUFFIX)
     postbolt_output = ctx.actions.declare_output(output_name, has_content_based_path = False)
     dwo_output = None
     cxx_toolchain_info = get_cxx_toolchain_info(ctx)
-    bolt_exe = cxx_toolchain_info.binary_utilities_info.bolt
-    bolt_msdk = cxx_toolchain_info.binary_utilities_info.bolt_msdk
+    bolt_tool = cxx_toolchain_info.binary_utilities_info.bolt
 
-    if not (bolt_exe or bolt_msdk) or not cxx_use_bolt(ctx):
-        fail("Cannot use bolt if bolt_msdk is not available or bolt profile is not available")
+    if not bolt_tool or not cxx_use_bolt(ctx):
+        fail("Cannot use bolt if bolt tool is not available or bolt profile is not available")
 
     materialized_external_debug_info = project_artifacts(ctx.actions, external_debug_info)
 
     # bolt command format:
     # {llvm_bolt} {input_bin} -o $OUT -data={fdata} {args}
     args = cmd_args(
-        bolt_exe if bolt_exe else cmd_args(bolt_msdk, format = "{}/bin/llvm-bolt"),
+        bolt_tool,
         prebolt_output,
         "-o",
         postbolt_output.as_output(),
