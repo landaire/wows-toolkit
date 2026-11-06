@@ -440,6 +440,37 @@ fn misspelled_names_resolve_or_suggest() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn tier_prefixes_must_match_the_ship() {
+    let resolved: Vec<String> = [
+        "T10 Fuyutsuki",
+        "t8 Edinburgh",
+        "Tier 9 ZH-1",
+        "tier10 DM",
+        "T11 Super Montana",
+        "Tier X Yamato",
+        "T9 Fuyutsuki",
+        "T12 Yamato",
+    ]
+    .into_iter()
+    .map(|query| match game().ship_summary(query) {
+        Ok(resolved) => format!("{query} -> T{} {}", resolved.ship.tier.0, resolved.ship.name),
+        Err(error) => format!("{query} -> {error}"),
+    })
+    .collect();
+
+    insta::assert_yaml_snapshot!(resolved);
+
+    let found = |name: &str| -> Vec<String> {
+        let found =
+            game().find_ships(&wows_query::ships::FindShipsArgs { name: Some(name.to_owned()), ..Default::default() });
+        found.ships.into_iter().map(|found| format!("T{} {}", found.ship.tier.0, found.ship.name)).collect()
+    };
+    assert_eq!(found("T10 Fuyutsuki"), ["T10 Fuyutsuki"]);
+    assert!(found("T9 Fuyutsuki").is_empty());
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn full_names_resolve_to_abbreviated_ships() {
     let resolved: Vec<(&str, String)> = [
         "Grosser Kurfurst",

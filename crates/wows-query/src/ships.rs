@@ -445,7 +445,7 @@ pub struct ShipSummary {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindShipsArgs {
-    /// Ship name or part of it, e.g. "moines". A name that names one ship exactly, by an alias such as "DM", by its initials or by a former name lists that ship first. Omit to list by the other filters.
+    /// Ship name or part of it, e.g. "moines". A name that names one ship exactly, by an alias such as "DM", by its initials or by a former name lists that ship first. A leading tier, as in "T10 Fuyutsuki", lists only ships of that tier. Omit to list by the other filters.
     pub name: Option<String>,
 
     pub min_tier: Option<Tier>,
@@ -647,9 +647,22 @@ impl ShipFilter {
 impl GameData {
     /// Ships by name fragment, tier, class or nation.
     pub fn find_ships(&self, args: &FindShipsArgs) -> FindShipsOutput {
-        let needle = args.name.as_deref().map(search_key);
+        // "T10 Fuyutsuki" lists ships of that tier by the rest of the name.
+        let (name, name_tier) = match args.name.as_deref() {
+            Some(name) => match tier_prefix(name) {
+                Some((tier, rest)) => (Some(rest), Some(tier)),
+                None => (Some(name), None),
+            },
+            None => (None, None),
+        };
+        let tiers = match (TierRange::from_bounds(args.min_tier, args.max_tier), name_tier) {
+            (bounds, None) => bounds,
+            (None, Some(tier)) => Some(TierRange { min: tier, max: tier }),
+            (Some(bounds), Some(tier)) => Some(TierRange { min: bounds.min.max(tier), max: bounds.max.min(tier) }),
+        };
+        let needle = name.map(search_key);
         let filter = ShipFilter {
-            tiers: TierRange::from_bounds(args.min_tier, args.max_tier),
+            tiers,
             class: args.class,
             nation: args.nation.clone(),
             include_irregular: args.include_event_variants.unwrap_or(false),
@@ -661,7 +674,7 @@ impl GameData {
         // so "DM" lists Des Moines before Dm. Donskoi.
         let mut interpretations = Interpretations::default();
         // A replica named exactly is listed even when replicas are left out.
-        let named = match args.name.as_deref() {
+        let named = match name {
             Some(name) => {
                 let named_filter = ShipFilter { include_replicas: true, ..filter.clone() };
                 self.named_ships(name, &named_filter, &mut interpretations)
@@ -788,8 +801,27 @@ impl GameData {
 
     /// The ship `query` names. A ship name shared by event or retired copies
     /// resolves to the regular variant. "Super <ship>" names the tier 11 ship
-    /// a tier 10 ship leads to.
+    /// a tier 10 ship leads to. A leading tier, as in "T10 Fuyutsuki" or
+    /// "Tier 9 ZH-1", must be the ship's.
     pub(crate) fn resolve_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
+        let Some((tier, name)) = tier_prefix(query) else {
+            return self.resolve_untiered_ship(query, interpretations);
+        };
+
+        let ship = self.resolve_untiered_ship(name, interpretations)?;
+        if ship.tier != tier {
+            return Err(QueryError::TierMismatch {
+                query: query.to_owned(),
+                ship: ship.name.clone(),
+                tier,
+                actual: ship.tier,
+            });
+        }
+
+        Ok(ship)
+    }
+
+    fn resolve_untiered_ship(&self, query: &str, interpretations: &mut Interpretations) -> Result<&Ship, QueryError> {
         if let Some(supership) = self.resolve_supership(query, interpretations) {
             return supership;
         }
@@ -896,6 +928,35 @@ fn supership_base(query: &str) -> Option<&str> {
     let base = rest.strip_prefix([' ', '-'])?.trim();
 
     (word.eq_ignore_ascii_case("super") && !base.is_empty()).then_some(base)
+}
+
+/// The tier and ship name of "T10 Fuyutsuki", "t8 Edinburgh", "Tier 9 ZH-1",
+/// "Tier9 ZH-1" or "Tier X Yamato". A space must end the tier, so "T61" stays
+/// a name. Roman numerals follow only "Tier".
+fn tier_prefix(query: &str) -> Option<(Tier, &str)> {
+    const NUMERALS: [&str; 11] = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
+
+    let query = query.trim();
+    let strip = |prefix: &str| {
+        query.get(..prefix.len()).filter(|head| head.eq_ignore_ascii_case(prefix)).map(|_| &query[prefix.len()..])
+    };
+    let (rest, roman) = match (strip("tier"), strip("t")) {
+        (Some(rest), _) => (rest, true),
+        (None, Some(rest)) => (rest, false),
+        (None, None) => return None,
+    };
+
+    let (tier, name) = rest.trim_start().split_once(char::is_whitespace)?;
+    let tier = match tier.parse::<u32>() {
+        Ok(tier) => tier,
+        Err(_) if roman => {
+            NUMERALS.iter().zip(1..).find(|(numeral, _)| numeral.eq_ignore_ascii_case(tier)).map(|(_, tier)| tier)?
+        }
+        Err(_) => return None,
+    };
+    let name = name.trim();
+
+    ((1..=11).contains(&tier) && !name.is_empty()).then_some((Tier(tier), name))
 }
 
 /// The regular variant when one exists, preferring an original to a
@@ -1010,6 +1071,48 @@ mod tests {
         "Superb" -> None
         "super" -> None
         "super-" -> None
+        "#);
+    }
+
+    #[test]
+    fn tier_prefixes_split_from_the_name() {
+        let split: Vec<String> = [
+            "T10 Fuyutsuki",
+            "t8 Edinburgh",
+            "Tier 9 ZH-1",
+            "TIER10  Des Moines ",
+            "Tier X Yamato",
+            "tier xi Super Montana",
+            "T 10 Gearing",
+            "T X Yamato",
+            "T61",
+            "T-61",
+            "Tirpitz",
+            "Tiger '59",
+            "T12 X",
+            "T0 X",
+            "T10",
+        ]
+        .into_iter()
+        .map(|query| format!("{query:?} -> {:?}", tier_prefix(query).map(|(tier, name)| (tier.0, name))))
+        .collect();
+
+        insta::assert_snapshot!(split.join("\n"), @r#"
+        "T10 Fuyutsuki" -> Some((10, "Fuyutsuki"))
+        "t8 Edinburgh" -> Some((8, "Edinburgh"))
+        "Tier 9 ZH-1" -> Some((9, "ZH-1"))
+        "TIER10  Des Moines " -> Some((10, "Des Moines"))
+        "Tier X Yamato" -> Some((10, "Yamato"))
+        "tier xi Super Montana" -> Some((11, "Super Montana"))
+        "T 10 Gearing" -> Some((10, "Gearing"))
+        "T X Yamato" -> None
+        "T61" -> None
+        "T-61" -> None
+        "Tirpitz" -> None
+        "Tiger '59" -> None
+        "T12 X" -> None
+        "T0 X" -> None
+        "T10" -> None
         "#);
     }
 }

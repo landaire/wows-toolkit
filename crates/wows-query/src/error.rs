@@ -10,6 +10,7 @@ use crate::armor_trace::TraceWeapon;
 use crate::armor_trace::WeaponAmmo;
 use crate::replay_worker::ByteCount;
 use crate::shells::Ammo;
+use crate::ships::Tier;
 
 /// Failure to load a game data build.
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +67,9 @@ pub enum QueryError {
 
     #[error("{query:?} asks for the tier 11 ship researched from {ship}, but {ship} leads to no tier 11 ship")]
     NoSupership { query: String, ship: String },
+
+    #[error("{query:?} names {ship}, which is tier {}, not tier {}", actual.0, tier.0)]
+    TierMismatch { query: String, ship: String, tier: Tier, actual: Tier },
 
     #[error("{ship} has no armor zone or plate named {zone:?}; zones: {}", zones.join(", "))]
     ZoneNotFound { ship: String, zone: String, zones: Vec<&'static str> },

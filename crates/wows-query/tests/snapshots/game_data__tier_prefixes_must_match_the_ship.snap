@@ -1,0 +1,12 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: resolved
+---
+- T10 Fuyutsuki -> T10 Fuyutsuki
+- t8 Edinburgh -> T8 Edinburgh
+- Tier 9 ZH-1 -> T9 ZH-1
+- tier10 DM -> T10 Des Moines
+- T11 Super Montana -> T11 Maine
+- Tier X Yamato -> T10 Yamato
+- "T9 Fuyutsuki -> \"T9 Fuyutsuki\" names Fuyutsuki, which is tier 10, not tier 9"
+- "T12 Yamato -> no ship matches \"T12 Yamato\"; did you mean: ARP Yamato?"
