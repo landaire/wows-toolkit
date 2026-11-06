@@ -1,4 +1,5 @@
 use serde::Serialize;
+use wows_core::game_types::Relation;
 use wows_replays::ReplayFile;
 use wowsunpack::game_params::translations::translate_game_mode;
 use wowsunpack::game_params::translations::translate_map_name;
@@ -40,17 +41,16 @@ pub enum Team {
     Recorder,
     Ally,
     Enemy,
-    Other,
 }
 
-impl Team {
-    /// `VehicleInfoMeta::relation` as the client writes it.
-    fn from_relation(relation: u32) -> Self {
-        match relation {
-            0 => Self::Recorder,
-            1 => Self::Ally,
-            2 => Self::Enemy,
-            _ => Self::Other,
+impl From<Relation> for Team {
+    fn from(relation: Relation) -> Self {
+        if relation.is_self() {
+            Self::Recorder
+        } else if relation.is_ally() {
+            Self::Ally
+        } else {
+            Self::Enemy
         }
     }
 }
@@ -66,7 +66,7 @@ impl GameData {
             .iter()
             .map(|vehicle| ReplayPlayer {
                 name: vehicle.name.clone(),
-                team: Team::from_relation(vehicle.relation),
+                team: Relation::new(vehicle.relation).into(),
                 ship: self.ship_by_id(vehicle.shipId),
             })
             .collect();
