@@ -36,6 +36,14 @@ use wowsunpack::game_params::types::SkillPointCost;
 use crate::armor::ThicknessSpan;
 use crate::armor::plates;
 use crate::armor::zone_spans;
+use crate::builds;
+use crate::builds::Better;
+use crate::builds::BuildValue;
+use crate::builds::Builds;
+use crate::builds::Extract;
+use crate::builds::Planner;
+use crate::builds::StatAmount;
+use crate::builds::StatPlan;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::fuzzy;
@@ -133,12 +141,16 @@ pub struct StatCondition {
     pub qualifier: Option<String>,
 }
 
-/// Arguments for `stat_search`.
+/// Arguments for `stat_search`. Give conditions, rank, or both.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StatSearchArgs {
-    /// Conditions that must all hold.
+    /// Conditions that must all hold. Optional when rank is given.
+    #[serde(default)]
     pub conditions: Vec<StatCondition>,
+
+    /// Order ships by one stat on each ship's best-fit build, for "best", "lowest", "highest" or "most" questions. With conditions, ranks only the ships that meet them.
+    pub rank: Option<StatRank>,
 
     pub min_tier: Option<Tier>,
     pub max_tier: Option<Tier>,
@@ -157,29 +169,75 @@ pub struct StatSearchArgs {
     pub include_replicas: Option<bool>,
 }
 
+/// A stat to order ships by.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StatRank {
+    /// Stat name from stat_names, e.g. "visibility.sea_detection".
+    pub stat: String,
+
+    /// "asc": lowest first, each ship on the build that lowers the stat most. "desc": highest first, on the build that raises it most.
+    pub order: RankOrder,
+
+    /// Only the row with this qualifier, as for conditions. Omit to rank each ship by its lowest ("asc") or highest ("desc") row.
+    pub qualifier: Option<String>,
+
+    /// Ships listed. Defaults to 10.
+    pub limit: Option<RankLimit>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RankOrder {
+    Asc,
+    Desc,
+}
+
+impl RankOrder {
+    fn better(self) -> Better {
+        match self {
+            Self::Asc => Better::Lower,
+            Self::Desc => Better::Higher,
+        }
+    }
+}
+
+/// Number of ranked ships to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct RankLimit(#[schemars(range(min = 1, max = 25))] pub usize);
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StatSearchOutput {
     /// The conditions as understood, e.g. "artillery.reload_time < 5 s".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<String>,
 
-    pub rule: &'static str,
+    /// How ships qualify; given with conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<&'static str>,
 
     /// Ships matching the tier, class and nation filters.
     pub considered: ShipCounts,
 
-    pub qualifying: QualifyingCounts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualifying: Option<QualifyingCounts>,
 
     #[serde(flatten)]
-    pub shares: Shares,
+    pub shares: Option<Shares>,
 
-    /// Fewest requirements first, then highest tier.
-    pub ships: Vec<StatSearchHit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking: Option<Ranking>,
+
+    /// Without rank: fewest requirements first, then highest tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ships: Option<Vec<StatSearchHit>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
 
-    /// Ships that are not counted as qualifying because their search could
-    /// not finish.
+    /// Ships that are not counted as qualifying or ranked because their
+    /// search could not finish.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub undetermined: Vec<UndeterminedShip>,
 
@@ -221,6 +279,13 @@ pub struct StatSearchHit {
     /// "T10 Des Moines (cruiser, USA)".
     pub ship: String,
 
+    #[serde(flatten)]
+    pub meets: ConditionMatch,
+}
+
+/// How one ship meets every condition.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConditionMatch {
     /// True when stock modules meet every condition without upgrades or skills.
     pub stock: bool,
 
@@ -236,6 +301,65 @@ pub struct StatSearchHit {
     /// of requirements may exist.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unchecked: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Ranking {
+    /// The stat and order as understood, e.g. "visibility.sea_detection (km), lowest first".
+    pub stat: String,
+
+    pub rule: &'static str,
+
+    /// Ships with a value of the stat.
+    pub ranked: usize,
+
+    pub ships: Vec<RankedShip>,
+
+    /// Ships left out by the limit that share the value of the last one listed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tied_beyond_limit: Vec<String>,
+
+    /// Ranked ships left out by the limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<usize>,
+
+    /// Ships that lack the stat, or the qualifier's row, with every module combination.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lacking_stat: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RankedShip {
+    /// Position from 1; ships with equal values share it.
+    pub rank: usize,
+
+    /// "T10 Des Moines (cruiser, USA)".
+    pub ship: String,
+
+    /// On the best-fit build.
+    pub value: String,
+
+    /// Stock modules, or the first modules that have the stat when stock
+    /// lacks it; no captain skills or upgrades.
+    pub base: String,
+
+    /// Modules, captain skills and upgrades of the best-fit build. Empty
+    /// when nothing changes the stat.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub build: Vec<String>,
+
+    /// Captain skills taken only to fill cheaper skill tiers; not conditions
+    /// of the build.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tier_fillers: Vec<String>,
+
+    /// Another ranked ship has the same value.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tied: bool,
+
+    /// With conditions: how the ship meets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meets: Option<ConditionMatch>,
 }
 
 /// Arguments for `stat_names`.
@@ -308,6 +432,17 @@ enum RicochetBound {
 
     /// Every hit that does not overmatch the plate ricochets.
     Always,
+}
+
+impl RicochetBound {
+    fn angle(self, angles: &RicochetAngles) -> f32 {
+        let angle = match self {
+            Self::Start => angles.from_deg,
+            Self::Always => angles.always_from_deg,
+        };
+
+        angle.value()
+    }
 }
 
 impl SearchStat {
@@ -403,6 +538,12 @@ impl SearchStat {
     fn is_fixed(self) -> bool {
         matches!(self, Self::Armor { .. })
     }
+
+    /// Modules do not change it. Ranked as ship_consumables plans consumable
+    /// stats, except that every extra charge counts.
+    fn is_consumable(self) -> bool {
+        matches!(self, Self::Card(stat) if stat.field_key().starts_with("consumable."))
+    }
 }
 
 /// A condition resolved against the stat list.
@@ -485,43 +626,13 @@ struct View {
 impl View {
     fn readings(&self, condition: &Condition, armor: &BTreeMap<&'static str, ThicknessSpan>) -> Vec<Reading> {
         match condition.stat {
-            SearchStat::Card(stat) => self
-                .rows
-                .iter()
-                .filter(|row| row.stat == stat)
-                .filter(|row| {
-                    condition.qualifier.as_deref().is_none_or(|wanted| {
-                        row.qualifier.as_deref().is_some_and(|qualifier| qualifier.eq_ignore_ascii_case(wanted.trim()))
-                    })
-                })
-                .filter_map(|row| {
-                    let value = match row.value {
-                        StatValue::Ammo(AmmoCount::Infinite) => f32::INFINITY,
-                        value => value.as_f32()?,
-                    };
-                    Some(Reading { qualifier: row.qualifier.clone(), value })
-                })
+            SearchStat::Card(stat) => card_values(&self.rows, stat, condition.qualifier.as_deref())
+                .map(|(row, value)| Reading { qualifier: row.qualifier.clone(), value })
                 .collect(),
-            SearchStat::Armor { zone, bound } => armor
-                .get(zone.zone)
-                .map(|span| {
-                    let mm = match bound {
-                        Bound::Min => span.thinnest(),
-                        Bound::Max => span.thickest(),
-                    };
-                    Reading { qualifier: None, value: mm.value() }
-                })
-                .into_iter()
-                .collect(),
-            SearchStat::Derived(stat) => self
-                .derived
-                .iter()
-                .filter(|row| row.stat == stat)
-                .filter(|row| {
-                    condition.qualifier.as_deref().is_none_or(|wanted| {
-                        row.qualifier.as_deref().is_some_and(|qualifier| qualifier.eq_ignore_ascii_case(wanted.trim()))
-                    })
-                })
+            SearchStat::Armor { zone, bound } => {
+                armor_value(armor, zone, bound).map(|value| Reading { qualifier: None, value }).into_iter().collect()
+            }
+            SearchStat::Derived(stat) => derived_rows(&self.derived, stat, condition.qualifier.as_deref())
                 .map(|row| Reading { qualifier: row.qualifier.clone(), value: row.value.as_f32() })
                 .collect(),
             SearchStat::Ricochet { ammo, bound } => {
@@ -529,11 +640,7 @@ impl View {
                     self.ricochet.iter().filter(|(shell_ammo, _)| *shell_ammo == ammo).map(|(_, angles)| angles);
                 let mut readings: Vec<Reading> = Vec::new();
                 for angles in angles {
-                    let angle = match bound {
-                        RicochetBound::Start => angles.from_deg,
-                        RicochetBound::Always => angles.always_from_deg,
-                    };
-                    let reading = Reading { qualifier: None, value: angle.value() };
+                    let reading = Reading { qualifier: None, value: bound.angle(angles) };
                     if !readings.contains(&reading) {
                         readings.push(reading);
                     }
@@ -667,13 +774,17 @@ impl GameData {
     }
 
     /// Ships whose stats meet every condition, stock or with the fewest
-    /// modules, upgrades and captain skills.
+    /// modules, upgrades and captain skills, or ships in order of one stat on
+    /// their best-fit builds.
     pub fn stat_search(&self, args: &StatSearchArgs) -> Result<StatSearchOutput, QueryError> {
-        if args.conditions.is_empty() {
-            return Err(QueryError::InvalidArguments { reason: "give at least one condition" });
-        }
+        const CONDITION_RULE: &str = "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health.";
+
         let conditions: Vec<Condition> =
             args.conditions.iter().map(resolve_condition).collect::<Result<_, QueryError>>()?;
+        let rank = args.rank.as_ref().map(resolve_rank).transpose()?;
+        if conditions.is_empty() && rank.is_none() {
+            return Err(QueryError::InvalidArguments { reason: "give at least one condition, or rank" });
+        }
 
         let filter = ShipFilter {
             tiers: TierRange::from_bounds(args.min_tier, args.max_tier),
@@ -685,13 +796,68 @@ impl GameData {
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+        let considered = ShipCounts::from_ships(ships.iter().copied());
 
-        let mut hits: Vec<(&Ship, StatSearchHit)> = Vec::new();
         let mut undetermined = Vec::new();
+        let ConditionSearch { hits, searched_without_skills, unmatched_qualifiers } = if conditions.is_empty() {
+            ConditionSearch::default()
+        } else {
+            self.condition_search(&ships, &conditions, &mut undetermined)
+        };
+        let qualifying = (!conditions.is_empty()).then(|| qualifying_counts(&hits));
+        let shares = qualifying.as_ref().map(|qualifying| Shares::new(&qualifying.by_class, &considered));
+
+        let (ranking, listed, omitted) = match &rank {
+            Some(rank) => {
+                let candidates: Vec<(&Ship, Option<ConditionMatch>)> = if conditions.is_empty() {
+                    ships.iter().map(|ship| (*ship, None)).collect()
+                } else {
+                    hits.into_iter().map(|(ship, meets)| (ship, Some(meets))).collect()
+                };
+                (Some(self.rank_ships(candidates, rank, &mut undetermined)), None, None)
+            }
+            None => {
+                const HIT_LIMIT: usize = 40;
+
+                let total = hits.len();
+                let listed: Vec<StatSearchHit> = hits
+                    .into_iter()
+                    .take(HIT_LIMIT)
+                    .map(|(ship, meets)| StatSearchHit { ship: ship.listing_label(), meets })
+                    .collect();
+                let omitted = (total > listed.len()).then(|| total - listed.len());
+                (None, Some(listed), omitted)
+            }
+        };
+
+        Ok(StatSearchOutput {
+            conditions: conditions.iter().map(Condition::describe).collect(),
+            rule: (!conditions.is_empty()).then_some(CONDITION_RULE),
+            considered,
+            qualifying,
+            shares,
+            ranking,
+            ships: listed,
+            omitted,
+            undetermined,
+            searched_without_skills,
+            unmatched_qualifiers,
+        })
+    }
+
+    /// Ships that meet every condition, fewest requirements first, then
+    /// highest tier.
+    fn condition_search<'s>(
+        &'s self,
+        ships: &[&'s Ship],
+        conditions: &[Condition],
+        undetermined: &mut Vec<UndeterminedShip>,
+    ) -> ConditionSearch<'s> {
+        let mut hits: Vec<(&Ship, ConditionMatch)> = Vec::new();
         let mut searched_without_skills = Vec::new();
         let mut qualifier_matched = vec![false; conditions.len()];
-        for &ship in &ships {
-            let search = ShipSearch::new(self, ship, &conditions);
+        for &ship in ships {
+            let search = ShipSearch::new(self, ship, conditions);
             let outcome = match search.stock_readings() {
                 Ok(stock) => search.run(&stock),
                 Err(error) => Outcome::Undetermined { reason: format!("stock stats could not be computed: {error}") },
@@ -703,26 +869,19 @@ impl GameData {
                 searched_without_skills.push(ship.listing_label());
             }
             match outcome {
-                Outcome::Stock { values } => hits.push((
-                    ship,
-                    StatSearchHit {
-                        ship: ship.listing_label(),
-                        stock: true,
-                        requires: Vec::new(),
-                        values,
-                        unchecked: None,
-                    },
-                )),
-                Outcome::Requires { requires, values, unchecked } => hits.push((
-                    ship,
-                    StatSearchHit { ship: ship.listing_label(), stock: false, requires, values, unchecked },
-                )),
+                Outcome::Stock { values } => {
+                    hits.push((ship, ConditionMatch { stock: true, requires: Vec::new(), values, unchecked: None }))
+                }
+                Outcome::Requires { requires, values, unchecked } => {
+                    hits.push((ship, ConditionMatch { stock: false, requires, values, unchecked }))
+                }
                 Outcome::Impossible => {}
                 Outcome::Undetermined { reason } => {
                     undetermined.push(UndeterminedShip { ship: ship.listing_label(), reason })
                 }
             }
         }
+
         let unmatched_qualifiers = if ships.is_empty() {
             Vec::new()
         } else {
@@ -733,6 +892,7 @@ impl GameData {
                 .map(|(condition, _)| condition.describe())
                 .collect()
         };
+
         hits.sort_by(|(left_ship, left), (right_ship, right)| {
             left.requires
                 .len()
@@ -741,33 +901,132 @@ impl GameData {
                 .then_with(|| left_ship.name.cmp(&right_ship.name))
         });
 
-        let stock = hits.iter().filter(|(_, hit)| hit.stock).count();
-        let counts = ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship));
-        let qualifying = QualifyingCounts {
-            total: counts.total,
-            by_class: counts.by_class,
-            stock,
-            with_requirements: hits.len() - stock,
-            test: counts.test,
-        };
-        const HIT_LIMIT: usize = 40;
-        let listed: Vec<StatSearchHit> = hits.into_iter().take(HIT_LIMIT).map(|(_, hit)| hit).collect();
-        let omitted = (qualifying.total > listed.len()).then(|| qualifying.total - listed.len());
+        ConditionSearch { hits, searched_without_skills, unmatched_qualifiers }
+    }
 
-        let considered = ShipCounts::from_ships(ships.iter().copied());
+    /// `candidates` in rank order, each on its best-fit build for the rank
+    /// stat, then highest tier first.
+    fn rank_ships(
+        &self,
+        candidates: Vec<(&Ship, Option<ConditionMatch>)>,
+        rank: &Rank,
+        undetermined: &mut Vec<UndeterminedShip>,
+    ) -> Ranking {
+        const RANK_RULE: &str = "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
 
-        Ok(StatSearchOutput {
-            conditions: conditions.iter().map(Condition::describe).collect(),
-            rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health.",
-            shares: Shares::new(&qualifying.by_class, &considered),
-            considered,
-            qualifying,
-            ships: listed,
-            omitted,
-            undetermined,
-            searched_without_skills,
-            unmatched_qualifiers,
-        })
+        let mut entries: Vec<RankEntry<'_>> = Vec::new();
+        let mut lacking_stat = 0;
+        for (ship, meets) in candidates {
+            match self.rank_builds(ship, rank) {
+                Ok(Some(builds)) => entries.push(RankEntry { ship, builds, meets }),
+                Ok(None) => lacking_stat += 1,
+                Err(error) => undetermined.push(UndeterminedShip {
+                    ship: ship.listing_label(),
+                    reason: format!("{} could not be computed: {error}", rank.stat.name()),
+                }),
+            }
+        }
+
+        entries.sort_by(|left, right| {
+            let (left_value, right_value) = (left.builds.best.value.0, right.builds.best.value.0);
+            let order = match rank.order {
+                RankOrder::Asc => left_value.total_cmp(&right_value),
+                RankOrder::Desc => right_value.total_cmp(&left_value),
+            };
+            order.then_with(|| right.ship.tier.cmp(&left.ship.tier)).then_with(|| left.ship.name.cmp(&right.ship.name))
+        });
+
+        let limit = rank.limit.0;
+        let printed = |index: usize| entries.get(index).map(|entry| shown(entry.builds.best.value.0));
+        let tied_beyond_limit = (limit..entries.len())
+            .filter(|&index| printed(index) == printed(limit - 1))
+            .map(|index| entries[index].ship.listing_label())
+            .collect();
+
+        // Competition ranks: a ship tied with the one before it shares its rank.
+        let mut placements: Vec<(usize, bool)> = Vec::new();
+        for index in 0..entries.len().min(limit) {
+            let value = printed(index);
+            let after_tie = index > 0 && printed(index - 1) == value;
+            let position = match placements.last() {
+                Some(&(previous, _)) if after_tie => previous,
+                _ => index + 1,
+            };
+            placements.push((position, after_tie || printed(index + 1) == value));
+        }
+
+        let ranked = entries.len();
+        let unit = rank.stat.unit();
+        let ships: Vec<RankedShip> = entries
+            .into_iter()
+            .zip(placements)
+            .map(|(RankEntry { ship, builds, meets }, (position, tied))| RankedShip {
+                rank: position,
+                ship: ship.listing_label(),
+                value: format_value(builds.best.value.0, unit),
+                base: format_value(builds.base.0, unit),
+                build: builds.best.assumed,
+                tier_fillers: builds.best.tier_fillers,
+                tied,
+                meets,
+            })
+            .collect();
+        let omitted = (ranked > ships.len()).then(|| ranked - ships.len());
+
+        Ranking { stat: rank.describe(), rule: RANK_RULE, ranked, ships, tied_beyond_limit, omitted, lacking_stat }
+    }
+
+    /// Base and best-fit build value of the rank stat, `None` when the ship
+    /// lacks it.
+    fn rank_builds(&self, ship: &Ship, rank: &Rank) -> Result<Option<Builds<Amount>>, QueryError> {
+        match rank.stat {
+            SearchStat::Card(stat) => {
+                let planner = Planner::new(self, ship);
+                let extract = |outcome: &builds::Outcome| {
+                    let rows = outcome.stats.rows();
+                    extreme(rank.order, card_values(&rows, stat, rank.qualifier.as_deref()).map(|(_, value)| value))
+                };
+
+                planned_builds(&planner, rank, &extract)
+            }
+            SearchStat::Derived(stat) => {
+                let stock_ranges = self.stock_ranges(ship)?;
+                let planner = Planner::new(self, ship);
+                let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+                let extract = |outcome: &builds::Outcome| {
+                    let rows = Derivation {
+                        ship: &ship.param,
+                        selection: selections[outcome.selection],
+                        stats: &outcome.stats,
+                        modifiers: &outcome.bundle,
+                        stock_ranges,
+                    }
+                    .rows();
+                    let values = derived_rows(&rows, stat, rank.qualifier.as_deref()).map(|row| row.value.as_f32());
+                    extreme(rank.order, values)
+                };
+
+                planned_builds(&planner, rank, &extract)
+            }
+            SearchStat::Armor { zone, bound } => {
+                let value = armor_value(&zone_spans(&plates(ship)), zone, bound);
+                Ok(value.map(|value| {
+                    let best = BuildValue { value: Amount(value), assumed: Vec::new(), tier_fillers: Vec::new() };
+                    Builds { base: Amount(value), best, alternatives: Vec::new() }
+                }))
+            }
+            SearchStat::Ricochet { ammo, bound } => {
+                let planner = Planner::new(self, ship);
+                let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+                let extract = |outcome: &builds::Outcome| {
+                    let shells = main_battery_ricochet(self, ship, selections[outcome.selection]);
+                    let angles = shells.iter().filter(|(shell_ammo, _)| *shell_ammo == ammo);
+                    extreme(rank.order, angles.map(|(_, angles)| bound.angle(angles)))
+                };
+
+                planned_builds(&planner, rank, &extract)
+            }
+        }
     }
 }
 
@@ -1305,6 +1564,76 @@ struct Choice<'a> {
     enables: bool,
 }
 
+/// Ships meeting every condition, with what the search learned on the way.
+#[derive(Default)]
+struct ConditionSearch<'a> {
+    hits: Vec<(&'a Ship, ConditionMatch)>,
+    searched_without_skills: Vec<String>,
+    unmatched_qualifiers: Vec<String>,
+}
+
+/// A rank request resolved against the stat list.
+struct Rank {
+    stat: SearchStat,
+    qualifier: Option<String>,
+    order: RankOrder,
+    limit: RankLimit,
+}
+
+impl Rank {
+    fn describe(&self) -> String {
+        let qualifier = self.qualifier.as_deref().map(|qualifier| format!(" ({qualifier})")).unwrap_or_default();
+        let order = match self.order {
+            RankOrder::Asc => "lowest first",
+            RankOrder::Desc => "highest first",
+        };
+
+        format!("{}{qualifier} ({}), {order}", self.stat.name(), self.stat.unit().name())
+    }
+}
+
+/// One ranked ship.
+struct RankEntry<'a> {
+    ship: &'a Ship,
+    builds: Builds<Amount>,
+    meets: Option<ConditionMatch>,
+}
+
+/// A stat value in its search `Unit`, for the build planner.
+#[derive(Debug, Clone, Copy)]
+struct Amount(f32);
+
+impl StatAmount for Amount {
+    fn amount(self) -> f32 {
+        self.0
+    }
+}
+
+fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {
+    const DEFAULT_LIMIT: RankLimit = RankLimit(10);
+    const MAX_LIMIT: RankLimit = RankLimit(25);
+
+    let limit = rank.limit.unwrap_or(DEFAULT_LIMIT);
+    if !(1..=MAX_LIMIT.0).contains(&limit.0) {
+        return Err(QueryError::RankLimitOutOfRange { limit: limit.0, max: MAX_LIMIT.0 });
+    }
+
+    Ok(Rank { stat: resolve_stat(&rank.stat)?, qualifier: rank.qualifier.clone(), order: rank.order, limit })
+}
+
+fn qualifying_counts(hits: &[(&Ship, ConditionMatch)]) -> QualifyingCounts {
+    let stock = hits.iter().filter(|(_, meets)| meets.stock).count();
+    let counts = ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship));
+
+    QualifyingCounts {
+        total: counts.total,
+        by_class: counts.by_class,
+        stock,
+        with_requirements: hits.len() - stock,
+        test: counts.test,
+    }
+}
+
 fn resolve_condition(condition: &StatCondition) -> Result<Condition, QueryError> {
     Ok(Condition {
         stat: resolve_stat(&condition.stat)?,
@@ -1496,6 +1825,82 @@ fn format_value(value: f32, unit: Unit) -> String {
 
 fn is_zero(count: &usize) -> bool {
     *count == 0
+}
+
+/// The rows of `stat` with their values, only the row named `qualifier`
+/// when given.
+fn card_values<'r>(
+    rows: &'r [StatRow],
+    stat: TtxStat,
+    qualifier: Option<&'r str>,
+) -> impl Iterator<Item = (&'r StatRow, f32)> + 'r {
+    rows.iter()
+        .filter(move |row| row.stat == stat && qualifier_matches(row.qualifier.as_deref(), qualifier))
+        .filter_map(|row| {
+            let value = match row.value {
+                StatValue::Ammo(AmmoCount::Infinite) => f32::INFINITY,
+                value => value.as_f32()?,
+            };
+            Some((row, value))
+        })
+}
+
+/// The derived rows of `stat`, only the row named `qualifier` when given.
+fn derived_rows<'r>(
+    rows: &'r [DerivedRow],
+    stat: DerivedStat,
+    qualifier: Option<&'r str>,
+) -> impl Iterator<Item = &'r DerivedRow> + 'r {
+    rows.iter().filter(move |row| row.stat == stat && qualifier_matches(row.qualifier.as_deref(), qualifier))
+}
+
+fn qualifier_matches(row: Option<&str>, wanted: Option<&str>) -> bool {
+    wanted.is_none_or(|wanted| row.is_some_and(|row| row.eq_ignore_ascii_case(wanted.trim())))
+}
+
+fn armor_value(armor: &BTreeMap<&'static str, ThicknessSpan>, zone: ArmorZone, bound: Bound) -> Option<f32> {
+    let span = armor.get(zone.zone)?;
+    let mm = match bound {
+        Bound::Min => span.thinnest(),
+        Bound::Max => span.thickest(),
+    };
+
+    Some(mm.value())
+}
+
+/// The lowest ("asc") or highest ("desc") of a ship's rows.
+fn extreme(order: RankOrder, values: impl Iterator<Item = f32>) -> Option<Amount> {
+    let value = match order {
+        RankOrder::Asc => values.min_by(f32::total_cmp),
+        RankOrder::Desc => values.max_by(f32::total_cmp),
+    };
+
+    value.map(Amount)
+}
+
+/// Base and best-fit build of a stat the planner computes. A stat the stock
+/// modules lack, such as torpedoes a later hull mounts, is ranked from the
+/// first module combination that has it.
+fn planned_builds(
+    planner: &Planner<'_>,
+    rank: &Rank,
+    extract: Extract<'_, Amount>,
+) -> Result<Option<Builds<Amount>>, QueryError> {
+    let mut base_selection = None;
+    for selection in 0..planner.selections().count() {
+        if extract(&*planner.bare(selection)?).is_some() {
+            base_selection = Some(selection);
+            break;
+        }
+    }
+    let Some(base_selection) = base_selection else {
+        return Ok(None);
+    };
+
+    let plan = StatPlan::new(rank.stat.name(), rank.order.better(), extract).on_selection(base_selection);
+    let plan = if rank.stat.is_consumable() { plan.for_consumable() } else { plan };
+
+    planner.best(&plan)
 }
 
 #[cfg(test)]

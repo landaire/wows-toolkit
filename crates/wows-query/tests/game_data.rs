@@ -1017,6 +1017,103 @@ fn stat_search_finds_ap_ricocheting_later_than_standard() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_destroyers_by_surface_detectability() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({ "rank": { "stat": "visibility.sea_detection", "order": "asc" }, "class": "destroyer" }),
+        )
+        .expect("rank resolves");
+
+    assert_eq!(search["ranking"]["ships"].as_array().expect("ships is a list").len(), 10);
+    assert!(search.get("qualifying").is_none());
+    insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_tier_10_battleships_by_main_battery_range() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "rank": { "stat": "artillery.range", "order": "desc" },
+                "class": "battleship",
+                "min_tier": 10,
+                "max_tier": 10,
+            }),
+        )
+        .expect("rank resolves");
+
+    insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_only_ships_meeting_the_conditions() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "conditions": [{ "stat": "artillery.reload_time", "op": "<", "value": 6 }],
+                "rank": { "stat": "visibility.sea_detection", "order": "asc", "limit": 5 },
+                "class": "cruiser",
+                "min_tier": 10,
+                "max_tier": 10,
+            }),
+        )
+        .expect("conditions and rank resolve");
+
+    let qualifying = search["qualifying"]["total"].as_u64().expect("count");
+    assert_eq!(search["ranking"]["ranked"].as_u64().expect("count") + undetermined(&search), qualifying);
+    assert!(search.get("ships").is_none());
+    insta::assert_yaml_snapshot!(search);
+
+    let errors: Vec<String> = [
+        json!({ "rank": { "stat": "visibility.sea_detection", "order": "asc", "limit": 26 } }),
+        json!({ "rank": { "stat": "visibility.sea_detection", "order": "lowest" } }),
+        json!({ "class": "destroyer" }),
+    ]
+    .into_iter()
+    .map(|arguments| match game().call_tool("stat_search", arguments) {
+        Ok(found) => format!("ok: {}", found["ranking"]["stat"]),
+        Err(error) => error.to_string(),
+    })
+    .collect();
+    insta::assert_yaml_snapshot!(errors);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_derived_and_ricochet_stats() {
+    let ranked: Vec<String> = ["artillery.barrels", "artillery.ap.ricochet_start"]
+        .into_iter()
+        .flat_map(|stat| {
+            let search = game()
+                .call_tool(
+                    "stat_search",
+                    json!({
+                        "rank": { "stat": stat, "order": "desc", "limit": 3 },
+                        "class": "battleship",
+                        "min_tier": 10,
+                        "max_tier": 10,
+                    }),
+                )
+                .expect("rank resolves");
+            let ships = search["ranking"]["ships"].as_array().expect("ships is a list").clone();
+            ships.into_iter().map(move |ship| format!("{stat}: {} {} {}", ship["rank"], ship["ship"], ship["value"]))
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(ranked);
+}
+
+fn undetermined(search: &serde_json::Value) -> u64 {
+    search.get("undetermined").and_then(|ships| ships.as_array()).map_or(0, |ships| ships.len() as u64)
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn ship_aircraft_lists_squadrons_air_strikes_and_plate_verdicts() {
     for (name, thickness) in
         [("Midway", None), ("Ise", Some(32.0)), ("Gouden Leeuw", Some(25.0)), ("Sekiryu", Some(32.0))]

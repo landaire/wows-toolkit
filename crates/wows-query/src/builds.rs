@@ -55,17 +55,28 @@ use crate::upgrades::Upgrade;
 /// Two stat values closer than this are equal.
 const EPSILON: f32 = 1e-4;
 
-/// A stat value with a unit, comparable as a number.
-pub trait StatUnit: Copy + Serialize {
+/// A stat value comparable as a number.
+pub trait StatAmount: Copy {
+    fn amount(self) -> f32;
+}
+
+/// A stat value reported with its unit.
+pub trait StatUnit: StatAmount + Serialize {
     /// Unit symbol reported next to the value.
     const UNIT: &'static str;
+}
 
-    fn amount(self) -> f32;
+impl StatAmount for Km {
+    fn amount(self) -> f32 {
+        self.value()
+    }
 }
 
 impl StatUnit for Km {
     const UNIT: &'static str = "km";
+}
 
+impl StatAmount for Meters {
     fn amount(self) -> f32 {
         self.value()
     }
@@ -73,7 +84,9 @@ impl StatUnit for Km {
 
 impl StatUnit for Meters {
     const UNIT: &'static str = "m";
+}
 
+impl StatAmount for Millimeters {
     fn amount(self) -> f32 {
         self.value()
     }
@@ -81,7 +94,9 @@ impl StatUnit for Meters {
 
 impl StatUnit for Millimeters {
     const UNIT: &'static str = "mm";
+}
 
+impl StatAmount for Seconds {
     fn amount(self) -> f32 {
         self.value()
     }
@@ -89,7 +104,9 @@ impl StatUnit for Millimeters {
 
 impl StatUnit for Seconds {
     const UNIT: &'static str = "s";
+}
 
+impl StatAmount for TorpedoesPerMinute {
     fn amount(self) -> f32 {
         self.value()
     }
@@ -97,10 +114,6 @@ impl StatUnit for Seconds {
 
 impl StatUnit for TorpedoesPerMinute {
     const UNIT: &'static str = "torpedoes/min";
-
-    fn amount(self) -> f32 {
-        self.value()
-    }
 }
 
 /// Number of charges, or unlimited.
@@ -122,9 +135,7 @@ impl Serialize for Charges {
     }
 }
 
-impl StatUnit for Charges {
-    const UNIT: &'static str = "charges";
-
+impl StatAmount for Charges {
     fn amount(self) -> f32 {
         match self {
             // Precision is not a concern for charge counts.
@@ -133,6 +144,10 @@ impl StatUnit for Charges {
             Self::Unlimited => f32::INFINITY,
         }
     }
+}
+
+impl StatUnit for Charges {
+    const UNIT: &'static str = "charges";
 }
 
 /// One build-dependent stat.
@@ -250,6 +265,22 @@ impl Build {
     fn all(&self) -> Vec<Item> {
         self.items.iter().chain(&self.tier_fillers).copied().collect()
     }
+}
+
+/// The best-fit build of one stat, before alternatives.
+struct Fit<V> {
+    base: V,
+
+    /// Index of the module combination the build uses.
+    selection: usize,
+
+    exclusions: Vec<Exclusion>,
+
+    /// The items of `exclusions`.
+    excluded: Vec<Item>,
+
+    chosen: Build,
+    value: V,
 }
 
 /// The builds of one ship, with the outcomes computed so far.
@@ -448,52 +479,28 @@ impl<'a> Planner<'a> {
         loadout
     }
 
+    /// Base and best-fit build of one stat, without alternatives. `None`
+    /// when the ship lacks the stat.
+    pub(crate) fn best<V: StatAmount>(&self, plan: &StatPlan<'_, V>) -> Result<Option<Builds<V>>, QueryError> {
+        let Some(fit) = self.fit(plan)? else {
+            return Ok(None);
+        };
+
+        let best = self.build_value(fit.selection, &fit.chosen, fit.value);
+        Ok(Some(Builds { base: fit.base, best, alternatives: Vec::new() }))
+    }
+
     /// Base, best-fit build and alternatives of one stat. `None` when the
     /// ship lacks the stat.
     pub(crate) fn plan<V: StatUnit>(&self, plan: &StatPlan<'_, V>) -> Result<Option<BuildStat<V>>, QueryError> {
         let value = |outcome: &Outcome| (plan.extract)(outcome);
-        let Some(base) = value(&*self.bare(plan.base_selection)?) else {
+        let Some(Fit { base, selection, exclusions, excluded, chosen, value: best_value }) = self.fit(plan)? else {
             return Ok(None);
         };
 
-        let mut selection = plan.base_selection;
-        let mut start = base;
-        if plan.modules {
-            for index in (0..self.selections.len()).filter(|index| *index != plan.base_selection) {
-                if let Some(candidate) = value(&*self.outcome(index, &[], None)?)
-                    && plan.better.improves(candidate.amount(), start.amount())
-                {
-                    selection = index;
-                    start = candidate;
-                }
-            }
-        }
-
-        let mut singles: Vec<(Item, V)> = Vec::new();
-        for &item in &self.items {
-            if let Some(candidate) = value(&*self.outcome(selection, &[item], None)?)
-                && plan.better.improves(candidate.amount(), start.amount())
-            {
-                singles.push((item, candidate));
-            }
-        }
-        let exclusions = match plan.exclude {
-            Some(exclude) => exclude(self, &singles)?,
-            None => Vec::new(),
-        };
-        let excluded: Vec<Item> = exclusions.iter().map(|exclusion| exclusion.item).collect();
-        let chosen = self.complete(selection, self.choose(&singles, &excluded, plan.better), plan, &excluded)?;
-
-        let best_value = value(&*self.outcome(selection, &chosen.all(), None)?).unwrap_or(start);
-        let modules = &self.selections[selection].1;
-        let names = |items: &[Item]| -> Vec<String> { items.iter().map(|item| self.name(*item)).collect() };
-        let assumed = |build: &Build| -> Vec<String> { modules.iter().cloned().chain(names(&build.items)).collect() };
-        let alternative = |label: String, value: V, build: &Build, note: Option<String>| BuildAlternative {
-            label,
-            value,
-            assumed: assumed(build),
-            tier_fillers: names(&build.tier_fillers),
-            note,
+        let alternative = |label: String, value: V, build: &Build, note: Option<String>| {
+            let BuildValue { value, assumed, tier_fillers } = self.build_value(selection, build, value);
+            BuildAlternative { label, value, assumed, tier_fillers, note }
         };
 
         let mut alternatives = Vec::new();
@@ -541,15 +548,66 @@ impl<'a> Planner<'a> {
             }
         }
 
-        let best =
-            BuildValue { value: best_value, assumed: assumed(&chosen), tier_fillers: names(&chosen.tier_fillers) };
+        let best = self.build_value(selection, &chosen, best_value);
         Ok(Some(BuildStat { stat: plan.label.clone(), unit: V::UNIT, builds: Builds { base, best, alternatives } }))
+    }
+
+    /// The best-fit build of one stat: the module combination that improves
+    /// it most, then the improving skills and upgrades that fit.
+    fn fit<V: StatAmount>(&self, plan: &StatPlan<'_, V>) -> Result<Option<Fit<V>>, QueryError> {
+        let value = |outcome: &Outcome| (plan.extract)(outcome);
+        let Some(base) = value(&*self.bare(plan.base_selection)?) else {
+            return Ok(None);
+        };
+
+        let mut selection = plan.base_selection;
+        let mut start = base;
+        if plan.modules {
+            for index in (0..self.selections.len()).filter(|index| *index != plan.base_selection) {
+                if let Some(candidate) = value(&*self.outcome(index, &[], None)?)
+                    && plan.better.improves(candidate.amount(), start.amount())
+                {
+                    selection = index;
+                    start = candidate;
+                }
+            }
+        }
+
+        let mut singles: Vec<(Item, V)> = Vec::new();
+        for &item in &self.items {
+            if let Some(candidate) = value(&*self.outcome(selection, &[item], None)?)
+                && plan.better.improves(candidate.amount(), start.amount())
+            {
+                singles.push((item, candidate));
+            }
+        }
+        let exclusions = match plan.exclude {
+            Some(exclude) => exclude(self, &singles)?,
+            None => Vec::new(),
+        };
+        let excluded: Vec<Item> = exclusions.iter().map(|exclusion| exclusion.item).collect();
+        let chosen = self.complete(selection, self.choose(&singles, &excluded, plan.better), plan, &excluded)?;
+        let best_value = value(&*self.outcome(selection, &chosen.all(), None)?).unwrap_or(start);
+
+        Ok(Some(Fit { base, selection, exclusions, excluded, chosen, value: best_value }))
+    }
+
+    /// `build` on module combination `selection` as reported: the
+    /// combination's modules that are not stock, then the build's items.
+    fn build_value<V>(&self, selection: usize, build: &Build, value: V) -> BuildValue<V> {
+        let name = |item: &Item| self.name(*item);
+
+        BuildValue {
+            value,
+            assumed: self.selections[selection].1.iter().cloned().chain(build.items.iter().map(name)).collect(),
+            tier_fillers: build.tier_fillers.iter().map(name).collect(),
+        }
     }
 
     /// Improving skills that fit the captain's points with a skill on every
     /// cheaper tier, most improving first, and the most improving upgrade of
     /// each slot.
-    fn choose<V: StatUnit>(&self, singles: &[(Item, V)], excluded: &[Item], better: Better) -> Vec<Item> {
+    fn choose<V: StatAmount>(&self, singles: &[(Item, V)], excluded: &[Item], better: Better) -> Vec<Item> {
         let gain = |value: V| match better {
             Better::Lower => -value.amount(),
             Better::Higher => value.amount(),
@@ -582,7 +640,7 @@ impl<'a> Planner<'a> {
     /// `items` with a skill on every cheaper tier its skills leave empty: of
     /// each such tier, the skill outside `avoid` that leaves the stat best,
     /// the first in skill order on a tie.
-    fn complete<V: StatUnit>(
+    fn complete<V: StatAmount>(
         &self,
         selection: usize,
         items: Vec<Item>,

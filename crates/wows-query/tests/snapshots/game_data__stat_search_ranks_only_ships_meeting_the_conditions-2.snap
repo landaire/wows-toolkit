@@ -1,0 +1,7 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: errors
+---
+- "rank.limit must be from 1 to 25, not 26"
+- "invalid arguments for stat_search: unknown variant `lowest`, expected `asc` or `desc`"
+- "give at least one condition, or rank"

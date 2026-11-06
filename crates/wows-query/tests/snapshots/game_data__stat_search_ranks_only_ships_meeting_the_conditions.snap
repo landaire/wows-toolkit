@@ -1,0 +1,110 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+conditions:
+  - artillery.reload_time < 6 s
+rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health."
+considered:
+  total: 56
+  by_class:
+    cruiser: 56
+  test: 7
+qualifying:
+  total: 22
+  by_class:
+    cruiser: 22
+  stock: 16
+  with_requirements: 6
+  test: 2
+share_pct: 39.3
+share_pct_by_class:
+  cruiser: 39.3
+ranking:
+  stat: "visibility.sea_detection (km), lowest first"
+  rule: "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  ranked: 22
+  ships:
+    - rank: 1
+      ship: "T10 Kitakami (cruiser, Japan)"
+      value: 7.92 km
+      base: 9.78 km
+      build:
+        - Concealment Expert
+        - Concealment System Modification 1
+      tier_fillers:
+        - Consumable Specialist
+        - Focus Fire Training
+        - Heavy AP Shells
+      meets:
+        stock: true
+        values:
+          - "artillery.reload_time: 3 s"
+    - rank: 2
+      ship: "T10 Taejong (cruiser, Pan_Asia)"
+      value: 8.49 km
+      base: 10.48 km
+      build:
+        - Concealment Expert
+        - Concealment System Modification 1
+      tier_fillers:
+        - Consumable Specialist
+        - Focus Fire Training
+        - Heavy AP Shells
+      meets:
+        stock: true
+        values:
+          - "artillery.reload_time: 3.5 s"
+    - rank: 3
+      ship: "T10 Minotaur (cruiser, United_Kingdom)"
+      value: 9.05 km
+      base: 11.17 km
+      build:
+        - Concealment Expert
+        - Concealment System Modification 1
+      tier_fillers:
+        - Consumable Specialist
+        - Focus Fire Training
+        - Heavy AP Shells
+      meets:
+        stock: true
+        values:
+          - "artillery.reload_time: 3.2 s"
+    - rank: 4
+      ship: "T10 San Martín (cruiser, Pan_America)"
+      value: 9.12 km
+      base: 11.26 km
+      build:
+        - Concealment Expert
+        - Concealment System Modification 1
+      tier_fillers:
+        - Consumable Specialist
+        - Focus Fire Training
+        - Heavy AP Shells
+      meets:
+        stock: false
+        requires:
+          - "upgrade: Main Battery Modification 3 (slot 6)"
+        values:
+          - "artillery.reload_time: 5.28 s"
+    - rank: 5
+      ship: "T10 Fearmaw (cruiser, United_Kingdom, test)"
+      value: 9.19 km
+      base: 11.35 km
+      build:
+        - Concealment Expert
+        - Concealment System Modification 1
+      tier_fillers:
+        - Consumable Specialist
+        - Focus Fire Training
+        - Heavy AP Shells
+      tied: true
+      meets:
+        stock: false
+        requires:
+          - "upgrade: Main Battery Modification 3 (slot 6)"
+        values:
+          - "artillery.reload_time: 5.72 s"
+  tied_beyond_limit:
+    - "T10 Plymouth (cruiser, United_Kingdom)"
+  omitted: 17

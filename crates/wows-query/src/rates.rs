@@ -34,6 +34,7 @@ use crate::builds::Better;
 use crate::builds::BuildStat;
 use crate::builds::Outcome;
 use crate::builds::Planner;
+use crate::builds::StatAmount;
 use crate::builds::StatPlan;
 use crate::builds::StatUnit;
 use crate::builds::round;
@@ -188,12 +189,14 @@ impl DamageRate {
     }
 }
 
-impl StatUnit for DamageRate {
-    const UNIT: &'static str = "HP/min";
-
+impl StatAmount for DamageRate {
     fn amount(self) -> f32 {
         self.damage_per_minute.value()
     }
+}
+
+impl StatUnit for DamageRate {
+    const UNIT: &'static str = "HP/min";
 }
 
 /// Damage per minute of the barrels that bear inside the broadside and bow

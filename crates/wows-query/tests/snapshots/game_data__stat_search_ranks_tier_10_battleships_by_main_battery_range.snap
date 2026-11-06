@@ -1,0 +1,79 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+considered:
+  total: 43
+  by_class:
+    battleship: 43
+  test: 11
+ranking:
+  stat: "artillery.range (km), highest first"
+  rule: "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  ranked: 43
+  ships:
+    - rank: 1
+      ship: "T10 Shikishima (battleship, Japan)"
+      value: 30.89 km
+      base: 26.63 km
+      build:
+        - Gun Fire Control System Modification 2
+      tied: true
+    - rank: 1
+      ship: "T10 Yamato (battleship, Japan) [replicas: ARP Yamato, Yamato Kai]"
+      value: 30.89 km
+      base: 26.63 km
+      build:
+        - Gun Fire Control System Modification 2
+      tied: true
+    - rank: 3
+      ship: "T10 Aki (battleship, Japan) [replicas: Aki G]"
+      value: 30.26 km
+      base: 26.09 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 4
+      ship: "T10 République (battleship, France)"
+      value: 30.25 km
+      base: 26.08 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 5
+      ship: "T10 Sete de Setembro (battleship, Pan_America)"
+      value: 29.36 km
+      base: 25.31 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 6
+      ship: "T10 Bungo (battleship, Japan)"
+      value: 29 km
+      base: 25 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 7
+      ship: "T10 Bourgogne (battleship, France)"
+      value: 28.77 km
+      base: 24.8 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 8
+      ship: "T10 Slava (battleship, Russia)"
+      value: 28.63 km
+      base: 24.68 km
+      build:
+        - Gun Fire Control System Modification 2
+    - rank: 9
+      ship: "T10 Utah (battleship, USA, test)"
+      value: 28.42 km
+      base: 24.5 km
+      build:
+        - Artillery Plotting Room Modification 1
+      tied: true
+    - rank: 9
+      ship: "T10 Vermont (battleship, USA)"
+      value: 28.42 km
+      base: 24.5 km
+      build:
+        - Artillery Plotting Room Modification 1
+      tied: true
+  omitted: 33

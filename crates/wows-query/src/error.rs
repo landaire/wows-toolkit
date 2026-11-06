@@ -148,6 +148,9 @@ pub enum QueryError {
     #[error("stat {stat} is yes or no, not a number; it cannot be compared")]
     StatNotNumeric { stat: &'static str },
 
+    #[error("rank.limit must be from 1 to {max}, not {limit}")]
+    RankLimitOutOfRange { limit: usize, max: usize },
+
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 

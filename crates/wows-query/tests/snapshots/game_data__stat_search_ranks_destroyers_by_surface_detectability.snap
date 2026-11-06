@@ -1,0 +1,124 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+considered:
+  total: 216
+  by_class:
+    destroyer: 216
+  test: 6
+ranking:
+  stat: "visibility.sea_detection (km), lowest first"
+  rule: "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  ranked: 216
+  ships:
+    - rank: 1
+      ship: "T2 Longjiang (destroyer, Pan_Asia)"
+      value: 4.72 km
+      base: 5.24 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 1
+      ship: "T2 Medea (destroyer, United_Kingdom)"
+      value: 4.72 km
+      base: 5.24 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 1
+      ship: "T2 Tachibana (destroyer, Japan) [replicas: Tachibana L]"
+      value: 4.72 km
+      base: 5.24 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 1
+      ship: "T2 V-25 (destroyer, Germany)"
+      value: 4.72 km
+      base: 5.24 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 5
+      ship: "T2 Umikaze (destroyer, Japan)"
+      value: 4.87 km
+      base: 5.41 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+    - rank: 6
+      ship: "T3 Phra Ruang (destroyer, Pan_Asia)"
+      value: 5.03 km
+      base: 5.59 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 6
+      ship: "T2 Smith (destroyer, USA)"
+      value: 5.03 km
+      base: 5.59 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 6
+      ship: "T2 Storozhevoi (destroyer, Russia)"
+      value: 5.03 km
+      base: 5.59 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 9
+      ship: "T2 En. Gabolde (destroyer, France)"
+      value: 5.18 km
+      base: 5.76 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+    - rank: 9
+      ship: "T2 Sampson (destroyer, USA)"
+      value: 5.18 km
+      base: 5.76 km
+      build:
+        - Concealment Expert
+      tier_fillers:
+        - Consumable Specialist
+        - Extra-Heavy Ammunition
+        - Adrenaline Rush
+      tied: true
+  omitted: 206
