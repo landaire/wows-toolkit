@@ -9,7 +9,7 @@ pub mod query_bar;
 pub mod replay_parser;
 pub mod search_tab;
 pub mod session_stats_chart;
-mod settings_tab;
+pub(crate) mod settings_tab;
 pub mod stats_tab;
 pub mod theme;
 pub mod widgets;

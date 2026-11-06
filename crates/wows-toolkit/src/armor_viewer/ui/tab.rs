@@ -1159,17 +1159,9 @@ impl ToolkitTabViewer<'_> {
     }
 }
 
-/// Prompt for a save path and export the ship model, entirely off the UI
-/// thread: `rfd::FileDialog::save_file` blocks whatever thread calls it while
-/// the native picker is open. Calling it inside this worker rather than in
-/// the frame closure (where the old inline dialog called it) is what keeps
-/// the picker from freezing the app -- the same pattern `rfd`'s own
-/// `AsyncFileDialog` backend uses internally on Windows (a dedicated
-/// `std::thread::spawn` running the synchronous, COM-initializing call). That
-/// thread is also always freshly spawned here, never pooled, which is what
-/// makes calling the COM-initializing picker off the UI thread sound: a
-/// pooled thread could already sit in an incompatible COM apartment and hit
-/// `RPC_E_CHANGED_MODE`.
+/// Prompt for a save path and export the ship model off the UI thread. The
+/// async dialog is created here, on the UI thread, because macOS requires
+/// dialogs to start from the main thread; the worker only waits on it.
 ///
 /// Raises the toast itself, from this thread, rather than reporting through
 /// `finished_sender`: that keeps the result visible even if the dialog was
@@ -1187,13 +1179,14 @@ fn spawn_ship_export(
     toasts: crate::tab_state::SharedToasts,
     finished_sender: egui_inbox::UiInboxSender<()>,
 ) {
-    let default_filename = format!("{}.glb", display_name);
+    let picked = rfd::AsyncFileDialog::new()
+        .set_file_name(format!("{display_name}.glb"))
+        .add_filter("GLB", &["glb"])
+        .save_file();
     let ship_name = display_name.to_string();
     let param_idx = param_index.to_string();
     crate::util::thread::spawn_logged("export-ship-model", move || {
-        let Some(path) =
-            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("GLB", &["glb"]).save_file()
-        else {
+        let Some(path) = pollster::block_on(picked).map(|handle| handle.path().to_path_buf()) else {
             tracing::warn!("save-file picker returned no path for {ship_name} (cancelled, or the picker failed)");
             let _ = finished_sender.send(());
             return;

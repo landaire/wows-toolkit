@@ -1,5 +1,6 @@
 pub(crate) mod build_tracker;
 pub mod error;
+pub(crate) mod file_dialog;
 pub(crate) mod formatting;
 pub(crate) mod game_params;
 pub(crate) mod http;

@@ -50,6 +50,9 @@ use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::theme::semantic::semantic;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
+
 /// Filter results: positions rather than rows, since a three-character filter
 /// matches most of an install and a row apiece would cost more than the list
 /// itself.
@@ -78,6 +81,19 @@ enum GameParamsFormat {
     MinimalJson,
     MinimalCbor,
 }
+
+/// GameParams export waiting on a destination path.
+struct GameParamsDump {
+    format: GameParamsFormat,
+    base_params: bool,
+}
+
+/// A [`GameParamsDump`] plus the build it reads from, fixed when the dialog opens.
+struct GameParamsRequest {
+    dump: GameParamsDump,
+    source: crate::data::wows_data::SharedBuildData,
+}
+
 /// A single match found during content search.
 #[derive(Clone)]
 pub struct ContentSearchHit {
@@ -224,6 +240,10 @@ pub struct ResourceBrowserState {
     pub assets_bin_loading_build: Option<u32>,
     /// When true, batch extraction decodes supported Assets.bin prototypes to JSON.
     pub decode_prototypes_as_json: bool,
+
+    extract_json_dialog: FileDialogSlot<ExtractJsonRequest>,
+    game_params_dialog: FileDialogSlot<GameParamsRequest>,
+    output_dir_dialog: FileDialogSlot,
 }
 
 impl Default for ResourceBrowserState {
@@ -238,6 +258,9 @@ impl Default for ResourceBrowserState {
             assets_bin_rx: None,
             assets_bin_loading_build: None,
             decode_prototypes_as_json: false,
+            extract_json_dialog: FileDialogSlot::new(),
+            game_params_dialog: FileDialogSlot::new(),
+            output_dir_dialog: FileDialogSlot::new(),
         }
     }
 }
@@ -711,7 +734,8 @@ fn add_view_file_context_menu(
                     .button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.unpacker.extract_as_json")))
                     .clicked()
                 {
-                    extract_single_as_json(&node_extract, pt);
+                    let request = ExtractJsonRequest { node: node_extract.clone(), proto_type: pt };
+                    ui.ctx().data_mut(|data| data.insert_temp(extract_json_request_id(), Some(request)));
                     ui.close_kind(UiKind::Menu);
                 }
             });
@@ -759,25 +783,31 @@ fn open_decoded_json_viewer(
     }
 }
 
-/// Extract a single Assets.bin file as decoded JSON via file dialog.
-fn extract_single_as_json(node: &VfsPath, proto_type: PrototypeType) {
-    let filename = node.filename();
-    let json_filename = format!("{filename}.json");
+/// Assets.bin file to decode and save as JSON once a destination is chosen.
+#[derive(Clone)]
+struct ExtractJsonRequest {
+    node: VfsPath,
+    proto_type: PrototypeType,
+}
 
-    if let Some(path) = rfd::FileDialog::new().set_file_name(&json_filename).save_file() {
-        let mut data = Vec::new();
-        if let Ok(mut reader) = node.open_file() {
-            let _ = reader.read_to_end(&mut data);
+fn extract_json_request_id() -> egui::Id {
+    egui::Id::new("unpacker_extract_json_request")
+}
+
+/// Decode a single Assets.bin file and write it as JSON to `path`.
+fn extract_single_as_json(request: &ExtractJsonRequest, path: &Path) {
+    let mut data = Vec::new();
+    if let Ok(mut reader) = request.node.open_file() {
+        let _ = reader.read_to_end(&mut data);
+    }
+    match wowsunpack::models::decode_prototype_to_json(&data, request.proto_type) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(path, json.as_bytes()) {
+                eprintln!("Failed to write {}: {}", path.display(), e);
+            }
         }
-        match wowsunpack::models::decode_prototype_to_json(&data, proto_type) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(&path, json.as_bytes()) {
-                    eprintln!("Failed to write {}: {}", path.display(), e);
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to decode {}: {}", node.as_str(), e);
-            }
+        Err(e) => {
+            eprintln!("Failed to decode {}: {}", request.node.as_str(), e);
         }
     }
 }
@@ -1444,14 +1474,30 @@ impl ToolkitTabViewer<'_> {
         self.extract_files(output_dir.as_ref(), items_to_unpack.entries(), decode_json);
     }
 
-    fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat, base_params: bool) {
+    /// Applies the result of any unpacker dialog that closed since the last frame.
+    pub(crate) fn poll_unpacker_dialogs(&mut self) {
+        if let Some((request, path)) = self.tab_state.browser_state.game_params_dialog.poll() {
+            self.dump_game_params(path, request);
+        }
+
+        if let Some(folder) = self.tab_state.browser_state.output_dir_dialog.poll_path() {
+            self.tab_state.persisted.write().output_dir = folder.to_string_lossy().into_owned();
+        }
+
+        if let Some((request, path)) = self.tab_state.browser_state.extract_json_dialog.poll() {
+            extract_single_as_json(&request, &path);
+        }
+    }
+
+    fn dump_game_params(&mut self, file_path: PathBuf, request: GameParamsRequest) {
+        let GameParamsRequest { dump: GameParamsDump { format, base_params }, source } = request;
         let (tx, rx) = crate::ui_channel::guarded_channel();
 
         self.tab_state.unpacker_progress = Some(rx);
         UNPACKER_STOP.store(false, Ordering::Relaxed);
 
-        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-            let wows_data = wows_data.read();
+        {
+            let wows_data = source.read();
             let metadata_provider = { wows_data.game_metadata.clone() };
             let vfs = wows_data.vfs.clone();
 
@@ -1734,33 +1780,44 @@ impl ToolkitTabViewer<'_> {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // GameParams dump menu (rightmost)
                     ui.menu_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.unpacker.game_params")), |ui| {
-                        if ui.small_button(t!("ui.unpacker.base_as_json")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
-                                self.dump_game_params(path, GameParamsFormat::Json, true);
-                            }
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.small_button(t!("ui.unpacker.as_json")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
-                                self.dump_game_params(path, GameParamsFormat::Json, false);
-                            }
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.small_button(t!("ui.unpacker.as_cbor")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
-                                self.dump_game_params(path, GameParamsFormat::Cbor, false);
-                            }
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.small_button(t!("ui.unpacker.as_json_minimal")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
-                                self.dump_game_params(path, GameParamsFormat::MinimalJson, false);
-                            }
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.small_button(t!("ui.unpacker.as_cbor_minimal")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
-                                self.dump_game_params(path, GameParamsFormat::MinimalCbor, false);
+                        let dump = if ui.small_button(t!("ui.unpacker.base_as_json")).clicked() {
+                            Some((
+                                "GameParams.json",
+                                GameParamsDump { format: GameParamsFormat::Json, base_params: true },
+                            ))
+                        } else if ui.small_button(t!("ui.unpacker.as_json")).clicked() {
+                            Some((
+                                "GameParams.json",
+                                GameParamsDump { format: GameParamsFormat::Json, base_params: false },
+                            ))
+                        } else if ui.small_button(t!("ui.unpacker.as_cbor")).clicked() {
+                            Some((
+                                "GameParams.cbor",
+                                GameParamsDump { format: GameParamsFormat::Cbor, base_params: false },
+                            ))
+                        } else if ui.small_button(t!("ui.unpacker.as_json_minimal")).clicked() {
+                            Some((
+                                "MinGameParams.json",
+                                GameParamsDump { format: GameParamsFormat::MinimalJson, base_params: false },
+                            ))
+                        } else if ui.small_button(t!("ui.unpacker.as_cbor_minimal")).clicked() {
+                            Some((
+                                "MinGameParams.cbor",
+                                GameParamsDump { format: GameParamsFormat::MinimalCbor, base_params: false },
+                            ))
+                        } else {
+                            None
+                        };
+                        if let Some((file_name, dump)) = dump {
+                            // Nothing to dump until game data has loaded.
+                            if let Some(source) = self.tab_state.world_of_warships_data.clone() {
+                                let dialog = rfd::AsyncFileDialog::new().set_file_name(file_name);
+                                self.tab_state.browser_state.game_params_dialog.open(
+                                    ui.ctx(),
+                                    DialogKind::SaveFile,
+                                    dialog,
+                                    GameParamsRequest { dump, source },
+                                );
                             }
                             ui.close_kind(UiKind::Menu);
                         }
@@ -1864,10 +1921,15 @@ impl ToolkitTabViewer<'_> {
                     ui.separator();
 
                     // Browse button
-                    if ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.unpacker.browse"))).clicked()
-                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                    let output_dir_dialog = &mut self.tab_state.browser_state.output_dir_dialog;
+                    if ui
+                        .add_enabled(
+                            !output_dir_dialog.is_pending(),
+                            egui::Button::new(wt_translations::icon_t(icons::FOLDER, &t!("ui.unpacker.browse"))),
+                        )
+                        .clicked()
                     {
-                        self.tab_state.persisted.write().output_dir = folder.to_string_lossy().into_owned();
+                        output_dir_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
                     }
 
                     // Output path text box fills remaining space
@@ -1932,6 +1994,17 @@ impl ToolkitTabViewer<'_> {
             // Apply deferred content search
             if let Some(source) = start_search.take() {
                 self.start_content_search(source);
+            }
+
+            // The context menu runs in a free function without access to tab state.
+            // Stored as `Option` because `remove_temp` requires `Default`.
+            if let Some(request) = ui
+                .ctx()
+                .data_mut(|data| data.remove_temp::<Option<ExtractJsonRequest>>(extract_json_request_id()))
+                .flatten()
+            {
+                let dialog = rfd::AsyncFileDialog::new().set_file_name(format!("{}.json", request.node.filename()));
+                self.tab_state.browser_state.extract_json_dialog.open(ui.ctx(), DialogKind::SaveFile, dialog, request);
             }
         });
     }

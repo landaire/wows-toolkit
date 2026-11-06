@@ -48,6 +48,7 @@ wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox"
 wows-battle-world = { workspace = true }
 wt-translations = { workspace = true }
 rfd = "0.17"
+pollster = "0.4"
 humansize = "2.1.3"
 thiserror = { workspace = true }
 glob = { workspace = true }

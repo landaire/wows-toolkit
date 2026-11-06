@@ -74,6 +74,8 @@ use crate::replay::timeline::format_timeline_event;
 use crate::replay::timeline::ui::TimelineFilter;
 use crate::replay::timeline::ui::timeline_filter_bar;
 use crate::replay::timeline::ui::timeline_list;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
 
 /// Fill behind the map, shared by the renderer window and the hover preview
 /// so the two minimap surfaces cannot drift apart.
@@ -1018,6 +1020,8 @@ pub struct ReplayRendererViewer {
     pub suppress_gpu_warning: Arc<AtomicBool>,
     /// Active GPU encoder warning dialog, if any.
     gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
+    /// Save dialog for "Save as video", carrying the options captured on click.
+    video_save_dialog: Arc<Mutex<FileDialogSlot<RenderOptions>>>,
     /// User preference: prefer CPU (software) encoder for video export.
     prefer_cpu_encoder: Arc<AtomicBool>,
     /// User preference: codec for video export. `None` means "best available".
@@ -1170,6 +1174,7 @@ pub fn launch_replay_renderer(
         local_pings: Arc::new(Mutex::new(Vec::new())),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
+        video_save_dialog: Arc::new(Mutex::new(FileDialogSlot::new())),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
         video_codec: Arc::new(Mutex::new(saved_options.video_codec)),
         include_pre_battle: Arc::new(AtomicBool::new(saved_options.include_pre_battle)),
@@ -1362,6 +1367,7 @@ pub fn launch_client_renderer(
         local_pings: Arc::new(Mutex::new(Vec::new())),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
+        video_save_dialog: Arc::new(Mutex::new(FileDialogSlot::new())),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
         video_codec: Arc::new(Mutex::new(None)),
         include_pre_battle: Arc::new(AtomicBool::new(false)),
@@ -1430,6 +1436,7 @@ impl ReplayRendererViewer {
         let local_pings_arc = self.local_pings.clone();
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
+        let video_save_dialog = Arc::clone(&self.video_save_dialog);
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let video_codec = self.video_codec.clone();
         let include_pre_battle = self.include_pre_battle.clone();
@@ -2881,10 +2888,11 @@ impl ReplayRendererViewer {
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
                                                 let has_warning = gpu_encoder_warning.lock().is_some();
+                                                let dialog_pending = video_save_dialog.lock().is_pending();
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .enabled_ui(!is_exporting && !has_warning)
+                                                    .enabled_ui(!is_exporting && !has_warning && !dialog_pending)
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
                                                     ));
@@ -2902,32 +2910,10 @@ impl ReplayRendererViewer {
                                                         }));
                                                     }
                                                     let default_name = format!("{}.mp4", video_export_data.video_file_stem);
-                                                    if let Some(path) = rfd::FileDialog::new()
+                                                    let dialog = rfd::AsyncFileDialog::new()
                                                         .set_file_name(&default_name)
-                                                        .add_filter("MP4 Video", &["mp4"])
-                                                        .save_file()
-                                                    {
-                                                        let status = cached_encoder_status(&ctx);
-                                                        let codec_pref = *video_codec.lock();
-                                                        let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
-                                                        let action = PendingVideoExport::SaveToFile {
-                                                            output_path: path.to_string_lossy().to_string(),
-                                                            options: opts,
-                                                            prefer_cpu,
-                                                            codec: codec_pref,
-                                                            actual_game_duration,
-                                                            encoder_config: wows_minimap_renderer::EncoderConfig::default(),
-                                                            include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
-                                                        };
-                                                        if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                            execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
-                                                        } else {
-                                                            *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
-                                                                pending_action: action,
-                                                                dont_show_again: false,
-                                                            });
-                                                        }
-                                                    }
+                                                        .add_filter("MP4 Video", &["mp4"]);
+                                                    video_save_dialog.lock().open(&ctx, DialogKind::SaveFile, dialog, opts);
                                                 }
                                             }
 
@@ -2935,10 +2921,11 @@ impl ReplayRendererViewer {
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
                                                 let has_warning = gpu_encoder_warning.lock().is_some();
+                                                let dialog_pending = video_save_dialog.lock().is_pending();
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .enabled_ui(!is_exporting && !has_warning)
+                                                    .enabled_ui(!is_exporting && !has_warning && !dialog_pending)
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::CLIPBOARD).size(18.0),
                                                     ));
@@ -3299,6 +3286,41 @@ impl ReplayRendererViewer {
 
                                 });
                             });
+                    }
+
+                    // Polled outside the overlay so the result applies while the overlay is hidden.
+                    let picked_video_path = video_save_dialog.lock().poll();
+                    // The clipboard export or the encoder warning can still be active from
+                    // before the dialog opened; both share the export state.
+                    let export_busy = video_exporting.load(Ordering::Relaxed) || gpu_encoder_warning.lock().is_some();
+                    if let Some((_, path)) = &picked_video_path
+                        && export_busy
+                    {
+                        tracing::warn!(path = %path.display(), "video export already active; dropping picked save path");
+                        toasts.lock().warning("Another video export is already running");
+                    } else if let Some((opts, path)) = picked_video_path
+                        && let Some(video_export_data) = &video_export_data
+                    {
+                        let status = cached_encoder_status(&ctx);
+                        let codec_pref = *video_codec.lock();
+                        let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
+                        let action = PendingVideoExport::SaveToFile {
+                            output_path: path.to_string_lossy().to_string(),
+                            options: opts,
+                            prefer_cpu,
+                            codec: codec_pref,
+                            actual_game_duration,
+                            encoder_config: wows_minimap_renderer::EncoderConfig::default(),
+                            include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                        };
+                        if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
+                            execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
+                        } else {
+                            *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
+                                pending_action: action,
+                                dont_show_again: false,
+                            });
+                        }
                     }
 
                     // GPU encoder warning dialog

@@ -14,6 +14,8 @@ use wows_toolkit_launcher::proton::Severity;
 
 use crate::app::ToolkitTabViewer;
 use crate::update_background_task;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
 
 /// Fixed width of the whole download-progress block, so the row keeps its
 /// size as the byte count and the in-flight file name change width.
@@ -33,6 +35,21 @@ enum DownloadRowAction {
     Resume(PathBuf),
 }
 
+/// Native dialogs opened from the launcher tab.
+#[derive(Default)]
+pub struct LauncherDialogs {
+    folder: FileDialogSlot<FolderRequest>,
+    proton_binary: FileDialogSlot,
+    proton_prefix: FileDialogSlot,
+}
+
+/// What a chosen folder from [`LauncherDialogs::folder`] is used for.
+enum FolderRequest {
+    AddInstall,
+    Download { install: PathBuf },
+    Install(KnownGame),
+}
+
 /// What the user asked for this frame, applied after rendering.
 enum Intent {
     Rescan,
@@ -41,7 +58,9 @@ enum Intent {
     UseForToolkit(PathBuf),
     Recheck(PathBuf),
     Download { install: PathBuf, default_dir: PathBuf },
+    StartDownload { install: PathBuf, dest_dir: PathBuf },
     Install(KnownGame),
+    InstallGame { game: KnownGame, dest_dir: PathBuf },
     Row(DownloadRowAction),
     RetryAvailableGames,
     SetUpProton,
@@ -181,20 +200,54 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    /// Applies the result of any launcher dialog that closed since the last frame.
+    pub(crate) fn poll_launcher_dialogs(&mut self) {
+        if let Some((request, dir)) = self.tab_state.launcher_dialogs.folder.poll() {
+            self.apply_intent(match request {
+                FolderRequest::AddInstall => Intent::AddInstall(dir),
+                FolderRequest::Download { install } => Intent::StartDownload { install, dest_dir: dir },
+                FolderRequest::Install(game) => Intent::InstallGame { game, dest_dir: dir },
+            });
+        }
+
+        let proton_binary = self.tab_state.launcher_dialogs.proton_binary.poll_path();
+        let proton_prefix = self.tab_state.launcher_dialogs.proton_prefix.poll_path();
+        if proton_binary.is_none() && proton_prefix.is_none() {
+            return;
+        }
+
+        {
+            let mut persisted = self.tab_state.persisted.write();
+            let launcher = &mut persisted.settings.launcher;
+            if let Some(path) = proton_binary {
+                launcher.proton_binary = Some(path);
+            }
+            if let Some(path) = proton_prefix {
+                launcher.proton_prefix = Some(path);
+            }
+        }
+        self.tab_state.request_save();
+    }
+
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
         self.build_account_section(ui);
         ui.separator();
 
         let mut intents = Vec::new();
+
         ui.horizontal(|ui| {
             ui.heading("Launcher");
             if ui.button("Rescan").clicked() {
                 intents.push(Intent::Rescan);
             }
-            if ui.button("Add install...").clicked()
-                && let Some(dir) = rfd::FileDialog::new().pick_folder()
-            {
-                intents.push(Intent::AddInstall(dir));
+            let folder_dialog = &mut self.tab_state.launcher_dialogs.folder;
+            if ui.add_enabled(!folder_dialog.is_pending(), egui::Button::new("Add install...")).clicked() {
+                folder_dialog.open(
+                    ui.ctx(),
+                    DialogKind::PickFolder,
+                    rfd::AsyncFileDialog::new(),
+                    FolderRequest::AddInstall,
+                );
             }
             if self.tab_state.launcher.is_discovering() {
                 ui.spinner();
@@ -314,11 +367,9 @@ impl ToolkitTabViewer<'_> {
                     ui.weak("not set");
                 }
             }
-            if ui.small_button("Browse...").clicked()
-                && let Some(path) = rfd::FileDialog::new().pick_file()
-            {
-                launcher.proton_binary = Some(path);
-                changed = true;
+            let binary_dialog = &mut self.tab_state.launcher_dialogs.proton_binary;
+            if ui.add_enabled(!binary_dialog.is_pending(), egui::Button::new("Browse...").small()).clicked() {
+                binary_dialog.open(ui.ctx(), DialogKind::PickFile, rfd::AsyncFileDialog::new(), ());
             }
         });
         ui.horizontal(|ui| {
@@ -331,11 +382,9 @@ impl ToolkitTabViewer<'_> {
                     ui.weak("not set");
                 }
             }
-            if ui.small_button("Browse...").clicked()
-                && let Some(path) = rfd::FileDialog::new().pick_folder()
-            {
-                launcher.proton_prefix = Some(path);
-                changed = true;
+            let prefix_dialog = &mut self.tab_state.launcher_dialogs.proton_prefix;
+            if ui.add_enabled(!prefix_dialog.is_pending(), egui::Button::new("Browse...").small()).clicked() {
+                prefix_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
             }
         });
         if ui.button("Auto-detect").clicked() {
@@ -414,9 +463,16 @@ impl ToolkitTabViewer<'_> {
                 false
             }),
             Intent::Download { install, default_dir } => {
-                let Some(dest_dir) = rfd::FileDialog::new().set_directory(&default_dir).pick_folder() else {
-                    return;
-                };
+                let dialog = rfd::AsyncFileDialog::new().set_directory(&default_dir);
+                let request = FolderRequest::Download { install };
+                self.tab_state.launcher_dialogs.folder.open(
+                    &self.tab_state.egui_ctx,
+                    DialogKind::PickFolder,
+                    dialog,
+                    request,
+                );
+            }
+            Intent::StartDownload { install, dest_dir } => {
                 let mut result = Ok(());
                 self.tab_state.launcher_op(|launcher, _, env| {
                     result = launcher.start_download(install, dest_dir, env);
@@ -425,11 +481,16 @@ impl ToolkitTabViewer<'_> {
                 self.toast_launcher_error(result);
             }
             Intent::Install(game) => {
-                let Some(dest_dir) =
-                    rfd::FileDialog::new().set_directory(wgc_download::default_install_dir()).pick_folder()
-                else {
-                    return;
-                };
+                let dialog = rfd::AsyncFileDialog::new().set_directory(wgc_download::default_install_dir());
+                let request = FolderRequest::Install(game);
+                self.tab_state.launcher_dialogs.folder.open(
+                    &self.tab_state.egui_ctx,
+                    DialogKind::PickFolder,
+                    dialog,
+                    request,
+                );
+            }
+            Intent::InstallGame { game, dest_dir } => {
                 let mut result = Ok(());
                 self.tab_state.launcher_op(|launcher, _, env| {
                     result = launcher.install_known_game(&game, dest_dir, env);

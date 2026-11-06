@@ -15654,6 +15654,7 @@ dependencies = [
  "octocrab",
  "parking_lot",
  "pickled",
+ "pollster 0.4.0",
  "rand 0.10.3",
  "regex",
  "reqwest 0.12.28",

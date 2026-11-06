@@ -60,6 +60,9 @@ use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::ui::file_unpacker::UNPACKER_STOP;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::util::error::ToolkitError;
+use crate::util::file_dialog;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -354,6 +357,13 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
+/// Command palette action waiting on a native dialog.
+enum PaletteDialog {
+    OpenReplayFile,
+    OpenReplayDirectory,
+    ImportConstantsFile,
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -487,6 +497,10 @@ pub struct WowsToolkitApp {
     /// these are handed over rather than read from the task's own completion.
     #[serde(skip)]
     finished_download_replay: Option<PathBuf>,
+
+    /// Native dialog opened from the command palette.
+    #[serde(skip)]
+    palette_dialog: FileDialogSlot<PaletteDialog>,
 
     /// The builds the offer that started a re-walk showed, released by the walk
     /// that has just finished.
@@ -1038,6 +1052,7 @@ impl Default for WowsToolkitApp {
             directory_reingest: BTreeMap::new(),
             pending_scans: HashMap::new(),
             finished_download_replay: None,
+            palette_dialog: FileDialogSlot::new(),
             finished_reingest_offer: None,
             pending_constants_data: None,
         }
@@ -4794,19 +4809,16 @@ impl WowsToolkitApp {
             PaletteAction::OpenSearchTab => self.focus_tab(&Tab::Search),
             PaletteAction::OpenReplay { path } => self.open_replay_path(path),
             PaletteAction::OpenReplayFile => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
-                    self.open_replay_path(path);
-                }
+                let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+                self.palette_dialog.open(ctx, DialogKind::PickFile, dialog, PaletteDialog::OpenReplayFile);
             }
             PaletteAction::OpenReplayDirectory => {
-                if let Some(root) = rfd::FileDialog::new().pick_folder() {
-                    self.open_replay_directory(root);
-                }
+                let dialog = rfd::AsyncFileDialog::new();
+                self.palette_dialog.open(ctx, DialogKind::PickFolder, dialog, PaletteDialog::OpenReplayDirectory);
             }
             PaletteAction::ImportConstantsFile => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Constants", &["json"]).pick_file() {
-                    self.import_constants_file(&path);
-                }
+                let dialog = rfd::AsyncFileDialog::new().add_filter("Constants", &["json"]);
+                self.palette_dialog.open(ctx, DialogKind::PickFile, dialog, PaletteDialog::ImportConstantsFile);
             }
             PaletteAction::RefreshPersistedReplayData => {
                 self.refresh_persisted_data_window_open = true;
@@ -4844,6 +4856,27 @@ impl WowsToolkitApp {
             // Handled by the render loop before it reaches dispatch: entering a
             // sub-mode keeps the palette open instead of running an action.
             PaletteAction::EnterSub(_) => {}
+        }
+    }
+
+    /// Applies every native dialog result that arrived since the last frame,
+    /// whichever tab is visible.
+    fn poll_file_dialogs(&mut self, ctx: &egui::Context) {
+        let mut viewer = ToolkitTabViewer { tab_state: &mut self.tab_state };
+        viewer.poll_settings_dialogs();
+        #[cfg(feature = "launcher")]
+        viewer.poll_launcher_dialogs();
+        viewer.poll_unpacker_dialogs();
+        viewer.poll_replay_dialogs(ctx);
+
+        let Some((request, path)) = self.palette_dialog.poll() else {
+            return;
+        };
+
+        match request {
+            PaletteDialog::OpenReplayFile => self.open_replay_path(path),
+            PaletteDialog::OpenReplayDirectory => self.open_replay_directory(path),
+            PaletteDialog::ImportConstantsFile => self.import_constants_file(&path),
         }
     }
 }
@@ -4967,6 +5000,8 @@ impl eframe::App for WowsToolkitApp {
                 }
             }
         }
+
+        self.poll_file_dialogs(&ctx);
 
         if std::mem::take(&mut self.tab_state.pending_focus_search) {
             self.focus_tab(&Tab::Search);

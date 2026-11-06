@@ -74,6 +74,10 @@ use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 
+use crate::util::file_dialog;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
+use crate::util::replay_export::ExportedMatch;
 use crate::util::replay_export::FlattenedVehicle;
 use crate::util::replay_export::export_match;
 
@@ -2797,6 +2801,78 @@ fn take_alt_reparse(ctx: &egui::Context) -> Option<PendingAltRequest> {
     ctx.data_mut(|data| data.remove_temp::<PendingAltReparse>(alt_perspective_slot_id())).and_then(|pending| pending.0)
 }
 
+/// Native dialogs opened from replay tabs and their floating windows.
+#[derive(Default)]
+pub struct ReplayDialogs {
+    /// Chat and timeline exports, formatted when the button is pressed.
+    save_text: FileDialogSlot<String>,
+    export_results: FileDialogSlot<ExportResultsRequest>,
+    open_replay: FileDialogSlot,
+    alt_perspective: FileDialogSlot<AltPerspectiveRequest>,
+    batch_render_output: FileDialogSlot<Vec<PathBuf>>,
+}
+
+struct ExportResultsRequest {
+    format: ReplayExportFormat,
+    results: ExportedMatch,
+}
+
+/// Replay a picked alt-perspective file is validated against and merged into.
+struct AltPerspectiveRequest {
+    workspace: WorkspaceId,
+    replay: Weak<RwLock<Replay>>,
+}
+
+/// Formats chat messages as one line each, prefixing the sender's clan when known.
+fn format_game_chat(messages: &[GameMessage]) -> String {
+    let mut text = String::new();
+    for message in messages {
+        let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+        let line = match player {
+            Some(player) if !player.initial_state().clan().is_empty() => {
+                format!("[{}] {} ({:?}): {}\n", player.initial_state().clan(), sender_name, channel, message)
+            }
+            _ => format!("{sender_name} ({channel:?}): {message}\n"),
+        };
+        text.push_str(&line);
+    }
+
+    text
+}
+
+fn write_exported_results(request: ExportResultsRequest, path: &std::path::Path) {
+    let mut file = match std::fs::File::create(path) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Failed to create {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    let result =
+        match request.format {
+            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &request.results)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            ReplayExportFormat::Cbor => ciborium::into_writer(&request.results, &mut file)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            ReplayExportFormat::Csv => {
+                let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                let mut result = Ok(());
+                for vehicle in request.results.vehicles {
+                    result = writer.serialize(FlattenedVehicle::from(vehicle));
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                let _ = writer.flush();
+                result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            }
+        };
+    if let Err(e) = result {
+        error!("Failed to write results to file: {}", e);
+    }
+}
+
 /// What one parse of a replay produced: the battle report, plus the
 /// independently-collected evidence of whether the stream carried an
 /// end-of-battle marker.
@@ -3279,7 +3355,7 @@ impl ToolkitTabViewer<'_> {
                         .on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
                         .clicked()
                     {
-                        self.load_alt_perspective_action(ui, replay_file, replay_weak, ws_id);
+                        self.load_alt_perspective_action(ui, replay_weak, ws_id);
                         ui.close_kind(UiKind::Menu);
                     }
 
@@ -3297,43 +3373,19 @@ impl ToolkitTabViewer<'_> {
                         .button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.export_chat_save")))
                         .clicked()
                     {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_file_name(format!(
-                                "{} {} {} - Game Chat.txt",
-                                report.game_type(),
-                                report.game_mode(),
-                                report.map_name()
-                            ))
-                            .save_file()
-                            && let Ok(mut file) = std::fs::File::create(path)
-                        {
-                            for message in report.game_chat() {
-                                let GameMessage {
-                                    sender_relation: _,
-                                    sender_name,
-                                    channel,
-                                    message,
-                                    entity_id: _,
-                                    player,
-                                    clock: _,
-                                } = message;
-                                match player {
-                                    Some(player) if !player.initial_state().clan().is_empty() => {
-                                        let _ = writeln!(
-                                            file,
-                                            "[{}] {} ({:?}): {}",
-                                            player.initial_state().clan(),
-                                            sender_name,
-                                            channel,
-                                            message
-                                        );
-                                    }
-                                    _ => {
-                                        let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
-                                    }
-                                }
-                            }
-                        }
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{} {} {} - Game Chat.txt",
+                            report.game_type(),
+                            report.game_mode(),
+                            report.map_name()
+                        ));
+                        let text = format_game_chat(report.game_chat());
+                        self.tab_state.replay_dialogs.lock().save_text.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            text,
+                        );
                         ui.close_kind(UiKind::Menu);
                     }
                     if ui.button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.export_chat_copy"))).clicked() {
@@ -3379,39 +3431,21 @@ impl ToolkitTabViewer<'_> {
                     } else {
                         None
                     };
-                    if let Some(format) = format
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_file_name(format!(
-                                "{}.{}",
-                                replay_file.better_file_name(metadata_provider),
-                                format.extension()
-                            ))
-                            .save_file()
-                        && let Ok(mut file) = std::fs::File::create(path)
-                    {
-                        let transformed_results =
+                    if let Some(format) = format {
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{}.{}",
+                            replay_file.better_file_name(metadata_provider),
+                            format.extension()
+                        ));
+                        let results =
                             export_match(replay_file, self.tab_state.persisted.read().settings.app.debug_mode);
-                        let result = match format {
-                            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results)
-                                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-                            ReplayExportFormat::Cbor => ciborium::into_writer(&transformed_results, &mut file)
-                                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-                            ReplayExportFormat::Csv => {
-                                let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
-                                let mut result = Ok(());
-                                for vehicle in transformed_results.vehicles {
-                                    result = writer.serialize(FlattenedVehicle::from(vehicle));
-                                    if result.is_err() {
-                                        break;
-                                    }
-                                }
-                                let _ = writer.flush();
-                                result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-                            }
-                        };
-                        if let Err(e) = result {
-                            error!("Failed to write results to file: {}", e);
-                        }
+                        let request = ExportResultsRequest { format, results };
+                        self.tab_state.replay_dialogs.lock().export_results.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            request,
+                        );
                     }
 
                     if self.tab_state.persisted.read().settings.app.debug_mode {
@@ -4114,21 +4148,25 @@ impl ToolkitTabViewer<'_> {
     }
 
     /// Opens a file picker for another `.wowsreplay` recording of the same
-    /// match and validates it. If valid, the freshly-loaded `ReplayFile`
-    /// plus a Weak pointer to the current Replay are stashed in egui's
-    /// transient store for [`Self::handle_pending_alt_reparse`] to pick up -
-    /// that handler takes the write lock, appends to `alt_replays`, and
-    /// dispatches the re-parse.
-    fn load_alt_perspective_action(
-        &self,
-        ui: &mut egui::Ui,
-        replay_file: &Replay,
-        replay_weak: &Weak<RwLock<Replay>>,
-        ws_id: WorkspaceId,
-    ) {
-        let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
+    /// match. The pick is validated by [`Self::stage_alt_perspective`].
+    fn load_alt_perspective_action(&self, ui: &mut egui::Ui, replay_weak: &Weak<RwLock<Replay>>, ws_id: WorkspaceId) {
+        let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+        let request = AltPerspectiveRequest { workspace: ws_id, replay: replay_weak.clone() };
+        self.tab_state.replay_dialogs.lock().alt_perspective.open(ui.ctx(), DialogKind::PickFile, dialog, request);
+    }
+
+    /// Loads and validates a picked alt-perspective file. If valid, the
+    /// freshly-loaded `ReplayFile` plus a Weak pointer to the current Replay
+    /// are stashed in egui's transient store for
+    /// [`Self::handle_pending_alt_reparse`] to pick up - that handler takes the
+    /// write lock, appends to `alt_replays`, and dispatches the re-parse.
+    fn stage_alt_perspective(&self, ctx: &egui::Context, request: AltPerspectiveRequest, file: PathBuf) {
+        let Some(replay_arc) = request.replay.upgrade() else {
+            tracing::warn!(workspace = request.workspace.0, "alt-perspective pick: replay was dropped");
             return;
         };
+        let replay_file = replay_arc.read();
+
         let alt = match ReplayFile::from_file(&file) {
             Ok(r) => r,
             Err(e) => {
@@ -4167,14 +4205,12 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        // Hand the alt off to the outer loop: we only hold &Replay here, so
-        // we can't push to alt_replays or call `deps.load_replay` without
-        // first releasing the calling write guard. The next frame's handler
-        // upgrades the Weak, takes its own write lock, and re-parses.
+        // The read guard above is released before `handle_pending_alt_reparse`
+        // takes its write lock.
         tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
         stash_alt_reparse(
-            ui.ctx(),
-            PendingAltRequest { workspace: ws_id, replay: replay_weak.clone(), alt: std::sync::Arc::new(alt) },
+            ctx,
+            PendingAltRequest { workspace: request.workspace, replay: request.replay, alt: std::sync::Arc::new(alt) },
         );
     }
 
@@ -4280,17 +4316,16 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.open_manually"))).clicked()
-                && let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file()
+            let open_pending = self.tab_state.replay_dialogs.lock().open_replay.is_pending();
+            if ui
+                .add_enabled(
+                    !open_pending,
+                    egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.open_manually"))),
+                )
+                .clicked()
             {
-                self.tab_state.persisted.write().settings.game.current_replay_path = file.clone();
-
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(file, ReplaySource::ManualOpen)
-                    );
-                }
+                let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+                self.tab_state.replay_dialogs.lock().open_replay.open(ui.ctx(), DialogKind::PickFile, dialog, ());
             }
 
             {
@@ -5296,43 +5331,20 @@ impl ToolkitTabViewer<'_> {
                         ui.ctx().copy_text(game_chat);
                         toasts.lock().success(t!("ui.replay.chat_copied"));
                     }
-                    if ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_file_name(format!(
-                                "{} {} {} - Game Chat.txt",
-                                report.game_type(),
-                                report.game_mode(),
-                                report.map_name()
-                            ))
-                            .save_file()
-                        && let Ok(mut file) = std::fs::File::create(path)
-                    {
-                        for message in chat_messages {
-                            let GameMessage {
-                                sender_relation: _,
-                                sender_name,
-                                channel,
-                                message,
-                                entity_id: _,
-                                player,
-                                clock: _,
-                            } = message;
-                            match player {
-                                Some(player) if !player.initial_state().clan().is_empty() => {
-                                    let _ = writeln!(
-                                        file,
-                                        "[{}] {} ({:?}): {}",
-                                        player.initial_state().clan(),
-                                        sender_name,
-                                        channel,
-                                        message
-                                    );
-                                }
-                                _ => {
-                                    let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
-                                }
-                            }
-                        }
+                    if ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked() {
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{} {} {} - Game Chat.txt",
+                            report.game_type(),
+                            report.game_mode(),
+                            report.map_name()
+                        ));
+                        let text = format_game_chat(chat_messages);
+                        self.tab_state.replay_dialogs.lock().save_text.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            text,
+                        );
                     }
                 });
                 ui.separator();
@@ -5452,17 +5464,23 @@ impl ToolkitTabViewer<'_> {
                                     .add_enabled(visible_count > 0, egui::Button::new(t!("ui.replay.save_to_file")))
                                     .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
                                     .clicked()
-                                    && let Some(path) = rfd::FileDialog::new()
-                                        .set_file_name(format!(
-                                            "{} - Match Timeline.txt",
-                                            replay.map_name(&replay.resource_loader)
-                                        ))
-                                        .save_file()
-                                    && let Ok(mut file) = std::fs::File::create(path)
                                 {
-                                    for event in result.events.iter().filter(|e| filter.matches(e)) {
-                                        let _ = writeln!(file, "{}", format_timeline_event(event));
-                                    }
+                                    let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                                        "{} - Match Timeline.txt",
+                                        replay.map_name(&replay.resource_loader)
+                                    ));
+                                    let text: String = result
+                                        .events
+                                        .iter()
+                                        .filter(|e| filter.matches(e))
+                                        .map(|event| format!("{}\n", format_timeline_event(event)))
+                                        .collect();
+                                    self.tab_state.replay_dialogs.lock().save_text.open(
+                                        ui.ctx(),
+                                        DialogKind::SaveFile,
+                                        dialog,
+                                        text,
+                                    );
                                 }
                                 if ui
                                     .add_enabled(visible_count > 0, egui::Button::new(t!("ui.buttons.copy")))
@@ -5623,20 +5641,13 @@ impl ToolkitTabViewer<'_> {
         if let Some(paths) = ui.ctx().data_mut(|data| {
             data.remove_temp::<Vec<PathBuf>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays))
         }) {
-            let Some(output_dir) =
-                rfd::FileDialog::new().set_title("Select output folder for rendered videos").pick_folder()
-            else {
-                return;
-            };
-
-            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
-                self.tab_state.toasts.lock().warning("No renderable replays in selection");
-                return;
-            };
-
-            let ctx = self.batch_render_context(build_cache);
-            let task = crate::replay::renderer::batch_render_to_folder(output_dir, paths, ctx);
-            self.tab_state.background_tasks.push(task);
+            let dialog = rfd::AsyncFileDialog::new().set_title("Select output folder for rendered videos");
+            self.tab_state.replay_dialogs.lock().batch_render_output.open(
+                ui.ctx(),
+                DialogKind::PickFolder,
+                dialog,
+                paths,
+            );
             return;
         }
 
@@ -5651,6 +5662,53 @@ impl ToolkitTabViewer<'_> {
 
             let ctx = self.batch_render_context(build_cache);
             let task = crate::replay::renderer::batch_render_to_clipboard(paths, ctx);
+            self.tab_state.background_tasks.push(task);
+        }
+    }
+
+    /// Applies the result of any replay dialog that closed since the last frame.
+    pub(crate) fn poll_replay_dialogs(&mut self, ctx: &egui::Context) {
+        let save_text = self.tab_state.replay_dialogs.lock().save_text.poll();
+        let export_results = self.tab_state.replay_dialogs.lock().export_results.poll();
+        let open_replay = self.tab_state.replay_dialogs.lock().open_replay.poll_path();
+        let alt_perspective = self.tab_state.replay_dialogs.lock().alt_perspective.poll();
+        let batch_render_output = self.tab_state.replay_dialogs.lock().batch_render_output.poll();
+
+        if let Some((text, path)) = save_text
+            && let Err(e) = std::fs::write(&path, text)
+        {
+            error!("Failed to write {}: {}", path.display(), e);
+        }
+
+        if let Some((request, path)) = export_results {
+            write_exported_results(request, &path);
+        }
+
+        if let Some(file) = open_replay {
+            self.tab_state.persisted.write().settings.game.current_replay_path = file.clone();
+
+            if let Some(deps) = self.tab_state.replay_dependencies() {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    deps.parse_replay_from_path(file, ReplaySource::ManualOpen)
+                );
+            }
+        }
+
+        if let Some((request, file)) = alt_perspective {
+            self.stage_alt_perspective(ctx, request, file);
+            // No replay write guard is held here, and no replay tab has to be visible.
+            self.handle_pending_alt_reparse(ctx);
+        }
+
+        if let Some((paths, output_dir)) = batch_render_output {
+            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
+                self.tab_state.toasts.lock().warning("No renderable replays in selection");
+                return;
+            };
+
+            let ctx = self.batch_render_context(build_cache);
+            let task = crate::replay::renderer::batch_render_to_folder(output_dir, paths, ctx);
             self.tab_state.background_tasks.push(task);
         }
     }

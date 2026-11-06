@@ -680,6 +680,10 @@ pub struct TabState {
     /// Notify handle to wake the background save task when settings change.
     pub save_notify: Arc<tokio::sync::Notify>,
 
+    pub settings_dialogs: crate::ui::settings_tab::SettingsDialogs,
+    /// Locked because replay views and windows draw through `&self`.
+    pub replay_dialogs: parking_lot::Mutex<crate::ui::replay_parser::ReplayDialogs>,
+
     #[cfg(feature = "launcher")]
     pub launcher: wows_toolkit_launcher::Launcher,
     #[cfg(feature = "launcher")]
@@ -689,6 +693,8 @@ pub struct TabState {
     pub launch_safe_mode: bool,
     #[cfg(feature = "launcher")]
     pub login_form: LoginForm,
+    #[cfg(feature = "launcher")]
+    pub launcher_dialogs: crate::ui::launcher_tab::LauncherDialogs,
 }
 
 impl Default for TabState {
@@ -788,6 +794,8 @@ impl Default for TabState {
             window_settings: Default::default(),
             active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
             save_notify: Arc::new(tokio::sync::Notify::new()),
+            settings_dialogs: Default::default(),
+            replay_dialogs: Default::default(),
             #[cfg(feature = "launcher")]
             launcher,
             #[cfg(feature = "launcher")]
@@ -796,6 +804,8 @@ impl Default for TabState {
             launch_safe_mode: false,
             #[cfg(feature = "launcher")]
             login_form: LoginForm::default(),
+            #[cfg(feature = "launcher")]
+            launcher_dialogs: Default::default(),
         }
     }
 }
