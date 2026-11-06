@@ -375,3 +375,95 @@ fn firing_arcs_accept_point_blank_range() {
     assert_eq!(point_blank.dispersion.expect("Des Moines has a main battery").range_km, Km::new(0.0));
     assert!(matches!(arcs_at(Km::new(-1.0)), Err(QueryError::InvalidArguments { .. })));
 }
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_reports_stock_ships_and_the_fewest_requirements() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "conditions": [{ "stat": "artillery.reload_time", "op": "<", "value": 5 }],
+                "min_tier": 10,
+                "max_tier": 10,
+                "class": "cruiser",
+                "nation": "USA",
+            }),
+        )
+        .expect("conditions resolve");
+
+    let ships = search["ships"].as_array().expect("ships is a list");
+    let des_moines =
+        ships.iter().find(|hit| hit["ship"] == "T10 Des Moines (cruiser, USA)").expect("Des Moines qualifies");
+    assert_eq!(des_moines["stock"], false);
+    assert!(ships.iter().any(|hit| hit["stock"] == true), "some ship qualifies stock");
+    insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_needing_a_skill_flags_its_trigger() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "conditions": [
+                    { "stat": "armor.citadel.max", "op": ">=", "value": 400 },
+                    { "stat": "mobility.speed", "op": ">=", "value": 33 },
+                ],
+                "min_tier": 10,
+                "max_tier": 10,
+                "nation": "USA",
+            }),
+        )
+        .expect("conditions resolve");
+
+    insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_rejects_unreachable_conditions() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({ "conditions": [{ "stat": "durability.health", "op": ">", "value": 200000 }] }),
+        )
+        .expect("conditions resolve");
+
+    assert_eq!(search["qualifying"]["total"], 0);
+    assert!(search["considered"]["total"].as_u64().expect("count") > 500);
+    assert!(search.get("undetermined").is_none());
+
+    let errors: Vec<String> = [
+        json!({ "conditions": [{ "stat": "artilery.reload_tim", "op": "<", "value": 5 }] }),
+        json!({ "conditions": [{ "stat": "speed of light", "op": "<", "value": 5 }] }),
+        json!({ "conditions": [{ "stat": "torpedoes.torpedoes.is_damage_increasing", "op": "=", "value": 1 }] }),
+        json!({ "conditions": [] }),
+    ]
+    .into_iter()
+    .map(|arguments| match game().call_tool("stat_search", arguments) {
+        Ok(found) => format!("ok: {}", found["conditions"]),
+        Err(error) => error.to_string(),
+    })
+    .collect();
+    insta::assert_yaml_snapshot!(errors);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_names_qualifiers_that_match_no_row() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "conditions": [{ "stat": "artillery.shell.damage", "op": ">", "value": 1000, "qualifier": "HEAT" }],
+                "min_tier": 10,
+                "class": "cruiser",
+            }),
+        )
+        .expect("conditions resolve");
+
+    assert_eq!(search["qualifying"]["total"], 0);
+    insta::assert_yaml_snapshot!(search["unmatched_qualifiers"]);
+}

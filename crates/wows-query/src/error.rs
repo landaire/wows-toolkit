@@ -114,6 +114,12 @@ pub enum QueryError {
     #[error("{ship}'s hull has no fire nodes")]
     FireNodesMissing { ship: String },
 
+    #[error("no stat matches {query:?}; {}", did_you_mean(suggestions, "list stat names with stat_names"))]
+    StatNotFound { query: String, suggestions: Vec<String> },
+
+    #[error("stat {stat} is yes or no, not a number; it cannot be compared")]
+    StatNotNumeric { stat: &'static str },
+
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 

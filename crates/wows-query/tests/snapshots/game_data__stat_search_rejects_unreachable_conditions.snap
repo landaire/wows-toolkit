@@ -1,0 +1,8 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: errors
+---
+- "ok: [\"artillery.reload_time < 5 s\"]"
+- "no stat matches \"speed of light\"; list stat names with stat_names"
+- "stat torpedoes.torpedoes.is_damage_increasing is yes or no, not a number; it cannot be compared"
+- give at least one condition

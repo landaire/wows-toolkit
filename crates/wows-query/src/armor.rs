@@ -55,23 +55,28 @@ impl GameData {
     pub fn ship_armor(&self, args: &ShipArgs) -> Result<ShipArmor, QueryError> {
         let ship = self.resolve_ship(&args.ship)?;
         let plates = plates(ship);
-
-        let mut zones: BTreeMap<&'static str, (Millimeters, Millimeters)> = BTreeMap::new();
-        for plate in plates.iter().filter(|plate| is_above_water(plate.material)) {
-            for thickness in plate.thickness_mm.iter().copied().filter(|mm| mm.value() > 0.0) {
-                let entry = zones.entry(plate.zone).or_insert((thickness, thickness));
-                if thickness.value() < entry.0.value() {
-                    entry.0 = thickness;
-                }
-                if thickness.value() > entry.1.value() {
-                    entry.1 = thickness;
-                }
-            }
-        }
-        let zones = zones.into_iter().map(|(zone, (min_mm, max_mm))| ZoneArmor { zone, min_mm, max_mm }).collect();
+        let zones = zone_armor(&plates);
 
         Ok(ShipArmor { ship: ship.summary(), zones, plates })
     }
+}
+
+/// Per hull zone, the thinnest and thickest nonzero plate above the waterline.
+pub(crate) fn zone_armor(plates: &[PlateArmor]) -> Vec<ZoneArmor> {
+    let mut zones: BTreeMap<&'static str, (Millimeters, Millimeters)> = BTreeMap::new();
+    for plate in plates.iter().filter(|plate| is_above_water(plate.material)) {
+        for thickness in plate.thickness_mm.iter().copied().filter(|mm| mm.value() > 0.0) {
+            let entry = zones.entry(plate.zone).or_insert((thickness, thickness));
+            if thickness.value() < entry.0.value() {
+                entry.0 = thickness;
+            }
+            if thickness.value() > entry.1.value() {
+                entry.1 = thickness;
+            }
+        }
+    }
+
+    zones.into_iter().map(|(zone, (min_mm, max_mm))| ZoneArmor { zone, min_mm, max_mm }).collect()
 }
 
 /// Plates of `ship` that the armor view classifies, sorted by zone and material.

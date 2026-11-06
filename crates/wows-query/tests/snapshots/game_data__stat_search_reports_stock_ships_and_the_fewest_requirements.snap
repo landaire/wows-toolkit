@@ -1,0 +1,34 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+conditions:
+  - artillery.reload_time < 5 s
+rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health."
+considered:
+  total: 8
+  by_class:
+    cruiser: 8
+qualifying:
+  total: 3
+  by_class:
+    cruiser: 3
+  stock: 1
+  with_requirements: 2
+ships:
+  - ship: "T10 Worcester (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.reload_time: 4.6 s"
+  - ship: "T10 Des Moines (cruiser, USA)"
+    stock: false
+    requires:
+      - "upgrade: Main Battery Modification 3 (slot 6)"
+    values:
+      - "artillery.reload_time: 4.84 s"
+  - ship: "T10 Salem (cruiser, USA)"
+    stock: false
+    requires:
+      - "upgrade: Main Battery Modification 3 (slot 6)"
+    values:
+      - "artillery.reload_time: 4.84 s"

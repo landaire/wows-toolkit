@@ -183,6 +183,74 @@ expression: specs()
         description: "Firing range in km for the dispersion ellipse, 0 or more; 0 gives the ellipse at the muzzle and ranges past the main battery's maximum use the maximum. Defaults to the maximum range."
     required:
       - ship
+- name: stat_names
+  description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness and total main battery barrels."
+  input_schema:
+    type: object
+    additionalProperties: false
+- name: stat_search
+  description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      conditions:
+        type: array
+        items:
+          description: One condition on a stat.
+          type: object
+          properties:
+            stat:
+              description: "Stat name from stat_names, e.g. \"artillery.reload_time\" or \"armor.citadel.max\"."
+              type: string
+            op:
+              description: "How a stat value compares to a condition's threshold."
+              type: string
+              enum:
+                - "<"
+                - "<="
+                - ">"
+                - ">="
+                - "="
+                - "!="
+            value:
+              description: Threshold in the unit stat_names lists for the stat.
+              type: number
+            qualifier:
+              description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"CS\"), torpedo, secondary mount or consumable name. Omit to accept any row."
+              type: string
+          additionalProperties: false
+          required:
+            - stat
+            - op
+            - value
+        description: Conditions that must all hold.
+      min_tier:
+        type: integer
+        description: "A ship tier, 1 to 11."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "A ship tier, 1 to 11."
+        minimum: 1
+        maximum: 11
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\"."
+      include_event_variants:
+        type: boolean
+        description: "Include event, clan-battle and retired variants. Defaults to false."
+    required:
+      - conditions
 - name: captain_skill
   description: "One captain skill by name or acronym (IFHE, SI, CE, AR, DE, BoS): description, point cost and effects per ship class."
   input_schema:

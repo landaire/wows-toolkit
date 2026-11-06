@@ -23,6 +23,8 @@ use crate::ships::FindShipsArgs;
 use crate::ships::ShipArgs;
 use crate::skills::CaptainSkillArgs;
 use crate::skills::SkillTreeArgs;
+use crate::stat_search::StatNamesArgs;
+use crate::stat_search::StatSearchArgs;
 use crate::stats::ShipStatsArgs;
 use crate::upgrades::UpgradeArgs;
 
@@ -115,6 +117,18 @@ const TOOLS: &[Tool] = &[
         description: "Which guns and torpedo tubes of one ship bear on a target at each bearing: barrels bearing bow-on, stern-on (within 30 degrees) and on each broadside, where all barrels bear or never, damage of one salvo per ammo type, fires per minute and fire chance per salvo assuming every shell hits, and main battery dispersion at a range. Optional skills, upgrades and modules; guns or torpedoes that fit only another hull need that hull in modules too. Optional target_ship applies the target's fire resistance.",
         schema: input_schema::<FiringArcsArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_firing_arcs(args)),
+    },
+    Tool {
+        name: "stat_names",
+        description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness and total main battery barrels.",
+        schema: input_schema::<StatNamesArgs>,
+        call: |game, arguments| run(arguments, |args| Ok(game.stat_names(args))),
+    },
+    Tool {
+        name: "stat_search",
+        description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class.",
+        schema: input_schema::<StatSearchArgs>,
+        call: |game, arguments| run(arguments, |args| game.stat_search(args)),
     },
     Tool {
         name: "captain_skill",
