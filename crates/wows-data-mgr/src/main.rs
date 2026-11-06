@@ -2,6 +2,7 @@ use clap::Parser;
 use clap::Subcommand;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -100,6 +101,15 @@ enum Commands {
         /// May be combined with any selector.
         #[arg(long)]
         game_dir: Option<PathBuf>,
+
+        /// Skip ship armor extraction, which reads every vehicle package.
+        #[arg(long)]
+        no_armor: bool,
+
+        /// Threads extracting ship armor. Defaults to half the available
+        /// parallelism.
+        #[arg(long)]
+        armor_workers: Option<NonZeroUsize>,
     },
 
     /// Remove a previously dumped build, cleaning up deduplicated storage
@@ -202,6 +212,27 @@ enum Commands {
         /// Also re-extract the gui/ asset dirs (ribbons, achievements, flags, ...)
         #[arg(long)]
         with_gui: bool,
+    },
+
+    /// Extract ship armor from a game install into an existing build,
+    /// replacing the armor it held. The install needs GameParams, assets.bin
+    /// and the vehicle packages of the same build.
+    ExtractArmor {
+        /// Build number (must already exist in builds.toml)
+        #[arg(long)]
+        build: u32,
+
+        /// Game install directory holding bin/<build>/idx and res_packages
+        #[arg(long)]
+        game_dir: PathBuf,
+
+        /// Output directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Extraction threads. Defaults to half the available parallelism.
+        #[arg(long)]
+        workers: Option<NonZeroUsize>,
     },
 
     /// Fold a legacy `vfs_common/` store into `common/` and relink every build.
@@ -471,8 +502,19 @@ fn downloaded_build_dirs(builds_dir: &Path) -> Vec<u32> {
         .collect()
 }
 
+/// Half the available parallelism, so an extraction leaves the machine usable.
+fn default_workers() -> NonZeroUsize {
+    let available = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
+
+    NonZeroUsize::new(available / 2).unwrap_or(NonZeroUsize::MIN)
+}
+
 /// Returns the version the dump was written under.
-fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result<String, Report> {
+fn execute_dump_renderer_plan(
+    plan: DumpRendererPlan,
+    data_dir: &Path,
+    armor_extraction: dump::ArmorExtraction,
+) -> Result<String, Report> {
     let game_dir = match plan.source {
         DumpDataSource::Supplied(path) => path,
         DumpDataSource::Registry => {
@@ -497,7 +539,15 @@ fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result
 
     println!("Dumping build {} ({version}) from {}", plan.target, game_dir.display());
     let progress = dump::create_progress_bar(&game_dir);
-    dump::dump_renderer_data(&game_dir, plan.target, &version, &plan.output, progress.as_ref(), false)?;
+    dump::dump_renderer_data(
+        &game_dir,
+        plan.target,
+        &version,
+        &plan.output,
+        progress.as_ref(),
+        false,
+        armor_extraction,
+    )?;
     println!("Dumped renderer data to {}", dump::dump_dir(&plan.output, &version, plan.target).display());
     Ok(version)
 }
@@ -794,6 +844,21 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             println!("Done: extracted {map_count} map(s) and regenerated derived data.");
             return Ok(None);
         }
+        Commands::ExtractArmor { build, game_dir, output, workers } => {
+            let workers = workers.unwrap_or_else(default_workers);
+            println!("Extracting ship armor for build {build} from {} ({workers} workers)...", game_dir.display());
+            let summary = dump::extract_build_armor(game_dir, *build, output, workers)?;
+            println!(
+                "Done: {} ships and {} mount models recorded; {} ships skipped.",
+                summary.vehicles,
+                summary.mount_models,
+                summary.failures.len()
+            );
+            for (param_index, error) in summary.failures.iter().take(NAMED_PROBLEM_PATHS) {
+                println!("  skipped {param_index}: {error}");
+            }
+            return Ok(None);
+        }
         Commands::MigrateCas { output } => {
             println!("Merging vfs_common/ into common/ and relinking builds in {}...", output.display());
             let migrated = dump::migrate_cas_dir_name(output)?;
@@ -894,8 +959,17 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
     }
 
     let manifest = manifest::load_manifest(&repo_root.join("game_versions.toml"))?;
-    if let Commands::DumpRendererData { latest, build, version, output, force, game_dir, no_manifest_update } =
-        &args.command
+    if let Commands::DumpRendererData {
+        latest,
+        build,
+        version,
+        output,
+        force,
+        game_dir,
+        no_manifest_update,
+        no_armor,
+        armor_workers,
+    } = &args.command
     {
         let local_builds = local_builds_for_dump(game_dir.as_deref(), data_dir)?;
         let request = DumpRequest {
@@ -906,7 +980,12 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         };
         let plan = resolve_dump_renderer_plan(&manifest, &request, &local_builds)?;
         let target = plan.link_target();
-        let dumped_version = execute_dump_renderer_plan(plan, data_dir)?;
+        let armor_extraction = if *no_armor {
+            dump::ArmorExtraction::Skip
+        } else {
+            dump::ArmorExtraction::Extract { workers: armor_workers.unwrap_or_else(default_workers) }
+        };
+        let dumped_version = execute_dump_renderer_plan(plan, data_dir, armor_extraction)?;
 
         if !*no_manifest_update {
             let refresh = ManifestRefresh {
@@ -1075,7 +1154,8 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         | Commands::Update { .. }
         | Commands::Verify { .. }
         | Commands::MigrateCas { .. }
-        | Commands::CompleteBuild { .. } => {
+        | Commands::CompleteBuild { .. }
+        | Commands::ExtractArmor { .. } => {
             unreachable!("handled before manifest load")
         }
 

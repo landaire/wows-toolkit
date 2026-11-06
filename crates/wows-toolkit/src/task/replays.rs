@@ -332,9 +332,15 @@ pub fn load_wows_files(
                 let build = fv_build;
                 let vs = version_str.clone();
                 crate::util::thread::spawn_logged("auto-dump-game-data", move || {
-                    if let Err(e) =
-                        wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true)
-                    {
+                    if let Err(e) = wows_data_mgr::dump::dump_renderer_data(
+                        &game_dir,
+                        build,
+                        &vs,
+                        &dump_base,
+                        None,
+                        true,
+                        wows_data_mgr::dump::ArmorExtraction::Skip,
+                    ) {
                         tracing::warn!("Auto-dump failed for {vs}_{build}: {e}");
                     } else {
                         // Copy constants.json into the dump if available on disk

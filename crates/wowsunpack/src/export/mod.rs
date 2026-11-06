@@ -1,6 +1,8 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+#[cfg(all(feature = "models", feature = "rkyv"))]
+pub mod armor_extract;
 #[cfg(feature = "models")]
 pub mod armor_ray;
 #[cfg(feature = "models")]

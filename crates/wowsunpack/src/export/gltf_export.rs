@@ -2870,6 +2870,16 @@ impl InteractiveArmorMesh {
 
         Self { name: armor.name.clone(), positions, normals, indices, colors, triangle_info, transform: None }
     }
+
+    /// Places a mount's mesh at its hardpoint and names it after it.
+    /// `hardpoint_transform` is column-major in the hull's own (left-handed)
+    /// space.
+    pub fn placed_at_mount(mut self, hp_name: &str, hardpoint_transform: [f32; 16]) -> Self {
+        self.transform = Some(negate_z_transform(hardpoint_transform));
+        self.name = format!("{} [{hp_name}]", self.name);
+
+        self
+    }
 }
 
 /// An armor mesh ready for glTF export (triangle soup, no textures).

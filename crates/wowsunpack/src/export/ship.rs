@@ -701,7 +701,7 @@ impl ShipAssets {
     }
 
     /// Re-parse the PrototypeDatabase from owned bytes.
-    fn db(&self) -> Result<PrototypeDatabase<'_>, Report> {
+    pub(super) fn db(&self) -> Result<PrototypeDatabase<'_>, Report> {
         Ok(assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to parse assets.bin")?)
     }
 
@@ -725,7 +725,7 @@ impl ShipAssets {
     }
 
     /// Scan paths_storage for .visual files in a directory matching the name.
-    fn find_visual_paths(
+    pub(super) fn find_visual_paths(
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
@@ -750,7 +750,7 @@ impl ShipAssets {
     }
 
     /// Load and parse all sub-models from (name, full_path) pairs.
-    fn load_sub_models(
+    pub(super) fn load_sub_models(
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
@@ -1011,10 +1011,7 @@ impl ShipAssets {
                 let parent_name = db.strings.get_string_by_id(parent_id);
                 let local =
                     compose_misc_transform(parent_name, &local_matrix, std::slice::from_ref(turret), &db.strings);
-                let transform = match mount.armor_transform {
-                    Some(m) => mat4_mul_col_major(&m, &local),
-                    None => local,
-                };
+                let transform = mat4_mul_col_major(&mount.armor_transform, &local);
                 placements.push(ResolvedMisc {
                     node_name: format!("{node_name} [{}]", mount.hp_name),
                     misc_model_index: model_idx,
@@ -1065,25 +1062,14 @@ impl ShipAssets {
     }
 
     /// Load turret models and build mount resolution data.
-    fn load_mounts(
+    pub(super) fn load_mounts(
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
         mount_points: &[MountPoint],
         hull_parts: &[OwnedSubModel],
     ) -> Result<LoadedMounts, Report> {
-        // Collect hardpoint transforms from hull visuals.
-        let mut hp_transforms: HashMap<String, [f32; 16]> = HashMap::new();
-        for smd in hull_parts {
-            for &name_id in &smd.visual.nodes.name_map_name_ids {
-                if let Some(name) = db.strings.get_string_by_id(name_id)
-                    && name.starts_with("HP_")
-                    && let Some(xform) = smd.visual.find_hardpoint_transform(name, &db.strings)
-                {
-                    hp_transforms.insert(name.to_string(), xform);
-                }
-            }
-        }
+        let hp_transforms = hull_hardpoint_transforms(db, hull_parts);
 
         // Load unique turret models.
         let (turret_models, turret_model_index) = self.load_turret_models_deduped(db, self_id_index, mount_points)?;
@@ -1135,7 +1121,7 @@ impl ShipAssets {
             // takes over: visual_transform = hp_transform * inverse(bone_rotation).
             // Armor geometry is already aligned with the hardpoint, so it uses
             // the raw transform without rotation correction.
-            let armor_transform = Some(hp_transform);
+            let armor_transform = hp_transform;
             let turret_visual = &turret_models[model_idx].visual;
             let yaw_correction = turret_visual
                 .find_node_local_matrix("Rotate_Y_BlendBone", &db.strings)
@@ -1270,6 +1256,27 @@ pub struct ShipModelContext {
     armor_map: Option<ArmorMap>,
     /// Hit location zones from GameParams, keyed by zone name (e.g. "Citadel").
     hit_locations: Option<HashMap<String, crate::game_params::types::HitLocation>>,
+}
+
+/// The `HP_` nodes of the hull visuals, by name. A name in more than one
+/// visual resolves to the last visual's node, as mounts are placed.
+pub(super) fn hull_hardpoint_transforms(
+    db: &PrototypeDatabase<'_>,
+    hull_parts: &[OwnedSubModel],
+) -> HashMap<String, [f32; 16]> {
+    let mut hp_transforms: HashMap<String, [f32; 16]> = HashMap::new();
+    for smd in hull_parts {
+        for &name_id in &smd.visual.nodes.name_map_name_ids {
+            if let Some(name) = db.strings.get_string_by_id(name_id)
+                && name.starts_with("HP_")
+                && let Some(xform) = smd.visual.find_hardpoint_transform(name, &db.strings)
+            {
+                hp_transforms.insert(name.to_string(), xform);
+            }
+        }
+    }
+
+    hp_transforms
 }
 
 /// Resolve a visual suffix to VisualPrototype record data.
@@ -1440,14 +1447,12 @@ impl ShipModelContext {
         for mount in &self.mounts {
             let geom = &turret_geoms[mount.turret_model_index];
             for armor_model in &geom.armor_models {
-                let mut mesh = InteractiveArmorMesh::from_armor_model(
+                let mesh = InteractiveArmorMesh::from_armor_model(
                     armor_model,
                     self.armor_map.as_ref(),
                     mount.mount_armor.as_ref(),
                 );
-                mesh.transform = mount.armor_transform.map(gltf_export::negate_z_transform);
-                mesh.name = format!("{} [{}]", mesh.name, mount.hp_name);
-                result.push(mesh);
+                result.push(mesh.placed_at_mount(&mount.hp_name, mount.armor_transform));
             }
         }
 
@@ -1683,7 +1688,7 @@ impl ShipModelContext {
                 for am in &turret_geom.armor_models {
                     let mut subs = gltf_export::armor_sub_models_by_zone(am, armor_map, mount.mount_armor.as_ref());
                     for s in &mut subs {
-                        s.transform = mount.armor_transform;
+                        s.transform = Some(mount.armor_transform);
                         s.name = format!("{} [{}]", s.name, mount.hp_name);
                     }
                     armor_meshes.extend(subs);
@@ -2017,30 +2022,29 @@ fn encode_png(image: &camo_composite::RgbaImageData) -> Result<Vec<u8>, Report> 
 // ---------------------------------------------------------------------------
 
 /// Owns visual + geometry bytes for one sub-model (no lifetime parameters).
-struct OwnedSubModel {
+pub(super) struct OwnedSubModel {
     name: String,
     visual: VisualPrototype,
-    geom_bytes: Vec<u8>,
+    pub(super) geom_bytes: Vec<u8>,
     /// Raw `.splash` file bytes (only present for base hull models).
     splash_bytes: Option<Vec<u8>>,
 }
 
 /// Result of [`ShipAssets::load_mounts`].
-struct LoadedMounts {
-    turret_models: Vec<OwnedSubModel>,
-    #[allow(dead_code)]
-    turret_model_index: HashMap<String, usize>,
-    mounts: Vec<ResolvedMount>,
+pub(super) struct LoadedMounts {
+    pub(super) turret_models: Vec<OwnedSubModel>,
+    pub(super) turret_model_index: HashMap<String, usize>,
+    pub(super) mounts: Vec<ResolvedMount>,
 }
 
 /// A mount instance with resolved transform.
-struct ResolvedMount {
-    hp_name: String,
-    turret_model_index: usize,
+pub(super) struct ResolvedMount {
+    pub(super) hp_name: String,
+    pub(super) turret_model_index: usize,
     /// Visual transform with yaw correction.
     transform: Option<[f32; 16]>,
     /// Raw hardpoint transform without model rotation (for armor geometry).
-    armor_transform: Option<[f32; 16]>,
+    pub(super) armor_transform: [f32; 16],
     /// Per-mount armor map for turret shell surfaces (from `A_Artillery.HP_XXX.armor`).
     mount_armor: Option<crate::game_params::types::ArmorMap>,
     /// Mount species from GameParams `typeinfo.species`.

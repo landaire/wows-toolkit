@@ -29,6 +29,7 @@
 /// crate cannot silently drop its logs on the floor.
 pub const LOG_TARGET: &str = module_path!();
 
+pub mod armor;
 pub mod builds;
 pub mod cas;
 pub mod cas_vfs;

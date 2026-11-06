@@ -1119,3 +1119,20 @@ When `space.bin` is available, the exporter creates one glTF mesh per unique
 prototype and one node per instance with the world transform applied via the
 glTF `matrix` property. This enables efficient mesh reuse — 3174 nodes sharing
 only 458 unique meshes.
+
+# Armor Extract (wows-data-mgr dumps)
+
+Armor queries need each ship's armor triangles and mount placements, which otherwise come from `content/assets.bin` and the hull and mount `.geometry` files (about 5 GB per build). A wows-data-mgr dump instead records an armor-only extract in its content store, written by `wowsunpack::export::armor_extract`:
+
+- `armor/vehicles/<param_index>.armor`: one `VehicleArmor` per ship. It holds the armor models and `HP_*` hardpoint nodes of each hull model, and for every hull upgrade the hull model it uses and each mount with armor (hardpoint name, mount model path, hardpoint transform).
+- `armor/mounts/<model path without .model>.armor`: one `MountModelArmor` per mount model, shared by every ship that fits it.
+
+Each object is a 4-byte magic (`WUAV` or `WUAM`), a little-endian `u32` format version, and an rkyv payload. Readers refuse any version other than `armor_extract::FORMAT_VERSION`. Thickness is not stored. `VehicleArmor::interactive_meshes` resolves it from the dump's GameParams the same way `ShipModelContext::interactive_armor_meshes` does, so an extract changes only when models change.
+
+New dumps extract armor unless `dump-renderer-data --no-armor` is given. To add it to a build that is already dumped, point `extract-armor` at an install of the same build:
+
+```
+wows-data-mgr extract-armor --build 13533378 --game-dir /path/to/World_of_Warships --output /path/to/wows-replay-data
+```
+
+The install needs `content/GameParams.data`, `content/assets.bin` and the ship and mount geometry (`wows-data-mgr required-paths` lists the globs).

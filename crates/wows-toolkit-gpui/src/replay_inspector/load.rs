@@ -675,7 +675,15 @@ impl GameDataCache {
         std::thread::Builder::new()
             .name("auto-dump-game-data".to_owned())
             .spawn(move || {
-                match wows_data_mgr::dump::dump_renderer_data(&wows_dir, build, &version_str, &dump_base, None, true) {
+                match wows_data_mgr::dump::dump_renderer_data(
+                    &wows_dir,
+                    build,
+                    &version_str,
+                    &dump_base,
+                    None,
+                    true,
+                    wows_data_mgr::dump::ArmorExtraction::Skip,
+                ) {
                     Ok(()) => {
                         tracing::info!(build, version = %version_str, "auto-dump: the build is now cached");
                         copy_constants_into_dump(&dump_base, &version_str, build);

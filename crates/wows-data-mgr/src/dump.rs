@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsFileType;
 use wowsunpack::vfs::VfsPath;
 
+use crate::armor;
 use crate::builds::BuildEntry;
 use crate::builds::BuildMetadata;
 use crate::builds::BuildsIndex;
@@ -76,7 +78,21 @@ pub fn required_path_globs() -> Vec<String> {
     for name in MAP_FILES_GAMEPLAY {
         globs.push(format!("content/gameplay/*/{name}"));
     }
+    for glob in armor::SOURCE_GLOBS {
+        if !globs.iter().any(|existing| existing == glob) {
+            globs.push((*glob).to_string());
+        }
+    }
     globs
+}
+
+/// Whether a dump extracts ship armor ([`armor`]). Extraction reads every
+/// vehicle package and takes a minute or more, which only a dump that will
+/// answer armor queries needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmorExtraction {
+    Skip,
+    Extract { workers: NonZeroUsize },
 }
 
 /// Returns the dump directory path for a given version and build.
@@ -196,6 +212,7 @@ pub fn dump_renderer_data(
     output_base: &Path,
     progress: Option<&ProgressBar>,
     allow_existing: bool,
+    armor_extraction: ArmorExtraction,
 ) -> Result<(), Report> {
     let output_dir = dump_dir(output_base, version_str, build);
     let cas_root = cas::cas_root(output_base);
@@ -257,6 +274,24 @@ pub fn dump_renderer_data(
             "no map data extracted (spaces/*/minimap.png); the content depot's spaces packages are likely missing"
                 .to_string(),
         );
+    }
+    if let ArmorExtraction::Extract { workers } = armor_extraction
+        && problems.is_empty()
+    {
+        // Builds from before the prototype database have no model data to
+        // extract armor from; they dump as they always have.
+        match vfs.join(armor::ASSETS_BIN).and_then(|path| path.exists()) {
+            Ok(true) => match armor::extract_armor(&vfs, &cas_root, &mut file_hashes, workers) {
+                Ok(summary) => log_armor_summary(build, &summary),
+                Err(error) => {
+                    problems.push(format!("armor extraction failed (dump with --no-armor to skip it): {error}"))
+                }
+            },
+            Ok(false) => {
+                tracing::warn!("dump for build {build}: no {}, so no ship armor is extracted", armor::ASSETS_BIN);
+            }
+            Err(error) => problems.push(format!("could not look up {}: {error}", armor::ASSETS_BIN)),
+        }
     }
     if !problems.is_empty() {
         let _ = std::fs::remove_dir_all(&output_dir);
@@ -372,6 +407,53 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
     }
     metadata.save(&meta_path)?;
     Ok(map_count)
+}
+
+/// Extract ship armor ([`armor`]) from `game_dir` into an existing build,
+/// replacing whatever armor it held. Reads only GameParams, `assets.bin` and
+/// ship geometry from the install ([`armor::SOURCE_GLOBS`]). The build must
+/// already exist in `builds.toml`.
+pub fn extract_build_armor(
+    game_dir: &Path,
+    build: u32,
+    output_base: &Path,
+    workers: NonZeroUsize,
+) -> Result<armor::ExtractSummary, Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let entry = index
+        .find_by_build(build)
+        .ok_or_else(|| report!("build {build} is not in builds.toml; dump it normally first"))?
+        .clone();
+    let output_dir = output_base.join(&entry.dir);
+    let cas_root = cas::cas_root(output_base);
+    let meta_path = output_dir.join("metadata.toml");
+    let mut metadata =
+        BuildMetadata::load(&meta_path).ok_or_else(|| report!("{} has no readable metadata.toml", entry.dir))?;
+
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build, game_data::AssetsBin::Omit)
+        .attach_with(|| "Failed to build game VFS")?;
+    let summary = armor::extract_armor(&vfs, &cas_root, &mut metadata.files, workers)?;
+    log_armor_summary(build, &summary);
+
+    if metadata.materialized {
+        relink_build(&output_dir, &cas_root, &metadata, TreeSync::Full)?;
+    }
+    metadata.save(&meta_path)?;
+
+    Ok(summary)
+}
+
+fn log_armor_summary(build: u32, summary: &armor::ExtractSummary) {
+    tracing::info!(
+        build,
+        vehicles = summary.vehicles,
+        mount_models = summary.mount_models,
+        failures = summary.failures.len(),
+        "extracted ship armor"
+    );
+    for (param_index, error) in &summary.failures {
+        tracing::warn!(build, param_index, %error, "ship armor not extracted");
+    }
 }
 
 /// Create a configured progress bar for CLI use.
