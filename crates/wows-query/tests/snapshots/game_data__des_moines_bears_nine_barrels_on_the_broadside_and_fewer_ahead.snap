@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 291
 expression: arcs
 ---
 ship:
@@ -9,6 +10,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  status: released
 notes:
   - "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie."
   - "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. p is the shell's fire chance, times the fire-node probability of the target's stock hull when a target is given. Not applied: the target's Fire Prevention Expert (p x0.9) and Damage Control System Modification 1 (p x0.95), the fire limit (4 fires, 3 with Fire Prevention Expert), fire duration and the Damage Control Party consumable."

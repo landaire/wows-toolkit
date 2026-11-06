@@ -1,7 +1,7 @@
 # wows-mcp
 
 - Answers World of Warships game data questions for any [MCP](https://modelcontextprotocol.io) client.
-- Looks up ships, armor, aircraft and their ordnance, shells, penetration and overmatch, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
+- Looks up ships (including ships in closed testing), armor, aircraft and their ordnance, shells, penetration and overmatch, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
 - Answers anything else in GameParams with a [jq](https://jqlang.org) filter over the raw entries.
 - Finds ships whose stats meet your conditions, with the fewest modules, upgrades and captain skills they need.
 - Reads one game build from a [wows-replay-data](https://github.com/landaire/wows-replay-data) dump, or downloads the newest one.

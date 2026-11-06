@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 150
 expression: upgrades
 ---
 ship:
@@ -9,6 +10,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  status: released
 slots:
   - slot: 1
     options:

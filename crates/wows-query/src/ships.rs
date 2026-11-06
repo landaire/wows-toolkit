@@ -118,6 +118,14 @@ impl ShipClass {
 pub struct ShipCounts {
     pub total: usize,
     pub by_class: BTreeMap<ShipClass, usize>,
+
+    /// Ships in closed testing among `total`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub test: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 impl ShipCounts {
@@ -126,32 +134,52 @@ impl ShipCounts {
         for ship in ships {
             counts.total += 1;
             *counts.by_class.entry(ship.class).or_default() += 1;
+            if ship.status() == ShipStatus::Test {
+                counts.test += 1;
+            }
         }
 
         counts
     }
 }
 
-/// A playable ship indexed by its English name.
+/// A ship indexed by its English name, including ships in closed testing.
 pub(crate) struct Ship {
     pub(crate) param: Rc<Param>,
     pub(crate) name: String,
     pub(crate) search_key: String,
     pub(crate) class: ShipClass,
     pub(crate) tier: Tier,
+
+    /// A released ship has the same name: this is a test copy of it, listed
+    /// only with event variants.
+    pub(crate) copies_released: bool,
 }
 
 impl Ship {
     pub(crate) fn from_param(provider: &GameMetadataProvider, param: &Rc<Param>) -> Option<Self> {
         let vehicle = param.vehicle()?;
-        if vehicle.is_test_ship() {
-            return None;
-        }
-
         let class = ShipClass::from_species(*param.species()?.known()?)?;
         let name = clean(&provider.localized_name_from_param(param)?);
 
-        Some(Self { param: Rc::clone(param), search_key: search_key(&name), name, class, tier: Tier(vehicle.level()) })
+        Some(Self {
+            param: Rc::clone(param),
+            search_key: search_key(&name),
+            name,
+            class,
+            tier: Tier(vehicle.level()),
+            copies_released: false,
+        })
+    }
+
+    /// Marks test ships that copy a released ship of the same name, such as
+    /// "[Conqueror]".
+    pub(crate) fn mark_test_copies(ships: &mut [Ship]) {
+        let released: std::collections::BTreeSet<String> =
+            ships.iter().filter(|ship| ship.is_regular()).map(|ship| ship.search_key.clone()).collect();
+        for ship in ships.iter_mut() {
+            ship.copies_released = ship.status() == ShipStatus::Test && released.contains(&ship.search_key);
+        }
     }
 
     pub(crate) fn group(&self) -> &str {
@@ -162,7 +190,13 @@ impl Ship {
         REGULAR_GROUPS.contains(&self.group())
     }
 
+    pub(crate) fn status(&self) -> ShipStatus {
+        let test = self.group() == TEST_GROUP || self.param.vehicle().is_some_and(|vehicle| vehicle.is_test_ship());
+        if test { ShipStatus::Test } else { ShipStatus::Released }
+    }
+
     pub(crate) fn summary(&self) -> ShipSummary {
+        let status = self.status();
         ShipSummary {
             name: self.name.clone(),
             index: self.param.index().to_owned(),
@@ -170,13 +204,30 @@ impl Ship {
             class: self.class,
             nation: self.param.nation().to_owned(),
             group: self.group().to_owned(),
+            status,
+            status_note: (status == ShipStatus::Test).then_some(TEST_SHIP_NOTE),
         }
     }
 
-    /// "T10 Des Moines (cruiser, USA)", for compact lists.
+    /// "T10 Des Moines (cruiser, USA)", for compact lists; test ships end in
+    /// ", test".
     pub(crate) fn label(&self) -> String {
-        format!("T{} {} ({}, {})", self.tier.0, self.name, self.class.label(), self.param.nation())
+        let test = if self.status() == ShipStatus::Test { ", test" } else { "" };
+        format!("T{} {} ({}, {}{test})", self.tier.0, self.name, self.class.label(), self.param.nation())
     }
+}
+
+/// GameParams group of ships in closed testing.
+const TEST_GROUP: &str = "demoWithoutStats";
+
+const TEST_SHIP_NOTE: &str = "test ship, values from the current client may change before release";
+
+/// Whether a ship is released or in closed testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShipStatus {
+    Released,
+    Test,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -195,6 +246,12 @@ pub struct ShipSummary {
     /// GameParams group: "upgradeable" (tech tree), "premium", "special",
     /// "ultimate", "superShip", "start"; event and retired variants use others.
     pub group: String,
+
+    pub status: ShipStatus,
+
+    /// Present for test ships.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_note: Option<&'static str>,
 }
 
 /// Arguments for `find_ships`. Every filter is optional.
@@ -213,11 +270,19 @@ pub struct FindShipsArgs {
 
     /// Include event, clan-battle and retired variants. Defaults to false.
     pub include_event_variants: Option<bool>,
+
+    /// Leave out ships in closed testing. Defaults to false: they are listed with status "test". A test copy of a released ship is listed only with event variants.
+    pub exclude_test_ships: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FindShipsOutput {
     pub total: usize,
+
+    /// Ships in closed testing among `total`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub test: usize,
+
     pub ships: Vec<ShipSummary>,
 
     /// Matches left out of `ships` to keep the answer short.
@@ -301,18 +366,25 @@ impl TierRange {
     }
 }
 
-/// Ship filters shared by the list queries.
+/// Ship filters shared by the list queries. Test ships are included unless
+/// excluded; a test copy of a released ship counts as a variant.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ShipFilter {
     pub(crate) tiers: Option<TierRange>,
     pub(crate) class: Option<ShipClass>,
     pub(crate) nation: Option<String>,
     pub(crate) include_irregular: bool,
+    pub(crate) exclude_test: bool,
 }
 
 impl ShipFilter {
     pub(crate) fn matches(&self, ship: &Ship) -> bool {
-        (self.include_irregular || ship.is_regular())
+        let listed = match ship.status() {
+            ShipStatus::Test => !self.exclude_test && (!ship.copies_released || self.include_irregular),
+            ShipStatus::Released => self.include_irregular || ship.is_regular(),
+        };
+
+        listed
             && self.tiers.is_none_or(|range| range.contains(ship.tier))
             && self.class.is_none_or(|class| class == ship.class)
             && self.nation.as_deref().is_none_or(|nation| ship.param.nation().eq_ignore_ascii_case(nation))
@@ -328,6 +400,7 @@ impl GameData {
             class: args.class,
             nation: args.nation.clone(),
             include_irregular: args.include_event_variants.unwrap_or(false),
+            exclude_test: args.exclude_test_ships.unwrap_or(false),
         };
 
         let mut ships: Vec<&Ship> = self
@@ -339,10 +412,11 @@ impl GameData {
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
 
         let total = ships.len();
+        let test = ships.iter().filter(|ship| ship.status() == ShipStatus::Test).count();
         let listed: Vec<ShipSummary> = ships.iter().take(FIND_SHIPS_LIMIT).map(|ship| ship.summary()).collect();
         let omitted = (total > listed.len()).then(|| total - listed.len());
 
-        FindShipsOutput { total, ships: listed, omitted }
+        FindShipsOutput { total, test, ships: listed, omitted }
     }
 
     /// The playable ship with this GameParams id, e.g. from a replay.
@@ -363,11 +437,17 @@ impl GameData {
         };
         let research = vehicle.research();
 
-        // Retired copies keep their research links; only owned-ship groups are listed.
+        // Retired copies keep their research links; only owned-ship groups
+        // and ships in testing are listed.
         let names = |params: &[String]| -> Vec<String> {
             params
                 .iter()
-                .filter(|name| self.ships.iter().any(|other| other.param.name() == name.as_str() && other.is_regular()))
+                .filter(|name| {
+                    self.ships.iter().any(|other| {
+                        other.param.name() == name.as_str()
+                            && (other.is_regular() || (other.status() == ShipStatus::Test && !other.copies_released))
+                    })
+                })
                 .map(|name| self.ship_display_name(name))
                 .collect()
         };

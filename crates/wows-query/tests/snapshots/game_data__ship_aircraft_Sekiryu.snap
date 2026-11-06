@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 489
 expression: aircraft
 ---
 ship:
@@ -9,6 +10,7 @@ ship:
   class: aircraft_carrier
   nation: Japan
   group: superShip
+  status: released
 squadron_count: 6
 squadrons:
   - role: rocket_planes

@@ -81,7 +81,7 @@ enum CallFailure {
 const TOOLS: &[Tool] = &[
     Tool {
         name: "find_ships",
-        description: "List ships by name fragment, tier, class or nation. Returns name, GameParams index, tier, class, nation and group.",
+        description: "List ships by name fragment, tier, class or nation, including ships in closed testing (status \"test\", counted in test). Returns name, GameParams index, tier, class, nation, group and status.",
         schema: input_schema::<FindShipsArgs>,
         call: |game, arguments| run(arguments, |args| Ok(game.find_ships(args))),
     },

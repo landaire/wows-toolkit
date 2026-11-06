@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 543
 expression: search
 ---
 conditions:
@@ -7,19 +8,21 @@ conditions:
   - mobility.speed >= 33 kn
 rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health."
 considered:
-  total: 30
+  total: 34
   by_class:
     destroyer: 6
     cruiser: 8
-    battleship: 9
+    battleship: 12
     aircraft_carrier: 4
-    submarine: 3
+    submarine: 4
+  test: 4
 qualifying:
-  total: 3
+  total: 4
   by_class:
-    battleship: 3
+    battleship: 4
   stock: 0
-  with_requirements: 3
+  with_requirements: 4
+  test: 1
 ships:
   - ship: "T10 BA Montana (battleship, USA)"
     stock: false
@@ -36,6 +39,13 @@ ships:
       - "armor.citadel.max: 457 mm"
       - "mobility.speed: 34.1 kn"
   - ship: "T10 Montana (battleship, USA)"
+    stock: false
+    requires:
+      - "skill: Brisk (2 points, trigger counted as met)"
+    values:
+      - "armor.citadel.max: 457 mm"
+      - "mobility.speed: 33 kn"
+  - ship: "T10 Montana 2 (battleship, USA, test)"
     stock: false
     requires:
       - "skill: Brisk (2 points, trigger counted as met)"

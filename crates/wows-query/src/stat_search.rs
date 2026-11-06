@@ -140,6 +140,9 @@ pub struct StatSearchArgs {
 
     /// Include event, clan-battle and retired variants. Defaults to false.
     pub include_event_variants: Option<bool>,
+
+    /// Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is searched only with event variants.
+    pub exclude_test_ships: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -192,6 +195,10 @@ pub struct QualifyingCounts {
 
     /// Qualify only with the listed modules, upgrades or skills.
     pub with_requirements: usize,
+
+    /// Ships in closed testing among `total`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub test: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -738,6 +745,7 @@ impl GameData {
             class: args.class,
             nation: args.nation.clone(),
             include_irregular: args.include_event_variants.unwrap_or(false),
+            exclude_test: args.exclude_test_ships.unwrap_or(false),
         };
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
@@ -795,6 +803,7 @@ impl GameData {
             by_class: counts.by_class,
             stock,
             with_requirements: hits.len() - stock,
+            test: counts.test,
         };
         const HIT_LIMIT: usize = 40;
         let listed: Vec<StatSearchHit> = hits.into_iter().take(HIT_LIMIT).map(|(_, hit)| hit).collect();
@@ -1490,6 +1499,10 @@ fn format_value(value: f32, unit: Unit) -> String {
     let text = text.trim_end_matches('0').trim_end_matches('.');
 
     format!("{text}{}", unit.suffix())
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 #[cfg(test)]

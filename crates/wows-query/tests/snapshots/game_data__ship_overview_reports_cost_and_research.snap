@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 143
 expression: overviews
 ---
 - ship:
@@ -9,6 +10,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: upgradeable
+    status: released
   cost_credits: 19800000
   research_xp: 237500
   researched_from:
@@ -23,6 +25,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: superShip
+    status: released
   cost_credits: 47500000
   researched_from:
     - Des Moines
@@ -35,6 +38,7 @@ expression: overviews
     class: cruiser
     nation: USA
     group: ultimate
+    status: released
   game_params_doubloon_value: 26000
   acquisition_note: "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price."
   upgrade_slots: 6

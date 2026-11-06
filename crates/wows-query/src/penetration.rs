@@ -72,6 +72,9 @@ pub struct PenetrationSearchArgs {
 
     /// Nation as GameParams spells it, e.g. "USA".
     pub nation: Option<String>,
+
+    /// Leave out ships in closed testing. Defaults to false: they are searched and counted under `test`. A test copy of a released ship is never searched.
+    pub exclude_test_ships: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -172,7 +175,13 @@ impl GameData {
             (None, Some(ship)) => (Some(TierRange::around(ship.tier)), TierSource::TargetMatchmaking),
             (None, None) => (None, TierSource::All),
         };
-        let filter = ShipFilter { tiers, class: args.class, nation: args.nation.clone(), include_irregular: false };
+        let filter = ShipFilter {
+            tiers,
+            class: args.class,
+            nation: args.nation.clone(),
+            include_irregular: false,
+            exclude_test: args.exclude_test_ships.unwrap_or(false),
+        };
 
         let ifhe = args.ifhe.unwrap_or(false);
         let battery = args.battery.unwrap_or_default();

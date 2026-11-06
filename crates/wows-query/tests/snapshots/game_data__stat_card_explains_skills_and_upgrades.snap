@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 132
 expression: stats
 ---
 ship:
@@ -9,6 +10,7 @@ ship:
   class: battleship
   nation: Germany
   group: upgradeable
+  status: released
 skills:
   - name: Inertia Fuse for HE Shells
     points: 2

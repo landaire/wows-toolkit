@@ -1,0 +1,17 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 263
+expression: overview
+---
+ship:
+  name: Neptunus
+  index: PHSB010
+  tier: 10
+  class: battleship
+  nation: Netherlands
+  group: demoWithoutStats
+  status: test
+  status_note: "test ship, values from the current client may change before release"
+cost_credits: 21000000
+research_xp: 260000
+upgrade_slots: 6

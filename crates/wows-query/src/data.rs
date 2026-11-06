@@ -105,8 +105,9 @@ impl GameData {
     }
 
     fn index(version: Version, provider: GameMetadataProvider, vfs: VfsPath, raw_params: RawParamsSlot) -> Self {
-        let ships: Vec<Ship> =
+        let mut ships: Vec<Ship> =
             provider.params().iter().filter_map(|param| Ship::from_param(&provider, param)).collect();
+        Ship::mark_test_copies(&mut ships);
 
         let skills = provider
             .params()

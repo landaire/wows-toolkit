@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 159
 expression: consumables
 ---
 ship:
@@ -9,6 +10,7 @@ ship:
   class: cruiser
   nation: USA
   group: upgradeable
+  status: released
 skills:
   - name: Superintendent
     points: 3

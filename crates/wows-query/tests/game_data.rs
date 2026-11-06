@@ -256,6 +256,13 @@ fn sekiryu_is_indexed() {
     insta::assert_yaml_snapshot!(names);
 }
 
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn test_ships_resolve_with_status() {
+    let overview = game().ship_overview(&ship("Neptunus")).expect("Neptunus is in the client data");
+    insta::assert_yaml_snapshot!(overview);
+}
+
 fn firing_arcs(ship: &str, target: Option<&str>, skills: &[&str]) -> ShipFiringArcs {
     game()
         .ship_firing_arcs(&FiringArcsArgs {

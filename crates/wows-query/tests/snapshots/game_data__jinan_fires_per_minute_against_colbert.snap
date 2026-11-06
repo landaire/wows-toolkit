@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 349
 expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demolition))"
 ---
 - ship:
@@ -9,6 +10,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
     class: cruiser
     nation: France
     group: ultimate
+    status: released
   fire_node_probability: 0.5005
 - ammo: HE
   projectiles:
