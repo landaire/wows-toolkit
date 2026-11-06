@@ -327,19 +327,27 @@ impl StatsView {
             return false;
         }
 
-        let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> =
-            chart_ids.iter().copied().map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, window, cx)))).collect();
+        let dock = self.dock_area.downgrade();
+        let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> = chart_ids
+            .iter()
+            .copied()
+            .map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, dock.clone(), window, cx))))
+            .collect();
         let chart_registry: Arc<Mutex<HashMap<ChartId, WeakEntity<StatsChartPanel>>>> =
             Arc::new(Mutex::new(chart_entities.iter().map(|(id, chart)| (*id, chart.downgrade())).collect()));
 
         let overview = self.overview.downgrade();
+        let overview_dock = dock.clone();
         gpui_kit::component::dock::register_panel(cx, "StatsOverviewPanel", move |_state, _window, cx| {
-            let panel = overview.upgrade().unwrap_or_else(|| cx.new(StatsOverviewPanel::new));
+            let panel =
+                overview.upgrade().unwrap_or_else(|| cx.new(|cx| StatsOverviewPanel::new(overview_dock.clone(), cx)));
             panel_handle(panel)
         });
         let ships = self.ships.downgrade();
+        let ships_dock = dock.clone();
         gpui_kit::component::dock::register_panel(cx, "StatsShipsPanel", move |_state, window, cx| {
-            let panel = ships.upgrade().unwrap_or_else(|| cx.new(|cx| StatsShipsPanel::new(window, cx)));
+            let panel =
+                ships.upgrade().unwrap_or_else(|| cx.new(|cx| StatsShipsPanel::new(ships_dock.clone(), window, cx)));
             panel_handle(panel)
         });
         let chart_registry_for_build = chart_registry.clone();
@@ -350,7 +358,7 @@ impl StatsView {
                 .expect("Stats chart restore registry lock is not poisoned")
                 .get(&id)
                 .and_then(WeakEntity::upgrade)
-                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, window, cx)));
+                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, dock.clone(), window, cx)));
             panel_handle(panel)
         });
 
@@ -510,19 +518,35 @@ impl StatsView {
         })
         .detach();
     }
+
+    /// Restores `state` as a saved layout would be. Test-only.
+    #[cfg(test)]
+    pub(crate) fn restore_layout(&mut self, state: DockAreaState, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.restore_dock_layout(state, window, cx)
+    }
+
+    /// The tab's dock area, to build a layout to restore from. Test-only.
+    #[cfg(test)]
+    pub(crate) fn dock_area(&self) -> &Entity<DockArea> {
+        &self.dock_area
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let overview = cx.new(StatsOverviewPanel::new);
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
-        let (dock_area, _) = DockSkin::dock_area("stats-dock", None, window, cx);
+        let (dock_area, skin) = DockSkin::dock_area("stats-dock", None, window, cx);
+        // Each panel's own header carries the collapse control
+        // (`ui::dock_collapse_button`), and render adds the expand rails.
+        skin.set_toggle_button_visible(false, cx);
+        let overview = cx.new(|cx| StatsOverviewPanel::new(dock_area.downgrade(), cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(overview.clone()), DockPlacement::Center, None, window, cx);
         });
-        let ships = cx.new(|cx| StatsShipsPanel::new(window, cx));
+        let ships = cx.new(|cx| StatsShipsPanel::new(dock_area.downgrade(), window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
-        let first_chart = cx.new(|cx| StatsChartPanel::new(0, window, cx));
+        let first_chart = cx.new(|cx| StatsChartPanel::new(0, dock_area.downgrade(), window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
             // Overview and Ships share the main tab group; Charts opens beside them.
@@ -777,7 +801,8 @@ impl StatsView {
         let id = settings.id.unwrap_or(self.next_chart_id);
         self.next_chart_id = self.next_chart_id.max(id.saturating_add(1));
 
-        let chart = cx.new(|cx| StatsChartPanel::new(id, window, cx));
+        let dock = self.dock_area.downgrade();
+        let chart = cx.new(|cx| StatsChartPanel::new(id, dock, window, cx));
         self._chart_subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
         let games = self.games.clone();
@@ -1156,7 +1181,11 @@ impl Render for StatsView {
                 }
             })
             .child(dock_area.clone());
-        let chart_splitter = dock_area.read(cx).dock_size(DockPlacement::Right).map(|size| {
+        let dock_state = dock_area.read(cx);
+        // A closed dock has no edge to drag.
+        let open_chart_width =
+            dock_state.dock_size(DockPlacement::Right).filter(|_| dock_state.is_dock_open(DockPlacement::Right));
+        let chart_splitter = open_chart_width.map(|size| {
             let drag_active = self.chart_split_dragging.clone();
             let drag_start = drag_active.clone();
             let bounds = dock_bounds.clone();
@@ -1222,8 +1251,9 @@ impl Render for StatsView {
                         .group_hover("stats-chart-splitter", |this| this.bg(accent)),
                 )
         });
-        let dock_layout = dock_layout.children(chart_splitter);
+        let dock_layout = dock_layout.size_full().children(chart_splitter);
+        let body = crate::ui::dock_with_expand_rails("stats-dock-rail", &self.dock_area, dock_layout, cx);
 
-        v_flex().id("stats-root").track_focus(&self.focus_handle).size_full().child(filter_bar).child(dock_layout)
+        v_flex().id("stats-root").track_focus(&self.focus_handle).size_full().child(filter_bar).child(body)
     }
 }

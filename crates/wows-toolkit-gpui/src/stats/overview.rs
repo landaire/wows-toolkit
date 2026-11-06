@@ -10,8 +10,10 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
+use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
@@ -77,13 +79,16 @@ pub struct StatsOverviewPanel {
     scroll: ScrollHandle,
     horizontal_scroll: ScrollHandle,
     achievements_expanded: bool,
+    /// The tab's dock, for the header control that collapses a side dock this
+    /// panel was dragged into.
+    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
 }
 
 impl EventEmitter<PanelEvent> for StatsOverviewPanel {}
 
 impl StatsOverviewPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(dock: WeakEntity<DockArea>, cx: &mut Context<Self>) -> Self {
         Self {
             icons: IconCache::new(),
             achievement_vfs: None,
@@ -96,6 +101,7 @@ impl StatsOverviewPanel {
             scroll: ScrollHandle::new(),
             horizontal_scroll: ScrollHandle::new(),
             achievements_expanded: true,
+            dock,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -201,6 +207,17 @@ impl BasePanel for StatsOverviewPanel {
 impl Panel for StatsOverviewPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(t!("ui.stats.overview").into_owned())
+    }
+
+    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
+        let collapse = crate::ui::dock_collapse_button(
+            "stats-overview-collapse-dock",
+            &self.dock,
+            PanelId::from(cx.entity_id()),
+            cx,
+        )?;
+
+        Some(vec![collapse])
     }
 }
 

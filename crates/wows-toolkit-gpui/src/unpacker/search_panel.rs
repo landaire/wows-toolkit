@@ -12,8 +12,10 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::dock::BasePanel;
+use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::Scrollbar;
@@ -92,11 +94,19 @@ pub struct SearchPanel {
     /// the panel is dropped, so closing the tab stops the scan behind it.
     stop_flag: Arc<AtomicBool>,
     list_state: ListState,
+    /// The tab's dock, for the header control that collapses the dock.
+    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
 }
 
 impl SearchPanel {
-    pub fn new(query: SharedString, source: BrowserSource, stop_flag: Arc<AtomicBool>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        query: SharedString,
+        source: BrowserSource,
+        stop_flag: Arc<AtomicBool>,
+        dock: WeakEntity<DockArea>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             query,
             source,
@@ -105,6 +115,7 @@ impl SearchPanel {
             running: true,
             stop_flag,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            dock,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -162,6 +173,17 @@ impl BasePanel for SearchPanel {
 impl Panel for SearchPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(t!("ui.unpacker.search_title", query = self.query).to_string())
+    }
+
+    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
+        let collapse = crate::ui::dock_collapse_button(
+            "unpacker-search-collapse-dock",
+            &self.dock,
+            PanelId::from(cx.entity_id()),
+            cx,
+        )?;
+
+        Some(vec![collapse])
     }
 }
 

@@ -21,8 +21,10 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
+use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -30,6 +32,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::resizable::ResizableState;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::scroll::Scrollbar;
@@ -202,12 +205,21 @@ pub struct BrowserPanel {
     search_state: Entity<InputState>,
     path_filter_state: Entity<InputState>,
     list_state: ListState,
+    /// Whether the folder-tree sidebar is hidden behind its expand rail.
+    /// Session state: the Unpacker persists no layout.
+    sidebar_collapsed: bool,
+    /// Owned here rather than keyed to the element, so the sidebar width a
+    /// reader dragged to survives collapsing it.
+    split_state: Entity<ResizableState>,
+    /// The tab's dock, for the header control that collapses a side dock this
+    /// pane was dragged into.
+    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl BrowserPanel {
-    pub fn new(source: BrowserSource, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(source: BrowserSource, dock: WeakEntity<DockArea>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         let filter_state =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.filter_files").to_string()));
@@ -234,6 +246,9 @@ impl BrowserPanel {
             search_state,
             path_filter_state,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            sidebar_collapsed: false,
+            split_state: cx.new(|_| ResizableState::default()),
+            dock,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -357,6 +372,15 @@ impl BrowserPanel {
         cx.notify();
     }
 
+    fn set_sidebar_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        if self.sidebar_collapsed == collapsed {
+            return;
+        }
+
+        self.sidebar_collapsed = collapsed;
+        cx.notify();
+    }
+
     fn select_dir(&mut self, path: String, cx: &mut Context<Self>) {
         if self.selected_dir.as_deref() == Some(path.as_str()) {
             return;
@@ -427,6 +451,13 @@ impl Panel for BrowserPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(self.source.title())
     }
+
+    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
+        let id = SharedString::from(format!("unpacker-{}-collapse-dock", self.source.id_fragment()));
+        let collapse = crate::ui::dock_collapse_button(id, &self.dock, PanelId::from(cx.entity_id()), cx)?;
+
+        Some(vec![collapse])
+    }
 }
 
 impl Render for BrowserPanel {
@@ -458,6 +489,12 @@ impl Render for BrowserPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
+            .child(crate::ui::panel_collapse_button(
+                SharedString::from(format!("unpacker-{fragment}-tree-collapse")),
+                crate::ui::PanelSide::Left,
+                t!("ui.unpacker.collapse_folders").to_string(),
+                cx.listener(|this, _event, _window, cx| this.set_sidebar_collapsed(true, cx)),
+            ))
             .child(Icon::new(IconName::Search))
             .child(
                 Input::new(&self.filter_state)
@@ -674,7 +711,22 @@ impl Render for BrowserPanel {
                     .child(Scrollbar::vertical(&self.list_state)),
             );
 
+        if self.sidebar_collapsed {
+            return h_flex()
+                .size_full()
+                .items_start()
+                .child(crate::ui::panel_expand_rail(
+                    SharedString::from(format!("unpacker-{fragment}-tree-rail")),
+                    crate::ui::PanelSide::Left,
+                    t!("ui.unpacker.expand_folders").to_string(),
+                    cx.listener(|this, _event, _window, cx| this.set_sidebar_collapsed(false, cx)),
+                ))
+                .child(div().h_full().flex_1().min_w(px(0.)).child(listing))
+                .into_any_element();
+        }
+
         h_resizable(SharedString::from(format!("unpacker-{fragment}-split")))
+            .with_state(&self.split_state)
             .child(
                 resizable_panel()
                     .size(SIDEBAR_WIDTH)
@@ -826,8 +878,9 @@ mod tests {
         use wowsunpack::vfs::VfsPath;
 
         cx.update(gpui_kit::init);
-        let window =
-            cx.open_window(size(px(800.), px(600.)), |window, cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
+        let window = cx.open_window(size(px(800.), px(600.)), |window, cx| {
+            BrowserPanel::new(BrowserSource::Pkg, gpui_kit::WeakEntity::new_invalid(), window, cx)
+        });
 
         let root: VfsPath = MemoryFS::new().into();
         let deep = root.join("res/content/gameplay/a.xml").expect("a valid path");
@@ -875,7 +928,7 @@ mod tests {
     fn open_pane(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<BrowserPanel> {
         cx.update(gpui_kit::init);
         cx.open_window(size(px(900.), px(600.)), |window, cx| {
-            let mut pane = BrowserPanel::new(BrowserSource::Pkg, window, cx);
+            let mut pane = BrowserPanel::new(BrowserSource::Pkg, gpui_kit::WeakEntity::new_invalid(), window, cx);
             pane.set_vfs(fixture(), window, cx);
             pane
         })

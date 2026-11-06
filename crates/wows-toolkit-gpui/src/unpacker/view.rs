@@ -163,15 +163,19 @@ pub struct UnpackerView {
 
 impl UnpackerView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
-        let assets_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, window, cx));
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
-        let (dock_area, _) = DockSkin::dock_area("unpacker-dock", None, window, cx);
+        let (dock_area, skin) = DockSkin::dock_area("unpacker-dock", None, window, cx);
+        // Each panel's own header carries the collapse control
+        // (`ui::dock_collapse_button`), and render adds the expand rails.
+        skin.set_toggle_button_visible(false, cx);
+        let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, dock_area.downgrade(), window, cx));
+        let assets_browser =
+            cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, dock_area.downgrade(), window, cx));
 
         let output_dir_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.output_dir_hint").to_string()));
-        let queue_panel = cx.new(|cx| QueuePanel::new(output_dir_input.clone(), cx));
+        let queue_panel = cx.new(|cx| QueuePanel::new(output_dir_input.clone(), dock_area.downgrade(), cx));
 
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(
@@ -234,6 +238,12 @@ impl UnpackerView {
         self.output_dir_input.update(cx, |state, cx| state.set_value(output_dir.clone(), window, cx));
         self.output_dir = output_dir;
         cx.notify();
+    }
+
+    /// The package pane, so a test can hand it a VFS. Test-only.
+    #[cfg(test)]
+    pub(crate) fn pkg_browser(&self) -> &Entity<BrowserPanel> {
+        &self.pkg_browser
     }
 
     /// Saved on blur or Enter rather than per keystroke, so a half-typed path
@@ -455,7 +465,8 @@ impl UnpackerView {
         };
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let panel = cx.new(|cx| SearchPanel::new(query.into(), source, stop_flag.clone(), cx));
+        let dock = self.dock_area.downgrade();
+        let panel = cx.new(|cx| SearchPanel::new(query.into(), source, stop_flag.clone(), dock, cx));
         self.dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(panel.clone()), DockPlacement::Bottom, None, window, cx);
         });
@@ -876,11 +887,8 @@ impl Render for UnpackerView {
                 this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
             });
 
-        v_flex()
-            .id("unpacker-root")
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .child(chrome)
-            .child(div().flex_1().min_h(px(0.)).child(self.dock_area.clone()))
+        let dock = crate::ui::dock_with_expand_rails("unpacker-dock-rail", &self.dock_area, self.dock_area.clone(), cx);
+
+        v_flex().id("unpacker-root").track_focus(&self.focus_handle).size_full().child(chrome).child(dock)
     }
 }

@@ -1774,6 +1774,18 @@ impl App {
         &self.search
     }
 
+    /// The Unpacker tab, so a test can hand its panes a VFS. Test-only.
+    #[cfg(test)]
+    pub(crate) fn unpacker(&self) -> &Entity<UnpackerView> {
+        &self.unpacker
+    }
+
+    /// The Stats tab, so a test can restore a saved layout into it. Test-only.
+    #[cfg(test)]
+    pub(crate) fn stats(&self) -> &Entity<StatsView> {
+        &self.stats
+    }
+
     /// Starts what the Player Tracker needs from the config database as soon
     /// as it opens: the shared notes, and the Twitch chat poll. Its index
     /// aggregates wait until the tab is first shown

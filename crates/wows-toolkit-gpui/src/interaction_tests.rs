@@ -12,6 +12,8 @@ use gpui_kit::AppContext;
 use gpui_kit::TestAppContext;
 use gpui_kit::WindowHandle;
 use gpui_kit::component::IndexPath;
+use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockState;
 use gpui_kit::px;
 use gpui_kit::size;
 use gpui_kit::test::TestAppContextExt;
@@ -60,10 +62,23 @@ const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
 const OUTPUT_DIR: &str = "unpacker-output-dir";
 const QUEUE_CLEAR_ALL: &str = "unpacker-queue-clear-all";
+const QUEUE_COLLAPSE: &str = "unpacker-queue-collapse";
+const QUEUE_RAIL: &str = "unpacker-dock-rail-right";
+const PKG_TREE_COLLAPSE: &str = "unpacker-pkg-tree-collapse";
+const PKG_TREE_RAIL: &str = "unpacker-pkg-tree-rail";
+const PKG_EXTRACT_LISTED: &str = "unpacker-pkg-extract-listed";
 
 /// Stats tab filter bar (`stats::view`).
 const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
 const STATS_LIMIT_COUNT: &str = "stats-limit-count";
+const STATS_LEFT_RAIL: &str = "stats-dock-rail-left";
+const STATS_RIGHT_RAIL: &str = "stats-dock-rail-right";
+
+/// The first chart's collapse control (`stats::chart_panel`), drawn only
+/// while the chart sits in an open side dock.
+fn first_chart_collapse() -> (&'static str, usize) {
+    ("chart-collapse-dock", 0)
+}
 
 /// Player Tracker controls (`player_tracker`).
 const TRACKER_FILTER: &str = "tracker-filter";
@@ -659,6 +674,105 @@ fn the_unpacker_browsers_say_there_is_no_game_data_when_the_directory_is_unset(c
         show_tab(window, AppTab::Unpacker, cx);
         // With no VFS the panes show a status line instead of a filter box.
         assert!(window.try_find(PKG_FILTER).is_none(), "the filter appears only once a VFS is loaded");
+    })
+    .expect("the test window stays open");
+}
+
+/// A package VFS holding one directory with one file, enough for the folder
+/// tree and the listing to draw.
+fn one_file_vfs() -> wowsunpack::vfs::VfsPath {
+    let vfs: wowsunpack::vfs::VfsPath = wowsunpack::vfs::MemoryFS::new().into();
+    vfs.join("gui").and_then(|dir| dir.create_dir()).expect("a memory VFS takes a directory");
+    vfs.join("gui/readme.txt").and_then(|file| file.create_file()).expect("a memory VFS takes a file");
+
+    vfs
+}
+
+#[gpui_kit::test]
+fn the_unpacker_folder_tree_collapses_to_a_rail_and_expands_again(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.apply_settings(test_settings(), window, cx);
+            let browser = app.unpacker().read(cx).pkg_browser().clone();
+            browser.update(cx, |browser, cx| browser.set_vfs(one_file_vfs(), window, cx));
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(PKG_FILTER).is_some(), "the tree sidebar is up once a VFS is loaded");
+        assert!(window.try_find(PKG_TREE_RAIL).is_none(), "no rail while the sidebar is up");
+
+        window.click(PKG_TREE_COLLAPSE, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(PKG_FILTER).is_none(), "collapsing puts the sidebar away");
+        assert!(window.try_find(PKG_EXTRACT_LISTED).is_some(), "the listing stays when the sidebar goes");
+
+        window.click(PKG_TREE_RAIL, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(PKG_FILTER).is_some(), "the rail brings the sidebar back");
+        assert!(window.try_find(PKG_TREE_RAIL).is_none(), "and goes away with it");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_unpacker_queue_dock_collapses_to_a_rail_and_expands_again(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(QUEUE_RAIL).is_none(), "no rail while the queue is up");
+
+        window.click(QUEUE_COLLAPSE, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_none(), "collapsing closes the queue dock");
+
+        window.click(QUEUE_RAIL, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "the rail opens the queue dock again");
+        assert!(window.try_find(QUEUE_RAIL).is_none(), "and goes away with it");
+    })
+    .expect("the test window stays open");
+}
+
+/// A saved layout may leave the charts in a closed left dock. The restored tab
+/// has to offer a way to open it again, and the chart then collapses it back.
+#[gpui_kit::test]
+fn a_restored_closed_left_chart_dock_reopens_from_its_rail(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.stats().clone().update(cx, |stats, cx| {
+                let mut state = stats.dock_area().read(cx).dump(cx);
+                let right = state.right_dock.take().expect("the default layout holds the chart in the right dock");
+                state.left_dock = Some(DockState::new(right.panel().clone(), DockPlacement::Left, right.size(), false));
+                assert!(stats.restore_layout(state, window, cx), "a closed left chart dock is a layout restore accepts");
+            });
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(STATS_LEFT_RAIL).is_some(), "the closed left dock leaves a rail");
+        assert!(window.try_find(STATS_RIGHT_RAIL).is_none(), "and no other dock does");
+        assert!(window.try_find(first_chart_collapse()).is_none(), "the chart is not on screen");
+
+        window.click(STATS_LEFT_RAIL, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(STATS_LEFT_RAIL).is_none(), "the rail goes once the dock is open");
+        assert!(window.try_find(first_chart_collapse()).is_some(), "the chart is back with its collapse control");
+
+        window.click(first_chart_collapse(), cx);
+        window.render_frame(cx);
+        assert!(window.try_find(STATS_LEFT_RAIL).is_some(), "collapsing from the chart closes the left dock");
     })
     .expect("the test window stays open");
 }

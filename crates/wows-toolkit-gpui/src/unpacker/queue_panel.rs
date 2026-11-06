@@ -19,8 +19,10 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
+use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputState;
@@ -64,6 +66,8 @@ pub struct QueuePanel {
     /// the thing being written.
     output_dir: Entity<InputState>,
     scroll: ScrollHandle,
+    /// The tab's dock, for the header control that collapses the queue.
+    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
 }
 
@@ -71,8 +75,14 @@ impl EventEmitter<PanelEvent> for QueuePanel {}
 impl EventEmitter<QueueEvent> for QueuePanel {}
 
 impl QueuePanel {
-    pub fn new(output_dir: Entity<InputState>, cx: &mut Context<Self>) -> Self {
-        Self { view: QueueView::default(), output_dir, scroll: ScrollHandle::new(), focus_handle: cx.focus_handle() }
+    pub fn new(output_dir: Entity<InputState>, dock: WeakEntity<DockArea>, cx: &mut Context<Self>) -> Self {
+        Self {
+            view: QueueView::default(),
+            output_dir,
+            scroll: ScrollHandle::new(),
+            dock,
+            focus_handle: cx.focus_handle(),
+        }
     }
 
     pub fn set_view(&mut self, view: QueueView, cx: &mut Context<Self>) {
@@ -162,6 +172,13 @@ impl BasePanel for QueuePanel {
 impl Panel for QueuePanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(t!("ui.unpacker.extraction_queue").to_string())
+    }
+
+    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
+        let collapse =
+            crate::ui::dock_collapse_button("unpacker-queue-collapse", &self.dock, PanelId::from(cx.entity_id()), cx)?;
+
+        Some(vec![collapse])
     }
 }
 

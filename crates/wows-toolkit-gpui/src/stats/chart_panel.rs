@@ -13,8 +13,10 @@ use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
+use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -134,6 +136,8 @@ pub struct StatsChartPanel {
     /// Absent until the expected values are cached, which is what decides
     /// whether personal rating is offered at all.
     personal_rating: Option<Arc<PersonalRatingData>>,
+    /// The tab's dock, for the header control that collapses the chart dock.
+    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
 }
 
@@ -144,7 +148,7 @@ impl EventEmitter<PanelEvent> for StatsChartPanel {}
 impl EventEmitter<ChartSettingsChanged> for StatsChartPanel {}
 
 impl StatsChartPanel {
-    pub fn new(id: ChartId, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(id: ChartId, dock: WeakEntity<DockArea>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let ship_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.stats.search_ships").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |_this, _state, _event: &InputEvent, cx| cx.notify());
@@ -169,6 +173,7 @@ impl StatsChartPanel {
             plot_bounds: None,
             drag: None,
             personal_rating: None,
+            dock,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -906,6 +911,17 @@ impl Panel for StatsChartPanel {
                 crate::icons::CHART_BAR
             }))
             .child(self.tab_title())
+    }
+
+    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
+        let collapse = crate::ui::dock_collapse_button(
+            ("chart-collapse-dock", self.id),
+            &self.dock,
+            PanelId::from(cx.entity_id()),
+            cx,
+        )?;
+
+        Some(vec![collapse])
     }
 }
 
