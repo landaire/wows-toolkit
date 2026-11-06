@@ -65,13 +65,19 @@ const REGULAR_GROUPS: &[&str] = &[
 #[serde(transparent)]
 pub struct Tier(#[schemars(range(min = 1, max = 11))] pub u32);
 
+/// A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ShipClass {
+    #[serde(alias = "DD", alias = "dd", alias = "Destroyer")]
     Destroyer,
+    #[serde(alias = "CA", alias = "ca", alias = "CL", alias = "cl", alias = "Cruiser")]
     Cruiser,
+    #[serde(alias = "BB", alias = "bb", alias = "Battleship")]
     Battleship,
+    #[serde(alias = "CV", alias = "cv", alias = "carrier", alias = "Carrier", alias = "AircraftCarrier")]
     AircraftCarrier,
+    #[serde(alias = "SS", alias = "ss", alias = "sub", alias = "Sub", alias = "Submarine")]
     Submarine,
 }
 
@@ -615,5 +621,26 @@ mod tests {
         assert_eq!(TierRange::around(Tier(1)), TierRange { min: Tier(1), max: Tier(3) });
         assert_eq!(TierRange::around(Tier(10)), TierRange { min: Tier(8), max: Tier(11) });
         assert_eq!(TierRange::around(Tier(11)), TierRange { min: Tier(9), max: Tier(11) });
+    }
+
+    #[test]
+    fn class_arguments_accept_community_abbreviations() {
+        let parsed: Vec<String> = ["DD", "cl", "BB", "CV", "SS", "sub", "Cruiser", "aircraft_carrier"]
+            .into_iter()
+            .map(|name| {
+                format!("{name} -> {:?}", serde_json::from_value::<ShipClass>(serde_json::Value::from(name)).unwrap())
+            })
+            .collect();
+
+        insta::assert_snapshot!(parsed.join("\n"), @"
+        DD -> Destroyer
+        cl -> Cruiser
+        BB -> Battleship
+        CV -> AircraftCarrier
+        SS -> Submarine
+        sub -> Submarine
+        Cruiser -> Cruiser
+        aircraft_carrier -> AircraftCarrier
+        ");
     }
 }

@@ -30,6 +30,7 @@ expression: specs()
           - battleship
           - aircraft_carrier
           - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
       nation:
         type: string
         description: "Nation as GameParams spells it, e.g. \"USA\", \"Germany\", \"Japan\", \"Russia\", \"United_Kingdom\"."
@@ -147,6 +148,7 @@ expression: specs()
           - battleship
           - aircraft_carrier
           - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
       nation:
         type: string
         description: "Nation as GameParams spells it, e.g. \"USA\"."
@@ -348,6 +350,7 @@ expression: specs()
           - battleship
           - aircraft_carrier
           - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
       nation:
         type: string
         description: "Nation as GameParams spells it, e.g. \"USA\"."
@@ -396,6 +399,7 @@ expression: specs()
           - battleship
           - aircraft_carrier
           - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
     required:
       - class
 - name: upgrade
