@@ -106,6 +106,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Format of the view handed to egui; see `render`.
+const DISPLAY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MSAA_SAMPLE_COUNT: u32 = 4;
 
 /// RGBA8 pixels plus their dimensions, as uploaded to the GPU.
@@ -912,7 +914,16 @@ impl Viewport3D {
             });
             let msaa_color_view = msaa_color_texture.create_view(&Default::default());
 
-            // Resolve color texture (1x) — registered with egui for display
+            // egui-wgpu samples user textures as already gamma-encoded. Sampling an
+            // sRGB view would decode the stored bytes back to linear and show them
+            // too dark, so egui gets a non-sRGB view of the same encoded bytes.
+            // Backends without view reinterpretation (GLES) keep the sRGB view.
+            let reinterpret = render_state
+                .adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::VIEW_FORMATS);
+            let view_formats: &[wgpu::TextureFormat] = if reinterpret { &[DISPLAY_FORMAT] } else { &[] };
             let color_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("viewport_3d_color"),
                 size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
@@ -921,9 +932,15 @@ impl Viewport3D {
                 dimension: wgpu::TextureDimension::D2,
                 format: COLOR_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
+                view_formats,
             });
             let color_view = color_texture.create_view(&Default::default());
+            let display_view = if reinterpret {
+                color_texture
+                    .create_view(&wgpu::TextureViewDescriptor { format: Some(DISPLAY_FORMAT), ..Default::default() })
+            } else {
+                color_view.clone()
+            };
 
             // Depth texture — multisampled to match MSAA color
             let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -942,15 +959,15 @@ impl Viewport3D {
             let egui_texture_id = if let Some(old) = self.offscreen.take() {
                 if let Some(id) = old.egui_texture_id {
                     let mut renderer = render_state.renderer.write();
-                    renderer.update_egui_texture_from_wgpu_texture(device, &color_view, wgpu::FilterMode::Linear, id);
+                    renderer.update_egui_texture_from_wgpu_texture(device, &display_view, wgpu::FilterMode::Linear, id);
                     Some(id)
                 } else {
                     let mut renderer = render_state.renderer.write();
-                    Some(renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear))
+                    Some(renderer.register_native_texture(device, &display_view, wgpu::FilterMode::Linear))
                 }
             } else {
                 let mut renderer = render_state.renderer.write();
-                Some(renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear))
+                Some(renderer.register_native_texture(device, &display_view, wgpu::FilterMode::Linear))
             };
 
             self.offscreen = Some(OffscreenTarget {
