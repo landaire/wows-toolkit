@@ -28,6 +28,7 @@ use wows_replays::context::GameDataContext;
 use wows_replays::context::GameDataContextError;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 
 /// Parses & processes World of Warships replay files
 #[derive(Parser)]
@@ -184,6 +185,32 @@ enum Commands {
         pr_expected_values: Option<PathBuf>,
         #[arg(required = true)]
         replays: Vec<PathBuf>,
+    },
+    /// Print the match, players with results, kills and chat as JSON.
+    Analyze {
+        /// The replay file to use
+        replay: PathBuf,
+    },
+    /// Print decoded packets as JSON lines, one object per packet.
+    Packets {
+        /// Payload kind to keep, such as `Chat` or `DamageReceived`. Repeatable.
+        #[arg(long = "kind")]
+        kinds: Vec<String>,
+
+        /// Keep packets that name this entity id.
+        #[arg(long)]
+        entity_id: Option<u32>,
+
+        /// Earliest game clock in seconds since the recording started.
+        #[arg(long)]
+        from: Option<f32>,
+
+        /// Latest game clock in seconds since the recording started.
+        #[arg(long)]
+        to: Option<f32>,
+
+        /// The replay file to use
+        replay: PathBuf,
     },
 }
 
@@ -1006,6 +1033,24 @@ impl GameDataContext for CliGameDataContext<'_> {
     }
 }
 
+/// The wows-constants JSON that names a build's battle results fields: the
+/// -c file, else the resolved dump's `constants.json`. `None` when neither
+/// exists, which leaves the server's results out of an analysis.
+fn results_constants(
+    constants_path: Option<&Path>,
+    extracted: Option<&str>,
+    version: &Version,
+) -> Option<serde_json::Value> {
+    if let Some(path) = constants_path {
+        return Some(read_constants_overrides(path));
+    }
+
+    let dir = resolve_extracted_dir(Path::new(extracted?), version).ok()?;
+    let text = std::fs::read_to_string(dir.join("constants.json")).ok()?;
+
+    serde_json::from_str(&text).ok()
+}
+
 /// Read and parse a -c/--constants overrides file; a bad file is a usage
 /// error worth dying over.
 fn read_constants_overrides(path: &Path) -> serde_json::Value {
@@ -1431,6 +1476,33 @@ fn main() {
                     replays[idx].1.playerVehicle
                 );
             }
+        }
+        Commands::Analyze { replay } => {
+            let replay_file = ReplayFile::from_file(&replay).expect("failed to read replay");
+            let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+            let results_constants = results_constants(constants_path, extracted, &version);
+            let analysis =
+                replayshark::analyze(&replay_file, ctx, results_constants.as_ref()).expect("failed to analyze replay");
+            println!("{}", serde_json::to_string_pretty(&analysis).expect("an analysis serializes"));
+        }
+        Commands::Packets { kinds, entity_id, from, to, replay } => {
+            let replay_file = ReplayFile::from_file(&replay).expect("failed to read replay");
+            let filter = replayshark::PacketFilter {
+                kinds,
+                entity: entity_id.map(EntityId::from),
+                from: from.map(GameClock),
+                to: to.map(GameClock),
+            };
+            let mut stdout = std::io::stdout().lock();
+            let scan = replayshark::scan_packets(&replay_file, ctx, &filter, |record| {
+                let written = serde_json::to_writer(&mut stdout, &record).map_err(std::io::Error::from);
+                match written.and_then(|()| writeln!(stdout)) {
+                    Ok(()) => std::ops::ControlFlow::Continue(()),
+                    Err(_) => std::ops::ControlFlow::Break(()),
+                }
+            })
+            .expect("failed to scan packets");
+            eprintln!("{} packets, {} matched", scan.packets, scan.matched);
         }
         Commands::BattleResults {
             format,

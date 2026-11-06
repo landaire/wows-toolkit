@@ -1,7 +1,8 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library", "workspace_test")
 
 REPLAYSHARK_DEPS = [
     "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-core:wows_core",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
@@ -11,11 +12,20 @@ REPLAYSHARK_DEPS = [
     "//third-party/rust:jiff",
     "//third-party/rust:parse_int",
     "//third-party/rust:rootcause",
+    "//third-party/rust:serde",
     "//third-party/rust:serde_json",
     "//third-party/rust:thiserror",
     "//third-party/rust:toml",
     "//third-party/rust:walkdir",
 ]
+
+workspace_library(
+    name = "replayshark",
+    crate = "replayshark",
+    package = "replayshark",
+    version = "0.1.0",
+    deps = REPLAYSHARK_DEPS,
+)
 
 workspace_binary(
     name = "replayshark_bin",
@@ -23,6 +33,15 @@ workspace_binary(
     package = "replayshark",
     version = "0.1.0",
     crate_root = "src/main.rs",
+    deps = REPLAYSHARK_DEPS + [":replayshark"],
+)
+
+workspace_test(
+    name = "replayshark_lib_test",
+    crate = "replayshark",
+    package = "replayshark",
+    version = "0.1.0",
+    crate_root = "src/lib.rs",
     deps = REPLAYSHARK_DEPS,
 )
 
@@ -32,5 +51,5 @@ workspace_test(
     package = "replayshark",
     version = "0.1.0",
     crate_root = "src/main.rs",
-    deps = REPLAYSHARK_DEPS,
+    deps = REPLAYSHARK_DEPS + [":replayshark"],
 )
