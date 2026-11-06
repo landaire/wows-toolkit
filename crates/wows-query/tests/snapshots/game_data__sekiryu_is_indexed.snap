@@ -1,0 +1,7 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: names
+---
+- - Sekiryu
+  - PJSA111
+  - 11

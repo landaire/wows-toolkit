@@ -25,6 +25,7 @@ pub mod stats;
 pub mod tools;
 pub mod upgrades;
 
+mod fuzzy;
 mod jq;
 mod text;
 

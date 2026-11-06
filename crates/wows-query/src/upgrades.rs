@@ -15,6 +15,9 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::fuzzy;
+use crate::fuzzy::Candidate;
+use crate::fuzzy::Fuzzy;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipClass;
@@ -212,7 +215,7 @@ impl GameData {
     pub(crate) fn resolve_upgrade_for_ship(&self, query: &str, ship: &Ship) -> Result<&Upgrade, QueryError> {
         let matches = self.match_upgrades(query)?;
         let Some(first) = matches.first() else {
-            return Err(QueryError::UpgradeNotFound { query: query.to_owned() });
+            return Err(QueryError::UpgradeNotFound { query: query.to_owned(), suggestions: Vec::new() });
         };
 
         matches
@@ -234,20 +237,33 @@ impl GameData {
             return Ok(exact);
         }
 
-        let partial: Vec<&Upgrade> = self
-            .upgrades
-            .iter()
-            .filter(|upgrade| !key.is_empty() && upgrade.search_key.contains(key.as_str()))
-            .collect();
+        let matching = |accept: &dyn Fn(&str) -> bool| -> Vec<&Upgrade> {
+            self.upgrades.iter().filter(|upgrade| !key.is_empty() && accept(&upgrade.search_key)).collect()
+        };
+        let prefix = matching(&|name| name.starts_with(key.as_str()));
+        let partial = if prefix.is_empty() { matching(&|name| name.contains(key.as_str())) } else { prefix };
         let mut distinct: Vec<&str> = partial.iter().map(|upgrade| upgrade.name.as_str()).collect();
         distinct.sort();
         distinct.dedup();
         match distinct.len() {
-            0 => Err(QueryError::UpgradeNotFound { query: query.to_owned() }),
-            1 => Ok(partial),
-            _ => Err(QueryError::AmbiguousUpgrade {
+            0 => {}
+            1 => return Ok(partial),
+            _ => {
+                return Err(QueryError::AmbiguousUpgrade {
+                    query: query.to_owned(),
+                    candidates: distinct.into_iter().take(15).map(str::to_owned).collect(),
+                });
+            }
+        }
+
+        match fuzzy::closest(
+            &key,
+            self.upgrades.iter().map(|upgrade| Candidate::primary(&upgrade.search_key, &upgrade.name)),
+        ) {
+            Fuzzy::Unique(name) => Ok(self.upgrades.iter().filter(|upgrade| upgrade.name == name).collect()),
+            Fuzzy::Suggestions(suggestions) => Err(QueryError::UpgradeNotFound {
                 query: query.to_owned(),
-                candidates: distinct.into_iter().take(15).map(str::to_owned).collect(),
+                suggestions: suggestions.into_iter().map(str::to_owned).collect(),
             }),
         }
     }

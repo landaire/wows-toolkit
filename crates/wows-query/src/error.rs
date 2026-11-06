@@ -52,8 +52,8 @@ pub enum LoadError {
 /// for the person or model that made the query.
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
-    #[error("no ship matches {query:?}; try find_ships with a shorter name")]
-    ShipNotFound { query: String },
+    #[error("no ship matches {query:?}; {}", did_you_mean(suggestions, "try find_ships with a shorter name"))]
+    ShipNotFound { query: String, suggestions: Vec<String> },
 
     #[error("{query:?} matches several ships: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousShip { query: String, candidates: Vec<String> },
@@ -61,8 +61,11 @@ pub enum QueryError {
     #[error("{ship} has no armor zone or plate named {zone:?}; zones: {}", zones.join(", "))]
     ZoneNotFound { ship: String, zone: String, zones: Vec<&'static str> },
 
-    #[error("no captain skill matches {query:?}; use the skill's English name or a common acronym such as IFHE")]
-    SkillNotFound { query: String },
+    #[error(
+        "no captain skill matches {query:?}; {}",
+        did_you_mean(suggestions, "use the skill's English name or a common acronym such as IFHE")
+    )]
+    SkillNotFound { query: String, suggestions: Vec<String> },
 
     #[error("captain skill {skill} is not in the {class} skill tree")]
     SkillNotForClass { skill: String, class: &'static str },
@@ -70,8 +73,11 @@ pub enum QueryError {
     #[error("{query:?} matches several captain skills: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousSkill { query: String, candidates: Vec<String> },
 
-    #[error("no upgrade matches {query:?}; use the upgrade's English name, e.g. \"Main Battery Modification 2\"")]
-    UpgradeNotFound { query: String },
+    #[error(
+        "no upgrade matches {query:?}; {}",
+        did_you_mean(suggestions, "use the upgrade's English name, e.g. \"Main Battery Modification 2\"")
+    )]
+    UpgradeNotFound { query: String, suggestions: Vec<String> },
 
     #[error("{query:?} matches several upgrades: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousUpgrade { query: String, candidates: Vec<String> },
@@ -231,4 +237,13 @@ fn exit_description(status: Option<&std::process::ExitStatus>) -> String {
         Some(status) => status.to_string(),
         None => "exit status unknown".to_owned(),
     }
+}
+
+/// "did you mean: A, B?" when there are suggestions, otherwise `hint`.
+fn did_you_mean(suggestions: &[String], hint: &str) -> String {
+    if suggestions.is_empty() {
+        return hint.to_owned();
+    }
+
+    format!("did you mean: {}?", suggestions.join(", "))
 }

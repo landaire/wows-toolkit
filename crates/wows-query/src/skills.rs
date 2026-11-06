@@ -13,6 +13,9 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::fuzzy;
+use crate::fuzzy::Candidate;
+use crate::fuzzy::Fuzzy;
 use crate::ships::ShipClass;
 use crate::ships::search_key;
 use crate::text::clean;
@@ -182,7 +185,7 @@ impl GameData {
         if let Some((_, names)) = ACRONYMS.iter().find(|(acronym, _)| *acronym == key) {
             let skills = by_internal(names);
             if skills.is_empty() {
-                return Err(QueryError::SkillNotFound { query: query.to_owned() });
+                return Err(QueryError::SkillNotFound { query: query.to_owned(), suggestions: Vec::new() });
             }
             return Ok(skills);
         }
@@ -198,18 +201,33 @@ impl GameData {
             return Ok(exact);
         }
 
-        let partial: Vec<&CrewSkill> = named
-            .iter()
-            .filter(|(_, name)| !key.is_empty() && name.contains(key.as_str()))
-            .map(|(skill, _)| *skill)
-            .collect();
+        let matching = |accept: &dyn Fn(&str) -> bool| -> Vec<&CrewSkill> {
+            named.iter().filter(|(_, name)| !key.is_empty() && accept(name)).map(|(skill, _)| *skill).collect()
+        };
+        let prefix = matching(&|name| name.starts_with(key.as_str()));
+        let partial = if prefix.is_empty() { matching(&|name| name.contains(key.as_str())) } else { prefix };
         let mut distinct: Vec<String> = partial.iter().map(|skill| self.skill_name(skill)).collect();
         distinct.sort();
         distinct.dedup();
         match distinct.len() {
-            0 => Err(QueryError::SkillNotFound { query: query.to_owned() }),
-            1 => Ok(partial),
-            _ => Err(QueryError::AmbiguousSkill { query: query.to_owned(), candidates: distinct }),
+            0 => {}
+            1 => return Ok(partial),
+            _ => return Err(QueryError::AmbiguousSkill { query: query.to_owned(), candidates: distinct }),
+        }
+
+        let names: Vec<String> = named.iter().map(|(skill, _)| self.skill_name(skill)).collect();
+        let candidates = named.iter().zip(&names).map(|((_, key), name)| Candidate::primary(key, name));
+        match fuzzy::closest(&key, candidates) {
+            Fuzzy::Unique(name) => Ok(names
+                .iter()
+                .zip(&named)
+                .filter(|(skill_name, _)| *skill_name == name)
+                .map(|(_, (skill, _))| *skill)
+                .collect()),
+            Fuzzy::Suggestions(suggestions) => Err(QueryError::SkillNotFound {
+                query: query.to_owned(),
+                suggestions: suggestions.into_iter().map(str::to_owned).collect(),
+            }),
         }
     }
 

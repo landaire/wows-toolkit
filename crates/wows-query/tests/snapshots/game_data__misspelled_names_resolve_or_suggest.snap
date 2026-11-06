@@ -1,0 +1,7 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "(far.to_string(), skill.expect(\"one typo\"), upgrade.expect(\"one typo\"))"
+---
+- "no ship matches \"Smolensker\"; did you mean: Smolensk, Smolensk B?"
+- - Concealment Expert
+- - Main Battery Modification 2

@@ -189,3 +189,56 @@ fn registry_calls_report_each_failure_kind() {
         failures.into_iter().map(|failure| failure.expect_err("call fails").to_string()).collect();
     insta::assert_yaml_snapshot!(messages);
 }
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn misspelled_names_resolve_or_suggest() {
+    let resolved = |query: &str| game().ship_summary(query).map(|ship| ship.name);
+    assert_eq!(resolved("Sekryu").expect("one typo"), "Sekiryu");
+    assert_eq!(resolved("Des Moins").expect("one typo"), "Des Moines");
+    assert_eq!(resolved("Kurfurts").expect("one transposition"), "G. Kurf\u{fc}rst");
+
+    assert_eq!(resolved("Kitakazee").expect("whole name beats a word of a longer name"), "Kitakaze");
+
+    let far = resolved("Smolensker").expect_err("two names are equally near");
+    let skill = game()
+        .captain_skill(&CaptainSkillArgs { skill: "Concealment Expertt".to_owned(), class: None })
+        .map(|output| output.skills.into_iter().map(|skill| skill.name).collect::<Vec<_>>());
+    let upgrade = game()
+        .upgrade(&wows_query::upgrades::UpgradeArgs { upgrade: "Main Batery Modification 2".to_owned(), ship: None })
+        .map(|output| output.upgrades.into_iter().map(|upgrade| upgrade.name).collect::<Vec<_>>());
+    insta::assert_yaml_snapshot!((far.to_string(), skill.expect("one typo"), upgrade.expect("one typo")));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn full_names_resolve_to_abbreviated_ships() {
+    let resolved: Vec<(&str, String)> = [
+        "Grosser Kurfurst",
+        "Gro\u{df}er Kurf\u{fc}rst",
+        "Friedrich der Grosse",
+        "Dmitri Donskoi",
+        "Dmitry Donskoy",
+        "Dmitri Pozharsky",
+        "Dmitry Pozharsky",
+        "Attilio Regolo",
+        "Francesco Ferruccio",
+        "Forrest Sherman",
+        "Prinz Eitel Friedrich",
+        "Friedrich der Grose",
+    ]
+    .into_iter()
+    .map(|query| (query, game().ship_summary(query).map(|ship| ship.name).unwrap_or_else(|error| error.to_string())))
+    .collect();
+    insta::assert_yaml_snapshot!(resolved);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn sekiryu_is_indexed() {
+    let found =
+        game().find_ships(&wows_query::ships::FindShipsArgs { name: Some("Seki".to_owned()), ..Default::default() });
+    let names: Vec<(&str, &str, u32)> =
+        found.ships.iter().map(|ship| (ship.name.as_str(), ship.index.as_str(), ship.tier.0)).collect();
+    insta::assert_yaml_snapshot!(names);
+}

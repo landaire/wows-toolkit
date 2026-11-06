@@ -16,8 +16,36 @@ use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::fuzzy;
+use crate::fuzzy::Candidate;
+use crate::fuzzy::Fuzzy;
+use crate::text::clean;
 
 const FIND_SHIPS_LIMIT: usize = 40;
+
+/// A full English name for a ship whose in-game name is abbreviated.
+struct Alias {
+    /// Search key of the full name.
+    key: &'static str,
+
+    /// In-game English name.
+    name: &'static str,
+}
+
+/// Every target is checked against the data by the
+/// `full_names_resolve_to_abbreviated_ships` test.
+const ALIASES: &[Alias] = &[
+    Alias { key: "grosser kurfurst", name: "G. Kurf\u{fc}rst" },
+    Alias { key: "friedrich der grosse", name: "F. der Grosse" },
+    Alias { key: "dmitri donskoi", name: "Dm. Donskoi" },
+    Alias { key: "dmitry donskoy", name: "Dm. Donskoi" },
+    Alias { key: "dmitri pozharsky", name: "D. Pozharsky" },
+    Alias { key: "dmitry pozharsky", name: "D. Pozharsky" },
+    Alias { key: "attilio regolo", name: "A. Regolo" },
+    Alias { key: "francesco ferruccio", name: "F. Ferruccio" },
+    Alias { key: "forrest sherman", name: "F. Sherman" },
+    Alias { key: "prinz eitel friedrich", name: "P. E. Friedrich" },
+];
 
 /// Groups of ships players can own. Event, clan-battle, test and retired
 /// variants share display names with these and are listed only on request.
@@ -102,7 +130,7 @@ impl Ship {
         }
 
         let class = ShipClass::from_species(*param.species()?.known()?)?;
-        let name = provider.localized_name_from_param(param)?;
+        let name = clean(&provider.localized_name_from_param(param)?);
 
         Some(Self { param: Rc::clone(param), search_key: search_key(&name), name, class, tier: Tier(vehicle.level()) })
     }
@@ -312,7 +340,7 @@ impl GameData {
     pub fn ship_overview(&self, args: &ShipArgs) -> Result<ShipOverview, QueryError> {
         let ship = self.resolve_ship(&args.ship)?;
         let Some(vehicle) = ship.param.vehicle() else {
-            return Err(QueryError::ShipNotFound { query: args.ship.clone() });
+            return Err(QueryError::ShipNotFound { query: args.ship.clone(), suggestions: Vec::new() });
         };
         let research = vehicle.research();
 
@@ -367,14 +395,47 @@ impl GameData {
             return Ok(ship);
         }
 
-        let partial: Vec<&Ship> = self.ships.iter().filter(|ship| ship.search_key.contains(key.as_str())).collect();
+        if let Some(alias) = ALIASES.iter().find(|alias| alias.key == key) {
+            let named: Vec<&Ship> = self.ships.iter().filter(|ship| ship.name == alias.name).collect();
+            if let Some(ship) = preferred(&named) {
+                return Ok(ship);
+            }
+        }
+
+        let prefix: Vec<&Ship> = self.ships.iter().filter(|ship| ship.search_key.starts_with(key.as_str())).collect();
+        let partial: Vec<&Ship> = if prefix.is_empty() {
+            self.ships.iter().filter(|ship| ship.search_key.contains(key.as_str())).collect()
+        } else {
+            prefix
+        };
         let distinct: BTreeMap<&str, &Ship> = partial.iter().map(|ship| (ship.name.as_str(), *ship)).collect();
-        match distinct.len() {
-            0 => Err(QueryError::ShipNotFound { query: query.to_owned() }),
-            1 => preferred(&partial).ok_or_else(|| QueryError::ShipNotFound { query: query.to_owned() }),
-            _ => Err(QueryError::AmbiguousShip {
+        if distinct.len() > 1 {
+            return Err(QueryError::AmbiguousShip {
                 query: query.to_owned(),
                 candidates: distinct.keys().take(15).map(|name| (*name).to_owned()).collect(),
+            });
+        }
+        if let Some(ship) = preferred(&partial) {
+            return Ok(ship);
+        }
+
+        // Aliases join as names of their own so a misspelled full name still
+        // resolves.
+        let candidates = self
+            .ships
+            .iter()
+            .map(|ship| Candidate { key: &ship.search_key, name: &ship.name, secondary: !ship.is_regular() })
+            .chain(ALIASES.iter().map(|alias| Candidate::primary(alias.key, alias.name)));
+
+        match fuzzy::closest(&key, candidates) {
+            Fuzzy::Unique(name) => {
+                let named: Vec<&Ship> = self.ships.iter().filter(|ship| ship.name == name).collect();
+                preferred(&named)
+                    .ok_or_else(|| QueryError::ShipNotFound { query: query.to_owned(), suggestions: Vec::new() })
+            }
+            Fuzzy::Suggestions(names) => Err(QueryError::ShipNotFound {
+                query: query.to_owned(),
+                suggestions: names.into_iter().map(str::to_owned).collect(),
             }),
         }
     }
@@ -384,7 +445,7 @@ impl GameData {
         self.provider()
             .game_param_by_name(param_name)
             .and_then(|param| self.provider().localized_name_from_param(&param))
-            .unwrap_or_else(|| param_name.to_owned())
+            .map_or_else(|| param_name.to_owned(), |name| clean(&name))
     }
 }
 
@@ -423,6 +484,13 @@ pub(crate) fn search_key(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alias_keys_are_search_keys() {
+        for alias in ALIASES {
+            assert_eq!(search_key(alias.key), alias.key);
+        }
+    }
 
     #[test]
     fn search_key_folds_diacritics_and_punctuation() {
