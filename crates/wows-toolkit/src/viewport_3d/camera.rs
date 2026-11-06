@@ -197,13 +197,22 @@ impl ArcballCamera {
         let view = self.view_matrix();
         let view_na = mat4_to_na(view);
 
-        // Extract right and up vectors from view matrix columns
-        let right = Vec3::new(view_na[(0, 0)], view_na[(1, 0)], view_na[(2, 0)]);
-        let up = Vec3::new(view_na[(0, 1)], view_na[(1, 1)], view_na[(2, 1)]);
+        // Camera right and up axes are the first two rows of the view rotation.
+        let right = Vec3::new(view_na[(0, 0)], view_na[(0, 1)], view_na[(0, 2)]);
+        let up = Vec3::new(view_na[(1, 0)], view_na[(1, 1)], view_na[(1, 2)]);
 
         let scale = self.distance * (self.fov * 0.5).tan() * 2.0 / viewport_size.y.max(1.0);
 
         self.target -= (right * delta.x + up * delta.y) * scale;
+    }
+
+    /// Pan from held keys. `dir` is in screen space (+x right, +y up) and
+    /// `dt` is the frame time in seconds.
+    pub fn pan_keys(&mut self, dir: egui::Vec2, dt: f32, viewport_size: egui::Vec2) {
+        /// Viewport heights per second.
+        const SPEED: f32 = 0.25;
+        // `pan` moves the target opposite to the delta, so negate to move the view toward `dir`.
+        self.pan(-dir * viewport_size.y.max(1.0) * SPEED * dt, viewport_size);
     }
 
     /// Move the camera target using WASD-style keys.
@@ -304,8 +313,9 @@ impl ArcballCamera {
                 self.wasd(fwd, rt);
             }
 
-            // Arrow keys: Up/Down = move vertically, Left/Right = rotate around target
-            let (vert, rot) = response.ctx.input(|i| {
+            // Arrow keys: Up/Down = move vertically, Left/Right = rotate around target.
+            // With Shift: pan in screen space.
+            let (shift, vert, rot, dt) = response.ctx.input(|i| {
                 let mut v = 0.0_f32;
                 let mut r = 0.0_f32;
                 if i.key_down(egui::Key::ArrowUp) {
@@ -320,13 +330,19 @@ impl ArcballCamera {
                 if i.key_down(egui::Key::ArrowRight) {
                     r -= 1.0;
                 }
-                (v, r)
+                (i.modifiers.shift, v, r, i.stable_dt)
             });
-            if vert != 0.0 {
-                self.move_vertical(vert);
-            }
-            if rot != 0.0 {
-                self.rotate_horizontal(rot);
+            if shift {
+                if vert != 0.0 || rot != 0.0 {
+                    self.pan_keys(egui::vec2(-rot, vert), dt, viewport_size);
+                }
+            } else {
+                if vert != 0.0 {
+                    self.move_vertical(vert);
+                }
+                if rot != 0.0 {
+                    self.rotate_horizontal(rot);
+                }
             }
         }
 
@@ -472,6 +488,20 @@ mod tests {
         let before = (c.target, c.distance, c.azimuth, c.elevation);
         c.set_eye_and_target(Vec3::new(1.0, 1.0, 1.0), Vec3::new(1.0, 1.0, 1.0));
         assert_eq!(before, (c.target, c.distance, c.azimuth, c.elevation));
+    }
+
+    #[test]
+    fn pan_keys_right_moves_target_along_view_right() {
+        let mut c = ArcballCamera::default();
+        c.set_eye_and_target(Vec3::new(5.0, 3.0, -2.0), Vec3::new(-1.0, 0.5, 4.0));
+        let forward = (c.target - c.eye_position()).normalize();
+        let right = forward.cross(&Vec3::y()).normalize();
+        let (target, azimuth) = (c.target, c.azimuth);
+        c.pan_keys(egui::vec2(1.0, 0.0), 0.1, egui::vec2(800.0, 600.0));
+        let moved = c.target - target;
+        assert!(moved.norm() > 1e-4);
+        assert!((moved.normalize() - right).norm() < 1e-4, "moved {moved:?} right {right:?}");
+        assert_eq!(c.azimuth, azimuth);
     }
 }
 
