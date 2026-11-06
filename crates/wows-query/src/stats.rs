@@ -73,7 +73,7 @@ pub struct ShipStatsOutput {
     pub stats: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StatChange {
     pub stat: String,
 
@@ -118,7 +118,7 @@ impl GameData {
         let changes = if modified {
             let baseline = self.card(ship, &self.stock_loadout())?;
             let attributions = render_attributions(&card.provenance, &rows, self.provider(), self.provider());
-            changes(&baseline.stats, &card.stats, &attributions, &loadout, self)
+            changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true)
         } else {
             Vec::new()
         };
@@ -168,18 +168,22 @@ fn stat_lines(stats: &ShipStats, game: &GameData) -> Vec<String> {
         .collect()
 }
 
-fn changes(
+/// Stats `keep` accepts that differ between the cards, with the loadout
+/// inputs that moved them.
+pub(crate) fn changes(
     baseline: &ShipStats,
     candidate: &ShipStats,
     attributions: &[AttributionLine],
     loadout: &ResolvedLoadout,
     game: &GameData,
+    keep: impl Fn(TtxStat) -> bool,
 ) -> Vec<StatChange> {
     let by_key: HashMap<(TtxStat, Option<&str>), &AttributionLine> =
         attributions.iter().map(|line| ((line.stat, line.qualifier.as_deref()), line)).collect();
 
     diff_stat_rows(&baseline.rows(), &candidate.rows(), game.provider())
         .into_iter()
+        .filter(|delta| keep(delta.stat))
         .map(|delta| {
             let because = by_key
                 .get(&(delta.stat, delta.qualifier.as_deref()))

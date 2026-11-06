@@ -1,0 +1,113 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demolition))"
+---
+- ship:
+    name: Colbert
+    index: PFSC510
+    tier: 10
+    class: cruiser
+    nation: France
+    group: ultimate
+  fire_node_probability: 0.5005
+- ammo: HE
+  projectiles:
+    - param: PZPA039_127MM_HE_MK41
+      caliber_mm: 127
+      damage: 1900
+      reload_s: 3
+      fire_chance_pct: 11
+      fire_chance_on_target_pct: 5.51
+  arcs:
+    bow:
+      bearing: 335
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 11.01
+        salvo_at_least_one_fire_pct: 43.2
+        salvo_expected_fires: 0.55
+    stern:
+      bearing: 155
+      barrels: 8
+      damage: 15200
+      fire:
+        fires_per_minute: 8.81
+        salvo_at_least_one_fire_pct: 36.4
+        salvo_expected_fires: 0.44
+    starboard:
+      bearing: 90
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 11.01
+        salvo_at_least_one_fire_pct: 43.2
+        salvo_expected_fires: 0.55
+    port:
+      bearing: 270
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 11.01
+        salvo_at_least_one_fire_pct: 43.2
+        salvo_expected_fires: 0.55
+  all_barrels:
+    barrels: 10
+    damage: 19000
+    fire:
+      fires_per_minute: 11.01
+      salvo_at_least_one_fire_pct: 43.2
+      salvo_expected_fires: 0.55
+- - stat: Chances of Causing a Fire on Target (HE)
+    from: 11%
+    to: 12%
+    because:
+      - Demolition Expert +1 (+1)
+- ammo: HE
+  projectiles:
+    - param: PZPA039_127MM_HE_MK41
+      caliber_mm: 127
+      damage: 1900
+      reload_s: 3
+      fire_chance_pct: 12
+      fire_chance_on_target_pct: 6.01
+  arcs:
+    bow:
+      bearing: 335
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 12.01
+        salvo_at_least_one_fire_pct: 46.2
+        salvo_expected_fires: 0.6
+    stern:
+      bearing: 155
+      barrels: 8
+      damage: 15200
+      fire:
+        fires_per_minute: 9.61
+        salvo_at_least_one_fire_pct: 39.1
+        salvo_expected_fires: 0.48
+    starboard:
+      bearing: 90
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 12.01
+        salvo_at_least_one_fire_pct: 46.2
+        salvo_expected_fires: 0.6
+    port:
+      bearing: 270
+      barrels: 10
+      damage: 19000
+      fire:
+        fires_per_minute: 12.01
+        salvo_at_least_one_fire_pct: 46.2
+        salvo_expected_fires: 0.6
+  all_barrels:
+    barrels: 10
+    damage: 19000
+    fire:
+      fires_per_minute: 12.01
+      salvo_at_least_one_fire_pct: 46.2
+      salvo_expected_fires: 0.6

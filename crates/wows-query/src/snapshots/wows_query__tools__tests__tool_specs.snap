@@ -151,6 +151,38 @@ expression: specs()
         description: "Include the full stat card. Defaults to true without skills or upgrades and false with them, when only the changes are listed."
     required:
       - ship
+- name: ship_firing_arcs
+  description: "Which guns and torpedo tubes of one ship bear on a target at each bearing: barrels bearing bow-on, stern-on (within 30 degrees) and on each broadside, where all barrels bear or never, damage of one salvo per ammo type, fires per minute and fire chance per salvo assuming every shell hits, and main battery dispersion at a range. Optional skills, upgrades and modules; guns or torpedoes that fit only another hull need that hull in modules too. Optional target_ship applies the target's fire resistance."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name, e.g. \"Des Moines\"."
+      modules:
+        type: array
+        items:
+          type: string
+        description: "Modules to mount instead of stock, e.g. [\"Hull B\"]. Omit for stock."
+      skills:
+        type: array
+        items:
+          type: string
+        description: "Captain skills by name or acronym, e.g. [\"Demolition Expert\"]. They change reload and fire chance."
+      upgrades:
+        type: array
+        items:
+          type: string
+        description: "Upgrades by name, e.g. [\"Main Battery Modification 3\"]. One per slot."
+      target_ship:
+        type: string
+        description: "Ship being fired at, e.g. \"Colbert\". Its hull's fire-node probability scales the fire chance. Omit to use the shell's fire chance alone."
+      range_km:
+        type: number
+        description: "Firing range in km for the dispersion ellipse, 0 or more; 0 gives the ellipse at the muzzle and ranges past the main battery's maximum use the maximum. Defaults to the maximum range."
+    required:
+      - ship
 - name: captain_skill
   description: "One captain skill by name or acronym (IFHE, SI, CE, AR, DE, BoS): description, point cost and effects per ship class."
   input_schema:

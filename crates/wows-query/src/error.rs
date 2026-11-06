@@ -97,6 +97,23 @@ pub enum QueryError {
     #[error("modules {first} and {second} are both {kind}; a ship mounts one module of each kind")]
     ModuleSlotConflict { first: String, second: String, kind: &'static str },
 
+    #[error(
+        "the game data has no hull model hardpoints for {ship}, so its mount facings are unknown; the dump lacks the armor extract for this ship, which wows-data-mgr dump-renderer-data writes unless given --no-armor"
+    )]
+    HullFacingsUnavailable { ship: String },
+
+    #[error("module {module} does not fit {ship}'s {hull}; add {} to modules", hulls.join(" or "))]
+    ModuleNeedsHull { ship: String, module: String, hull: String, hulls: Vec<String> },
+
+    #[error("{ship}'s {hull} does not take the stock {kind}; add {} to modules", modules.join(" or "))]
+    HullNeedsModule { ship: String, hull: String, kind: &'static str, modules: Vec<String> },
+
+    #[error("{ship}'s hull model has no hardpoint {hardpoint}, so that mount's facing is unknown")]
+    MountFacingMissing { ship: String, hardpoint: String },
+
+    #[error("{ship}'s hull has no fire nodes")]
+    FireNodesMissing { ship: String },
+
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 

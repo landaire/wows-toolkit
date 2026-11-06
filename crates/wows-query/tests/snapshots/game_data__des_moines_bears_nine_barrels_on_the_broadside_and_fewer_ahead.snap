@@ -1,0 +1,188 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: arcs
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+notes:
+  - "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie."
+  - "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. p is the shell's fire chance, times the fire-node probability of the target's stock hull when a target is given. Not applied: the target's Fire Prevention Expert (p x0.9) and Damage Control System Modification 1 (p x0.95), the fire limit (4 fires, 3 with Fire Prevention Expert), fire duration and the Damage Control Party consumable."
+  - "No target ship: p is the shell's fire chance alone. The target hull's fire-node probability (0.2 to 1.0 by ship) lowers it; give target_ship to apply it."
+  - "Dispersion is the main battery shell ellipse at the range. How many shells hit depends on the target's size, angle and the aim point; this tool does not estimate hits."
+batteries:
+  - weapon: main_battery
+    mounts: 3
+    barrels: 9
+    coverage:
+      bow:
+        barrels: 6
+        bearings:
+          - 331-29
+        fewest_barrels: 6
+      stern:
+        barrels: 3
+        bearings:
+          - 151-209
+        fewest_barrels: 3
+      starboard:
+        barrels: 9
+        bearings:
+          - 30-149
+        fewest_barrels: 3
+      port:
+        barrels: 9
+        bearings:
+          - 211-330
+        fewest_barrels: 3
+    all_barrels_bear:
+      - 30-149
+      - 211-330
+    ammo:
+      - ammo: AP
+        projectiles:
+          - param: PAPA012_Shell_203mm_AP_AP_Mk_21
+            caliber_mm: 203
+            damage: 5000
+            reload_s: 5.5
+        arcs:
+          bow:
+            bearing: 0
+            barrels: 6
+            damage: 30000
+          stern:
+            bearing: 180
+            barrels: 3
+            damage: 15000
+          starboard:
+            bearing: 90
+            barrels: 9
+            damage: 45000
+          port:
+            bearing: 270
+            barrels: 9
+            damage: 45000
+        all_barrels:
+          barrels: 9
+          damage: 45000
+      - ammo: HE
+        projectiles:
+          - param: PAPA002_Shell_203mm_HE_HC_Mk_25
+            caliber_mm: 203
+            damage: 2800
+            reload_s: 5.5
+            fire_chance_pct: 14
+        arcs:
+          bow:
+            bearing: 0
+            barrels: 6
+            damage: 16800
+            fire:
+              fires_per_minute: 9.16
+              salvo_at_least_one_fire_pct: 59.5
+              salvo_expected_fires: 0.84
+          stern:
+            bearing: 180
+            barrels: 3
+            damage: 8400
+            fire:
+              fires_per_minute: 4.58
+              salvo_at_least_one_fire_pct: 36.4
+              salvo_expected_fires: 0.42
+          starboard:
+            bearing: 90
+            barrels: 9
+            damage: 25200
+            fire:
+              fires_per_minute: 13.75
+              salvo_at_least_one_fire_pct: 74.3
+              salvo_expected_fires: 1.26
+          port:
+            bearing: 270
+            barrels: 9
+            damage: 25200
+            fire:
+              fires_per_minute: 13.75
+              salvo_at_least_one_fire_pct: 74.3
+              salvo_expected_fires: 1.26
+        all_barrels:
+          barrels: 9
+          damage: 25200
+          fire:
+            fires_per_minute: 13.75
+            salvo_at_least_one_fire_pct: 74.3
+            salvo_expected_fires: 1.26
+  - weapon: secondaries
+    mounts: 6
+    barrels: 12
+    coverage:
+      bow:
+        barrels: 6
+        bearings:
+          - 0
+        fewest_barrels: 4
+      stern:
+        barrels: 6
+        bearings:
+          - 180
+        fewest_barrels: 4
+      starboard:
+        barrels: 8
+        bearings:
+          - 36-146
+        fewest_barrels: 4
+      port:
+        barrels: 8
+        bearings:
+          - 214-324
+        fewest_barrels: 4
+    all_barrels_bear: never
+    ammo:
+      - ammo: HE
+        projectiles:
+          - param: PAPA018_Main_127mm_HE_C_Mk_32
+            caliber_mm: 127
+            damage: 1800
+            reload_s: 6
+            fire_chance_pct: 5
+        arcs:
+          bow:
+            bearing: 0
+            barrels: 6
+            damage: 10800
+            fire:
+              fires_per_minute: 3
+              salvo_at_least_one_fire_pct: 26.5
+              salvo_expected_fires: 0.3
+          stern:
+            bearing: 180
+            barrels: 6
+            damage: 10800
+            fire:
+              fires_per_minute: 3
+              salvo_at_least_one_fire_pct: 26.5
+              salvo_expected_fires: 0.3
+          starboard:
+            bearing: 90
+            barrels: 8
+            damage: 14400
+            fire:
+              fires_per_minute: 4
+              salvo_at_least_one_fire_pct: 33.7
+              salvo_expected_fires: 0.4
+          port:
+            bearing: 270
+            barrels: 8
+            damage: 14400
+            fire:
+              fires_per_minute: 4
+              salvo_at_least_one_fire_pct: 33.7
+              salvo_expected_fires: 0.4
+dispersion:
+  range_km: 15.83
+  horizontal_m: 142.2
+  vertical_m: 85.3

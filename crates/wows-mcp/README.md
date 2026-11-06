@@ -52,7 +52,7 @@ For a client that launches stdio servers from a JSON config:
 
 ## Tools
 
-`find_ships`, `ship_overview`, `ship_armor`, `ship_shells`, `penetration_search`, `ship_stats`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `gameparams_query`, `replay_summary`.
+`find_ships`, `ship_overview`, `ship_armor`, `ship_shells`, `penetration_search`, `ship_stats`, `ship_firing_arcs`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `gameparams_query`, `replay_summary`.
 
 Each tool returns compact JSON. The query logic lives in the `wows-query` crate.
 

@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::GameData;
 use crate::QueryError;
 use crate::consumables::ShipConsumablesArgs;
+use crate::firing_arcs::FiringArcsArgs;
 use crate::gameparams::GameParamsQueryArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::ships::FindShipsArgs;
@@ -108,6 +109,12 @@ const TOOLS: &[Tool] = &[
         description: "Port stat card of one ship with stock modules. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
         schema: input_schema::<ShipStatsArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_stats(args)),
+    },
+    Tool {
+        name: "ship_firing_arcs",
+        description: "Which guns and torpedo tubes of one ship bear on a target at each bearing: barrels bearing bow-on, stern-on (within 30 degrees) and on each broadside, where all barrels bear or never, damage of one salvo per ammo type, fires per minute and fire chance per salvo assuming every shell hits, and main battery dispersion at a range. Optional skills, upgrades and modules; guns or torpedoes that fit only another hull need that hull in modules too. Optional target_ship applies the target's fire resistance.",
+        schema: input_schema::<FiringArcsArgs>,
+        call: |game, arguments| run(arguments, |args| game.ship_firing_arcs(args)),
     },
     Tool {
         name: "captain_skill",

@@ -5,9 +5,15 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use serde_json::json;
+use wows_core::units::Km;
 use wows_core::units::Millimeters;
 use wows_query::GameData;
+use wows_query::QueryError;
 use wows_query::consumables::ShipConsumablesArgs;
+use wows_query::firing_arcs::BatteryArcs;
+use wows_query::firing_arcs::FiringArcsArgs;
+use wows_query::firing_arcs::ShipFiringArcs;
+use wows_query::firing_arcs::Weapon;
 use wows_query::penetration::PenetrationSearchArgs;
 use wows_query::shells::Ammo;
 use wows_query::shells::Battery;
@@ -245,4 +251,127 @@ fn sekiryu_is_indexed() {
     let names: Vec<(&str, &str, u32)> =
         found.ships.iter().map(|ship| (ship.name.as_str(), ship.index.as_str(), ship.tier.0)).collect();
     insta::assert_yaml_snapshot!(names);
+}
+
+fn firing_arcs(ship: &str, target: Option<&str>, skills: &[&str]) -> ShipFiringArcs {
+    game()
+        .ship_firing_arcs(&FiringArcsArgs {
+            ship: ship.to_owned(),
+            target_ship: target.map(str::to_owned),
+            skills: (!skills.is_empty()).then(|| skills.iter().map(|skill| (*skill).to_owned()).collect()),
+            ..Default::default()
+        })
+        .expect("firing arcs resolve")
+}
+
+fn battery(arcs: &ShipFiringArcs, weapon: Weapon) -> &BatteryArcs {
+    arcs.batteries.iter().find(|battery| battery.weapon == weapon).expect("battery present")
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_bears_nine_barrels_on_the_broadside_and_fewer_ahead() {
+    let arcs = firing_arcs("Des Moines", None, &[]);
+    let main = battery(&arcs, Weapon::MainBattery);
+
+    assert_eq!(main.barrels, 9);
+    assert_eq!(main.coverage.starboard.barrels, 9);
+    assert_eq!(main.coverage.port.barrels, 9);
+    assert!(main.coverage.bow.fewest_barrels < 9);
+    insta::assert_yaml_snapshot!(arcs);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn colbert_main_battery_coverage() {
+    let arcs = firing_arcs("Colbert", None, &[]);
+    let main = battery(&arcs, Weapon::MainBattery);
+
+    insta::assert_yaml_snapshot!((&main.coverage, &main.all_barrels_bear));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn submarine_torpedoes_are_left_out() {
+    let arcs = firing_arcs("Balao", None, &[]);
+
+    assert!(arcs.batteries.iter().all(|battery| battery.weapon != Weapon::Torpedoes));
+    assert!(arcs.notes.iter().any(|note| note.starts_with("Submarine torpedo tubes")));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn iowa_rear_turret_never_bears_within_30_degrees_of_the_bow() {
+    let arcs = firing_arcs("Iowa", None, &[]);
+    let main = battery(&arcs, Weapon::MainBattery);
+
+    assert_eq!(main.barrels, 9);
+    assert_eq!((main.coverage.bow.barrels, main.coverage.bow.fewest_barrels), (6, 6));
+    assert_eq!(main.coverage.starboard.barrels, 9);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn modules_differing_by_punctuation_are_selected_by_exact_name() {
+    for name in ["533 mm Mk IX", "533 mm Mk IX*"] {
+        let arcs = game()
+            .ship_firing_arcs(&FiringArcsArgs {
+                ship: "Fiji".to_owned(),
+                modules: Some(vec![name.to_owned()]),
+                ..Default::default()
+            })
+            .expect("exact module name resolves");
+        let chosen: Vec<&str> = arcs.modules.iter().map(|module| module.name.as_str()).collect();
+        assert_eq!(chosen, [name]);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn jinan_fires_per_minute_against_colbert() {
+    let stock = firing_arcs("Jinan", Some("Colbert"), &[]);
+    let demolition = firing_arcs("Jinan", Some("Colbert"), &["Demolition Expert"]);
+
+    let he = |arcs: &ShipFiringArcs| {
+        let main = battery(arcs, Weapon::MainBattery);
+        main.ammo.iter().find(|ammo| ammo.ammo == "HE").expect("HE").clone()
+    };
+    insta::assert_yaml_snapshot!((&stock.target, he(&stock), &demolition.loadout_changes, he(&demolition)));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn firing_arcs_name_the_hull_an_upgraded_module_needs() {
+    let arcs_with = |ship: &str, modules: &[&str]| {
+        game().ship_firing_arcs(&FiringArcsArgs {
+            ship: ship.to_owned(),
+            modules: Some(modules.iter().map(|module| (*module).to_owned()).collect()),
+            ..Default::default()
+        })
+    };
+    let guns = "203 mm/55 Mk.14 on a triple mount/twin mount (upgraded)";
+
+    let alone = arcs_with("Pensacola (old)", &[guns]).expect_err("the upgraded guns need Hull B");
+    assert!(matches!(&alone, QueryError::ModuleNeedsHull { hulls, .. } if hulls == &["Hull B"]), "{alone:?}");
+    let torpedoes = arcs_with("Ognevoi (OLD)", &["53-39 mod. 1"]).expect_err("the torpedoes need Hull B");
+    insta::assert_yaml_snapshot!([alone.to_string(), torpedoes.to_string()]);
+
+    let with_hull = arcs_with("Pensacola (old)", &["Hull B", guns]).expect("Hull B takes the upgraded guns");
+    assert!(!battery(&with_hull, Weapon::MainBattery).ammo.is_empty());
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn firing_arcs_accept_point_blank_range() {
+    let arcs_at = |range: Km| {
+        game().ship_firing_arcs(&FiringArcsArgs {
+            ship: "Des Moines".to_owned(),
+            range_km: Some(range),
+            ..Default::default()
+        })
+    };
+
+    let point_blank = arcs_at(Km::new(0.0)).expect("0 km is point blank");
+    assert_eq!(point_blank.dispersion.expect("Des Moines has a main battery").range_km, Km::new(0.0));
+    assert!(matches!(arcs_at(Km::new(-1.0)), Err(QueryError::InvalidArguments { .. })));
 }
