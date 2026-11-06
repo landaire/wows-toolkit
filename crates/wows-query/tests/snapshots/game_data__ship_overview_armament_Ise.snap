@@ -1,0 +1,39 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Ise
+  - kind: guns
+    name: 356 mm/45 41st Year Type in a twin-gun turret
+main_battery:
+  - layout: 4 x 2 356 mm
+    mounts: 4
+    barrels_per_mount: 2
+    caliber_mm: 356
+secondary_battery:
+  - layout: 8 x 2 127 mm
+    mounts: 8
+    barrels_per_mount: 2
+    caliber_mm: 127
+torpedoes: none
+depth_charge_launchers: none
+aircraft:
+  squadrons:
+    - role: torpedo_bombers
+      aircraft: Aichi M6A2 Seiran
+      squadron_size: 4
+      ordnance: torpedo
+  air_strike:
+    aircraft: Kawanishi H8K
+    ordnance: depth_charge
+    uses: 1
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Repair Party

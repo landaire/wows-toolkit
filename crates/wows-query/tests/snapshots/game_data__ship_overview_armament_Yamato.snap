@@ -1,0 +1,43 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Yamato
+  - kind: guns
+    name: 460 mm/45 Type 94 in a triple-gun turret
+main_battery:
+  - layout: 3 x 3 460 mm
+    mounts: 3
+    barrels_per_mount: 3
+    caliber_mm: 460
+secondary_battery:
+  - layout: 2 x 3 155 mm
+    mounts: 2
+    barrels_per_mount: 3
+    caliber_mm: 155
+  - layout: 12 x 2 127 mm
+    mounts: 12
+    barrels_per_mount: 2
+    caliber_mm: 127
+torpedoes: none
+depth_charge_launchers: none
+aircraft:
+  squadrons: none
+  air_strike:
+    aircraft: Kawanishi H6K
+    ordnance: depth_charge
+    uses: 2
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Repair Party
+  - slot: 3
+    options:
+      - Spotting Aircraft
+      - Fighters

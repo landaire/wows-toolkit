@@ -24,6 +24,7 @@ use crate::gameparams::GameParamsQueryArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::ships::FindShipsArgs;
 use crate::ships::ShipArgs;
+use crate::ships::ShipOverviewArgs;
 use crate::skills::CaptainSkillArgs;
 use crate::skills::SkillTreeArgs;
 use crate::stat_search::StatNamesArgs;
@@ -112,8 +113,8 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_overview",
-        description: "Credit price and research XP of tech tree ships, the GameParams doubloon value (with a note when it is not how the ship is obtained, e.g. Armory ships sold for coal or steel), research tree predecessors and successors, group and upgrade slot count of one ship.",
-        schema: input_schema::<ShipArgs>,
+        description: "Credit price and research XP of tech tree ships, the GameParams doubloon value (with a note when it is not how the ship is obtained, e.g. Armory ships sold for coal or steel), research tree predecessors and successors, group and upgrade slot count of one ship, and its armament: main and secondary battery mounts with barrels and caliber (e.g. \"2 x 2 152 mm\"), torpedo launchers and torpedoes, depth charge launchers, aircraft squadrons and air strike (an air strike with depth_charge ordnance is anti-submarine armament), and consumables by slot. Every armament category the ship lacks is listed as \"none\". Armament is for stock modules; pass names from other_modules in modules for another hull, guns or torpedoes. other_squadrons lists squadrons of researched plane modules.",
+        schema: input_schema::<ShipOverviewArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_overview(args)),
     },
     Tool {

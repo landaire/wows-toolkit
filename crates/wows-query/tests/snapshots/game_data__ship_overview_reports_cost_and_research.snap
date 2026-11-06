@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 143
+assertion_line: 180
 expression: overviews
 ---
 - ship:
@@ -18,6 +18,46 @@ expression: overviews
   unlocks:
     - Annapolis
   upgrade_slots: 6
+  armament:
+    modules:
+      - kind: hull
+        name: Des Moines
+      - kind: guns
+        name: 203 mm/55 RF Mk.16 in a turret
+    main_battery:
+      - layout: 3 x 3 203 mm
+        mounts: 3
+        barrels_per_mount: 3
+        caliber_mm: 203
+    secondary_battery:
+      - layout: 6 x 2 127 mm
+        mounts: 6
+        barrels_per_mount: 2
+        caliber_mm: 127
+    torpedoes: none
+    depth_charge_launchers: none
+    aircraft:
+      squadrons: none
+      air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        ordnance: depth_charge
+        uses: 2
+    consumables:
+      - slot: 1
+        options:
+          - Damage Control Party
+      - slot: 2
+        options:
+          - Auxiliary and Torpedo Weaponry Coordination
+          - Hydroacoustic Search
+      - slot: 3
+        options:
+          - Surveillance Radar
+          - Fighters
+          - Spotting Aircraft
+      - slot: 4
+        options:
+          - Repair Party
 - ship:
     name: Annapolis
     index: PASC111
@@ -31,6 +71,44 @@ expression: overviews
     - Des Moines
   requires_ship: Des Moines
   upgrade_slots: 6
+  armament:
+    modules:
+      - kind: hull
+        name: Annapolis
+      - kind: guns
+        name: 203 mm/55 RF Mk.16 in a turret
+    main_battery:
+      - layout: 4 x 3 203 mm
+        mounts: 4
+        barrels_per_mount: 3
+        caliber_mm: 203
+    secondary_battery:
+      - layout: 6 x 2 127 mm
+        mounts: 6
+        barrels_per_mount: 2
+        caliber_mm: 127
+    torpedoes: none
+    depth_charge_launchers: none
+    aircraft:
+      squadrons: none
+      air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        ordnance: depth_charge
+        uses: 2
+    consumables:
+      - slot: 1
+        options:
+          - Damage Control Party
+      - slot: 2
+        options:
+          - Auxiliary and Torpedo Weaponry Coordination
+          - Hydroacoustic Search
+      - slot: 3
+        options:
+          - Surveillance Radar
+      - slot: 4
+        options:
+          - Repair Party
 - ship:
     name: Salem
     index: PASC710
@@ -42,3 +120,41 @@ expression: overviews
   game_params_doubloon_value: 26000
   acquisition_note: "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price."
   upgrade_slots: 6
+  armament:
+    modules:
+      - kind: hull
+        name: Salem
+      - kind: guns
+        name: 203 mm/55 RF Mk.16 in a turret
+    main_battery:
+      - layout: 3 x 3 203 mm
+        mounts: 3
+        barrels_per_mount: 3
+        caliber_mm: 203
+    secondary_battery:
+      - layout: 6 x 2 127 mm
+        mounts: 6
+        barrels_per_mount: 2
+        caliber_mm: 127
+    torpedoes: none
+    depth_charge_launchers: none
+    aircraft:
+      squadrons: none
+      air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        ordnance: depth_charge
+        uses: 2
+    consumables:
+      - slot: 1
+        options:
+          - Damage Control Party
+      - slot: 2
+        options:
+          - Auxiliary and Torpedo Weaponry Coordination
+      - slot: 3
+        options:
+          - Surveillance Radar
+          - Hydroacoustic Search
+      - slot: 4
+        options:
+          - Repair Party

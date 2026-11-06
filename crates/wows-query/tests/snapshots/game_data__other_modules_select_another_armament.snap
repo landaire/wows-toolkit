@@ -1,0 +1,93 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 208
+expression: selected
+---
+- ship: Gearing
+  module: Mark 17
+  armament:
+    modules:
+      - kind: hull
+        name: Gearing
+      - kind: guns
+        name: 127 mm/38 Mk.12 on a Mk.38 mount
+      - kind: torpedoes
+        name: Mark 17
+    main_battery:
+      - layout: 3 x 2 127 mm
+        mounts: 3
+        barrels_per_mount: 2
+        caliber_mm: 127
+    secondary_battery: none
+    torpedoes:
+      launchers:
+        - layout: 2 x 5
+          launchers: 2
+          tubes_per_launcher: 5
+      torpedoes:
+        - name: Mk17 mod. 0
+          param: PAPT008_Mk_17
+          caliber_mm: 533
+    depth_charge_launchers: 8
+    aircraft: none
+    consumables:
+      - slot: 1
+        options:
+          - Damage Control Party
+      - slot: 2
+        options:
+          - Smoke Generator
+      - slot: 3
+        options:
+          - Engine Boost
+          - Auxiliary and Torpedo Weaponry Coordination
+    other_modules:
+      - kind: torpedoes
+        name: Mk16 mod. 1
+- ship: Cleveland
+  module: Hull B
+  armament:
+    modules:
+      - kind: hull
+        name: Hull B
+      - kind: guns
+        name: 152 mm/47 Mk.16 in a turret
+    main_battery:
+      - layout: 4 x 3 152 mm
+        mounts: 4
+        barrels_per_mount: 3
+        caliber_mm: 152
+    secondary_battery:
+      - layout: 6 x 2 127 mm
+        mounts: 6
+        barrels_per_mount: 2
+        caliber_mm: 127
+    torpedoes: none
+    depth_charge_launchers: none
+    aircraft:
+      squadrons: none
+      air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        ordnance: depth_charge
+        uses: 2
+    consumables:
+      - slot: 1
+        options:
+          - Damage Control Party
+      - slot: 2
+        options:
+          - Auxiliary and Torpedo Weaponry Coordination
+      - slot: 3
+        options:
+          - Surveillance Radar
+          - Spotting Aircraft
+          - Fighters
+      - slot: 4
+        options:
+          - Hydroacoustic Search
+      - slot: 5
+        options:
+          - Repair Party
+    other_modules:
+      - kind: hull
+        name: Hull A

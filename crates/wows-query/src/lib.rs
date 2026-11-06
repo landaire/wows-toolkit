@@ -7,6 +7,7 @@
 //! [`replay_worker::init`] there too.
 
 pub mod aircraft;
+pub mod armament;
 pub mod armor;
 mod armor_models;
 pub mod armor_trace;

@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 263
+assertion_line: 473
 expression: overview
 ---
 ship:
@@ -15,3 +15,37 @@ ship:
 cost_credits: 21000000
 research_xp: 260000
 upgrade_slots: 6
+armament:
+  modules:
+    - kind: hull
+      name: Neptunus
+    - kind: guns
+      name: 420 mm/52 in a turret
+  main_battery:
+    - layout: 3 x 3 420 mm
+      mounts: 3
+      barrels_per_mount: 3
+      caliber_mm: 420
+  secondary_battery:
+    - layout: 8 x 2 120 mm
+      mounts: 8
+      barrels_per_mount: 2
+      caliber_mm: 120
+  torpedoes: none
+  depth_charge_launchers: none
+  aircraft:
+    squadrons: none
+    air_strike:
+      aircraft: Fokker T.V.
+      ordnance: bomb
+      uses: 2
+  consumables:
+    - slot: 1
+      options:
+        - Damage Control Party
+    - slot: 2
+      options:
+        - Repair Party
+    - slot: 3
+      options:
+        - Auxiliary and Torpedo Weaponry Coordination

@@ -1,0 +1,42 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Balao
+  - kind: torpedoes
+    name: Mk29 mod. 0 and Mk28 MIE
+main_battery: none
+secondary_battery: none
+torpedoes:
+  launchers:
+    - layout: 10 x 1
+      launchers: 10
+      tubes_per_launcher: 1
+  torpedoes:
+    - name: Mk29 mod. 0
+      param: PAPT056_MK29_MOD0_SUB
+      caliber_mm: 533
+    - name: Mk28 MIE
+      param: PAPT061_Mk28_Sub_Magnetic_Balao
+      caliber_mm: 533
+depth_charge_launchers: none
+aircraft: none
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Hydrophone
+  - slot: 3
+    options:
+      - Submarine Surveillance
+  - slot: 4
+    options:
+      - Enhanced Rudder Gears
+other_modules:
+  - kind: torpedoes
+    name: Mk29 and Mk29 MIE

@@ -14,6 +14,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
+use crate::armament::Armament;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
@@ -325,6 +326,17 @@ pub struct ShipArgs {
     pub ship: String,
 }
 
+/// Arguments for `ship_overview`.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShipOverviewArgs {
+    /// Ship name as the user wrote it, e.g. "Des Moines", or a GameParams index such as "PASC020".
+    pub ship: String,
+
+    /// Modules whose armament to report instead of stock, e.g. ["Hull B"]. Omit for stock.
+    pub modules: Option<Vec<String>>,
+}
+
 /// A ship resolved from a player-written name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedShip {
@@ -335,7 +347,7 @@ pub struct ResolvedShip {
     pub ship: ShipSummary,
 }
 
-/// Price, research position and availability of one ship.
+/// Price, research position, availability and armament of one ship.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShipOverview {
     /// Names read as something they do not spell exactly.
@@ -379,6 +391,9 @@ pub struct ShipOverview {
     /// Other variants with the same name (event, clan, retired copies).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<ShipSummary>,
+
+    /// Armament of the stock modules, or of the modules given.
+    pub armament: Armament,
 }
 
 /// An inclusive tier range.
@@ -502,13 +517,19 @@ impl GameData {
         Ok(ResolvedShip { interpretations, ship })
     }
 
-    /// Price, research links and availability of one ship.
-    pub fn ship_overview(&self, args: &ShipArgs) -> Result<ShipOverview, QueryError> {
+    /// Price, research links, availability and armament of one ship.
+    pub fn ship_overview(&self, args: &ShipOverviewArgs) -> Result<ShipOverview, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let Some(vehicle) = ship.param.vehicle() else {
             return Err(QueryError::ShipNotFound { query: args.ship.clone(), suggestions: Vec::new() });
         };
+        let modules = self.resolve_modules(ship, args.modules.as_deref().unwrap_or_default())?;
+        // Stock modules always fit; checking them could only lose the price data.
+        if !modules.chosen.is_empty() {
+            self.check_hull_fit(ship, &modules)?;
+        }
+        let armament = self.armament(ship, &modules.selection);
         let research = vehicle.research();
 
         // Retired copies keep their research links; only owned-ship groups
@@ -550,6 +571,7 @@ impl GameData {
                 &ship.param,
             ),
             variants,
+            armament,
         })
     }
 

@@ -196,7 +196,7 @@ impl GameData {
                 {
                     continue;
                 }
-                let name = translate_consumable(ability, self.provider()).map(|name| clean(&name));
+                let name = self.consumable_name(ability, category);
                 let mut stats = consumable_stats(name, category, bundle);
                 if let Some(planner) = &planner {
                     stats.builds = Some(consumable_builds(planner, &stats.name, category)?);
@@ -220,6 +220,12 @@ impl GameData {
             upgrades: loadout.applied_upgrades,
             slots,
         })
+    }
+
+    /// English name of a consumable, or its GameParams type when it has none.
+    pub(crate) fn consumable_name(&self, ability: &str, category: &AbilityCategory) -> String {
+        translate_consumable(ability, self.provider())
+            .map_or_else(|| category.consumable_type_raw().to_owned(), |name| clean(&name))
     }
 
     /// The consumable types a player-written consumable name refers to.
@@ -324,12 +330,12 @@ fn charges(count: AmmoCount) -> Charges {
     }
 }
 
-fn consumable_stats(name: Option<String>, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {
+fn consumable_stats(name: String, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {
     let (stats, _) = effective_consumable(category, bundle);
     let kind = category.consumable_type_raw().to_owned();
 
     ConsumableStats {
-        name: name.unwrap_or_else(|| kind.clone()),
+        name,
         kind,
         charges: charges(stats.charges),
         reload_s: Seconds::new(round(stats.reload_time.value())),

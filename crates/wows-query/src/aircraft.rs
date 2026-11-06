@@ -71,6 +71,16 @@ pub enum SquadronRole {
 }
 
 impl SquadronRole {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RocketPlanes => "rocket planes",
+            Self::DiveBombers => "dive bombers",
+            Self::TorpedoBombers => "torpedo bombers",
+            Self::SkipBombers => "skip bombers",
+            Self::AirStrike => "air strike",
+        }
+    }
+
     fn from_slot(slot: PlaneSlot) -> Self {
         match slot {
             PlaneSlot::Fighter => Self::RocketPlanes,
@@ -304,24 +314,7 @@ impl GameData {
             return Vec::new();
         };
 
-        let mut carried: Vec<(&String, &wowsunpack::game_params::ttx::components::SquadronUpgrade)> =
-            components.squadrons.iter().collect();
-        carried.sort_by(|(left_name, left), (right_name, right)| {
-            SquadronRole::from_slot(left.slot)
-                .cmp(&SquadronRole::from_slot(right.slot))
-                .then_with(|| right.stock.cmp(&left.stock))
-                .then_with(|| left_name.cmp(right_name))
-        });
-
-        let mut squadrons = Vec::new();
-        for (_, upgrade) in carried {
-            for plane in &upgrade.planes {
-                let Some(squadron) = self.squadron(plane, SquadronRole::from_slot(upgrade.slot)) else {
-                    continue;
-                };
-                squadrons.push(Squadron { module_upgrade: !upgrade.stock, ..squadron });
-            }
-        }
+        let mut squadrons = self.carrier_squadrons(ship);
 
         // Hulls usually share one air strike; list each distinct one once,
         // the stock hull's first.
@@ -356,7 +349,35 @@ impl GameData {
         squadrons
     }
 
-    fn squadron(&self, plane_name: &str, role: SquadronRole) -> Option<Squadron> {
+    /// Carrier and hybrid squadrons of every plane module, stock modules first.
+    pub(crate) fn carrier_squadrons(&self, ship: &Ship) -> Vec<Squadron> {
+        let Some(components) = ship.param.vehicle().and_then(|vehicle| vehicle.ttx_components()) else {
+            return Vec::new();
+        };
+
+        let mut carried: Vec<(&String, &wowsunpack::game_params::ttx::components::SquadronUpgrade)> =
+            components.squadrons.iter().collect();
+        carried.sort_by(|(left_name, left), (right_name, right)| {
+            SquadronRole::from_slot(left.slot)
+                .cmp(&SquadronRole::from_slot(right.slot))
+                .then_with(|| right.stock.cmp(&left.stock))
+                .then_with(|| left_name.cmp(right_name))
+        });
+
+        let mut squadrons = Vec::new();
+        for (_, upgrade) in carried {
+            for plane in &upgrade.planes {
+                let Some(squadron) = self.squadron(plane, SquadronRole::from_slot(upgrade.slot)) else {
+                    continue;
+                };
+                squadrons.push(Squadron { module_upgrade: !upgrade.stock, ..squadron });
+            }
+        }
+
+        squadrons
+    }
+
+    pub(crate) fn squadron(&self, plane_name: &str, role: SquadronRole) -> Option<Squadron> {
         let param = self.provider().game_param_by_name(plane_name)?;
         let aircraft = param.aircraft()?;
         let ordnance = aircraft

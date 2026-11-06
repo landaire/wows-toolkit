@@ -29,6 +29,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::HullUpgradeConfig;
 use wowsunpack::game_params::types::MountPoint;
 
+use crate::armament::selected_mounts;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AppliedSkill;
@@ -492,7 +493,7 @@ impl GameData {
     /// Rejects guns or torpedoes the selected hull cannot mount, which would
     /// leave no mounts for the card's projectiles. As in stat_search, data
     /// without component links places no limit.
-    fn check_hull_fit(&self, ship: &Ship, modules: &ModuleSelection) -> Result<(), QueryError> {
+    pub(crate) fn check_hull_fit(&self, ship: &Ship, modules: &ModuleSelection) -> Result<(), QueryError> {
         let selection = &modules.selection;
         let Some(vehicle) = ship.param.vehicle() else {
             return Ok(());
@@ -767,40 +768,13 @@ impl GameData {
 /// The aiming mounts of one weapon for the selected hull and modules, with
 /// their barrel counts.
 fn weapon_mounts<'a>(ship: &'a Ship, selection: &ShipUpgradeSelection, weapon: Weapon) -> Vec<(&'a MountPoint, u32)> {
-    let Some(vehicle) = ship.param.vehicle() else {
-        return Vec::new();
-    };
-    let Some(hull) = selection.hull.as_deref().and_then(|name| vehicle.hull_upgrade(name)) else {
-        return Vec::new();
-    };
-
     let component_type = match weapon {
         Weapon::MainBattery => ComponentType::Artillery,
         Weapon::Secondaries => ComponentType::Atba,
         Weapon::Torpedoes => ComponentType::Torpedoes,
     };
 
-    // Guns and torpedoes are modules of their own; the hull lists the
-    // components they may mount.
-    let upgrade = match weapon {
-        Weapon::MainBattery => selection.artillery.as_deref(),
-        Weapon::Torpedoes => selection.torpedoes.as_deref(),
-        Weapon::Secondaries => None,
-    };
-    let component = upgrade
-        .and_then(|name| vehicle.ttx_components()?.component_on_hull(name, hull, component_type))
-        .or_else(|| hull.component_name(component_type));
-    let Some(component) = component else {
-        return Vec::new();
-    };
-
-    let mounts = if hull.component_name(component_type) == Some(component) {
-        hull.mounts(component_type).unwrap_or_default()
-    } else {
-        hull.alternative_mounts.get(component).map(|mounts| mounts.mounts()).unwrap_or_default()
-    };
-
-    let mut mounts: Vec<(&MountPoint, u32)> = mounts
+    let mut mounts: Vec<(&MountPoint, u32)> = selected_mounts(ship, selection, component_type)
         .iter()
         .filter(|mount| mount.traverse().is_some())
         .filter_map(|mount| Some((mount, mount.num_barrels()?)))
@@ -938,7 +912,7 @@ fn ranges(bearings: &[Bearing]) -> Vec<BearingRange> {
     out
 }
 
-fn round_to(value: f32, scale: f32) -> f32 {
+pub(crate) fn round_to(value: f32, scale: f32) -> f32 {
     (value * scale).round() / scale
 }
 

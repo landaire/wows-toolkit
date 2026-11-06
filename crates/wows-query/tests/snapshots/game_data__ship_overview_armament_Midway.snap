@@ -1,0 +1,54 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Midway
+main_battery: none
+secondary_battery:
+  - layout: 18 x 1 127 mm
+    mounts: 18
+    barrels_per_mount: 1
+    caliber_mm: 127
+torpedoes: none
+depth_charge_launchers: none
+aircraft:
+  squadrons:
+    - role: rocket_planes
+      aircraft: F4U Corsair
+      squadron_size: 9
+      ordnance: rocket
+    - role: dive_bombers
+      aircraft: AD-1 Skyraider
+      squadron_size: 9
+      ordnance: bomb
+    - role: torpedo_bombers
+      aircraft: AD-1 Skyraider
+      squadron_size: 8
+      ordnance: torpedo
+  air_strike:
+    aircraft: Consolidated PB4Y-2 Privateer
+    ordnance: depth_charge
+    uses: 1
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Interceptors
+other_squadrons:
+  - role: rocket_planes
+    aircraft: F8F Bearcat
+    squadron_size: 9
+    ordnance: rocket
+  - role: dive_bombers
+    aircraft: BTD Destroyer
+    squadron_size: 12
+    ordnance: bomb
+  - role: torpedo_bombers
+    aircraft: BTD Destroyer
+    squadron_size: 9
+    ordnance: torpedo

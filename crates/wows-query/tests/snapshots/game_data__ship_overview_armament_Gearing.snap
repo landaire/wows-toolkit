@@ -1,0 +1,43 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Gearing
+  - kind: guns
+    name: 127 mm/38 Mk.12 on a Mk.38 mount
+  - kind: torpedoes
+    name: Mk16 mod. 1
+main_battery:
+  - layout: 3 x 2 127 mm
+    mounts: 3
+    barrels_per_mount: 2
+    caliber_mm: 127
+secondary_battery: none
+torpedoes:
+  launchers:
+    - layout: 2 x 5
+      launchers: 2
+      tubes_per_launcher: 5
+  torpedoes:
+    - name: Mk16 mod. 1
+      param: PAPT027_Mk_16_mod_1
+      caliber_mm: 533
+depth_charge_launchers: 8
+aircraft: none
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Smoke Generator
+  - slot: 3
+    options:
+      - Engine Boost
+      - Auxiliary and Torpedo Weaponry Coordination
+other_modules:
+  - kind: torpedoes
+    name: Mark 17

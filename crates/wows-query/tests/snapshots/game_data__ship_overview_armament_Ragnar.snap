@@ -1,0 +1,32 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 188
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Ragnar
+  - kind: guns
+    name: 152 mm/53 Model 1942 in a turret
+main_battery:
+  - layout: 2 x 2 152 mm
+    mounts: 2
+    barrels_per_mount: 2
+    caliber_mm: 152
+secondary_battery: none
+torpedoes: none
+depth_charge_launchers: 1
+aircraft: none
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Repair Party
+  - slot: 3
+    options:
+      - Surveillance Radar
+  - slot: 4
+    options:
+      - Engine Boost

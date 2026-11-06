@@ -22,6 +22,7 @@ use wows_query::shells::Ammo;
 use wows_query::shells::Battery;
 use wows_query::ships::ShipArgs;
 use wows_query::ships::ShipClass;
+use wows_query::ships::ShipOverviewArgs;
 use wows_query::skills::CaptainSkillArgs;
 use wows_query::stats::ShipStatsArgs;
 
@@ -39,6 +40,10 @@ fn game() -> &'static GameData {
 
 fn ship(name: &str) -> ShipArgs {
     ShipArgs { ship: name.to_owned() }
+}
+
+fn overview(name: &str) -> ShipOverviewArgs {
+    ShipOverviewArgs { ship: name.to_owned(), modules: None }
 }
 
 #[test]
@@ -169,10 +174,38 @@ fn stat_card_explains_skills_and_upgrades() {
 fn ship_overview_reports_cost_and_research() {
     let overviews: Vec<_> = ["Des Moines", "Annapolis", "Salem"]
         .into_iter()
-        .map(|name| game().ship_overview(&ship(name)).expect("ship exists"))
+        .map(|name| game().ship_overview(&overview(name)).expect("ship exists"))
         .collect();
 
     insta::assert_yaml_snapshot!(overviews);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_overview_lists_armament_and_what_is_absent() {
+    for name in ["Ragnar", "Gearing", "Yamato", "Midway", "Balao", "Ise"] {
+        let overview = game().ship_overview(&overview(name)).expect("ship exists");
+        insta::assert_yaml_snapshot!(format!("ship_overview_armament_{name}"), overview.armament);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn other_modules_select_another_armament() {
+    let selected: Vec<_> = ["Gearing", "Cleveland"]
+        .into_iter()
+        .map(|name| {
+            let stock = game().ship_overview(&overview(name)).expect("ship exists");
+            let module = stock.armament.other_modules.first().expect("the ship has another module").name.clone();
+            let args = ShipOverviewArgs { ship: name.to_owned(), modules: Some(vec![module.clone()]) };
+            match game().ship_overview(&args) {
+                Ok(chosen) => json!({ "ship": name, "module": module, "armament": chosen.armament }),
+                Err(error) => json!({ "ship": name, "module": module, "error": error.to_string() }),
+            }
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(selected);
 }
 
 #[test]
@@ -410,7 +443,7 @@ fn grosser_kurfurst_resolves_from_abbreviations() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn bracketed_variant_resolves_by_its_exact_name() {
     let copy = game().ship_summary("[Conqueror]").expect("the clan variant is in the client data");
-    let released = game().ship_overview(&ship("Conqueror")).expect("Conqueror exists");
+    let released = game().ship_overview(&overview("Conqueror")).expect("Conqueror exists");
     let variants: Vec<&str> = released.variants.iter().map(|variant| variant.name.as_str()).collect();
     insta::assert_yaml_snapshot!(json!({ "copy": copy, "variants_of_conqueror": variants }));
 }
@@ -436,7 +469,7 @@ fn ambiguous_names_list_candidates() {
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn test_ships_resolve_with_status() {
-    let overview = game().ship_overview(&ship("Neptunus")).expect("Neptunus is in the client data");
+    let overview = game().ship_overview(&overview("Neptunus")).expect("Neptunus is in the client data");
     insta::assert_yaml_snapshot!(overview);
 }
 
