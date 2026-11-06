@@ -19,6 +19,7 @@ pub enum Unit {
     /// 0 to 100.
     Percent,
     DegreesPerSecond,
+    Degrees,
     Count,
 
     /// A dimensionless real, such as the submarine dive capacity pool.
@@ -42,6 +43,7 @@ impl Unit {
             Self::Millimeters => " mm",
             Self::Percent => "%",
             Self::DegreesPerSecond => " deg/s",
+            Self::Degrees => " deg",
             Self::Count | Self::Ratio | Self::Flag => "",
         }
     }
@@ -59,6 +61,7 @@ impl Unit {
             Self::Millimeters => "mm",
             Self::Percent => "percent 0-100",
             Self::DegreesPerSecond => "deg/s",
+            Self::Degrees => "deg",
             Self::Count => "count",
             Self::Ratio => "ratio",
             Self::Flag => "yes/no",

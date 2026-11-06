@@ -1,0 +1,192 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+conditions:
+  - artillery.ap.ricochet_start > 45 deg
+rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health."
+considered:
+  total: 800
+  by_class:
+    destroyer: 210
+    cruiser: 306
+    battleship: 212
+    aircraft_carrier: 45
+    submarine: 27
+qualifying:
+  total: 97
+  by_class:
+    destroyer: 26
+    cruiser: 65
+    battleship: 6
+  stock: 97
+  with_requirements: 0
+share_pct: 12.1
+share_pct_by_class:
+  destroyer: 12.4
+  cruiser: 21.2
+  battleship: 2.8
+  aircraft_carrier: 0
+  submarine: 0
+ships:
+  - ship: "T11 Annapolis (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T11 Edgar (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T11 Novosibirsk (cruiser, Russia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T10 20 de Julio (destroyer, Pan_America)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Daring (destroyer, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Defence (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Des Moines (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Druid (destroyer, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Elbing (destroyer, Germany)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Gibraltar (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Hull (destroyer, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Incheon (cruiser, Pan_Asia) [replicas: Incheon B]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Komissar (cruiser, Russia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T10 La Pampa (destroyer, Pan_America)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Minotaur (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Monmouth (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Petropavlovsk (cruiser, Russia) [replicas: PTRPVLSK]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T10 Plymouth (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Puerto Rico (cruiser, USA) [replicas: Puerto Rico B]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Rhode Island (battleship, USA) [replicas: Rhode Island B]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T10 Salem (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 San Martín (cruiser, Pan_America)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T10 Sevastopol (cruiser, Russia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T10 Stalingrad (cruiser, Russia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 55 deg"
+  - ship: "T10 Vampire II (destroyer, Commonwealth)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Aberdeen (cruiser, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Alaska (cruiser, USA) [replicas: Alaska B]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Baotou (cruiser, Pan_Asia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T9 Barfleur (destroyer, United_Kingdom)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Blücher (cruiser, Germany)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 55 deg"
+  - ship: "T9 Buffalo (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Cambridge (cruiser, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 F. Schultz (destroyer, Germany)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Fort Worth (cruiser, USA) [replicas: Fort Worth G]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Illinois (battleship, USA)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Jutland (destroyer, United_Kingdom) [replicas: Somme]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Neptune (cruiser, United_Kingdom) [replicas: Cursed Fang]"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Nueva Esparta (destroyer, Pan_America)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+  - ship: "T9 Riga (cruiser, Russia)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 50 deg"
+  - ship: "T9 Santander (cruiser, Pan_America)"
+    stock: true
+    values:
+      - "artillery.ap.ricochet_start: 60 deg"
+omitted: 57

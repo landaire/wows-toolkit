@@ -125,7 +125,7 @@ expression: specs()
     required:
       - ship
 - name: ship_shells
-  description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance. Each HE/SAP shell's penetration carries builds: base, best (the best-fit build, which takes Inertia Fuse for HE Shells only when it lifts the shell over its tier's armor threshold) and alternatives such as \"with Inertia Fuse for HE Shells\" with a note. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions."
+  description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity, fire chance, and for AP and SAP the ricochet angles from the plate normal (ricochets start, every hit ricochets) as game data states them per shell; HE does not ricochet. ricochet_note marks a shell whose angles differ from those most shells of its ammo type share, e.g. AP whose ricochets start at 60 deg instead of 45. Each HE/SAP shell's penetration carries builds: base, best (the best-fit build, which takes Inertia Fuse for HE Shells only when it lifts the shell over its tier's armor threshold) and alternatives such as \"with Inertia Fuse for HE Shells\" with a note. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions."
   input_schema:
     type: object
     additionalProperties: false
@@ -387,12 +387,12 @@ expression: specs()
     required:
       - ship
 - name: stat_names
-  description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness and stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range."
+  description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness, stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range, and main battery AP and SAP ricochet angles, which game data states per shell."
   input_schema:
     type: object
     additionalProperties: false
 - name: stat_search
-  description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\"."
+  description: "Find ships whose stats meet every condition, e.g. [{\"stat\": \"artillery.reload_time\", \"op\": \"<\", \"value\": 5}], or main battery AP whose ricochets start later than most, [{\"stat\": \"artillery.ap.ricochet_start\", \"op\": \">\", \"value\": 45}]. Get stat names from stat_names. Lists ships that qualify stock, and ships that need modules, upgrades or captain skills, with the fewest needed. Returns counts of ships considered and qualifying, by class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\"."
   input_schema:
     type: object
     additionalProperties: false

@@ -961,6 +961,31 @@ fn stat_search_names_qualifiers_that_match_no_row() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_shells_report_ricochet_angles() {
+    let shells = game().ship_shells(&ship("Des Moines")).expect("Des Moines exists");
+    insta::assert_yaml_snapshot!(shells);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_finds_ap_ricocheting_later_than_standard() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "conditions": [{ "stat": "artillery.ap.ricochet_start", "op": ">", "value": 45 }],
+                "exclude_test_ships": true,
+            }),
+        )
+        .expect("conditions resolve");
+
+    let ships = search["ships"].as_array().expect("ships is a list");
+    assert!(ships.iter().any(|hit| hit["ship"] == "T10 Des Moines (cruiser, USA)"), "{ships:#?}");
+    insta::assert_yaml_snapshot!(search);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn ship_aircraft_lists_squadrons_air_strikes_and_plate_verdicts() {
     for (name, thickness) in
         [("Midway", None), ("Ise", Some(32.0)), ("Gouden Leeuw", Some(25.0)), ("Sekiryu", Some(32.0))]

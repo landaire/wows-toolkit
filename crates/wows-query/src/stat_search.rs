@@ -30,6 +30,7 @@ use wowsunpack::game_params::ttx::model::StatRow;
 use wowsunpack::game_params::ttx::model::StatValue;
 use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
 use wowsunpack::game_params::types::CrewSkill;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::SkillPointCost;
 
 use crate::armor::ThicknessSpan;
@@ -44,6 +45,10 @@ use crate::loadout::build_failed;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::search_key;
+use crate::shells::Ammo;
+use crate::shells::RicochetAngles;
+use crate::shells::ricochet_angles;
+use crate::shells::shell_ammo;
 use crate::ships::Shares;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -261,6 +266,12 @@ enum SearchStat {
 
     /// A stat computed from the card.
     Derived(DerivedStat),
+
+    /// Ricochet angle of the selected guns' main battery shells of one ammo type.
+    Ricochet {
+        ammo: Ammo,
+        bound: RicochetBound,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +301,15 @@ enum Bound {
     Max,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RicochetBound {
+    /// Ricochets start.
+    Start,
+
+    /// Every hit that does not overmatch the plate ricochets.
+    Always,
+}
+
 impl SearchStat {
     fn all() -> Vec<Self> {
         let mut stats: Vec<Self> = TtxStat::ALL
@@ -303,6 +323,10 @@ impl SearchStat {
             stats.push(Self::Armor { zone, bound: Bound::Min });
             stats.push(Self::Armor { zone, bound: Bound::Max });
         }
+        for ammo in [Ammo::Ap, Ammo::Sap] {
+            stats.push(Self::Ricochet { ammo, bound: RicochetBound::Start });
+            stats.push(Self::Ricochet { ammo, bound: RicochetBound::Always });
+        }
 
         stats
     }
@@ -313,6 +337,12 @@ impl SearchStat {
             Self::Armor { zone, bound: Bound::Min } => format!("armor.{}.min", zone.key),
             Self::Armor { zone, bound: Bound::Max } => format!("armor.{}.max", zone.key),
             Self::Derived(stat) => stat.field_key().to_owned(),
+            Self::Ricochet { ammo, bound: RicochetBound::Start } => {
+                format!("artillery.{}.ricochet_start", ammo.label().to_ascii_lowercase())
+            }
+            Self::Ricochet { ammo, bound: RicochetBound::Always } => {
+                format!("artillery.{}.ricochet_always", ammo.label().to_ascii_lowercase())
+            }
         }
     }
 
@@ -321,6 +351,7 @@ impl SearchStat {
             Self::Card(stat) => wows_ship_stats::stat::unit(stat),
             Self::Armor { .. } => Unit::Millimeters,
             Self::Derived(stat) => stat.unit(),
+            Self::Ricochet { .. } => Unit::Degrees,
         }
     }
 
@@ -334,13 +365,21 @@ impl SearchStat {
                 format!("Thickest {} plate above the waterline", zone.key.replace('_', " "))
             }
             Self::Derived(stat) => stat.label().to_owned(),
+            Self::Ricochet { ammo, bound: RicochetBound::Start } => format!(
+                "Main battery {} shell impact angle from the plate normal where ricochets start, from game data",
+                ammo.label()
+            ),
+            Self::Ricochet { ammo, bound: RicochetBound::Always } => format!(
+                "Main battery {} shell impact angle from the plate normal where every hit ricochets, from game data",
+                ammo.label()
+            ),
         }
     }
 
     /// What one row of a multi-row stat stands for.
     fn item(self) -> Option<&'static str> {
         let key = match self {
-            Self::Card(TtxStat::SecondaryRange) | Self::Armor { .. } => return None,
+            Self::Card(TtxStat::SecondaryRange) | Self::Armor { .. } | Self::Ricochet { .. } => return None,
             Self::Card(stat) => stat.field_key(),
             Self::Derived(stat) => stat.field_key(),
         };
@@ -436,6 +475,9 @@ struct View {
     rows: Vec<StatRow>,
     derived: Vec<DerivedRow>,
 
+    /// Main battery shells of the selected guns.
+    ricochet: Vec<(Ammo, RicochetAngles)>,
+
     /// Internal names of conditional skills counted as triggered.
     triggered: Vec<String>,
 }
@@ -482,6 +524,23 @@ impl View {
                 })
                 .map(|row| Reading { qualifier: row.qualifier.clone(), value: row.value.as_f32() })
                 .collect(),
+            SearchStat::Ricochet { ammo, bound } => {
+                let angles =
+                    self.ricochet.iter().filter(|(shell_ammo, _)| *shell_ammo == ammo).map(|(_, angles)| angles);
+                let mut readings: Vec<Reading> = Vec::new();
+                for angles in angles {
+                    let angle = match bound {
+                        RicochetBound::Start => angles.from_deg,
+                        RicochetBound::Always => angles.always_from_deg,
+                    };
+                    let reading = Reading { qualifier: None, value: angle.value() };
+                    if !readings.contains(&reading) {
+                        readings.push(reading);
+                    }
+                }
+
+                readings
+            }
         }
     }
 }
@@ -1124,7 +1183,15 @@ impl<'a> ShipSearch<'a> {
         }
         .rows();
 
-        Ok(View { rows: stats.rows(), derived, triggered: effects.active_conditions })
+        // Shells are looked up only when a condition reads them.
+        let ricochet = if self.conditions.iter().any(|condition| matches!(condition.stat, SearchStat::Ricochet { .. }))
+        {
+            main_battery_ricochet(self.game, self.ship, &selection)
+        } else {
+            Vec::new()
+        };
+
+        Ok(View { rows: stats.rows(), derived, ricochet, triggered: effects.active_conditions })
     }
 
     fn stock_ranges(&self) -> Result<StockRanges, QueryError> {
@@ -1303,7 +1370,7 @@ fn relevant_inputs<'c>(
         let stats: &[TtxStat] = match &condition.stat {
             SearchStat::Card(stat) => std::slice::from_ref(stat),
             SearchStat::Derived(stat) => stat.sources(),
-            SearchStat::Armor { .. } => continue,
+            SearchStat::Armor { .. } | SearchStat::Ricochet { .. } => continue,
         };
         pending.extend(
             provenance
@@ -1345,6 +1412,36 @@ fn input_id(item: &Item<'_>) -> InputId {
         Item::Upgrade(upgrade) => InputId::Upgrade { name: upgrade.param.name().to_owned() },
         Item::Skill { skill, .. } => InputId::Skill { name: skill.internal_name().clone() },
     }
+}
+
+/// Ammo type and ricochet angles of each main battery shell of the selected guns.
+fn main_battery_ricochet(
+    game: &GameData,
+    ship: &Ship,
+    selection: &ShipUpgradeSelection,
+) -> Vec<(Ammo, RicochetAngles)> {
+    let Some(artillery) = ship
+        .param
+        .vehicle()
+        .and_then(|vehicle| vehicle.ttx_components())
+        .and_then(|components| components.artillery(selection.artillery.as_deref()?))
+    else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<&str> = artillery.guns.iter().flat_map(|gun| gun.ammo.iter().map(String::as_str)).collect();
+    names.sort_unstable();
+    names.dedup();
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let param = game.provider().game_param_by_name(name)?;
+            let projectile = param.projectile()?;
+            let ammo = shell_ammo(projectile)?;
+            Some((ammo, ricochet_angles(ammo, projectile)?))
+        })
+        .collect()
 }
 
 /// A skill needs a learned skill on the tier below it

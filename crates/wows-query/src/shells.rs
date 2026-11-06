@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+use std::collections::HashSet;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::Degrees;
 use wows_core::units::MetersPerSecond;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
@@ -9,6 +13,7 @@ use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::Projectile;
 
 use crate::builds::BuildAlternative;
 use crate::builds::BuildStat;
@@ -21,6 +26,7 @@ use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipClass;
+use crate::ships::ShipFilter;
 use crate::ships::ShipSummary;
 use crate::ships::Tier;
 
@@ -58,6 +64,49 @@ impl Ammo {
     }
 }
 
+/// Impact angles from the plate normal at which a shell ricochets.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct RicochetAngles {
+    /// Ricochets start.
+    pub from_deg: Degrees,
+
+    /// Every hit that does not overmatch the plate ricochets.
+    pub always_from_deg: Degrees,
+}
+
+impl RicochetAngles {
+    /// "60 deg, always at 67.5 deg".
+    fn describe(self) -> String {
+        format!("{} deg, always at {} deg", self.from_deg.value(), self.always_from_deg.value())
+    }
+}
+
+/// The ricochet angles most shells of each ammo type share.
+pub(crate) struct RicochetStandards(BTreeMap<Ammo, RicochetAngles>);
+
+impl RicochetStandards {
+    fn get(&self, ammo: Ammo) -> Option<RicochetAngles> {
+        self.0.get(&ammo).copied()
+    }
+
+    /// A note naming the angles of a shell whose angles are not its ammo type's standard.
+    fn note(&self, shell: &Shell) -> Option<String> {
+        let angles = shell.ricochet?;
+        let standard = self.get(shell.ammo)?;
+        if angles == standard {
+            return None;
+        }
+
+        Some(format!(
+            "{} ricochets from {} (standard {} / {})",
+            shell.ammo.label(),
+            angles.describe(),
+            standard.from_deg.value(),
+            standard.always_from_deg.value()
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Shell {
     /// GameParams name of the projectile.
@@ -89,6 +138,10 @@ pub struct Shell {
     /// Base chance to start a fire.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fire_chance_pct: Option<Percent>,
+
+    /// From the projectile's `bulletRicochetAt` and `bulletAlwaysRicochetAt`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ricochet: Option<RicochetAngles>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +162,11 @@ pub struct ShellReport {
     /// HE or SAP penetration on the best-fit build.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub penetration: Option<BuildStat<Millimeters>>,
+
+    /// Set when the ricochet angles differ from those most shells of the
+    /// ammo type share.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ricochet_note: Option<String>,
 }
 
 /// HE penetration multipliers Inertia Fuse for HE Shells gives one class.
@@ -144,10 +202,15 @@ impl GameData {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let ifhe = self.ifhe_build(ship.class);
+        let standards = self.ricochet_standards();
         let shells = self
             .shells(ship)
             .into_iter()
-            .map(|shell| ShellReport { penetration: penetration_builds(&shell, ship.tier, ifhe.as_ref()), shell })
+            .map(|shell| ShellReport {
+                penetration: penetration_builds(&shell, ship.tier, ifhe.as_ref()),
+                ricochet_note: standards.note(&shell),
+                shell,
+            })
             .collect();
 
         Ok(ShipShells { interpretations, ship: ship.summary(), shells })
@@ -177,6 +240,65 @@ impl GameData {
         }
 
         shells
+    }
+
+    /// The most common ricochet angles of each ammo type across the distinct
+    /// main and secondary shells of released ships, counted on first use.
+    fn ricochet_standards(&self) -> &RicochetStandards {
+        self.ricochet_standards.get_or_init(|| self.count_ricochet_standards())
+    }
+
+    fn count_ricochet_standards(&self) -> RicochetStandards {
+        let filter = ShipFilter { exclude_test: true, ..ShipFilter::default() };
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut counts: BTreeMap<Ammo, Vec<(RicochetAngles, usize)>> = BTreeMap::new();
+        for ship in self.ships.iter().filter(|ship| filter.matches(ship)) {
+            let Some(config) = ship.param.vehicle().and_then(|vehicle| vehicle.config_data()) else {
+                continue;
+            };
+            for name in config.main_battery_ammo.iter().chain(&config.secondary_battery_ammo) {
+                if !seen.insert(name.as_str()) {
+                    continue;
+                }
+                let Some(param) = self.provider().game_param_by_name(name) else {
+                    continue;
+                };
+                let Some(projectile) = param.projectile() else {
+                    continue;
+                };
+                let Some(ammo) = shell_ammo(projectile) else {
+                    continue;
+                };
+                let Some(angles) = ricochet_angles(ammo, projectile) else {
+                    continue;
+                };
+
+                let tally = counts.entry(ammo).or_default();
+                match tally.iter_mut().find(|(known, _)| *known == angles) {
+                    Some((_, count)) => *count += 1,
+                    None => tally.push((angles, 1)),
+                }
+            }
+        }
+
+        // Ties go to the lower angles so the choice does not depend on ship order.
+        let standards = counts
+            .into_iter()
+            .filter_map(|(ammo, tally)| {
+                let (angles, _) = tally.into_iter().max_by(|(left, left_count), (right, right_count)| {
+                    left_count.cmp(right_count).then_with(|| {
+                        right
+                            .from_deg
+                            .value()
+                            .total_cmp(&left.from_deg.value())
+                            .then_with(|| right.always_from_deg.value().total_cmp(&left.always_from_deg.value()))
+                    })
+                })?;
+                Some((ammo, angles))
+            })
+            .collect();
+
+        RicochetStandards(standards)
     }
 
     /// `None` when the class tree has no Inertia Fuse for HE Shells.
@@ -292,12 +414,7 @@ fn penetration_builds(shell: &Shell, tier: Tier, ifhe: Option<&IfheBuild>) -> Op
 
 fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficients>) -> Option<Shell> {
     let projectile = param.projectile()?;
-    let ammo = match AmmoType::from_game_str(projectile.ammo_type()) {
-        AmmoType::AP => Ammo::Ap,
-        AmmoType::HE => Ammo::He,
-        AmmoType::SAP => Ammo::Sap,
-        AmmoType::Unknown(_) => return None,
-    };
+    let ammo = shell_ammo(projectile)?;
     let caliber_mm = Millimeters::new(round_tenth(projectile.bullet_diametr()? * 1000.0));
 
     // The client floors HE and SAP penetration (FactoryArtillery.py).
@@ -326,7 +443,33 @@ fn shell_from_param(param: &Param, battery: Battery, ifhe: Option<IfheCoefficien
             .burn_prob()
             .filter(|chance| *chance > 0.0)
             .map(|chance| Percent::new(round_tenth(chance * 100.0))),
+        ricochet: ricochet_angles(ammo, projectile),
     })
+}
+
+/// `None` for ammo other than AP, HE and SAP.
+pub(crate) fn shell_ammo(projectile: &Projectile) -> Option<Ammo> {
+    match AmmoType::from_game_str(projectile.ammo_type()) {
+        AmmoType::AP => Some(Ammo::Ap),
+        AmmoType::HE => Some(Ammo::He),
+        AmmoType::SAP => Some(Ammo::Sap),
+        AmmoType::Unknown(_) => None,
+    }
+}
+
+/// `None` for HE, which does not ricochet whatever angles its projectile lists.
+/// GameParams states no random band with a start angle past the always angle
+/// (91 deg); every hit from the always angle on ricochets, so ricochets start
+/// there.
+pub(crate) fn ricochet_angles(ammo: Ammo, projectile: &Projectile) -> Option<RicochetAngles> {
+    if ammo == Ammo::He {
+        return None;
+    }
+
+    let always = projectile.bullet_always_ricochet_at()?;
+    let start = projectile.bullet_ricochet_at()?.min(always);
+
+    Some(RicochetAngles { from_deg: Degrees::new(start), always_from_deg: Degrees::new(always) })
 }
 
 fn round_tenth(value: f32) -> f32 {
@@ -357,5 +500,42 @@ mod tests {
                 "{caliber:?} does not overmatch past {thickness:?}"
             );
         }
+    }
+
+    #[derive(Serialize)]
+    struct NonstandardRicochet<'a> {
+        standards: &'a BTreeMap<Ammo, RicochetAngles>,
+
+        /// "T10 Des Moines (cruiser, USA): PAPA012_Shell_203mm_AP_AP_Mk_21: AP ricochets from ...".
+        main_battery: Vec<String>,
+    }
+
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn released_ships_with_nonstandard_main_battery_ricochet_angles() {
+        let root =
+            std::path::PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
+        let cache = std::env::temp_dir().join("wows-query-test-cache");
+        let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
+
+        let standards = game.ricochet_standards();
+        let filter = ShipFilter { exclude_test: true, ..ShipFilter::default() };
+        let mut ships: Vec<&Ship> = game.ships.iter().filter(|ship| filter.matches(ship)).collect();
+        ships.sort_by(|left, right| right.tier.cmp(&left.tier).then_with(|| left.name.cmp(&right.name)));
+
+        let mut main_battery = Vec::new();
+        for ship in ships {
+            for shell in game.shells(ship).iter().filter(|shell| shell.battery == Battery::Main) {
+                if let Some(note) = standards.note(shell) {
+                    main_battery.push(format!("{}: {}: {note}", ship.label(), shell.param));
+                }
+            }
+        }
+
+        let des_moines = "T10 Des Moines (cruiser, USA): PAPA012_Shell_203mm_AP_AP_Mk_21";
+        assert!(main_battery.iter().any(|line| line.starts_with(des_moines)), "{main_battery:#?}");
+        insta::assert_yaml_snapshot!(NonstandardRicochet { standards: &standards.0, main_battery });
     }
 }

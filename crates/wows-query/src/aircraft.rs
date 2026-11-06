@@ -17,7 +17,6 @@ use wowsunpack::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
 use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::model::Knots;
 use wowsunpack::game_params::types::Aircraft;
-use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Projectile;
@@ -26,6 +25,7 @@ use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
 use crate::shells::Ammo;
+use crate::shells::shell_ammo;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
 use crate::text::clean;
@@ -444,14 +444,7 @@ fn ordnance(param: &Param, aircraft: &Aircraft) -> Option<Ordnance> {
     let projectile = param.projectile()?;
     let kind = OrdnanceKind::from_plane_ammo_type(projectile.plane_ammo_type()?);
     let ammo = match kind {
-        OrdnanceKind::Bomb | OrdnanceKind::SkipBomb | OrdnanceKind::Rocket => {
-            match AmmoType::from_game_str(projectile.ammo_type()) {
-                AmmoType::AP => Some(Ammo::Ap),
-                AmmoType::HE => Some(Ammo::He),
-                AmmoType::SAP => Some(Ammo::Sap),
-                AmmoType::Unknown(_) => None,
-            }
-        }
+        OrdnanceKind::Bomb | OrdnanceKind::SkipBomb | OrdnanceKind::Rocket => shell_ammo(projectile),
         _ => None,
     };
 

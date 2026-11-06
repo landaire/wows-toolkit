@@ -4,6 +4,7 @@ use std::io::Read;
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use gettext::Catalog;
 use rootcause::prelude::*;
@@ -28,6 +29,7 @@ use crate::names::NameIndex;
 use crate::raw_params::COMPLETE_MARKER;
 use crate::raw_params::LAST_USED_MARKER;
 use crate::raw_params::touch;
+use crate::shells::RicochetStandards;
 use crate::ships::Ship;
 use crate::ships::ship_names;
 use crate::skills::skill_names;
@@ -78,6 +80,9 @@ pub struct GameData {
 
     /// Peer tables of armor assessments, traced on first use.
     pub(crate) armor_comparisons: ComparisonCache,
+
+    /// Ricochet angles most shells of each ammo type share, counted on first use.
+    pub(crate) ricochet_standards: OnceLock<RicochetStandards>,
 }
 
 impl GameData {
@@ -195,6 +200,7 @@ impl GameData {
             consumable_names,
             raw_params,
             armor_comparisons,
+            ricochet_standards: OnceLock::new(),
         }
     }
 }
