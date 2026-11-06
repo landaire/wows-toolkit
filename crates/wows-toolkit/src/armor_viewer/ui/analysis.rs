@@ -13,8 +13,9 @@ use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonShip;
 use crate::armor_viewer::penetration::Ifhe;
 use crate::armor_viewer::penetration::PlateIndex;
+use crate::armor_viewer::penetration::ShellSimResult;
 use crate::armor_viewer::penetration::TrajectoryHit;
-use crate::armor_viewer::penetration::enclosing_zone;
+use crate::armor_viewer::penetration::detonation_zone;
 use crate::armor_viewer::penetration::he_penetration;
 use crate::armor_viewer::penetration::sap_penetration;
 use crate::armor_viewer::state::AnalysisTab;
@@ -26,8 +27,8 @@ use crate::icons;
 use crate::ui::theme::semantic::SemanticExt;
 
 /// Name of the volume a shell detonated inside, for display.
-fn describe_zone(hits: &[TrajectoryHit], plate: PlateIndex) -> &str {
-    enclosing_zone(hits, plate).unwrap_or("past all armor")
+fn describe_zone<'a>(hits: &'a [TrajectoryHit], sim: &ShellSimResult) -> &'a str {
+    detonation_zone(hits, sim).unwrap_or("past all armor")
 }
 
 /// Icon, color and text for a shell that defeats armor on flat penetration alone.
@@ -514,8 +515,8 @@ impl AnalysisPaneViewer<'_> {
                 let shell_label = format!("{} {} {:.0}mm", ss.ship_name, ammo, ss.shell.caliber.value());
                 if let Some(ref sim) = ss.sim {
                     use crate::armor_viewer::penetration::PlateOutcome;
-                    let (icon, badge_color, outcome_text) = if let Some(det_plate) = sim.detonated_at {
-                        let volume_desc = describe_zone(&result.hits, det_plate);
+                    let (icon, badge_color, outcome_text) = if sim.detonated_at.is_some() {
+                        let volume_desc = describe_zone(&result.hits, sim);
                         (icons::BOMB, ui.sem().armor.pen, format!("detonation inside {}", volume_desc))
                     } else if let Some(stop_plate) = sim.stopped_at {
                         let plate_desc = result
@@ -733,7 +734,7 @@ impl AnalysisPaneViewer<'_> {
                             );
                             ui.label(egui::RichText::new("\u{25CF}").color(dot_color));
                             ui.label(egui::RichText::new(icons::BOMB).color(ui.sem().armor.pen));
-                            let volume_desc = describe_zone(&result.hits, plate);
+                            let volume_desc = describe_zone(&result.hits, sim);
                             ui.label(
                                 egui::RichText::new(format!(
                                     "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",

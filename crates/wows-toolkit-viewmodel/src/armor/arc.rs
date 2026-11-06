@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use wowsunpack::ballistics::PlateOutcome;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::ShellSimResult;
-use wowsunpack::ballistics::enclosing_zone;
 use wowsunpack::ballistics::is_citadel_zone;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::types::Degrees;
@@ -68,9 +67,9 @@ pub enum ArcOutcome {
 pub fn describe_arc(sim: Option<&ShellSimResult>, plates: &[ArcPlate]) -> ArcOutcome {
     let Some(sim) = sim else { return ArcOutcome::NotSimulated };
 
-    if let Some(detonated) = sim.detonated_at {
+    if sim.detonated_at.is_some() {
         let zones: Vec<&str> = plates.iter().map(|plate| plate.zone.as_str()).collect();
-        let zone = enclosing_zone(&zones, detonated.number()).map(str::to_owned);
+        let zone = sim.detonation_zone(&zones).map(str::to_owned);
         return ArcOutcome::Detonated { zone };
     }
 
@@ -284,11 +283,11 @@ pub fn sim_outcome(sim: &ShellSimResult, plates: &[ArcPlate]) -> SimOutcome {
     // A detonation takes priority even if the shell shattered or ricocheted on a
     // later plate: the fragments still explode.
     if sim.detonation.is_some() {
-        let Some(detonated_at) = sim.detonated_at else {
+        if sim.detonated_at.is_none() {
             return SimOutcome::Overpenetration;
-        };
+        }
         let zones: Vec<&str> = plates.iter().map(|plate| plate.zone.as_str()).collect();
-        let inside_citadel = enclosing_zone(&zones, detonated_at.number()).is_some_and(is_citadel_zone);
+        let inside_citadel = sim.detonation_zone(&zones).is_some_and(is_citadel_zone);
         return if inside_citadel { SimOutcome::Citadel } else { SimOutcome::Penetration };
     }
 

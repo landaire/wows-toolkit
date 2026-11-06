@@ -2042,7 +2042,7 @@ impl RealtimeArmorViewer {
     /// Draw the plate-by-plate detail panel for a selected salvo.
     fn draw_salvo_detail(&self, ui: &mut egui::Ui, trajectory_id: u64) {
         use crate::armor_viewer::penetration::PlateOutcome;
-        use crate::armor_viewer::penetration::enclosing_zone;
+        use crate::armor_viewer::penetration::detonation_zone;
 
         // Find the matching shell entry (from salvo groups) and trajectory
         let shell_and_group = self
@@ -2293,7 +2293,8 @@ impl RealtimeArmorViewer {
 
                 // Detonation marker
                 if let Some(det) = detonation_here {
-                    let zone = enclosing_zone(&result.hits, plate).unwrap_or("past all armor");
+                    let zone =
+                        sim.as_ref().and_then(|sim| detonation_zone(&result.hits, sim)).unwrap_or("past all armor");
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
                         ui.label(

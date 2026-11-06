@@ -642,6 +642,23 @@ impl ShellSimResult {
             (detonated, stopped) => detonated.or(stopped),
         }
     }
+
+    /// The zone the fuse went off inside, given the zone of each plate along
+    /// the ray in strike order. `None` without a detonation inside the armor.
+    ///
+    /// A shell stopped by a ricochet or shatter detonates against that plate
+    /// without crossing it, so it is still outside the plate's zone.
+    pub fn detonation_zone<'a>(&self, zones: &[&'a str]) -> Option<&'a str> {
+        let detonated = self.detonated_at?;
+        let stopped_short = self.stopped_at == Some(detonated)
+            && self
+                .plates
+                .get(detonated.value())
+                .is_some_and(|plate| matches!(plate.outcome, PlateOutcome::Ricochet | PlateOutcome::Shatter));
+        let crossed = if stopped_short { detonated.value() } else { detonated.number() };
+
+        enclosing_zone(zones, crossed)
+    }
 }
 
 /// The zone a shell is inside after crossing the first `up_to` of `zones`,
@@ -650,16 +667,24 @@ impl ShellSimResult {
 /// Every crossing of a zone's boundary toggles whether the shell is within it,
 /// so a zone crossed an odd number of times has been entered and not left. The
 /// innermost such zone is the one the shell sits in; `None` once it is clear of
-/// every zone.
-pub fn enclosing_zone<'a>(zones: &[&'a str], up_to: usize) -> Option<&'a str> {
-    let crossed = &zones[..zones.len().min(up_to)];
+/// every zone. Plates of zones that bound no volume do not toggle anything.
+fn enclosing_zone<'a>(zones: &[&'a str], up_to: usize) -> Option<&'a str> {
+    let crossed: Vec<&str> =
+        zones[..zones.len().min(up_to)].iter().copied().filter(|zone| bounds_volume(zone)).collect();
 
     let mut crossings: HashMap<&str, usize> = HashMap::new();
-    for zone in crossed {
+    for zone in &crossed {
         *crossings.entry(zone).or_default() += 1;
     }
 
     crossed.iter().rev().copied().find(|zone| crossings[zone] % 2 == 1)
+}
+
+/// Whether a zone's plates enclose a volume. Generic hull plates (internal
+/// decks, bulkheads and plating, which the game's armor viewer hides) sit
+/// inside other zones' volumes and bound none of their own.
+fn bounds_volume(zone: &str) -> bool {
+    !matches!(zone, "Hull" | "Default")
 }
 
 /// Whether a detonation inside `zone` counts as a citadel hit.
@@ -1042,5 +1067,36 @@ mod tests {
         assert_eq!(enclosing_zone(&zones, 4), None);
         assert_eq!(enclosing_zone(&zones, 2), Some("Citadel"));
         assert_eq!(enclosing_zone(&zones, 1), Some("Casemate"));
+    }
+
+    /// An internal deck of the generic hull zone inside the citadel does not
+    /// take the shell out of the citadel.
+    #[test]
+    fn a_generic_hull_plate_bounds_no_volume() {
+        let zones = ["Casemate", "Casemate", "Citadel", "Hull"];
+        assert_eq!(enclosing_zone(&zones, 4), Some("Citadel"));
+    }
+
+    /// The belt arms the fuse and the shell shatters on the next plate: it
+    /// detonates against that plate, outside the zone the plate encloses.
+    #[test]
+    fn a_shell_stopped_by_a_plate_detonates_outside_its_zone() {
+        let hits = [plate(units(0.0), mm(425.0)), plate(units(0.2), mm(375.0))];
+
+        let sim = simulate_shell_through_plates(&colombo_ap(), mps(699.0), &hits, false);
+
+        assert_eq!(sim.plates[1].outcome, PlateOutcome::Shatter);
+        assert_eq!(sim.detonated_at, Some(PlateIndex::new(1)));
+        assert_eq!(sim.detonation_zone(&["casemate", "citadel"]), Some("casemate"));
+    }
+
+    /// A fuse that fires between plates has crossed every plate before it.
+    #[test]
+    fn a_fuse_firing_between_plates_is_inside_the_last_zone_entered() {
+        let hits = [plate(units(0.0), mm(425.0)), plate(units(0.42), mm(40.0)), plate(units(0.6), mm(375.0))];
+
+        let sim = simulate_shell_through_plates(&colombo_ap(), mps(699.0), &hits, false);
+
+        assert_eq!(sim.detonation_zone(&["casemate", "citadel", "citadel"]), Some("citadel"));
     }
 }

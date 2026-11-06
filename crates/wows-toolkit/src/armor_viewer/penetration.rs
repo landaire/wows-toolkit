@@ -50,13 +50,13 @@ pub struct TrajectoryResult {
     pub detonation_points: Vec<DetonationMarker>,
 }
 
-/// Which zone volume the shell is inside after crossing plates up to and
-/// including `last_plate`.
+/// Which zone volume the shell's fuse went off inside, `None` past all armor
+/// or without a detonation.
 ///
 /// Shared with the GPUI port, which reads the same answer out of the same cast.
-pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate: PlateIndex) -> Option<&str> {
+pub fn detonation_zone<'a>(hits: &'a [TrajectoryHit], sim: &ShellSimResult) -> Option<&'a str> {
     let zones: Vec<&str> = hits.iter().map(|hit| hit.zone.as_str()).collect();
-    wowsunpack::ballistics::enclosing_zone(&zones, last_plate.number())
+    sim.detonation_zone(&zones)
 }
 
 /// Strike angle between a ray direction and a triangle normal.
