@@ -26,7 +26,7 @@
 //! a first-class per-row hook the tree builder already exposes); picking it
 //! emits [`ExportModelRequested`], which `pane.rs` handles by exporting that
 //! ship at STOCK hull/default LOD -- independent of whatever any pane
-//! currently displays, unlike the toolbar's own export button
+//! currently displays, unlike the options rail's own export button
 //! (`viewport_view::ViewportView::confirm_export`), which exports a pane's
 //! LIVE hull/LOD/module selection. Ports the egui app's sidebar-tree
 //! "Export model" context-menu item (`tab.rs:472-486`), which likewise
@@ -107,6 +107,10 @@ pub struct ExportModelRequested {
     pub display_name: String,
 }
 
+/// Asks the pane to collapse the ships list to its expand rail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollapseSidebar;
+
 /// What one level of the tree indents by, and the width its guide is drawn in.
 const INDENT: Pixels = px(16.);
 
@@ -141,6 +145,7 @@ impl EventEmitter<CommonPaneSettings> for Sidebar {}
 impl EventEmitter<ShipSelected> for Sidebar {}
 impl EventEmitter<CompareSplit> for Sidebar {}
 impl EventEmitter<ExportModelRequested> for Sidebar {}
+impl EventEmitter<CollapseSidebar> for Sidebar {}
 
 impl Sidebar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -400,6 +405,12 @@ impl Render for Sidebar {
             .py_1()
             .border_b_1()
             .border_color(border)
+            .child(crate::ui::panel_collapse_button(
+                "armor-ships-collapse",
+                crate::ui::PanelSide::Left,
+                t!("ui.armor.collapse_ships").to_string(),
+                cx.listener(|_this, _event, _window, cx| cx.emit(CollapseSidebar)),
+            ))
             .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.ships").to_string()))
             .child(
                 Button::new("armor-sidebar-compare")

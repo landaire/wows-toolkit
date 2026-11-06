@@ -16,7 +16,7 @@
 //! toggles. `visibility` holds the zone/part/plate override maps' shared
 //! types (`VisibilityFilter`, undo/redo snapshot stack, sidebar-highlight
 //! key) plus the tri-state tree's pure derivation logic; `popover` builds the
-//! toolbar button and the armor-visibility popover's gpui_kit tree on top of it,
+//! options rail's tools and the armor-visibility tree on top of it,
 //! plus (Milestone 4 Task 8a) the hull-visibility popover's tree, backed by
 //! `upload_hull`'s hull-only mesh upload (kept separate from `upload`'s armor
 //! upload so a hull-only change never rebuilds the armor mesh set).

@@ -1,10 +1,12 @@
-//! The armor viewer's options rail: the armor, hull and display sections.
+//! The armor viewer's options rail: the viewport tools, then the armor, hull
+//! and display sections.
 //!
-//! The viewport toolbar carries the controls that are one click. These three
-//! hold a tree or a row of sliders, which a popover can only show by covering
-//! the hull they describe, so they are a panel beside it instead.
+//! The tools are the one-click toggles (also in the viewport's context menu).
+//! The three sections hold a tree or a row of sliders, which a popover can
+//! only show by covering the hull they describe, so they are a panel beside it
+//! instead.
 //!
-//! The sections act on the pane the reader last clicked in
+//! Everything here acts on the pane the reader last clicked in
 //! (`ViewportDock::active_viewport`), which the header names. Nothing here
 //! knows about `sync_options`: a change emits `ViewportChange::Settings`
 //! from that pane, and `ArmorViewerPane::push_settings_from` is what widens it
@@ -34,35 +36,64 @@ pub const PANEL_WIDTH: Pixels = px(300.);
 pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
     let viewport = view.active_viewport(cx);
     let legend_visible = view.legend_visible();
+    let position = view.active_pane_position(cx);
+    let border = cx.theme().border;
+    let accent = cx.theme().primary;
 
-    // Which pane these act on, since with a comparison split open the rail
-    // edits whichever was last clicked in.
-    let header = h_flex()
-        .gap_2()
-        .items_center()
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
-        .when_some(viewport.read(cx).shown_ship_name(), |this, name| {
-            this.child(div().flex_1().text_xs().text_color(crate::theme::text_dim()).child(name))
-        });
+    let collapse = {
+        let pane = pane.clone();
+        crate::ui::panel_collapse_button(
+            "armor-options-collapse",
+            crate::ui::PanelSide::Right,
+            t!("ui.armor.collapse_options").to_string(),
+            move |_event, _window, cx| pane.update(cx, |pane, cx| pane.toggle_options(cx)),
+        )
+    };
+
+    // Which pane these act on. With a comparison split open it is named in
+    // the accent its border is drawn in.
+    let target = match (position.count > 1, viewport.read(cx).shown_ship_name()) {
+        (true, name) => {
+            let pane_label = t!("ui.armor.options_pane", number = position.number, count = position.count);
+            let label = match name {
+                Some(name) => format!("{pane_label}: {name}"),
+                None => pane_label.into_owned(),
+            };
+            Some(div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(accent).child(label))
+        }
+        (false, Some(name)) => Some(div().text_xs().text_color(crate::theme::text_dim()).child(name)),
+        (false, None) => None,
+    };
+
+    let header = v_flex()
+        .flex_none()
+        .px_2()
+        .py_1()
+        .border_b_1()
+        .border_color(border)
+        .child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
+                .child(collapse),
+        )
+        .children(target);
+
+    let pen = popover::PenCheckButton { open: view.analysis_open(), ship_count: view.comparison_count() };
+    let tools = popover::render_tools(viewport.read(cx), &viewport, pen, pane);
 
     let visibility = viewport.clone();
     let hull = viewport.clone();
     let display = viewport.clone();
 
-    v_flex()
-        .id("armor-options-panel")
-        // Without this the harness cannot find a plain container by its id.
-        .test_support()
-        .size_full()
-        .border_l_1()
-        .border_color(cx.theme().border)
+    let body = v_flex()
         .gap_2()
         .p_2()
-        .overflow_y_scroll()
+        .child(tools)
         .when(viewport.read(cx).trajectory_state().shown, |panel| {
             panel.child(popover::render_trajectory_panel(view, pane, &viewport, cx))
         })
-        .child(header)
         .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.armor_options").as_ref(), cx, |cx| {
             popover::render_popover_content(&visibility, cx)
         }))
@@ -71,11 +102,37 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         }))
         .child(section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), cx, |cx| {
             popover::render_display_popover_content(&display, legend_visible, cx)
-        }))
+        }));
+
+    v_flex()
+        .id("armor-options-panel")
+        // Without this the harness cannot find a plain container by its id.
+        .test_support()
+        .size_full()
+        .border_l_1()
+        .border_color(border)
+        .child(header)
+        .child(div().id("armor-options-body").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
         .into_any_element()
 }
 
-/// One section, labelled as its toolbar button was. `body` is called only while
+/// The control the collapsed rail leaves on the right edge, where the
+/// header's collapse button was.
+pub fn render_expand_rail(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
+    let pane = pane.clone();
+    crate::ui::panel_expand_rail(
+        "armor-options-expand",
+        crate::ui::PanelSide::Right,
+        t!("ui.armor.expand_options").to_string(),
+        move |_event, _window, cx| pane.update(cx, |pane, cx| pane.toggle_options(cx)),
+    )
+    .h_full()
+    .border_l_1()
+    .border_color(cx.theme().border)
+    .into_any_element()
+}
+
+/// One section, labelled as its popover button was. `body` is called only while
 /// the section is expanded, which is what the collapse is for.
 fn section(
     view: &ArmorViewerPane,

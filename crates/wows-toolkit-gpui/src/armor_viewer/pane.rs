@@ -84,6 +84,7 @@ use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
 use super::analysis;
 use super::analysis::PenetrationState;
 use super::dock::DockEvent;
+use super::dock::PanePosition;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
@@ -91,6 +92,7 @@ use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
+use super::sidebar::CollapseSidebar;
 use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
@@ -190,10 +192,11 @@ pub struct ArmorViewerPane {
     /// Whether the checker's panel is up beside the viewport. It stays up
     /// while the pointer sweeps the hull, which is the whole interaction.
     show_analysis: bool,
-    /// Whether the options rail is up. Open by default: the toolbar carries no
-    /// way into the controls it holds, so a closed rail would leave them
-    /// unreachable until the reader found the toggle.
+    /// Whether the options rail is up. Open by default: it holds the viewport
+    /// tools as well as the option sections.
     show_options: bool,
+    /// Whether the ships list is collapsed to its expand rail.
+    sidebar_collapsed: bool,
     /// Which of the rail's sections are expanded.
     option_sections: OptionSectionsOpen,
     _subscriptions: Vec<Subscription>,
@@ -250,8 +253,8 @@ impl OptionSectionsOpen {
 impl ArmorViewerPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
-        // Every viewport knows its pane, so the pane's own controls can sit
-        // in the viewport's toolbar rather than on a strip above it.
+        // Every viewport knows its pane, so its context menu can offer the
+        // pane's own controls.
         let this = cx.weak_entity();
         let viewport = cx.new(|cx| {
             let mut viewport = ViewportView::new(window, cx);
@@ -264,6 +267,8 @@ impl ArmorViewerPane {
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
         let common_settings_sub = cx.subscribe_in(&sidebar, window, Self::on_common_settings);
+        let collapse_sidebar_sub =
+            cx.subscribe(&sidebar, |this, _sidebar, _event: &CollapseSidebar, cx| this.set_sidebar_collapsed(true, cx));
         // `dock`'s own `cx.notify()` (add/close/activate pane) only
         // invalidates `ViewportDock`'s render; without this, the common-
         // settings toggle row below -- gated on `dock.panes().len() > 1` --
@@ -297,11 +302,13 @@ impl ArmorViewerPane {
             pen,
             show_analysis,
             show_options: true,
+            sidebar_collapsed: false,
             option_sections: OptionSectionsOpen::default(),
             _subscriptions: vec![
                 pen_search_sub,
                 ship_selected_sub,
                 compare_split_sub,
+                collapse_sidebar_sub,
                 export_requested_sub,
                 common_settings_sub,
                 viewport_event_sub,
@@ -452,6 +459,19 @@ impl ArmorViewerPane {
         self.dock.read(cx).active_viewport()
     }
 
+    /// Which of the dock's panes the options rail acts on.
+    pub(crate) fn active_pane_position(&self, cx: &App) -> PanePosition {
+        self.dock.read(cx).active_position()
+    }
+
+    fn set_sidebar_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        if self.sidebar_collapsed == collapsed {
+            return;
+        }
+        self.sidebar_collapsed = collapsed;
+        cx.notify();
+    }
+
     /// The catalogue of ships this pane can open, once it has loaded.
     ///
     /// `None` while the assets are still being read, which is what the palette's
@@ -546,7 +566,7 @@ impl ArmorViewerPane {
         self.show_analysis
     }
 
-    /// How many ships are being compared, which the toolbar button carries.
+    /// How many ships are being compared, which the Pen Check button carries.
     pub(crate) fn comparison_count(&self) -> usize {
         self.pen.ships.len()
     }
@@ -1334,35 +1354,56 @@ impl Render for ArmorViewerPane {
         // the first a middle one, whose close truncates the wrong entry and
         // rescales every other panel. One optional panel in the group, at the
         // end, is what keeps that state honest.
-        let options = self.show_options.then(|| {
-            div().flex_none().w(options_panel::PANEL_WIDTH).h_full().child(options_panel::render_panel(
-                self,
-                &cx.entity(),
-                cx,
-            ))
+        let options = if self.show_options {
+            div()
+                .flex_none()
+                .w(options_panel::PANEL_WIDTH)
+                .h_full()
+                .child(options_panel::render_panel(self, &cx.entity(), cx))
+                .into_any_element()
+        } else {
+            options_panel::render_expand_rail(&cx.entity(), cx)
+        };
+
+        // A collapsed ships list takes its group with it: `ResizableState` is
+        // positional, so the split without it is a separate group.
+        let split = if self.sidebar_collapsed {
+            h_resizable("armor-viewer-split-no-ships")
+        } else {
+            h_resizable("armor-viewer-split").child(
+                resizable_panel()
+                    .size(SIDEBAR_WIDTH)
+                    .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                    .flex_none()
+                    .child(self.sidebar.clone()),
+            )
+        };
+        let split = split
+            .child(resizable_panel().child(self.dock.clone()))
+            // `child`, not `children`: the group tracks its panels,
+            // and a plain `ParentElement` child is not one of them.
+            .when_some(analysis, |group, panel| group.child(panel));
+
+        let ships_rail = self.sidebar_collapsed.then(|| {
+            let pane = cx.entity();
+            crate::ui::panel_expand_rail(
+                "armor-ships-expand",
+                crate::ui::PanelSide::Left,
+                t!("ui.armor.expand_ships").to_string(),
+                move |_event, _window, cx| pane.update(cx, |pane, cx| pane.set_sidebar_collapsed(false, cx)),
+            )
+            .h_full()
+            .border_r_1()
+            .border_color(cx.theme().border)
         });
 
         let content = v_flex().size_full().child(
             h_flex()
                 .flex_1()
                 .min_h(px(0.))
-                .child(
-                    div().flex_1().min_w(px(0.)).h_full().child(
-                        h_resizable("armor-viewer-split")
-                            .child(
-                                resizable_panel()
-                                    .size(SIDEBAR_WIDTH)
-                                    .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                                    .flex_none()
-                                    .child(self.sidebar.clone()),
-                            )
-                            .child(resizable_panel().child(self.dock.clone()))
-                            // `child`, not `children`: the group tracks its panels,
-                            // and a plain `ParentElement` child is not one of them.
-                            .when_some(analysis, |group, panel| group.child(panel)),
-                    ),
-                )
-                .children(options),
+                .children(ships_rail)
+                .child(div().flex_1().min_w(px(0.)).h_full().child(split))
+                .child(options),
         );
 
         // Legend floats over the whole pane (not just the viewport), gated

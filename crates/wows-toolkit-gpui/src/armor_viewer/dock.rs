@@ -11,8 +11,8 @@
 //!
 //! Camera-mirror and settings-sync across panes (Milestone 5 Task 9c) are
 //! out of scope here -- each pane's `ViewportView` remains fully
-//! self-contained (own camera, own hull/camo/visibility state, own
-//! toolbar/popovers).
+//! self-contained (own camera, own hull/camo/visibility state and tool
+//! toggles, which the options rail edits for the active pane).
 //!
 //! Task 9a's original doc:
 //!
@@ -49,6 +49,14 @@ pub enum DockEvent {
 
 impl EventEmitter<DockEvent> for ViewportDock {}
 
+/// Where the active pane sits among the dock's panes, as the reader counts
+/// them (`number` is 1-based).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanePosition {
+    pub number: usize,
+    pub count: usize,
+}
+
 pub struct ViewportDock {
     panes: Vec<Entity<ViewportView>>,
     active_ix: usize,
@@ -75,6 +83,10 @@ impl ViewportDock {
     /// clicked in, or the one a new pane became when added.
     pub fn active_viewport(&self) -> Entity<ViewportView> {
         self.panes[self.active_ix].clone()
+    }
+
+    pub fn active_position(&self) -> PanePosition {
+        PanePosition { number: self.active_ix + 1, count: self.panes.len() }
     }
 
     /// Which way the panes are laid out.
@@ -198,17 +210,17 @@ impl Render for ViewportDock {
                 .id(("armor-viewport-pane", ix))
                 .relative()
                 .size_full()
-                // Fires on any left-click inside the pane, including its
-                // toolbar/close buttons -- enabled `gpui-component` `Button`s
-                // don't stop propagation, so clicking a control on an
-                // inactive pane both runs the control's own action AND
-                // activates that pane. Intended: interacting with a pane is
-                // what makes it the active one (the target for sidebar ship
-                // selections and the source for mirror/sync-on-enable).
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| this.activate_pane(ix, cx)),
-                )
+                // Fires on any left- or right-click inside the pane, including
+                // its close button: interacting with a pane is what makes it
+                // the active one (the target for sidebar ship selections, the
+                // options rail and the context menu, and the source for
+                // mirror/sync-on-enable). Capture phase, because the viewport's
+                // context menu stops a right press from bubbling.
+                .capture_any_mouse_down(cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    if matches!(event.button, MouseButton::Left | MouseButton::Right) {
+                        this.activate_pane(ix, cx);
+                    }
+                }))
                 .when(multi, |this| this.border_2().border_color(if is_active { accent } else { transparent_black() }))
                 .child(pane)
                 .child(close_button);

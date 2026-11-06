@@ -127,9 +127,9 @@ fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
 
 /// The same, wide enough that a whole toolbar strip is in one frame.
 ///
-/// The armor viewport's strip carries a dozen controls beside a sidebar; at
-/// the default width the last of them are off the edge, and the harness
-/// refuses to click what it cannot see.
+/// The armor viewer puts the ships list, the viewport and the options rail
+/// side by side; at the default width parts of them are off the edge, and the
+/// harness refuses to click what it cannot see.
 fn open_wide_app(cx: &mut TestAppContext) -> WindowHandle<App> {
     use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
@@ -469,17 +469,23 @@ fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppCont
         window.click("armor-analysis-toggle", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-pen-search").is_none(), "the toggle puts it away again");
+
+        window.click("armor-analysis-toggle", cx);
+        window.render_frame(cx);
+        window.click("armor-pen-close", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-pen-search").is_none(), "and so does the panel's own close button");
     })
     .expect("the test window stays open");
 }
 
-/// The visibility, hull and display options are a rail beside the viewport.
+/// The viewport tools and the visibility, hull and display options are a
+/// rail beside the viewport, collapsed from its own header to a control on
+/// the right edge.
 ///
-/// Each holds a tree or a row of sliders, which a popover can only show by
-/// covering the hull it describes. The rail is up by default because the
-/// toolbar carries no way into those three.
+/// The viewport has no strip of its own, so the tools leave with the rail.
 #[gpui_kit::test]
-fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
+fn the_options_rail_collapses_to_an_edge_control_and_expands_from_it(cx: &mut TestAppContext) {
     let window = open_wide_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
@@ -490,14 +496,49 @@ fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
         // loaded, and all three sections then say so rather than drawing
         // controls that would act on an empty viewport.
         assert!(window.try_find("armor-options-panel").is_some(), "the rail is up without being asked for");
+        assert!(window.try_find("armor-show-hidden-button").is_some(), "the tools are on the rail");
+        assert!(window.try_find("armor-options-expand").is_none(), "no expand control while the rail is up");
 
-        window.click("collapse", cx);
+        window.click("armor-options-collapse", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-options-panel").is_none(), "the toolbar toggle puts the rail away");
+        assert!(window.try_find("armor-options-panel").is_none(), "the header button puts the rail away");
+        assert!(window.try_find("armor-show-hidden-button").is_none(), "and the tools with it");
 
-        window.click("collapse", cx);
+        window.click("armor-options-expand", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-options-panel").is_some(), "and brings it back");
+        assert!(window.try_find("armor-options-panel").is_some(), "the edge control brings it back");
+        assert!(window.try_find("armor-options-expand").is_none(), "and goes away again");
+    })
+    .expect("the test window stays open");
+}
+
+/// The ships list collapses from its own header to a control on the left
+/// edge, and expands from there.
+#[gpui_kit::test]
+fn the_ships_list_collapses_to_an_edge_control_and_expands_from_it(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+        assert!(window.try_find(SHIP_SEARCH).is_some(), "the list is up without being asked for");
+
+        window.click("armor-ships-collapse", cx);
+    })
+    .expect("the test window stays open");
+    // The header button asks the pane through an event, which is delivered
+    // once the click's update ends.
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(SHIP_SEARCH).is_none(), "the header button puts the list away");
+        assert!(window.try_find("armor-ships-collapse").is_none(), "its collapse button goes with it");
+
+        window.click("armor-ships-expand", cx);
+        window.render_frame(cx);
+        assert!(window.try_find(SHIP_SEARCH).is_some(), "the edge control brings it back");
+        assert!(window.try_find("armor-ships-expand").is_none(), "and goes away again");
     })
     .expect("the test window stays open");
 }

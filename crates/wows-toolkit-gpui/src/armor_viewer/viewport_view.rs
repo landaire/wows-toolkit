@@ -642,9 +642,8 @@ pub struct ViewportView {
     /// after the hover ends so the penetration checker opens on it.
     last_plate: Option<(SharedString, f32)>,
     /// The pane this viewport is one of. Weak: the pane owns the dock that
-    /// owns this. Carried so the toolbar can offer the pane's own controls --
-    /// the legend and the penetration checker -- rather than a second strip
-    /// above it.
+    /// owns this. Carried so the viewport's context menu can offer the pane's
+    /// own controls -- the options rail and the penetration checker.
     pane: Option<WeakEntity<ArmorViewerPane>>,
     /// Live display settings (plate edges, waterline, zero-mm plates, armor
     /// opacity) mutable via the display-settings popover (`popover.rs`, Task
@@ -672,7 +671,7 @@ pub struct ViewportView {
     /// as it moves.
     aim_mesh_ids: Vec<crate::viewport::types::MeshId>,
     /// Whether the openings in the armor are marked, and how many were
-    /// found last time they were looked for. The count is what the toolbar
+    /// found last time they were looked for. The count is what the rail
     /// reports, so it is kept rather than recomputed per frame.
     show_gaps: bool,
     /// Whether a click casts a shell instead of hiding the plate under it.
@@ -686,7 +685,7 @@ pub struct ViewportView {
     /// the comparison list. `None` until one is chosen, which still casts:
     /// the plates a ray crosses are worth showing without a shell.
     cast_ship: Option<ComparisonShip>,
-    /// Shell selected from that ship, when chosen in the toolbar.
+    /// Shell selected from that ship, when chosen in the trajectory panel.
     cast_shell_index: Option<usize>,
     /// The range the cast shell is fired from, which sets how steeply it
     /// falls. The egui viewer offers the same slider over the same span.
@@ -721,7 +720,7 @@ pub struct ViewportView {
     /// the sliders.
     _lighting_slider_subscriptions: Vec<Subscription>,
     _lighting_color_subscriptions: Vec<Subscription>,
-    /// The toolbar's export-confirm panel (Milestone 5 Task 10) target, if
+    /// The export-confirm panel (Milestone 5 Task 10) target, if
     /// open: a snapshot of everything the export needs, taken at the moment
     /// the panel opens (`open_export_confirm`), mirroring the egui app's own
     /// `Option<ExportRequest>` (`state.rs:180-188`, `tab.rs:556-576`). The
@@ -2356,7 +2355,7 @@ impl ViewportView {
         }
     }
 
-    /// Ctrl/Cmd+S opens and closes the display-settings popover. Ctrl/Cmd+Z
+    /// Ctrl/Cmd+S opens and closes the options rail. Ctrl/Cmd+Z
     /// (no shift) undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R redoes.
     /// Otherwise WASD moves the camera target and arrows move it vertically /
     /// orbit the azimuth, tracking the key as held and (re)starting the
@@ -3224,7 +3223,7 @@ impl ViewportView {
         .detach();
     }
 
-    /// Opens the export-confirm panel (toolbar "Export" button,
+    /// Opens the export-confirm panel (rail and context-menu "Export",
     /// `popover.rs`'s `render_export_button`) for this pane's currently
     /// displayed ship, snapshotting `reload_source` plus the live hull/LOD/
     /// module selection into `export_confirm` so the export target is FIXED
@@ -3707,11 +3706,7 @@ impl Render for ViewportView {
                 .into_any_element()
         });
 
-        // Toolbar row above the viewport: the armor-visibility popover
-        // trigger today, with room for Task 7b's display-settings button.
-        let toolbar = popover::render_toolbar(&*self, &entity, cx);
-
-        let viewport_area = div()
+        div()
             .id("armor-viewport")
             .track_focus(&self.focus_handle)
             .relative()
@@ -3771,8 +3766,12 @@ impl Render for ViewportView {
             .when_some(tooltip_overlay, |this, t| this.child(t))
             .when_some(ring_overlay, |this, t| this.child(t))
             .when_some(export_overlay, |this, o| this.child(o))
-            .context_menu(move |mut menu, _window, _cx| {
-                let Some(hover) = hovered_for_menu.clone() else { return menu };
+            // Right is not a camera button, so a press opens the menu without
+            // competing with an orbit or a pan.
+            .context_menu(move |mut menu, _window, cx| {
+                let Some(hover) = hovered_for_menu.clone() else {
+                    return popover::quick_toggle_items(menu, &entity, cx);
+                };
                 let PlateKey { zone, material_name: material, thickness_tenths } = hover.key.clone();
                 let thickness_mm = thickness_tenths as f32 / 10.0;
 
@@ -3809,10 +3808,8 @@ impl Render for ViewportView {
                     },
                 ));
 
-                menu
-            });
-
-        v_flex().size_full().child(toolbar).child(div().flex_1().min_h(px(0.)).child(viewport_area))
+                popover::quick_toggle_items(menu.separator(), &entity, cx)
+            })
     }
 }
 

@@ -245,7 +245,16 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                         pane.update(cx, |pane, cx| pane.set_pen_ifhe(checked, cx));
                     }
                 }),
-        );
+        )
+        .child({
+            let pane = pane.clone();
+            crate::ui::panel_collapse_button(
+                "armor-pen-close",
+                crate::ui::PanelSide::Right,
+                t!("ui.armor.close_pen_check").to_string(),
+                move |_event, _window, cx| pane.update(cx, |pane, cx| pane.toggle_analysis(cx)),
+            )
+        });
 
     // What the verdicts below are being read against. Live: it follows the
     // pointer over the hull rather than being typed in.

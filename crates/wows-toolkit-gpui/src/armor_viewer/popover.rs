@@ -1,5 +1,5 @@
-//! The viewport toolbar row `viewport_view.rs` renders above the 3D viewport,
-//! and the three option sections `options_panel.rs` renders beside it: the
+//! The options rail's tool rows and the viewport context menu's toggles,
+//! and the three option sections `options_panel.rs` renders below them: the
 //! tri-state zone/material/plate tree, the hull-visibility tree and the
 //! display settings. Ports `armor_viewer::ui::tab`'s
 //! `draw_armor_visibility_popover` (`tab.rs:4403-4611`) and
@@ -21,7 +21,6 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
-use gpui_kit::component::Side;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::button::Button;
@@ -31,9 +30,9 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit::component::sidebar::SidebarToggleButton;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
@@ -77,68 +76,119 @@ use wowsunpack::game_params::types::Km;
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
 const CHECKBOX_BOX: Pixels = px(16.);
 
-/// Toolbar row above the 3D viewport: the visibility-popover trigger button
-/// (Task 7a) and the display-settings trigger button (Task 7b).
-/// `viewport_view.rs`'s `Render` impl wraps this above the interactive
-/// viewport div.
-pub fn render_toolbar(
+/// The options rail's tool rows for the active viewport: the view toggles,
+/// then the tools that take over a click on the hull and the export.
+///
+/// `pen` is passed in rather than read: the rail renders inside the pane's
+/// own render (see the module doc).
+pub(super) fn render_tools(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    cx: &mut Context<ViewportView>,
-) -> impl IntoElement + use<> {
-    let trajectory_active = view.trajectory_state().shown;
-    let commands = h_flex()
-        .flex_none()
+    pen: PenCheckButton,
+    pane: &Entity<ArmorViewerPane>,
+) -> AnyElement {
+    let toggles = h_flex()
         .flex_wrap()
-        .gap_2()
+        .gap_1()
         .items_center()
-        .px_2()
-        .py_1()
-        // What this viewport is showing, where the controls that act on it
-        // are, rather than on a strip of its own above them.
-        .when_some(view.shown_ship_name(), |this, name| {
-            this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name)).child(crate::ui::rule_v(cx))
-        })
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
         .child(render_splash_button(view, entity))
-        .child(render_splash_boxes_button(view, entity))
-        .child(render_export_button(view, entity))
-        // The pane's own controls: one toolbar, not two.
-        .when_some(view.pane(), |this, pane| {
-            this.child(crate::ui::rule_v(cx))
-                .child(render_options_button(pane.clone(), cx))
-                .child(render_penetration_button(pane, cx))
-        });
+        .child(render_splash_boxes_button(view, entity));
 
-    let trajectory = h_flex()
+    let tools = h_flex()
         .flex_wrap()
+        .gap_1()
         .items_center()
-        .gap_2()
-        .px_2()
-        .py_1()
-        .border_l_2()
-        .border_color(if trajectory_active { crate::theme::accent() } else { cx.theme().border })
-        .when(trajectory_active, |row| row.bg(crate::theme::accent().opacity(0.08)))
-        .child(render_trajectory_button(view, entity));
+        .child(render_trajectory_button(view, entity))
+        .child(render_penetration_button(pen, pane.clone()))
+        .child(render_export_button(view, entity));
 
-    crate::ui::toolbar(cx).flex_col().items_stretch().p_0().gap_0().w_full().child(commands).child(trajectory).when(
-        trajectory_active,
-        |toolbar| {
-            toolbar.child(
-                div()
-                    .px_2()
-                    .pb_1()
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .whitespace_normal()
-                    .child(t!("ui.armor.trajectory_tooltip").to_string()),
-            )
-        },
-    )
+    v_flex().id("armor-options-tools").test_support().gap_1().child(toggles).child(tools).into_any_element()
 }
 
-/// Toolbar toggle for "Show Hidden": the plates that are part of the combat
+/// What the Pen Check toggle shows, read from the pane by the caller.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PenCheckButton {
+    pub open: bool,
+    pub ship_count: usize,
+}
+
+/// The viewport context menu's toggles, read from `entity` and its pane as
+/// the menu opens.
+pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportView>, cx: &App) -> PopupMenu {
+    let view = entity.read(cx);
+    let has_armor = view.has_armor();
+    let show_hidden = view.show_hidden_only();
+    let gaps_shown = view.gaps().shown;
+    let splash = view.splash_state();
+    let trajectory_shown = view.trajectory_state().shown;
+    let pane = view.pane();
+
+    let toggle = |label: String,
+                  checked: bool,
+                  enabled: bool,
+                  apply: fn(&mut ViewportView, bool, &mut Context<ViewportView>)| {
+        let entity = entity.clone();
+        PopupMenuItem::new(label).checked(checked).disabled(!enabled).on_click(move |_event, _window, cx| {
+            entity.update(cx, |view, cx| apply(view, !checked, cx));
+        })
+    };
+    menu = menu
+        .item(toggle(
+            t!("ui.armor.show_hidden").into_owned(),
+            show_hidden,
+            has_armor,
+            ViewportView::set_show_hidden_only,
+        ))
+        .item(toggle(t!("ui.armor.gaps").into_owned(), gaps_shown, has_armor, ViewportView::set_show_gaps))
+        .item(toggle(
+            t!("ui.armor.splash_mode").into_owned(),
+            splash.shown,
+            splash.has_data,
+            ViewportView::set_splash_mode,
+        ))
+        .item(toggle(
+            t!("ui.armor.splash_boxes").into_owned(),
+            splash.boxes_shown,
+            splash.has_data,
+            ViewportView::set_show_splash_boxes,
+        ))
+        .item(toggle(
+            t!("ui.armor.trajectory").into_owned(),
+            trajectory_shown,
+            has_armor,
+            ViewportView::set_trajectory_mode,
+        ));
+
+    if let Some(pane) = pane {
+        let (analysis_open, options_open) = {
+            let pane = pane.read(cx);
+            (pane.analysis_open(), pane.options_open())
+        };
+        let analysis_pane = pane.clone();
+        menu = menu
+            .item(PopupMenuItem::new(t!("ui.armor.pen_check").into_owned()).checked(analysis_open).on_click(
+                move |_event, _window, cx| {
+                    analysis_pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
+                },
+            ))
+            .item(PopupMenuItem::new(t!("ui.armor.options_panel").into_owned()).checked(options_open).on_click(
+                move |_event, _window, cx| {
+                    pane.update(cx, |pane, cx| pane.toggle_options(cx));
+                },
+            ));
+    }
+
+    let export_entity = entity.clone();
+    menu.separator().item(PopupMenuItem::new(t!("ui.armor.export_model").into_owned()).disabled(!has_armor).on_click(
+        move |_event, _window, cx| {
+            export_entity.update(cx, |view, cx| view.open_export_confirm(cx));
+        },
+    ))
+}
+
+/// Rail toggle for "Show Hidden": the plates that are part of the combat
 /// model but that the game's own armor viewer never draws.
 ///
 /// A mode rather than an addition, so it reads as selected while it is on.
@@ -422,7 +472,7 @@ fn render_trajectory_section(
         .into_any_element()
 }
 
-/// Toolbar toggle for gap detection, which carries its own count: the
+/// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
 fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
     let gaps = view.gaps();
@@ -451,7 +501,7 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
     )
 }
 
-/// Toolbar toggle for trajectory mode, which carries how many shells have
+/// Rail toggle for trajectory mode, which carries how many shells have
 /// been cast: while the mode is on a click casts rather than hides a plate,
 /// and the count is what says whether the last click landed.
 fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
@@ -632,7 +682,7 @@ pub(super) fn render_trajectory_panel(
         .into_any_element()
 }
 
-/// Toolbar toggle for splash mode, carrying how many zones the last burst
+/// Rail toggle for splash mode, carrying how many zones the last burst
 /// reached: that number is the answer the mode exists to give.
 ///
 /// Refused on a hull that ships no splash file, and on one where the chosen
@@ -668,7 +718,7 @@ fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
     )
 }
 
-/// Toolbar toggle for the splash-box outlines, which stand on their own: they
+/// Rail toggle for the splash-box outlines, which stand on their own: they
 /// are worth seeing while placing a burst and after it.
 fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
     let state = view.splash_state();
@@ -679,7 +729,7 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
         state.boxes_shown,
         Button::new("armor-splash-boxes-button")
             .child(crate::icons::icon(crate::icons::CUBE))
-            .label(t!("ui.armor.splash_toggle").to_string())
+            .label(t!("ui.armor.splash_boxes").to_string())
             .compact()
             .selected(state.boxes_shown)
             .disabled(!state.has_data)
@@ -690,32 +740,18 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
     )
 }
 
-/// Toolbar toggle for the options rail, which holds the visibility, hull and
-/// display sections. `SidebarToggleButton` is the component the rest of the app
-/// collapses a side panel with, and it picks the panel-right icons from `side`.
-fn render_options_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
-    let open = pane.read(cx).options_open();
-
-    // `SidebarToggleButton` carries no tooltip of its own; the panel-right
-    // icons it picks are the app's own vocabulary for this.
-    SidebarToggleButton::new().side(Side::Right).collapsed(!open).on_click(move |_event, _window, cx: &mut App| {
-        pane.update(cx, |pane, cx| pane.toggle_options(cx));
-    })
-}
-
-/// Toolbar toggle for the penetration checker, which belongs to the pane
-/// rather than to this viewport: the egui app puts its own Pen Check button
-/// in this same row (`ui/armor.pen_check`).
+/// Rail toggle for the penetration checker, which belongs to the pane rather
+/// than to the viewport: the egui app puts its own Pen Check button beside
+/// the viewport toggles (`ui/armor.pen_check`).
 ///
 /// A toggle rather than a popover trigger. The verdicts are read against the
 /// plate the pointer is on, so the panel has to stay up while the pointer is
 /// on the hull; a popover closes on the first click and swallows the pointer
 /// moves that would move the plate.
-fn render_penetration_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
-    let open = pane.read(cx).analysis_open();
-    let count = pane.read(cx).comparison_count();
-    let label = if count > 0 {
-        format!("{} ({})", t!("ui.armor.pen_check"), count)
+fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>) -> impl IntoElement + use<> {
+    let open = pen.open;
+    let label = if pen.ship_count > 0 {
+        format!("{} ({})", t!("ui.armor.pen_check"), pen.ship_count)
     } else {
         t!("ui.armor.pen_check").into_owned()
     };
@@ -738,7 +774,7 @@ fn render_penetration_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl In
     )
 }
 
-/// Toolbar trigger for the export-confirm flow (Milestone 5 Task 10): opens
+/// Rail trigger for the export-confirm flow (Milestone 5 Task 10): opens
 /// `ViewportView`'s confirm panel for the ship currently displayed in this
 /// pane, at its current hull/LOD/module selection. Ports the egui app's
 /// "Export Ship Model" tab button (`tab.rs:1696-1709`), which is likewise
