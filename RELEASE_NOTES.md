@@ -4,14 +4,24 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.0.3
+
+### Replay analysis
+
+- Replays from newer client builds use their matching roster layout when an exact constants file is unavailable. This keeps the application from failing while opening a replay with older fallback constants.
+- Player action menus can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
+
+### Game data and compatibility
+
+- GitHub constants checks remain available after the application fetches versioned constants in a background worker.
+- Ship configuration and captain skill parsing handles current packet data, including the 15.9 exterior state layout, and older replay layouts.
+
 ## 1.0.2
 
 ### Replay analysis
 
 - Replay parsing follows the 15.9 roster layout while retaining the older layout for earlier replays. Player teams and ship identities resolve correctly, and roster data links to vehicle packets so captain skills and ship configurations are retained.
-- Replays from newer client builds use their matching roster layout when an exact constants file is unavailable. This keeps both applications from failing while opening a replay with older fallback constants.
 - Normalized replay reports include stable player ordering, battle outcome, and ship identity. Replay analysis can resolve effective fire chance and track damage, spotting, and consumable use over battle time.
-- Player action menus in both applications can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
 - `replayshark` can inspect rosters, battle results, and constants mappings.
 
 ### Game data and compatibility
@@ -19,8 +29,7 @@ per-commit history lives in `CHANGELOG.md`.
 - Game data downloads cover multiple required builds in one plan, deduplicate shared files, verify downloaded content, and report which build contains a corrupt file.
 - Steam public-branch depot manifests are pinned for reproducible game data downloads. WoWs 15.8 data is included.
 - Fixed `wows-data-mgr` link and library behavior when unused files are removed by aggressive cache cleanup.
-- GitHub constants checks remain available after the application fetches versioned constants in a background worker.
-- Ship configuration and captain skill parsing handles current packet data, including the 15.9 exterior state layout, and older replay layouts.
+- Ship configuration and captain skill parsing handles the current packet data and older replay layouts.
 
 ### Armor viewer
 
