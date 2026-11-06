@@ -1,0 +1,61 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: search
+---
+considered:
+  total: 851
+  by_class:
+    destroyer: 216
+    cruiser: 320
+    battleship: 237
+    aircraft_carrier: 50
+    submarine: 28
+  test: 51
+qualifying:
+  total: 28
+  by_class:
+    destroyer: 10
+    cruiser: 15
+    battleship: 3
+  test: 3
+share_pct: 3.3
+share_pct_by_class:
+  destroyer: 4.6
+  cruiser: 4.7
+  battleship: 1.3
+  aircraft_carrier: 0
+  submarine: 0
+by_kind:
+  alternative_fire_mode: 28
+  burst_fire: 19
+released:
+  - "T11 Annapolis (cruiser, USA): Burst Fire (3 salvos 1.5 s apart, then 40 s reload)"
+  - "T11 Condé (cruiser, France): Burst Fire and Modified Shells (2 salvos 1.5 s apart, then 50 s reload): -20% Maximum main battery shell dispersion, +25% Main battery HE shell armor penetration capability, +25% Secondary battery HE shell armor penetration capability"
+  - "T11 Edgar (cruiser, United_Kingdom): Burst Fire and Modified Shells (3 salvos 1.5 s apart, then 35 s reload): +50% Main battery AP shell damage, +100% AP shell armor penetration capability"
+  - "T11 J. Humphreys (destroyer, USA): Burst Fire and Modified Shells (3 salvos 1.5 s apart, then 35 s reload): +50% Main battery damage"
+  - "T11 Kurama (cruiser, Japan): Burst Fire and Modified Shells (2 salvos 2 s apart, then 26 s reload); shells HE 203 mm, AP 203 mm"
+  - "T11 Yamagiri (destroyer, Japan): Burst Fire (3 salvos 1 s apart, then 30 s reload)"
+  - "T11 Zorkiy (destroyer, Russia): Burst Fire and Modified Shells (3 salvos 1 s apart, then 40 s reload): +50% Main battery HE shell armor penetration capability"
+  - "T10 A. da Barbiano (destroyer, Italy): Modified Shells (3.71 s reload); shells SAP 90 mm"
+  - "T10 Castilla (cruiser, Spain): Burst Fire (2 salvos 1.2 s apart, then 28.5 s reload)"
+  - "T10 Hawaii (cruiser, USA) [replicas: Hawaii G]: Modified Shells (3.4 s reload): -31.7% Main battery firing range; shells HE 127 mm, AP 127 mm"
+  - "T10 Laffey (destroyer, USA): Burst Fire (3 salvos 1 s apart, then 25 s reload)"
+  - "T10 Taejong (cruiser, Pan_Asia): Modified Shells (3.5 s reload); shells HE 127 mm, AP 127 mm"
+  - "T10 Álvaro de Bazán (destroyer, Spain): Burst Fire and Modified Shells (3 salvos 1.2 s apart, then 21 s reload): -10% Maximum main battery shell dispersion"
+  - "T9 Almte. Oquendo (cruiser, Spain): Modified Shells (18 s reload): -20% Maximum main battery shell dispersion; shells HE 203 mm, AP 203 mm"
+  - "T9 Andalucía (cruiser, Spain): Burst Fire (2 salvos 1.6 s apart, then 33 s reload)"
+  - "T9 Aragón (cruiser, Spain): Modified Shells (28 s reload): -27% Maximum main battery shell dispersion, +60% AP shell armor penetration capability; shells HE 305 mm, AP 305 mm"
+  - "T9 Johnston (destroyer, USA) [replicas: GQ Johnny]: Burst Fire (3 salvos 1.4 s apart, then 9 s reload)"
+  - "T9 La Spezia (cruiser, Italy): Burst Fire (2 salvos 1.5 s apart, then 35 s reload)"
+  - "T9 Triunfante (battleship, Spain): Modified Shells (33 s reload); shells HE 406 mm, AP 406 mm"
+  - "T9 Victoria (battleship, Spain) [replicas: Victoria B]: Burst Fire and Modified Shells (2 salvos 2 s apart, then 53 s reload); shells AP 381 mm, HE 381 mm"
+  - "T8 Cataluña (cruiser, Spain): Burst Fire (2 salvos 1.8 s apart, then 31 s reload)"
+  - "T8 Datong (destroyer, Pan_Asia): Modified Shells (4.45 s reload); shells HE 100 mm, AP 100 mm"
+  - "T8 Numancia (cruiser, Spain): Burst Fire and Modified Shells (3 salvos 1 s apart, then 42 s reload): +25% Main battery AP shell damage"
+  - "T7 Asturias (cruiser, Spain): Burst Fire (2 salvos 2 s apart, then 32 s reload)"
+  - "T7 Fiume (cruiser, Italy): Burst Fire and Modified Shells (2 salvos 1.5 s apart, then 36.5 s reload): -20% Maximum main battery shell dispersion; shells HE 203 mm, AP 203 mm (standard shell)"
+test:
+  - "T10 Tōgasa (battleship, Japan, test): Modified Shells (36 s reload): +28% AP shell armor penetration capability; shells HE 310 mm, AP 310 mm"
+  - "T9 Frank Friday (destroyer, USA, test): Burst Fire (3 salvos 1.4 s apart, then 9 s reload)"
+  - "T9 Halcón (destroyer, Spain, test): Modified Shells (5.2 s reload); shells HE 120 mm"
+note: "Read from GameParams of the current client for each ship's modules: Combat Instructions from the hull, alternative fire modes from the main battery. Test ships may change before release. Replicas such as BA ships are named in their original's [replicas]."

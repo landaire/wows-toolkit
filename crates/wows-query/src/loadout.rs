@@ -42,6 +42,19 @@ pub struct AppliedUpgrade {
     pub slot: u8,
 }
 
+/// Modifiers of a ship ability counted as active, such as Combat
+/// Instructions or an alternative fire mode.
+#[derive(Debug, Clone)]
+pub(crate) struct AbilityModifiers {
+    /// Source name the stat changes cite before relabeling.
+    pub(crate) source: String,
+
+    /// English name, e.g. "Combat Instructions: Modified Secondary Munitions".
+    pub(crate) label: String,
+
+    pub(crate) modifiers: Vec<CrewSkillModifier>,
+}
+
 /// A loadout resolved against one ship.
 pub(crate) struct ResolvedLoadout {
     pub(crate) skills: Vec<CrewSkill>,
@@ -51,18 +64,30 @@ pub(crate) struct ResolvedLoadout {
     pub(crate) triggers: Triggers,
     pub(crate) hp_percent: Option<Percent>,
 
-    /// Skill internal names and upgrade param names to English names, for
-    /// relabeling provenance.
+    /// Ship abilities switched on.
+    pub(crate) abilities: Vec<AbilityModifiers>,
+
+    /// Skill internal names, upgrade param names and ability sources to
+    /// English names, for relabeling provenance.
     pub(crate) labels: HashMap<String, String>,
 }
 
 impl ResolvedLoadout {
+    /// Whether no captain skill or upgrade is chosen. Abilities do not count.
     pub(crate) fn is_empty(&self) -> bool {
         self.skills.is_empty() && self.modernizations.is_empty()
     }
 
     pub(crate) fn skill_points(&self) -> u32 {
         self.applied_skills.iter().map(|skill| u32::from(skill.points)).sum()
+    }
+
+    /// Switches `abilities` on.
+    pub(crate) fn activate(&mut self, abilities: &[AbilityModifiers]) {
+        for ability in abilities {
+            self.labels.insert(ability.source.clone(), ability.label.clone());
+        }
+        self.abilities.extend_from_slice(abilities);
     }
 }
 
@@ -128,6 +153,7 @@ impl GameData {
             applied_upgrades,
             triggers: if request.conditions_met { Triggers::All } else { Triggers::Unmet },
             hp_percent: request.hp_percent,
+            abilities: Vec::new(),
             labels,
         })
     }
@@ -138,10 +164,23 @@ impl GameData {
         ship: &Ship,
         loadout: &ResolvedLoadout,
     ) -> Result<ResolvedEffects, QueryError> {
+        // Abilities apply like upgrades: always on, each under its own name.
+        let combined: Vec<(String, Vec<CrewSkillModifier>)>;
+        let modernizations = if loadout.abilities.is_empty() {
+            &loadout.modernizations
+        } else {
+            combined = loadout
+                .modernizations
+                .iter()
+                .cloned()
+                .chain(loadout.abilities.iter().map(|ability| (ability.source.clone(), ability.modifiers.clone())))
+                .collect();
+            &combined
+        };
         let build = Build {
             ship: &ship.param,
             skills: &loadout.skills,
-            modernizations: &loadout.modernizations,
+            modernizations,
             triggers: &loadout.triggers,
             health: loadout.hp_percent.map(|percent| HealthFraction::new(percent.to_fraction())),
         };
@@ -164,6 +203,7 @@ impl GameData {
             applied_upgrades: Vec::new(),
             triggers: Triggers::Unmet,
             hp_percent: None,
+            abilities: Vec::new(),
             labels: HashMap::new(),
         }
     }

@@ -736,6 +736,21 @@ impl Param {
             _ => None,
         }
     }
+
+    /// This ship param with its main battery in the alternative fire mode.
+    /// See [`Vehicle::in_alternative_fire_mode`].
+    pub fn in_alternative_fire_mode(&self) -> Option<Self> {
+        let vehicle = self.vehicle()?.in_alternative_fire_mode()?;
+
+        Some(Self {
+            id: self.id,
+            index: self.index.clone(),
+            name: self.name.clone(),
+            species: self.species.clone(),
+            nation: self.nation.clone(),
+            data: ParamData::Vehicle(vehicle),
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
@@ -1719,6 +1734,37 @@ impl Vehicle {
     /// Cosmetic series, e.g. "azurlane". `None` outside any series.
     pub fn peculiarity(&self) -> Option<&str> {
         self.peculiarity.as_deref()
+    }
+
+    /// This ship with its main battery in the alternative fire mode: guns
+    /// reload for the mode's full reload and load its shells when it has its
+    /// own. `None` when the ship has no such mode.
+    pub fn in_alternative_fire_mode(&self) -> Option<Self> {
+        let components = self.ttx_components.as_ref()?;
+        let switched_components = components.in_alternative_fire_mode()?;
+
+        let mut switched = self.clone();
+        if let Some(config) = &mut switched.config_data {
+            for hull in config.hull_upgrades.values_mut() {
+                let mounted = hull.mounts_by_type.get_mut(&super::keys::ComponentType::Artillery);
+                for component in mounted.into_iter().chain(hull.alternative_mounts.values_mut()) {
+                    let Some(mode) = components.alternative_fire(&component.component_name) else {
+                        continue;
+                    };
+                    if mode.ammo.is_empty() {
+                        continue;
+                    }
+
+                    let names: Vec<String> = mode.ammo.iter().map(|ammo| ammo.name.clone()).collect();
+                    for mount in &mut component.mounts {
+                        mount.ammo = names.clone();
+                    }
+                }
+            }
+        }
+        switched.ttx_components = Some(switched_components);
+
+        Some(switched)
     }
 
     /// Look up a specific hull upgrade config by name.

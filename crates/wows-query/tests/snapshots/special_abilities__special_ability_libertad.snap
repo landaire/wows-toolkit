@@ -1,0 +1,26 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Libertad
+  index: PVSB010
+  tier: 10
+  class: battleship
+  nation: Pan_America
+  group: upgradeable
+  status: released
+abilities:
+  - kind: combat_instructions
+    name: Modified Secondary Munitions
+    activation: Press the Combat Instructions key (F by default) once the meter is full.
+    charge:
+      - "Hit an enemy ship with a main battery shell: +6.5%"
+      - "Receive 1000 HP of potential damage: +0.15%"
+    progress_loss: "After 50 s without progress, the meter loses 5% every 1 s."
+    duration_s: 30
+    effects:
+      - +30% Secondary battery damage
+      - +20% Secondary battery firing range
+      - "-20% Secondary battery reload time"
+    uses_per_battle: "No limit per battle and no cooldown or charges: each use empties the meter, which must fill to 100% again before the next use."

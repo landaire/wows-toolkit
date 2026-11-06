@@ -154,6 +154,11 @@ pub enum QueryError {
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 
+    #[error(
+        "{ship} has no special ability (neither Combat Instructions nor an alternative fire mode); ask again without special_ability_active"
+    )]
+    NoSpecialAbility { ship: String },
+
     #[error("failed to compute the stats of {ship}")]
     Build {
         ship: String,

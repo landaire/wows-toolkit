@@ -1,0 +1,25 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Archerfish
+  index: PASS710
+  tier: 10
+  class: submarine
+  nation: USA
+  group: ultimate
+  status: released
+abilities:
+  - kind: combat_instructions
+    name: Immediate Torpedo Tubes Reload
+    activation: Starts by itself once the meter is full.
+    charge:
+      - "Hit an enemy ship with a torpedo: +50%"
+      - "Receive 1500 HP of potential damage: +50%"
+    progress_loss: "After 10 s without progress, the meter loses 50% every 1 s."
+    duration_s: 45
+    effects:
+      - "-17.5% Torpedo tube reload time"
+      - "-20% Consumable preparation and cooldown time"
+    uses_per_battle: "No limit per battle and no cooldown or charges: each use empties the meter, which must fill to 100% again before the next use."

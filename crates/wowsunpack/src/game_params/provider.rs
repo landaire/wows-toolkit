@@ -29,6 +29,17 @@ use crate::game_params::ttx::components::LauncherDirectionGroup;
 use crate::game_params::ttx::components::LoaderCount;
 use crate::game_params::ttx::components::TorpedoLoaderGroup;
 use crate::game_params::ttx::components::TorpedoLoading;
+use crate::game_params::ttx::model::Hp;
+use crate::game_params::ttx::model::Seconds;
+use crate::game_params::ttx::special_abilities::Activation;
+use crate::game_params::ttx::special_abilities::AlternativeAmmo;
+use crate::game_params::ttx::special_abilities::AlternativeFireMode;
+use crate::game_params::ttx::special_abilities::BurstShots;
+use crate::game_params::ttx::special_abilities::CombatInstructions;
+use crate::game_params::ttx::special_abilities::ProgressDecay;
+use crate::game_params::ttx::special_abilities::ProgressEvent;
+use crate::game_params::ttx::special_abilities::ProgressPercent;
+use crate::game_params::ttx::special_abilities::ProgressTrigger;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
 use crate::game_types::Vec3;
@@ -704,6 +715,166 @@ fn read_torpedo_loading(component: &pickled::Dict) -> Option<TorpedoLoading> {
     Some(TorpedoLoading { loader_groups, directions })
 }
 
+/// Combat Instructions of a `specials` component (its `RageMode` section),
+/// `None` when it has none. Absent scalar fields take the client's GameParams
+/// class defaults (`RageMode`: zero times, `isAutoUsage` false).
+fn read_combat_instructions(specials: &pickled::Dict) -> Option<CombatInstructions> {
+    let section = specials.get(&pk(keys::RAGE_MODE))?.dict_or_object_dict()?;
+    let section = section.inner();
+    let seconds = |key: &str| Seconds::from(read_float(&section, key).unwrap_or(0.0));
+
+    let activation = match section.get(&pk("isAutoUsage")).and_then(|value| value.bool_ref().copied()) {
+        Some(true) => Activation::Automatic,
+        Some(false) | None => Activation::Manual,
+    };
+    let preparation = Some(seconds("boostPreparation")).filter(|time| time.value() > 0.0);
+    let decay = match (
+        read_float(&section, "decrementDelay"),
+        read_float(&section, "decrementCount"),
+        read_float(&section, "decrementPeriod"),
+    ) {
+        (Some(delay), Some(loss), Some(period)) if loss > 0.0 => Some(ProgressDecay {
+            delay: Seconds::from(delay),
+            loss: ProgressPercent(loss),
+            period: Seconds::from(period),
+        }),
+        _ => None,
+    };
+    let modifiers = section
+        .get(&pk("modifiers"))
+        .and_then(|value| value.dict_or_object_dict())
+        .map(|modifiers| build_skill_modifiers(&modifiers.inner()))
+        .unwrap_or_default();
+
+    // The client reads every `GameLogicTrigger*` child, in name order
+    // (Components/GameLogicTriggers.py).
+    let mut trigger_names: Vec<String> = section
+        .keys()
+        .filter_map(|key| key.string_ref().map(|name| name.inner().clone()))
+        .filter(|name| name.starts_with("GameLogicTrigger"))
+        .collect();
+    trigger_names.sort();
+    let triggers = trigger_names
+        .iter()
+        .filter_map(|name| section.get(&pk(name))?.dict_or_object_dict())
+        .filter_map(|trigger| read_progress_trigger(&trigger.inner()))
+        .collect();
+
+    Some(CombatInstructions {
+        name: read_string(&section, "rageModeName").unwrap_or_default(),
+        activation,
+        duration: seconds("boostDuration"),
+        preparation,
+        decay,
+        modifiers,
+        triggers,
+    })
+}
+
+/// One trigger of a `RageMode` section, `None` unless its first action adds
+/// meter progress, as the client lists them (`RageModeSystem.buildRageModeTrigger`).
+fn read_progress_trigger(trigger: &pickled::Dict) -> Option<ProgressTrigger> {
+    let child = |prefix: &str| -> Option<pickled::Dict> {
+        let mut names: Vec<String> = trigger
+            .keys()
+            .filter_map(|key| key.string_ref().map(|name| name.inner().clone()))
+            .filter(|name| name.to_ascii_lowercase().starts_with(prefix))
+            .collect();
+        names.sort();
+        let first = trigger.get(&pk(names.first()?))?.dict_or_object_dict()?;
+
+        Some(first.inner().clone())
+    };
+    let action = child("action")?;
+    if read_string(&action, "type").as_deref() != Some("RageModeProgressAction") {
+        return None;
+    }
+    let activator = child("activator")?;
+
+    let ids = |key: &str| -> Vec<i64> {
+        activator
+            .get(&pk(key))
+            .map(read_sequence)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|value| value.i64_ref().copied())
+            .collect()
+    };
+    let kind = read_string(&activator, "type").unwrap_or_default();
+    let event = match kind.as_str() {
+        "RibbonActivator" => ProgressEvent::Ribbon { ribbons: ids("ribbons"), sub_ribbons: ids("subRibbons") },
+        "PotentialDamageActivator" => {
+            ProgressEvent::PotentialDamage { per: Hp::from(read_float(&activator, "potentialDamageShift")?) }
+        }
+        "TimerActivator" => ProgressEvent::Timer {
+            period: Seconds::from(read_float(&activator, "duration")?),
+            repeating: activator.get(&pk("isRepeating")).and_then(|value| value.bool_ref().copied()).unwrap_or(false),
+        },
+        "ConsumableUseActivator" => ProgressEvent::ConsumableUse {
+            consumables: activator.get(&pk("trackedConsumables")).map(read_string_sequence).unwrap_or_default(),
+        },
+        "AdjustmentShotActivator" => {
+            ProgressEvent::AdjustmentShot { radius: Meters::from(read_float(&activator, "radius")?) }
+        }
+        "VisibilityChangedActivator" => ProgressEvent::VisibilityChanged {
+            visible: activator.get(&pk("isVisible")).and_then(|value| value.bool_ref().copied())?,
+        },
+        _ => ProgressEvent::Other { activator: kind },
+    };
+
+    Some(ProgressTrigger {
+        progress_name: read_string(&action, "progressName").unwrap_or_else(|| "default".to_owned()),
+        gain: ProgressPercent(read_float(&action, "progress")?),
+        event,
+        required_count: read_float(&activator, "requiredCount").map_or(1, |count| count as u32),
+        max_activations: read_float(&activator, "maxActivations")
+            .filter(|count| *count >= 0.0)
+            .map(|count| count as u32),
+        starts_enabled: trigger.get(&pk("startEnabled")).and_then(|value| value.bool_ref().copied()).unwrap_or(true),
+    })
+}
+
+/// The alternative fire mode of an artillery component, `None` when it has
+/// none.
+fn read_alternative_fire(artillery: &pickled::Dict) -> Option<AlternativeFireMode> {
+    let section = artillery.get(&pk(keys::SWITCHABLE_MODE_ARTILLERY))?.dict_or_object_dict()?;
+    let section = section.inner();
+
+    let pool: HashMap<String, i64> = section
+        .get(&pk("secondaryAmmoPool"))
+        .and_then(|value| value.dict_or_object_dict())
+        .map(|pool| {
+            pool.inner()
+                .iter()
+                .filter_map(|(name, count)| Some((name.string_ref()?.inner().clone(), *count.i64_ref()?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let ammo = section
+        .get(&pk("secondaryAmmoList"))
+        .map(read_string_sequence)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| {
+            let limit = pool.get(&name).and_then(|count| u32::try_from(*count).ok());
+            AlternativeAmmo { name, limit }
+        })
+        .collect();
+    let modifiers = section
+        .get(&pk("modifiers"))
+        .and_then(|value| value.dict_or_object_dict())
+        .map(|modifiers| build_skill_modifiers(&modifiers.inner()))
+        .unwrap_or_default();
+
+    Some(AlternativeFireMode {
+        shots: BurstShots(u32::try_from(*section.get(&pk("shotsCount"))?.i64_ref()?).ok()?),
+        shot_interval: Seconds::from(read_float(&section, "burstReloadTime")?),
+        full_reload: Seconds::from(read_float(&section, "fullReloadTime")?),
+        modifiers,
+        ammo,
+    })
+}
+
 /// Port price and research links from a ship's `ShipUpgradeInfo` dict.
 fn read_ship_research(upgrade_info: &pickled::Dict) -> super::types::ShipResearch {
     let mut next_ships: Vec<String> = upgrade_info
@@ -1275,9 +1446,35 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                 .and_then(|v| v.dict_or_object_dict())
                 .and_then(|c| c.inner().get(&pk(component_key)).map(read_all_strings))
                 .unwrap_or_default();
+            if component_key == keys::COMP_ARTILLERY {
+                for component in &listed {
+                    if ttx_components.alternative_fire.contains_key(component) {
+                        continue;
+                    }
+                    let Some(data) = ship_data.get(&pk(component)).and_then(|v| v.dict_or_object_dict()) else {
+                        continue;
+                    };
+
+                    if let Some(mode) = read_alternative_fire(&data.inner()) {
+                        ttx_components.alternative_fire.insert(component.clone(), mode);
+                    }
+                }
+            }
             if !listed.is_empty() {
                 ttx_components.upgrade_components.insert(upgrade_name.clone(), listed);
             }
+        }
+
+        // Combat Instructions hang off the hull's `specials` component.
+        if uc_type == keys::UC_TYPE_HULL
+            && let Some(specials) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_SPECIALS)).and_then(read_first_string))
+            && let Some(specials_data) = ship_data.get(&pk(&specials)).and_then(|v| v.dict_or_object_dict())
+            && let Some(instructions) = read_combat_instructions(&specials_data.inner())
+        {
+            ttx_components.combat_instructions.insert(upgrade_name.clone(), instructions);
         }
 
         // Torpedoes are a standalone _Torpedoes upgrade naming a torpedo component

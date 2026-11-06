@@ -58,6 +58,12 @@ pub const COMP_DIVE_BOMBER: &str = "diveBomber";
 pub const COMP_TORPEDO_BOMBER: &str = "torpedoBomber";
 pub const COMP_SKIP_BOMBER: &str = "skipBomber";
 pub const COMP_AIR_SUPPORT: &str = "airSupport";
+pub const COMP_SPECIALS: &str = "specials";
+
+/// Combat Instructions section of a `specials` component.
+pub const RAGE_MODE: &str = "RageMode";
+/// Alternative fire mode section of an artillery component.
+pub const SWITCHABLE_MODE_ARTILLERY: &str = "SwitchableModeArtilleryModule";
 
 /// Aircraft params of a plane-slot component.
 pub const PLANES: &str = "planes";

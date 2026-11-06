@@ -1,0 +1,13 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+  status: released
+none: "No special ability: the ship has neither Combat Instructions nor an alternative main battery fire mode, so its ability key (F by default) does nothing."

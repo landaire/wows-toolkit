@@ -19,9 +19,11 @@ use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
 use wowsunpack::game_params::ttx::render_attributions;
 use wowsunpack::game_params::ttx::render_stat_rows;
+use wowsunpack::game_params::ttx::special_abilities::BurstShots;
 
 use crate::builds::Better;
 use crate::builds::BuildStat;
+use crate::builds::Outcome;
 use crate::builds::Planner;
 use crate::builds::StatPlan;
 use crate::builds::round;
@@ -36,6 +38,7 @@ use crate::names::Interpretations;
 use crate::rates::Rates;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
+use crate::special_abilities::ActiveAbility;
 use crate::text::clean;
 
 /// Arguments for `ship_stats`.
@@ -57,6 +60,9 @@ pub struct ShipStatsArgs {
     /// Remaining health in percent for health-scaled effects such as Adrenaline Rush. Defaults to full health.
     pub hp_percent: Option<Percent>,
 
+    /// Switch on the ship's special ability (its F key): Combat Instructions apply their effects; an alternative fire mode such as Burst Fire switches the main battery to it, with its reload, shells and effects. Defaults to false.
+    pub special_ability_active: Option<bool>,
+
     /// Include the full stat card. Defaults to true without skills or upgrades and false with them, when only the changes are listed.
     pub full_card: Option<bool>,
 }
@@ -68,6 +74,10 @@ pub struct ShipStatsOutput {
     pub interpretations: Interpretations,
 
     pub ship: ShipSummary,
+
+    /// Abilities switched on by special_ability_active.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub special_ability: Vec<String>,
 
     /// Without skills and upgrades: weapon stats on the best-fit build.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,8 +120,32 @@ pub struct WeaponBuilds {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub torpedo_reload: Option<BuildStat<Seconds>>,
 
+    /// With Burst Fire switched on: the salvos of one burst and its timing.
+    /// main_battery_reload is then the reload after a burst.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub burst_fire: Option<BurstFireBuilds>,
+
     #[serde(flatten)]
     pub rates: Rates,
+}
+
+/// Burst timing on the best-fit build. The client scales the interval and
+/// the reload by the same reload modifiers.
+#[derive(Debug, Clone, Serialize)]
+pub struct BurstFireBuilds {
+    pub shots_per_burst: BurstShots,
+
+    /// Reload between the salvos of one burst.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shot_interval: Option<BuildStat<Seconds>>,
+
+    /// Reload after the last salvo of a burst.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reload_after_burst: Option<BuildStat<Seconds>>,
+
+    /// One burst and the reload after it: (shots - 1) x interval + reload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<BuildStat<Seconds>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -152,14 +186,29 @@ impl GameData {
             conditions_met: args.conditions_met.unwrap_or(false),
             hp_percent: args.hp_percent,
         };
-        let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
-        let modified = !loadout.is_empty() || args.hp_percent.is_some();
+        let mut loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
 
-        let card = self.card(ship, &loadout)?;
+        let ability =
+            if args.special_ability_active.unwrap_or(false) { Some(self.active_ability(ship)?) } else { None };
+        let stock_ship = ship;
+        let ship = ability.as_ref().and_then(|ability| ability.switched.as_ref()).unwrap_or(ship);
+        if let Some(ability) = &ability {
+            loadout.activate(&ability.modifiers);
+        }
+        let modified = !loadout.is_empty() || args.hp_percent.is_some() || ability.is_some();
+
+        let mut card = self.card(ship, &loadout)?;
+        if let Some(burst) = ability.as_ref().and_then(|ability| ability.burst)
+            && let Some(reload) = card.stats.artillery.as_ref().and_then(|artillery| artillery.reload_time)
+        {
+            burst.average_damage_rates(&mut card.derived, Seconds::new(reload.value()));
+        }
         let rows = card.stats.rows();
 
+        // The baseline is the stock card in the standard fire mode, so an
+        // ability's changes show against it.
         let changes = if modified {
-            let baseline = self.card(ship, &self.stock_loadout())?;
+            let baseline = self.card(stock_ship, &self.stock_loadout())?;
             let attributions = render_attributions(&card.provenance, &rows, self.provider(), self.provider());
             let mut changes = changes(&baseline.stats, &card.stats, &attributions, &loadout, self, |_| true);
             changes.extend(derived_changes(&baseline.derived, &card.derived, &attributions, &loadout));
@@ -170,11 +219,12 @@ impl GameData {
 
         let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card, self) } else { Vec::new() };
 
-        let build_stats = if loadout.is_empty() { Some(self.weapon_builds(ship)?) } else { None };
+        let build_stats = if loadout.is_empty() { Some(self.weapon_builds(ship, ability.as_ref())?) } else { None };
 
         Ok(ShipStatsOutput {
             interpretations,
             ship: ship.summary(),
+            special_ability: ability.map(|ability| ability.names).unwrap_or_default(),
             build_stats,
             skill_points: (!loadout.applied_skills.is_empty()).then(|| loadout.skill_points()),
             skills: loadout.applied_skills,
@@ -185,12 +235,42 @@ impl GameData {
         })
     }
 
-    fn weapon_builds(&self, ship: &Ship) -> Result<WeaponBuilds, QueryError> {
-        let planner = Planner::new(self, ship);
+    fn weapon_builds(&self, ship: &Ship, ability: Option<&ActiveAbility>) -> Result<WeaponBuilds, QueryError> {
+        let planner = match ability {
+            Some(ability) => Planner::new(self, ship).with_ability(ability.modifiers.clone(), ability.burst),
+            None => Planner::new(self, ship),
+        };
         let seconds = |value: Option<wowsunpack::game_params::ttx::model::Seconds>| {
             value.map(|value| Seconds::new(round(value.value())))
         };
         let km = |value: Option<wowsunpack::game_params::types::Km>| value.map(|value| Km::new(round(value.value())));
+
+        let burst_fire = match planner.burst() {
+            Some(burst) => {
+                let reload = |outcome: &Outcome| {
+                    outcome.stats.artillery.as_ref()?.reload_time.map(|reload| Seconds::new(reload.value()))
+                };
+                let rounded = |value: Seconds| Seconds::new(round(value.value()));
+
+                Some(BurstFireBuilds {
+                    shots_per_burst: burst.shots,
+                    shot_interval: planner.plan(&StatPlan::new(
+                        "burst shot interval".to_owned(),
+                        Better::Lower,
+                        &|outcome| reload(outcome).map(|reload| rounded(burst.interval(reload))),
+                    ))?,
+                    reload_after_burst: planner.plan(&StatPlan::new(
+                        "reload after a burst".to_owned(),
+                        Better::Lower,
+                        &|outcome| reload(outcome).map(rounded),
+                    ))?,
+                    cycle: planner.plan(&StatPlan::new("burst cycle".to_owned(), Better::Lower, &|outcome| {
+                        reload(outcome).map(|reload| rounded(burst.cycle(reload)))
+                    }))?,
+                })
+            }
+            None => None,
+        };
 
         Ok(WeaponBuilds {
             main_battery_reload: planner.plan(&StatPlan::new(
@@ -211,6 +291,7 @@ impl GameData {
             torpedo_reload: planner.plan(&StatPlan::new("torpedo reload".to_owned(), Better::Lower, &|outcome| {
                 seconds(outcome.stats.torpedoes.as_ref()?.reload_time)
             }))?,
+            burst_fire,
             rates: self.rates(&planner)?,
         })
     }

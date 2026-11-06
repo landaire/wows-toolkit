@@ -34,6 +34,7 @@ pub mod replay_worker;
 pub mod shells;
 pub mod ships;
 pub mod skills;
+pub mod special_abilities;
 pub mod stat_search;
 pub mod stats;
 pub mod tech_tree;

@@ -1,0 +1,27 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Le Havre
+  index: PFSC719
+  tier: 9
+  class: cruiser
+  nation: France
+  group: special
+  status: released
+  replicas:
+    - BA Utnapishtim...
+abilities:
+  - kind: combat_instructions
+    name: Heavy Secondary Barrage
+    activation: Press the Combat Instructions key (F by default) once the meter is full.
+    charge:
+      - "Hit an enemy ship with a main battery shell: +10%"
+    progress_loss: "After 50 s without progress, the meter loses 5% every 1 s."
+    duration_s: 50
+    effects:
+      - "-60% Maximum secondary battery shell dispersion"
+      - +40% Secondary battery HE shell armor penetration capability
+      - "-70% Secondary battery reload time"
+    uses_per_battle: "No limit per battle and no cooldown or charges: each use empties the meter, which must fill to 100% again before the next use."

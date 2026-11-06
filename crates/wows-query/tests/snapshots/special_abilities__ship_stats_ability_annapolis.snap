@@ -1,0 +1,439 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: stats
+---
+ship:
+  name: Annapolis
+  index: PASC111
+  tier: 11
+  class: cruiser
+  nation: USA
+  group: superShip
+  status: released
+special_ability:
+  - Burst Fire
+build_stats:
+  main_battery_reload:
+    stat: main battery reload
+    unit: s
+    builds:
+      base: 40
+      best:
+        value: 35.2
+        assumed:
+          - Main Battery Modification 3
+      alternatives:
+        - label: without Main Battery Modification 3
+          value: 40
+          assumed: []
+        - label: with Top Grade Gunner active
+          value: 32.38
+          assumed:
+            - Main Battery Modification 3
+            - Top Grade Gunner
+          tier_fillers:
+            - Consumable Specialist
+            - Focus Fire Training
+            - Heavy AP Shells
+          note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  main_battery_range:
+    stat: main battery range
+    unit: km
+    builds:
+      base: 16.22
+      best:
+        value: 18.82
+        assumed:
+          - Gun Fire Control System Modification 2
+      alternatives:
+        - label: without Gun Fire Control System Modification 2
+          value: 16.22
+          assumed: []
+  secondary_range:
+    stat: secondary battery range
+    unit: km
+    builds:
+      base: 7.3
+      best:
+        value: 10.51
+        assumed:
+          - Pack a Punch
+          - Secondary Battery Modification 1
+        tier_fillers:
+          - Consumable Specialist
+          - Focus Fire Training
+      alternatives:
+        - label: without Pack a Punch
+          value: 8.76
+          assumed:
+            - Secondary Battery Modification 1
+        - label: without Secondary Battery Modification 1
+          value: 8.76
+          assumed:
+            - Pack a Punch
+          tier_fillers:
+            - Consumable Specialist
+            - Focus Fire Training
+  burst_fire:
+    shots_per_burst: 3
+    shot_interval:
+      stat: burst shot interval
+      unit: s
+      builds:
+        base: 1.5
+        best:
+          value: 1.32
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 1.5
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 1.21
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+              - Heavy AP Shells
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    reload_after_burst:
+      stat: reload after a burst
+      unit: s
+      builds:
+        base: 40
+        best:
+          value: 35.2
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 40
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 32.38
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+              - Heavy AP Shells
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    cycle:
+      stat: burst cycle
+      unit: s
+      builds:
+        base: 43
+        best:
+          value: 37.84
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 43
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 34.81
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+              - Heavy AP Shells
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  main_battery_damage:
+    - ammo: AP
+      damage: 5000
+      barrels: 12
+      rates:
+        stat: main battery AP damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 251163
+            damage_per_second: 4186
+            broadside_damage_per_minute: 251163
+            bow_on_damage_per_minute: 125581
+          best:
+            value:
+              damage_per_minute: 299683
+              damage_per_second: 4994.7
+              broadside_damage_per_minute: 299683
+              bow_on_damage_per_minute: 149841
+            assumed:
+              - Heavy AP Shells
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          alternatives:
+            - label: without Heavy AP Shells
+              value:
+                damage_per_minute: 285412
+                damage_per_second: 4756.9
+                broadside_damage_per_minute: 285412
+                bow_on_damage_per_minute: 142706
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 263721
+                damage_per_second: 4395.3
+                broadside_damage_per_minute: 263721
+                bow_on_damage_per_minute: 131860
+              assumed:
+                - Heavy AP Shells
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 325742
+                damage_per_second: 5429
+                broadside_damage_per_minute: 325742
+                bow_on_damage_per_minute: 162871
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+      burst_damage: 180000
+      during_burst:
+        stat: main battery AP damage rate during a burst
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 2400000
+            damage_per_second: 40000
+            broadside_damage_per_minute: 2400000
+            bow_on_damage_per_minute: 1200000
+          best:
+            value:
+              damage_per_minute: 2863636
+              damage_per_second: 47727.3
+              broadside_damage_per_minute: 2863636
+              bow_on_damage_per_minute: 1431818
+            assumed:
+              - Heavy AP Shells
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          alternatives:
+            - label: without Heavy AP Shells
+              value:
+                damage_per_minute: 2727273
+                damage_per_second: 45454.5
+                broadside_damage_per_minute: 2727273
+                bow_on_damage_per_minute: 1363636
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 2520000
+                damage_per_second: 42000
+                broadside_damage_per_minute: 2520000
+                bow_on_damage_per_minute: 1260000
+              assumed:
+                - Heavy AP Shells
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 3112649
+                damage_per_second: 51877.5
+                broadside_damage_per_minute: 3112649
+                bow_on_damage_per_minute: 1556324
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    - ammo: HE
+      damage: 2800
+      barrels: 12
+      rates:
+        stat: main battery HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 140651
+            damage_per_second: 2344.2
+            broadside_damage_per_minute: 140651
+            bow_on_damage_per_minute: 70326
+          best:
+            value:
+              damage_per_minute: 175814
+              damage_per_second: 2930.2
+              broadside_damage_per_minute: 175814
+              bow_on_damage_per_minute: 87907
+            assumed:
+              - Heavy HE and SAP Shells
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          alternatives:
+            - label: without Heavy HE and SAP Shells
+              value:
+                damage_per_minute: 159831
+                damage_per_second: 2663.8
+                broadside_damage_per_minute: 159831
+                bow_on_damage_per_minute: 79915
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 154716
+                damage_per_second: 2578.6
+                broadside_damage_per_minute: 154716
+                bow_on_damage_per_minute: 77358
+              assumed:
+                - Heavy HE and SAP Shells
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 191102
+                damage_per_second: 3185
+                broadside_damage_per_minute: 191102
+                bow_on_damage_per_minute: 95551
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+      burst_damage: 100800
+      during_burst:
+        stat: main battery HE damage rate during a burst
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 1344000
+            damage_per_second: 22400
+            broadside_damage_per_minute: 1344000
+            bow_on_damage_per_minute: 672000
+          best:
+            value:
+              damage_per_minute: 1680000
+              damage_per_second: 28000
+              broadside_damage_per_minute: 1680000
+              bow_on_damage_per_minute: 840000
+            assumed:
+              - Heavy HE and SAP Shells
+              - Main Battery Modification 3
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          alternatives:
+            - label: without Heavy HE and SAP Shells
+              value:
+                damage_per_minute: 1527273
+                damage_per_second: 25454.5
+                broadside_damage_per_minute: 1527273
+                bow_on_damage_per_minute: 763636
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 1478400
+                damage_per_second: 24640
+                broadside_damage_per_minute: 1478400
+                bow_on_damage_per_minute: 739200
+              assumed:
+                - Heavy HE and SAP Shells
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 1826087
+                damage_per_second: 30434.8
+                broadside_damage_per_minute: 1826087
+                bow_on_damage_per_minute: 913044
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  secondary_damage:
+    - ammo: 127 mm HE
+      damage: 1800
+      barrels: 12
+      rates:
+        stat: secondary 127 mm HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 324000
+            damage_per_second: 5400
+            broadside_damage_per_minute: 216000
+            bow_on_damage_per_minute: 108000
+          best:
+            value:
+              damage_per_minute: 450000
+              damage_per_second: 7500
+              broadside_damage_per_minute: 300000
+              bow_on_damage_per_minute: 150000
+            assumed:
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+              - Heavy AP Shells
+          alternatives:
+            - label: without Top Grade Gunner
+              value:
+                damage_per_minute: 405000
+                damage_per_second: 6750
+                broadside_damage_per_minute: 270000
+                bow_on_damage_per_minute: 135000
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value:
+                damage_per_minute: 360000
+                damage_per_second: 6000
+                broadside_damage_per_minute: 240000
+                bow_on_damage_per_minute: 120000
+              assumed:
+                - Top Grade Gunner
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+                - Heavy AP Shells
+  rate_notes:
+    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+    - "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval."
+changes:
+  - stat: Main Battery Reload Time
+    from: 5.5 s
+    to: 40.0 s
+  - stat: Minimum Shell Type Switching Time
+    from: 5.5 s
+    to: 40.0 s
+  - stat: Main battery damage per minute (HE)
+    from: 366545 hp/min
+    to: 140651 hp/min
+  - stat: Main battery damage per minute (AP)
+    from: 654545 hp/min
+    to: 251163 hp/min

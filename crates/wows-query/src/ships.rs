@@ -253,6 +253,21 @@ impl Ship {
         })
     }
 
+    /// This ship with `param` in place of its own, such as the same ship with
+    /// its main battery in its alternative fire mode.
+    pub(crate) fn with_param(&self, param: Rc<Param>) -> Self {
+        Self {
+            param,
+            name: self.name.clone(),
+            search_key: self.search_key.clone(),
+            class: self.class,
+            tier: self.tier,
+            copies_released: self.copies_released,
+            replica_of: self.replica_of.clone(),
+            replicas: self.replicas.clone(),
+        }
+    }
+
     /// Marks test ships that copy a released ship of the same name, such as
     /// "[Conqueror]".
     pub(crate) fn mark_test_copies(ships: &mut [Ship]) {

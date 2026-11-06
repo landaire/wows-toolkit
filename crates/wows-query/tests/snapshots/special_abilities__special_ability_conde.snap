@@ -1,0 +1,26 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Condé
+  index: PFSC111
+  tier: 11
+  class: cruiser
+  nation: France
+  group: superShip
+  status: released
+abilities:
+  - kind: alternative_fire_mode
+    name: Burst Fire and Modified Shells
+    description: "Increases main battery gun rate of fire by allowing you to shoot a series of quick salvos. Each series is followed by a longer reload.\n\nModified shells possess characteristics that differ from those of conventional shells."
+    shots_per_burst: 2
+    shot_interval_s: 1.5
+    reload_s: 50
+    standard_reload_s: 14
+    cycle_s: 51.5
+    effects:
+      - "-20% Maximum main battery shell dispersion"
+      - +25% Main battery HE shell armor penetration capability
+      - +25% Secondary battery HE shell armor penetration capability
+    usage: Toggled with the fire mode key (F by default) at any time except while a burst is firing; no limit per battle and no cooldown. The mode stays on until switched back.

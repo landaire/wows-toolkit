@@ -28,6 +28,7 @@ use crate::ships::ShipArgs;
 use crate::ships::ShipOverviewArgs;
 use crate::skills::CaptainSkillArgs;
 use crate::skills::SkillTreeArgs;
+use crate::special_abilities::SpecialAbilitySearchArgs;
 use crate::stat_search::StatNamesArgs;
 use crate::stat_search::StatSearchArgs;
 use crate::stats::ShipStatsArgs;
@@ -182,9 +183,21 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_stats",
-        description: "Port stat card of one ship with stock modules, followed by stats computed from it: main battery barrels, salvo damage and damage per minute per ammo type, dispersion at the stock firing range, torpedo tubes, and time to use every charge of a consumable. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, and the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change.",
+        description: "Port stat card of one ship with stock modules, followed by stats computed from it: main battery barrels, salvo damage and damage per minute per ammo type, dispersion at the stock firing range, torpedo tubes, and time to use every charge of a consumable. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, and the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change. special_ability_active switches on the ship's F key ability (ship_special_ability says what it is): Combat Instructions apply their effects, e.g. a longer secondary range; Burst Fire or Modified Shells switch the main battery, and build_stats then gives burst_fire (shots_per_burst, shot_interval, reload_after_burst, cycle) and each main battery ammo's damage_per_minute over a full burst cycle with during_burst, the rate while a burst fires; changes lists what the ability changes against the standard stock card.",
         schema: input_schema::<ShipStatsArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_stats(args)),
+    },
+    Tool {
+        name: "ship_special_ability",
+        description: "What one ship's special ability does, the ability players call \"the F key\": Combat Instructions (in-game name; a meter filled by events such as main battery hits or potential damage received, then activated for a set duration with effects such as faster secondary reload, or started automatically on some ships) and the alternative main battery fire mode (\"Burst Fire\", \"Modified Shells\" or \"Burst Fire and Modified Shells\": shots per burst, interval between shots, reload after the burst, cycle time, shells and effects). Gives charge conditions with progress per event, progress loss, duration, effects, and uses per battle (no charges or cooldown: each use needs the meter refilled). Ships without either say so. Values are for no captain skills or upgrades; ship_stats with special_ability_active gives stats with the ability on.",
+        schema: input_schema::<ShipArgs>,
+        call: |game, arguments| run(arguments, |args| game.ship_special_ability(args)),
+    },
+    Tool {
+        name: "special_ability_search",
+        description: "Which ships have a special ability (the F key): Combat Instructions, an alternative main battery fire mode, or Burst Fire, optionally filtered by words of the ability name or an effect (e.g. \"secondary battery firing range\", \"reload\") and by tier, class and nation. Lists every qualifying ship, released and test apart, with the ability, its duration or burst timing and effects, and counts per class and kind with shares of the ships considered.",
+        schema: input_schema::<SpecialAbilitySearchArgs>,
+        call: |game, arguments| run(arguments, |args| game.special_ability_search(args)),
     },
     Tool {
         name: "ship_firing_arcs",

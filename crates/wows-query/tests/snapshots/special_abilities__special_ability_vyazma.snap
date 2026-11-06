@@ -1,0 +1,28 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Vyazma
+  index: PRSC709
+  tier: 9
+  class: cruiser
+  nation: Russia
+  group: experimental
+  status: released
+abilities:
+  - kind: alternative_fire_mode
+    name: Burst Fire and Modified Shells
+    description: "Increases main battery gun rate of fire by allowing you to shoot a series of quick salvos. Each series is followed by a longer reload.\n\nModified shells possess characteristics that differ from those of conventional shells."
+    shots_per_burst: 2
+    shot_interval_s: 1.7
+    reload_s: 45
+    standard_reload_s: 33
+    cycle_s: 46.7
+    effects:
+      - "-42.7% Main battery firing range"
+    shells:
+      - HE 406 mm
+      - AP 406 mm (standard shell)
+      - "AP 406 mm, 60 per battle"
+    usage: Toggled with the fire mode key (F by default) at any time except while a burst is firing; no limit per battle and no cooldown. The mode stays on until switched back.

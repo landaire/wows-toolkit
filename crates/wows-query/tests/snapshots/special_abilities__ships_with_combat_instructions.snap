@@ -1,0 +1,71 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: search
+---
+considered:
+  total: 851
+  by_class:
+    destroyer: 216
+    cruiser: 320
+    battleship: 237
+    aircraft_carrier: 50
+    submarine: 28
+  test: 51
+qualifying:
+  total: 38
+  by_class:
+    destroyer: 5
+    cruiser: 12
+    battleship: 17
+    submarine: 4
+  test: 7
+share_pct: 4.5
+share_pct_by_class:
+  destroyer: 2.3
+  cruiser: 3.8
+  battleship: 7.2
+  aircraft_carrier: 0
+  submarine: 14.3
+by_kind:
+  combat_instructions: 38
+released:
+  - "T11 Affondatore (battleship, Italy): Combat Instructions \"Consumable Operational Readiness\" (manual, 60 s): -10% Consumable preparation and cooldown time, +10% Ship speed"
+  - "T11 Hannover (battleship, Germany): Combat Instructions \"Direct Control Over Secondary Battery Crews\" (manual, 50 s): +12% Secondary battery firing range, -20% Secondary battery reload time"
+  - "T11 Jacksonville (cruiser, USA): Combat Instructions \"High-Explosive Barrage\" (manual, 40 s): +40% Main battery HE shell armor penetration capability"
+  - "T11 Maine (battleship, USA): Combat Instructions \"Immediate Threat Elimination\" (manual, 45 s): +25% Continuous AA damage, -65% Damage taken from fires, -65% Damage taken from flooding"
+  - "T11 Satsuma (battleship, Japan): Combat Instructions \"Immediate Main Battery Fire Adjustment\" (manual, 25 s): -35% Maximum main battery shell dispersion"
+  - "T11 Ushakov (battleship, Russia): Combat Instructions \"Immediate Main Battery Recalibration\" (manual, 25 s): -30% Maximum main battery shell dispersion, +10% Main battery firing range"
+  - "T10 20 de Julio (destroyer, Pan_America): Combat Instructions \"Armor-Piercing Barrage\" (automatic, 10 s): +50% Main battery AP shell damage"
+  - "T10 Almte. Irízar (cruiser, Pan_America): Combat Instructions \"Heavy Armor-Piercing Barrage\" (manual, 60 s): +45% Main battery AP shell damage, +32% Secondary battery firing range, +100% AP shell armor penetration capability"
+  - "T10 Archerfish (submarine, USA): Combat Instructions \"Immediate Torpedo Tubes Reload\" (automatic, 45 s): -17.5% Torpedo tube reload time, -20% Consumable preparation and cooldown time"
+  - "T10 La Pampa (destroyer, Pan_America): Combat Instructions \"Covert Consumable Readiness\" (manual, 30 s): -85% Consumable preparation and cooldown time"
+  - "T10 Libertad (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +30% Secondary battery damage, +20% Secondary battery firing range, -20% Secondary battery reload time"
+  - "T10 Pietro Calvi (submarine, Italy): Combat Instructions \"Torpedo Reload and Power Plant Forcing\" (automatic, 60 s): -20% Torpedo tube reload time, +15% Ship speed"
+  - "T10 San Martín (cruiser, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 30 s): -85% Consumable preparation and cooldown time"
+  - "T10 Sete de Setembro (battleship, Pan_America): Combat Instructions \"Immediate Main Battery Reload\" (manual, 50 s): -50% Main battery reload time, -20% Consumable preparation and cooldown time"
+  - "T10 Sibir (battleship, Russia): Combat Instructions \"Immediate Main Battery Fire Adjustment\" (manual, 33 s): -20% Maximum main battery shell dispersion"
+  - "T10 Wisconsin (battleship, USA) [replicas: Wisconsin G]: Combat Instructions \"Immediate Systems Reload\" (manual, 20 s): -50% Main battery reload time, -80% Consumable preparation and cooldown time"
+  - "T9 Baotou (cruiser, Pan_Asia): Combat Instructions \"Consumable Operational Readiness\" (manual, 15 s): -95% Consumable preparation and cooldown time"
+  - "T9 Le Havre (cruiser, France) [replicas: BA Utnapishtim...]: Combat Instructions \"Heavy Secondary Barrage\" (manual, 50 s): -60% Maximum secondary battery shell dispersion, +40% Secondary battery HE shell armor penetration capability, -70% Secondary battery reload time"
+  - "T9 Los Andes (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +25% Secondary battery damage, +20% Secondary battery firing range, -15% Secondary battery reload time"
+  - "T9 Nueva Esparta (destroyer, Pan_America): Combat Instructions \"Armor-Piercing Barrage\" (automatic, 10 s): +50% Main battery AP shell damage"
+  - "T9 Santander (cruiser, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 30 s): -80% Consumable preparation and cooldown time"
+  - "T9 Valparaíso (battleship, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 5 s): -95% Consumable preparation and cooldown time"
+  - "T8 Almte. Grau (cruiser, Pan_America): Combat Instructions \"Immediate Main Battery Reload\" (manual, 30 s): -66% Main battery reload time"
+  - "T8 C. Aguirre (cruiser, Pan_America): Combat Instructions \"Immediate Main Battery Reload\" (manual, 20 s): -70% Main battery reload time"
+  - "T8 Cuauhtémoc (destroyer, Pan_America): Combat Instructions \"Armor-Piercing Barrage\" (automatic, 10 s): +50% Main battery AP shell damage"
+  - "T8 I. Allende (cruiser, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 30 s): -80% Consumable preparation and cooldown time"
+  - "T8 Ipiranga (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +25% Secondary battery damage, +20% Secondary battery firing range, -15% Secondary battery reload time"
+  - "T8 Pietro Micca (submarine, Italy): Combat Instructions \"Torpedo Reload and Power Plant Forcing\" (automatic, 60 s): -10% Torpedo tube reload time, +15% Ship speed"
+  - "T7 Cnel. Bolognesi (cruiser, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 30 s): -80% Consumable preparation and cooldown time"
+  - "T6 Almte. Cochrane (cruiser, Pan_America): Combat Instructions \"Consumable Operational Readiness\" (manual, 30 s): -75% Consumable preparation and cooldown time"
+  - "T6 Foca (submarine, Italy): Combat Instructions \"Torpedo Reload and Power Plant Forcing\" (automatic, 60 s): -10% Torpedo tube reload time, +15% Ship speed"
+test:
+  - "T10 Comodoro (battleship, Pan_America, test): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +30% Secondary battery damage, +20% Secondary battery firing range, -20% Secondary battery reload time"
+  - "T10 Kléber TE (destroyer, France, test): Combat Instructions \"Immediate Main Battery Reload TE\" (automatic, 5 s): -50% Main battery reload time"
+  - "T10 Latouche-Tréville (cruiser, France, test): Combat Instructions \"Heavy Secondary Barrage\" (manual, 60 s): -60% Maximum secondary battery shell dispersion, +60% Secondary battery HE shell armor penetration capability, -70% Secondary battery reload time"
+  - "T10 New Jersey (battleship, USA, test): Combat Instructions \"Immediate Main Battery Fire Adjustment\" (manual, 50 s): +20% Main battery AP shell damage, -20% Maximum main battery shell dispersion"
+  - "T10 Pérez Gacitúa (battleship, Pan_America, test): Combat Instructions \"Immediate Main Battery Fire Adjustment\" (manual, 50 s): +20% Main battery AP shell damage, -20% Maximum main battery shell dispersion"
+  - "T9 Respublika (battleship, Russia, test): Combat Instructions \"Immediate Systems Reload\" (manual, 10 s): +25% Main battery AP shell damage, -95% Consumable preparation and cooldown time"
+  - "T8 Borodino TE (battleship, Russia, test): Combat Instructions \"Consumable Operational Readiness TE\" (manual, 30 s): -85% Consumable preparation and cooldown time"
+note: "Read from GameParams of the current client for each ship's modules: Combat Instructions from the hull, alternative fire modes from the main battery. Test ships may change before release. Replicas such as BA ships are named in their original's [replicas]."

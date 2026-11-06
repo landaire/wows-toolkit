@@ -47,8 +47,11 @@ use crate::firing_arcs::oriented_mounts;
 use crate::firing_arcs::round_to;
 use crate::firing_arcs::weapon_mounts;
 use crate::ships::Ship;
+use crate::special_abilities::Burst;
 
 const DAMAGE_NOTE: &str = "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them.";
+
+const BURST_NOTE: &str = "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval.";
 
 const TORPEDO_NOTE: &str = "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers.";
 
@@ -159,6 +162,16 @@ pub struct AmmoDamage {
     pub barrels: BarrelCount,
 
     pub rates: BuildStat<DamageRate>,
+
+    /// Main battery in bursts: damage of one burst of every barrel, no
+    /// skills or upgrades.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub burst_damage: Option<Hp>,
+
+    /// Main battery in bursts: the rate while a burst fires, one salvo per
+    /// interval. `rates` then averages a burst and the reload after it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub during_burst: Option<BuildStat<DamageRate>>,
 }
 
 /// Damage per minute and per second of one ammo, every barrel firing.
@@ -205,6 +218,30 @@ impl StatUnit for DamageRate {
 struct ArcRates {
     broadside: DamagePerMinute,
     bow_on: DamagePerMinute,
+}
+
+/// How often the main battery fires.
+#[derive(Debug, Clone, Copy)]
+enum Cadence {
+    /// One salvo per reload.
+    Standard,
+
+    /// Bursts, averaged over a burst and the reload after it.
+    Cycle(Burst),
+
+    /// The salvos of one burst.
+    InBurst(Burst),
+}
+
+impl Cadence {
+    /// Seconds per salvo, given the card's main battery reload.
+    fn salvo_time(self, reload: Seconds) -> Seconds {
+        match self {
+            Self::Standard => reload,
+            Self::Cycle(burst) => Seconds::new(burst.cycle(reload).value() / burst.shots.0 as f32),
+            Self::InBurst(burst) => burst.interval(reload),
+        }
+    }
 }
 
 /// One gun mount: its hardpoint, the shells it may fire and its barrels.
@@ -339,6 +376,7 @@ impl GameData {
         }
         kinds.sort();
         let mut main_battery_damage = Vec::new();
+        let standard = planner.burst().map_or(Cadence::Standard, Cadence::Cycle);
         for kind in kinds {
             let shells: Vec<_> = stock
                 .stats
@@ -354,11 +392,24 @@ impl GameData {
             let barrels = layouts.main_battery[0].barrels_firing(&names);
 
             let label = format!("main battery {kind} damage rate");
-            let extract =
-                |outcome: &Outcome| main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind);
-            if let Some(rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? {
-                main_battery_damage.push(AmmoDamage::new(kind.clone(), Vec::new(), damage, barrels, rates));
+            let extract = |outcome: &Outcome| {
+                main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, standard)
+            };
+            let Some(rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? else {
+                continue;
+            };
+
+            let mut ammo = AmmoDamage::new(kind.clone(), Vec::new(), damage, barrels, rates);
+            if let Some(burst) = planner.burst() {
+                let label = format!("main battery {kind} damage rate during a burst");
+                let extract = |outcome: &Outcome| {
+                    main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, Cadence::InBurst(burst))
+                };
+                ammo.during_burst = planner.plan(&StatPlan::new(label, Better::Higher, &extract))?;
+                let burst_damage = ammo.damage.value() * (ammo.barrels.0 * burst.shots.0) as f32;
+                ammo.burst_damage = Some(Hp::from(burst_damage.round()));
             }
+            main_battery_damage.push(ammo);
         }
 
         let mut secondary_damage = Vec::new();
@@ -423,6 +474,9 @@ impl GameData {
         if !(main_battery_damage.is_empty() && secondary_damage.is_empty() && torpedo_damage.is_empty()) {
             rate_notes.push(DAMAGE_NOTE);
         }
+        if planner.burst().is_some() && !main_battery_damage.is_empty() {
+            rate_notes.push(BURST_NOTE);
+        }
 
         Ok(Rates { torpedoes_per_minute, main_battery_damage, secondary_damage, torpedo_damage, rate_notes })
     }
@@ -453,7 +507,15 @@ impl GameData {
 
 impl AmmoDamage {
     fn new(ammo: String, modules: Vec<String>, damage: Hp, barrels: BarrelCount, rates: BuildStat<DamageRate>) -> Self {
-        Self { ammo, modules, damage: Hp::from(damage.value().round()), barrels, rates }
+        Self {
+            ammo,
+            modules,
+            damage: Hp::from(damage.value().round()),
+            barrels,
+            rates,
+            burst_damage: None,
+            during_burst: None,
+        }
     }
 }
 
@@ -537,9 +599,9 @@ fn torpedo_layout(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<Torpe
     })
 }
 
-fn main_battery_rate(outcome: &Outcome, battery: &Battery, kind: &str) -> Option<DamageRate> {
+fn main_battery_rate(outcome: &Outcome, battery: &Battery, kind: &str, cadence: Cadence) -> Option<DamageRate> {
     let artillery = outcome.stats.artillery.as_ref()?;
-    let reload = Seconds::new(artillery.reload_time?.value());
+    let reload = cadence.salvo_time(Seconds::new(artillery.reload_time?.value()));
     let shells: Vec<&ShellStats> = artillery
         .shells
         .iter()

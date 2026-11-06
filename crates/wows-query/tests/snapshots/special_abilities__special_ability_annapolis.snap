@@ -1,0 +1,22 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: ability
+---
+ship:
+  name: Annapolis
+  index: PASC111
+  tier: 11
+  class: cruiser
+  nation: USA
+  group: superShip
+  status: released
+abilities:
+  - kind: alternative_fire_mode
+    name: Burst Fire
+    description: Increases main battery gun rate of fire by allowing you to shoot a series of quick salvos at short intervals. Each salvo series is followed by a longer reload time.
+    shots_per_burst: 3
+    shot_interval_s: 1.5
+    reload_s: 40
+    standard_reload_s: 5.5
+    cycle_s: 43
+    usage: Toggled with the fire mode key (F by default) at any time except while a burst is firing; no limit per battle and no cooldown. The mode stays on until switched back.

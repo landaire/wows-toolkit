@@ -17,6 +17,8 @@ use crate::game_params::ttx::model::DegreesPerSecond;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
 use crate::game_params::ttx::model::Seconds;
+use crate::game_params::ttx::special_abilities::AlternativeFireMode;
+use crate::game_params::ttx::special_abilities::CombatInstructions;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 
@@ -374,6 +376,14 @@ pub struct ShipTtxComponents {
     /// Air strike per `_Hull` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub air_supports: HashMap<String, AirSupportStats>,
+    /// Combat Instructions per `_Hull` upgrade name, from the hull's
+    /// `specials` component.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub combat_instructions: HashMap<String, CombatInstructions>,
+    /// Alternative fire mode per artillery component name, e.g.
+    /// `A_Artillery`, for components that have one.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alternative_fire: HashMap<String, AlternativeFireMode>,
     /// Stock (base) upgrade selection per slot: the empty-`prev` upgrade in each
     /// `ShipUpgradeInfo` chain, captured during the same walk that fills the maps
     /// above (the raw `ShipUpgradeInfo` pickle is dropped after parsing).
@@ -383,7 +393,7 @@ pub struct ShipTtxComponents {
 
 impl ShipTtxComponents {
     /// True when no hull, engine, torpedo, artillery, secondary, fire-control,
-    /// squadron or air strike stats were extracted.
+    /// squadron, air strike or ability stats were extracted.
     pub fn is_empty(&self) -> bool {
         self.hulls.is_empty()
             && self.engines.is_empty()
@@ -393,6 +403,44 @@ impl ShipTtxComponents {
             && self.fire_controls.is_empty()
             && self.squadrons.is_empty()
             && self.air_supports.is_empty()
+            && self.combat_instructions.is_empty()
+            && self.alternative_fire.is_empty()
+    }
+
+    /// Combat Instructions of a `_Hull` upgrade, `None` when it has none.
+    pub fn combat_instructions(&self, hull_upgrade: &str) -> Option<&CombatInstructions> {
+        self.combat_instructions.get(hull_upgrade)
+    }
+
+    /// Alternative fire mode of an artillery component, `None` when it has
+    /// none.
+    pub fn alternative_fire(&self, component: &str) -> Option<&AlternativeFireMode> {
+        self.alternative_fire.get(component)
+    }
+
+    /// These stats with every artillery upgrade switched to its alternative
+    /// fire mode: guns reload for the mode's full reload and load its shells
+    /// when it has its own. `None` when no artillery upgrade has the mode.
+    pub fn in_alternative_fire_mode(&self) -> Option<Self> {
+        let mut switched = self.clone();
+        let mut any = false;
+        for (upgrade, artillery) in &mut switched.artillery {
+            let Some(mode) =
+                self.upgrade_components(upgrade).first().and_then(|component| self.alternative_fire(component))
+            else {
+                continue;
+            };
+
+            any = true;
+            for gun in &mut artillery.guns {
+                gun.shot_delay = Some(mode.full_reload);
+                if !mode.ammo.is_empty() {
+                    gun.ammo = mode.ammo.iter().map(|ammo| ammo.name.clone()).collect();
+                }
+            }
+        }
+
+        any.then_some(switched)
     }
 
     /// Look up hull stats for a given `_Hull` upgrade name.

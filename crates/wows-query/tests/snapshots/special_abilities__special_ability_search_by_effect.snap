@@ -1,0 +1,37 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: search
+---
+considered:
+  total: 851
+  by_class:
+    destroyer: 216
+    cruiser: 320
+    battleship: 237
+    aircraft_carrier: 50
+    submarine: 28
+  test: 51
+qualifying:
+  total: 6
+  by_class:
+    cruiser: 1
+    battleship: 5
+  test: 1
+share_pct: 0.7
+share_pct_by_class:
+  destroyer: 0
+  cruiser: 0.3
+  battleship: 2.1
+  aircraft_carrier: 0
+  submarine: 0
+by_kind:
+  combat_instructions: 6
+released:
+  - "T11 Hannover (battleship, Germany): Combat Instructions \"Direct Control Over Secondary Battery Crews\" (manual, 50 s): +12% Secondary battery firing range, -20% Secondary battery reload time"
+  - "T10 Almte. Irízar (cruiser, Pan_America): Combat Instructions \"Heavy Armor-Piercing Barrage\" (manual, 60 s): +45% Main battery AP shell damage, +32% Secondary battery firing range, +100% AP shell armor penetration capability"
+  - "T10 Libertad (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +30% Secondary battery damage, +20% Secondary battery firing range, -20% Secondary battery reload time"
+  - "T9 Los Andes (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +25% Secondary battery damage, +20% Secondary battery firing range, -15% Secondary battery reload time"
+  - "T8 Ipiranga (battleship, Pan_America): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +25% Secondary battery damage, +20% Secondary battery firing range, -15% Secondary battery reload time"
+test:
+  - "T10 Comodoro (battleship, Pan_America, test): Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): +30% Secondary battery damage, +20% Secondary battery firing range, -20% Secondary battery reload time"
+note: "Read from GameParams of the current client for each ship's modules: Combat Instructions from the hull, alternative fire modes from the main battery. Test ships may change before release. Replicas such as BA ships are named in their original's [replicas]."

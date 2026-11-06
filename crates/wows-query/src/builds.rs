@@ -43,12 +43,14 @@ use wowsunpack::game_params::types::SkillPointCost;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::loadout::AbilityModifiers;
 use crate::loadout::AppliedSkill;
 use crate::loadout::AppliedUpgrade;
 use crate::loadout::ResolvedLoadout;
 use crate::loadout::build_failed;
 use crate::modules::ModuleKind;
 use crate::ships::Ship;
+use crate::special_abilities::Burst;
 use crate::stat_search::skills_fit;
 use crate::upgrades::Upgrade;
 
@@ -298,6 +300,13 @@ pub(crate) struct Planner<'a> {
     triggered: Vec<Item>,
 
     outcomes: RefCell<HashMap<OutcomeKey, Rc<Outcome>>>,
+
+    /// Ship abilities switched on in every build.
+    abilities: Vec<AbilityModifiers>,
+
+    /// Bursts of the alternative fire mode switched on, which set how often
+    /// the main battery fires.
+    burst: Option<Burst>,
 }
 
 /// The value of a stat under one build, `None` when the ship lacks it.
@@ -377,7 +386,21 @@ impl<'a> Planner<'a> {
             items,
             triggered,
             outcomes: RefCell::new(HashMap::new()),
+            abilities: Vec::new(),
+            burst: None,
         }
+    }
+
+    /// These builds with a ship ability switched on in each.
+    pub(crate) fn with_ability(mut self, abilities: Vec<AbilityModifiers>, burst: Option<Burst>) -> Self {
+        self.abilities = abilities;
+        self.burst = burst;
+        self
+    }
+
+    /// Bursts of the alternative fire mode switched on.
+    pub(crate) fn burst(&self) -> Option<Burst> {
+        self.burst
     }
 
     pub(crate) fn ship(&self) -> &Ship {
@@ -452,6 +475,7 @@ impl<'a> Planner<'a> {
 
     fn loadout(&self, items: &[Item], triggered: Option<usize>) -> ResolvedLoadout {
         let mut loadout = self.game.stock_loadout();
+        loadout.activate(&self.abilities);
         if let Some(index) = triggered {
             loadout.triggers = Triggers::Skill(self.game.skills[index].internal_name().clone());
         }

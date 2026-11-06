@@ -26,6 +26,7 @@ pub mod orchestration;
 pub mod provenance;
 pub mod render;
 pub mod selection;
+pub mod special_abilities;
 pub mod weapon_tables;
 
 pub use attribution_render::AttributionLine;

@@ -1,0 +1,328 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: stats
+---
+ship:
+  name: Libertad
+  index: PVSB010
+  tier: 10
+  class: battleship
+  nation: Pan_America
+  group: upgradeable
+  status: released
+special_ability:
+  - "Combat Instructions: Modified Secondary Munitions"
+build_stats:
+  main_battery_reload:
+    stat: main battery reload
+    unit: s
+    builds:
+      base: 33
+      best:
+        value: 29.04
+        assumed:
+          - Main Battery Modification 3
+      alternatives:
+        - label: without Main Battery Modification 3
+          value: 33
+          assumed: []
+        - label: with Close Quarters Combat active
+          value: 26.14
+          assumed:
+            - Main Battery Modification 3
+            - Close Quarters Combat
+          tier_fillers:
+            - Emergency Repair Specialist
+            - AA Defense and ASW Expert
+            - Focus Fire Training
+          note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+  main_battery_range:
+    stat: main battery range
+    unit: km
+    builds:
+      base: 20.5
+      best:
+        value: 23.78
+        assumed:
+          - Gun Fire Control System Modification 2
+      alternatives:
+        - label: without Gun Fire Control System Modification 2
+          value: 20.5
+          assumed: []
+  secondary_range:
+    stat: secondary battery range
+    unit: km
+    builds:
+      base: 9.96
+      best:
+        value: 14.34
+        assumed:
+          - Long-Range Secondary Battery Shells
+          - Secondary Battery Modification 1
+        tier_fillers:
+          - Emergency Repair Specialist
+          - AA Defense and ASW Expert
+      alternatives:
+        - label: without Long-Range Secondary Battery Shells
+          value: 11.95
+          assumed:
+            - Secondary Battery Modification 1
+        - label: without Secondary Battery Modification 1
+          value: 11.95
+          assumed:
+            - Long-Range Secondary Battery Shells
+          tier_fillers:
+            - Emergency Repair Specialist
+            - AA Defense and ASW Expert
+  main_battery_damage:
+    - ammo: AP
+      damage: 11700
+      barrels: 12
+      rates:
+        stat: main battery AP damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 255273
+            damage_per_second: 4254.5
+            broadside_damage_per_minute: 255273
+            bow_on_damage_per_minute: 127636
+          best:
+            value:
+              damage_per_minute: 311839
+              damage_per_second: 5197.3
+              broadside_damage_per_minute: 311839
+              bow_on_damage_per_minute: 155919
+            assumed:
+              - Super-Heavy AP Shells
+              - Main Battery Modification 3
+            tier_fillers:
+              - Emergency Repair Specialist
+              - AA Defense and ASW Expert
+          alternatives:
+            - label: without Super-Heavy AP Shells
+              value:
+                damage_per_minute: 290083
+                damage_per_second: 4834.7
+                broadside_damage_per_minute: 290083
+                bow_on_damage_per_minute: 145041
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 274418
+                damage_per_second: 4573.6
+                broadside_damage_per_minute: 274418
+                bow_on_damage_per_minute: 137209
+              assumed:
+                - Super-Heavy AP Shells
+              tier_fillers:
+                - Emergency Repair Specialist
+                - AA Defense and ASW Expert
+            - label: with Close Quarters Combat active
+              value:
+                damage_per_minute: 346488
+                damage_per_second: 5774.8
+                broadside_damage_per_minute: 346488
+                bow_on_damage_per_minute: 173244
+              assumed:
+                - Super-Heavy AP Shells
+                - Main Battery Modification 3
+                - Close Quarters Combat
+              tier_fillers:
+                - Emergency Repair Specialist
+                - AA Defense and ASW Expert
+              note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+    - ammo: HE
+      damage: 6100
+      barrels: 12
+      rates:
+        stat: main battery HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 133091
+            damage_per_second: 2218.2
+            broadside_damage_per_minute: 133091
+            bow_on_damage_per_minute: 66545
+          best:
+            value:
+              damage_per_minute: 151240
+              damage_per_second: 2520.7
+              broadside_damage_per_minute: 151240
+              bow_on_damage_per_minute: 75620
+            assumed:
+              - Main Battery Modification 3
+          alternatives:
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 133091
+                damage_per_second: 2218.2
+                broadside_damage_per_minute: 133091
+                bow_on_damage_per_minute: 66545
+              assumed: []
+            - label: with Close Quarters Combat active
+              value:
+                damage_per_minute: 168044
+                damage_per_second: 2800.7
+                broadside_damage_per_minute: 168044
+                bow_on_damage_per_minute: 84022
+              assumed:
+                - Main Battery Modification 3
+                - Close Quarters Combat
+              tier_fillers:
+                - Emergency Repair Specialist
+                - AA Defense and ASW Expert
+                - Focus Fire Training
+              note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+  secondary_damage:
+    - ammo: 234 mm HE
+      damage: 5005
+      barrels: 20
+      rates:
+        stat: secondary 234 mm HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 682500
+            damage_per_second: 11375
+            broadside_damage_per_minute: 341250
+            bow_on_damage_per_minute: 341250
+          best:
+            value:
+              damage_per_minute: 947917
+              damage_per_second: 15798.6
+              broadside_damage_per_minute: 473958
+              bow_on_damage_per_minute: 473958
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Auxiliary Armaments Modification 2
+            tier_fillers:
+              - Emergency Repair Specialist
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          alternatives:
+            - label: without Manual Secondary Battery Aiming
+              value:
+                damage_per_minute: 853125
+                damage_per_second: 14218.7
+                broadside_damage_per_minute: 426562
+                bow_on_damage_per_minute: 426562
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value:
+                damage_per_minute: 758333
+                damage_per_second: 12638.9
+                broadside_damage_per_minute: 379167
+                bow_on_damage_per_minute: 379167
+              assumed:
+                - Manual Secondary Battery Aiming
+              tier_fillers:
+                - Emergency Repair Specialist
+                - AA Defense and ASW Expert
+                - Focus Fire Training
+    - ammo: 127 mm HE
+      damage: 2340
+      barrels: 8
+      rates:
+        stat: secondary 127 mm HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 280800
+            damage_per_second: 4680
+            broadside_damage_per_minute: 140400
+            bow_on_damage_per_minute: 140400
+          best:
+            value:
+              damage_per_minute: 390000
+              damage_per_second: 6500
+              broadside_damage_per_minute: 195000
+              bow_on_damage_per_minute: 195000
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Auxiliary Armaments Modification 2
+            tier_fillers:
+              - Emergency Repair Specialist
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          alternatives:
+            - label: without Manual Secondary Battery Aiming
+              value:
+                damage_per_minute: 351000
+                damage_per_second: 5850
+                broadside_damage_per_minute: 175500
+                bow_on_damage_per_minute: 175500
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value:
+                damage_per_minute: 312000
+                damage_per_second: 5200
+                broadside_damage_per_minute: 156000
+                bow_on_damage_per_minute: 156000
+              assumed:
+                - Manual Secondary Battery Aiming
+              tier_fillers:
+                - Emergency Repair Specialist
+                - AA Defense and ASW Expert
+                - Focus Fire Training
+  rate_notes:
+    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+changes:
+  - stat: Firing Range
+    from: 8.3 km
+    to: 10.0 km
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66)"
+  - stat: Secondary Reload Time (234 mm)
+    from: 11.0 s
+    to: 8.8 s
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
+  - stat: Secondary Dispersion (234 mm)
+    from: 304 m
+    to: 359 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
+  - stat: Secondary Dispersion Vertical (234 mm)
+    from: 304 m
+    to: 359 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
+  - stat: Secondary Shells Damage (234 mm)
+    from: "3850"
+    to: "5005"
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.3 (+1155)"
+  - stat: Secondary Reload Time (127 mm)
+    from: 5.0 s
+    to: 4.0 s
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"
+  - stat: Secondary Dispersion (127 mm)
+    from: 304 m
+    to: 359 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
+  - stat: Secondary Dispersion Vertical (127 mm)
+    from: 304 m
+    to: 359 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
+  - stat: Secondary Shells Damage (127 mm)
+    from: "1800"
+    to: "2340"
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.3 (+540)"
+  - stat: Secondary vertical dispersion at stock secondary range (234 mm)
+    from: 304 m
+    to: 279 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
+  - stat: Secondary vertical dispersion at stock secondary range (127 mm)
+    from: 304 m
+    to: 279 m
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
