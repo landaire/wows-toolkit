@@ -33,8 +33,10 @@ struct Cli {
     #[arg(long)]
     download: bool,
 
-    /// Directory for a rebuilt GameParams cache, used when the dump's own
-    /// cache was written by another version.
+    /// Cache root for a rebuilt GameParams cache, used when the dump's own
+    /// cache was written by another version, and for the raw GameParams that
+    /// gameparams_query reads. Each lives in `<kind>/<build>/` below it, where
+    /// `<kind>` (`game-params-v<N>`, `raw-params-v<N>`) names the format.
     #[arg(long)]
     cache_dir: Option<PathBuf>,
 
@@ -130,7 +132,7 @@ async fn serve_http(server: GameDataServer, address: SocketAddr) -> Result<(), R
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Report<ServeError>> {
+async fn run() -> Result<(), Report<ServeError>> {
     // Stdout carries the MCP protocol; logs go to stderr.
     tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).init();
 
@@ -147,4 +149,12 @@ async fn main() -> Result<(), Report<ServeError>> {
             Ok(())
         }
     }
+}
+
+fn main() -> Result<(), Report<ServeError>> {
+    // gameparams_query runs jq in a copy of this program; in that copy this
+    // evaluates and exits.
+    wows_query::jq_worker::init();
+
+    run()
 }

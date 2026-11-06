@@ -1,0 +1,18 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: "[recursion, product]"
+---
+- matched: 1
+  queried: 0
+  total_bytes: 0
+  truncated: true
+  stopped: crashed
+  hint: the filter recursed too deeply or used too much memory; avoid recursive definitions and building large values
+  results: []
+- matched: 1
+  queried: 0
+  total_bytes: 0
+  truncated: true
+  stopped: time_limit
+  hint: the filter ran out of time; select fewer entries or avoid nested iteration
+  results: []

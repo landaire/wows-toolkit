@@ -5,15 +5,19 @@ publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Query World of Warships game data: ships, armor, shells, stat cards, captain skills, upgrades and consumables"
+description = "Query World of Warships game data: ships, armor, shells, stat cards, captain skills, upgrades, consumables and raw GameParams"
 
 [dependencies]
-wowsunpack = { workspace = true, features = ["arc", "models", "rkyv", "serde", "vfs"] }
+wowsunpack = { workspace = true, features = ["arc", "json", "models", "rkyv", "serde", "vfs"] }
 wows-core = { workspace = true, features = ["arc", "schemars", "serde"] }
 wows-data-mgr = { workspace = true }
 wows_replays = { workspace = true, features = ["arc", "parsing"] }
 deunicode = "1"
+flate2 = { workspace = true }
 gettext = { workspace = true }
+jaq-core = "3.1"
+jaq-json = { version = "2.0", features = ["serde"] }
+jaq-std = "3.0"
 reqwest = { version = "0.12", default-features = false, optional = true }
 rootcause = { workspace = true }
 schemars = { workspace = true }
@@ -22,6 +26,12 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Caps the jq worker's address space.
+rustix = { version = "1", features = ["process"] }
+# Denies the jq worker filesystem access.
+landlock = "0.4"
 
 [features]
 default = []

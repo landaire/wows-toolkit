@@ -17740,6 +17740,41 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "hifijson-0.5.0.crate",
+    sha256 = "242402749acf71e6f32f5857598b7002c4058a4e3c3b22b4c7d51cab9aea754e",
+    size_bytes = 23946,
+    strip_prefix = "hifijson-0.5.0",
+    urls = ["https://static.crates.io/crates/hifijson/0.5.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "hifijson-0.5",
+    srcs = [":hifijson-0.5.0.crate"],
+    crate = "hifijson",
+    crate_root = "hifijson-0.5.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "hifijson",
+        "CARGO_MANIFEST_DIR": "hifijson-0.5.0.crate",
+        "CARGO_PKG_AUTHORS": "Michael Färber <michael.faerber@gedenkt.at>",
+        "CARGO_PKG_DESCRIPTION": "High-fidelity JSON lexer and parser",
+        "CARGO_PKG_NAME": "hifijson",
+        "CARGO_PKG_REPOSITORY": "https://github.com/01mf02/hifijson",
+        "CARGO_PKG_VERSION": "0.5.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "alloc",
+        "std",
+    ],
+    visibility = [],
+)
+
+http_archive(
     name = "hkdf-0.12.4.crate",
     sha256 = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7",
     size_bytes = 171163,
@@ -21085,6 +21120,172 @@ cargo.rust_library(
 )
 
 alias(
+    name = "jaq-core",
+    actual = ":jaq-core-3",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "jaq-core-3.1.2.crate",
+    sha256 = "723ad9253808e95daa2d10ad5b258ac4e65c07003e223e08d1d8734c2942d606",
+    size_bytes = 63549,
+    strip_prefix = "jaq-core-3.1.2",
+    urls = ["https://static.crates.io/crates/jaq-core/3.1.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "jaq-core-3",
+    srcs = [":jaq-core-3.1.2.crate"],
+    crate = "jaq_core",
+    crate_root = "jaq-core-3.1.2.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "jaq_core",
+        "CARGO_MANIFEST_DIR": "jaq-core-3.1.2.crate",
+        "CARGO_PKG_AUTHORS": "Michael Färber <michael.faerber@gedenkt.at>",
+        "CARGO_PKG_DESCRIPTION": "Interpreter for the jaq language",
+        "CARGO_PKG_NAME": "jaq-core",
+        "CARGO_PKG_REPOSITORY": "https://github.com/01mf02/jaq",
+        "CARGO_PKG_VERSION": "3.1.2",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":dyn-clone-1",
+        ":once_cell-1",
+        ":typed-arena-2",
+    ],
+)
+
+alias(
+    name = "jaq-json",
+    actual = ":jaq-json-2",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "jaq-json-2.0.3.crate",
+    sha256 = "4be2f53207ffb1313a2d2ad819cfa8bfaa7936cb85a110eda10fd5da822cec94",
+    size_bytes = 28772,
+    strip_prefix = "jaq-json-2.0.3",
+    urls = ["https://static.crates.io/crates/jaq-json/2.0.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "jaq-json-2",
+    srcs = [":jaq-json-2.0.3.crate"],
+    crate = "jaq_json",
+    crate_root = "jaq-json-2.0.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "jaq_json",
+        "CARGO_MANIFEST_DIR": "jaq-json-2.0.3.crate",
+        "CARGO_PKG_AUTHORS": "Michael Färber <michael.faerber@gedenkt.at>",
+        "CARGO_PKG_DESCRIPTION": "JSON values for jaq",
+        "CARGO_PKG_NAME": "jaq-json",
+        "CARGO_PKG_REPOSITORY": "https://github.com/01mf02/jaq",
+        "CARGO_PKG_VERSION": "2.0.3",
+        "CARGO_PKG_VERSION_MAJOR": "2",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "serde",
+        "serde_core",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":bstr-1",
+        ":bytes-1",
+        ":foldhash-0.1",
+        ":hifijson-0.5",
+        ":indexmap-2",
+        ":jaq-core-3",
+        ":jaq-std-3",
+        ":num-bigint-0.4",
+        ":num-traits-0.2",
+        ":ryu-1",
+        ":self_cell-1",
+        ":serde_core-1",
+    ],
+)
+
+alias(
+    name = "jaq-std",
+    actual = ":jaq-std-3",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "jaq-std-3.0.4.crate",
+    sha256 = "56b378d4f7587d332111a92608348db6d6b9b8f7cb5ee1d2bd162ec715d7c5bf",
+    size_bytes = 25874,
+    strip_prefix = "jaq-std-3.0.4",
+    urls = ["https://static.crates.io/crates/jaq-std/3.0.4/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "jaq-std-3",
+    srcs = [":jaq-std-3.0.4.crate"],
+    crate = "jaq_std",
+    crate_root = "jaq-std-3.0.4.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "jaq_std",
+        "CARGO_MANIFEST_DIR": "jaq-std-3.0.4.crate",
+        "CARGO_PKG_AUTHORS": "Michael Färber <michael.faerber@gedenkt.at>",
+        "CARGO_PKG_DESCRIPTION": "Standard library for jaq",
+        "CARGO_PKG_NAME": "jaq-std",
+        "CARGO_PKG_REPOSITORY": "https://github.com/01mf02/jaq",
+        "CARGO_PKG_VERSION": "3.0.4",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "aho-corasick",
+        "base64",
+        "default",
+        "format",
+        "jiff",
+        "libm",
+        "log",
+        "math",
+        "regex",
+        "regex-bites",
+        "std",
+        "time",
+        "urlencoding",
+    ],
+    visibility = [],
+    deps = [
+        ":aho-corasick-1",
+        ":base64-0.22",
+        ":bstr-1",
+        ":jaq-core-3",
+        ":jiff-0.2",
+        ":libm-0.2",
+        ":log-0.4",
+        ":regex-bites-0.1",
+        ":urlencoding-2",
+    ],
+)
+
+alias(
     name = "jiff",
     actual = ":jiff-0.2",
     visibility = ["PUBLIC"],
@@ -21809,6 +22010,48 @@ cargo.rust_library(
         ":arrayvec-0.7",
         ":polycool-0.4",
         ":smallvec-1",
+    ],
+)
+
+alias(
+    name = "landlock",
+    actual = ":landlock-0.4",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "landlock-0.4.7.crate",
+    sha256 = "4cca98e95f35b29d469dade6724c6f96cec9236640f745a0e99b0334ec320ab1",
+    size_bytes = 65552,
+    strip_prefix = "landlock-0.4.7",
+    urls = ["https://static.crates.io/crates/landlock/0.4.7/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "landlock-0.4",
+    srcs = [":landlock-0.4.7.crate"],
+    crate = "landlock",
+    crate_root = "landlock-0.4.7.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "landlock",
+        "CARGO_MANIFEST_DIR": "landlock-0.4.7.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Landlock LSM helpers",
+        "CARGO_PKG_NAME": "landlock",
+        "CARGO_PKG_REPOSITORY": "https://github.com/landlock-lsm/rust-landlock",
+        "CARGO_PKG_VERSION": "0.4.7",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":enumflags2-0.7",
+        ":libc-0.2",
+        ":thiserror-2",
     ],
 )
 
@@ -35450,6 +35693,42 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "regex-bites-0.1.6.crate",
+    sha256 = "b6a15a2fa0bfda9361941c45550896ae87b15cc6c8c939ea350079670332e211",
+    size_bytes = 120570,
+    strip_prefix = "regex-bites-0.1.6",
+    urls = ["https://static.crates.io/crates/regex-bites/0.1.6/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "regex-bites-0.1",
+    srcs = [":regex-bites-0.1.6.crate"],
+    crate = "regex_bites",
+    crate_root = "regex-bites-0.1.6.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "regex_bites",
+        "CARGO_MANIFEST_DIR": "regex-bites-0.1.6.crate",
+        "CARGO_PKG_AUTHORS": "The Rust Project Developers:Andrew Gallant <jamslam@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "A lightweight regex engine that optimizes for binary size and compilation time. ",
+        "CARGO_PKG_NAME": "regex-bites",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-lang/regex/tree/master/regex-bites",
+        "CARGO_PKG_VERSION": "0.1.6",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+        "string",
+    ],
+    visibility = [],
+)
+
+http_archive(
     name = "regex-syntax-0.8.11.crate",
     sha256 = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
     size_bytes = 359055,
@@ -37989,6 +38268,12 @@ buildscript_run(
         "use-libc-auxv",
     ],
     version = "0.38.44",
+)
+
+alias(
+    name = "rustix",
+    actual = ":rustix-1",
+    visibility = ["PUBLIC"],
 )
 
 http_archive(
@@ -46168,6 +46453,37 @@ cargo.rust_library(
     },
     visibility = [],
     deps = [":rustc-hash-2"],
+)
+
+http_archive(
+    name = "typed-arena-2.0.2.crate",
+    sha256 = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a",
+    size_bytes = 11848,
+    strip_prefix = "typed-arena-2.0.2",
+    urls = ["https://static.crates.io/crates/typed-arena/2.0.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "typed-arena-2",
+    srcs = [":typed-arena-2.0.2.crate"],
+    crate = "typed_arena",
+    crate_root = "typed-arena-2.0.2.crate/src/lib.rs",
+    edition = "2015",
+    env = {
+        "CARGO_CRATE_NAME": "typed_arena",
+        "CARGO_MANIFEST_DIR": "typed-arena-2.0.2.crate",
+        "CARGO_PKG_AUTHORS": "The typed-arena developers",
+        "CARGO_PKG_DESCRIPTION": "The arena, a fast but limited type of allocator",
+        "CARGO_PKG_NAME": "typed-arena",
+        "CARGO_PKG_REPOSITORY": "https://github.com/SimonSapin/rust-typed-arena",
+        "CARGO_PKG_VERSION": "2.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "2",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
 )
 
 http_archive(

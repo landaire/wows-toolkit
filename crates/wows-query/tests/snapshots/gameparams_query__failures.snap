@@ -1,0 +1,7 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: messages
+---
+- "jq syntax error: expected closing brace at byte 27 (end of filter)"
+- names starting with __ are reserved; the filter uses __range
+- "no GameParams entry has the name, index or id \"PASC999\""

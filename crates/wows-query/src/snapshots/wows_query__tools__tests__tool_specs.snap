@@ -233,3 +233,71 @@ expression: specs()
         description: "Upgrades by name, e.g. [\"Engine Boost Modification 1\"], applied to the consumable stats."
     required:
       - ship
+- name: gameparams_query
+  description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys`, then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      select:
+        oneOf:
+          - type: object
+            properties:
+              param:
+                type: string
+            required:
+              - param
+            additionalProperties: false
+            description: "One entry by param name (PASC020_Des_Moines_1948), index (PASC020)\nor numeric id."
+          - type: object
+            properties:
+              ship:
+                type: string
+            required:
+              - ship
+            additionalProperties: false
+            description: "One ship by English name, as the ship tools resolve it."
+          - type: object
+            properties:
+              set:
+                description: Entries matching every given field. Text matches without regard to case.
+                type: object
+                properties:
+                  type:
+                    description: "`typeinfo.type`, e.g. Ship, Projectile, Gun, Modernization, Ability,\nCrew, Unit, Exterior."
+                    type: string
+                  nation:
+                    description: "`typeinfo.nation`, e.g. USA, Japan, Germany, Russia."
+                    type: string
+                  species:
+                    description: "`typeinfo.species`, e.g. Cruiser, Destroyer, Artillery."
+                    type: string
+                  tier:
+                    description: "The entry's `level` field: tier for ships and modules."
+                    type: integer
+                    maximum: 11
+                    minimum: 1
+                additionalProperties: false
+                required:
+                  - type
+            required:
+              - set
+            additionalProperties: false
+            description: "Entries of one `typeinfo.type`, in GameParams order."
+        description: Which GameParams entries to read.
+      filter:
+        type: string
+        description: "jq program (jaq dialect) run once per selected entry, with the entry\nobject as input. Start with `keys` to list fields, then narrow, e.g.\n`.A_Hull | keys` or `.A1_Artillery | {maxDist, sigmaCount}`."
+      limit:
+        type: integer
+        maximum: 200
+        minimum: 1
+        description: "Most entries a set selection reads, 1 to 200, default 20."
+      max_bytes:
+        type: integer
+        maximum: 24000
+        minimum: 500
+        description: "Output budget in bytes, 500 to 24000, default 6000."
+    required:
+      - select
+      - filter

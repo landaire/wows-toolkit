@@ -1,0 +1,22 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: names
+---
+matched: 10
+queried: 3
+total_bytes: 74
+truncated: true
+hint: "10 entries matched and the first 3 were read; add nation, species or tier, or raise limit"
+results:
+  - param: PASC016_Worcester_1948
+    name: Worcester
+    values:
+      - PASC016_Worcester_1948
+  - param: PASC019_Burlington_1944
+    name: Buffalo
+    values:
+      - PASC019_Burlington_1944
+  - param: PASC020_Des_Moines_1948
+    name: Des Moines
+    values:
+      - PASC020_Des_Moines_1948

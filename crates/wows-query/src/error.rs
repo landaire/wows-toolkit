@@ -1,5 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use serde::Deserialize;
+use serde::Serialize;
 use wowsunpack::game_params::ttx::modifiers::ModifierError;
 
 /// Failure to load a game data build.
@@ -91,4 +94,132 @@ pub enum QueryError {
 
     #[error("not a readable World of Warships replay")]
     Replay(#[source] wows_replays::ParseError),
+
+    #[error("no GameParams entry has the name, index or id {query:?}")]
+    ParamNotFound { query: String },
+
+    /// Shared because a failed build is reported to every call until it is
+    /// retried.
+    #[error("raw GameParams are not available: {source}")]
+    RawParams {
+        #[source]
+        source: Arc<RawParamsError>,
+    },
+
+    #[error(transparent)]
+    Jq(#[from] JqError),
+}
+
+/// Failure to build or read the raw GameParams store.
+#[derive(Debug, thiserror::Error)]
+pub enum RawParamsError {
+    #[error("the game data was loaded without a cache directory to hold them")]
+    NoCacheDir,
+
+    #[error("failed to open GameParams.data in {dir}")]
+    Source {
+        dir: PathBuf,
+        #[source]
+        source: wowsunpack::vfs::VfsError,
+    },
+
+    #[error("failed to decode GameParams.data")]
+    Decode(#[source] wowsunpack::error::GameDataError),
+
+    #[error("failed to encode GameParams entry {name} as JSON")]
+    Encode {
+        name: String,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("GameParams entry {name} is {len} bytes, more than a record holds")]
+    RecordTooLarge { name: String, len: usize },
+
+    #[error("I/O error on {path}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to read or write the index {path}")]
+    Index {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("{path} is {found} bytes; its index expects {expected}")]
+    Truncated { path: PathBuf, expected: u64, found: u64 },
+
+    #[error("the stored record of {name} is damaged")]
+    DamagedRecord { name: String },
+
+    #[error("{path} belongs to build {found}, not {expected}")]
+    WrongBuild { path: PathBuf, expected: u32, found: u32 },
+
+    #[error("the store published at {dir} was removed before it could be opened")]
+    Vanished { dir: PathBuf },
+}
+
+/// A jq filter that does not compile. Messages are written for the model
+/// that wrote the filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum CompileError {
+    #[error("jq syntax error: {}", errors.join("; "))]
+    Syntax { errors: Vec<String> },
+
+    #[error("jq filter uses undefined {}", names.join(", "))]
+    Undefined { names: Vec<String> },
+
+    #[error("jq modules (import, include) are not available")]
+    Module,
+
+    #[error("names starting with __ are reserved; the filter uses {name}")]
+    Reserved { name: String },
+}
+
+/// Failure to evaluate a jq filter.
+#[derive(Debug, thiserror::Error)]
+pub enum JqError {
+    #[error(transparent)]
+    Compile(#[from] CompileError),
+
+    #[error("jq evaluation is not set up in this program; call wows_query::jq_worker::init() first in main")]
+    NoWorker,
+
+    #[error("failed to start the jq worker {program}")]
+    Spawn {
+        program: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to create the jq worker's working directory {path}")]
+    Workdir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("all jq workers stayed busy for {waited:?}; retry later")]
+    Busy { waited: std::time::Duration },
+
+    #[error("the jq worker exited before it read the request ({}); check that main calls wows_query::jq_worker::init() first", exit_description(.status.as_ref()))]
+    Exited { status: Option<std::process::ExitStatus> },
+
+    #[error("a jq input of {bytes} bytes exceeds the 4 GiB record limit")]
+    InputTooLarge { bytes: usize },
+
+    #[error("the jq worker sent an unreadable reply")]
+    Reply(#[source] serde_json::Error),
+}
+
+fn exit_description(status: Option<&std::process::ExitStatus>) -> String {
+    match status {
+        Some(status) => status.to_string(),
+        None => "exit status unknown".to_owned(),
+    }
 }

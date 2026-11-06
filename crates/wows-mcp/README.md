@@ -2,6 +2,7 @@
 
 - Answers World of Warships game data questions for any [MCP](https://modelcontextprotocol.io) client.
 - Looks up ships, armor, shells, penetration and overmatch, stat cards with captain skills and upgrades applied, captain skills, upgrades, consumables, ship prices and research tree links, and replay headers.
+- Answers anything else in GameParams with a [jq](https://jqlang.org) filter over the raw entries.
 - Reads one game build from a [wows-replay-data](https://github.com/landaire/wows-replay-data) dump, or downloads the newest one.
 
 ## Usage
@@ -26,6 +27,8 @@ If the dump's GameParams cache was written by another version of the toolkit, th
 wows-mcp --data ~/wows-game-data --cache-dir ~/.cache/wows-mcp
 ```
 
+`gameparams_query` needs `--cache-dir`. Its first call writes the raw GameParams of the build there, about 40 MB, which takes about ten seconds.
+
 To serve streamable HTTP instead of stdio, give an address:
 
 ```bash
@@ -49,7 +52,7 @@ For a client that launches stdio servers from a JSON config:
 
 ## Tools
 
-`find_ships`, `ship_overview`, `ship_armor`, `ship_shells`, `penetration_search`, `ship_stats`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `replay_summary`.
+`find_ships`, `ship_overview`, `ship_armor`, `ship_shells`, `penetration_search`, `ship_stats`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `gameparams_query`, `replay_summary`.
 
 Each tool returns compact JSON. The query logic lives in the `wows-query` crate.
 

@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::GameData;
 use crate::QueryError;
 use crate::consumables::ShipConsumablesArgs;
+use crate::gameparams::GameParamsQueryArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::ships::FindShipsArgs;
 use crate::ships::ShipArgs;
@@ -137,6 +138,12 @@ const TOOLS: &[Tool] = &[
         description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate, optionally with captain skills and upgrades applied.",
         schema: input_schema::<ShipConsumablesArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_consumables(args)),
+    },
+    Tool {
+        name: "gameparams_query",
+        description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys`, then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available.",
+        schema: input_schema::<GameParamsQueryArgs>,
+        call: |game, arguments| run(arguments, |args| game.gameparams_query(args)),
     },
 ];
 
