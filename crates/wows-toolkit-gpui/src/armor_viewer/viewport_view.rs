@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::Button;
@@ -309,21 +310,74 @@ enum MoveKey {
     Down,
     RotateLeft,
     RotateRight,
+    PanLeft,
+    PanRight,
+    PanUp,
+    PanDown,
 }
 
 impl MoveKey {
-    fn from_str(key: &str) -> Option<Self> {
-        match key {
-            "w" => Some(Self::Forward),
-            "s" => Some(Self::Back),
-            "a" => Some(Self::Left),
-            "d" => Some(Self::Right),
-            "up" => Some(Self::Up),
-            "down" => Some(Self::Down),
-            "left" => Some(Self::RotateLeft),
-            "right" => Some(Self::RotateRight),
+    /// Shift turns the arrows from a vertical move and an orbit into a pan.
+    fn from_key(key: &str, shift: bool) -> Option<Self> {
+        match (key, shift) {
+            ("w", _) => Some(Self::Forward),
+            ("s", _) => Some(Self::Back),
+            ("a", _) => Some(Self::Left),
+            ("d", _) => Some(Self::Right),
+            ("up", false) => Some(Self::Up),
+            ("down", false) => Some(Self::Down),
+            ("left", false) => Some(Self::RotateLeft),
+            ("right", false) => Some(Self::RotateRight),
+            ("up", true) => Some(Self::PanUp),
+            ("down", true) => Some(Self::PanDown),
+            ("left", true) => Some(Self::PanLeft),
+            ("right", true) => Some(Self::PanRight),
             _ => None,
         }
+    }
+
+    /// Every motion a released key may have started: Shift can be let go
+    /// before the arrow it modified.
+    fn released_by(key: &str) -> impl Iterator<Item = Self> {
+        [Self::from_key(key, false), Self::from_key(key, true)].into_iter().flatten()
+    }
+}
+
+/// One tick's camera motion from the held keys, each axis summed over the
+/// keys that drive it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct HeldMotion {
+    forward: f32,
+    right: f32,
+    vertical: f32,
+    rotate: f32,
+
+    /// Screen space, +x right and +y up.
+    pan_x: f32,
+    pan_y: f32,
+}
+
+impl HeldMotion {
+    fn from_keys<'a>(keys: impl IntoIterator<Item = &'a MoveKey>) -> Self {
+        let mut motion = Self::default();
+        for key in keys {
+            match key {
+                MoveKey::Forward => motion.forward += 1.0,
+                MoveKey::Back => motion.forward -= 1.0,
+                MoveKey::Left => motion.right -= 1.0,
+                MoveKey::Right => motion.right += 1.0,
+                MoveKey::Up => motion.vertical += 1.0,
+                MoveKey::Down => motion.vertical -= 1.0,
+                MoveKey::RotateLeft => motion.rotate += 1.0,
+                MoveKey::RotateRight => motion.rotate -= 1.0,
+                MoveKey::PanLeft => motion.pan_x -= 1.0,
+                MoveKey::PanRight => motion.pan_x += 1.0,
+                MoveKey::PanUp => motion.pan_y += 1.0,
+                MoveKey::PanDown => motion.pan_y -= 1.0,
+            }
+        }
+
+        motion
     }
 }
 
@@ -2357,8 +2411,8 @@ impl ViewportView {
 
     /// Ctrl/Cmd+S opens and closes the options rail. Ctrl/Cmd+Z
     /// (no shift) undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R redoes.
-    /// Otherwise WASD moves the camera target and arrows move it vertically /
-    /// orbit the azimuth, tracking the key as held and (re)starting the
+    /// Otherwise WASD moves the camera target, arrows move it vertically /
+    /// orbit the azimuth and Shift+arrows pan it, tracking the key as held and (re)starting the
     /// ~60Hz movement ticker (`start_key_ticker`), which applies the
     /// per-tick camera delta every tick for smooth continuous motion with no
     /// OS auto-repeat delay, for as long as any movement key remains held.
@@ -2389,7 +2443,8 @@ impl ViewportView {
                 return;
             }
         }
-        let Some(key) = MoveKey::from_str(event.keystroke.key.as_str()) else { return };
+        let shift = event.keystroke.modifiers.shift;
+        let Some(key) = MoveKey::from_key(event.keystroke.key.as_str(), shift) else { return };
         if self.held_keys.insert(key) {
             self.start_key_ticker(cx);
         }
@@ -2398,43 +2453,35 @@ impl ViewportView {
     /// Removes a released movement key from the held set. The ticker itself
     /// notices an empty set and stops (no idle cost once nothing is held).
     fn handle_key_up(&mut self, event: &KeyUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        if let Some(key) = MoveKey::from_str(event.keystroke.key.as_str()) {
+        for key in MoveKey::released_by(event.keystroke.key.as_str()) {
             self.held_keys.remove(&key);
         }
     }
 
     /// Applies one tick's worth of camera movement for every currently held
     /// movement key, mirroring the egui original's per-frame `key_down` poll
-    /// (`viewport_3d/camera.rs` `handle_input`).
-    fn apply_held_keys(&mut self) -> bool {
+    /// (`viewport_3d/camera.rs` `handle_input`). `dt` is the time since the
+    /// previous tick, which the pan is scaled by.
+    fn apply_held_keys(&mut self, dt: Duration) -> bool {
         if self.held_keys.is_empty() || !self.camera_is_free() {
             return false;
         }
-        let mut fwd = 0.0f32;
-        let mut right = 0.0f32;
-        let mut vert = 0.0f32;
-        let mut rot = 0.0f32;
-        for key in &self.held_keys {
-            match key {
-                MoveKey::Forward => fwd += 1.0,
-                MoveKey::Back => fwd -= 1.0,
-                MoveKey::Left => right -= 1.0,
-                MoveKey::Right => right += 1.0,
-                MoveKey::Up => vert += 1.0,
-                MoveKey::Down => vert -= 1.0,
-                MoveKey::RotateLeft => rot += 1.0,
-                MoveKey::RotateRight => rot -= 1.0,
-            }
+
+        let motion = HeldMotion::from_keys(&self.held_keys);
+        if motion.forward != 0.0 || motion.right != 0.0 {
+            self.viewport.camera.wasd(motion.forward, motion.right);
         }
-        if fwd != 0.0 || right != 0.0 {
-            self.viewport.camera.wasd(fwd, right);
+        if motion.vertical != 0.0 {
+            self.viewport.camera.move_vertical(motion.vertical);
         }
-        if vert != 0.0 {
-            self.viewport.camera.move_vertical(vert);
+        if motion.rotate != 0.0 {
+            self.viewport.camera.rotate_horizontal(motion.rotate);
         }
-        if rot != 0.0 {
-            self.viewport.camera.rotate_horizontal(rot);
+        if motion.pan_x != 0.0 || motion.pan_y != 0.0 {
+            let size = self.viewport_size();
+            self.viewport.camera.pan_keys((motion.pan_x, motion.pan_y), dt.as_secs_f32(), size);
         }
+
         true
     }
 
@@ -2448,10 +2495,14 @@ impl ViewportView {
         }
         self.key_ticking = true;
         cx.spawn(async move |this, cx| {
+            let mut last_tick = Instant::now();
             loop {
                 cx.background_executor().timer(Duration::from_secs_f32(1.0 / KEY_TICK_HZ)).await;
+                let now = Instant::now();
+                let dt = now - last_tick;
+                last_tick = now;
                 let still_held = this.update(cx, |this, cx| {
-                    let moved = this.apply_held_keys();
+                    let moved = this.apply_held_keys(dt);
                     if moved {
                         this.viewport.mark_dirty();
                         cx.emit(ViewportChange::Camera);
@@ -4111,6 +4162,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Axis;
+    use super::HeldMotion;
+    use super::MoveKey;
     use super::SyncedSettings;
     use super::axis_color;
     use super::ball_bounds;
@@ -4137,6 +4190,24 @@ mod tests {
             use_color_scheme: false,
             uv_transforms: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn shift_arrows_pan_instead_of_orbit_and_rise() {
+        let held: Vec<MoveKey> = ["left", "up"].iter().filter_map(|key| MoveKey::from_key(key, true)).collect();
+        let motion = HeldMotion::from_keys(&held);
+        assert_eq!(motion, HeldMotion { pan_x: -1.0, pan_y: 1.0, ..HeldMotion::default() });
+
+        let held: Vec<MoveKey> = ["left", "up"].iter().filter_map(|key| MoveKey::from_key(key, false)).collect();
+        let motion = HeldMotion::from_keys(&held);
+        assert_eq!(motion, HeldMotion { rotate: 1.0, vertical: 1.0, ..HeldMotion::default() });
+    }
+
+    /// Shift released before the arrow must not leave the pan running.
+    #[test]
+    fn releasing_an_arrow_stops_its_pan_whatever_shift_is() {
+        let pan = MoveKey::from_key("right", true).expect("shift+right is a movement key");
+        assert!(MoveKey::released_by("right").any(|key| key == pan));
     }
 
     #[test]
