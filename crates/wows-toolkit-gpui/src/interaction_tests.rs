@@ -45,12 +45,17 @@ const TAB_BAR: &str = "app-tabs";
 /// The debug-build strip shown at the bottom while debug mode is on.
 const DEBUG_NOTICE: &str = "app-debug-notice";
 
-/// Replay Inspector header controls (`replay_inspector::view::Render`).
-const AUTOLOAD: &str = "replay-header-auto-load-latest";
-const COLUMN_FILTERS_TRIGGER: &str = "replay-header-column-filters-trigger";
-const FILTER_RAW_XP: &str = "replay-header-filter-raw-xp";
-const FILTER_HEALS: &str = "replay-header-filter-heals";
-const GROUPING: &str = "replay-header-grouping";
+/// Replay Inspector listing header controls (`replay_inspector::view`).
+const LISTING_OPTIONS: &str = "replay-listing-options";
+const LISTING_OPEN: &str = "replay-listing-open";
+const AUTOLOAD: &str = "replay-listing-auto-load-latest";
+const FILTER_RAW_XP: &str = "replay-listing-filter-raw-xp";
+const FILTER_HEALS: &str = "replay-listing-filter-heals";
+
+/// One grouping's choice in the listing options.
+fn grouping_choice(grouping: ReplayGrouping) -> (&'static str, usize) {
+    ("replay-listing-grouping", grouping as usize)
+}
 
 /// Armor Viewer sidebar ship search (`armor_viewer::sidebar`).
 const SHIP_SEARCH: &str = "armor-sidebar-search";
@@ -273,38 +278,23 @@ fn show_tab(window: &mut gpui_kit::Window, tab: AppTab, cx: &mut gpui_kit::App) 
     );
 }
 
-/// `Select` commits through `defer_in` after the dispatch callback returns, so
-/// the assertion on the committed value has to wait for the executor.
 #[gpui_kit::test]
-async fn the_grouping_combo_opens_and_applies_a_choice(cx: &mut TestAppContext) {
+fn a_grouping_chosen_in_the_listing_options_reaches_the_browser(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
 
-        assert_eq!(window.find(GROUPING).value(), Some("Group: Date"), "Date is the default grouping");
-        assert_eq!(window.find(GROUPING).expanded(), Some(false));
+        assert!(window.try_find(grouping_choice(ReplayGrouping::Date)).is_none(), "the options live behind the cog");
+        window.click(LISTING_OPTIONS, cx);
+        assert_eq!(window.find(grouping_choice(ReplayGrouping::Date)).selected(), Some(true), "Date is the default");
 
-        window.within(GROUPING).click("input", cx);
-        assert_eq!(window.find(GROUPING).expanded(), Some(true), "clicking the combo opens its menu");
-
-        window.press("escape", cx);
-        assert_eq!(window.find(GROUPING).expanded(), Some(false), "escape closes it without choosing");
-        assert_eq!(window.find(GROUPING).value(), Some("Group: Date"));
-
-        window.within(GROUPING).click("input", cx);
-        window.press("down", cx);
-        window.press("enter", cx);
+        window.click(grouping_choice(ReplayGrouping::Ship), cx);
+        assert_eq!(window.find(grouping_choice(ReplayGrouping::Ship)).selected(), Some(true));
+        assert_eq!(window.find(grouping_choice(ReplayGrouping::Date)).selected(), Some(false), "the choices are exclusive");
     })
     .expect("the test window stays open");
 
-    cx.wait_for(window.into(), Duration::from_millis(500), |window, _| {
-        window.find(GROUPING).expanded() == Some(false) && window.find(GROUPING).value() == Some("Group: Ship")
-    })
-    .await;
-
-    // The combo's own value is `SelectState`'s, so it would read "Group: Ship"
-    // even with nothing wired to the browser. Assert the browser applied it.
     window
         .update(cx, |app, _window, cx| {
             assert_eq!(app.replay_inspector().read(cx).grouping(cx), ReplayGrouping::Ship);
@@ -318,6 +308,7 @@ fn clicking_the_autoload_checkbox_toggles_it(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
+        window.click(LISTING_OPTIONS, cx);
 
         let before = window.find(AUTOLOAD).checked().expect("the autoload checkbox reports a checked state");
         window.click(AUTOLOAD, cx);
@@ -329,14 +320,14 @@ fn clicking_the_autoload_checkbox_toggles_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_column_filters_popover_opens_and_toggles_only_the_column_clicked(cx: &mut TestAppContext) {
+fn the_listing_options_toggle_only_the_column_clicked(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
 
-        assert!(window.try_find(FILTER_RAW_XP).is_none(), "the filters live behind the dropdown");
-        window.click(COLUMN_FILTERS_TRIGGER, cx);
+        assert!(window.try_find(FILTER_RAW_XP).is_none(), "the filters live behind the cog");
+        window.click(LISTING_OPTIONS, cx);
 
         let raw_xp_before = window.find(FILTER_RAW_XP).checked().expect("checkbox reports state");
         let heals_before = window.find(FILTER_HEALS).checked().expect("checkbox reports state");
@@ -346,6 +337,31 @@ fn the_column_filters_popover_opens_and_toggles_only_the_column_clicked(cx: &mut
         assert_eq!(window.find(FILTER_HEALS).checked(), Some(heals_before), "the other filters are untouched");
     })
     .expect("the test window stays open");
+}
+
+/// Each item of the listing's open menu asks for its own kind of dialog.
+#[gpui_kit::test]
+fn the_listing_open_menu_asks_for_a_file_or_a_directory(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    crate::dialog::take_asked();
+
+    cx.update_window(window.into(), |_, window, cx| show_tab(window, AppTab::ReplayInspector, cx))
+        .expect("the test window stays open");
+
+    for (row, expected) in [(0u64, crate::dialog::Asked::File), (1u64, crate::dialog::Asked::Folder)] {
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click(LISTING_OPEN, cx);
+            window.render_frame(cx);
+            let rows: Vec<u64> = menu_items(window).into_iter().map(|(row, _)| row).collect();
+            assert!(rows.contains(&row), "the open menu offers row {row}, got {rows:?}");
+            window.within("popup-menu").click(gpui_kit::ElementId::Integer(row), cx);
+        })
+        .expect("the test window stays open");
+        // The menu dismisses itself through a deferred effect, which has to
+        // land before its trigger opens it again.
+        cx.run_until_parked();
+        assert_eq!(crate::dialog::take_asked(), vec![expected], "row {row} asked for its dialog");
+    }
 }
 
 /// A settings snapshot with distinguishable values, so an assertion on a
@@ -416,6 +432,7 @@ fn the_autoload_checkbox_reflects_the_loaded_setting(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
+        window.click(LISTING_OPTIONS, cx);
         assert_eq!(window.find(AUTOLOAD).checked(), Some(false), "seeded from the settings snapshot");
         window.click(AUTOLOAD, cx);
         assert_eq!(window.find(AUTOLOAD).checked(), Some(true), "and it is still live after seeding");
@@ -530,7 +547,7 @@ fn typing_in_the_ship_search_records_the_query(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_loaded_grouping_reaches_the_browser_and_the_combo(cx: &mut TestAppContext) {
+fn the_loaded_grouping_reaches_the_browser_and_the_listing_options(cx: &mut TestAppContext) {
     let window = open_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
@@ -544,7 +561,8 @@ fn the_loaded_grouping_reaches_the_browser_and_the_combo(cx: &mut TestAppContext
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
-        assert_eq!(window.find(GROUPING).value(), Some("Group: Ship"), "and the combo mirrors it");
+        window.click(LISTING_OPTIONS, cx);
+        assert_eq!(window.find(grouping_choice(ReplayGrouping::Ship)).selected(), Some(true), "and the options show it");
     })
     .expect("the test window stays open");
 }
@@ -997,7 +1015,7 @@ fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
 
         // The replay header's own filter mirrors the same setting.
         show_tab(window, AppTab::ReplayInspector, cx);
-        window.click(COLUMN_FILTERS_TRIGGER, cx);
+        window.click(LISTING_OPTIONS, cx);
         assert_eq!(window.find(FILTER_RAW_XP).checked(), Some(false), "the edit reached the other tab");
     })
     .expect("the test window stays open");

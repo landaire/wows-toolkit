@@ -120,6 +120,20 @@ enum SidePanel {
     RawPlayerMetadata,
 }
 
+impl SidePanel {
+    /// The catalogue key for the caption over the slot's content.
+    const fn title_key(self) -> Option<&'static str> {
+        match self {
+            SidePanel::None => None,
+            SidePanel::Chat => Some("ui.replay.game_chat"),
+            SidePanel::RawMetadata => Some("ui.replay.debug.raw_metadata"),
+            SidePanel::RawResults => Some("ui.replay.debug.raw_results"),
+            SidePanel::MappedResults => Some("ui.replay.debug.mapped_results"),
+            SidePanel::RawPlayerMetadata => Some("ui.replay.debug.player_metadata"),
+        }
+    }
+}
+
 /// The payloads the debug-mode viewers show, bundled so the loaded-state
 /// builder takes one argument for them rather than three.
 struct DebugPayloads {
@@ -1459,14 +1473,43 @@ impl Render for ReplayPanel {
                             .min_h(px(0.))
                             .child(div().flex_1().min_w(px(0.)).h_full().child(table))
                             .when_some(side_panel_entity, |row, side_panel| {
+                                // The close control sits at the slot's outer
+                                // edge, as the listing's does on the left.
+                                let header = h_flex()
+                                    .flex_none()
+                                    .gap_1()
+                                    .items_center()
+                                    .px_2()
+                                    .py_1()
+                                    .border_b_1()
+                                    .border_color(border)
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_sm()
+                                            .font_weight(FontWeight::BOLD)
+                                            .children(self.side_panel.title_key().map(|key| t!(key).into_owned())),
+                                    )
+                                    .child(crate::ui::panel_collapse_button(
+                                        "replay-side-panel-close",
+                                        crate::ui::PanelSide::Right,
+                                        t!("ui.replay.close_side_panel").into_owned(),
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.side_panel = SidePanel::None;
+                                            cx.notify();
+                                        }),
+                                    ));
                                 row.child(
-                                    div()
+                                    v_flex()
                                         .flex_none()
                                         .w(SIDE_PANEL_WIDTH)
                                         .h_full()
                                         .border_l_1()
                                         .border_color(border)
-                                        .child(side_panel),
+                                        .child(header)
+                                        .child(div().flex_1().min_h(px(0.)).child(side_panel)),
                                 )
                             }),
                     )
@@ -1561,6 +1604,28 @@ mod tests {
             }
         })
         .expect("the window is open");
+    }
+
+    /// The side panel carries its own close control, so it can be put away
+    /// from where it is rather than from the toggle that opened it.
+    #[gpui_kit::test]
+    fn the_side_panel_closes_from_its_own_header(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+        let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
+        panel.update(cx, |panel, cx| panel.toggle_side_panel(super::SidePanel::RawMetadata, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("replay-side-panel-close", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-side-panel-close").is_none(), "the side panel went with its header");
+        })
+        .expect("the window is open");
+
+        panel.update(cx, |panel, _cx| assert!(panel.side_panel == super::SidePanel::None));
     }
 
     /// Rendering is offered on the replay being read, so a reader does not

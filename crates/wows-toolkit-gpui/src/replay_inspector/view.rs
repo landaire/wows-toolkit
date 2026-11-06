@@ -14,7 +14,7 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
-use gpui_kit::component::IndexPath;
+use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
@@ -27,14 +27,11 @@ use gpui_kit::component::dock::PaneRef;
 use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
-use gpui_kit::component::searchable_list::SearchableListItem;
-use gpui_kit::component::searchable_list::SearchableVec;
-use gpui_kit::component::select::Select;
-use gpui_kit::component::select::SelectEvent;
-use gpui_kit::component::select::SelectState;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -81,28 +78,20 @@ const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
 
-/// One entry in the grouping combo box. A local newtype because both
-/// `ReplayGrouping` and `SearchableListItem` are foreign, and because
-/// carrying the enum keeps the confirm handler off a string round trip.
-#[derive(Clone)]
-struct GroupingItem(ReplayGrouping);
-
-impl SearchableListItem for GroupingItem {
-    type Value = ReplayGrouping;
-
-    fn title(&self) -> SharedString {
-        SharedString::from(t!(grouping_label_key(self.0)).into_owned())
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.0
+/// The catalogue key for a grouping's name, so the choice reads in the
+/// reader's language as the egui app's own menu does
+/// (`ui/replay_parser/mod.rs:4301`).
+const fn grouping_label_key(grouping: ReplayGrouping) -> &'static str {
+    match grouping {
+        ReplayGrouping::Date => "ui.replay.group.date",
+        ReplayGrouping::Ship => "ui.replay.group.ship",
+        ReplayGrouping::None => "ui.replay.group.none",
     }
 }
 
-/// The catalogue key for a grouping's name, so the combo reads in the reader's
-/// language as the egui app's own menu does (`ui/replay_parser/mod.rs:4301`).
-/// `ReplayGrouping::label` is English, which is what the egui *selected* text
-/// still shows.
+/// Offered order, matching the egui app's `selectable_value` order.
+const GROUPINGS: [ReplayGrouping; 3] = [ReplayGrouping::Date, ReplayGrouping::Ship, ReplayGrouping::None];
+
 /// Where a batch render's files go.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BatchTarget {
@@ -117,21 +106,6 @@ fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
     arboard::Clipboard::new()
         .and_then(|mut clipboard| clipboard.set().file_list(written))
         .map_err(|err| err.to_string())
-}
-
-const fn grouping_label_key(grouping: ReplayGrouping) -> &'static str {
-    match grouping {
-        ReplayGrouping::Date => "ui.replay.group.date",
-        ReplayGrouping::Ship => "ui.replay.group.ship",
-        ReplayGrouping::None => "ui.replay.group.none",
-    }
-}
-
-/// Combo-box order, matching the egui app's `selectable_value` order.
-const GROUPINGS: [ReplayGrouping; 3] = [ReplayGrouping::Date, ReplayGrouping::Ship, ReplayGrouping::None];
-
-fn grouping_index(grouping: ReplayGrouping) -> usize {
-    GROUPINGS.iter().position(|g| *g == grouping).expect("GROUPINGS lists every ReplayGrouping variant")
 }
 
 pub struct ReplayInspectorView {
@@ -213,10 +187,6 @@ pub struct ReplayInspectorView {
     /// lands. The flip is not written back to the DB, so it lasts the session
     /// (`docs/gpui-port-gaps.md`).
     auto_load_latest_replay: bool,
-    /// Backing state for the header's grouping combo box. The live grouping
-    /// lives on `browser`; this mirrors it so the closed combo shows the
-    /// current value.
-    grouping_select: Entity<SelectState<SearchableVec<GroupingItem>>>,
     /// The builds whose result mapping has already been asked about this
     /// session, so a second scan does not ask again.
     constants_asked: std::collections::BTreeSet<u32>,
@@ -361,20 +331,6 @@ impl ReplayInspectorView {
         });
         let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
-        let items = SearchableVec::new(GROUPINGS.map(GroupingItem).to_vec());
-        let grouping_select = cx.new(|cx| {
-            SelectState::new(items, Some(IndexPath::new(grouping_index(ReplayGrouping::default()))), window, cx)
-                .searchable(false)
-        });
-        // `Confirm(None)` is the cleared-selection case, which this combo
-        // cannot produce: it is not `.cleanable()` and always holds a value.
-        let grouping_subscription = cx.subscribe_in(&grouping_select, window, |this, _state, event, window, cx| {
-            let SelectEvent::Confirm(Some(grouping)) = event else {
-                return;
-            };
-            this.set_grouping(*grouping, window, cx);
-        });
-
         Self {
             data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode::default(),
             browser,
@@ -398,11 +354,10 @@ impl ReplayInspectorView {
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
             auto_load_latest_replay: true,
-            grouping_select,
             constants_asked: std::collections::BTreeSet::new(),
             constants_mismatched: std::collections::BTreeSet::new(),
             contributing: None,
-            _subscriptions: vec![subscription, grouping_subscription, dock_subscription],
+            _subscriptions: vec![subscription, dock_subscription],
         }
     }
 
@@ -458,7 +413,7 @@ impl ReplayInspectorView {
         self.auto_load_latest_replay = auto_load_latest_replay;
         let grouping = replay_settings.grouping;
         self.replay_settings = replay_settings;
-        self.adopt_grouping(grouping, window, cx);
+        self.adopt_grouping(grouping, cx);
 
         self.install_dir = wows_dir.clone();
         if wows_dir.is_empty() {
@@ -569,7 +524,6 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
-            ReplayBrowserEvent::CollapseListing => self.set_listing_collapsed(true, cx),
             ReplayBrowserEvent::BuildsListed(builds) => {
                 self.fetch_missing_constants(builds.clone(), crate::constants::Cached::Keep, window, cx)
             }
@@ -826,7 +780,7 @@ impl ReplayInspectorView {
         self.auto_load_latest_replay = context.auto_load_latest_replay;
         self.collab.display_name = context.collab_display_name.clone();
         self.collab_name.update(cx, |state, cx| state.set_value(context.collab_display_name, window, cx));
-        self.adopt_grouping(context.replay_settings.grouping, window, cx);
+        self.adopt_grouping(context.replay_settings.grouping, cx);
         self.set_replay_settings(context.replay_settings, cx);
         if let Some(table) = context.personal_rating {
             self.set_personal_rating(table, cx);
@@ -1761,17 +1715,11 @@ impl ReplayInspectorView {
     }
 
     /// The browser's current grouping strategy. The browser is the single
-    /// source of truth for it; the header combo only mirrors it.
+    /// source of truth for it; the listing's options only show it.
     pub(crate) fn grouping(&self, cx: &App) -> ReplayGrouping {
         self.browser.read(cx).grouping()
     }
 
-    /// Switches the browser's grouping strategy. The header toolbar owns this
-    /// control (matching the egui app's header placement); `browser` itself
-    /// just applies it and rebuilds its tree (`ReplayBrowser::set_grouping`).
-    ///
-    /// The only writer, so the combo mirror cannot drift from the browser: a
-    /// caller that reaches the browser directly would desync the two.
     /// Shows or hides the replay listing beside the open replays.
     fn set_listing_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
         if self.replay_settings.listing_collapsed == collapsed {
@@ -1780,8 +1728,10 @@ impl ReplayInspectorView {
         self.set_column_filter(|settings| settings.listing_collapsed = collapsed, cx);
     }
 
-    fn set_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
-        self.adopt_grouping(grouping, window, cx);
+    /// Switches the browser's grouping strategy. The only writer, so the
+    /// stored row cannot drift from the browser.
+    fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+        self.adopt_grouping(grouping, cx);
         // Written back as the egui header writes it, so the listing is grouped
         // the same way on the next launch.
         self.set_column_filter(|settings| settings.grouping = grouping, cx);
@@ -1789,9 +1739,8 @@ impl ReplayInspectorView {
 
     /// Shows `grouping` without writing it back, for the seed from the stored
     /// row: announcing that would ask the app to save what it just read.
-    fn adopt_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
+    fn adopt_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
         self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
-        self.grouping_select.update(cx, |state, cx| state.set_selected_value(&grouping, window, cx));
         cx.notify();
     }
 
@@ -1828,34 +1777,92 @@ impl ReplayInspectorView {
     }
 }
 
-/// The narrow rail the listing is collapsed and expanded from.
+/// The listing's own header: the control that puts it away, its caption, and
+/// the listing's options and open actions, which belong to the listing rather
+/// than to whichever replay is showing.
+fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorView, cx: &App) -> impl IntoElement {
+    let collapse_entity = entity.clone();
+    h_flex()
+        .flex_none()
+        .gap_1()
+        .items_center()
+        .px_2()
+        .py_1()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(crate::ui::panel_collapse_button(
+            "replay-listing-collapse",
+            crate::ui::PanelSide::Left,
+            t!("ui.replay.collapse_listing").to_string(),
+            move |_event, _window, cx| {
+                collapse_entity.update(cx, |view, cx| view.set_listing_collapsed(true, cx));
+            },
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .child(t!("ui.replay.listing_caption").to_string()),
+        )
+        .child(listing_options_popover(
+            entity.clone(),
+            view.replay_settings.clone(),
+            view.auto_load_latest_replay,
+        ))
+        .child(listing_open_menu(entity))
+}
+
 /// The control that brings the listing back, in the place the listing's own
 /// header keeps it while it is up.
-///
-/// Same button, same padding, same corner: collapsing the listing must not move
-/// the control under the pointer that just clicked it.
 fn listing_rail(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
-    div().flex_none().px_2().py_1().child(
-        Button::new("replay-listing-rail")
-            .icon(IconName::PanelLeftOpen)
-            .ghost()
-            .small()
-            .tooltip(t!("ui.replay.expand_listing").to_string())
-            .on_click(move |_event, _window, cx| {
-                entity.update(cx, |view, cx| view.set_listing_collapsed(false, cx));
-            }),
+    crate::ui::panel_expand_rail(
+        "replay-listing-rail",
+        crate::ui::PanelSide::Left,
+        t!("ui.replay.expand_listing").to_string(),
+        move |_event, _window, cx| {
+            entity.update(cx, |view, cx| view.set_listing_collapsed(false, cx));
+        },
     )
 }
 
-/// One column-filter checkbox in the header toolbar: `checked` reflects
+/// The listing's open actions: one replay file, or a directory of replays
+/// opened as a workspace of its own.
+fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
+    let opening = entity.downgrade();
+    Button::new("replay-listing-open")
+        .icon(IconName::FolderOpen)
+        .ghost()
+        .small()
+        .tooltip(t!("ui.replay.open").to_string())
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+            let file = opening.clone();
+            let directory = opening.clone();
+            menu.item(PopupMenuItem::new(t!("ui.replay.open_file").into_owned()).on_click(
+                move |_event, window, cx| {
+                    let Some(view) = file.upgrade() else { return };
+                    view.update(cx, |view, cx| view.open_manually(window, cx));
+                },
+            ))
+            .item(PopupMenuItem::new(t!("ui.replay.open_directory").into_owned()).on_click(
+                move |_event, window, cx| {
+                    let Some(view) = directory.upgrade() else { return };
+                    view.update(cx, |view, cx| view.open_directory(window, cx));
+                },
+            ))
+        })
+}
+
+/// One column-filter checkbox in the listing options: `checked` reflects
 /// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
-/// and recomputes the visible columns. A free function for the same reason as
-/// `column_filters_popover` -- built three times, once per optional column the egui
+/// and recomputes the visible columns. Built once per optional column the egui
 /// app's `build_replay_header` (`ui/replay_parser/mod.rs:3697-3711`) exposes a
 /// toggle for and that has a live column in this port: Raw XP, Observed
-/// Damage, Heals. Received Damage and Distance Traveled are not exposed here
-/// either -- the egui app never lets the user toggle those, so they stay at
-/// `ReplaySettings`'s config defaults.
+/// Damage, Heals. Received Damage and Distance Traveled stay at
+/// `ReplaySettings`'s config defaults, as the egui app never lets the user
+/// toggle those.
 fn column_filter_checkbox(
     entity: Entity<ReplayInspectorView>,
     id: &'static str,
@@ -1869,42 +1876,85 @@ fn column_filter_checkbox(
     })
 }
 
-/// The column-filter dropdown, matching the egui app's "Column Filters"
-/// `ComboBox` (`ui/replay_parser/mod.rs:4609`) rather than showing the
-/// checkboxes inline. `settings` is a snapshot: the `.content()` closure
-/// re-runs on every open-render, so it always reflects the latest state.
+/// The listing's options: autoload, grouping and the column filters of the
+/// egui app's `build_replay_header` (`ui/replay_parser/mod.rs:3657`).
+/// `settings` and `auto_load` are snapshots: the `.content()` closure is
+/// rebuilt on every render of this view, so it reflects the latest state.
 ///
-/// The egui popup carries a fourth toggle, Entity ID, which neither app has a
-/// column for; it is left out here rather than drawn as a control that does
-/// nothing.
-fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplaySettings) -> impl IntoElement {
-    Popover::new("replay-header-column-filters")
+/// Grouping is a row of exclusive buttons rather than a combo: a combo's list
+/// is drawn outside the popover, and a click on it would dismiss the popover
+/// before the choice landed. The egui column popup carries a fourth toggle,
+/// Entity ID, which neither app has a column for; it is left out here.
+fn listing_options_popover(
+    entity: Entity<ReplayInspectorView>,
+    settings: ReplaySettings,
+    auto_load: bool,
+) -> impl IntoElement {
+    Popover::new("replay-listing-options-menu")
+        .anchor(Anchor::TopRight)
         .trigger(
-            Button::new("replay-header-column-filters-trigger")
-                .label(t!("ui.replay.column_filters").to_string())
-                .compact(),
+            Button::new("replay-listing-options")
+                .icon(IconName::Settings2)
+                .ghost()
+                .small()
+                .tooltip(t!("ui.replay.listing_options").to_string()),
         )
-        .content(move |_state, _window, _cx| {
+        .content(move |_state, _window, cx| {
+            let autoload_entity = entity.clone();
+            let grouping_buttons: Vec<_> = GROUPINGS
+                .into_iter()
+                .map(|offered| {
+                    let chosen = settings.grouping == offered;
+                    let entity = entity.clone();
+                    crate::ui::selectable(
+                        ("replay-listing-grouping", offered as usize),
+                        chosen,
+                        Button::new(("replay-listing-grouping-button", offered as usize))
+                            .label(t!(grouping_label_key(offered)).into_owned())
+                            .compact()
+                            .selected(chosen)
+                            .on_click(move |_event, _window, cx| {
+                                entity.update(cx, |view, cx| view.set_grouping(offered, cx));
+                            }),
+                    )
+                })
+                .collect();
+
             v_flex()
                 .gap_1()
                 .p_1()
+                .child(
+                    Checkbox::new("replay-listing-auto-load-latest")
+                        .label(t!("ui.replay.autoload_latest").to_string())
+                        .checked(auto_load)
+                        .tooltip(t!("ui.replay.autoload_latest_tooltip").to_string())
+                        .on_click(move |checked: &bool, _window, cx: &mut App| {
+                            let checked = *checked;
+                            autoload_entity.update(cx, |view, cx| view.set_auto_load_latest_replay(checked, cx));
+                        }),
+                )
+                .child(crate::ui::rule_h(cx))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.group_label").to_string()))
+                .child(h_flex().gap_1().flex_wrap().children(grouping_buttons))
+                .child(crate::ui::rule_h(cx))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.column_filters").to_string()))
                 .child(column_filter_checkbox(
                     entity.clone(),
-                    "replay-header-filter-raw-xp",
+                    "replay-listing-filter-raw-xp",
                     t!("stat.raw_xp").into_owned(),
                     settings.show_raw_xp,
                     |settings, value| settings.show_raw_xp = value,
                 ))
                 .child(column_filter_checkbox(
                     entity.clone(),
-                    "replay-header-filter-observed-damage",
+                    "replay-listing-filter-observed-damage",
                     t!("ui.replay.column.observed_damage").into_owned(),
                     settings.show_observed_damage,
                     |settings, value| settings.show_observed_damage = value,
                 ))
                 .child(column_filter_checkbox(
                     entity.clone(),
-                    "replay-header-filter-heals",
+                    "replay-listing-filter-heals",
                     t!("ui.replay.column.heals").into_owned(),
                     settings.show_heals,
                     |settings, value| settings.show_heals = value,
@@ -1915,7 +1965,7 @@ fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplayS
 impl Render for ReplayInspectorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.grouping(cx) != self.replay_settings.grouping {
-            self.adopt_grouping(self.replay_settings.grouping, window, cx);
+            self.adopt_grouping(self.replay_settings.grouping, cx);
         }
         let dock_content: AnyElement = div()
             .relative()
@@ -1949,12 +1999,10 @@ impl Render for ReplayInspectorView {
 
         let entity = cx.entity();
 
-        // Header toolbar: mirrors the egui app's `build_replay_header`
-        // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
-        // checkbox, grouping selector, column-filter checkboxes, the session
-        // popover -- in the same left-to-right order. Rendering a replay is
-        // not here: it belongs to a replay, and an opened one carries it in
-        // its own Actions menu.
+        // Header toolbar: the session popover and, for a directory workspace,
+        // which directory is listed and what can be done with it. The listing's
+        // own options and open actions are in the listing's header, and
+        // rendering a replay is in the opened replay's own Actions menu.
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
@@ -1975,24 +2023,6 @@ impl Render for ReplayInspectorView {
         let replay_header = crate::ui::toolbar(cx)
             .flex_wrap()
             .child(session)
-            .child(
-                Button::new("replay-header-open-manually")
-                    .icon(IconName::FolderOpen)
-                    .label(t!("ui.replay.open_manually").to_string())
-                    .compact()
-                    .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_manually(window, cx))),
-            )
-            // A folder of replays that is not the install's: an archive, or
-            // someone else's. The egui app opens each as a workspace of its own.
-            .child(
-                Button::new("replay-header-open-directory")
-                    .icon(IconName::Folder)
-                    // The glyph alone: the header is already the width of the
-                    // window at its narrowest, and the name is in the tooltip.
-                    .tooltip(t!("ui.replay.open_directory").to_string())
-                    .compact()
-                    .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_directory(window, cx))),
-            )
             // Which directory is being listed, when it is not the install's: the
             // rows otherwise look like the game's own and are not.
             .children(self.browser.read(cx).chosen_directory().map(|directory| {
@@ -2015,35 +2045,15 @@ impl Render for ReplayInspectorView {
             .when(self.browser.read(cx).chosen_directory().is_some(), |header| {
                 header.child(
                     Button::new("directory-game-data")
-                        .label("Check game data")
+                        .label(t!("ui.replay.check_game_data").to_string())
                         .compact()
-                        .tooltip("Check for game data required by replays in this directory")
+                        .tooltip(t!("ui.replay.check_game_data_tooltip").to_string())
                         .on_click(cx.listener(|this, _event, _window, cx| {
                             let missing = this.browser.read(cx).missing_builds();
                             cx.emit(CheckGameDataRequested(missing));
                         })),
                 )
-            })
-            .child(
-                Checkbox::new("replay-header-auto-load-latest")
-                    .label(t!("ui.replay.autoload_latest").to_string())
-                    .checked(self.auto_load_latest_replay)
-                    .tooltip(t!("ui.replay.autoload_latest_tooltip").to_string())
-                    .on_click(
-                        cx.listener(|this, checked: &bool, _window, cx| this.set_auto_load_latest_replay(*checked, cx)),
-                    ),
-            )
-            .child(crate::ui::rule_v(cx))
-            .child(
-                crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                    Select::new(&self.grouping_select)
-                        .id("replay-header-grouping")
-                        .title_prefix(t!("ui.replay.group_prefix").to_string())
-                        .accessibility_label(t!("ui.replay.group_label").to_string())
-                        .small(),
-                ),
-            )
-            .child(column_filters_popover(entity.clone(), self.replay_settings.clone()));
+            });
 
         v_flex()
             .size_full()
@@ -2075,7 +2085,14 @@ impl Render for ReplayInspectorView {
                                             .size(BROWSER_WIDTH)
                                             .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
                                             .flex_none()
-                                            .child(self.browser.clone()),
+                                            .child(
+                                                v_flex()
+                                                    .size_full()
+                                                    .child(listing_header(entity.clone(), self, cx))
+                                                    .child(
+                                                        div().flex_1().min_h(px(0.)).child(self.browser.clone()),
+                                                    ),
+                                            ),
                                     )
                                     .child(resizable_panel().child(dock_content)),
                             )
@@ -2133,7 +2150,7 @@ mod tests {
     /// The test window's height, which the listing is measured against.
     const WINDOW_HEIGHT: gpui_kit::Pixels = px(800.);
 
-    /// Every grouping names a catalogue entry, since the combo draws whatever
+    /// Every grouping names a catalogue entry, since the options draw whatever
     /// the key resolves to and an absent one draws the key itself.
     #[test]
     fn every_grouping_has_a_name_in_the_catalog() {
@@ -2195,9 +2212,9 @@ mod tests {
             // its own Actions menu rather than the header carrying it for
             // whichever replay happens to be showing.
             assert!(window.try_find("replay-header-render").is_none(), "rendering is not a header control");
-            // The rest of the header still draws beside it.
-            assert!(window.try_find("replay-header-open-manually").is_some());
-            assert!(window.try_find("replay-header-auto-load-latest").is_some());
+            // The listing's own controls draw in its header beside it.
+            assert!(window.try_find("replay-listing-options").is_some());
+            assert!(window.try_find("replay-listing-open").is_some());
         })
         .expect("the window is open");
     }

@@ -29,6 +29,7 @@ pub const REPLAYS: Filter = Filter { label: "WoWs Replays", extensions: &["wowsr
 pub const GLB: Filter = Filter { label: "glTF Binary", extensions: &["glb"] };
 
 /// Asks for one existing file.
+#[cfg(not(test))]
 pub fn pick_file(title: Option<&str>, filter: Option<Filter>) -> impl Future<Output = Option<PathBuf>> + use<> {
     let mut dialog = rfd::AsyncFileDialog::new();
     if let Some(title) = title {
@@ -42,9 +43,42 @@ pub fn pick_file(title: Option<&str>, filter: Option<Filter>) -> impl Future<Out
 }
 
 /// Asks for one directory.
+#[cfg(not(test))]
 pub fn pick_folder(title: &str) -> impl Future<Output = Option<PathBuf>> + use<> {
     let picked = rfd::AsyncFileDialog::new().set_title(title).pick_folder();
     async move { picked.await.map(|handle| handle.path().to_path_buf()) }
+}
+
+/// A dialog a test asked for. Tests run headless, so the picker is recorded
+/// and answered as cancelled instead of opened.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Asked {
+    File,
+    Folder,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ASKED: std::cell::RefCell<Vec<Asked>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The dialogs asked for on this thread since the last call.
+#[cfg(test)]
+pub fn take_asked() -> Vec<Asked> {
+    ASKED.with_borrow_mut(std::mem::take)
+}
+
+#[cfg(test)]
+pub fn pick_file(_title: Option<&str>, _filter: Option<Filter>) -> impl Future<Output = Option<PathBuf>> + use<> {
+    ASKED.with_borrow_mut(|asked| asked.push(Asked::File));
+    std::future::ready(None)
+}
+
+#[cfg(test)]
+pub fn pick_folder(_title: &str) -> impl Future<Output = Option<PathBuf>> + use<> {
+    ASKED.with_borrow_mut(|asked| asked.push(Asked::Folder));
+    std::future::ready(None)
 }
 
 /// Asks for one directory, starting in `start`.

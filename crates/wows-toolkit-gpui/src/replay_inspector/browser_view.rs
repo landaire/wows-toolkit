@@ -266,9 +266,6 @@ enum ScanError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayBrowserEvent {
     OpenReplay(PathBuf),
-    /// Put the listing away. Raised by the control in its own header, which
-    /// goes with it, so the rail beside the dock is what brings it back.
-    CollapseListing,
     /// Open this replay beside whatever is already open rather than in place
     /// of it.
     OpenReplayInNewTab(PathBuf),
@@ -1241,38 +1238,6 @@ fn render_browser_item(
 impl Render for ReplayBrowser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.release_dropped(window);
-        let border = cx.theme().border;
-        let entity = cx.entity();
-
-        let header = h_flex()
-            .flex_none()
-            .gap_1()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
-            // In the header rather than a rail of its own, which would hold a
-            // column of width open for one glyph the whole time the listing is
-            // up. The same icon a left-hand panel is collapsed with elsewhere.
-            .child(
-                Button::new("replay-listing-collapse")
-                    .icon(IconName::PanelLeftClose)
-                    .ghost()
-                    .small()
-                    .tooltip(t!("ui.replay.collapse_listing").to_string())
-                    .on_click(cx.listener(|_this, _event, _window, cx| {
-                        cx.emit(ReplayBrowserEvent::CollapseListing);
-                    })),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .child(t!("ui.replay.listing_caption").to_string()),
-            );
-
         let body = match &self.status {
             // A spinner beside the line, as the egui listing shows while it
             // is reading the directory.
@@ -1331,7 +1296,7 @@ impl Render for ReplayBrowser {
                     .into_any_element()
             }
             ScanStatus::Loaded => {
-                let entity = entity.clone();
+                let entity = cx.entity();
                 let leaf_info = self.leaf_info.clone();
                 let context_menu_leaf_info = self.leaf_info.clone();
                 let context_menu_children = self.group_children.clone();
@@ -1679,7 +1644,6 @@ impl Render for ReplayBrowser {
 
         v_flex()
             .size_full()
-            .child(header)
             .child(
                 div()
                     .id("replay-browser-rows")
