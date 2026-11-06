@@ -14,6 +14,7 @@ use wowsunpack::export::armor_ray::transform_point;
 
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::common::ActiveCamo;
+use crate::armor_viewer::common::GameNames;
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::export_dialog;
 use crate::armor_viewer::export_dialog::DialogOutcome;
@@ -80,7 +81,7 @@ struct ArmorPaneViewer<'a> {
     analysis_tab_signal: &'a std::cell::Cell<Option<AnalysisTab>>,
     comparison_ships: &'a [crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
-    translate_part: &'a dyn Fn(&str) -> String,
+    names: GameNames<'a>,
     comparison_ships_version: u64,
     /// Signal: (pane_id, new_lod) when user changes hull LOD in a popover.
     hull_lod_signal: &'a std::cell::Cell<Option<(u64, usize)>>,
@@ -147,7 +148,7 @@ fn update_trajectory_isolation(pane: &mut ArmorPane) -> bool {
             for hit in &trajectory.result.hits {
                 hit_plates.insert((
                     hit.zone.clone(),
-                    hit.material.clone(),
+                    hit.material.name().to_owned(),
                     (hit.thickness.value() * 10.0).round() as i32,
                 ));
             }
@@ -339,20 +340,9 @@ impl ToolkitTabViewer<'_> {
         let active_pane_cell: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
         let active_pane_ref = &active_pane_cell;
 
-        // Build a translation helper from game metadata.
+        // Names nations and plates from game metadata.
         let wd = wows_data.read();
-        let translate_part = |name: &str| -> String {
-            let id = format!("IDS_{}", name.to_uppercase());
-            wd.game_metadata
-                .as_ref()
-                .and_then(|m| {
-                    use wowsunpack::data::ResourceLoader;
-                    use wowsunpack::data::TranslationKey;
-                    m.localized_name_from_id(&TranslationKey::new(id))
-                })
-                .unwrap_or_else(|| name.to_string())
-        };
-        let translate_part_ref = &translate_part;
+        let names = GameNames::new(wd.game_metadata.as_deref());
 
         // Layout: sidebar (left) | separator | split_tree (right)
         let available = ui.available_rect_before_wrap();
@@ -440,8 +430,8 @@ impl ToolkitTabViewer<'_> {
                 // Sort nations by translated display name.
                 let mut sorted_nations: Vec<&_> = catalog.nations.iter().collect();
                 sorted_nations.sort_by(|a, b| {
-                    let ta = translate_part_ref(&a.nation);
-                    let tb = translate_part_ref(&b.nation);
+                    let ta = names.translate_name(&a.nation);
+                    let tb = names.translate_name(&b.nation);
                     ta.cmp(&tb)
                 });
 
@@ -508,7 +498,7 @@ impl ToolkitTabViewer<'_> {
 
                             let nation_id = egui::Id::unique(("armor_nation", &nation.nation));
                             let flag_asset = nation_flags.get(&nation.nation).cloned();
-                            let nation_display = translate_part_ref(&nation.nation);
+                            let nation_display = names.translate_name(&nation.nation);
                             let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
                                 .default_open(searching)
                                 .icon(move |ui| {
@@ -733,7 +723,7 @@ impl ToolkitTabViewer<'_> {
                 analysis_tab_signal: analysis_tab_ref,
                 comparison_ships: comparison_ships_snapshot,
                 ifhe_enabled: ifhe_snapshot,
-                translate_part: translate_part_ref,
+                names,
                 comparison_ships_version: state.comparison_ships_version,
                 hull_lod_signal: hull_lod_ref,
                 hull_change_signal: hull_change_ref,
@@ -992,7 +982,7 @@ impl ToolkitTabViewer<'_> {
             let traj_actions = crate::armor_viewer::ui::analysis::show_analysis_window(
                 ui.ctx(),
                 state,
-                translate_part_ref,
+                names,
                 &wows_data,
                 catalog_clone.as_deref(),
             );
@@ -1328,14 +1318,14 @@ pub(crate) fn upload_armor_to_viewport(
                 continue;
             }
 
-            let key = (info.zone.clone(), info.material_name.clone());
+            let key = (info.zone.clone(), info.material.name().to_owned());
             let part_visible = pane.part_visibility.get(&key).copied().unwrap_or(true);
             if !part_visible {
                 continue;
             }
 
             let plate_key: PlateKey =
-                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+                (info.zone.clone(), info.material.name().to_owned(), (info.thickness_mm * 10.0).round() as i32);
             let plate_visible = pane.plate_visibility.get(&plate_key).copied().unwrap_or(true);
             if !plate_visible {
                 continue;
@@ -1367,7 +1357,7 @@ pub(crate) fn upload_armor_to_viewport(
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
 
             tooltips.push(ArmorTriangleTooltip {
-                material_name: info.material_name.clone(),
+                material: info.material,
                 zone: info.zone.clone(),
                 thickness_mm: info.thickness_mm,
                 layers: info.layers.clone(),
@@ -1712,7 +1702,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
     let analysis_tab_signal = ctx.analysis_tab_signal;
     let comparison_ships = ctx.comparison_ships;
     let ifhe_enabled = ctx.ifhe_enabled;
-    let translate_part = ctx.translate_part;
+    let names = ctx.names;
     let comparison_ships_version = ctx.comparison_ships_version;
     let hull_lod_signal = ctx.hull_lod_signal;
     let hull_change_signal = ctx.hull_change_signal;
@@ -1748,7 +1738,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            let (changed, hkey) = draw_armor_visibility_popover(ui, pane, &armor, translate_part);
+                            let (changed, hkey) = draw_armor_visibility_popover(ui, pane, &armor, names);
                             if changed {
                                 zone_changed = true;
                             }
@@ -2512,7 +2502,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         &response,
                         pane,
                         &render_state.device,
-                        translate_part,
+                        names,
                         !pane.trajectory_mode && !pane.splash_mode,
                         comparison_ships,
                         ifhe_enabled,
@@ -2657,6 +2647,7 @@ fn load_ship_for_pane_with_lod(
     use wowsunpack::game_params::types::GameParamProvider;
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
+    let species = param.as_ref().and_then(|p| p.species()).and_then(|s| s.known()).copied();
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
 
@@ -2688,6 +2679,7 @@ fn load_ship_for_pane_with_lod(
             Some(v) => {
                 let load_opts = crate::armor_viewer::common::ShipLoadOptions {
                     display_name: ship_display_name,
+                    species,
                     lod: requested_lod,
                     selected_hull,
                     module_overrides,
@@ -3048,12 +3040,12 @@ fn start_upgrade_reload(
             > = std::collections::HashMap::new();
             for mesh in &armor_meshes {
                 for info in &mesh.triangle_info {
-                    zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material_name.clone());
+                    zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material.name().to_owned());
                     let thickness_key = (info.thickness_mm * 10.0).round() as i32;
                     zone_part_plates_map
                         .entry(info.zone.clone())
                         .or_default()
-                        .entry(info.material_name.clone())
+                        .entry(info.material.name().to_owned())
                         .or_default()
                         .insert(thickness_key);
                 }
@@ -3239,7 +3231,7 @@ pub(crate) fn show_armor_tooltip(
     info: &ArmorTriangleTooltip,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
-    translate: &dyn Fn(&str) -> String,
+    material_label: &str,
 ) {
     use crate::armor_viewer::penetration::PenResult;
     use crate::armor_viewer::penetration::check_penetration;
@@ -3262,7 +3254,7 @@ pub(crate) fn show_armor_tooltip(
     });
 
     // Zone and part info
-    ui.label(format!("{} / {}", info.zone, translate(&info.material_name)));
+    ui.label(format!("{} / {material_label}", info.zone));
 
     if info.layers.len() > 1 {
         ui.separator();
@@ -3367,7 +3359,7 @@ pub(crate) fn upload_plate_highlight(
             }
 
             let thickness_key = (info.thickness_mm * 10.0).round() as i32;
-            if info.zone != key.0 || info.material_name != key.1 || thickness_key != key.2 {
+            if info.zone != key.0 || info.material.name() != key.1 || thickness_key != key.2 {
                 continue;
             }
 
@@ -3375,7 +3367,7 @@ pub(crate) fn upload_plate_highlight(
             if pane.show_hidden_only && !info.hidden {
                 continue;
             }
-            let part_key = (info.zone.clone(), info.material_name.clone());
+            let part_key = (info.zone.clone(), info.material.name().to_owned());
             if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
                 continue;
             }
@@ -3439,12 +3431,12 @@ pub fn upload_zone_highlight(
             if pane.show_hidden_only && !info.hidden {
                 continue;
             }
-            let part_key = (info.zone.clone(), info.material_name.clone());
+            let part_key = (info.zone.clone(), info.material.name().to_owned());
             if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
                 continue;
             }
             let thickness_key = (info.thickness_mm * 10.0).round() as i32;
-            let plate_key: PlateKey = (info.zone.clone(), info.material_name.clone(), thickness_key);
+            let plate_key: PlateKey = (info.zone.clone(), info.material.name().to_owned(), thickness_key);
             if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
                 continue;
             }
@@ -3495,7 +3487,7 @@ pub fn upload_part_highlight(
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if info.zone != zone || info.material_name != part {
+            if info.zone != zone || info.material.name() != part {
                 continue;
             }
             if !pane.show_zero_mm && info.thickness_mm.abs() < 0.05 {
@@ -3504,12 +3496,12 @@ pub fn upload_part_highlight(
             if pane.show_hidden_only && !info.hidden {
                 continue;
             }
-            let part_key = (info.zone.clone(), info.material_name.clone());
+            let part_key = (info.zone.clone(), info.material.name().to_owned());
             if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
                 continue;
             }
             let thickness_key = (info.thickness_mm * 10.0).round() as i32;
-            let plate_key: PlateKey = (info.zone.clone(), info.material_name.clone(), thickness_key);
+            let plate_key: PlateKey = (info.zone.clone(), info.material.name().to_owned(), thickness_key);
             if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
                 continue;
             }
@@ -3898,7 +3890,7 @@ fn cast_armor_trajectory(
             position: hit.position,
             thickness: Millimeters::from(hit.info.thickness_mm),
             zone: hit.info.zone.clone(),
-            material: hit.info.material_name.clone(),
+            material: hit.info.material,
             angle_from_normal: crate::armor_viewer::penetration::impact_angle_from_normal(&direction, &hit.normal),
             distance_from_start: ShipModelDistance::from(hit.distance - first_distance),
         })
@@ -4467,12 +4459,12 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
             if pane.show_hidden_only && !info.hidden {
                 continue;
             }
-            let key = (info.zone.clone(), info.material_name.clone());
+            let key = (info.zone.clone(), info.material.name().to_owned());
             if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
                 continue;
             }
             let plate_key: PlateKey =
-                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+                (info.zone.clone(), info.material.name().to_owned(), (info.thickness_mm * 10.0).round() as i32);
             if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
                 continue;
             }
@@ -4654,12 +4646,12 @@ fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu
             if pane.show_hidden_only && !info.hidden {
                 continue;
             }
-            let key = (info.zone.clone(), info.material_name.clone());
+            let key = (info.zone.clone(), info.material.name().to_owned());
             if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
                 continue;
             }
             let plate_key: PlateKey =
-                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+                (info.zone.clone(), info.material.name().to_owned(), (info.thickness_mm * 10.0).round() as i32);
             if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
                 continue;
             }
@@ -4845,7 +4837,7 @@ pub(crate) fn draw_armor_visibility_popover(
     ui: &mut egui::Ui,
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
-    translate_part: &dyn Fn(&str) -> String,
+    names: GameNames<'_>,
 ) -> (bool, Option<SidebarHighlightKey>) {
     let mut zone_changed = false;
     let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
@@ -4965,7 +4957,7 @@ pub(crate) fn draw_armor_visibility_popover(
                             let pk: PlateKey = (zone.name.clone(), part.name.clone(), t);
                             pane.plate_visibility.get(&pk).copied() == Some(false)
                         });
-                        let display = translate_part(&part.name);
+                        let display = names.material_key(&part.name, armor.species);
 
                         if visible_plates.len() <= 1 {
                             let mut v = part_on && !any_plate_hidden;
@@ -5760,12 +5752,13 @@ pub(crate) fn handle_plate_interaction(
     response: &egui::Response,
     pane: &mut ArmorPane,
     device: &wgpu::Device,
-    translate_part: &dyn Fn(&str) -> String,
+    names: GameNames<'_>,
     allow_click_toggle: bool,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
 ) -> bool {
     let mut zone_changed = false;
+    let species = pane.loaded_armor.as_ref().and_then(|armor| armor.species);
 
     // Picking on hover
     let mut hovered_plate_key: Option<PlateKey> = None;
@@ -5791,11 +5784,12 @@ pub(crate) fn handle_plate_interaction(
 
             if let Some(tooltip) = tooltip {
                 let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
-                hovered_plate_key = Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
+                hovered_plate_key = Some((tooltip.zone.clone(), tooltip.material.name().to_owned(), thickness_key));
                 pane.hovered_info = Some(tooltip.clone());
                 if !context_menu_open && ring_label.is_none() {
                     egui::containers::Tooltip::for_widget(response).at_pointer().show(|ui| {
-                        show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, translate_part);
+                        let material_label = names.material(tooltip.material, species);
+                        show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, &material_label);
                     });
                 }
             } else {
@@ -5831,7 +5825,7 @@ pub(crate) fn handle_plate_interaction(
         let ctx_key = ctx_key.clone();
         let part_key = (ctx_key.0.clone(), ctx_key.1.clone());
         let thickness = ctx_key.2 as f32 / 10.0;
-        let ctx_name = translate_part(&ctx_key.1);
+        let ctx_name = names.material_key(&ctx_key.1, species);
         response.context_menu(|ui| {
             let plate_visible = pane.plate_visibility.get(&ctx_key).copied().unwrap_or(true);
             let plate_label = if plate_visible {

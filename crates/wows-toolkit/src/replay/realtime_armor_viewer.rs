@@ -23,6 +23,7 @@ use wowsunpack::recognized::Recognized;
 extern crate nalgebra as na;
 use na::Rotation3;
 
+use crate::armor_viewer::common::GameNames;
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonShipIndex;
 use crate::armor_viewer::penetration::ComparisonVerdict;
@@ -329,6 +330,7 @@ impl RealtimeArmorViewer {
                 let camera_trajectories = v.camera_trajectories().to_vec();
                 let load_opts = crate::armor_viewer::common::ShipLoadOptions {
                     display_name,
+                    species: param.as_ref().and_then(|p| p.species()).and_then(|s| s.known()).copied(),
                     lod: requested_lod,
                     selected_hull,
                     hull_upgrade_names,
@@ -1356,7 +1358,8 @@ impl RealtimeArmorViewer {
         }
 
         let mut zone_changed = false;
-        let translate_part = |name: &str| -> String { name.to_string() };
+        let ship_assets = Arc::clone(&self.ship_assets);
+        let names = GameNames::new(Some(ship_assets.metadata()));
 
         // Undo/redo keyboard shortcuts
         if crate::armor_viewer::common::handle_undo_redo(ui, &mut self.pane) {
@@ -1382,7 +1385,7 @@ impl RealtimeArmorViewer {
                                 ui,
                                 &mut self.pane,
                                 &armor,
-                                &translate_part,
+                                names,
                             );
                             if changed {
                                 zone_changed = true;
@@ -1532,7 +1535,7 @@ impl RealtimeArmorViewer {
                 &response,
                 &mut self.pane,
                 &self.render_state.device,
-                &translate_part,
+                names,
                 true,  // allow click-to-toggle (no trajectory mode conflict in realtime viewer)
                 &[],   // no comparison ships
                 false, // no IFHE
@@ -2238,8 +2241,10 @@ impl RealtimeArmorViewer {
                         );
                     }
                 });
+                let species = self.pane.loaded_armor.as_ref().and_then(|armor| armor.species);
+                let material_label = GameNames::new(Some(self.ship_assets.metadata())).material(hit.material, species);
                 ui.label(
-                    egui::RichText::new(format!("  {} / {}", hit.zone, hit.material)).small().color(ui.sem().text_dim),
+                    egui::RichText::new(format!("  {} / {material_label}", hit.zone)).small().color(ui.sem().text_dim),
                 );
 
                 // Per-plate penetration outcome (AP)

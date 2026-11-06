@@ -22,7 +22,9 @@ use wowsunpack::ballistics::is_citadel_zone;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::ballistics::normalized_strike_angle;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
+use crate::armor::PlateNames;
 use crate::armor_trace::GridRay;
 use crate::armor_trace::GunRequest;
 use crate::armor_trace::RayPlate;
@@ -338,7 +340,13 @@ pub enum StackLabel {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StackPlate {
-    pub material: String,
+    /// The game's name for the plate, led by its zone, e.g. "citadel: Armor Belt".
+    pub plate: String,
+
+    #[serde(skip)]
+    pub material: ArmorMaterial,
+    pub zone: String,
+
     pub thickness_mm: Millimeters,
     pub angle_deg: Degrees,
     pub effective_mm: Millimeters,
@@ -452,11 +460,13 @@ impl GameData {
             length_profile: length_profile(&side_rays, bow),
         };
 
-        let mut approaches = vec![approach(&starboard.rays, Degrees::new(0.0), None, shell.as_ref(), bow)];
+        let materials = meshes.iter().flat_map(|mesh| mesh.triangle_info.iter().map(|info| info.material));
+        let names = self.plate_names(ship, materials);
+        let mut approaches = vec![approach(&starboard.rays, Degrees::new(0.0), None, shell.as_ref(), bow, &names)];
         if let Some(weapon) = &weapon {
             let fall = weapon.arrival.fall_angle_deg;
             let plunging = cast_grid(&meshes, line_of_fire(Degrees::new(0.0), fall), spacing)?;
-            approaches.push(approach(&plunging.rays, fall, weapon.arrival.range_km, shell.as_ref(), bow));
+            approaches.push(approach(&plunging.rays, fall, weapon.arrival.range_km, shell.as_ref(), bow, &names));
         }
 
         let exposure = CitadelExposure {
@@ -496,6 +506,7 @@ pub(crate) fn approach(
     range: Option<Km>,
     shell: Option<&ShellFlags>,
     bow: ShipModelDistance,
+    names: &PlateNames,
 ) -> CitadelApproach {
     let mut reaching: Vec<CitadelRay> =
         rays.iter().filter(|ray| !ray.underwater).filter_map(|ray| citadel_ray(&ray.plates)).collect();
@@ -534,7 +545,7 @@ pub(crate) fn approach(
     } else {
         [(StackLabel::Least, 0), (StackLabel::Median, clear.len() / 2), (StackLabel::Most, clear.len() - 1)]
             .into_iter()
-            .map(|(label, index)| stack(label, clear[index], shell, bow))
+            .map(|(label, index)| stack(label, clear[index], shell, bow, names))
             .collect()
     };
 
@@ -724,7 +735,13 @@ fn length_profile(rays: &[&GridRay], bow: ShipModelDistance) -> Vec<Station> {
         .collect()
 }
 
-fn stack(label: StackLabel, ray: &CitadelRay, shell: Option<&ShellFlags>, bow: ShipModelDistance) -> CitadelStack {
+fn stack(
+    label: StackLabel,
+    ray: &CitadelRay,
+    shell: Option<&ShellFlags>,
+    bow: ShipModelDistance,
+    names: &PlateNames,
+) -> CitadelStack {
     const STACK_PLATE_LIMIT: usize = 8;
 
     // The plates nearest the citadel matter most, so the list keeps those.
@@ -733,7 +750,9 @@ fn stack(label: StackLabel, ray: &CitadelRay, shell: Option<&ShellFlags>, bow: S
         .iter()
         .chain(std::iter::once(ray.citadel))
         .map(|plate| StackPlate {
-            material: plate.material.to_owned(),
+            plate: names.of(plate.material),
+            material: plate.material,
+            zone: plate.zone.to_owned(),
             thickness_mm: round_mm(plate.thickness),
             angle_deg: round_deg(plate.angle),
             effective_mm: round_mm(effective_mm(plate)),

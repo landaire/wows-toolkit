@@ -7,6 +7,7 @@
 
 use crate::viewport_3d::Vec3;
 
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
@@ -30,7 +31,7 @@ pub struct TrajectoryHit {
     pub position: Vec3,
     pub thickness: Millimeters,
     pub zone: String,
-    pub material: String,
+    pub material: ArmorMaterial,
     /// Strike angle from the plate normal: 0 is head-on, 90 is glancing.
     pub angle_from_normal: Degrees,
     pub distance_from_start: ShipModelDistance,
@@ -168,7 +169,7 @@ pub fn compare_with_server(
         .map(|hit| wows_toolkit_viewmodel::armor::arc::ArcPlate {
             zone: hit.zone.clone(),
             thickness: hit.thickness,
-            material: hit.material.clone(),
+            material: hit.material,
         })
         .collect();
     wows_toolkit_viewmodel::armor::arc::compare_with_server(sim, &plates, strike, server_outcome, params)

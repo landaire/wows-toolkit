@@ -133,7 +133,7 @@ pub(crate) fn is_zero_mm(thickness_mm: f32) -> bool {
 pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
     PlateKey {
         zone: info.zone.clone(),
-        material_name: info.material_name.clone(),
+        material_name: info.material.name().to_owned(),
         thickness_tenths: (info.thickness_mm * 10.0).round() as i32,
     }
 }
@@ -155,7 +155,7 @@ pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityF
     if visibility.show_hidden_only && !info.hidden {
         return false;
     }
-    if !part_on(visibility.part, &info.zone, &info.material_name) {
+    if !part_on(visibility.part, &info.zone, info.material.name()) {
         return false;
     }
     !visibility.plate.get(&derive_plate_key(info)).copied().unwrap_or(false)
@@ -213,7 +213,7 @@ fn upload_armor_meshes(
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
 
             tooltips.push(ArmorTriangleTooltip {
-                material_name: info.material_name.clone(),
+                material: info.material,
                 zone: info.zone.clone(),
                 thickness_mm: info.thickness_mm,
                 layers: info.layers.clone(),
@@ -469,6 +469,7 @@ fn upload_plate_boundary_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
     #[test]
     fn is_zero_mm_matches_the_egui_epsilon() {
@@ -496,7 +497,7 @@ mod tests {
             model_index: 1,
             triangle_index: 0,
             material_id: 0,
-            material_name: material.to_string(),
+            material: ArmorMaterial::parse(material).expect("test material is a table key"),
             zone: zone.to_string(),
             thickness_mm,
             layers: vec![thickness_mm],
@@ -743,7 +744,7 @@ mod tests {
         // nothing else, without moving the camera.
         let tooltip_key = |t: &ArmorTriangleTooltip| PlateKey {
             zone: t.zone.clone(),
-            material_name: t.material_name.clone(),
+            material_name: t.material.name().to_owned(),
             thickness_tenths: (t.thickness_mm * 10.0).round() as i32,
         };
         let hidden_key = mesh_triangle_info[0]

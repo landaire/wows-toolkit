@@ -1,10 +1,16 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use serde::Serialize;
+use serde::Serializer;
 use wows_core::units::Millimeters;
 use wowsunpack::export::gltf_export::zone_from_material_name;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
+use wowsunpack::game_params::ttx::armor_material::MaterialPart;
+use wowsunpack::game_params::ttx::armor_material::MaterialZone;
 use wowsunpack::game_params::ttx::armor_materials::armor_type_classifies;
-use wowsunpack::game_params::ttx::armor_materials::collision_material_name;
+use wowsunpack::game_params::types::Species;
 
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -21,38 +27,100 @@ pub struct ShipArmor {
 
     pub ship: ShipSummary,
 
-    /// Per hull zone, the thinnest and thickest nonzero plate above the waterline.
+    /// Plates shown in the port armor view, by hull zone.
     pub zones: Vec<ZoneArmor>,
-
-    /// Plates shown in the port armor view, by collision material. Names ending
-    /// in `_Bottom` are below the waterline.
-    pub plates: Vec<PlateArmor>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ZoneArmor {
     /// Hull zone as the WoWs Toolkit armor viewer names it.
     pub zone: &'static str,
-    pub min_mm: Millimeters,
-    pub max_mm: Millimeters,
+
+    /// Plates above the waterline; absent when every plate of the zone is
+    /// below it.
+    #[serde(flatten)]
+    pub above_water: Option<ThicknessSpan>,
+
+    pub plates: Vec<PlateArmor>,
+}
+
+/// Thickness of a zone's plates above the waterline.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ThicknessSpan {
+    /// Every plate has this thickness.
+    Uniform {
+        thickness_mm: Millimeters,
+    },
+    Range {
+        thinnest_mm: Millimeters,
+        thickest_mm: Millimeters,
+    },
+}
+
+impl ThicknessSpan {
+    fn new(thinnest: Millimeters, thickest: Millimeters) -> Self {
+        if thinnest == thickest {
+            Self::Uniform { thickness_mm: thinnest }
+        } else {
+            Self::Range { thinnest_mm: thinnest, thickest_mm: thickest }
+        }
+    }
+
+    pub fn thinnest(self) -> Millimeters {
+        match self {
+            Self::Uniform { thickness_mm } => thickness_mm,
+            Self::Range { thinnest_mm, .. } => thinnest_mm,
+        }
+    }
+
+    pub fn thickest(self) -> Millimeters {
+        match self {
+            Self::Uniform { thickness_mm } => thickness_mm,
+            Self::Range { thickest_mm, .. } => thickest_mm,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlateArmor {
-    pub zone: &'static str,
-    pub material: &'static str,
+    /// The game's name for the plate, led by its zone, e.g. "bow: Fore End Deck".
+    pub plate: String,
 
-    /// Thickness of each layer, ascending and deduplicated.
+    #[serde(skip)]
+    pub material: ArmorMaterial,
+
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub below_waterline: bool,
+
+    /// One thickness, or each layer's ascending when the plate has several.
+    #[serde(serialize_with = "one_or_list")]
     pub thickness_mm: Vec<Millimeters>,
 }
 
 /// The plate thickness a shell must defeat to damage a zone.
-#[derive(Debug, Clone, Serialize)]
-pub struct ZoneThickness {
-    pub thickness: Millimeters,
+#[derive(Debug, Clone)]
+pub(crate) struct ZoneThickness {
+    pub(crate) thickness: Millimeters,
 
-    /// Plates of the zone that have this thickness.
-    pub plates: Vec<&'static str>,
+    /// Names of the zone's plates that have this thickness.
+    pub(crate) plates: Vec<String>,
+}
+
+/// A plate of a ship's armor table that the armor view shows, with its
+/// nonzero layers.
+pub(crate) struct Plate {
+    pub(crate) zone: &'static str,
+    pub(crate) material: ArmorMaterial,
+
+    /// Ascending and deduplicated.
+    pub(crate) layers: Vec<Millimeters>,
+}
+
+impl Plate {
+    fn is_above_water(&self) -> bool {
+        is_above_water(self.material)
+    }
 }
 
 impl GameData {
@@ -61,18 +129,84 @@ impl GameData {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let plates = plates(ship);
-        let zones = zone_armor(&plates);
+        let names = self.plate_names(ship, plates.iter().map(|plate| plate.material));
+        let spans = zone_spans(&plates);
 
-        Ok(ShipArmor { interpretations, ship: ship.summary(), zones, plates })
+        let mut zones: Vec<ZoneArmor> = Vec::new();
+        for plate in &plates {
+            let named = PlateArmor {
+                plate: names.of(plate.material),
+                material: plate.material,
+                below_waterline: !plate.is_above_water(),
+                thickness_mm: plate.layers.clone(),
+            };
+            match zones.last_mut() {
+                Some(zone) if zone.zone == plate.zone => zone.plates.push(named),
+                _ => zones.push(ZoneArmor {
+                    zone: plate.zone,
+                    above_water: spans.get(plate.zone).copied(),
+                    plates: vec![named],
+                }),
+            }
+        }
+
+        Ok(ShipArmor { interpretations, ship: ship.summary(), zones })
+    }
+
+    /// Names for the plates of `ship` that are made of `materials`.
+    pub(crate) fn plate_names(
+        &self,
+        ship: &Ship,
+        materials: impl IntoIterator<Item = ArmorMaterial>,
+    ) -> PlateNames<'_> {
+        let provider = self.provider();
+        let species = ship.class.species();
+
+        let materials: BTreeSet<ArmorMaterial> = materials.into_iter().collect();
+        let mut by_name: BTreeMap<String, Vec<ArmorMaterial>> = BTreeMap::new();
+        for material in materials {
+            by_name.entry(material.qualified_name(provider, Some(species))).or_default().push(material);
+        }
+
+        let mut names: BTreeMap<ArmorMaterial, String> = BTreeMap::new();
+        for (name, materials) in by_name {
+            let shared = materials.len() > 1;
+            for material in materials {
+                let name = if shared { format!("{name} ({})", material.part()) } else { name.clone() };
+                names.insert(material, name);
+            }
+        }
+
+        PlateNames { provider, species, names }
     }
 }
 
-/// Per hull zone, the thinnest and thickest nonzero plate above the waterline.
-pub(crate) fn zone_armor(plates: &[PlateArmor]) -> Vec<ZoneArmor> {
-    let mut zones: BTreeMap<&'static str, (Millimeters, Millimeters)> = BTreeMap::new();
-    for plate in plates.iter().filter(|plate| is_above_water(plate.material)) {
-        for thickness in plate.thickness_mm.iter().copied().filter(|mm| mm.value() > 0.0) {
-            let entry = zones.entry(plate.zone).or_insert((thickness, thickness));
+/// Names the plates of one ship. Plates the game names alike are told apart
+/// by their part: "superstructure: Plating (roof)".
+pub(crate) struct PlateNames<'a> {
+    provider: &'a GameMetadataProvider,
+    species: Species,
+    names: BTreeMap<ArmorMaterial, String>,
+}
+
+impl PlateNames<'_> {
+    /// The game's name for `material`, led by its zone.
+    pub(crate) fn of(&self, material: ArmorMaterial) -> String {
+        match self.names.get(&material) {
+            Some(name) => name.clone(),
+            // A material the names were not built from has no plate to be
+            // told apart from.
+            None => material.qualified_name(self.provider, Some(self.species)),
+        }
+    }
+}
+
+/// Per hull zone, the thinnest and thickest plate above the waterline.
+pub(crate) fn zone_spans(plates: &[Plate]) -> BTreeMap<&'static str, ThicknessSpan> {
+    let mut bounds: BTreeMap<&'static str, (Millimeters, Millimeters)> = BTreeMap::new();
+    for plate in plates.iter().filter(|plate| plate.is_above_water()) {
+        for thickness in plate.layers.iter().copied() {
+            let entry = bounds.entry(plate.zone).or_insert((thickness, thickness));
             if thickness.value() < entry.0.value() {
                 entry.0 = thickness;
             }
@@ -82,62 +216,88 @@ pub(crate) fn zone_armor(plates: &[PlateArmor]) -> Vec<ZoneArmor> {
         }
     }
 
-    zones.into_iter().map(|(zone, (min_mm, max_mm))| ZoneArmor { zone, min_mm, max_mm }).collect()
+    bounds.into_iter().map(|(zone, (thinnest, thickest))| (zone, ThicknessSpan::new(thinnest, thickest))).collect()
 }
 
-/// Plates of `ship` that the armor view classifies, sorted by zone and material.
-pub(crate) fn plates(ship: &Ship) -> Vec<PlateArmor> {
+/// Plates of `ship` that the armor view classifies, sorted by zone and
+/// material. Layers of 0 mm are left out: they close a zone's volume for hit
+/// detection and stop nothing.
+pub(crate) fn plates(ship: &Ship) -> Vec<Plate> {
     let Some(armor) = ship.param.vehicle().and_then(|vehicle| vehicle.armor()) else {
         return Vec::new();
     };
 
-    let mut plates: Vec<PlateArmor> = Vec::new();
+    let mut plates: Vec<Plate> = Vec::new();
     for (material, layers) in armor {
         let Ok(material) = u8::try_from(*material) else {
             continue;
         };
-        let name = collision_material_name(material);
-        if !armor_type_classifies(name) {
+        let material = ArmorMaterial::from_id(material);
+        if !armor_type_classifies(material.name()) {
             continue;
         }
 
-        let mut thickness_mm: Vec<Millimeters> = layers.values().map(|mm| Millimeters::new(*mm)).collect();
-        thickness_mm.sort_by(|left, right| left.value().total_cmp(&right.value()));
-        thickness_mm.dedup();
-        plates.push(PlateArmor { zone: zone_from_material_name(name), material: name, thickness_mm });
+        let mut layers: Vec<Millimeters> =
+            layers.values().map(|mm| Millimeters::new(*mm)).filter(|mm| mm.value() > 0.0).collect();
+        if layers.is_empty() {
+            continue;
+        }
+        layers.sort_by(|left, right| left.value().total_cmp(&right.value()));
+        layers.dedup();
+
+        plates.push(Plate { zone: zone_from_material_name(material.name()), material, layers });
     }
-    plates.sort_by(|left, right| left.zone.cmp(right.zone).then_with(|| left.material.cmp(right.material)));
+    plates.sort_by(|left, right| left.zone.cmp(right.zone).then_with(|| left.material.cmp(&right.material)));
 
     plates
 }
 
-/// Thickness to test a shell against. A plate name selects that plate's
-/// thickest layer. A zone name such as "Bow" selects the thinnest nonzero
-/// plate of that zone above the waterline, which is the plate a shell must
-/// defeat to damage the zone.
-pub(crate) fn zone_thickness(ship: &Ship, zone: &str) -> Result<ZoneThickness, QueryError> {
+/// Thickness to test a shell against. A plate selects that plate's thickest
+/// layer; it is named by its material key, its English label or its name as
+/// ship_armor gives it. A zone name such as "Bow" selects the thinnest plate
+/// of that zone above the waterline, which is the plate a shell must defeat
+/// to damage the zone.
+pub(crate) fn zone_thickness(game: &GameData, ship: &Ship, zone: &str) -> Result<ZoneThickness, QueryError> {
     let plates = plates(ship);
+    let names = game.plate_names(ship, plates.iter().map(|plate| plate.material));
+    let wanted = zone.trim();
 
-    let named = plates.iter().find(|plate| plate.material.eq_ignore_ascii_case(zone.trim()));
-    if let Some(plate) = named
-        && let Some(thickest) = plate.thickness_mm.iter().rev().find(|mm| mm.value() > 0.0)
-    {
-        return Ok(ZoneThickness { thickness: *thickest, plates: vec![plate.material] });
+    let named: Vec<&Plate> = plates
+        .iter()
+        .filter(|plate| {
+            let material = plate.material;
+            material.name().eq_ignore_ascii_case(wanted)
+                || material.english_label().eq_ignore_ascii_case(wanted)
+                || names.of(material).eq_ignore_ascii_case(wanted)
+        })
+        .collect();
+    match named.as_slice() {
+        [] => {}
+        [plate] => {
+            if let Some(thickest) = plate.layers.last() {
+                return Ok(ZoneThickness { thickness: *thickest, plates: vec![names.of(plate.material)] });
+            }
+        }
+        several => {
+            return Err(QueryError::AmbiguousPlate {
+                ship: ship.name.clone(),
+                plate: wanted.to_owned(),
+                candidates: several.iter().map(|plate| names.of(plate.material)).collect(),
+            });
+        }
     }
 
     let zone_name = canonical_zone(zone);
     let mut thinnest: Option<ZoneThickness> = None;
-    for plate in
-        plates.iter().filter(|plate| plate.zone.eq_ignore_ascii_case(zone_name) && is_above_water(plate.material))
-    {
-        let Some(thickness) = plate.thickness_mm.iter().copied().find(|mm| mm.value() > 0.0) else {
+    for plate in plates.iter().filter(|plate| plate.zone.eq_ignore_ascii_case(zone_name) && plate.is_above_water()) {
+        let Some(thickness) = plate.layers.first().copied() else {
             continue;
         };
 
         match &mut thinnest {
-            Some(current) if current.thickness == thickness => current.plates.push(plate.material),
+            Some(current) if current.thickness == thickness => current.plates.push(names.of(plate.material)),
             Some(current) if current.thickness.value() < thickness.value() => {}
-            _ => thinnest = Some(ZoneThickness { thickness, plates: vec![plate.material] }),
+            _ => thinnest = Some(ZoneThickness { thickness, plates: vec![names.of(plate.material)] }),
         }
     }
 
@@ -148,8 +308,14 @@ pub(crate) fn zone_thickness(ship: &Ship, zone: &str) -> Result<ZoneThickness, Q
     })
 }
 
-fn is_above_water(material: &str) -> bool {
-    !material.ends_with("_Bottom")
+/// Bottom plates of the hull and its zones lie below the waterline.
+fn is_above_water(material: ArmorMaterial) -> bool {
+    let hull_zone = matches!(
+        material.zone(),
+        MaterialZone::Bow | MaterialZone::Stern | MaterialZone::Citadel | MaterialZone::Casemate | MaterialZone::Hull
+    );
+
+    !(hull_zone && material.part() == MaterialPart::Bottom)
 }
 
 /// Maps player wording for a hull zone to the names `zone_from_material_name`
@@ -166,5 +332,12 @@ fn canonical_zone(zone: &str) -> &str {
         "torpedo protection" | "tdz" | "bulge" => "TorpedoProtection",
         "hull" => "Hull",
         _ => zone.trim(),
+    }
+}
+
+fn one_or_list<S: Serializer>(layers: &[Millimeters], serializer: S) -> Result<S::Ok, S::Error> {
+    match layers {
+        [single] => single.serialize(serializer),
+        _ => layers.serialize(serializer),
     }
 }

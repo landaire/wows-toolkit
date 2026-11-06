@@ -6,8 +6,8 @@ expression: search
 thickness_mm: 27
 target: "T10 Des Moines (cruiser, USA) bow"
 plates:
-  - Bow_ConstrSide
-  - Bow_Deck
+  - "bow: Fore End Plating"
+  - "bow: Fore End Deck"
 tiers:
   min: 8
   max: 11

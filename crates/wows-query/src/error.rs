@@ -64,6 +64,9 @@ pub enum QueryError {
     #[error("{ship} has no armor zone or plate named {zone:?}; zones: {}", zones.join(", "))]
     ZoneNotFound { ship: String, zone: String, zones: Vec<&'static str> },
 
+    #[error("{plate:?} names several plates of {ship}: {}; give one of these names or a zone", candidates.join(", "))]
+    AmbiguousPlate { ship: String, plate: String, candidates: Vec<String> },
+
     #[error(
         "no captain skill matches {query:?}; {}",
         did_you_mean(suggestions, "use the skill's English name or a common acronym such as IFHE")
@@ -198,6 +201,7 @@ impl QueryError {
     pub fn candidates(&self) -> &[String] {
         match self {
             Self::AmbiguousShip { candidates, .. }
+            | Self::AmbiguousPlate { candidates, .. }
             | Self::AmbiguousSkill { candidates, .. }
             | Self::AmbiguousUpgrade { candidates, .. }
             | Self::AmbiguousConsumable { candidates, .. }

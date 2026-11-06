@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 621
+assertion_line: 697
 expression: friedrich
 ---
 interpretations:
@@ -99,20 +99,23 @@ approaches:
         from_bow_m: 109.3
         height_m: 0.2
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 6.6
             effective_mm: 302
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 120
             angle_deg: 64
             effective_mm: 273.9
             shell:
               - may_ricochet
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 0.7
             effective_mm: 45
@@ -123,20 +126,23 @@ approaches:
         from_bow_m: 98.8
         height_m: 0.2
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 16.2
             effective_mm: 312.4
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 150
             angle_deg: 67.5
             effective_mm: 391.4
             shell:
               - may_ricochet
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 8.7
             effective_mm: 45.5
@@ -147,20 +153,23 @@ approaches:
         from_bow_m: 72.3
         height_m: 0.7
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 29.2
             effective_mm: 343.8
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 150
             angle_deg: 67.5
             effective_mm: 391.4
             shell:
               - may_ricochet
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 8.7
             effective_mm: 45.5
@@ -197,19 +206,22 @@ approaches:
         from_bow_m: 133.3
         height_m: -1.1
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 18.8
             effective_mm: 317
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 120
             angle_deg: 51.6
             effective_mm: 193.3
             shell:
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 12.4
             effective_mm: 46.1
@@ -220,19 +232,22 @@ approaches:
         from_bow_m: 97.8
         height_m: 0.5
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 19.2
             effective_mm: 317.6
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 150
             angle_deg: 55.1
             effective_mm: 262.1
             shell:
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 15.1
             effective_mm: 46.6
@@ -243,19 +258,22 @@ approaches:
         from_bow_m: 66.3
         height_m: 1
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 300
             angle_deg: 46.7
             effective_mm: 437.5
             shell:
               - arms_fuse
-          - material: Cas_Inclin
+          - plate: "casemate: Armored Deck Slope"
+            zone: Casemate
             thickness_mm: 150
             angle_deg: 55.1
             effective_mm: 262.1
             shell:
               - arms_fuse
-          - material: Cit_Bulge
+          - plate: "citadel: Torpedo Bulkhead"
+            zone: Citadel
             thickness_mm: 45
             angle_deg: 15.1
             effective_mm: 46.6

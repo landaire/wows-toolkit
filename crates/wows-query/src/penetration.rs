@@ -118,9 +118,9 @@ pub struct PenetrationSearchOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 
-    /// Plates of the target zone that have this thickness.
+    /// Plates of the target zone that have this thickness, by their game names.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub plates: Vec<&'static str>,
+    pub plates: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiers: Option<TierRange>,
@@ -164,7 +164,7 @@ impl GameData {
         // picked from ship_armor, and the zone rule is the one documented.
         let (thickness, plates, target_label) = match (target, args.zone.as_deref(), args.thickness_mm) {
             (Some(ship), Some(zone), _) => {
-                let zone_armor = zone_thickness(ship, zone)?;
+                let zone_armor = zone_thickness(self, ship, zone)?;
                 (zone_armor.thickness, zone_armor.plates, Some(format!("{} {}", ship.label(), zone.trim())))
             }
             (_, _, Some(thickness)) if thickness.value() > 0.0 => (thickness, Vec::new(), None),

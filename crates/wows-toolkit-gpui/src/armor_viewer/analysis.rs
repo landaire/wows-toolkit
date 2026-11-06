@@ -715,7 +715,8 @@ fn hit_label(hit: &HitType) -> String {
 /// plates, and reading them side by side is the point.
 fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
     let viewport = view.active_viewport(cx);
-    let arcs = viewport.read(cx).arcs();
+    let shown = viewport.read(cx);
+    let arcs = shown.arcs();
     if arcs.is_empty() {
         return div().into_any_element();
     }
@@ -762,7 +763,7 @@ fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
                 .child(t!("ui.armor.arc_simulation_caveat").to_string()),
         )
         .child(render_angle_legend())
-        .children(arcs.iter().enumerate().map(|(index, arc)| arc_block(view, &viewport, index, arc)))
+        .children(arcs.iter().enumerate().map(|(index, arc)| arc_block(shown, &viewport, index, arc)))
         .into_any_element()
 }
 
@@ -788,7 +789,7 @@ fn render_angle_legend() -> impl IntoElement {
 
 /// One cast arc: what it crossed, what became of the shell, and the two things
 /// the reader can do to it.
-fn arc_block(view: &ArmorViewerPane, viewport: &Entity<ViewportView>, index: usize, arc: &ArcSummary) -> AnyElement {
+fn arc_block(shown: &ViewportView, viewport: &Entity<ViewportView>, index: usize, arc: &ArcSummary) -> AnyElement {
     let swatch = rgba(
         (((arc.color[0] * 255.0) as u32) << 24)
             | (((arc.color[1] * 255.0) as u32) << 16)
@@ -862,7 +863,7 @@ fn arc_block(view: &ArmorViewerPane, viewport: &Entity<ViewportView>, index: usi
                     )
                 }),
         )
-        .child(div().text_xs().text_color(outcome_color(&arc.outcome)).child(describe_outcome(&arc.outcome, view)))
+        .child(div().text_xs().text_color(outcome_color(&arc.outcome)).child(describe_outcome(&arc.outcome, shown)))
         .into_any_element()
 }
 
@@ -899,7 +900,7 @@ fn arc_range_step(
 }
 
 /// What an outcome reads as.
-fn describe_outcome(outcome: &ArcOutcome, view: &ArmorViewerPane) -> String {
+fn describe_outcome(outcome: &ArcOutcome, shown: &ViewportView) -> String {
     match outcome {
         ArcOutcome::NotSimulated => t!("ui.armor.arc_no_shell").into_owned(),
         ArcOutcome::Detonated { zone } => match zone {
@@ -907,10 +908,10 @@ fn describe_outcome(outcome: &ArcOutcome, view: &ArmorViewerPane) -> String {
             None => t!("ui.armor.arc_detonated_past_armor").into_owned(),
         },
         ArcOutcome::Ricocheted { plate } => {
-            t!("ui.armor.arc_ricochet", plate = describe_plate(plate, view)).into_owned()
+            t!("ui.armor.arc_ricochet", plate = describe_plate(plate, shown)).into_owned()
         }
-        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate, view)).into_owned(),
-        ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate, view)).into_owned(),
+        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate, shown)).into_owned(),
+        ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate, shown)).into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),
     }
@@ -918,12 +919,10 @@ fn describe_outcome(outcome: &ArcOutcome, view: &ArmorViewerPane) -> String {
 
 /// The plate a shell stopped at, or that it stopped at one nothing is known
 /// about, which a cast whose plate list is shorter than its simulation reports.
-fn describe_plate(plate: &Option<StoppingPlate>, view: &ArmorViewerPane) -> String {
+fn describe_plate(plate: &Option<StoppingPlate>, shown: &ViewportView) -> String {
     match plate {
-        // Named as the reader knows it: the material key is a mesh name, and
-        // the build has a translation for it.
         Some(plate) => {
-            let named = view.translate_part(&plate.material);
+            let named = shown.material_label(plate.material);
             format!("#{} {:.0}mm {}", plate.number, plate.thickness.value(), named)
         }
         None => t!("ui.armor.arc_plate_unknown").into_owned(),

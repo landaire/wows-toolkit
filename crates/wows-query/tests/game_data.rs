@@ -46,7 +46,7 @@ fn ship(name: &str) -> ShipArgs {
 fn des_moines_bow_is_27_mm_above_water() {
     let armor = game().ship_armor(&ship("Des Moines")).expect("Des Moines exists");
 
-    let bow: Vec<_> = armor.plates.iter().filter(|plate| plate.zone == "Bow").collect();
+    let bow = armor.zones.iter().find(|zone| zone.zone == "Bow").expect("Des Moines has a bow");
     insta::assert_yaml_snapshot!(bow);
 
     let search = game()
@@ -59,6 +59,33 @@ fn des_moines_bow_is_27_mm_above_water() {
         .expect("zone resolves");
     assert_eq!(search.thickness_mm, Millimeters::new(27.0));
     insta::assert_yaml_snapshot!(search);
+}
+
+/// Yamato's superstructure side and roof, and each turret's barbettes, share a
+/// game name; their part tells them apart and selects each one.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn yamato_plates_sharing_a_game_name_are_told_apart() {
+    let armor = game().ship_armor(&ship("Yamato")).expect("Yamato exists");
+    let zones: Vec<_> = armor.zones.iter().filter(|zone| matches!(zone.zone, "Superstructure" | "Turret")).collect();
+    insta::assert_yaml_snapshot!(zones);
+
+    let roof = armor
+        .zones
+        .iter()
+        .flat_map(|zone| zone.plates.iter())
+        .find(|plate| plate.material.name() == "SS_Top")
+        .expect("Yamato has a superstructure roof");
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            target_ship: Some("Yamato".to_owned()),
+            zone: Some(roof.plate.clone()),
+            ammo: Some(Ammo::Ap),
+            ..Default::default()
+        })
+        .expect("the roof's name selects it");
+    assert_eq!(search.plates, std::slice::from_ref(&roof.plate));
+    assert_eq!(Some(&search.thickness_mm), roof.thickness_mm.last());
 }
 
 #[test]

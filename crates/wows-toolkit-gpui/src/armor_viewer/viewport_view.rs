@@ -107,10 +107,12 @@ use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::game_params::types::Species;
 
 /// The mode a ship opens on: its first, which is the one the game itself
 /// uses. `None` for a ship whose GameParams name none, where there is
@@ -1086,6 +1088,21 @@ impl ViewportView {
         self.reload_source.as_ref().map(|source| Arc::clone(&source.bundle))
     }
 
+    /// The class of the ship shown, which picks the game's class-specific
+    /// plate names.
+    pub(crate) fn shown_species(&self) -> Option<Species> {
+        self.current_armor.as_ref().and_then(|armor| armor.species)
+    }
+
+    /// `material` named the way the game names it on the ship shown, or by
+    /// its English label while the build is still loading.
+    pub(crate) fn material_label(&self, material: ArmorMaterial) -> String {
+        match self.reload_bundle() {
+            Some(bundle) => material.localized_name(bundle.assets.metadata(), self.shown_species()),
+            None => material.english_label(),
+        }
+    }
+
     pub fn set_reload_source(&mut self, bundle: Arc<ArmorAssetsBundle>, param_index: String, display_name: String) {
         self.reload_source = Some(ReloadSource { bundle, param_index, display_name });
     }
@@ -1640,7 +1657,7 @@ impl ViewportView {
         let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
         let plates: Vec<ArcPlate> = hits
             .iter()
-            .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material.clone() })
+            .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material })
             .collect();
 
         let sim = trajectory::simulate(&params, &impact, &hits, self.continue_on_ricochet);
@@ -2153,7 +2170,7 @@ impl ViewportView {
                     .map(|hit| ArcPlate {
                         zone: hit.zone.clone(),
                         thickness: hit.thickness,
-                        material: hit.material.clone(),
+                        material: hit.material,
                     })
                     .collect();
                 ArcSummary {
@@ -2253,7 +2270,7 @@ impl ViewportView {
                 if cast.isolating_plates {
                     hit_plates.insert((
                         hit.zone.clone(),
-                        hit.material.clone(),
+                        hit.material.name().to_owned(),
                         (hit.thickness.value() * 10.0).round() as i32,
                     ));
                 }
@@ -3674,14 +3691,22 @@ impl Render for ViewportView {
             let theme = cx.theme();
             let (background, border, radius, muted) =
                 (theme.background, theme.border, theme.radius, theme.muted_foreground);
-            // A part is named the way the game names it, which is what the
-            // egui tooltip does through its own `translate_part`.
-            let bundle = self.reload_bundle();
-            let translate = move |name: &str| match bundle.as_ref() {
-                Some(bundle) => super::catalog::translate_part(bundle.assets.metadata(), name),
-                None => name.to_string(),
+            // A zone and a plate are named the way the game names them, as the
+            // egui tooltip does.
+            let zone_label = match self.reload_bundle() {
+                Some(bundle) => super::catalog::translate_name(bundle.assets.metadata(), &hover.tooltip.zone),
+                None => hover.tooltip.zone.clone(),
             };
-            let element = picking_ui::tooltip_element(&hover.tooltip, background, border, radius, muted, &translate);
+            let material_label = self.material_label(hover.tooltip.material);
+            let element = picking_ui::tooltip_element(
+                &hover.tooltip,
+                background,
+                border,
+                radius,
+                muted,
+                &zone_label,
+                &material_label,
+            );
             let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
             deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
                 .with_priority(0)
@@ -3695,9 +3720,12 @@ impl Render for ViewportView {
         // time a right-click follows a real hover) since the menu-item click
         // handlers only get `&mut App`, not this view's own `Context`.
         let entity = cx.entity();
-        let hovered_for_menu = self.hovered.clone();
+        let hovered_for_menu = self.hovered.clone().map(|hover| {
+            let label = self.material_label(hover.tooltip.material);
+            (hover, label)
+        });
         let hover_is_hidden =
-            hovered_for_menu.as_ref().is_some_and(|h| self.plate_visibility.get(&h.key).copied().unwrap_or(false));
+            hovered_for_menu.as_ref().is_some_and(|(h, _)| self.plate_visibility.get(&h.key).copied().unwrap_or(false));
         let hidden_count = self.plate_visibility.len();
 
         // Export-confirm panel (Milestone 5 Task 10): a minimal inline
@@ -3820,7 +3848,7 @@ impl Render for ViewportView {
             // Right is not a camera button, so a press opens the menu without
             // competing with an orbit or a pan.
             .context_menu(move |mut menu, _window, cx| {
-                let Some(hover) = hovered_for_menu.clone() else {
+                let Some((hover, label)) = hovered_for_menu.clone() else {
                     return popover::quick_toggle_items(menu, &entity, cx);
                 };
                 let PlateKey { zone, material_name: material, thickness_tenths } = hover.key.clone();
@@ -3829,9 +3857,9 @@ impl Render for ViewportView {
                 let toggle_key = hover.key.clone();
                 let toggle_entity = entity.clone();
                 let toggle_label = if hover_is_hidden {
-                    format!("Show {thickness_mm:.0} mm {material}")
+                    format!("Show {thickness_mm:.0} mm {label}")
                 } else {
-                    format!("Hide {thickness_mm:.0} mm {material}")
+                    format!("Hide {thickness_mm:.0} mm {label}")
                 };
                 menu = menu.item(PopupMenuItem::new(toggle_label).on_click(move |_event, _window, cx| {
                     let key = toggle_key.clone();
@@ -3851,8 +3879,8 @@ impl Render for ViewportView {
 
                 let disable_entity = entity.clone();
                 let disable_zone = zone.clone();
-                let disable_material_name = material.clone();
-                menu = menu.item(PopupMenuItem::new(format!("Disable {material}")).on_click(
+                let disable_material_name = material;
+                menu = menu.item(PopupMenuItem::new(format!("Disable {label}")).on_click(
                     move |_event, _window, cx| {
                         disable_entity
                             .update(cx, |view, cx| view.disable_material(&disable_zone, &disable_material_name, cx));

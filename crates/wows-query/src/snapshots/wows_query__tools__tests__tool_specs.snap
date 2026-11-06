@@ -51,7 +51,7 @@ expression: specs()
     required:
       - ship
 - name: ship_armor
-  description: "Armor of one ship: per hull zone the thinnest and thickest plate above the waterline, and every plate by collision material (Bow_*, St_* stern, Cit_* citadel, Cas_* casemate, SS_* superstructure) with thickness in mm."
+  description: "Armor of one ship by hull zone: plate thickness above the waterline (thickness_mm when every plate is equal, else thinnest_mm and thickest_mm), and each plate by its in-game name led by its zone, e.g. \"bow: Fore End Deck\", with thickness in mm. Plates of 0 mm, which only close a zone for hit detection, are left out."
   input_schema:
     type: object
     additionalProperties: false

@@ -2,19 +2,13 @@
 source: crates/wows-query/tests/game_data.rs
 expression: bow
 ---
-- zone: Bow
-  material: Bow_Bottom
-  thickness_mm:
-    - 40
-- zone: Bow
-  material: Bow_ConstrSide
-  thickness_mm:
-    - 27
-- zone: Bow
-  material: Bow_Deck
-  thickness_mm:
-    - 27
-- zone: Bow
-  material: Bow_Trans
-  thickness_mm:
-    - 0
+zone: Bow
+thickness_mm: 27
+plates:
+  - plate: "bow: Bottom"
+    below_waterline: true
+    thickness_mm: 40
+  - plate: "bow: Fore End Plating"
+    thickness_mm: 27
+  - plate: "bow: Fore End Deck"
+    thickness_mm: 27

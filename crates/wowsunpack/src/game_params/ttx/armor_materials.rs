@@ -361,6 +361,9 @@ pub const COLLISION_MATERIAL_NAMES: &[&str] = &[
     "Dual_Cit_SS_Deck",    // 254
 ];
 
+/// Name [`collision_material_name`] gives an id beyond the table.
+pub const UNKNOWN_MATERIAL_NAME: &str = "unknown";
+
 /// Look up the collision material name for a given material ID.
 ///
 /// Logs a warning for unknown IDs, indicating the game's material table has been
@@ -382,7 +385,7 @@ pub fn collision_material_name(id: u8) -> &'static str {
                 COLLISION_MATERIAL_NAMES.len() - 1
             );
         }
-        "unknown"
+        UNKNOWN_MATERIAL_NAME
     }
 }
 

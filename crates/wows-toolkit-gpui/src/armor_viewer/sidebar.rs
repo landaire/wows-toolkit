@@ -5,7 +5,7 @@
 //! by the row renderer.
 //!
 //! Nation rows are labelled and sorted by the translated name the catalog
-//! resolves (`catalog::translate_part`), as the egui sidebar does.
+//! resolves (`catalog::translate_name`), as the egui sidebar does.
 //!
 //! **Expand behavior.** Matches the egui app's `egui_ltreeview` usage
 //! (`tab.rs:404-447`, `default_open(searching)`): every nation/class row is

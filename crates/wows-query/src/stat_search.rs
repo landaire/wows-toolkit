@@ -24,9 +24,9 @@ use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::SkillPointCost;
 
-use crate::armor::ZoneArmor;
+use crate::armor::ThicknessSpan;
 use crate::armor::plates;
-use crate::armor::zone_armor;
+use crate::armor::zone_spans;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::fuzzy;
@@ -577,7 +577,7 @@ struct View {
 }
 
 impl View {
-    fn readings(&self, condition: &Condition, armor: &[ZoneArmor]) -> Vec<Reading> {
+    fn readings(&self, condition: &Condition, armor: &BTreeMap<&'static str, ThicknessSpan>) -> Vec<Reading> {
         match condition.stat {
             SearchStat::Card(stat) => self
                 .rows
@@ -597,15 +597,15 @@ impl View {
                 })
                 .collect(),
             SearchStat::Armor { zone, bound } => armor
-                .iter()
-                .filter(|armor| armor.zone == zone.zone)
-                .map(|armor| {
+                .get(zone.zone)
+                .map(|span| {
                     let mm = match bound {
-                        Bound::Min => armor.min_mm,
-                        Bound::Max => armor.max_mm,
+                        Bound::Min => span.thinnest(),
+                        Bound::Max => span.thickest(),
                     };
                     Reading { qualifier: None, value: mm.value() }
                 })
+                .into_iter()
                 .collect(),
             SearchStat::MainBatteryBarrels => {
                 self.barrels.map(|barrels| Reading { qualifier: None, value: barrels as f32 }).into_iter().collect()
@@ -702,7 +702,7 @@ struct ShipSearch<'a> {
     ship: &'a Ship,
     conditions: &'a [Condition],
     stock_selection: ShipUpgradeSelection,
-    armor: Vec<ZoneArmor>,
+    armor: BTreeMap<&'static str, ThicknessSpan>,
     modules: Vec<Module>,
     has_skill_grid: bool,
 
@@ -831,7 +831,7 @@ impl<'a> ShipSearch<'a> {
             ship,
             conditions,
             stock_selection: ShipUpgradeSelection::stock(&ship.param),
-            armor: zone_armor(&plates(ship)),
+            armor: zone_spans(&plates(ship)),
             modules: game.ship_modules(ship).into_iter().filter(|module| !module.stock).collect(),
             has_skill_grid: skill_grid(&game.version(), ship.class.species()).is_some(),
             failures: RefCell::default(),

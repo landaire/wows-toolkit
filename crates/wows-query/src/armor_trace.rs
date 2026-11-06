@@ -26,6 +26,7 @@ use wowsunpack::export::armor_ray::ParallelRays;
 use wowsunpack::export::armor_ray::RayOffset;
 use wowsunpack::export::armor_ray::angle_from_normal;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Projectile;
 
@@ -33,6 +34,7 @@ use crate::aircraft::Ordnance;
 use crate::aircraft::OrdnanceKind;
 use crate::aircraft::Squadron;
 use crate::aircraft::SquadronRole;
+use crate::armor::PlateNames;
 use crate::citadel;
 use crate::citadel::CitadelApproach;
 use crate::citadel::GLANCING_ASSUMPTION;
@@ -242,7 +244,11 @@ pub struct RayExample {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlateStep {
-    pub material: String,
+    /// The game's name for the plate, led by its zone, e.g. "citadel: Armor Belt".
+    pub plate: String,
+
+    #[serde(skip)]
+    pub material: ArmorMaterial,
     pub zone: String,
     pub thickness_mm: Millimeters,
 
@@ -306,7 +312,7 @@ pub(crate) struct TargetHull {
 /// One plate along a ray, borrowing its names from the meshes.
 pub(crate) struct RayPlate<'a> {
     pub(crate) zone: &'a str,
-    pub(crate) material: &'a str,
+    pub(crate) material: ArmorMaterial,
     pub(crate) thickness: Millimeters,
 
     /// Strike angle from the plate normal.
@@ -344,10 +350,10 @@ struct TracedRay<'a> {
 }
 
 /// A plate [`ray_plates`] kept, to recognize a second crossing of it.
-struct KeptPlate<'a> {
+struct KeptPlate {
     mesh_index: usize,
     model_index: u32,
-    material: &'a str,
+    material: ArmorMaterial,
     distance: ShipModelDistance,
 }
 
@@ -385,8 +391,16 @@ impl GameData {
             WeaponModel::ArmorPiercing { params, .. } => Some(ShellFlags { params }),
             WeaponModel::FirstPlate { .. } => None,
         };
-        let citadel_face =
-            citadel::approach(&grid.rays, weapon.arrival.fall_angle_deg, weapon.arrival.range_km, shell.as_ref(), bow);
+        let materials = meshes.iter().flat_map(|mesh| mesh.triangle_info.iter().map(|info| info.material));
+        let names = self.plate_names(target, materials);
+        let citadel_face = citadel::approach(
+            &grid.rays,
+            weapon.arrival.fall_angle_deg,
+            weapon.arrival.range_km,
+            shell.as_ref(),
+            bow,
+            &names,
+        );
 
         let struck = grid.rays.len();
         let underwater = grid.rays.iter().filter(|ray| ray.underwater).count();
@@ -399,7 +413,7 @@ impl GameData {
 
         let citadel = citadel_summary(&traced);
         let zones = zone_summaries(&traced);
-        let examples = examples(&traced, &weapon.model, bow);
+        let examples = examples(&traced, &weapon.model, bow, &names);
         let verdict = verdict(&weapon, &citadel, &zones, target);
 
         let mut assumptions = weapon.assumptions.clone();
@@ -741,7 +755,7 @@ fn ray_plates<'a>(meshes: &'a [InteractiveArmorMesh], hits: &[ArmorRayHit], dire
 
     let first_distance = hits.first().map_or(ShipModelDistance::new(0.0), |hit| hit.distance);
     let mut plates: Vec<RayPlate<'a>> = Vec::with_capacity(hits.len());
-    let mut kept: Vec<KeptPlate<'a>> = Vec::with_capacity(hits.len());
+    let mut kept: Vec<KeptPlate> = Vec::with_capacity(hits.len());
     for hit in hits {
         let Some(info) = meshes.get(hit.mesh_index).and_then(|mesh| mesh.triangle_info.get(hit.triangle_index)) else {
             continue;
@@ -751,7 +765,7 @@ fn ray_plates<'a>(meshes: &'a [InteractiveArmorMesh], hits: &[ArmorRayHit], dire
             kept.iter().rev().take_while(|plate| distance - plate.distance < SAME_POINT).any(|plate| {
                 plate.mesh_index == hit.mesh_index
                     && plate.model_index == info.model_index
-                    && plate.material == info.material_name
+                    && plate.material == info.material
             });
         if crossed_already {
             continue;
@@ -759,13 +773,13 @@ fn ray_plates<'a>(meshes: &'a [InteractiveArmorMesh], hits: &[ArmorRayHit], dire
         kept.push(KeptPlate {
             mesh_index: hit.mesh_index,
             model_index: info.model_index,
-            material: &info.material_name,
+            material: info.material,
             distance,
         });
 
         plates.push(RayPlate {
             zone: &info.zone,
-            material: &info.material_name,
+            material: info.material,
             thickness: Millimeters::new(info.thickness_mm),
             angle: angle_from_normal(direction, hit.normal),
             distance,
@@ -892,7 +906,7 @@ fn zone_summaries(rays: &[TracedRay]) -> Vec<ZoneSummary> {
 
 /// One ray per outcome, most common outcome first, taken from the middle of
 /// that outcome's rays. Rays over the citadel are preferred when there are any.
-fn examples(rays: &[TracedRay], model: &WeaponModel, bow: ShipModelDistance) -> Vec<RayExample> {
+fn examples(rays: &[TracedRay], model: &WeaponModel, bow: ShipModelDistance, names: &PlateNames) -> Vec<RayExample> {
     const EXAMPLE_LIMIT: usize = 4;
 
     let over_citadel: Vec<&TracedRay> = rays.iter().filter(|ray| ray.over_citadel).collect();
@@ -909,10 +923,10 @@ fn examples(rays: &[TracedRay], model: &WeaponModel, bow: ShipModelDistance) -> 
     let mut groups: Vec<(RayOutcome, Vec<&TracedRay>)> = by_outcome.into_iter().collect();
     groups.sort_by(|left, right| right.1.len().cmp(&left.1.len()).then_with(|| left.0.cmp(&right.0)));
 
-    groups.into_iter().take(EXAMPLE_LIMIT).map(|(_, rays)| example(rays[rays.len() / 2], bow)).collect()
+    groups.into_iter().take(EXAMPLE_LIMIT).map(|(_, rays)| example(rays[rays.len() / 2], bow, names)).collect()
 }
 
-fn example(ray: &TracedRay, bow: ShipModelDistance) -> RayExample {
+fn example(ray: &TracedRay, bow: ShipModelDistance, names: &PlateNames) -> RayExample {
     const EXAMPLE_PLATE_LIMIT: usize = 10;
 
     // A fuse that fired between plates leaves the next one unreached, which is
@@ -946,7 +960,8 @@ fn example(ray: &TracedRay, bow: ShipModelDistance) -> RayExample {
             };
 
             PlateStep {
-                material: plate.material.to_owned(),
+                plate: names.of(plate.material),
+                material: plate.material,
                 zone: plate.zone.to_owned(),
                 thickness_mm: round_mm(plate.thickness),
                 angle_deg: Degrees::new(round1(plate.angle.value())),

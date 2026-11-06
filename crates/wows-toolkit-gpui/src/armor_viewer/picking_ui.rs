@@ -64,7 +64,7 @@ pub fn tooltip_for_hit<'a>(
 pub fn plate_key_of(tooltip: &ArmorTriangleTooltip) -> PlateKey {
     PlateKey {
         zone: tooltip.zone.clone(),
-        material_name: tooltip.material_name.clone(),
+        material_name: tooltip.material.name().to_owned(),
         thickness_tenths: (tooltip.thickness_mm * 10.0).round() as i32,
     }
 }
@@ -123,7 +123,7 @@ pub fn upload_part_highlight(
     show_zero_mm: bool,
 ) -> MeshId {
     upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
-        info.zone == zone && info.material_name == material
+        info.zone == zone && info.material.name() == material
     })
 }
 
@@ -192,8 +192,8 @@ fn swatch(color: [f32; 4], size: Pixels) -> impl IntoElement {
 
 /// Builds the thickness tooltip element for `tooltip`, reproducing the egui
 /// app's `show_armor_tooltip` V1 subset (`tab.rs:2778-2820`): a swatch +
-/// "{mm} mm" header, then "{zone} / {material}", both named in the reader's
-/// own language through `translate` -- then, only when there is more than one
+/// "{mm} mm" header, then "{zone} / {material}" from the caller's labels in
+/// the reader's own language -- then, only when there is more than one
 /// layer, a
 /// "N layers for this part:" label and a swatch + "{mm} mm" row per layer
 /// (bold when that layer matches the plate's total thickness). The
@@ -205,14 +205,15 @@ pub fn tooltip_element(
     border: Hsla,
     radius: Pixels,
     muted: Hsla,
-    translate: &dyn Fn(&str) -> String,
+    zone_label: &str,
+    material_label: &str,
 ) -> AnyElement {
     let mut body = v_flex()
         .gap_1()
         .child(h_flex().gap_1().items_center().child(swatch(tooltip.color, px(12.))).child(
             div().font_weight(FontWeight::BOLD).text_size(px(14.)).child(format!("{:.0} mm", tooltip.thickness_mm)),
         ))
-        .child(div().text_sm().child(format!("{} / {}", translate(&tooltip.zone), translate(&tooltip.material_name))));
+        .child(div().text_sm().child(format!("{zone_label} / {material_label}")));
 
     if tooltip.layers.len() > 1 {
         body = body
@@ -247,10 +248,11 @@ pub fn tooltip_element(
 mod tests {
     use super::*;
     use crate::viewport::types::Vec3;
+    use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
     fn test_tooltip(zone: &str, material: &str, thickness_mm: f32, layers: Vec<f32>) -> ArmorTriangleTooltip {
         ArmorTriangleTooltip {
-            material_name: material.to_string(),
+            material: ArmorMaterial::parse(material).expect("test material is a table key"),
             zone: zone.to_string(),
             thickness_mm,
             layers,
@@ -285,7 +287,7 @@ mod tests {
         let hit = HitResult { mesh_id: mesh_b, triangle_index: 1, distance: 1.0, world_position: Vec3::zeros() };
         let found = tooltip_for_hit(&hit, &mesh_triangle_info).expect("expected a tooltip match");
         assert_eq!(found.zone, "Citadel");
-        assert_eq!(found.material_name, "Cit_Deck");
+        assert_eq!(found.material.name(), "Cit_Deck");
     }
 
     #[test]

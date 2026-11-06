@@ -21,6 +21,7 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::ShellSimResult;
 use wowsunpack::ballistics::simulate_arc;
 use wowsunpack::ballistics::simulate_shell_through_plates;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
@@ -61,7 +62,7 @@ pub struct TrajectoryHit {
     pub position: Vec3,
     pub thickness: Millimeters,
     pub zone: String,
-    pub material: String,
+    pub material: ArmorMaterial,
     /// Strike angle from the plate normal: 0 is head-on, 90 is glancing,
     /// which is the convention the game states its ricochet angles in.
     pub angle_from_normal: Degrees,
@@ -140,7 +141,7 @@ pub fn build_hits(
                 position: hit.world_position,
                 thickness: Millimeters::from(info.thickness_mm),
                 zone: info.zone.clone(),
-                material: info.material_name.clone(),
+                material: info.material,
                 angle_from_normal: impact_angle_from_normal(shell_dir, normal),
                 distance_from_start: ShipModelDistance::from(hit.distance - first_distance),
             })
@@ -366,12 +367,16 @@ fn push_marker(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, siz
 mod tests {
     use super::*;
 
+    fn hull_belt() -> ArmorMaterial {
+        ArmorMaterial::parse("Belt").expect("Belt is a table key")
+    }
+
     fn hit(distance: f32, thickness: f32, angle: f32) -> TrajectoryHit {
         TrajectoryHit {
             position: Vec3::new(distance, 0.0, 0.0),
             thickness: Millimeters::from(thickness),
             zone: "hull".to_string(),
-            material: "steel".to_string(),
+            material: hull_belt(),
             angle_from_normal: Degrees::from(angle),
             distance_from_start: ShipModelDistance::from(distance),
         }
@@ -427,7 +432,7 @@ mod tests {
         let info = vec![(
             mesh,
             vec![ArmorTriangleTooltip {
-                material_name: "steel".into(),
+                material: hull_belt(),
                 zone: "hull".into(),
                 thickness_mm: 32.0,
                 layers: vec![32.0],
@@ -448,7 +453,7 @@ mod tests {
             mesh,
             vec![
                 ArmorTriangleTooltip {
-                    material_name: "steel".into(),
+                    material: hull_belt(),
                     zone: "hull".into(),
                     thickness_mm: 32.0,
                     layers: vec![32.0],

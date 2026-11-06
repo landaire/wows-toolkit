@@ -56,17 +56,20 @@ citadel_face:
       from_bow_m: 121.5
       height_m: 4.1
       plates:
-        - material: Cas_Deck
+        - plate: "casemate: Deck"
+          zone: Casemate
           thickness_mm: 57
           angle_deg: 15
           effective_mm: 59
           shell:
             - arms_fuse
-        - material: Cas_Deck
+        - plate: "casemate: Deck"
+          zone: Casemate
           thickness_mm: 0
           angle_deg: 15
           effective_mm: 0
-        - material: Cit_Deck
+        - plate: "citadel: Deck"
+          zone: Citadel
           thickness_mm: 200
           angle_deg: 15
           effective_mm: 207.1
@@ -77,37 +80,44 @@ citadel_face:
       from_bow_m: 158.5
       height_m: 4.1
       plates:
-        - material: SS_Top
+        - plate: "superstructure: Plating (roof)"
+          zone: Superstructure
           thickness_mm: 19
           angle_deg: 15
           effective_mm: 19.7
           shell:
             - overmatch
-        - material: SS_Top
+        - plate: "superstructure: Plating (roof)"
+          zone: Superstructure
           thickness_mm: 0
           angle_deg: 15
           effective_mm: 0
-        - material: SS_Top
+        - plate: "superstructure: Plating (roof)"
+          zone: Superstructure
           thickness_mm: 19
           angle_deg: 15
           effective_mm: 19.7
           shell:
             - overmatch
-        - material: Cas_Deck
+        - plate: "casemate: Deck"
+          zone: Casemate
           thickness_mm: 57
           angle_deg: 15
           effective_mm: 59
           shell:
             - arms_fuse
-        - material: SS_Top
+        - plate: "superstructure: Plating (roof)"
+          zone: Superstructure
           thickness_mm: 0
           angle_deg: 15
           effective_mm: 0
-        - material: Cas_Deck
+        - plate: "casemate: Deck"
+          zone: Casemate
           thickness_mm: 0
           angle_deg: 15
           effective_mm: 0
-        - material: Cit_Deck
+        - plate: "citadel: Deck"
+          zone: Citadel
           thickness_mm: 200
           angle_deg: 15
           effective_mm: 207.1
@@ -118,32 +128,37 @@ citadel_face:
       from_bow_m: 201.5
       height_m: 4.1
       plates:
-        - material: TurretFwd
+        - plate: "turret: Frontal Plate"
+          zone: Turret
           thickness_mm: 650
           angle_deg: 46.9
           effective_mm: 951
           shell:
             - may_ricochet
             - arms_fuse
-        - material: TurretDown
+        - plate: "turret: Bottom Plate"
+          zone: Turret
           thickness_mm: 135
           angle_deg: 15
           effective_mm: 139.8
           shell:
             - arms_fuse
-        - material: Tur3GkTop
+        - plate: "turret 3: Barbette Hatch"
+          zone: Turret
           thickness_mm: 135
           angle_deg: 15
           effective_mm: 139.8
           shell:
             - arms_fuse
-        - material: St_Deck
+        - plate: "stern: Aft End Deck"
+          zone: Stern
           thickness_mm: 50
           angle_deg: 15
           effective_mm: 51.8
           shell:
             - arms_fuse
-        - material: Cit_Deck
+        - plate: "citadel: Deck"
+          zone: Citadel
           thickness_mm: 200
           angle_deg: 15
           effective_mm: 207.1
@@ -220,56 +235,56 @@ examples:
     above_waterline_m: 13.1
     detonated_in: Citadel
     plates:
-      - material: SS_Side
+      - plate: "superstructure: Plating (side)"
         zone: Superstructure
         thickness_mm: 19
         angle_deg: 46.8
         result: overmatch
         effective_mm: 19
         penetration_mm: 350.8
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 19
         angle_deg: 15
         result: overmatch
         effective_mm: 19
         penetration_mm: 350.8
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 0
         angle_deg: 15
         result: overmatch
         effective_mm: 0
         penetration_mm: 350.8
-      - material: Cas_Deck
+      - plate: "casemate: Deck"
         zone: Casemate
         thickness_mm: 57
         angle_deg: 15
         result: penetrate
         effective_mm: 57
         penetration_mm: 350.8
-      - material: Cas_Deck
+      - plate: "casemate: Deck"
         zone: Casemate
         thickness_mm: 0
         angle_deg: 15
         result: overmatch
         effective_mm: 0
         penetration_mm: 348
-      - material: Cit_Deck
+      - plate: "citadel: Deck"
         zone: Citadel
         thickness_mm: 200
         angle_deg: 15
         result: penetrate
         effective_mm: 200
         penetration_mm: 348
-      - material: Deck
+      - plate: "hull: Deck"
         zone: Hull
         thickness_mm: 18
         angle_deg: 15
         result: overmatch
         effective_mm: 18
         penetration_mm: 142.2
-      - material: Cit_Bottom
+      - plate: "citadel: Bottom"
         zone: Citadel
         thickness_mm: 50
         angle_deg: 15
@@ -279,42 +294,42 @@ examples:
     above_waterline_m: 14
     detonated_in: Casemate
     plates:
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 75
         angle_deg: 15
         result: penetrate
         effective_mm: 75
         penetration_mm: 350.8
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 75
         angle_deg: 15
         result: penetrate
         effective_mm: 75
         penetration_mm: 338.6
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 0
         angle_deg: 15
         result: overmatch
         effective_mm: 0
         penetration_mm: 324.8
-      - material: Cas_Deck
+      - plate: "casemate: Deck"
         zone: Casemate
         thickness_mm: 57
         angle_deg: 15
         result: penetrate
         effective_mm: 57
         penetration_mm: 324.8
-      - material: SS_Top
+      - plate: "superstructure: Plating (roof)"
         zone: Superstructure
         thickness_mm: 0
         angle_deg: 15
         result: overmatch
         effective_mm: 0
         penetration_mm: 320.7
-      - material: ConstrSide
+      - plate: "hull: Plating"
         zone: Hull
         thickness_mm: 75
         angle_deg: 79.5
@@ -326,7 +341,7 @@ examples:
     from_bow_m: 106.5
     above_waterline_m: 12.7
     plates:
-      - material: TurretSide
+      - plate: "turret: Side Plate"
         zone: Turret
         thickness_mm: 250
         angle_deg: 61.2
@@ -338,7 +353,7 @@ examples:
     from_bow_m: 201.5
     above_waterline_m: 10.8
     plates:
-      - material: TurretFwd
+      - plate: "turret: Frontal Plate"
         zone: Turret
         thickness_mm: 650
         angle_deg: 46.9

@@ -4,7 +4,9 @@ use std::sync::mpsc::Sender;
 
 use egui_dock::DockState;
 
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Species;
 
 use crate::viewport_3d::ArcballCamera;
 use crate::viewport_3d::GpuPipeline;
@@ -285,7 +287,7 @@ impl ArmorViewerState {
 /// Per-triangle metadata from the armor mesh, for tooltip display.
 #[derive(Clone, Debug)]
 pub struct ArmorTriangleTooltip {
-    pub material_name: String,
+    pub material: ArmorMaterial,
     pub zone: String,
     pub thickness_mm: f32,
     /// Per-layer thicknesses (ordered by model_index). Single-layer plates have one entry.
@@ -306,6 +308,8 @@ pub struct CameraRingHover {
 #[allow(dead_code)]
 pub struct LoadedShipArmor {
     pub display_name: String,
+    /// The ship's class, which picks the game's class-specific plate names.
+    pub species: Option<Species>,
     pub meshes: Vec<wowsunpack::export::gltf_export::InteractiveArmorMesh>,
     pub bounds: (Vec3, Vec3),
     pub zones: Vec<String>,

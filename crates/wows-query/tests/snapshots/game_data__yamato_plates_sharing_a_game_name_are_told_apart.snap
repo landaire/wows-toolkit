@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: zones
+---
+- zone: Superstructure
+  thinnest_mm: 19
+  thickest_mm: 500
+  plates:
+    - plate: "conning tower: Conning Tower (bottom)"
+      thickness_mm: 135
+    - plate: "conning tower: Conning Tower (side)"
+      thickness_mm: 500
+    - plate: "conning tower: Conning Tower (roof)"
+      thickness_mm: 270
+    - plate: "superstructure: Plating (side)"
+      thickness_mm:
+        - 19
+        - 50
+        - 75
+    - plate: "superstructure: Plating (roof)"
+      thickness_mm:
+        - 19
+        - 50
+        - 75
+- zone: Turret
+  thinnest_mm: 135
+  thickest_mm: 560
+  plates:
+    - plate: "turret 1: Barbette Armor"
+      thickness_mm: 560
+    - plate: "turret 1: Barbette Hatch"
+      thickness_mm: 135
+    - plate: "turret 2: Barbette Armor"
+      thickness_mm: 560
+    - plate: "turret 2: Barbette Hatch"
+      thickness_mm: 135
+    - plate: "turret 3: Barbette Armor"
+      thickness_mm: 560
+    - plate: "turret 3: Barbette Hatch"
+      thickness_mm: 135

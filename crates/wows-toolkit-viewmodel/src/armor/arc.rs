@@ -11,6 +11,7 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::ShellSimResult;
 use wowsunpack::ballistics::is_citadel_zone;
 use wowsunpack::ballistics::is_overmatch;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Millimeters;
 
@@ -23,8 +24,7 @@ pub struct ArcPlate {
     /// The armor zone the plate belongs to, as the model names it.
     pub zone: String,
     pub thickness: Millimeters,
-    /// The material key, which the caller translates for display.
-    pub material: String,
+    pub material: ArmorMaterial,
 }
 
 /// The plate a shell's run ended at.
@@ -33,7 +33,7 @@ pub struct StoppingPlate {
     /// Its place along the cast, counting from one, as the viewers number them.
     pub number: usize,
     pub thickness: Millimeters,
-    pub material: String,
+    pub material: ArmorMaterial,
 }
 
 /// How a cast shell's run ended.
@@ -77,7 +77,7 @@ pub fn describe_arc(sim: Option<&ShellSimResult>, plates: &[ArcPlate]) -> ArcOut
         let plate = plates.get(stopped.value()).map(|plate| StoppingPlate {
             number: stopped.number(),
             thickness: plate.thickness,
-            material: plate.material.clone(),
+            material: plate.material,
         });
         return match sim.plates.last().map(|plate| &plate.outcome) {
             Some(PlateOutcome::Ricochet) => ArcOutcome::Ricocheted { plate },

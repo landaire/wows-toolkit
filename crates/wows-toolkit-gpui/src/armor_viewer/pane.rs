@@ -427,17 +427,6 @@ impl ArmorViewerPane {
         self._export_dialog_subscription = None;
     }
 
-    /// A zone or a part named the way the game names it.
-    ///
-    /// Falls back to the mesh's own key while the build is still loading, which
-    /// is what the reader would otherwise see nothing at all for.
-    pub(crate) fn translate_part(&self, name: &str) -> String {
-        match &self.bundle {
-            BundleState::Ready(bundle) => super::catalog::translate_part(bundle.assets.metadata(), name),
-            _ => name.to_owned(),
-        }
-    }
-
     /// What was fired at the ship on screen.
     pub(crate) fn incoming(&self) -> &IncomingFire {
         &self.incoming

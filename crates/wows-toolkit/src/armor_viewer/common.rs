@@ -4,11 +4,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use wowsunpack::ballistics::PlateIndex;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShipModelDistance;
+use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 
 use super::constants::ARC_POINT_COUNT;
@@ -18,6 +23,43 @@ use super::state::ArmorZone;
 use super::state::LoadedShipArmor;
 use super::state::VisibilitySnapshot;
 use super::state::ZonePart;
+
+/// Names nations, zones and plates the way the game names them. Without game
+/// data nations and zones show their raw keys and plates their English labels.
+#[derive(Clone, Copy)]
+pub(crate) struct GameNames<'a> {
+    metadata: Option<&'a GameMetadataProvider>,
+}
+
+impl<'a> GameNames<'a> {
+    pub(crate) fn new(metadata: Option<&'a GameMetadataProvider>) -> Self {
+        Self { metadata }
+    }
+
+    /// A nation or zone keyed `IDS_<NAME>`.
+    pub(crate) fn translate_name(self, name: &str) -> String {
+        let key = TranslationKey::new(format!("IDS_{}", name.to_uppercase()));
+
+        self.metadata.and_then(|metadata| metadata.localized_name_from_id(&key)).unwrap_or_else(|| name.to_owned())
+    }
+
+    /// `material` on a ship of `species`.
+    pub(crate) fn material(self, material: ArmorMaterial, species: Option<Species>) -> String {
+        match self.metadata {
+            Some(metadata) => material.localized_name(metadata, species),
+            None => material.english_label(),
+        }
+    }
+
+    /// The material keyed `key` on a ship of `species`. A key outside the
+    /// material table shows as is.
+    pub(crate) fn material_key(self, key: &str, species: Option<Species>) -> String {
+        match ArmorMaterial::parse(key) {
+            Some(material) => self.material(material, species),
+            None => key.to_owned(),
+        }
+    }
+}
 
 /// Process undo/redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z / Ctrl+R).
 /// Returns `true` if visibility was changed (caller should re-upload armor).
@@ -92,6 +134,8 @@ pub(crate) fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String
 #[derive(Default)]
 pub(crate) struct ShipLoadOptions {
     pub display_name: String,
+    /// The ship's class, which picks the game's class-specific plate names.
+    pub species: Option<Species>,
     pub lod: usize,
     pub selected_hull: Option<String>,
     pub module_overrides: HashMap<ComponentType, String>,
@@ -186,12 +230,12 @@ pub(crate) fn load_ship_armor(
     > = std::collections::HashMap::new();
     for mesh in &meshes {
         for info in &mesh.triangle_info {
-            zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material_name.clone());
+            zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material.name().to_owned());
             let thickness_key = (info.thickness_mm * 10.0).round() as i32;
             zone_part_plates_map
                 .entry(info.zone.clone())
                 .or_default()
-                .entry(info.material_name.clone())
+                .entry(info.material.name().to_owned())
                 .or_default()
                 .insert(thickness_key);
         }
@@ -294,6 +338,7 @@ pub(crate) fn load_ship_armor(
 
     let mut armor = LoadedShipArmor {
         display_name: options.display_name,
+        species: options.species,
         meshes,
         bounds: (Vec3::from(min), Vec3::from(max)),
         zones,
@@ -440,7 +485,7 @@ pub(crate) fn build_traj_hits(
                 position: armor_hit.world_position,
                 thickness: Millimeters::from(info.thickness_mm),
                 zone: info.zone.clone(),
-                material: info.material_name.clone(),
+                material: info.material,
                 angle_from_normal: super::penetration::impact_angle_from_normal(shell_dir, normal),
                 distance_from_start: ShipModelDistance::from(armor_hit.distance - first_dist),
             });

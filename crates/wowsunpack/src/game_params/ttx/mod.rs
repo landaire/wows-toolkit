@@ -10,6 +10,7 @@
 //! values) then factory (apply the formulas, unit conversions, and the
 //! equipped-modifier pipeline). Public entry: [`ship_stats`] / [`ship_stats_stock`].
 
+pub mod armor_material;
 pub mod armor_materials;
 pub mod attribution_render;
 pub mod components;

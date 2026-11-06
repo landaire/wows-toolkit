@@ -2395,10 +2395,10 @@ fn run_armor(
             continue; // skip hull
         }
         // Key by (material_id, model_index) to show per-layer thickness.
-        let mut mat_summary: std::collections::BTreeMap<(u8, u32, String), (usize, f32)> = Default::default();
+        let mut mat_summary: std::collections::BTreeMap<(u8, u32, &str), (usize, f32)> = Default::default();
         for ti in &mesh.triangle_info {
             let entry = mat_summary
-                .entry((ti.material_id, ti.model_index, ti.material_name.clone()))
+                .entry((ti.material_id, ti.model_index, ti.material.name()))
                 .or_insert((0, ti.thickness_mm));
             entry.0 += 1;
         }

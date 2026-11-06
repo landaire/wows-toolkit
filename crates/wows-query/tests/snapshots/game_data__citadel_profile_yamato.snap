@@ -103,7 +103,8 @@ approaches:
         from_bow_m: 158.3
         height_m: 0.3
         plates:
-          - material: Cit_Belt
+          - plate: "citadel: Armor Belt"
+            zone: Citadel
             thickness_mm: 410
             angle_deg: 18.8
             effective_mm: 433.2
@@ -114,7 +115,8 @@ approaches:
         from_bow_m: 95.8
         height_m: 0.3
         plates:
-          - material: Cit_Belt
+          - plate: "citadel: Armor Belt"
+            zone: Citadel
             thickness_mm: 410
             angle_deg: 20.4
             effective_mm: 437.4
@@ -125,11 +127,13 @@ approaches:
         from_bow_m: 206.3
         height_m: 0.8
         plates:
-          - material: St_ConstrSide
+          - plate: "stern: Aft End Plating"
+            zone: Stern
             thickness_mm: 32
             angle_deg: 20.3
             effective_mm: 34.1
-          - material: Cit_AftTrans
+          - plate: "citadel: Athwartship (aft transverse bulkhead)"
+            zone: Citadel
             thickness_mm: 350
             angle_deg: 55.4
             effective_mm: 616.5
@@ -184,7 +188,8 @@ approaches:
         from_bow_m: 184.3
         height_m: 0.2
         plates:
-          - material: Cit_Belt
+          - plate: "citadel: Armor Belt"
+            zone: Citadel
             thickness_mm: 410
             angle_deg: 31.2
             effective_mm: 479.5
@@ -195,15 +200,18 @@ approaches:
         from_bow_m: 110.8
         height_m: 3.5
         plates:
-          - material: Cas_Belt
+          - plate: "casemate: Armor Belt"
+            zone: Casemate
             thickness_mm: 32
             angle_deg: 12.7
             effective_mm: 32.8
-          - material: Cas_Deck
+          - plate: "casemate: Deck"
+            zone: Casemate
             thickness_mm: 0
             angle_deg: 65.5
             effective_mm: 0
-          - material: Cit_Inclin
+          - plate: "citadel: Armored Deck Slope"
+            zone: Citadel
             thickness_mm: 230
             angle_deg: 65.5
             effective_mm: 555.1
@@ -215,13 +223,15 @@ approaches:
         from_bow_m: 193.8
         height_m: 3.2
         plates:
-          - material: St_ConstrSide
+          - plate: "stern: Aft End Plating"
+            zone: Stern
             thickness_mm: 32
             angle_deg: 46.3
             effective_mm: 46.3
             shell:
               - arms_fuse
-          - material: Cit_Inclin
+          - plate: "citadel: Armored Deck Slope"
+            zone: Citadel
             thickness_mm: 340
             angle_deg: 66.5
             effective_mm: 852.4

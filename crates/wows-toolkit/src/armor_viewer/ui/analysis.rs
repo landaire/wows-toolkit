@@ -9,6 +9,7 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 
+use crate::armor_viewer::common::GameNames;
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonShip;
 use crate::armor_viewer::penetration::Ifhe;
@@ -80,7 +81,7 @@ struct AnalysisPaneViewer<'a> {
     ifhe_enabled: bool,
     wows_data: &'a SharedBuildData,
     ship_catalog: Option<&'a crate::armor_viewer::ship_selector::ShipCatalog>,
-    translate_part: &'a dyn Fn(&str) -> String,
+    names: GameNames<'a>,
     active_pane: Option<&'a ArmorPane>,
 
     // Ships tab deferred mutations
@@ -131,7 +132,7 @@ impl TabViewer for AnalysisPaneViewer<'_> {
 pub fn show_analysis_window(
     ctx: &egui::Context,
     state: &mut ArmorViewerState,
-    translate_part: &dyn Fn(&str) -> String,
+    names: GameNames<'_>,
     wows_data: &SharedBuildData,
     ship_catalog: Option<&crate::armor_viewer::ship_selector::ShipCatalog>,
 ) -> TrajectoryActions {
@@ -157,7 +158,7 @@ pub fn show_analysis_window(
         ifhe_enabled: state.ifhe_enabled,
         wows_data,
         ship_catalog,
-        translate_part,
+        names,
         active_pane,
         ifhe_cell: &ifhe_cell,
         search_cell: &search_cell,
@@ -408,7 +409,8 @@ impl AnalysisPaneViewer<'_> {
 
         let traj_count = pane.trajectories.len();
         let ifhe_enabled = self.ifhe_enabled;
-        let translate_part = self.translate_part;
+        let names = self.names;
+        let species = pane.loaded_armor.as_ref().and_then(|armor| armor.species);
 
         // Helper: render one trajectory column
         let render_traj_column = |ui: &mut egui::Ui,
@@ -527,7 +529,7 @@ impl AnalysisPaneViewer<'_> {
                                     "#{} {:.0}mm {}",
                                     stop_plate.number(),
                                     h.thickness.value(),
-                                    translate_part(&h.material)
+                                    names.material(h.material, species)
                                 )
                             })
                             .unwrap_or_default();
@@ -602,7 +604,7 @@ impl AnalysisPaneViewer<'_> {
                     );
                 });
                 ui.label(
-                    egui::RichText::new(format!("  {} / {}", hit.zone, translate_part(&hit.material)))
+                    egui::RichText::new(format!("  {} / {}", hit.zone, names.material(hit.material, species)))
                         .small()
                         .color(ui.sem().text_dim),
                 );

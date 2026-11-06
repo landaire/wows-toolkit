@@ -50,8 +50,10 @@ use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 
 use crate::viewport::types::Vec3;
@@ -93,7 +95,7 @@ pub struct ArmorZone {
 /// picking/tooltip use. Ports `armor_viewer::state::ArmorTriangleTooltip`.
 #[derive(Clone, Debug)]
 pub struct ArmorTriangleTooltip {
-    pub material_name: String,
+    pub material: ArmorMaterial,
     pub zone: String,
     pub thickness_mm: f32,
     /// Per-layer thicknesses (ordered by model_index). Single-layer plates
@@ -150,6 +152,9 @@ pub struct ShipLoadOptions {
 /// of the egui app's `LoadedShipArmor` this intentionally omits.
 pub struct LoadedShipArmor {
     pub display_name: String,
+    /// The ship's class, which picks the game's class-specific plate names.
+    /// `None` for a ship whose GameParams class this build does not know.
+    pub species: Option<Species>,
     pub meshes: Vec<InteractiveArmorMesh>,
     pub bounds: (Vec3, Vec3),
     pub zones: Vec<String>,
@@ -323,6 +328,7 @@ fn reload_load_options(
 /// (see the module doc for why this v1 struct omits them).
 fn load_ship_armor(
     vehicle: &Vehicle,
+    species: Option<Species>,
     ship_assets: &ShipAssets,
     options: ShipLoadOptions,
 ) -> Result<LoadedShipArmor, ShipLoadError> {
@@ -364,12 +370,12 @@ fn load_ship_armor(
     let mut zone_part_plates_map: HashMap<String, HashMap<String, std::collections::BTreeSet<i32>>> = HashMap::new();
     for mesh in &meshes {
         for info in &mesh.triangle_info {
-            zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material_name.clone());
+            zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material.name().to_owned());
             let thickness_key = (info.thickness_mm * 10.0).round() as i32;
             zone_part_plates_map
                 .entry(info.zone.clone())
                 .or_default()
-                .entry(info.material_name.clone())
+                .entry(info.material.name().to_owned())
                 .or_default()
                 .insert(thickness_key);
         }
@@ -447,6 +453,7 @@ fn load_ship_armor(
 
     Ok(LoadedShipArmor {
         display_name: options.display_name,
+        species,
         meshes,
         bounds: (Vec3::new(min[0], min[1], min[2]), Vec3::new(max[0], max[1], max[2])),
         zones,
@@ -482,6 +489,14 @@ fn resolve_vehicle(ship_assets: &ShipAssets, param_index: &str) -> Result<Vehicl
     param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| ShipLoadError::NoVehicle(param_index.to_string()))
 }
 
+/// The class of `param_index`'s ship, or `None` when GameParams names one this
+/// build does not know.
+fn resolve_species(ship_assets: &ShipAssets, param_index: &str) -> Option<Species> {
+    let param = ship_assets.metadata().game_param_by_index(param_index)?;
+
+    param.species().and_then(|species| species.known()).copied()
+}
+
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
 /// default-hull armor model at [`DEFAULT_LOD`]. Synchronous and CPU/IO-bound;
 /// callers run it off the UI thread (see [`spawn_load_ship_armor`]).
@@ -492,7 +507,7 @@ pub(crate) fn load_ship_armor_by_param(
 ) -> Result<LoadedShipArmor, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
     let options = default_load_options(&vehicle, display_name, DEFAULT_LOD);
-    load_ship_armor(&vehicle, ship_assets, options)
+    load_ship_armor(&vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
@@ -507,7 +522,7 @@ fn load_ship_armor_with_options(
     options: ShipLoadOptions,
 ) -> Result<LoadedShipArmor, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
-    load_ship_armor(&vehicle, ship_assets, options)
+    load_ship_armor(&vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets` and builds the

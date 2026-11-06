@@ -13,6 +13,7 @@ use json::validation::USize64;
 use rootcause::Report;
 use thiserror::Error;
 
+use crate::game_params::ttx::armor_material::ArmorMaterial;
 use crate::game_params::types::ArmorMap;
 use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::geometry::MergedGeometry;
@@ -2738,8 +2739,8 @@ pub struct ArmorTriangleInfo {
     pub triangle_index: u32,
     /// Collision material ID (0–255) from the BVH node header.
     pub material_id: u8,
-    /// Human-readable material name (e.g. "Cit_Belt", "Bow_Bottom").
-    pub material_name: String,
+    /// Collision material, e.g. `Cit_Belt`; serialized as that key.
+    pub material: ArmorMaterial,
     /// Zone classification (e.g. "Citadel", "Bow", "Superstructure").
     pub zone: String,
     /// Total armor thickness in millimeters (sum of all layers).
@@ -2833,7 +2834,8 @@ impl InteractiveArmorMesh {
         let mut triangle_info = Vec::with_capacity(tri_count);
 
         for (ti, tri) in armor.triangles.iter().enumerate() {
-            let mat_name = collision_material_name(tri.material_id);
+            let material = ArmorMaterial::from_id(tri.material_id);
+            let mat_name = material.name();
             let zone = zone_from_material_name(mat_name).to_string();
 
             let mat_id = tri.material_id as u32;
@@ -2859,7 +2861,7 @@ impl InteractiveArmorMesh {
                 model_index: layer,
                 triangle_index: ti as u32,
                 material_id: tri.material_id,
-                material_name: mat_name.to_string(),
+                material,
                 zone,
                 thickness_mm,
                 layers: if all_layers.len() > 1 { all_layers } else { vec![thickness_mm] },
