@@ -505,6 +505,9 @@ pub struct TabState {
 
     // ─── Transient / runtime-only state ──────────────────────────────────
     pub world_of_warships_data: Option<SharedBuildData>,
+    /// Whether the Current Match view was drawn this frame. Gates the live
+    /// match's stats lookup: see `PlayerTracker::set_stats_view_shown`.
+    pub current_match_drawn: bool,
     pub items_to_extract: Mutex<wows_toolkit_viewmodel::unpacker::queue::ExtractQueue>,
     #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
@@ -728,6 +731,7 @@ impl Default for TabState {
                 .expect("failed to build ShipBuilds HTTP client"),
             proxy: None,
             world_of_warships_data: None,
+            current_match_drawn: false,
             items_to_extract: Default::default(),
             translations: Default::default(),
             unpacker_progress: Default::default(),
@@ -1346,6 +1350,18 @@ impl TabState {
             .background_parser_tx
             .as_ref()
             .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted { source, build, started_at }));
+    }
+
+    /// Tells the tracker whether the Current Match view was drawn this frame,
+    /// and sends the stats lookup it was holding once the view is.
+    pub(crate) fn send_held_stats_lookup(&mut self) {
+        let Some(lookup) = self.player_tracker.write().set_stats_view_shown(self.current_match_drawn) else {
+            return;
+        };
+        let _ = self
+            .background_parser_tx
+            .as_ref()
+            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::FetchMatchStats(lookup)));
     }
 
     /// Apply one message from a running directory walk to the listing it names.

@@ -53,6 +53,7 @@ use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::menu::PopupMenuItem;
+use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query_text;
@@ -79,6 +80,7 @@ use wows_toolkit_viewmodel::player_tracker::live::LiveRosterRow;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
 use wows_toolkit_viewmodel::player_tracker::live::RowStats;
+use wows_toolkit_viewmodel::player_tracker::live::StatsLookupGate;
 use wows_toolkit_viewmodel::player_tracker::live::TrackedIndex;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
@@ -172,9 +174,18 @@ enum StatsState {
     Idle,
     /// Waiting for the game to flush the packet that names the roster.
     Scanning,
+    /// The roster is read; the lookup waits for the Current Match section to
+    /// be shown.
+    Held,
     Fetching,
     Ready(HashMap<AccountId, PlayerStatsOut>),
     Failed(String),
+}
+
+/// A battle's stats lookup, held until the Current Match section is shown.
+struct HeldLookup {
+    started_at: Timestamp,
+    state: ArenaState,
 }
 
 /// Raised for the app to act on.
@@ -334,6 +345,15 @@ pub struct PlayerTrackerView {
     /// What this session has already asked the stats service, so a battle is
     /// asked about once and the service's budget is respected locally.
     stats_budget: live::StatsBudget,
+    /// Holds the stats lookup until the Current Match section is on screen,
+    /// which is when both flags below are set.
+    stats_gate: StatsLookupGate<HeldLookup>,
+    /// Whether this tab is the app's displayed tab. Set by the app.
+    tab_shown: bool,
+    /// Whether the Current Match section is the displayed panel of its
+    /// group. Set by the section's panel.
+    current_match_active: bool,
+    _live_lookup: Option<Task<()>>,
     /// The build `live_metadata` was loaded for, so a new battle on another
     /// build reloads rather than resolving against the wrong one.
     live_metadata_build: Option<u32>,
@@ -442,6 +462,10 @@ impl PlayerTrackerView {
             _live_scan: None,
             _live_build_load: None,
             stats_budget: live::StatsBudget::default(),
+            stats_gate: StatsLookupGate::default(),
+            tab_shown: false,
+            current_match_active: false,
+            _live_lookup: None,
             _live_watch: None,
             period: TimePeriod::default(),
             view_loaded: false,
@@ -1116,10 +1140,12 @@ impl PlayerTrackerView {
         self.stats = StatsState::Idle;
         self._live_scan = None;
         self._live_build_load = None;
+        self._live_lookup = None;
+        self.stats_gate.clear();
     }
 
     /// Reads the battle's roster off the live packet stream, then asks the
-    /// stats service about it.
+    /// stats service about it once the Current Match section is shown.
     ///
     /// The stream arrives in flushes, so the scan retries on a timer until
     /// the packet naming the roster lands or the budget runs out. Every write
@@ -1130,7 +1156,6 @@ impl PlayerTrackerView {
             return;
         };
         self.stats = StatsState::Scanning;
-        let proxy_url = self.proxy_url.clone();
         cx.notify();
 
         self._live_scan = Some(cx.spawn(async move |this, cx| {
@@ -1152,57 +1177,63 @@ impl PlayerTrackerView {
                 cx.background_executor().timer(live::SCAN_RETRY_INTERVAL).await;
             };
 
-            let Some(state) = state else {
-                let _ = this.update(cx, |this, cx| {
-                    if this.live_started_at() != Some(started_at) {
-                        return;
-                    }
+            let _ = this.update(cx, |this, cx| {
+                if this.live_started_at() != Some(started_at) {
+                    return;
+                }
+                let Some(state) = state else {
                     this.stats = StatsState::Failed(live::StatsError::NoRoster.to_string());
                     cx.notify();
-                });
-                return;
-            };
+                    return;
+                };
+                // Written before the lookup, so the clan tags and the account
+                // join light up even when the lookup then fails, is refused,
+                // or waits for the section to be shown.
+                this.live_identities = Some(LiveIdentities::from_player_states(&state.players));
+                // The roster's names can change with the identities, and
+                // the chip is keyed by them.
+                this.recompute_twitch_candidates();
+                this.offer_lookup(HeldLookup { started_at, state }, cx);
+            });
+        }));
+    }
 
-            // Written before the lookup, so the clan tags and the account
-            // join light up even when the lookup then fails or is refused.
-            let identities = LiveIdentities::from_player_states(&state.players);
-            let arena_id = state.arena_id;
-            let cleared = this
-                .update(cx, |this, cx| {
-                    if this.live_started_at() != Some(started_at) {
-                        return false;
-                    }
-                    this.live_identities = Some(identities);
-                    // The roster's names can change with the identities, and
-                    // the chip is keyed by them.
-                    this.recompute_twitch_candidates();
-
-                    // An answer this session already has costs no request.
-                    if let Some(answered) = this.stats_budget.answered(arena_id) {
-                        this.stats = StatsState::Ready(index_by_account(answered.players.clone()));
-                        cx.notify();
-                        return false;
-                    }
-
-                    match this.stats_budget.check(arena_id, Instant::now()) {
-                        Ok(()) => {
-                            this.stats_budget.record(Instant::now());
-                            this.stats = StatsState::Fetching;
-                            cx.notify();
-                            true
-                        }
-                        Err(refusal) => {
-                            this.stats = StatsState::Failed(live::refusal_text(&refusal.into()));
-                            cx.notify();
-                            false
-                        }
-                    }
-                })
-                .unwrap_or(false);
-            if !cleared {
-                return;
+    /// Answers `lookup` from what this session already has, sends it while
+    /// the Current Match section is shown, or holds it until it is.
+    fn offer_lookup(&mut self, lookup: HeldLookup, cx: &mut Context<Self>) {
+        // An answer this session already has costs no request.
+        if let Some(answered) = self.stats_budget.answered(lookup.state.arena_id) {
+            self.stats = StatsState::Ready(index_by_account(answered.players.clone()));
+            cx.notify();
+            return;
+        }
+        match self.stats_gate.offer(lookup) {
+            Some(lookup) => self.send_lookup(lookup, cx),
+            None => {
+                self.stats = StatsState::Held;
+                cx.notify();
             }
+        }
+    }
 
+    /// Asks the stats service about `lookup`'s roster, within the budget.
+    fn send_lookup(&mut self, lookup: HeldLookup, cx: &mut Context<Self>) {
+        let HeldLookup { started_at, state } = lookup;
+        if self.live_started_at() != Some(started_at) {
+            return;
+        }
+        let arena_id = state.arena_id;
+        if let Err(refusal) = self.stats_budget.check(arena_id, Instant::now()) {
+            self.stats = StatsState::Failed(live::refusal_text(&refusal.into()));
+            cx.notify();
+            return;
+        }
+        self.stats_budget.record(Instant::now());
+        self.stats = StatsState::Fetching;
+        cx.notify();
+
+        let proxy_url = self.proxy_url.clone();
+        self._live_lookup = Some(cx.spawn(async move |this, cx| {
             let fetched = runtime::spawn(cx, async move { live::fetch_stats(&state, &proxy_url).await }).await;
 
             let _ = this.update(cx, |this, cx| {
@@ -1224,6 +1255,30 @@ impl PlayerTrackerView {
                 cx.notify();
             });
         }));
+    }
+
+    /// Records whether this tab is the app's displayed tab.
+    pub fn set_tab_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.tab_shown != shown {
+            self.tab_shown = shown;
+            self.update_stats_view_shown(cx);
+        }
+    }
+
+    /// Records whether the Current Match section is its group's displayed
+    /// panel.
+    pub(crate) fn set_current_match_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.current_match_active != active {
+            self.current_match_active = active;
+            self.update_stats_view_shown(cx);
+        }
+    }
+
+    /// Sends the held lookup once the Current Match section is on screen.
+    fn update_stats_view_shown(&mut self, cx: &mut Context<Self>) {
+        if let Some(lookup) = self.stats_gate.set_shown(self.tab_shown && self.current_match_active) {
+            self.send_lookup(lookup, cx);
+        }
     }
 
     /// Says the rows have changed. Each section reconciles its own list as
@@ -1732,7 +1787,7 @@ impl PlayerTrackerView {
             StatsState::Failed(reason) => Some(t!("ui.player_tracker.stats_unavailable", reason = reason).to_string()),
             _ if !roster.ships_resolved => Some(t!("ui.player_tracker.live_loading_build").into_owned()),
             StatsState::Scanning => Some(t!("ui.player_tracker.stats_resolving").into_owned()),
-            StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned()),
+            StatsState::Held | StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned()),
             StatsState::Idle | StatsState::Ready(_) => None,
         };
         let stats = match &self.stats {
@@ -3427,6 +3482,59 @@ mod tests {
         // A row written before a field existed still reads, on the defaults.
         let older: TrackerSettings = serde_json::from_str("{}").expect("an empty row reads");
         assert_eq!(older, TrackerSettings::default());
+    }
+
+    /// A battle's stats lookup waits until the tab is displayed with its
+    /// Current Match section brought forward, and is sent once both are.
+    /// The arena is refused by the local budget, so sending it reaches no
+    /// service: the refusal is what shows the lookup was sent.
+    #[gpui_kit::test]
+    fn the_stats_lookup_waits_for_the_current_match_section(cx: &mut TestAppContext) {
+        use super::HeldLookup;
+        use super::StatsState;
+        use super::live::StatsError;
+        use std::time::Instant;
+        use wows_replays::analyzer::arena_scan::ArenaState;
+        use wows_replays::types::ArenaId;
+        use wows_toolkit_viewmodel::match_stats::MatchStatsError;
+        use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+        let started_at = Timestamp::from_second(1000).expect("a valid timestamp");
+        let arena_id = ArenaId::new(7);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.live_match = Some(LiveMatch { started_at, build: None, players: Vec::new() });
+                let failure = StatsError::Refused(MatchStatsError::Http { status: 500 });
+                tracker.stats_budget.note_failure(arena_id, &failure, Instant::now());
+
+                tracker
+                    .offer_lookup(HeldLookup { started_at, state: ArenaState { arena_id, players: Vec::new() } }, cx);
+                assert!(matches!(tracker.stats, StatsState::Held), "nothing is sent while the tab is hidden");
+
+                tracker.set_tab_shown(true, cx);
+                assert!(matches!(tracker.stats, StatsState::Held), "the tab opens on another section");
+            })
+            .expect("the window is open");
+
+        window
+            .update(cx, |tracker, window, cx| tracker.set_sub_tab(SubTab::CurrentMatch, window, cx))
+            .expect("the window is open");
+        cx.run_until_parked();
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                assert!(matches!(tracker.stats, StatsState::Failed(_)), "showing the section sends the held lookup");
+                assert!(!tracker.stats_gate.is_holding());
+
+                tracker.set_tab_shown(false, cx);
+                tracker
+                    .offer_lookup(HeldLookup { started_at, state: ArenaState { arena_id, players: Vec::new() } }, cx);
+                assert!(matches!(tracker.stats, StatsState::Held), "leaving the tab holds the next lookup");
+            })
+            .expect("the window is open");
     }
 }
 

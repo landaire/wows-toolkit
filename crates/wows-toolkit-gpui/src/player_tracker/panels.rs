@@ -95,6 +95,22 @@ impl BasePanel for TrackerPanel {
     fn closable(&self, _cx: &App) -> bool {
         false
     }
+
+    /// The Current Match section's stats lookup waits for this section to be
+    /// displayed, so the tab hears when it is.
+    fn set_active(&mut self, active: bool, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.section != SubTab::CurrentMatch {
+            return;
+        }
+        let Some(tracker) = self.tracker.upgrade() else { return };
+        tracker.update(cx, |tracker, cx| tracker.set_current_match_active(active, cx));
+    }
+
+    /// Removal is the dock's deactivation signal: no `set_active(false)`
+    /// follows it.
+    fn on_removed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        BasePanel::set_active(self, false, window, cx);
+    }
 }
 
 impl Panel for TrackerPanel {

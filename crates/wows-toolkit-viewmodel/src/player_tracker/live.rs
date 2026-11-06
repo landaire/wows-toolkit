@@ -492,6 +492,55 @@ pub fn resolve_roster(
     }
 }
 
+/// Holds the current match's stats lookup until the Current Match view is on
+/// screen.
+///
+/// The lookup is a request to an outside service, so it is sent only while
+/// the view that shows its answer is displayed. A lookup readied while the
+/// view is hidden waits here, and a newer one replaces it: showing the view
+/// sends at most one lookup, for the latest match.
+#[derive(Debug)]
+pub struct StatsLookupGate<L> {
+    shown: bool,
+    held: Option<L>,
+}
+
+impl<L> Default for StatsLookupGate<L> {
+    fn default() -> Self {
+        Self { shown: false, held: None }
+    }
+}
+
+impl<L> StatsLookupGate<L> {
+    /// Records whether the view is displayed. Returns the held lookup, for
+    /// the caller to send, when the view is displayed and one is waiting.
+    pub fn set_shown(&mut self, shown: bool) -> Option<L> {
+        self.shown = shown;
+        if shown { self.held.take() } else { None }
+    }
+
+    /// Offers the current match's lookup. Returned, for the caller to send
+    /// now, while the view is displayed; held otherwise.
+    pub fn offer(&mut self, lookup: L) -> Option<L> {
+        if self.shown {
+            self.held = None;
+            Some(lookup)
+        } else {
+            self.held = Some(lookup);
+            None
+        }
+    }
+
+    /// Drops the held lookup, whose match has ended or been replaced.
+    pub fn clear(&mut self) {
+        self.held = None;
+    }
+
+    pub fn is_holding(&self) -> bool {
+        self.held.is_some()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,5 +860,69 @@ mod tests {
             resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, Some(&identities), None);
 
         assert_eq!(resolved.enemy[0].account_id, None);
+    }
+}
+
+#[cfg(test)]
+mod stats_lookup_gate_tests {
+    use super::StatsLookupGate;
+
+    #[test]
+    fn a_lookup_readied_while_hidden_is_sent_once_when_shown() {
+        let mut gate = StatsLookupGate::default();
+
+        assert_eq!(gate.offer(1), None, "nothing is sent while the view is hidden");
+        assert_eq!(gate.set_shown(false), None);
+        assert_eq!(gate.set_shown(true), Some(1), "showing the view sends the held lookup");
+        assert_eq!(gate.set_shown(true), None, "and only once");
+    }
+
+    #[test]
+    fn a_view_never_shown_sends_nothing() {
+        let mut gate = StatsLookupGate::default();
+
+        assert_eq!(gate.offer(1), None);
+        assert_eq!(gate.offer(2), None);
+        assert!(gate.is_holding());
+    }
+
+    #[test]
+    fn only_the_latest_match_is_sent() {
+        let mut gate = StatsLookupGate::default();
+
+        gate.offer(1);
+        gate.offer(2);
+
+        assert_eq!(gate.set_shown(true), Some(2));
+        assert_eq!(gate.set_shown(true), None);
+    }
+
+    #[test]
+    fn a_lookup_readied_while_shown_is_sent_at_once() {
+        let mut gate = StatsLookupGate::default();
+        gate.set_shown(true);
+
+        assert_eq!(gate.offer(1), Some(1));
+        assert!(!gate.is_holding());
+    }
+
+    #[test]
+    fn hiding_the_view_again_holds_the_next_match() {
+        let mut gate = StatsLookupGate::default();
+        gate.set_shown(true);
+        assert_eq!(gate.offer(1), Some(1));
+
+        gate.set_shown(false);
+        assert_eq!(gate.offer(2), None, "a later match waits for the view again");
+        assert_eq!(gate.set_shown(true), Some(2));
+    }
+
+    #[test]
+    fn a_cleared_lookup_is_never_sent() {
+        let mut gate = StatsLookupGate::default();
+        gate.offer(1);
+        gate.clear();
+
+        assert_eq!(gate.set_shown(true), None);
     }
 }

@@ -40,6 +40,7 @@ use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
+use crate::data::match_stats::MatchStatsRequest;
 use crate::data::match_stats::PlayerStatsOut;
 use crate::data::wows_data::BuildData;
 use crate::ui::replay_parser::Replay;
@@ -50,6 +51,7 @@ use live::LiveMatch;
 use live::ResolvedRoster;
 
 pub use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
+use wows_toolkit_viewmodel::player_tracker::live::StatsLookupGate;
 pub use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 
 /// How far the current match's stats have got.
@@ -58,11 +60,21 @@ pub(crate) enum MatchStatsState {
     #[default]
     Idle,
     Resolving,
+    /// The lookup is ready and waits for the Current Match view to be shown.
+    Held,
     Fetching,
     Ready(HashMap<AccountId, PlayerStatsOut>),
     /// A rendered reason. The structured `MatchStatsError` is matched on in
     /// the worker; only its text crosses to the UI.
     Failed(String),
+}
+
+/// The stats lookup for one match, held until the Current Match view is
+/// shown.
+#[derive(Debug, Clone)]
+pub(crate) struct StatsLookup {
+    pub(crate) started_at: Timestamp,
+    pub(crate) request: MatchStatsRequest,
 }
 
 /// The Historical and Clans table settings, persisted one key apiece.
@@ -176,6 +188,8 @@ pub struct PlayerTracker {
     pub(crate) live_identities: Option<LiveIdentities>,
     #[serde(skip)]
     pub(crate) match_stats: MatchStatsState,
+    #[serde(skip)]
+    pub(crate) stats_gate: StatsLookupGate<StatsLookup>,
 }
 
 impl PlayerTracker {
@@ -195,6 +209,7 @@ impl PlayerTracker {
         // gathered.
         self.live_identities = None;
         self.match_stats = MatchStatsState::Idle;
+        self.stats_gate.clear();
     }
 
     /// The current roster, resolved against `wows_data` and tracked history.
@@ -239,15 +254,39 @@ impl PlayerTracker {
         true
     }
 
+    /// Whether `started_at` names the match in progress.
+    pub(crate) fn is_current_match(&self, started_at: Timestamp) -> bool {
+        self.live_match.as_ref().map(|live| live.started_at) == Some(started_at)
+    }
+
     /// Applies `state` if `started_at` still names the current match,
     /// otherwise leaves the tracker untouched and returns `false`: a scan can
     /// outlive the match it started for.
     pub(crate) fn set_match_stats_for(&mut self, started_at: Timestamp, state: MatchStatsState) -> bool {
-        if self.live_match.as_ref().map(|live| live.started_at) != Some(started_at) {
+        if !self.is_current_match(started_at) {
             return false;
         }
         self.match_stats = state;
         true
+    }
+
+    /// Offers the lookup for the match `lookup` names. Returned, for the
+    /// caller to send now, while the Current Match view is shown; held
+    /// otherwise. `None` too when the match has already changed.
+    pub(crate) fn offer_stats_lookup(&mut self, lookup: StatsLookup) -> Option<StatsLookup> {
+        if !self.is_current_match(lookup.started_at) {
+            return None;
+        }
+        let sent = self.stats_gate.offer(lookup);
+        self.match_stats = if sent.is_some() { MatchStatsState::Fetching } else { MatchStatsState::Held };
+        sent
+    }
+
+    /// Records whether the Current Match view was drawn this frame. Returns
+    /// the held lookup, for the caller to send, once the view is shown.
+    pub(crate) fn set_stats_view_shown(&mut self, shown: bool) -> Option<StatsLookup> {
+        let lookup = self.stats_gate.set_shown(shown)?;
+        self.set_match_stats_for(lookup.started_at, MatchStatsState::Fetching).then_some(lookup)
     }
 
     /// Record that the tracked encounter set changed, so aggregates cached over
@@ -589,6 +628,55 @@ mod tests {
 
         assert!(!tracker.set_match_stats_for(started_at, MatchStatsState::Fetching));
         assert!(matches!(tracker.match_stats, MatchStatsState::Idle));
+    }
+
+    fn lookup_for(started_at: Timestamp) -> StatsLookup {
+        StatsLookup { started_at, request: MatchStatsRequest { arena_id: ArenaId::new(1), players: Vec::new() } }
+    }
+
+    /// A lookup readied while the Current Match view is hidden is held, and
+    /// sent once, when the view is next drawn.
+    #[test]
+    fn a_lookup_waits_for_the_current_match_view() {
+        let current = Timestamp::from_second(2000).unwrap();
+        let mut tracker = PlayerTracker { live_match: Some(live_match_at(current)), ..Default::default() };
+
+        assert!(tracker.offer_stats_lookup(lookup_for(current)).is_none(), "nothing is sent while hidden");
+        assert!(matches!(tracker.match_stats, MatchStatsState::Held));
+        assert!(tracker.set_stats_view_shown(false).is_none());
+
+        let sent = tracker.set_stats_view_shown(true).expect("drawing the view sends the held lookup");
+        assert_eq!(sent.started_at, current);
+        assert!(matches!(tracker.match_stats, MatchStatsState::Fetching));
+        assert!(tracker.set_stats_view_shown(true).is_none(), "and sends it once");
+    }
+
+    /// While the view is drawn, a lookup is sent as soon as it is ready.
+    #[test]
+    fn a_lookup_readied_while_the_view_is_drawn_is_sent_at_once() {
+        let current = Timestamp::from_second(2000).unwrap();
+        let mut tracker = PlayerTracker { live_match: Some(live_match_at(current)), ..Default::default() };
+        tracker.set_stats_view_shown(true);
+
+        assert!(tracker.offer_stats_lookup(lookup_for(current)).is_some());
+        assert!(matches!(tracker.match_stats, MatchStatsState::Fetching));
+    }
+
+    /// A held lookup does not outlive its match: the next match replaces it,
+    /// so drawing the view later sends nothing stale.
+    #[test]
+    fn a_new_match_drops_the_held_lookup() {
+        let first = Timestamp::from_second(1000).unwrap();
+        let second = Timestamp::from_second(2000).unwrap();
+        let mut tracker = PlayerTracker { live_match: Some(live_match_at(first)), ..Default::default() };
+        assert!(tracker.offer_stats_lookup(lookup_for(first)).is_none());
+
+        tracker.live_match = Some(live_match_at(second));
+        tracker.stats_gate.clear();
+        assert!(tracker.offer_stats_lookup(lookup_for(first)).is_none(), "a stale lookup is refused");
+        assert!(!tracker.stats_gate.is_holding());
+
+        assert!(tracker.set_stats_view_shown(true).is_none());
     }
 
     /// The roster entry `ingest_roster` reads through its `state_of` accessor.

@@ -86,6 +86,7 @@ const TEAM_MAX_WIDTH: f32 = 620.0;
 
 impl ToolkitTabViewer<'_> {
     pub(crate) fn build_current_match_sub_tab(&mut self, ui: &mut egui::Ui) {
+        self.tab_state.current_match_drawn = true;
         self.debug_replay_picker(ui);
 
         // Collected during the table pass and applied after, because the
@@ -158,7 +159,9 @@ impl ToolkitTabViewer<'_> {
                         ui.spinner();
                         ui.label(t!("ui.player_tracker.stats_resolving"));
                     }
-                    MatchStatsState::Fetching => {
+                    // Held for one frame at most: the lookup is sent at the
+                    // end of the frame that draws this view.
+                    MatchStatsState::Held | MatchStatsState::Fetching => {
                         ui.spinner();
                         ui.label(t!("ui.player_tracker.stats_fetching"));
                     }

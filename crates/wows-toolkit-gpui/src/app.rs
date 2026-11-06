@@ -3913,6 +3913,10 @@ impl Render for App {
             let pending = std::mem::take(&mut self.pending_missing_builds);
             self.offer_missing_game_data(pending, window, cx);
         }
+        // Read here rather than at each place `active_tab` is assigned: the
+        // tracker holds its live stats lookup until its tab is displayed.
+        let tracker_shown = self.active_tab == AppTab::PlayerTracker;
+        self.player_tracker.update(cx, |tracker, cx| tracker.set_tab_shown(tracker_shown, cx));
         let tab_order = self.tab_order();
         let active_ix = tab_order.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")

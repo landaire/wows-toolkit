@@ -1,5 +1,6 @@
 //! Reads the roster off the replay a live battle is writing, then fetches
-//! that roster's stats. Runs on the background replay-parser thread.
+//! that roster's stats once the Current Match view is shown. Runs on the
+//! background replay-parser thread.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ use crate::data::match_stats::MatchStatsError;
 use crate::data::wows_data::BuildDataCache;
 use crate::ui::player_tracker::MatchStatsState;
 use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::player_tracker::StatsLookup;
 use crate::ui::player_tracker::live::LiveIdentities;
 pub(crate) use wows_toolkit_viewmodel::match_stats::build_request;
 
@@ -48,7 +50,9 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// How long to keep waiting before giving up on a battle's roster.
 const RETRY_BUDGET: Duration = Duration::from_secs(90);
 
-/// Read the live roster off `replay`, then fetch its stats.
+/// Read the live roster off `replay`, then fetch its stats if the Current
+/// Match view is shown. Otherwise the lookup is held on the tracker, and the
+/// UI sends it back through [`fetch`] once the view is shown.
 ///
 /// Every failure lands on the tracker as a `MatchStatsState`; none of them
 /// toast, because a match starting is not a moment to interrupt.
@@ -106,20 +110,40 @@ pub(crate) fn resolve_and_fetch(
         debug!("live roster scan: identities dropped, the match already changed");
         return;
     }
-    if !tracker.write().set_match_stats_for(started_at, MatchStatsState::Fetching) {
-        debug!("live roster scan: abandoned before the fetch, the match already changed");
+    let request = match build_request(state.arena_id, &state.players) {
+        Ok(request) => request,
+        Err(error) => {
+            tracker.write().set_match_stats_for(started_at, MatchStatsState::Failed(failure_reason(error)));
+            return;
+        }
+    };
+    // Bound before matching so the tracker lock is released before the fetch.
+    let ready = tracker.write().offer_stats_lookup(StatsLookup { started_at, request });
+    match ready {
+        Some(lookup) => fetch(lookup, tracker, client),
+        None => debug!("live roster scan: lookup held for the Current Match view, or its match already changed"),
+    }
+}
+
+/// Send `lookup` and land its answer on the tracker, unless its match has
+/// changed in the meantime.
+///
+/// Checked before the request as well as after: a lookup the UI released can
+/// wait in the parser's queue while a newer match starts, and sending it
+/// would spend the service's small budget on a battle nobody is looking at.
+pub(crate) fn fetch(lookup: StatsLookup, tracker: &Arc<RwLock<PlayerTracker>>, client: &mut MatchStatsClient) {
+    if !tracker.read().is_current_match(lookup.started_at) {
+        debug!("live roster scan: lookup dropped before sending, the match already changed");
         return;
     }
-
-    let outcome = build_request(state.arena_id, &state.players).and_then(|request| client.fetch(&request));
-    let next = match outcome {
+    let next = match client.fetch(&lookup.request) {
         Ok(response) => {
             let by_account = response.players.into_iter().map(|player| (player.account_id, player)).collect();
             MatchStatsState::Ready(by_account)
         }
         Err(error) => MatchStatsState::Failed(failure_reason(error)),
     };
-    if !tracker.write().set_match_stats_for(started_at, next) {
+    if !tracker.write().set_match_stats_for(lookup.started_at, next) {
         debug!("live roster scan: result dropped, the match already changed");
     }
 }
@@ -219,5 +243,75 @@ mod tests {
     fn other_errors_keep_their_own_text() {
         let reason = failure_reason(MatchStatsError::Http { status: 500 });
         assert_eq!(reason, MatchStatsError::Http { status: 500 }.to_string());
+    }
+
+    /// A lookup whose match was replaced while it waited in the queue is
+    /// dropped without a request. The client is pointed at a local proxy
+    /// that counts connections and closes each one, so a request that did go
+    /// out fails fast and is counted rather than reaching the service.
+    #[test]
+    fn a_lookup_for_a_replaced_match_sends_no_request() {
+        use std::net::TcpListener;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        use wows_replays::types::AccountId;
+        use wows_replays::types::ArenaId;
+        use wows_replays::types::GameParamId;
+
+        use crate::data::match_stats::MatchStatsRequest;
+        use crate::data::match_stats::Region;
+        use crate::ui::player_tracker::live::LiveMatch;
+        use crate::util::proxy::ProxyConfig;
+        use crate::util::proxy::ProxySource;
+        use wows_toolkit_viewmodel::match_stats::PlayerRef;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a local port binds");
+        listener.set_nonblocking(true).expect("the listener goes non-blocking");
+        let proxy = ProxyConfig {
+            url: format!("http://{}", listener.local_addr().expect("the listener has an address")),
+            bypass: Vec::new(),
+            source: ProxySource::Manual,
+        };
+        let connections = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = {
+            let (connections, stop) = (Arc::clone(&connections), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        // Counted before the stream drops, so a request that
+                        // went out is counted before its send returns.
+                        Ok((stream, _)) => {
+                            connections.fetch_add(1, Ordering::SeqCst);
+                            drop(stream);
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                    }
+                }
+            })
+        };
+
+        let replaced = Timestamp::from_second(1000).unwrap();
+        let current = Timestamp::from_second(2000).unwrap();
+        let tracker = Arc::new(RwLock::new(PlayerTracker {
+            live_match: Some(LiveMatch { started_at: current, build: None, players: Vec::new() }),
+            ..Default::default()
+        }));
+        let mut client = MatchStatsClient::new(
+            crate::data::shipbuilds::ShipBuildsClient::new(Some(&proxy)).expect("test HTTP client"),
+        );
+        let request = MatchStatsRequest {
+            arena_id: ArenaId::new(1),
+            players: vec![PlayerRef { account_id: AccountId(1), region: Region::Eu, ship_id: GameParamId::default() }],
+        };
+
+        fetch(StatsLookup { started_at: replaced, request }, &tracker, &mut client);
+
+        stop.store(true, Ordering::SeqCst);
+        server.join().expect("the proxy thread exits");
+        assert_eq!(connections.load(Ordering::SeqCst), 0, "no request is sent for a replaced match");
+        assert!(matches!(tracker.read().match_stats, MatchStatsState::Idle));
     }
 }

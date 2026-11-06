@@ -704,6 +704,9 @@ pub enum ReplayBackgroundParserThreadMessage {
         /// be refused instead of landing on the wrong roster.
         started_at: jiff::Timestamp,
     },
+    /// The Current Match view was shown while a match's stats lookup was
+    /// held for it.
+    FetchMatchStats(crate::ui::player_tracker::StatsLookup),
 }
 
 pub struct BackgroundParserThread {
@@ -914,6 +917,9 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                             ),
                         );
                     }
+                }
+                Some(ReplayBackgroundParserThreadMessage::FetchMatchStats(lookup)) => {
+                    crate::task::live_match_stats::fetch(lookup, &data.player_tracker, &mut match_stats_client);
                 }
                 None => {}
             }

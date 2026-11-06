@@ -5008,6 +5008,7 @@ impl eframe::App for WowsToolkitApp {
 
         self.tab_state.active_theme = ctx.theme();
         self.tab_state.dock_tab_rects.clear();
+        self.tab_state.current_match_drawn = false;
 
         egui::CentralPanel::default().show(ui, |ui| {
             DockArea::new(&mut self.dock_state)
@@ -5018,6 +5019,7 @@ impl eframe::App for WowsToolkitApp {
                 .show_close_buttons(true)
                 .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
+        self.tab_state.send_held_stats_lookup();
 
         if self.tab_state.command_palette.state.open {
             use crate::ui::command_palette::PaletteAction;
