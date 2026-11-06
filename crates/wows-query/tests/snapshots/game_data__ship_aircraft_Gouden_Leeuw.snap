@@ -1,0 +1,36 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: aircraft
+---
+ship:
+  name: Gouden Leeuw
+  index: PHSC110
+  tier: 10
+  class: cruiser
+  nation: Netherlands
+  group: upgradeable
+squadron_count: 1
+squadrons:
+  - role: air_strike
+    aircraft: Fokker T.V.
+    aircraft_param: PHAD012_Gouden_Leeuw_AS
+    squadron_size: 12
+    attack_flight_size: 12
+    payload_per_plane: 6
+    speed_with_ordnance_knots: 166
+    ordnance:
+      kind: bomb
+      ammo: HE
+      projectile: PHPB024_PuW_160kg_AS_HE
+      damage: 6800
+      fall_time_coef: 1
+      he_penetration_mm: 37
+    air_strike:
+      charges: 2
+      reload_s: 100
+      range_km: 13
+    vs_plate:
+      result: penetrates
+      penetration_mm: 37
+thickness_mm: 25
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. The server decides AP bombs and rockets; ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."

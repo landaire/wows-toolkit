@@ -467,3 +467,15 @@ fn stat_search_names_qualifiers_that_match_no_row() {
     assert_eq!(search["qualifying"]["total"], 0);
     insta::assert_yaml_snapshot!(search["unmatched_qualifiers"]);
 }
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_aircraft_lists_squadrons_air_strikes_and_plate_verdicts() {
+    for (name, thickness) in
+        [("Midway", None), ("Ise", Some(32.0)), ("Gouden Leeuw", Some(25.0)), ("Sekiryu", Some(32.0))]
+    {
+        let aircraft =
+            game().call_tool("ship_aircraft", json!({ "ship": name, "thickness_mm": thickness })).expect("ship exists");
+        insta::assert_yaml_snapshot!(format!("ship_aircraft_{}", name.replace(' ', "_")), aircraft);
+    }
+}

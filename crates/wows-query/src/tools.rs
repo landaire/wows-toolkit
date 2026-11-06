@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::GameData;
 use crate::QueryError;
+use crate::aircraft::ShipAircraftArgs;
 use crate::consumables::ShipConsumablesArgs;
 use crate::firing_arcs::FiringArcsArgs;
 use crate::gameparams::GameParamsQueryArgs;
@@ -93,6 +94,12 @@ const TOOLS: &[Tool] = &[
         description: "Armor of one ship: per hull zone the thinnest and thickest plate above the waterline, and every plate by collision material (Bow_*, St_* stern, Cit_* citadel, Cas_* casemate, SS_* superstructure) with thickness in mm.",
         schema: input_schema::<ShipArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_armor(args)),
+    },
+    Tool {
+        name: "ship_aircraft",
+        description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile and HE penetration, plus air strike charges, reload and range. With thickness_mm, says whether each ordnance defeats that plate.",
+        schema: input_schema::<ShipAircraftArgs>,
+        call: |game, arguments| run(arguments, |args| game.ship_aircraft(args)),
     },
     Tool {
         name: "ship_shells",

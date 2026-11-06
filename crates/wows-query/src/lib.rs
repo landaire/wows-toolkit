@@ -5,6 +5,7 @@
 //! serialize to compact JSON. Programs that serve `gameparams_query` call
 //! [`jq_worker::init`] first in `main`.
 
+pub mod aircraft;
 pub mod armor;
 mod armor_models;
 pub mod consumables;

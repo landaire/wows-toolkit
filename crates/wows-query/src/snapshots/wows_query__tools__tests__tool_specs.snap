@@ -57,6 +57,20 @@ expression: specs()
         description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\"."
     required:
       - ship
+- name: ship_aircraft
+  description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile and HE penetration, plus air strike charges, reload and range. With thickness_mm, says whether each ordnance defeats that plate."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Ship name, e.g. \"Midway\", \"Ise\" or \"Gouden Leeuw\"."
+      thickness_mm:
+        type: number
+        description: "Plate thickness in mm to test each squadron's ordnance against."
+    required:
+      - ship
 - name: ship_shells
   description: "Main and secondary battery shells of one ship: ammo type, caliber, HE/SAP penetration with and without Inertia Fuse for HE Shells, the thickest whole-mm plate AP overmatches, alpha damage, muzzle velocity and fire chance."
   input_schema:

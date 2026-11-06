@@ -1,0 +1,127 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: aircraft
+---
+ship:
+  name: Midway
+  index: PASA110
+  tier: 10
+  class: aircraft_carrier
+  nation: USA
+  group: upgradeable
+squadron_count: 8
+squadrons:
+  - role: rocket_planes
+    aircraft: F4U Corsair
+    aircraft_param: PAAF110_Midway_stock
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 10
+    speed_with_ordnance_knots: 173
+    ordnance:
+      kind: rocket
+      ammo: HE
+      projectile: PAPR110_Midway_stock
+      damage: 2000
+      fall_time_coef: 0.1
+      he_penetration_mm: 33
+  - role: rocket_planes
+    module_upgrade: true
+    aircraft: F8F Bearcat
+    aircraft_param: PAAF210_Midway_top
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 10
+    speed_with_ordnance_knots: 176
+    ordnance:
+      kind: rocket
+      ammo: HE
+      projectile: PAPR210_Midway_top
+      damage: 2000
+      fall_time_coef: 0.1
+      he_penetration_mm: 33
+  - role: rocket_planes
+    module_upgrade: true
+    aircraft: F8F Bearcat
+    aircraft_param: PAAF310_Midway_top
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 3
+    speed_with_ordnance_knots: 176
+    ordnance:
+      kind: rocket
+      ammo: HE
+      projectile: PAPR310_Midway_top
+      damage: 5400
+      fall_time_coef: 0.2
+      he_penetration_mm: 68
+  - role: dive_bombers
+    aircraft: AD-1 Skyraider
+    aircraft_param: PAAD110_Midway_stock
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 128
+    ordnance:
+      kind: bomb
+      ammo: HE
+      projectile: PAPB110_Midway_stock
+      damage: 11200
+      fall_time_coef: 1
+      he_penetration_mm: 67
+  - role: dive_bombers
+    module_upgrade: true
+    aircraft: BTD Destroyer
+    aircraft_param: PAAD210_Midway_top
+    squadron_size: 12
+    attack_flight_size: 3
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 131
+    ordnance:
+      kind: bomb
+      ammo: HE
+      projectile: PAPB210_Midway_top
+      damage: 11200
+      fall_time_coef: 1
+      he_penetration_mm: 67
+  - role: torpedo_bombers
+    aircraft: AD-1 Skyraider
+    aircraft_param: PAAB110_Midway_stock
+    squadron_size: 8
+    attack_flight_size: 2
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 128
+    ordnance:
+      kind: torpedo
+      projectile: PAPT110_Midway_stock
+      damage: 5067
+      fall_time_coef: 1
+  - role: torpedo_bombers
+    module_upgrade: true
+    aircraft: BTD Destroyer
+    aircraft_param: PAAB210_Midway_top
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 131
+    ordnance:
+      kind: torpedo
+      projectile: PAPT210_Midway_top
+      damage: 5067
+      fall_time_coef: 1
+  - role: air_strike
+    aircraft: Consolidated PB4Y-2 Privateer
+    aircraft_param: PAAD913_ASW_T10_CV
+    squadron_size: 9
+    attack_flight_size: 1
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 256
+    ordnance:
+      kind: depth_charge
+      projectile: PAPD110_depth_CV_10
+      damage: 4900
+      fall_time_coef: 1.5
+    air_strike:
+      charges: 1
+      reload_s: 25
+      range_km: 8

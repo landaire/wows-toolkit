@@ -1,0 +1,127 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: aircraft
+---
+ship:
+  name: Sekiryu
+  index: PJSA111
+  tier: 11
+  class: aircraft_carrier
+  nation: Japan
+  group: superShip
+squadron_count: 6
+squadrons:
+  - role: rocket_planes
+    aircraft: A8M Rikufū
+    aircraft_param: PJAF120_SEKIRYU_STOCK
+    squadron_size: 9
+    attack_flight_size: 3
+    payload_per_plane: 6
+    speed_with_ordnance_knots: 165
+    ordnance:
+      kind: rocket
+      ammo: HE
+      projectile: PJPR120_SEKIRYU_STOCK
+      damage: 3150
+      fall_time_coef: 0.1
+      he_penetration_mm: 30
+    vs_plate:
+      result: fails
+      penetration_mm: 30
+  - role: rocket_planes
+    alternative: true
+    aircraft: Kyushu J7W3
+    aircraft_param: PJAF121_SEKIRYU_JET
+    squadron_size: 3
+    attack_flight_size: 3
+    payload_per_plane: 8
+    speed_with_ordnance_knots: 173
+    ordnance:
+      kind: rocket
+      ammo: HE
+      projectile: PJPR121_SEKIRYU_JET
+      damage: 2850
+      fall_time_coef: 0.1
+      he_penetration_mm: 30
+    vs_plate:
+      result: fails
+      penetration_mm: 30
+  - role: dive_bombers
+    aircraft: J5N Tenrai
+    aircraft_param: PJAD120_SEKIRYU_STOCK
+    squadron_size: 12
+    attack_flight_size: 3
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 152
+    ordnance:
+      kind: bomb
+      ammo: AP
+      projectile: PJPB120_SEKIRYU_STOCK
+      damage: 6800
+      fall_time_coef: 1.15
+      ap:
+        caliber_mm: 404
+        mass_kg: 587
+        speed_mps: 490
+        krupp: 3170
+        normalization_deg: 40
+        ricochet_from_deg: 45
+        ricochet_always_from_deg: 60
+        fuse_time_s: 0.025
+        fuse_threshold_mm: 30
+        dive_angle_deg: -75
+    vs_plate:
+      result: undetermined
+      reason: the client has no AP bomb or rocket penetration formula; the server decides
+  - role: torpedo_bombers
+    aircraft: J5N Tenrai
+    aircraft_param: PJAB120_SEKIRYU_STOCK
+    squadron_size: 12
+    attack_flight_size: 2
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 145
+    ordnance:
+      kind: torpedo
+      projectile: PJPT121_SEKIRYU_STOCK
+      damage: 9333
+      fall_time_coef: 1
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+  - role: torpedo_bombers
+    alternative: true
+    aircraft: Yokosuka R2Y2
+    aircraft_param: PJAB121_SEKIRYU_JET
+    squadron_size: 2
+    attack_flight_size: 2
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 148
+    ordnance:
+      kind: torpedo
+      projectile: PJPT122_SEKIRYU_JET
+      damage: 7500
+      fall_time_coef: 1
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+  - role: air_strike
+    aircraft: Kawanishi H6K
+    aircraft_param: PJAD912_ASW_T10_CV
+    squadron_size: 8
+    attack_flight_size: 1
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 245
+    ordnance:
+      kind: depth_charge
+      projectile: PJPD108_depth_CV_10
+      damage: 4900
+      fall_time_coef: 1.5
+    air_strike:
+      charges: 1
+      reload_s: 25
+      range_km: 8
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+thickness_mm: 32
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. The server decides AP bombs and rockets; ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."

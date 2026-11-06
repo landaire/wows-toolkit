@@ -1,0 +1,49 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: aircraft
+---
+ship:
+  name: Ise
+  index: PJSB526
+  tier: 6
+  class: battleship
+  nation: Japan
+  group: special
+squadron_count: 2
+squadrons:
+  - role: torpedo_bombers
+    aircraft: Aichi M6A2 Seiran
+    aircraft_param: PJAB606_ISE_STOCK
+    squadron_size: 4
+    attack_flight_size: 4
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 122
+    ordnance:
+      kind: torpedo
+      projectile: PJPT606_ISE_STOCK
+      damage: 2767
+      fall_time_coef: 1
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+  - role: air_strike
+    aircraft: Kawanishi H8K
+    aircraft_param: PJAD904_ASW_T5
+    squadron_size: 8
+    attack_flight_size: 1
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 176
+    ordnance:
+      kind: depth_charge
+      projectile: PJPD103_depth_T5
+      damage: 2900
+      fall_time_coef: 1.5
+    air_strike:
+      charges: 1
+      reload_s: 20
+      range_km: 8
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+thickness_mm: 32
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. The server decides AP bombs and rockets; ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
