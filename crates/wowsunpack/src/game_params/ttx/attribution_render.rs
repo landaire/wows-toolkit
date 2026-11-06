@@ -24,6 +24,10 @@ pub struct ContributorLine {
     pub label: String,
     /// The applied magnitude, formatted: "x0.95" (Mul) or "+350" (Add).
     pub effect: String,
+    /// The modifier or module coefficient the step applies (`Contribution::modifier_name`).
+    pub modifier_name: String,
+    /// The raw applied magnitude (`effect` unformatted).
+    pub operand: f32,
     /// The signed amount this step moved the stat, in its units, trimmed
     /// ("+1000", "-1.2"). Per-step deltas sum to `value - base_value`; for an
     /// `order_sensitive` stat a multiplicative step's delta reflects its position
@@ -179,6 +183,8 @@ pub fn render_attributions(
                     .map(|((c, delta), running)| ContributorLine {
                         label: input_label(&c.input, loader, provider),
                         effect: format_effect(c),
+                        modifier_name: c.modifier_name.clone(),
+                        operand: c.operand,
                         delta: format_delta(delta),
                         delta_raw: delta,
                         value_after: trim(running),

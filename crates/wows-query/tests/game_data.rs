@@ -8,6 +8,7 @@ use serde_json::json;
 use wows_core::units::Degrees;
 use wows_core::units::Km;
 use wows_core::units::Millimeters;
+use wows_core::units::Percent;
 use wows_query::GameData;
 use wows_query::QueryError;
 use wows_query::armor_assessment::ArmorAssessmentArgs;
@@ -405,6 +406,34 @@ fn per_class_skill_names_resolve_by_class() {
         .captain_skill(&CaptainSkillArgs { skill: "ifhe".to_owned(), ..Default::default() })
         .expect("IFHE exists");
     insta::assert_yaml_snapshot!(ifhe);
+}
+
+/// Adrenaline Rush reduces reload by its coefficient per 1% of health lost.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn adrenaline_rush_reloads_faster_per_percent_of_health_lost() {
+    let skill = game()
+        .captain_skill(&CaptainSkillArgs { skill: "Adrenaline Rush".to_owned(), ..Default::default() })
+        .expect("Adrenaline Rush exists");
+    insta::assert_yaml_snapshot!(skill);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn colbert_with_adrenaline_rush_at_low_and_half_health() {
+    let at = |hp_percent: f32| {
+        game()
+            .ship_stats(&ShipStatsArgs {
+                ship: "Colbert".to_owned(),
+                skills: Some(vec!["Adrenaline Rush".to_owned()]),
+                hp_percent: Some(Percent::new(hp_percent)),
+                ..Default::default()
+            })
+            .expect("loadout resolves")
+    };
+
+    insta::assert_yaml_snapshot!("colbert_adrenaline_rush_at_1_percent_hp", at(1.0));
+    insta::assert_yaml_snapshot!("colbert_adrenaline_rush_at_50_percent_hp", at(50.0));
 }
 
 #[test]

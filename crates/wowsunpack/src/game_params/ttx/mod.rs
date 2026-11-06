@@ -39,6 +39,7 @@ pub use effects::EffectKind;
 pub use effects::EffectiveModifiers;
 pub use effects::Effects;
 pub use effects::EffectsState;
+pub use effects::HEALTH_SCALED_RELOAD_STEP;
 pub use effects::HealthFraction;
 pub use effects::Loadout;
 pub use effects::ReloadCoeffs;

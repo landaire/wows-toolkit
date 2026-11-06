@@ -12,6 +12,7 @@ use wows_ship_stats::DerivedStat;
 use wows_ship_stats::StockRanges;
 use wowsunpack::game_params::ttx::AttributionLine;
 use wowsunpack::game_params::ttx::ContributorLine;
+use wowsunpack::game_params::ttx::HEALTH_SCALED_RELOAD_STEP;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::diff_stat_rows;
 use wowsunpack::game_params::ttx::labels::TtxStat;
@@ -442,7 +443,7 @@ fn causes(line: &AttributionLine, loadout: &ResolvedLoadout) -> Vec<String> {
     let mut causes: Vec<String> = line
         .contributors
         .iter()
-        .filter_map(|contributor| loadout_label(contributor, loadout).map(|name| describe(&name, contributor)))
+        .filter_map(|contributor| loadout_label(contributor, loadout).map(|name| describe(&name, contributor, loadout)))
         .collect();
 
     for inherited in &line.inherited {
@@ -450,7 +451,7 @@ fn causes(line: &AttributionLine, loadout: &ResolvedLoadout) -> Vec<String> {
             continue;
         };
         let via = stat_label(&inherited.via_stat, inherited.via_qualifier.as_deref());
-        let cause = format!("{} via {via}", describe(&name, &inherited.line));
+        let cause = format!("{} via {via}", describe(&name, &inherited.line, loadout));
         if !causes.contains(&cause) {
             causes.push(cause);
         }
@@ -469,6 +470,15 @@ fn loadout_label(contributor: &ContributorLine, loadout: &ResolvedLoadout) -> Op
     loadout.labels.values().any(|name| *name == clean(&contributor.label)).then(|| clean(&contributor.label))
 }
 
-fn describe(name: &str, contributor: &ContributorLine) -> String {
+/// "Inertia Fuse for HE Shells x1.25 (+9)", or for a health-scaled reload
+/// "Adrenaline Rush at 1% HP: -19.8% reload (-0.84)".
+fn describe(name: &str, contributor: &ContributorLine, loadout: &ResolvedLoadout) -> String {
+    if let Some(hp) = loadout.hp_percent
+        && contributor.modifier_name == HEALTH_SCALED_RELOAD_STEP
+    {
+        let change = round((contributor.operand - 1.0) * 100.0);
+        return format!("{name} at {}% HP: {change:+}% reload ({})", round(hp.value()), contributor.delta);
+    }
+
     format!("{name} {} ({})", contributor.effect, contributor.delta)
 }

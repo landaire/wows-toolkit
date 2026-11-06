@@ -1,0 +1,33 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 416
+expression: at(50.0)
+---
+ship:
+  name: Colbert
+  index: PFSC510
+  tier: 10
+  class: cruiser
+  nation: France
+  group: ultimate
+  status: released
+skills:
+  - name: Adrenaline Rush
+    points: 3
+skill_points: 3
+changes:
+  - stat: Main Battery Reload Time
+    from: 3.4 s
+    to: 3.1 s
+    because:
+      - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"
+  - stat: Main battery damage per minute (HE)
+    from: 592941 hp/min
+    to: 658824 hp/min
+    because:
+      - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"
+  - stat: Main battery damage per minute (AP)
+    from: 734118 hp/min
+    to: 815686 hp/min
+    because:
+      - "Adrenaline Rush at 50% HP: -10% reload (-0.34)"

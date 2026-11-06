@@ -644,7 +644,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -692,7 +692,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -708,7 +708,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -724,7 +724,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -740,7 +740,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -756,7 +756,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -772,7 +772,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -788,7 +788,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -804,7 +804,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -948,7 +948,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -980,7 +980,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -1460,7 +1460,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -1716,7 +1716,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Kilometer,
                 base_value: 1.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.001,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -2180,7 +2180,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -3412,7 +3412,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: -0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -4964,7 +4964,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Kilometer,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.001,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -6020,7 +6020,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -6036,7 +6036,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -6420,7 +6420,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -6692,7 +6692,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Kilometer,
                 base_value: 100.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.001,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -6708,7 +6708,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Kilometer,
                 base_value: 1000.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.001,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -7108,7 +7108,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8532,7 +8532,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Kilometer,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.001,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8548,7 +8548,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8564,7 +8564,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8596,7 +8596,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8628,7 +8628,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8660,7 +8660,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: false,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8676,7 +8676,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8778,7 +8778,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8794,7 +8794,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8810,7 +8810,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8826,7 +8826,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -8842,7 +8842,7 @@ static DEFAULT_TABLE: Table = Table {
                 measure: Measure::Percent,
                 base_value: 0.0,
                 display_sign: true,
-                multiplier: 0.0,
+                multiplier: 0.01,
                 round_digits: 1,
                 round_percents: false,
                 hidden: false,
@@ -9022,13 +9022,15 @@ fn format_number(val: f32, round_digits: u8, display_sign: bool) -> String {
 
 /// Reproduce the client tooltip formatting for a single modifier: a description
 /// fragment like "+10% Main battery reload time". `None` when the modifier is
-/// hidden or its value equals the base (no change).
+/// hidden or its value equals the base (no change). A modifier that applies per
+/// 1% of HP lost also shows its total at 1% HP, e.g. "-0.2% Reload time
+/// reduction ... for each 1% of HP lost (-19.8% at 1% HP)".
 ///
 /// Label key order: `IDS_PARAMS_MODIFIER_<NAME>`, then the per-species suffix
 /// `IDS_PARAMS_MODIFIER_<NAME>_<SPECIES>`, then the raw modifier name.
 ///
 /// NOTE: `round_percents` is not yet honored; percent values always use the
-/// `(v - base) * 100` path regardless of that flag.
+/// `(v * multiplier - base) * 100` path regardless of that flag.
 pub fn format_modifier(
     version: Version,
     name: &str,
@@ -9077,20 +9079,39 @@ pub fn format_modifier(
 
     // `positive` is color-only (green/red category in the client) and is not
     // used here: the number's sign is the delta's own.
-    let number = if s.measure_value_hidden {
-        String::new()
-    } else {
-        let val = if s.measure == Measure::Percent { (value - s.base_value) * 100.0 } else { value * s.multiplier };
-        let unit = s
-            .measure
-            .unit_ids_key()
-            .and_then(|key| metadata.localized_name_from_id(&TranslationKey::new(key)))
-            .unwrap_or_default();
-        let num = format_number(val, s.round_digits, s.display_sign);
-        if s.measure.space_before() { format!("{num} {unit}") } else { format!("{num}{unit}") }
-    };
+    if s.measure_value_hidden {
+        return Some(label);
+    }
 
-    if number.is_empty() { Some(label) } else { Some(format!("{number} {label}")) }
+    let line = format!("{} {label}", measured_value(s, value, metadata));
+    if !scales_per_percent_of_health_lost(name) {
+        return Some(line);
+    }
+
+    // The client shows the in-battle effect as the value times the whole
+    // percents of HP lost (StateSystem.py:794-801), 99 at 1% HP.
+    Some(format!("{line} ({} at 1% HP)", measured_value(s, value * 99.0, metadata)))
+}
+
+/// The number and unit the client shows for `value` (ModifierSettings.py:264-286):
+/// scaled by `multiplier`, then for percents the change from the base in percent.
+fn measured_value(s: &ModifierSetting, value: f32, metadata: &dyn crate::data::ResourceLoader) -> String {
+    let scaled = value * s.multiplier;
+    let val = if s.measure == Measure::Percent { (scaled - s.base_value) * 100.0 } else { scaled };
+    let unit = s
+        .measure
+        .unit_ids_key()
+        .and_then(|key| metadata.localized_name_from_id(&TranslationKey::new(key)))
+        .unwrap_or_default();
+    let num = format_number(val, s.round_digits, s.display_sign);
+
+    if s.measure.space_before() { format!("{num} {unit}") } else { format!("{num}{unit}") }
+}
+
+/// Modifiers whose value applies once per 1% of HP lost: the client scales them
+/// by the fraction of HP lost (ModifiersApply.py:580-607, AirplaneUtils.py:260).
+fn scales_per_percent_of_health_lost(name: &str) -> bool {
+    name.starts_with("lastChance") || name == "GSLastChanceReloadCoefficient"
 }
 
 /// Format each `(name, value)` modifier for `species`, dropping the ones that
@@ -9268,5 +9289,21 @@ mod tests {
             .expect("a normal count should render");
         assert!(normal.contains('3'), "got {normal}");
         assert!(!normal.contains("INFINITY"), "got {normal}");
+    }
+
+    #[test]
+    fn per_percent_of_health_lost_shows_value_and_total_at_one_percent() {
+        // Adrenaline Rush: 0.2 * multiplier -0.01 = -0.2% per 1% lost, -19.8% at 1% HP.
+        let out = format_modifier(VERSION, "lastChanceReloadCoefficient", 0.2, Species::Cruiser, &EchoLoader)
+            .expect("should render");
+        assert_eq!(out, "-0.2IDS_PERCENT IDS_PARAMS_MODIFIER_LASTCHANCERELOADCOEFFICIENT (-19.8IDS_PERCENT at 1% HP)");
+    }
+
+    #[test]
+    fn percent_multiplier_scales_before_the_base_is_taken() {
+        // planeDamageDodgeCoeff: percent, base 0.0, multiplier -1.0.
+        let out = format_modifier(VERSION, "planeDamageDodgeCoeff", 0.1, Species::AirCarrier, &EchoLoader)
+            .expect("should render");
+        assert!(out.starts_with("-10IDS_PERCENT "), "got {out}");
     }
 }

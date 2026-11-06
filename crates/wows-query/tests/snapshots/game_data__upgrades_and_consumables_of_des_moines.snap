@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 152
+assertion_line: 360
 expression: upgrades
 ---
 ship:
@@ -124,7 +124,7 @@ slots:
         kind: regular
         cost_credits: 2000000
         effects:
-          - 0 km Assured acquisition range of torpedoes
+          - 1.8 km Assured acquisition range of torpedoes
       - name: Concealment System Modification 1
         kind: regular
         cost_credits: 2000000

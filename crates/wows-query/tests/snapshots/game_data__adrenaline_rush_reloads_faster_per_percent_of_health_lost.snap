@@ -1,0 +1,26 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 398
+expression: skill
+---
+skills:
+  - name: Adrenaline Rush
+    internal_name: ArmamentReloadAaDamage
+    description: Enhances ship parameters for each 1% of HP lost.
+    classes:
+      - classes:
+          - destroyer
+          - cruiser
+          - battleship
+        points: 3
+        effects:
+          - "-0.2% Reload time reduction for all armament types for each 1% of HP lost (-19.8% at 1% HP)"
+  - name: Adrenaline Rush
+    internal_name: ArmamentReloadSubmarine
+    description: Enhances ship parameters for each 1% of HP lost.
+    classes:
+      - classes:
+          - submarine
+        points: 4
+        effects:
+          - "-0.25% Reload time reduction for all armament types for each 1% of HP lost (-24.7% at 1% HP)"

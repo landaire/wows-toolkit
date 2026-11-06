@@ -59,6 +59,19 @@ impl Upgrade {
         self.param.modernization().expect("indexed upgrades are modernizations")
     }
 
+    /// Classes the upgrade lists, or every class when it lists none.
+    pub(crate) fn classes(&self) -> Vec<ShipClass> {
+        let listed: Vec<ShipClass> = self
+            .modernization()
+            .ship_types()
+            .iter()
+            .filter_map(|name| Species::from_name(name).known().copied())
+            .filter_map(ShipClass::from_species)
+            .collect();
+
+        if listed.is_empty() { ShipClass::ALL.to_vec() } else { listed }
+    }
+
     pub(crate) fn fits(&self, ship: &Ship) -> bool {
         let Some(vehicle) = ship.param.vehicle() else {
             return false;
@@ -269,15 +282,7 @@ impl GameData {
 
         let classes: Vec<ShipClass> = match ship {
             Some(ship) => vec![ship.class],
-            None => {
-                let listed: Vec<ShipClass> = modernization
-                    .ship_types()
-                    .iter()
-                    .filter_map(|name| Species::from_name(name).known().copied())
-                    .filter_map(ShipClass::from_species)
-                    .collect();
-                if listed.is_empty() { ShipClass::ALL.to_vec() } else { listed }
-            }
+            None => upgrade.classes(),
         };
         let mut effects: Vec<UpgradeClassEffects> = Vec::new();
         for class in classes {

@@ -123,7 +123,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -168,7 +168,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -192,7 +192,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -843,7 +843,7 @@
                 "skill_type": 4
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -1406,7 +1406,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -1451,7 +1451,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -1475,7 +1475,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -2065,7 +2065,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -2110,7 +2110,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -2134,7 +2134,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -2808,7 +2808,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -2837,7 +2837,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -3506,7 +3506,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -3551,7 +3551,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -3575,7 +3575,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -4304,7 +4304,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": true,
                 "name": null,
@@ -4333,7 +4333,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -4892,7 +4892,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+35 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+35 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -4937,7 +4937,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -4961,7 +4961,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -5687,7 +5687,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -5716,7 +5716,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -6299,7 +6299,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -6328,7 +6328,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -7012,7 +7012,7 @@
             "point_cost": 4,
             "skills": [
               {
-                "description": "+25 lastChanceReloadCoefficient",
+                "description": "-0.25 lastChanceReloadCoefficient (-24.7 at 1% HP)",
                 "internal_name": "ArmamentReloadSubmarine",
                 "learned": false,
                 "name": null,
@@ -7638,7 +7638,7 @@
             "point_cost": 4,
             "skills": [
               {
-                "description": "+25 lastChanceReloadCoefficient",
+                "description": "-0.25 lastChanceReloadCoefficient (-24.7 at 1% HP)",
                 "internal_name": "ArmamentReloadSubmarine",
                 "learned": true,
                 "name": null,
@@ -8276,7 +8276,7 @@
                 "skill_type": 4
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -8983,7 +8983,7 @@
                 "skill_type": 54
               },
               {
-                "description": "+1000 ignorePTZBonus",
+                "description": "+10 ignorePTZBonus",
                 "internal_name": "PlanesTorpedoUwReduced",
                 "learned": true,
                 "name": null,
@@ -9734,7 +9734,7 @@
                 "skill_type": 4
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -10406,7 +10406,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -10451,7 +10451,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -10475,7 +10475,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -11163,7 +11163,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -11192,7 +11192,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -11699,7 +11699,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -11728,7 +11728,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -12444,7 +12444,7 @@
                 "skill_type": 4
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": false,
                 "name": null,
@@ -13014,7 +13014,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -13059,7 +13059,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -13083,7 +13083,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -13789,7 +13789,7 @@
                 "skill_type": 54
               },
               {
-                "description": "+1000 ignorePTZBonus",
+                "description": "+10 ignorePTZBonus",
                 "internal_name": "PlanesTorpedoUwReduced",
                 "learned": false,
                 "name": null,
@@ -14380,7 +14380,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -14409,7 +14409,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -15071,7 +15071,7 @@
                 "skill_type": 28
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,
@@ -15100,7 +15100,7 @@
                 "skill_type": 30
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -15741,7 +15741,7 @@
                 "skill_type": 61
               },
               {
-                "description": "+25 torpedoDetectionCoefficient\n+700 uwCoeffBonus",
+                "description": "+25 torpedoDetectionCoefficient\n+7 uwCoeffBonus",
                 "internal_name": "DetectionTorpedoRange",
                 "learned": false,
                 "name": null,
@@ -15786,7 +15786,7 @@
                 "skill_type": 40
               },
               {
-                "description": "+20 lastChanceReloadCoefficient",
+                "description": "-0.2 lastChanceReloadCoefficient (-19.8 at 1% HP)",
                 "internal_name": "ArmamentReloadAaDamage",
                 "learned": true,
                 "name": null,
@@ -15810,7 +15810,7 @@
                 "skill_type": 44
               },
               {
-                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+150 prioritySectorStartPhaseStrengthBonus\n+2500 prioritySectorStrengthBonus",
+                "description": "+1  AAExtraBubbles\n-15 asReloadTimeCoeff\n-10 planeSpawnTime\n+1.5 prioritySectorStartPhaseStrengthBonus\n+25 prioritySectorStrengthBonus",
                 "internal_name": "AaPrioritysectorDamageConstant",
                 "learned": false,
                 "name": null,

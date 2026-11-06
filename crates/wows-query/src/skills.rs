@@ -302,3 +302,116 @@ pub(crate) fn skill_names(
     }
     names
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use wows_data_mgr::builds::BuildsIndex;
+    use wowsunpack::game_params::modifier_settings_data::Measure;
+    use wowsunpack::game_params::modifier_settings_data::Transform;
+    use wowsunpack::game_params::modifier_settings_data::format_modifier;
+    use wowsunpack::game_params::modifier_settings_data::modifier_setting;
+
+    use super::*;
+
+    /// Percent effects checked, and the ones whose displayed number is
+    /// implausible: over 100%, or over 100% in total at 1% HP.
+    #[derive(Debug, Default, Serialize)]
+    struct EffectAudit {
+        checked: usize,
+        implausible: Vec<String>,
+    }
+
+    impl EffectAudit {
+        /// Recomputes the client's percent for one modifier and checks the
+        /// formatted line shows it.
+        fn check(&mut self, game: &GameData, source: &str, class: ShipClass, modifier: &CrewSkillModifier) {
+            let version = game.version();
+            let name = modifier.name();
+            let value = modifier.get_for_species(&class.species());
+            let Some(setting) = modifier_setting(version, name) else {
+                return;
+            };
+            let shows_number = setting.measure == Measure::Percent
+                && setting.transform == Transform::None
+                && !setting.hidden
+                && !setting.measure_value_hidden
+                && value != setting.base_value
+                && !setting.translations.iter().any(|(key, _)| *key == value);
+            if !shows_number {
+                return;
+            }
+
+            // ModifierSettings.py:264-282.
+            let expected = (value * setting.multiplier - setting.base_value) * 100.0;
+            let line = format_modifier(version, name, value, class.species(), game.provider())
+                .map(|line| clean(&line))
+                .unwrap_or_else(|| panic!("{source}: {name} = {value} renders"));
+            let shown = leading_percent(&line).unwrap_or_else(|| panic!("{source}: no percent in {line:?}"));
+            let tolerance =
+                if expected.abs() < 2.0 { 0.005 } else { 0.5 / 10f32.powi(i32::from(setting.round_digits)) };
+            assert!(
+                (shown - expected).abs() <= tolerance + 1e-3,
+                "{source}: {name} = {value} shows {shown}, the client {expected}"
+            );
+
+            let at_one_percent_hp = line
+                .strip_suffix(" at 1% HP)")
+                .and_then(|rest| rest.rsplit_once('('))
+                .and_then(|(_, total)| leading_percent(total));
+            self.checked += 1;
+            if shown.abs() > 100.0 || at_one_percent_hp.is_some_and(|total| total.abs() > 100.0) {
+                self.implausible.push(format!("{source} ({}): {line}", class.label()));
+            }
+        }
+    }
+
+    /// The number before the first `%` of a formatted effect.
+    fn leading_percent(text: &str) -> Option<f32> {
+        text.split_once('%')?.0.parse().ok()
+    }
+
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn skill_and_upgrade_effects_show_plausible_percents() {
+        let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
+        let index = BuildsIndex::load(&root.join("builds.toml"));
+        let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
+        let cache = std::env::temp_dir().join("wows-query-test-cache");
+        let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
+
+        let mut audit = EffectAudit::default();
+        for skill in &game.skills {
+            let source = format!("skill {}", game.skill_name(skill));
+            let trigger = skill.logic_trigger();
+            let modifiers = skill
+                .modifiers()
+                .into_iter()
+                .flatten()
+                .chain(trigger.and_then(|trigger| trigger.modifiers()).into_iter().flatten())
+                .chain(
+                    trigger.into_iter().flat_map(|trigger| trigger.count_to_modifier()).flat_map(|(_, block)| block),
+                );
+            let classes: Vec<ShipClass> =
+                ShipClass::ALL.iter().copied().filter(|class| game.skill_points(skill, *class).is_some()).collect();
+            for modifier in modifiers {
+                for &class in &classes {
+                    audit.check(&game, &source, class, modifier);
+                }
+            }
+        }
+        for upgrade in &game.upgrades {
+            let source = format!("upgrade {}", upgrade.name);
+            for modifier in upgrade.modernization().modifiers() {
+                for class in upgrade.classes() {
+                    audit.check(&game, &source, class, modifier);
+                }
+            }
+        }
+        audit.implausible.sort();
+        audit.implausible.dedup();
+
+        insta::assert_yaml_snapshot!(audit);
+    }
+}

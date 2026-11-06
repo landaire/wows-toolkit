@@ -701,6 +701,7 @@ mod tests {
     use crate::game_params::ttx::components::HullComponentStats;
     use crate::game_params::ttx::components::ShipTtxComponents;
     use crate::game_params::ttx::components::TorpedoLauncherStats;
+    use crate::game_params::ttx::effects::HEALTH_SCALED_RELOAD_STEP;
     use crate::game_params::ttx::model::DegreesPerSecond;
     use crate::game_params::ttx::model::Hp;
     use crate::game_params::ttx::model::Knots;
@@ -1965,7 +1966,7 @@ mod tests {
             .find(|a| a.stat == TtxStat::ArtilleryReloadTime)
             .expect("ArtilleryReloadTime must be recorded");
 
-        let reload_step = reload_attr.steps.iter().find(|s| s.modifier_name == "reloadCoeff");
+        let reload_step = reload_attr.steps.iter().find(|s| s.modifier_name == HEALTH_SCALED_RELOAD_STEP);
         assert!(reload_step.is_some(), "reloadCoeff step must be recorded when coeff != 1.0");
         assert_eq!(
             reload_step.unwrap().input,

@@ -20,6 +20,7 @@ use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
+use crate::game_params::ttx::effects::HEALTH_SCALED_RELOAD_STEP;
 use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Armor;
@@ -580,7 +581,7 @@ pub fn torpedoes<R: Recorder>(
                 // fall back to the torpedo module when source is absent.
                 if reload_coeff != 1.0 {
                     let src = reload_coeff_source.clone().unwrap_or_else(torp_src);
-                    b.module(src, "reloadCoeff", reload_coeff);
+                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
                 }
             });
         }
@@ -913,7 +914,7 @@ pub fn artillery<R: Recorder>(
                 // fall back to the artillery module when source is absent.
                 if reload_coeff != 1.0 {
                     let src = reload_coeff_source.clone().unwrap_or_else(arty_src);
-                    b.module(src, "reloadCoeff", reload_coeff);
+                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
                 }
             });
         }
@@ -1188,7 +1189,7 @@ pub fn secondaries<R: Recorder>(
                 // fall back to the hull module when source is absent.
                 if reload_coeff != 1.0 {
                     let src = reload_coeff_source.clone().unwrap_or_else(hull_src);
-                    b.module(src, "reloadCoeff", reload_coeff);
+                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
                 }
             });
         }

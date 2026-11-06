@@ -319,8 +319,9 @@ pub enum EffectKind {
     /// On/off conditional trigger (most skill triggers). `condition` is metadata describing
     /// what game-world state activates it; resolution still keys off `On`/`Off` activation.
     Binary { condition: TriggerCondition },
-    /// HP-scaled reload (Adrenaline Rush): the modifiers are `lastChanceReloadCoefficient_*`
-    /// per-armament coefficients, evaluated by the gameplay formula at the health fraction.
+    /// HP-scaled reload (Adrenaline Rush): the modifiers are `lastChanceReloadCoefficient`
+    /// (every armament), its per-armament variants, or `GSLastChanceReloadCoefficient`
+    /// (secondaries), evaluated by the gameplay formula at the health fraction.
     HealthScaledReload,
     /// A consumable that, while active, applies its `modifiers` block and (for the spotter)
     /// an `artillery_dist_coeff` range multiplier.
@@ -399,9 +400,12 @@ impl EffectsState {
     }
 }
 
+/// Provenance step name of a `ReloadCoeffs` multiplier applied to a reload time.
+pub const HEALTH_SCALED_RELOAD_STEP: &str = "reloadCoeff";
+
 /// Per-armament reload multipliers from dynamic effects (Adrenaline Rush), evaluated at
 /// the state's health fraction. `1.0` = no change. Kept separate from the bundle because
-/// `lastChanceReloadCoefficient_*` is additive in `MODIFIER_SETTINGS` (the raw per-HP
+/// `lastChanceReloadCoefficient` is additive in `MODIFIER_SETTINGS` (the raw per-HP
 /// coefficient sums across sources), whereas the evaluated value is a multiplier.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReloadCoeffs {
@@ -472,6 +476,28 @@ fn input_id_for(id: &EffectId) -> InputId {
     }
 }
 
+/// A reload channel a health-scaled coefficient applies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReloadChannel {
+    Main,
+    Secondary,
+    Torpedo,
+}
+
+/// The reload channels a health-scaled coefficient applies to. The client applies
+/// `lastChanceReloadCoefficient` to every armament (Artillery.py:200,
+/// TorpedoesReloadManagers.py:262, ATBA/m41dd1280.py:93) and
+/// `GSLastChanceReloadCoefficient` to secondaries only (ATBA/m41dd1280.py:93).
+fn health_scaled_reload_channels(name: &str) -> &'static [ReloadChannel] {
+    match name {
+        "lastChanceReloadCoefficient" => &[ReloadChannel::Main, ReloadChannel::Secondary, ReloadChannel::Torpedo],
+        "lastChanceReloadCoefficient_Main" => &[ReloadChannel::Main],
+        "lastChanceReloadCoefficient_Sec" | "GSLastChanceReloadCoefficient" => &[ReloadChannel::Secondary],
+        "lastChanceReloadCoefficient_Torp" => &[ReloadChannel::Torpedo],
+        _ => &[],
+    }
+}
+
 /// Walk the ship's ability slots, invoking `f` for each resolved consumable.
 /// Skips slots whose param or category cannot be resolved. Does NOT filter by
 /// `into_known()`; callers apply that filter themselves if needed.
@@ -510,11 +536,22 @@ impl Loadout<'_> {
         for skill in self.skills {
             let name = skill.internal_name().clone();
             if let Some(mods) = skill.modifiers().filter(|m| !m.is_empty()) {
-                effects.push(Effect {
-                    id: EffectId::Skill(name.clone()),
-                    kind: EffectKind::AlwaysOn,
-                    modifiers: mods.clone(),
-                });
+                let (health_scaled, always_on): (Vec<CrewSkillModifier>, Vec<CrewSkillModifier>) =
+                    mods.iter().cloned().partition(|m| !health_scaled_reload_channels(m.name()).is_empty());
+                if !always_on.is_empty() {
+                    effects.push(Effect {
+                        id: EffectId::Skill(name.clone()),
+                        kind: EffectKind::AlwaysOn,
+                        modifiers: always_on,
+                    });
+                }
+                if !health_scaled.is_empty() {
+                    effects.push(Effect {
+                        id: EffectId::Skill(name.clone()),
+                        kind: EffectKind::HealthScaledReload,
+                        modifiers: health_scaled,
+                    });
+                }
             }
             if let Some(trigger) = skill.logic_trigger() {
                 match trigger.trigger_type() {
@@ -675,29 +712,23 @@ impl Effects {
                     };
                     let lost = 1.0 - hf.value();
                     for m in &effect.modifiers {
-                        let name = m.name();
-                        if let Some(suffix) = name.strip_prefix("lastChanceReloadCoefficient_") {
-                            // `clamp` matches `_getLastChanceReloadCoefficient` (ModifiersApply.py:551).
-                            // Multiplying per modifier is exact for SP1's single health-scaled source;
-                            // SP2 stacking/innate must instead sum `c` per channel and evaluate once.
-                            let c = m.get_for_species(&species).clamp(0.0, 1.0);
-                            let mul = (1.0 - lost * c).max(EPSILON);
-                            let src = input_id_for(effect.id());
-                            match suffix {
-                                "Main" => {
-                                    reload_coeffs.main *= mul;
-                                    reload_coeff_sources.main = Some(src);
+                        // `clamp` matches `_getLastChanceReloadCoefficient` (ModifiersApply.py:580-586).
+                        // Multiplying per modifier is exact for a single health-scaled source per
+                        // channel; stacking sources would instead sum `c` and evaluate once.
+                        let c = m.get_for_species(&species).clamp(0.0, 1.0);
+                        let mul = (1.0 - lost * c).max(EPSILON);
+                        for channel in health_scaled_reload_channels(m.name()) {
+                            let (coeff, source) = match channel {
+                                ReloadChannel::Main => (&mut reload_coeffs.main, &mut reload_coeff_sources.main),
+                                ReloadChannel::Secondary => {
+                                    (&mut reload_coeffs.secondary, &mut reload_coeff_sources.secondary)
                                 }
-                                "Sec" => {
-                                    reload_coeffs.secondary *= mul;
-                                    reload_coeff_sources.secondary = Some(src);
+                                ReloadChannel::Torpedo => {
+                                    (&mut reload_coeffs.torpedo, &mut reload_coeff_sources.torpedo)
                                 }
-                                "Torp" => {
-                                    reload_coeffs.torpedo *= mul;
-                                    reload_coeff_sources.torpedo = Some(src);
-                                }
-                                _ => {}
-                            }
+                            };
+                            *coeff *= mul;
+                            *source = Some(input_id_for(effect.id()));
                         }
                     }
                 }
@@ -1122,6 +1153,18 @@ mod tests {
     }
 
     #[test]
+    fn adrenaline_rush_modifier_emits_health_scaled_reload() {
+        let ship = ship_no_abilities();
+        let skill = skill_only_modifiers(
+            "ArmamentReloadAaDamage",
+            vec![uniform_modifier("lastChanceReloadCoefficient", 0.2), uniform_modifier("GMShotDelay", 0.9)],
+        );
+        let loadout = Loadout { skills: &[skill], modernizations: &[], ship: &ship };
+        let kinds: Vec<_> = loadout.effects(&EmptyProvider, test_version()).iter().map(|e| e.kind().clone()).collect();
+        assert_eq!(kinds, [EffectKind::AlwaysOn, EffectKind::HealthScaledReload]);
+    }
+
+    #[test]
     fn consumable_with_artillery_dist_coeff_emits_consumable_effect() {
         let ship_name = "PCY012_Scout";
         let variant = "Scout";
@@ -1488,6 +1531,24 @@ mod tests {
         let result = effects.resolve(&state_half, Species::Cruiser, test_version()).unwrap();
         let expected = 1.0 - 0.5 * raw;
         assert!((result.reload_coeffs().main - expected).abs() < 1e-6, "at 50% HP reload_coeffs.main == {expected}");
+    }
+
+    #[test]
+    fn resolve_adrenaline_rush_shortens_every_reload_by_the_health_lost() {
+        let effect = Effect::for_test(
+            EffectId::Skill("ArmamentReloadAaDamage".into()),
+            EffectKind::HealthScaledReload,
+            vec![uniform_modifier("lastChanceReloadCoefficient", 0.2)],
+        );
+        let effects = Effects(vec![effect]);
+
+        let state = EffectsState::default()
+            .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.01)));
+        let coeffs = effects.resolve(&state, Species::Cruiser, test_version()).unwrap().reload_coeffs();
+        let expected = 1.0 - 0.99 * 0.2;
+        for coeff in [coeffs.main, coeffs.secondary, coeffs.torpedo] {
+            assert!((coeff - expected).abs() < 1e-6, "at 1% HP each reload coefficient is {expected}, got {coeff}");
+        }
     }
 
     #[test]
