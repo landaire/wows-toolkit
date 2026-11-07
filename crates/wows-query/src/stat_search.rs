@@ -524,6 +524,7 @@ impl SearchStat {
             Self::Card(stat @ (TtxStat::ArmorMin | TtxStat::ArmorMax)) => {
                 format!("{} ({NOMINAL})", clean(&stat_display_label(stat, game.provider())))
             }
+            Self::Card(TtxStat::ConsumableMaxCapacity) => "Capacity of a time-based consumable, one switched on and off that draws on a pool of seconds of use per battle instead of charges (e.g. 20 de Julio's Main Battery Reload Booster); unlimited ranks above every number. Only ships with a time-based consumable have a row, so a condition >= 0 lists them all".to_owned(),
             Self::Card(stat) => clean(&stat_display_label(stat, game.provider())),
             Self::Armor { zone, bound: Bound::Min } => {
                 format!("Thinnest {} plate above the waterline ({NOMINAL})", zone.key.replace('_', " "))
@@ -1044,7 +1045,7 @@ impl GameData {
                 tied,
                 meets,
                 fires_by_armament,
-                row: builds.best.value.row.and_then(|row| row_names.label(self, rank.stat, row)),
+                row: builds.best.value.row.and_then(|row| row_names.label(self, ship, rank.stat, row)),
             })
             .collect();
         let omitted = (ranked > ships.len()).then(|| ranked - ships.len());
@@ -1578,7 +1579,7 @@ impl<'a> ShipSearch<'a> {
             .zip(readings)
             .filter_map(|(condition, readings)| {
                 let reading = condition.best(readings)?;
-                let qualifier = row_label(self.game, condition.stat, None, reading.qualifier.as_deref())
+                let qualifier = row_label(self.game, self.ship, condition.stat, None, reading.qualifier.as_deref())
                     .map(|label| format!(" ({label})"))
                     .unwrap_or_default();
                 Some(format!(
@@ -1857,10 +1858,10 @@ impl RowNames {
         Some(RowId(index))
     }
 
-    fn label(&self, game: &GameData, stat: SearchStat, id: RowId) -> Option<String> {
+    fn label(&self, game: &GameData, ship: &Ship, stat: SearchStat, id: RowId) -> Option<String> {
         let key = &self.0.borrow()[id.0];
 
-        row_label(game, stat, key.caliber, Some(&key.qualifier))
+        row_label(game, ship, stat, key.caliber, Some(&key.qualifier))
     }
 }
 
@@ -2186,14 +2187,27 @@ fn extreme(order: RankOrder, values: impl Iterator<Item = Amount>) -> Option<Amo
     }
 }
 
-/// What a row of `stat` stands for, e.g. "main battery 483 mm HE"; `None`
-/// when neither battery nor row needs naming.
-fn row_label(game: &GameData, stat: SearchStat, caliber: Option<f32>, qualifier: Option<&str>) -> Option<String> {
+/// What a row of `stat` on `ship` stands for, e.g. "main battery 483 mm HE"
+/// or "Main Battery Reload Booster, type artilleryBoosters"; `None` when
+/// neither battery nor row needs naming.
+fn row_label(
+    game: &GameData,
+    ship: &Ship,
+    stat: SearchStat,
+    caliber: Option<f32>,
+    qualifier: Option<&str>,
+) -> Option<String> {
     let battery = stat.shell_battery().map(Battery::label).map(str::to_owned);
     let caliber = caliber.map(|caliber| format_value(caliber, Unit::Millimeters));
     let row = qualifier.map(|qualifier| match battery {
         // Shell rows are keyed by GameParams ammo type, "CS" for SAP.
         Some(_) => AmmoType::from_game_str(qualifier).display_name().to_owned(),
+        // Consumable rows are keyed by consumable type, which qualifiers
+        // accept; the English name says which consumable it is.
+        None if stat.name().starts_with("consumable.") => match game.consumable_row_name(ship, qualifier) {
+            Some(name) => format!("{name}, type {qualifier}"),
+            None => qualifier.to_owned(),
+        },
         None => game.qualifier_name(qualifier),
     });
     let parts: Vec<String> = battery.into_iter().chain(caliber).chain(row).collect();

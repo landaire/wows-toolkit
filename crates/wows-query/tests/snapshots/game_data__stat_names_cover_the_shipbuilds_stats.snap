@@ -65,7 +65,7 @@ expression: table
 - "consumable.work_time: consumable.work_time"
 - "consumable.charges: consumable.charges"
 - "consumable.preparation_time: consumable.preparation_time"
-- "consumable.max_capacity: consumable.max_capacity"
+- "consumable.max_capacity: consumable.capacity"
 - "consumable.detection_radius: consumable.detection_radius"
 - "consumable.regeneration_hp_speed: consumable.regeneration_hp_speed"
 - "consumable.smoke_radius: consumable.smoke_radius"

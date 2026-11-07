@@ -99,6 +99,7 @@ pub fn unit(stat: TtxStat) -> Unit {
         | TtxStat::ConsumableReloadTime
         | TtxStat::ConsumableWorkTime
         | TtxStat::ConsumablePreparationTime
+        | TtxStat::ConsumableMaxCapacity
         | TtxStat::ConsumableSmokeLifetime
         | TtxStat::ConsumableCallFightersTimeDelay
         | TtxStat::ConsumableCallFightersTimeFromHeaven => Unit::Seconds,
@@ -151,7 +152,6 @@ pub fn unit(stat: TtxStat) -> Unit {
         | TtxStat::ConsumableCharges => Unit::Count,
         TtxStat::BatteryCapacity
         | TtxStat::BatteryRegeneration
-        | TtxStat::ConsumableMaxCapacity
         | TtxStat::ConsumableRegenerationHpSpeed
         | TtxStat::ConsumableFightersCount
         | TtxStat::ConsumablePlaneRegenerationRate => Unit::Ratio,

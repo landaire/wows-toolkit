@@ -522,7 +522,7 @@ fn push_consumable_rows(
         // The client labels an unlimited pool as infinite capacity
         // (`IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_CAPACITY`).
         let capacity = s.max_capacity.map(|capacity| match capacity {
-            ConsumableCapacity::Seconds(seconds) => StatValue::Float(seconds),
+            ConsumableCapacity::Seconds(seconds) => StatValue::Seconds(Seconds::from(seconds)),
             ConsumableCapacity::Unlimited => StatValue::Ammo(AmmoCount::Infinite),
         });
         item(rows, TtxStat::ConsumableMaxCapacity, q, capacity);

@@ -263,7 +263,7 @@ impl TtxStat {
             TtxStat::ConsumableWorkTime => "consumable.work_time",
             TtxStat::ConsumableCharges => "consumable.charges",
             TtxStat::ConsumablePreparationTime => "consumable.preparation_time",
-            TtxStat::ConsumableMaxCapacity => "consumable.max_capacity",
+            TtxStat::ConsumableMaxCapacity => "consumable.capacity",
             TtxStat::ConsumableDetectionRadius => "consumable.detection_radius",
             TtxStat::ConsumableRegenerationHpSpeed => "consumable.regeneration_hp_speed",
             TtxStat::ConsumableSmokeRadius => "consumable.smoke_radius",

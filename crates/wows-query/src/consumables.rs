@@ -42,6 +42,7 @@ use crate::names::Lookup;
 use crate::names::NameIndex;
 use crate::names::NameKind;
 use crate::names::ResolutionMethod;
+use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
 use crate::text::clean;
@@ -384,6 +385,27 @@ impl GameData {
     pub(crate) fn consumable_name(&self, ability: &str, category: &AbilityCategory) -> String {
         translate_consumable(ability, self.provider())
             .map_or_else(|| category.consumable_type_raw().to_owned(), |name| clean(&name))
+    }
+
+    /// English name of the consumable a stat card row of `ship` is qualified
+    /// by. Card rows name the first consumable of each type in slot order by
+    /// its type. `None` when no consumable of the ship has that type.
+    pub(crate) fn consumable_row_name(&self, ship: &Ship, qualifier: &str) -> Option<String> {
+        let slots = ship.param.vehicle()?.abilities()?;
+
+        for (ability, variant) in slots.iter().flatten() {
+            let Some(param) = self.provider().game_param_by_name(ability) else {
+                continue;
+            };
+            let Some(category) = param.ability().and_then(|ability| ability.get_category(variant)) else {
+                continue;
+            };
+            if category.consumable_type_raw() == qualifier {
+                return Some(self.consumable_name(ability, category));
+            }
+        }
+
+        None
     }
 
     /// The consumable types a player-written consumable name refers to.

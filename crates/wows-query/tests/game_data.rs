@@ -1705,6 +1705,56 @@ fn stat_search_ranks_derived_and_ricochet_stats() {
     insta::assert_yaml_snapshot!(ranked);
 }
 
+/// One condition on the capacity of time-based consumables lists every ship
+/// with one, released and in testing, naming the consumable and its capacity.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_lists_time_based_consumables() {
+    let search = game()
+        .call_tool("stat_search", json!({ "conditions": [{ "stat": "consumable.capacity", "op": ">=", "value": 0 }] }))
+        .expect("capacity resolves");
+
+    let ships: Vec<String> = search["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .map(|ship| {
+            format!("{}: {}", ship["ship"].as_str().unwrap_or_default(), ship["values"][0].as_str().unwrap_or_default())
+        })
+        .collect();
+    for name in ["20 de Julio", "Sibir"] {
+        assert!(ships.iter().any(|ship| ship.contains(name)), "{name} missing from {ships:#?}");
+    }
+
+    let ranking = game()
+        .call_tool("stat_search", json!({ "rank": { "stat": "consumable.capacity", "order": "desc", "limit": 5 } }))
+        .expect("capacity ranks");
+    let ranked: Vec<String> = ranking["ranking"]["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .map(|ship| {
+            format!(
+                "{} {}: {} ({}), base {}",
+                ship["rank"],
+                ship["ship"].as_str().unwrap_or_default(),
+                ship["value"].as_str().unwrap_or_default(),
+                ship["row"].as_str().unwrap_or_default(),
+                ship["base"].as_str().unwrap_or_default()
+            )
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(json!({
+        "conditions": search["conditions"],
+        "considered": search["considered"],
+        "qualifying": search["qualifying"],
+        "omitted": search["omitted"],
+        "ships": ships,
+        "ranking": ranked,
+    }));
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn stat_search_ranks_main_battery_penetration_by_row() {
@@ -2296,7 +2346,7 @@ const SHIPBUILDS_STATS: &[(&str, Coverage)] = &[
     ("consumable.work_time", Coverage::Searchable("consumable.work_time")),
     ("consumable.charges", Coverage::Searchable("consumable.charges")),
     ("consumable.preparation_time", Coverage::Searchable("consumable.preparation_time")),
-    ("consumable.max_capacity", Coverage::Searchable("consumable.max_capacity")),
+    ("consumable.max_capacity", Coverage::Searchable("consumable.capacity")),
     ("consumable.detection_radius", Coverage::Searchable("consumable.detection_radius")),
     ("consumable.regeneration_hp_speed", Coverage::Searchable("consumable.regeneration_hp_speed")),
     ("consumable.smoke_radius", Coverage::Searchable("consumable.smoke_radius")),
