@@ -1,5 +1,6 @@
-# Compiles the DirectX shaders with fxc. Only a release build needs them: with
-# debug assertions on the renderer compiles its HLSL at startup instead.
+# Stages the rounded-clip shader and compiles the DirectX shaders with fxc.
+# Only a release build compiles them: with debug assertions on the renderer
+# compiles its HLSL at startup instead.
 buildscript.run = true
 
 # test-support is for the GPUI tests only. They reach it through the

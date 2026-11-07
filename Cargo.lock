@@ -4666,7 +4666,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#840e2c4fc82c2d78a67a600c9591553f279c2e99"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4707,7 +4707,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#840e2c4fc82c2d78a67a600c9591553f279c2e99"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4754,7 +4754,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#840e2c4fc82c2d78a67a600c9591553f279c2e99"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5077,26 +5077,26 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#840e2c4fc82c2d78a67a600c9591553f279c2e99"
 dependencies = [
  "gpui-base",
  "gpui-component",
  "gpui-fast",
  "gpui-fast-platform",
+ "gpui-fast-web",
  "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-macros",
  "gpui-pre-platform",
- "gpui-pre-web",
 ]
 
 [[package]]
 name = "gpui-kit-assets"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#840e2c4fc82c2d78a67a600c9591553f279c2e99"
 dependencies = [
  "anyhow",
- "gpui-pre",
+ "gpui-fast",
  "gpui-pre-reqwest",
  "log",
  "rust-embed",

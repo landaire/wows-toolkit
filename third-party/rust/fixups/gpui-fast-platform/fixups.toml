@@ -5,4 +5,4 @@ rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:e
 
 # test-support reaches the headless renderer through gpui_wgpu on Linux.
 ['cfg(target_os = "linux")']
-extra_deps = [":gpui-pre-wgpu-0.3"]
+extra_deps = [":gpui-fast-wgpu-0.1"]
