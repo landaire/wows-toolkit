@@ -31,7 +31,8 @@ members = [
     "crates/wows-mcp",
     "build-support/buck/reindeer-features",
 ]
-exclude = ["third-party/rust/vendor"]
+# The nsh spike is a standalone workspace: it needs GTK dev files and builds on Linux only.
+exclude = ["third-party/rust/vendor", "crates/wows-toolkit-nsh"]
 
 [workspace.package]
 version = "1.0.3"

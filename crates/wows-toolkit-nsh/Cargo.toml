@@ -1,0 +1,40 @@
+# Standalone workspace (excluded from the root): needs GTK 4 dev files and
+# only builds on Linux, so root `cargo build/check/clippy` never sees it.
+[workspace]
+
+[package]
+name = "wows-toolkit-nsh"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+env_logger = "0.11"
+log = "0.4"
+nsh-base = "0.4.0"
+nsh-core = "0.4.0"
+png = "0.18"
+serde_json = "1.0"
+thiserror = "2.0"
+tiny-skia = "0.12"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["parsing", "arc"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# No `js` feature: a Rust-only app that links no QuickJS.
+nsh-platform-linux = { version = "0.4.0", default-features = false }
+
+[dev-dependencies]
+nsh-engine = { version = "0.4.0", default-features = false }
+nsh-testing = "0.4.0"
+
+# The root workspace's profiles, which the earlier measurements used.
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.dev.package."*"]
+opt-level = 2
