@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_core::units::Km;
+use wows_core::units::Meters;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
 use wows_ship_stats::Derivation;
@@ -19,6 +20,8 @@ use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::diff_stat_rows;
 use wowsunpack::game_params::ttx::labels::TtxStat;
 use wowsunpack::game_params::ttx::model::ShipStats;
+use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
+use wowsunpack::game_params::ttx::orchestration::artillery_dispersion;
 use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
 use wowsunpack::game_params::ttx::render_attributions;
 use wowsunpack::game_params::ttx::render_stat_rows;
@@ -128,6 +131,11 @@ pub struct WeaponBuilds {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub main_battery_range: Option<BuildStat<Km>>,
+
+    /// Horizontal dispersion at the stock ship's firing range, so builds
+    /// that change the range compare at one distance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_battery_dispersion: Option<BuildStat<Meters>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_range: Option<BuildStat<Km>>,
@@ -329,6 +337,14 @@ impl GameData {
                 Better::Higher,
                 &|outcome| km(outcome.stats.artillery.as_ref()?.range),
             ))?,
+            main_battery_dispersion: match self.stock_ranges(ship)?.main_battery {
+                Some(range) => planner.plan(&StatPlan::new(
+                    format!("main battery horizontal dispersion at {} km", round(range.value())),
+                    Better::Lower,
+                    &|outcome| extended_horizontal_dispersion(&planner, outcome, range),
+                ))?,
+                None => None,
+            },
             secondary_range: planner.plan(&StatPlan::new(
                 "secondary battery range".to_owned(),
                 Better::Higher,
@@ -387,6 +403,16 @@ impl GameData {
 
         Ok(StockRanges::from_stock_card(&stock))
     }
+}
+
+/// Horizontal main battery dispersion of `outcome` at `range` even past the
+/// build's own firing range, so a build that shortens the range does not read
+/// as tighter.
+fn extended_horizontal_dispersion(planner: &Planner<'_>, outcome: &Outcome, range: Km) -> Option<Meters> {
+    let profile = artillery_dispersion(&planner.ship().param, planner.selection(outcome.selection), &outcome.bundle)?;
+    let profile = ArtilleryDispersion { max_range: Km::new(profile.max_range.value().max(range.value())), ..profile };
+
+    Some(Meters::new(profile.ellipse_at(range).horizontal.to_meters().value().round()))
 }
 
 /// "Label (qualifier)", with a projectile qualifier by its English name.

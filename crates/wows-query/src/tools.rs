@@ -38,6 +38,7 @@ use crate::stat_search::StatSearchArgs;
 use crate::stats::ShipStatsArgs;
 use crate::tech_tree::TechTreeLinesArgs;
 use crate::turtleback::TurtlebackSearchArgs;
+use crate::upgrades::UniqueUpgradesArgs;
 use crate::upgrades::UpgradeArgs;
 
 /// A query tool as presented to a model.
@@ -235,15 +236,21 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "upgrade",
-        description: "One upgrade (modernization) by name: slot, kind, credit price, effects per class and which tiers, nations and ships it fits.",
+        description: "One upgrade (modernization) by name: slot, kind (regular, consumable_modification, or unique for a unique upgrade made for specific ships), credit price, effects per class and which tiers, nations and ships it fits.",
         schema: input_schema::<UpgradeArgs>,
         call: |game, arguments| run(arguments, |args| game.upgrade(args)),
     },
     Tool {
         name: "ship_upgrades",
-        description: "Every upgrade that fits one ship, by slot, with price and effects.",
+        description: "Every upgrade that fits one ship, by slot, with kind, price and effects. A ship with a unique upgrade lists it in its slot with kind \"unique\" and, under unique_upgrades, which ships it fits and the regular upgrades of the slot it replaces.",
         schema: input_schema::<ShipArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_upgrades(args)),
+    },
+    Tool {
+        name: "unique_upgrades",
+        description: "Unique (legendary) upgrades, each made for specific ships, for questions such as \"which ships have a unique upgrade\" or \"what does Colombo's unique upgrade do\": name, slot, the ships it fits, effects, and the regular upgrades of the slot it replaces. Filter by tier, class and nation of the ships. Best-fit builds in the other tools take a ship's unique upgrade where it improves a stat and give the build without it as an alternative.",
+        schema: input_schema::<UniqueUpgradesArgs>,
+        call: |game, arguments| run(arguments, |args| Ok(game.unique_upgrades(args))),
     },
     Tool {
         name: "ship_consumables",

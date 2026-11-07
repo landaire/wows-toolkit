@@ -49,6 +49,7 @@ use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::ResearchPoints;
 use wows_query::tech_tree::TechTreeLinesArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
+use wows_query::upgrades::UniqueUpgradesArgs;
 use wowsunpack::game_params::types::Credits;
 use wowsunpack::game_params::types::Experience;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -890,6 +891,42 @@ fn des_moines_weapon_stats_on_their_best_builds() {
         .ship_stats(&ShipStatsArgs { ship: "Des Moines".to_owned(), ..Default::default() })
         .expect("Des Moines exists");
     insta::assert_yaml_snapshot!(stats.build_stats);
+}
+
+/// Improved Rangefinders, C. Colombo's unique upgrade in slot 6, narrows
+/// dispersion on top of Aiming Systems Modification 1 in slot 3; a player
+/// without it has nothing in slot 6 that does.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn colombo_dispersion_with_and_without_its_unique_upgrade() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs { ship: "C. Colombo".to_owned(), ..Default::default() })
+        .expect("C. Colombo exists");
+    let dispersion = stats.build_stats.and_then(|builds| builds.main_battery_dispersion).expect("C. Colombo has guns");
+
+    let best = &dispersion.builds.best;
+    assert!(best.assumed.iter().any(|item| item == "Improved Rangefinders (unique upgrade)"), "{best:?}");
+    assert!(
+        dispersion
+            .builds
+            .alternatives
+            .iter()
+            .any(|alternative| alternative.label == "without unique upgrade Improved Rangefinders"
+                && alternative.value > best.value),
+        "{dispersion:?}"
+    );
+    insta::assert_yaml_snapshot!(dispersion);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn unique_upgrades_and_the_ships_they_fit() {
+    let unique = game().unique_upgrades(&UniqueUpgradesArgs::default());
+    assert!(unique.upgrades.iter().any(|upgrade| upgrade.param == "PCM106_Special_Mod_I_Colombo"));
+    insta::assert_yaml_snapshot!(unique);
+
+    let colombo = game().ship_upgrades(&ship("C. Colombo")).expect("C. Colombo exists");
+    insta::assert_yaml_snapshot!(colombo.unique_upgrades);
 }
 
 fn rates(name: &str) -> wows_query::rates::Rates {

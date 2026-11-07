@@ -748,6 +748,9 @@ impl Item<'_> {
     fn describe(&self, game: &GameData, triggered: &[String]) -> String {
         match self {
             Item::Module(module) => format!("{}: {}", module.kind.label(), module.name),
+            Item::Upgrade(upgrade) if upgrade.is_unique() => {
+                format!("unique upgrade: {} (slot {})", upgrade.name, upgrade.port_slot())
+            }
             Item::Upgrade(upgrade) => format!("upgrade: {} (slot {})", upgrade.name, upgrade.port_slot()),
             Item::Skill { skill, points } => {
                 let trigger = if triggered.iter().any(|name| name == skill.internal_name().as_str()) {

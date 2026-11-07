@@ -50,6 +50,29 @@ build_stats:
         - label: without Gun Fire Control System Modification 2
           value: 19.5
           assumed: []
+  main_battery_dispersion:
+    stat: main battery horizontal dispersion at 19.5 km
+    unit: m
+    builds:
+      base: 134
+      best:
+        value: 125
+        assumed:
+          - Aiming Systems Modification 1
+      alternatives:
+        - label: without Aiming Systems Modification 1
+          value: 134
+          assumed: []
+        - label: with Outnumbered active
+          value: 112
+          assumed:
+            - Aiming Systems Modification 1
+            - Outnumbered
+          tier_fillers:
+            - Consumable Specialist
+            - Focus Fire Training
+            - Heavy AP Shells
+          note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
   secondary_range:
     stat: secondary battery range
     unit: km

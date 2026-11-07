@@ -15,6 +15,7 @@ use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
 use crate::ships::Ship;
+use crate::upgrades::Upgrade;
 
 /// What a player chose for a ship, as named in tool arguments.
 #[derive(Debug, Clone, Default)]
@@ -48,6 +49,16 @@ pub struct AppliedUpgrade {
 
     /// 1-based slot.
     pub slot: u8,
+
+    /// A unique (legendary) upgrade, made for specific ships.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unique: bool,
+}
+
+impl AppliedUpgrade {
+    pub(crate) fn from_upgrade(upgrade: &Upgrade) -> Self {
+        Self { name: upgrade.name.clone(), slot: upgrade.port_slot(), unique: upgrade.is_unique() }
+    }
 }
 
 /// Modifiers of a ship ability counted as active, such as Combat
@@ -148,10 +159,7 @@ impl GameData {
             .iter()
             .map(|upgrade| (upgrade.param.name().to_owned(), upgrade.modernization().modifiers().to_vec()))
             .collect();
-        let applied_upgrades = chosen
-            .iter()
-            .map(|upgrade| AppliedUpgrade { name: upgrade.name.clone(), slot: upgrade.port_slot() })
-            .collect();
+        let applied_upgrades = chosen.iter().map(|upgrade| AppliedUpgrade::from_upgrade(upgrade)).collect();
         for upgrade in &chosen {
             labels.insert(upgrade.param.name().to_owned(), upgrade.name.clone());
         }

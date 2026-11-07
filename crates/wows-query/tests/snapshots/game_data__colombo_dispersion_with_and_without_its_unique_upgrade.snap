@@ -1,0 +1,24 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 758
+expression: dispersion
+---
+stat: main battery horizontal dispersion at 19.94 km
+unit: m
+builds:
+  base: 261
+  best:
+    value: 229
+    assumed:
+      - Aiming Systems Modification 1
+      - Improved Rangefinders (unique upgrade)
+  alternatives:
+    - label: without Aiming Systems Modification 1
+      value: 246
+      assumed:
+        - Improved Rangefinders (unique upgrade)
+    - label: without unique upgrade Improved Rangefinders
+      value: 243
+      assumed:
+        - Aiming Systems Modification 1
+      note: for players who do not own the unique upgrade

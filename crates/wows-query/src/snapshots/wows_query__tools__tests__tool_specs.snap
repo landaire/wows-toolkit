@@ -619,7 +619,7 @@ expression: specs()
     required:
       - class
 - name: upgrade
-  description: "One upgrade (modernization) by name: slot, kind, credit price, effects per class and which tiers, nations and ships it fits."
+  description: "One upgrade (modernization) by name: slot, kind (regular, consumable_modification, or unique for a unique upgrade made for specific ships), credit price, effects per class and which tiers, nations and ships it fits."
   input_schema:
     type: object
     additionalProperties: false
@@ -633,7 +633,7 @@ expression: specs()
     required:
       - upgrade
 - name: ship_upgrades
-  description: "Every upgrade that fits one ship, by slot, with price and effects."
+  description: "Every upgrade that fits one ship, by slot, with kind, price and effects. A ship with a unique upgrade lists it in its slot with kind \"unique\" and, under unique_upgrades, which ships it fits and the regular upgrades of the slot it replaces."
   input_schema:
     type: object
     additionalProperties: false
@@ -643,6 +643,34 @@ expression: specs()
         description: "Ship name as the user wrote it, e.g. \"Des Moines\", or a GameParams index such as \"PASC020\". A name several ships share reads as the tech tree or premium ship; a qualifier, as in \"old Essex\", \"[Zao]\", \"clan Zao\", \"test Vrijheid\" or \"Schlieffen co-op\", or a leading tier, as in \"T9 Essex\", picks another."
     required:
       - ship
+- name: unique_upgrades
+  description: "Unique (legendary) upgrades, each made for specific ships, for questions such as \"which ships have a unique upgrade\" or \"what does Colombo's unique upgrade do\": name, slot, the ships it fits, effects, and the regular upgrades of the slot it replaces. Filter by tier, class and nation of the ships. Best-fit builds in the other tools take a ship's unique upgrade where it improves a stat and give the build without it as an alternative."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      min_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\"."
 - name: ship_consumables
   description: "Consumables of one ship by slot with charges, reload, action time, detection ranges and heal rate. Each slot carries one consumable in battle: a slot with choice (\"choose one of: Surveillance Radar, Fighters, Spotting Aircraft\") carries only the option the player picks, never several at once. A consumable that is used on an allied ship (e.g. Engineering Crew Assistance) or applies a buff carries buff: who it can be used on, range, and its effects on the ally and on your own ship. Without skills and upgrades, each consumable carries builds for action time, charges, reload and smoke lifetime: base, best (consumable upgrades and skills such as Superintendent and Consumable Enhancements, listed in assumed) and alternatives. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. consumable narrows to one, e.g. \"radar\", \"hydro\", \"DCP\"; choice still names the slot's other options. With skills and upgrades, applies them instead."
   input_schema:

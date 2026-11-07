@@ -55,7 +55,7 @@ For a client that launches stdio servers from a JSON config:
 
 ## Tools
 
-`find_ships`, `ship_overview`, `tech_tree_lines`, `ship_armor`, `ship_aircraft`, `ship_shells`, `ship_concealment`, `penetration_search`, `armor_trace`, `citadel_profile`, `armor_assessment`, `turtleback_search`, `ship_stats`, `ship_firing_arcs`, `stat_names`, `stat_search`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `ship_consumables`, `healing_sources`, `commander`, `commander_search`, `game_mode_buffs`, `gameparams_query`, `replay_summary`.
+`find_ships`, `ship_overview`, `tech_tree_lines`, `ship_armor`, `ship_aircraft`, `ship_shells`, `ship_concealment`, `penetration_search`, `armor_trace`, `citadel_profile`, `armor_assessment`, `turtleback_search`, `ship_stats`, `ship_firing_arcs`, `stat_names`, `stat_search`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `unique_upgrades`, `ship_consumables`, `healing_sources`, `commander`, `commander_search`, `game_mode_buffs`, `gameparams_query`, `replay_summary`.
 
 `armor_trace`, `citadel_profile`, `armor_assessment`, `turtleback_search` and `ship_firing_arcs` read the ship armor models in the game data dump. `ship_firing_arcs` takes the mount facings from them. These tools need a dump that carries the armor extract. `wows-data-mgr dump-renderer-data` writes it unless you pass `--no-armor`.
 

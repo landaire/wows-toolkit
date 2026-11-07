@@ -78,7 +78,7 @@ torpedoes_per_minute:
         assumed:
           - Type F3
           - Fill the Tubes
-          - Torpedo Quick Reload System
+          - Torpedo Quick Reload System (unique upgrade)
         tier_fillers:
           - Consumable Specialist
           - Extra-Heavy Ammunition
@@ -90,18 +90,20 @@ torpedoes_per_minute:
             all_launchers_ceiling: 9.16
           assumed:
             - Type F3
-            - Torpedo Quick Reload System
-        - label: without Torpedo Quick Reload System
+            - Torpedo Quick Reload System (unique upgrade)
+        - label: without unique upgrade Torpedo Quick Reload System
           value:
-            torpedoes_per_minute: 7.63
+            torpedoes_per_minute: 8.98
             bearing: 90
-            all_launchers_ceiling: 7.63
+            all_launchers_ceiling: 8.98
           assumed:
             - Type F3
             - Fill the Tubes
+            - Torpedo Tubes Modification 2
           tier_fillers:
             - Consumable Specialist
             - Extra-Heavy Ammunition
+          note: for players who do not own the unique upgrade; slot 6 takes Torpedo Tubes Modification 2 instead
 main_battery_damage:
   - ammo: AP
     damage: 2200
@@ -423,7 +425,7 @@ torpedo_damage:
                 port: 0
           assumed:
             - Fill the Tubes
-            - Torpedo Quick Reload System
+            - Torpedo Quick Reload System (unique upgrade)
           tier_fillers:
             - Consumable Specialist
             - Extra-Heavy Ammunition
@@ -435,18 +437,20 @@ torpedo_damage:
               bearing: 90
               all_barrels_ceiling: 167733
             assumed:
-              - Torpedo Quick Reload System
-          - label: without Torpedo Quick Reload System
+              - Torpedo Quick Reload System (unique upgrade)
+          - label: without unique upgrade Torpedo Quick Reload System
             value:
-              damage_per_minute: 139778
-              damage_per_second: 2329.6
+              damage_per_minute: 164444
+              damage_per_second: 2740.7
               bearing: 90
-              all_barrels_ceiling: 139778
+              all_barrels_ceiling: 164444
             assumed:
               - Fill the Tubes
+              - Torpedo Tubes Modification 2
             tier_fillers:
               - Consumable Specialist
               - Extra-Heavy Ammunition
+            note: for players who do not own the unique upgrade; slot 6 takes Torpedo Tubes Modification 2 instead
   - ammo: Type 93 mod. 3
     modules:
       - Type 93 mod. 3
@@ -526,7 +530,7 @@ torpedo_damage:
           assumed:
             - Type 93 mod. 3
             - Fill the Tubes
-            - Torpedo Quick Reload System
+            - Torpedo Quick Reload System (unique upgrade)
           tier_fillers:
             - Consumable Specialist
             - Extra-Heavy Ammunition
@@ -539,19 +543,21 @@ torpedo_damage:
               all_barrels_ceiling: 186405
             assumed:
               - Type 93 mod. 3
-              - Torpedo Quick Reload System
-          - label: without Torpedo Quick Reload System
+              - Torpedo Quick Reload System (unique upgrade)
+          - label: without unique upgrade Torpedo Quick Reload System
             value:
-              damage_per_minute: 155338
-              damage_per_second: 2589
+              damage_per_minute: 182750
+              damage_per_second: 3045.8
               bearing: 90
-              all_barrels_ceiling: 155338
+              all_barrels_ceiling: 182750
             assumed:
               - Type 93 mod. 3
               - Fill the Tubes
+              - Torpedo Tubes Modification 2
             tier_fillers:
               - Consumable Specialist
               - Extra-Heavy Ammunition
+            note: for players who do not own the unique upgrade; slot 6 takes Torpedo Tubes Modification 2 instead
   - ammo: Type F3
     modules:
       - Type F3
@@ -631,7 +637,7 @@ torpedo_damage:
           assumed:
             - Type F3
             - Fill the Tubes
-            - Torpedo Quick Reload System
+            - Torpedo Quick Reload System (unique upgrade)
           tier_fillers:
             - Consumable Specialist
             - Extra-Heavy Ammunition
@@ -644,19 +650,21 @@ torpedo_damage:
               all_barrels_ceiling: 195725
             assumed:
               - Type F3
-              - Torpedo Quick Reload System
-          - label: without Torpedo Quick Reload System
+              - Torpedo Quick Reload System (unique upgrade)
+          - label: without unique upgrade Torpedo Quick Reload System
             value:
-              damage_per_minute: 163104
-              damage_per_second: 2718.4
+              damage_per_minute: 191887
+              damage_per_second: 3198.1
               bearing: 90
-              all_barrels_ceiling: 163104
+              all_barrels_ceiling: 191887
             assumed:
               - Type F3
               - Fill the Tubes
+              - Torpedo Tubes Modification 2
             tier_fillers:
               - Consumable Specialist
               - Extra-Heavy Ammunition
+            note: for players who do not own the unique upgrade; slot 6 takes Torpedo Tubes Modification 2 instead
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
   - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

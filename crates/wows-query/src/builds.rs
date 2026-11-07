@@ -313,6 +313,9 @@ struct Fit<V> {
     /// The items of `exclusions`.
     excluded: Vec<Item>,
 
+    /// Each item that improves the stat alone, with the value it gives.
+    singles: Vec<(Item, V)>,
+
     chosen: Build,
     value: V,
 }
@@ -471,6 +474,11 @@ impl<'a> Planner<'a> {
         self.selections.iter().map(|(selection, _)| selection)
     }
 
+    /// Module combination `index` of [`Self::selections`].
+    pub(crate) fn selection(&self, index: usize) -> &ShipUpgradeSelection {
+        &self.selections[index].0
+    }
+
     /// Names of the modules of combination `selection` that are not stock.
     pub(crate) fn selection_modules(&self, selection: usize) -> &[String] {
         &self.selections[selection].1
@@ -481,9 +489,9 @@ impl<'a> Planner<'a> {
         self.outcome(selection, &[], None)
     }
 
-    /// Items whose English names are in `names`.
-    pub(crate) fn items_named(&self, names: &[String]) -> Vec<Item> {
-        self.items.iter().copied().filter(|item| names.contains(&self.name(*item))).collect()
+    /// Items whose build labels are in `labels`.
+    pub(crate) fn items_named(&self, labels: &[String]) -> Vec<Item> {
+        self.items.iter().copied().filter(|item| labels.contains(&self.label(*item))).collect()
     }
 
     /// English name of an item.
@@ -491,6 +499,15 @@ impl<'a> Planner<'a> {
         match item {
             Item::Skill { index, .. } => self.game.skill_name(&self.skills[index]),
             Item::Upgrade(index) => self.game.upgrades[index].name.clone(),
+        }
+    }
+
+    /// An item as builds list it: its name, marked when it is a unique
+    /// upgrade.
+    pub(crate) fn label(&self, item: Item) -> String {
+        match item {
+            Item::Skill { .. } => self.name(item),
+            Item::Upgrade(index) => self.game.upgrades[index].build_label(),
         }
     }
 
@@ -564,9 +581,7 @@ impl<'a> Planner<'a> {
                     loadout
                         .modernizations
                         .push((upgrade.param.name().to_owned(), upgrade.modernization().modifiers().to_vec()));
-                    loadout
-                        .applied_upgrades
-                        .push(AppliedUpgrade { name: upgrade.name.clone(), slot: upgrade.port_slot() });
+                    loadout.applied_upgrades.push(AppliedUpgrade::from_upgrade(upgrade));
                 }
             }
         }
@@ -600,7 +615,8 @@ impl<'a> Planner<'a> {
     /// ship lacks the stat.
     pub(crate) fn plan<V: StatUnit>(&self, plan: &StatPlan<'_, V>) -> Result<Option<BuildStat<V>>, QueryError> {
         let value = |outcome: &Outcome| (plan.extract)(outcome);
-        let Some(Fit { base, selection, exclusions, excluded, chosen, value: best_value }) = self.fit(plan)? else {
+        let Some(Fit { base, selection, exclusions, excluded, singles, chosen, value: best_value }) = self.fit(plan)?
+        else {
             return Ok(None);
         };
 
@@ -611,14 +627,30 @@ impl<'a> Planner<'a> {
 
         let mut alternatives = Vec::new();
         for &item in &chosen.items {
-            let rest = chosen.items.iter().copied().filter(|other| *other != item).collect();
+            let mut rest: Vec<Item> = chosen.items.iter().copied().filter(|other| *other != item).collect();
+            let replacement = self.regular_replacement(item, &singles, &excluded, plan.better);
+            rest.extend(replacement);
             let avoid: Vec<Item> = excluded.iter().copied().chain([item]).collect();
             let without = self.complete(selection, rest, plan, &avoid)?;
-            if let Some(candidate) = value(&*self.outcome(selection, &without.all(), None)?)
-                && (candidate.amount() - best_value.amount()).abs() > EPSILON
-            {
-                alternatives.push(alternative(format!("without {}", self.name(item)), candidate, &without, None));
+            let Some(candidate) = value(&*self.outcome(selection, &without.all(), None)?) else {
+                continue;
+            };
+            if (candidate.amount() - best_value.amount()).abs() <= EPSILON {
+                continue;
             }
+
+            let (label, note) = match self.upgrade(item).filter(|upgrade| upgrade.is_unique()) {
+                Some(upgrade) => {
+                    let instead = match replacement {
+                        Some(regular) => format!("; slot {} takes {} instead", upgrade.port_slot(), self.name(regular)),
+                        None => String::new(),
+                    };
+                    let note = format!("for players who do not own the unique upgrade{instead}");
+                    (format!("without unique upgrade {}", upgrade.name), Some(note))
+                }
+                None => (format!("without {}", self.name(item)), None),
+            };
+            alternatives.push(alternative(label, candidate, &without, note));
         }
         for exclusion in &exclusions {
             let Some(items) = self.with_item(&chosen.items, exclusion.item) else {
@@ -695,19 +727,44 @@ impl<'a> Planner<'a> {
         let chosen = self.complete(selection, self.choose(&singles, &excluded, plan.better), plan, &excluded)?;
         let best_value = value(&*self.outcome(selection, &chosen.all(), None)?).unwrap_or(start);
 
-        Ok(Some(Fit { base, selection, exclusions, excluded, chosen, value: best_value }))
+        Ok(Some(Fit { base, selection, exclusions, excluded, singles, chosen, value: best_value }))
     }
 
     /// `build` on module combination `selection` as reported: the
     /// combination's modules that are not stock, then the build's items.
     fn build_value<V>(&self, selection: usize, build: &Build, value: V) -> BuildValue<V> {
-        let name = |item: &Item| self.name(*item);
+        let label = |item: &Item| self.label(*item);
 
         BuildValue {
             value,
-            assumed: self.selections[selection].1.iter().cloned().chain(build.items.iter().map(name)).collect(),
-            tier_fillers: build.tier_fillers.iter().map(name).collect(),
+            assumed: self.selections[selection].1.iter().cloned().chain(build.items.iter().map(label)).collect(),
+            tier_fillers: build.tier_fillers.iter().map(label).collect(),
         }
+    }
+
+    /// For a unique upgrade, the regular upgrade of its slot that improves
+    /// the stat most alone, which a player without the unique upgrade takes.
+    /// `None` for other items, or when no regular upgrade of the slot
+    /// improves the stat.
+    fn regular_replacement<V: StatAmount>(
+        &self,
+        item: Item,
+        singles: &[(Item, V)],
+        excluded: &[Item],
+        better: Better,
+    ) -> Option<Item> {
+        let unique = self.upgrade(item).filter(|upgrade| upgrade.is_unique())?;
+
+        singles
+            .iter()
+            .filter(|(candidate, _)| !excluded.contains(candidate))
+            .filter(|(candidate, _)| {
+                self.upgrade(*candidate).is_some_and(|upgrade| upgrade.slot == unique.slot && !upgrade.is_unique())
+            })
+            .reduce(
+                |best, candidate| if better.improves(candidate.1.amount(), best.1.amount()) { candidate } else { best },
+            )
+            .map(|(candidate, _)| *candidate)
     }
 
     /// Improving skills that fit the captain's points with a skill on every

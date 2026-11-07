@@ -1,0 +1,485 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 766
+expression: unique
+---
+ships: 44
+upgrades:
+  - name: Upgraded Damage Control Equipment
+    param: PCM049_Special_Mod_I_Hindenburg
+    slot: 5
+    ships:
+      - "T10 AL Hindenburg (cruiser, Germany, replica of Hindenburg)"
+      - "T10 Hindenburg (cruiser, Germany)"
+    effects:
+      - "-20% Rudder shift time"
+      - "-50% Fire extinguishing time"
+      - "-50% Flooding recovery time"
+      - +20% Repair Party consumable action time
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Torpedo Quick Reload System
+    param: PCM057_Special_Mod_I_Shimakaze
+    slot: 6
+    ships:
+      - "T10 AL Shimakaze (destroyer, Japan, replica of Shimakaze)"
+      - "T10 Shimakaze (destroyer, Japan)"
+    effects:
+      - +50% Risk of torpedo tubes becoming incapacitated
+      - "-70% Torpedo tubes traverse speed"
+      - "-25% Torpedo tube reload time"
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: ARP Main Battery Director System
+    param: PCM080_Special_Mod_I_ARP_Yamato
+    slot: 6
+    ships:
+      - "T10 ARP Yamato (battleship, Japan, replica of Yamato)"
+    effects:
+      - "-7% Maximum main battery shell dispersion"
+      - "-13% Main battery traverse speed"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Forced Takeoff and Landing Equipment
+    param: PCM079_Special_Mod_I_Audacious
+    slot: 6
+    ships:
+      - "T10 Audacious (aircraft_carrier, United_Kingdom)"
+    effects:
+      - "-30% Rudder shift time"
+      - "-50% Time to reach full engine power when accelerating"
+      - +20% Squadron engine boost duration
+      - "-15% Ship's detectability range"
+      - "-15% Ship detectability for submarines when underwater"
+    replaces:
+      - Flight Control Modification 2
+      - Air Groups Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Reinforced Emergency Response
+    param: PCM047_Special_Mod_I_Montana
+    slot: 5
+    ships:
+      - "T10 BA Montana (battleship, USA, replica of Montana)"
+      - "T10 Montana (battleship, USA)"
+    effects:
+      - "-70% Steering gears repair time"
+      - "-30% Rudder shift time"
+      - "-10% Fire extinguishing time"
+      - "-10% Flooding recovery time"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Ship Consumable Modification 1
+  - name: Improved Rangefinders
+    param: PCM106_Special_Mod_I_Colombo
+    slot: 6
+    ships:
+      - "T10 C. Colombo (battleship, Italy)"
+    effects:
+      - "-6% Maximum main battery shell dispersion"
+      - "-6% Main battery reload time"
+      - "-2 Number of Smoke Generator consumable charges"
+    replaces:
+      - Main Battery Modification 3
+      - Auxiliary Armaments Modification 2
+  - name: Enhanced Engineering Systems
+    param: PCM043_Special_Mod_I_Conqueror
+    slot: 5
+    ships:
+      - "T10 Conqueror (battleship, United_Kingdom)"
+      - "T10 Conqueror CLR (battleship, United_Kingdom, replica of Conqueror)"
+    effects:
+      - +13% Main battery traverse speed
+      - "-80% Steering gears repair time"
+      - "-40% Rudder shift time"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Ship Consumable Modification 1
+  - name: Enhanced Torpedo Loading Mechanism
+    param: PCM075_Special_Mod_I_Daring
+    slot: 5
+    ships:
+      - "T10 Daring (destroyer, United_Kingdom)"
+    effects:
+      - +12% Main battery reload time
+      - "-20% Torpedo tube reload time"
+      - +15% Torpedo speed
+      - "-10% Ship's detectability range"
+      - "-10% Ship detectability for submarines when underwater"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Enhanced Propulsion Plant
+    param: PCM052_Special_Mod_I_Des_Moines
+    slot: 6
+    ships:
+      - "T10 Des Moines (cruiser, USA)"
+    effects:
+      - "-20% Rudder shift time"
+      - "-50% Time to reach full engine power when accelerating"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Automated Gun and Fuel Systems
+    param: PCM098_Special_Mod_I_Elbing
+    slot: 6
+    ships:
+      - "T10 Elbing (destroyer, Germany)"
+    effects:
+      - "-8% Main battery firing range"
+      - +100% Main battery traverse speed
+      - "-6% Main battery reload time"
+      - +12% Maximum ship speed while the Engine Boost consumable is active
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Improved Ammunition Hoists
+    param: PCM045_Special_Mod_I_GKurfurst
+    slot: 6
+    ships:
+      - "T10 G. Kurfürst (battleship, Germany)"
+    effects:
+      - "-8% Main battery firing range"
+      - "-10% Main battery reload time"
+      - "-15% Secondary battery reload time"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Improved Hull Concealment
+    param: PCM058_Special_Mod_I_Gearing
+    slot: 5
+    ships:
+      - "T10 Gearing (destroyer, USA)"
+    effects:
+      - +15% Main battery reload time
+      - +5% Torpedo tube reload time
+      - +5% Dispersion of shells fired by enemies attacking your ship
+      - "-15% Ship's detectability range"
+      - "-15% Ship detectability for submarines when underwater"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Ship-to-Shore Radio
+    param: PCM099_Special_Mod_I_Gouden_Leeuw
+    slot: 6
+    ships:
+      - "T10 Gouden Leeuw (cruiser, Netherlands)"
+    effects:
+      - +1 Number of Airstrike flights
+      - +8% Airstrike range
+      - +10% HE bomb damage
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Main Gun Automatic Loader
+    param: PCM060_Special_Mod_I_Grozovoi
+    slot: 6
+    ships:
+      - "T10 Grozovoi (destroyer, Russia)"
+    effects:
+      - "-7% Main battery traverse speed"
+      - "-18% Main battery reload time"
+      - "+5% Ship's detectability range"
+      - +5% Ship detectability for submarines when underwater
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Fuel Injection System
+    param: PCM062_Special_Mod_I_Hakuryu
+    slot: 6
+    ships:
+      - "T10 Hakuryū (aircraft_carrier, Japan)"
+    effects:
+      - "-30% Squadron engine boost duration"
+      - +12.5% Maximum squadron speed
+    replaces:
+      - Flight Control Modification 2
+      - Air Groups Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Advanced Mechanical Maintenance
+    param: PCM094_Special_Mod_I_Halland
+    slot: 6
+    ships:
+      - "T10 Halland (destroyer, Europe)"
+    effects:
+      - +1 Number of ship consumable charges
+      - +8% Maximum ship speed while the Engine Boost consumable is active
+      - +25% HP restoration efficiency when using the Repair Party consumable
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Additional Smoke Generators
+    param: PCM077_Special_Mod_I_Harugumo
+    slot: 5
+    ships:
+      - "T10 Harugumo (destroyer, Japan)"
+    effects:
+      - "-6% Main battery reload time"
+      - +1 Number of ship consumable charges
+      - +30% Smoke screen dispersion time
+      - +100% Consumable action time
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Improved Main Battery Loading Mechanisms
+    param: PCM050_Special_Mod_I_Henri_IV
+    slot: 5
+    ships:
+      - "T10 Henri IV (cruiser, France)"
+    effects:
+      - +5% Main battery firing range
+      - "-10% Main battery reload time"
+      - "+10% Ship's detectability range"
+      - +10% Ship detectability for submarines when underwater
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Master Fire Control Director
+    param: PCM055_Special_Mod_I_Khabarovsk
+    slot: 5
+    ships:
+      - "T10 Khabarovsk (destroyer, Russia)"
+    effects:
+      - "-20% Ship consumable action time"
+      - +10% Main battery firing range
+      - "-6% Main battery reload time"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Improved Camouflage Patterns
+    param: PCM076_Special_Mod_I_Kleber
+    slot: 6
+    ships:
+      - "T10 Kléber (destroyer, France)"
+      - "T10 Kléber CLR (destroyer, France, replica of Kléber)"
+    effects:
+      - +60% Main battery reload time
+      - "-20% Ship's detectability range"
+      - "-20% Ship detectability for submarines when underwater"
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Automated Main Battery Loading Mechanism
+    param: PCM078_Special_Mod_I_Kremlin
+    slot: 6
+    ships:
+      - "T10 Kremlin (battleship, Russia)"
+    effects:
+      - "-12% Main battery firing range"
+      - "-18% Main battery reload time"
+      - +1 Number of ship consumable charges
+    replaces:
+      - Main Battery Modification 3
+      - Auxiliary Armaments Modification 2
+  - name: Aerodynamic Torpedo Fin Stabilizers
+    param: PCM097_Special_Mod_I_Manfred_Richthofen
+    slot: 6
+    ships:
+      - "T10 M. Richthofen (aircraft_carrier, Germany)"
+      - "T10 Süsshofen (aircraft_carrier, Germany, replica of M. Richthofen)"
+    effects:
+      - "-10% Torpedo Arming Distance"
+      - +15% Torpedo bomber HP
+      - +10% Torpedo damage
+    replaces:
+      - Flight Control Modification 2
+      - Air Groups Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Modified External Hardpoints
+    param: PCM061_Special_Mod_I_Midway
+    slot: 6
+    ships:
+      - "T10 Midway (aircraft_carrier, USA)"
+    effects:
+      - +10% Squadron bomb damage
+      - "-1.01% [HIDDEN]Maximum speed of bombers"
+      - "+1.42% [HIDDEN]Minimum speed of bombers"
+      - +5% Bomber cruising speed
+    replaces:
+      - Flight Control Modification 2
+      - Air Groups Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Aerosol Smoke Curtain System
+    param: PCM051_Special_Mod_I_Minotaur
+    slot: 5
+    ships:
+      - "T10 Minotaur (cruiser, United_Kingdom)"
+    effects:
+      - "-10% Ship consumables preparation and reload time"
+      - "-20% Smoke screen dispersion time"
+      - +300% Consumable action time
+      - "-5% Ship's detectability range"
+      - "-5% Ship detectability for submarines when underwater"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Extended Main Battery Effective Range
+    param: PCM054_Special_Mod_I_Moskva
+    slot: 6
+    ships:
+      - "T10 Moskva (cruiser, Russia)"
+    effects:
+      - "-7% Maximum main battery shell dispersion"
+      - +8% Main battery firing range
+      - "-20% Main battery traverse speed"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Ballistic Capped Armor-Piercing Shells
+    param: PCM096_Special_Mod_I_Petropavlovsk
+    slot: 6
+    ships:
+      - "T10 PTRPVLSK (cruiser, Russia, replica of Petropavlovsk)"
+      - "T10 Petropavlovsk (cruiser, Russia)"
+    effects:
+      - "-25% Ship consumable action time"
+      - +7.5% Main battery AP shell damage
+      - "-10% Maximum main battery shell dispersion"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Main Battery Fire Control Station
+    param: PCM044_Special_Mod_I_Republique
+    slot: 6
+    ships:
+      - "T10 République (battleship, France)"
+    effects:
+      - "-18% Main battery reload time"
+      - +15% Fire extinguishing time
+      - +15% Flooding recovery time
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Torpedo Fire Control System
+    param: PCM056_Special_Mod_I_Z_52
+    slot: 5
+    ships:
+      - "T10 Sharqi (destroyer, Germany, replica of Z-52)"
+      - "T10 Z-52 (destroyer, Germany)"
+    effects:
+      - "-15% Torpedo tube reload time"
+      - +5% Dispersion of shells fired by enemies attacking your ship
+      - +12% Torpedo speed
+      - "-5% Ship's detectability range"
+      - "-5% Ship detectability for submarines when underwater"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Augmented Smoke Generators
+    param: PCM095_Special_Mod_I_Venezia
+    slot: 5
+    ships:
+      - "T10 Venezia (cruiser, Italy)"
+    effects:
+      - +2 Number of Smoke Generator consumable charges
+      - "-55% Consumable cooldown time"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Improved Electrical Systems
+    param: PCM105_Special_Mod_I_Vermont
+    slot: 5
+    ships:
+      - "T10 Vermont (battleship, USA)"
+    effects:
+      - +15% Continuous AA damage
+      - "-10% Main battery reload time"
+      - "-15% Airstrike armament reload time"
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Ship Consumable Modification 1
+  - name: Enhanced Countermeasures
+    param: PCM053_Special_Mod_I_Worcester
+    slot: 6
+    ships:
+      - "T10 Worcester (cruiser, USA)"
+    effects:
+      - "-20% Ship consumables preparation and reload time"
+      - +1 Number of ship consumable charges
+      - "-20% AA Defense Priority cooldown time"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Main Battery Director System
+    param: PCM046_Special_Mod_I_Yamato
+    slot: 6
+    ships:
+      - "T10 Yamato (battleship, Japan)"
+      - "T10 Yamato Kai (battleship, Japan, replica of Yamato)"
+    effects:
+      - "-7% Maximum main battery shell dispersion"
+      - "-13% Main battery traverse speed"
+    replaces:
+      - Main Battery Modification 3
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+  - name: Improved Main Artillery
+    param: PCM059_Special_Mod_I_Yueyang
+    slot: 5
+    ships:
+      - "T10 Yueyang (destroyer, Pan_Asia)"
+    effects:
+      - "-18% Main battery reload time"
+      - +10% Ship HP
+      - +20% Consumable action time
+      - +20% Smoke screen dispersion time
+    replaces:
+      - Torpedo Lookout System
+      - Concealment System Modification 1
+      - Steering Gears Modification 2
+      - Ship Consumable Modification 1
+  - name: Improved Bridge
+    param: PCM048_Special_Mod_I_Zao
+    slot: 6
+    ships:
+      - "T10 Zaō (cruiser, Japan)"
+      - "T10 Zaō CLR (cruiser, Japan, replica of Zaō)"
+    effects:
+      - "-7% Maximum main battery shell dispersion"
+      - +8% Main battery firing range
+    replaces:
+      - Main Battery Modification 3
+      - Torpedo Tubes Modification 2
+      - Gun Fire Control System Modification 2
+      - Auxiliary Armaments Modification 2
+note: "A unique upgrade is made for specific ships and mounts in the slot of a regular upgrade, in its place. Best-fit builds take it where it improves a stat, list it as \"<name> (unique upgrade)\", and give the build without it as an alternative."

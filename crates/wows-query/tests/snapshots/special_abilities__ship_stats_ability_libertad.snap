@@ -50,6 +50,19 @@ build_stats:
         - label: without Gun Fire Control System Modification 2
           value: 20.5
           assumed: []
+  main_battery_dispersion:
+    stat: main battery horizontal dispersion at 20.5 km
+    unit: m
+    builds:
+      base: 265
+      best:
+        value: 246
+        assumed:
+          - Aiming Systems Modification 1
+      alternatives:
+        - label: without Aiming Systems Modification 1
+          value: 265
+          assumed: []
   secondary_range:
     stat: secondary battery range
     unit: km

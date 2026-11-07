@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 389
 expression: upgrades
 ---
 ship:
@@ -172,3 +173,5 @@ slots:
           - +15% Damage from AA shell explosions
           - +1 Number of Shell Explosions
           - "-20% Secondary battery reload time"
+unique_upgrades:
+  - "Enhanced Propulsion Plant (slot 6) is a unique upgrade: it fits only Des Moines and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Enhanced Propulsion Plant (unique upgrade)\"."

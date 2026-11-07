@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -20,11 +21,14 @@ use crate::names::Lookup;
 use crate::names::NameIndex;
 use crate::names::NameKind;
 use crate::names::ResolutionMethod;
+use crate::ship_variants::listing_order;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
 use crate::ships::ShipClass;
+use crate::ships::ShipFilter;
 use crate::ships::ShipSummary;
 use crate::ships::Tier;
+use crate::ships::TierRange;
 use crate::text::clean;
 
 /// Community names of upgrades, with the GameParams name of the upgrade.
@@ -89,6 +93,18 @@ impl Upgrade {
     /// 1-based slot as the port shows it.
     pub(crate) fn port_slot(&self) -> u8 {
         self.slot + 1
+    }
+
+    /// A unique (legendary) upgrade: GameParams `type` 3, the client's
+    /// `ModernizationTypes.Legendary`, made for specific ships.
+    pub(crate) fn is_unique(&self) -> bool {
+        matches!(self.modernization().kind(), Some(Recognized::Known(ModernizationKind::Unique)))
+    }
+
+    /// The name with " (unique upgrade)" after a unique upgrade, as builds
+    /// list it.
+    pub(crate) fn build_label(&self) -> String {
+        if self.is_unique() { format!("{} (unique upgrade)", self.name) } else { self.name.clone() }
     }
 }
 
@@ -187,6 +203,51 @@ pub struct ShipUpgrades {
 
     pub ship: ShipSummary,
     pub slots: Vec<UpgradeSlot>,
+
+    /// The ship's unique upgrades: which ships each fits, the regular
+    /// upgrades of its slot it replaces, and how best-fit builds treat it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unique_upgrades: Vec<String>,
+}
+
+/// Arguments for `unique_upgrades`. Every filter is optional and applies to
+/// the ships an upgrade fits.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UniqueUpgradesArgs {
+    pub min_tier: Option<Tier>,
+    pub max_tier: Option<Tier>,
+    pub class: Option<ShipClass>,
+
+    /// Nation as GameParams spells it, e.g. "USA".
+    pub nation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UniqueUpgradesOutput {
+    /// Ships with a unique upgrade under the filters.
+    pub ships: usize,
+    pub upgrades: Vec<UniqueUpgradeEntry>,
+    pub note: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UniqueUpgradeEntry {
+    pub name: String,
+    pub param: String,
+
+    /// 1-based slot as the port shows it.
+    pub slot: u8,
+
+    /// Ships it fits that pass the filters, e.g. "T10 C. Colombo (battleship, Italy)".
+    pub ships: Vec<String>,
+
+    /// Effects on the class of the first ship.
+    pub effects: Vec<String>,
+
+    /// Regular upgrades of the same slot on the first ship, one of which a
+    /// player without the unique upgrade mounts.
+    pub replaces: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,7 +303,97 @@ impl GameData {
         }
         let slots = slots.into_iter().map(|(slot, options)| UpgradeSlot { slot, options }).collect();
 
-        Ok(ShipUpgrades { interpretations, ship: ship.summary(), slots })
+        let unique_upgrades = self
+            .upgrades
+            .iter()
+            .filter(|upgrade| upgrade.is_unique() && upgrade.fits(ship))
+            .map(|upgrade| self.unique_upgrade_note(upgrade, ship))
+            .collect();
+
+        Ok(ShipUpgrades { interpretations, ship: ship.summary(), slots, unique_upgrades })
+    }
+
+    /// Unique upgrades and the ships they fit, highest tier first.
+    pub fn unique_upgrades(&self, args: &UniqueUpgradesArgs) -> UniqueUpgradesOutput {
+        const NOTE: &str = "A unique upgrade is made for specific ships and mounts in the slot of a regular upgrade, in its place. Best-fit builds take it where it improves a stat, list it as \"<name> (unique upgrade)\", and give the build without it as an alternative.";
+
+        let filter = ShipFilter {
+            tiers: TierRange::from_bounds(args.min_tier, args.max_tier),
+            class: args.class,
+            nation: args.nation.clone(),
+            include_irregular: false,
+            exclude_test: false,
+            include_replicas: true,
+        };
+
+        let mut entries: Vec<(&Ship, UniqueUpgradeEntry)> = Vec::new();
+        let mut counted: BTreeSet<&str> = BTreeSet::new();
+        for upgrade in self.upgrades.iter().filter(|upgrade| upgrade.is_unique()) {
+            let mut ships: Vec<&Ship> =
+                self.ships.iter().filter(|ship| filter.matches(ship) && upgrade.fits(ship)).collect();
+            ships.sort_by(|left, right| listing_order(left, right));
+            let Some(&first) = ships.first() else {
+                continue;
+            };
+
+            counted.extend(ships.iter().map(|ship| ship.param.name()));
+            let modernization = upgrade.modernization();
+            entries.push((
+                first,
+                UniqueUpgradeEntry {
+                    name: upgrade.name.clone(),
+                    param: upgrade.param.name().to_owned(),
+                    slot: upgrade.port_slot(),
+                    ships: ships.iter().map(|ship| ship.label()).collect(),
+                    effects: self.describe(modernization.modifiers(), first.class.species()),
+                    replaces: self.regular_slot_upgrades(upgrade, first),
+                },
+            ));
+        }
+        entries.sort_by(|left, right| listing_order(left.0, right.0).then_with(|| left.1.param.cmp(&right.1.param)));
+
+        UniqueUpgradesOutput {
+            ships: counted.len(),
+            upgrades: entries.into_iter().map(|(_, entry)| entry).collect(),
+            note: NOTE,
+        }
+    }
+
+    /// Names of the regular upgrades `ship` can mount in `unique`'s slot.
+    fn regular_slot_upgrades(&self, unique: &Upgrade, ship: &Ship) -> Vec<String> {
+        self.upgrades
+            .iter()
+            .filter(|upgrade| upgrade.slot == unique.slot && !upgrade.is_unique() && upgrade.fits(ship))
+            .map(|upgrade| upgrade.name.clone())
+            .collect()
+    }
+
+    /// "Improved Rangefinders (slot 6) is a unique upgrade: ..." for one of
+    /// `ship`'s unique upgrades.
+    fn unique_upgrade_note(&self, upgrade: &Upgrade, ship: &Ship) -> String {
+        let mut fits: Vec<&str> = self
+            .ships
+            .iter()
+            .filter(|other| other.is_regular() && upgrade.fits(other))
+            .map(|other| other.name.as_str())
+            .collect();
+        fits.sort_unstable();
+        fits.dedup();
+        let fits = if fits.is_empty() { ship.name.clone() } else { fits.join(", ") };
+
+        let regular = self.regular_slot_upgrades(upgrade, ship);
+        let replaces = if regular.is_empty() {
+            String::new()
+        } else {
+            format!(" in place of a regular upgrade of that slot ({})", regular.join(", "))
+        };
+
+        format!(
+            "{} (slot {}) is a unique upgrade: it fits only {fits} and mounts{replaces}. Best-fit builds take it where it improves a stat and list it as \"{}\".",
+            upgrade.name,
+            upgrade.port_slot(),
+            upgrade.build_label()
+        )
     }
 
     /// The upgrade named `query` that fits `ship`.
