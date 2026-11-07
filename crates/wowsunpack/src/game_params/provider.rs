@@ -523,7 +523,9 @@ fn build_crew_talents(unique_skills: &pickled::Dict) -> Vec<CrewTalent> {
         .into_iter()
         .filter_map(|(id, talent)| {
             let talent = talent.dict_or_object_dict()?;
-            Some(build_crew_talent(id, &talent.inner()))
+            let talent = talent.inner();
+            // Older builds define talents without isUnlimited, battleGroup or sortIndex.
+            talent.contains_key(&pk("isUnlimited")).then(|| build_crew_talent(id, &talent))
         })
         .sorted_by(|left, right| left.sort_index().cmp(&right.sort_index()).then_with(|| left.id().cmp(right.id())))
         .collect()
