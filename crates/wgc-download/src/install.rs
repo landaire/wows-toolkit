@@ -15,9 +15,7 @@ use crate::unpack::unpack_dspkg;
 use crate::webseed::DownloadControl;
 use crate::webseed::DownloadProgress;
 use crate::webseed::DownloadRequest;
-use crate::webseed::{
-    self,
-};
+use crate::webseed::{self};
 
 /// Lower bound for [`download_concurrency`]'s clamp. Even a low WGUS
 /// advisory (or a torrent with only one or two files) should still fetch a

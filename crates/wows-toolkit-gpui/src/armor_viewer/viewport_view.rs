@@ -2167,11 +2167,7 @@ impl ViewportView {
                 let plates: Vec<ArcPlate> = cast
                     .hits
                     .iter()
-                    .map(|hit| ArcPlate {
-                        zone: hit.zone.clone(),
-                        thickness: hit.thickness,
-                        material: hit.material,
-                    })
+                    .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material })
                     .collect();
                 ArcSummary {
                     color: TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()],
@@ -3880,12 +3876,11 @@ impl Render for ViewportView {
                 let disable_entity = entity.clone();
                 let disable_zone = zone.clone();
                 let disable_material_name = material;
-                menu = menu.item(PopupMenuItem::new(format!("Disable {label}")).on_click(
-                    move |_event, _window, cx| {
+                menu =
+                    menu.item(PopupMenuItem::new(format!("Disable {label}")).on_click(move |_event, _window, cx| {
                         disable_entity
                             .update(cx, |view, cx| view.disable_material(&disable_zone, &disable_material_name, cx));
-                    },
-                ));
+                    }));
 
                 popover::quick_toggle_items(menu.separator(), &entity, cx)
             })

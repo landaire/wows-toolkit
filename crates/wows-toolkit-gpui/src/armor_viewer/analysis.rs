@@ -910,7 +910,9 @@ fn describe_outcome(outcome: &ArcOutcome, shown: &ViewportView) -> String {
         ArcOutcome::Ricocheted { plate } => {
             t!("ui.armor.arc_ricochet", plate = describe_plate(plate, shown)).into_owned()
         }
-        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate, shown)).into_owned(),
+        ArcOutcome::Shattered { plate } => {
+            t!("ui.armor.arc_shatter", plate = describe_plate(plate, shown)).into_owned()
+        }
         ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate, shown)).into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),
