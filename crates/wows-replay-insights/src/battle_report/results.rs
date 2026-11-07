@@ -3,12 +3,15 @@
 //!
 //! The `DAMAGE_*`/`HITS_*` string constants and the `*_DESCRIPTIONS` tables are
 //! the resolved-results key names shared by the builder and the toolkit UI (the
-//! UI re-imports them to rebuild hover text).
+//! UI re-imports them to rebuild hover text). `ControllerWeaponGroup` names
+//! the weapon groups the controller damage stats are summed into.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use wows_replays::types::AccountId;
+use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::recognized::Recognized;
 
 pub const DAMAGE_MAIN_AP: &str = "damage_main_ap";
 pub const DAMAGE_MAIN_CS: &str = "damage_main_cs";
@@ -188,6 +191,197 @@ pub static RECEIVED_DAMAGE_DESCRIPTIONS: [(&str, &str); 27] = [
 pub static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] =
     [("agro_art", "Artillery"), ("agro_tpd", "Torpedo"), ("agro_air", "Planes"), ("agro_dbomb", "Depth Charge")];
 
+/// Weapon group for the recording player's controller damage stats. The
+/// controller reports one entry per weapon variant; these fold the variants
+/// into the groups the results tables also distinguish. Declaration order is
+/// listing order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ControllerWeaponGroup {
+    MainAp,
+    MainCs,
+    MainHe,
+    Secondary,
+    Torpedo,
+    TorpedoBomber,
+    Bomb,
+    Rocket,
+    DepthCharge,
+    Fire,
+    Flood,
+    Ram,
+    Missile,
+    Other,
+}
+
+impl ControllerWeaponGroup {
+    /// Serialized name.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::MainAp => "main_ap",
+            Self::MainCs => "main_cs",
+            Self::MainHe => "main_he",
+            Self::Secondary => "secondary",
+            Self::Torpedo => "torpedo",
+            Self::TorpedoBomber => "torpedo_bomber",
+            Self::Bomb => "bomb",
+            Self::Rocket => "rocket",
+            Self::DepthCharge => "depth_charge",
+            Self::Fire => "fire",
+            Self::Flood => "flood",
+            Self::Ram => "ram",
+            Self::Missile => "missile",
+            Self::Other => "other",
+        }
+    }
+
+    /// Breakdown label, in the style of the results description tables.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::MainAp => "AP",
+            Self::MainCs => "SAP",
+            Self::MainHe => "HE",
+            Self::Secondary => "Secondaries",
+            Self::Torpedo => "Torps",
+            Self::TorpedoBomber => "Torpedo Bomber",
+            Self::Bomb => "Bomb",
+            Self::Rocket => "Rocket",
+            Self::DepthCharge => "Depth Charge",
+            Self::Fire => "Fire",
+            Self::Flood => "Flood",
+            Self::Ram => "Ram",
+            Self::Missile => "Missile",
+            Self::Other => "Other",
+        }
+    }
+
+    /// The group a controller weapon is summed under.
+    pub fn of(weapon: &Recognized<DamageStatWeapon>) -> Self {
+        match weapon.known() {
+            Some(DamageStatWeapon::MainAp | DamageStatWeapon::MainAiAp) => Self::MainAp,
+            Some(DamageStatWeapon::MainCs) => Self::MainCs,
+            Some(DamageStatWeapon::MainHe | DamageStatWeapon::MainAiHe) => Self::MainHe,
+            Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => Self::Secondary,
+            Some(
+                DamageStatWeapon::Torpedo
+                | DamageStatWeapon::TorpedoAcc
+                | DamageStatWeapon::TorpedoDeep
+                | DamageStatWeapon::TorpedoAlter
+                | DamageStatWeapon::TorpedoMag
+                | DamageStatWeapon::TorpedoAccOff
+                | DamageStatWeapon::TorpedoPhoton,
+            ) => Self::Torpedo,
+            Some(
+                DamageStatWeapon::TBomber
+                | DamageStatWeapon::TBomberAsup
+                | DamageStatWeapon::TBomberAlter
+                | DamageStatWeapon::TBomberTc,
+            ) => Self::TorpedoBomber,
+            Some(DamageStatWeapon::Burn) => Self::Fire,
+            Some(DamageStatWeapon::Flood) => Self::Flood,
+            Some(
+                DamageStatWeapon::BomberAp
+                | DamageStatWeapon::BomberHe
+                | DamageStatWeapon::SkipHe
+                | DamageStatWeapon::SkipAp
+                | DamageStatWeapon::BomberApAsup
+                | DamageStatWeapon::BomberHeAsup
+                | DamageStatWeapon::SkipHeAsup
+                | DamageStatWeapon::SkipApAsup
+                | DamageStatWeapon::BomberApAlter
+                | DamageStatWeapon::BomberHeAlter
+                | DamageStatWeapon::SkipHeAlter
+                | DamageStatWeapon::SkipApAlter
+                | DamageStatWeapon::BomberApTc
+                | DamageStatWeapon::BomberHeTc
+                | DamageStatWeapon::SkipHeTc
+                | DamageStatWeapon::SkipApTc,
+            ) => Self::Bomb,
+            Some(
+                DamageStatWeapon::RocketHe
+                | DamageStatWeapon::RocketAp
+                | DamageStatWeapon::RocketHeAsup
+                | DamageStatWeapon::RocketApAsup
+                | DamageStatWeapon::RocketHeAlter
+                | DamageStatWeapon::RocketApAlter
+                | DamageStatWeapon::RocketHeTc
+                | DamageStatWeapon::RocketApTc,
+            ) => Self::Rocket,
+            Some(
+                DamageStatWeapon::DepthCharge
+                | DamageStatWeapon::DepthChargeAsup
+                | DamageStatWeapon::DepthChargeAlter
+                | DamageStatWeapon::DepthChargeTc,
+            ) => Self::DepthCharge,
+            Some(DamageStatWeapon::Ram) => Self::Ram,
+            Some(DamageStatWeapon::Missile) => Self::Missile,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl serde::Serialize for ControllerWeaponGroup {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.key())
+    }
+}
+
+/// One line of a per-type damage split.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageBreakdownLine {
+    pub label: &'static str,
+    pub amount: u64,
+}
+
+/// A per-type damage split, so a front end lists it without knowing which
+/// source it came from.
+#[derive(Clone, Copy, Debug)]
+pub enum DamageBreakdown<'a> {
+    /// A results map keyed by the key column of `descriptions`.
+    Results {
+        descriptions: &'static [(&'static str, &'static str)],
+        by_type: &'a BTreeMap<String, u64>,
+    },
+    Controller(&'a BTreeMap<ControllerWeaponGroup, u64>),
+}
+
+impl DamageBreakdown<'_> {
+    /// The nonzero lines, in description-table or group declaration order.
+    pub fn lines(&self) -> Vec<DamageBreakdownLine> {
+        match self {
+            Self::Results { descriptions, by_type } => descriptions
+                .iter()
+                .filter_map(|(key, label)| {
+                    let amount = by_type.get(*key).copied()?;
+                    (amount > 0).then_some(DamageBreakdownLine { label, amount })
+                })
+                .collect(),
+            Self::Controller(by_type) => by_type
+                .iter()
+                .filter(|(_, amount)| **amount > 0)
+                .map(|(group, amount)| DamageBreakdownLine { label: group.label(), amount: *amount })
+                .collect(),
+        }
+    }
+}
+
+/// The recording player's damage for one controller `DamageStatCategory`,
+/// from the cumulative `receiveDamageStat` entries.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ControllerDamage {
+    pub total: u64,
+    /// Only entries > 0.
+    pub by_type: BTreeMap<ControllerWeaponGroup, u64>,
+}
+
+impl ControllerDamage {
+    pub fn breakdown(&self) -> DamageBreakdown<'_> {
+        DamageBreakdown::Controller(&self.by_type)
+    }
+}
+
 /// Damage breakdown by type.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Damage {
@@ -243,6 +437,12 @@ pub struct DamageInteraction {
     pub damage_received_by_type_full: BTreeMap<String, u64>,
     pub damage_received_percentage: f64,
     pub damage_received_inverse_percentage: f64,
+    /// Damage allies dealt to this victim while this player spotted it
+    /// (`scouting_damage`).
+    pub spotting_damage: u64,
+    /// Share of this player's total spotting damage. `None` when the results
+    /// carry no nonzero total to divide by.
+    pub spotting_damage_percentage: Option<f64>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -270,10 +470,15 @@ pub struct ServerResults {
     /// Full hit breakdown keyed by the `HITS_*` constant, only entries > 0.
     pub hits_by_type: BTreeMap<String, u64>,
     /// Server-reported spotting (`scouting_damage`). `None` when absent; the
-    /// self-player controller fallback lives on `NormalizedPlayer`.
+    /// self-player controller fallback lives on `NormalizedPlayer`. The
+    /// results carry no per-type split of it, only the per-victim one in
+    /// `damage_interactions`.
     pub spotting_damage: Option<u64>,
     pub potential_damage: u64,
     pub potential_damage_details: PotentialDamage,
+    /// Potential breakdown keyed by the `POTENTIAL_DAMAGE_DESCRIPTIONS` key,
+    /// only entries > 0.
+    pub potential_damage_by_type: BTreeMap<String, u64>,
     pub received_damage: u64,
     pub received_damage_details: Damage,
     /// Full received breakdown keyed by the `DAMAGE_*` constant, only entries

@@ -6,5 +6,4 @@
 
 pub use wows_replay_insights::battle_report::DAMAGE_DESCRIPTIONS;
 pub use wows_replay_insights::battle_report::HITS_DESCRIPTIONS;
-pub use wows_replay_insights::battle_report::POTENTIAL_DAMAGE_DESCRIPTIONS;
 pub use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;

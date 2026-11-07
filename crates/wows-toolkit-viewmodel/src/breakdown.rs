@@ -1,6 +1,8 @@
 //! Label-and-value listings, shared so a breakdown names and orders its lines
 //! the same in both front ends.
 
+use wows_replay_insights::battle_report::DamageBreakdown;
+
 use crate::formatting::separate_number;
 
 /// One line of a breakdown: what was counted, and how much of it there was.
@@ -23,6 +25,15 @@ pub fn rows<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], locale: Option<&s
             (count > 0)
                 .then(|| BreakdownRow { label: (*description).to_owned(), value: separate_number(count, locale) })
         })
+        .collect()
+}
+
+/// The lines of a per-type damage split, in its own order.
+pub fn damage_rows(split: &DamageBreakdown<'_>, locale: Option<&str>) -> Vec<BreakdownRow> {
+    split
+        .lines()
+        .into_iter()
+        .map(|line| BreakdownRow { label: line.label.to_owned(), value: separate_number(line.amount, locale) })
         .collect()
 }
 

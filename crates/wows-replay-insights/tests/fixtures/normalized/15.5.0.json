@@ -199,7 +199,9 @@
               "damage_main_ap": 27584
             },
             "damage_received_inverse_percentage": 16.57587520032935,
-            "damage_received_percentage": 89.59864891714683
+            "damage_received_percentage": 89.59864891714683,
+            "spotting_damage": 10240,
+            "spotting_damage_percentage": 85.55434873423009
           },
           "530391934": {
             "damage_dealt": 11627,
@@ -233,7 +235,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 1175,
+            "spotting_damage_percentage": 9.81702732057816
           },
           "531066550": {
             "damage_dealt": 0,
@@ -265,7 +269,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 554,
+            "spotting_damage_percentage": 4.6286239451917455
           },
           "556799485": {
             "damage_dealt": 11351,
@@ -303,7 +309,9 @@
               "damage_main_he": 5235
             },
             "damage_received_inverse_percentage": 9.597579979833165,
-            "damage_received_percentage": 10.40135108285317
+            "damage_received_percentage": 10.40135108285317,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 24.389840991050008,
@@ -327,6 +335,9 @@
         },
         "kills": 0,
         "potential_damage": 1035800,
+        "potential_damage_by_type": {
+          "agro_art": 1035800
+        },
         "potential_damage_details": {
           "artillery": 1035800,
           "planes": 0,
@@ -558,7 +569,9 @@
               "damage_main_ap": 13632
             },
             "damage_received_inverse_percentage": 7.6077367562083715,
-            "damage_received_percentage": 64.38236849472734
+            "damage_received_percentage": 64.38236849472734,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "530391934": {
             "damage_dealt": 2100,
@@ -595,7 +608,9 @@
               "damage_main_ap": 9965
             },
             "damage_received_inverse_percentage": 16.06003226032681,
-            "damage_received_percentage": 35.61763150527265
+            "damage_received_percentage": 35.61763150527265,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 11.700494996756316,
@@ -618,6 +633,9 @@
         },
         "kills": 0,
         "potential_damage": 436000,
+        "potential_damage_by_type": {
+          "agro_art": 436000
+        },
         "potential_damage_details": {
           "artillery": 436000,
           "planes": 0,
@@ -831,7 +849,9 @@
               "damage_main_ap": 1911
             },
             "damage_received_inverse_percentage": 1.86672136912437,
-            "damage_received_percentage": 5.547169811320755
+            "damage_received_percentage": 5.547169811320755,
+            "spotting_damage": 1135,
+            "spotting_damage_percentage": 17.039483561026874
           },
           "531066550": {
             "damage_dealt": 15431,
@@ -868,7 +888,9 @@
               "damage_main_ap": 31549
             },
             "damage_received_inverse_percentage": 24.639557776768136,
-            "damage_received_percentage": 94.45283018867924
+            "damage_received_percentage": 94.45283018867924,
+            "spotting_damage": 5526,
+            "spotting_damage_percentage": 82.96051643897313
           }
         },
         "distance_traveled": 12.130147787332538,
@@ -891,6 +913,10 @@
         },
         "kills": 0,
         "potential_damage": 404100,
+        "potential_damage_by_type": {
+          "agro_art": 278800,
+          "agro_tpd": 125300
+        },
         "potential_damage_details": {
           "artillery": 278800,
           "planes": 0,
@@ -1097,7 +1123,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 15221,
+            "spotting_damage_percentage": 100.0
           },
           "530012201": {
             "damage_dealt": 912,
@@ -1135,7 +1163,9 @@
               "damage_tpd_normal": 9269
             },
             "damage_received_inverse_percentage": 19.429140780682218,
-            "damage_received_percentage": 62.13295014369611
+            "damage_received_percentage": 62.13295014369611,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "531066550": {
             "damage_dealt": 912,
@@ -1171,7 +1201,9 @@
               "damage_main_ap": 12122
             },
             "damage_received_inverse_percentage": 9.179160987429956,
-            "damage_received_percentage": 37.867049856303886
+            "damage_received_percentage": 37.867049856303886,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 18.17753143340349,
@@ -1195,6 +1227,10 @@
         },
         "kills": 0,
         "potential_damage": 323220,
+        "potential_damage_by_type": {
+          "agro_art": 260200,
+          "agro_tpd": 63020
+        },
         "potential_damage_details": {
           "artillery": 260200,
           "planes": 0,
@@ -1394,7 +1430,9 @@
               "damage_tpd_normal": 3627
             },
             "damage_received_inverse_percentage": 22.583917780424333,
-            "damage_received_percentage": 83.94818822757829
+            "damage_received_percentage": 83.94818822757829,
+            "spotting_damage": 24093,
+            "spotting_damage_percentage": 100.0
           },
           "530391934": {
             "damage_dealt": 0,
@@ -1429,7 +1467,9 @@
               "damage_main_ap": 10560
             },
             "damage_received_inverse_percentage": 16.478013885966757,
-            "damage_received_percentage": 16.051811772421708
+            "damage_received_percentage": 16.051811772421708,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 12.161367070823909,
@@ -1453,6 +1493,10 @@
         },
         "kills": 0,
         "potential_damage": 904014,
+        "potential_damage_by_type": {
+          "agro_art": 771750,
+          "agro_tpd": 132264
+        },
         "potential_damage_details": {
           "artillery": 771750,
           "planes": 0,
@@ -1638,7 +1682,9 @@
               "damage_fire": 982
             },
             "damage_received_inverse_percentage": 3.236881184479438,
-            "damage_received_percentage": 11.519242340998876
+            "damage_received_percentage": 11.519242340998876,
+            "spotting_damage": 13423,
+            "spotting_damage_percentage": 59.12174066243834
           },
           "530012201": {
             "damage_dealt": 5296,
@@ -1676,7 +1722,9 @@
               "damage_main_ap": 15267
             },
             "damage_received_inverse_percentage": 17.23615832454187,
-            "damage_received_percentage": 23.08165240823588
+            "damage_received_percentage": 23.08165240823588,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "530391934": {
             "damage_dealt": 0,
@@ -1711,7 +1759,9 @@
               "damage_main_ap": 15015
             },
             "damage_received_inverse_percentage": 21.89354092152325,
-            "damage_received_percentage": 20.41833451063496
+            "damage_received_percentage": 20.41833451063496,
+            "spotting_damage": 5428,
+            "spotting_damage_percentage": 23.907681465821
           },
           "531066550": {
             "damage_dealt": 0,
@@ -1745,7 +1795,9 @@
               "damage_main_ap": 12126
             },
             "damage_received_inverse_percentage": 9.182189913675602,
-            "damage_received_percentage": 15.862177223137902
+            "damage_received_percentage": 15.862177223137902,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "556799485": {
             "damage_dealt": 21189,
@@ -1783,7 +1835,9 @@
               "damage_main_he": 16369
             },
             "damage_received_inverse_percentage": 40.810340086167386,
-            "damage_received_percentage": 29.118593516992387
+            "damage_received_percentage": 29.118593516992387,
+            "spotting_damage": 3853,
+            "spotting_damage_percentage": 16.970577871740662
           }
         },
         "distance_traveled": 20.506956567764284,
@@ -1807,6 +1861,10 @@
         },
         "kills": 1,
         "potential_damage": 1263900,
+        "potential_damage_by_type": {
+          "agro_art": 1210200,
+          "agro_tpd": 53700
+        },
         "potential_damage_details": {
           "artillery": 1210200,
           "planes": 0,
@@ -2017,7 +2075,9 @@
               "damage_main_ap": 21370
             },
             "damage_received_inverse_percentage": 22.567694291407804,
-            "damage_received_percentage": 35.86809706416606
+            "damage_received_percentage": 35.86809706416606,
+            "spotting_damage": 733,
+            "spotting_damage_percentage": 48.382838283828384
           },
           "531066550": {
             "damage_dealt": 26547,
@@ -2058,7 +2118,9 @@
               "damage_main_ap": 27807
             },
             "damage_received_inverse_percentage": 31.2797213387854,
-            "damage_received_percentage": 64.13190293583393
+            "damage_received_percentage": 64.13190293583393,
+            "spotting_damage": 782,
+            "spotting_damage_percentage": 51.61716171617162
           }
         },
         "distance_traveled": 15.315208196192978,
@@ -2083,6 +2145,9 @@
         },
         "kills": 0,
         "potential_damage": 488700,
+        "potential_damage_by_type": {
+          "agro_art": 488700
+        },
         "potential_damage_details": {
           "artillery": 488700,
           "planes": 0,
@@ -2283,7 +2348,9 @@
               "damage_main_ap": 33443
             },
             "damage_received_inverse_percentage": 34.118704333216115,
-            "damage_received_percentage": 46.81159031817085
+            "damage_received_percentage": 46.81159031817085,
+            "spotting_damage": 5012,
+            "spotting_damage_percentage": 43.1436687612981
           },
           "531066550": {
             "damage_dealt": 37314,
@@ -2322,7 +2389,9 @@
               "damage_fire": 7069
             },
             "damage_received_inverse_percentage": 10.467969104952294,
-            "damage_received_percentage": 18.527354115849572
+            "damage_received_percentage": 18.527354115849572,
+            "spotting_damage": 6605,
+            "spotting_damage_percentage": 56.856331238701905
           },
           "556799485": {
             "damage_dealt": 0,
@@ -2357,7 +2426,9 @@
               "damage_main_he": 14113
             },
             "damage_received_inverse_percentage": 47.4140617838482,
-            "damage_received_percentage": 34.661055565979574
+            "damage_received_percentage": 34.661055565979574,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 14.922962325825353,
@@ -2381,6 +2452,10 @@
         },
         "kills": 0,
         "potential_damage": 1129900,
+        "potential_damage_by_type": {
+          "agro_art": 1004600,
+          "agro_tpd": 125300
+        },
         "potential_damage_details": {
           "artillery": 1004600,
           "planes": 0,
@@ -2599,7 +2674,9 @@
               "damage_main_ap": 41440
             },
             "damage_received_inverse_percentage": 25.711628659226914,
-            "damage_received_percentage": 96.68942828707287
+            "damage_received_percentage": 96.68942828707287,
+            "spotting_damage": 6634,
+            "spotting_damage_percentage": 100.0
           },
           "530391934": {
             "damage_dealt": 0,
@@ -2633,7 +2710,9 @@
               "damage_main_ap": 2395
             },
             "damage_received_inverse_percentage": 3.359281857072726,
-            "damage_received_percentage": 3.310571712927126
+            "damage_received_percentage": 3.310571712927126,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 14.682914181947709,
@@ -2657,6 +2736,9 @@
         },
         "kills": 0,
         "potential_damage": 615050,
+        "potential_damage_by_type": {
+          "agro_art": 615050
+        },
         "potential_damage_details": {
           "artillery": 615050,
           "planes": 0,
@@ -2858,7 +2940,9 @@
               "damage_main_ap": 8831
             },
             "damage_received_inverse_percentage": 17.07430932321762,
-            "damage_received_percentage": 75.73697254288136
+            "damage_received_percentage": 75.73697254288136,
+            "spotting_damage": 4534,
+            "spotting_damage_percentage": 44.87775908146095
           },
           "530012201": {
             "damage_dealt": 0,
@@ -2892,7 +2976,9 @@
               "damage_main_ap": 3488
             },
             "damage_received_inverse_percentage": 3.407181651232759,
-            "damage_received_percentage": 5.687080153916389
+            "damage_received_percentage": 5.687080153916389,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "530391934": {
             "damage_dealt": 3642,
@@ -2929,7 +3015,9 @@
               "damage_main_ap": 8360
             },
             "damage_received_inverse_percentage": 15.980082754751384,
-            "damage_received_percentage": 18.575947303202245
+            "damage_received_percentage": 18.575947303202245,
+            "spotting_damage": 5569,
+            "spotting_damage_percentage": 55.12224091853904
           }
         },
         "distance_traveled": 18.644454867839823,
@@ -2953,6 +3041,10 @@
         },
         "kills": 0,
         "potential_damage": 950750,
+        "potential_damage_by_type": {
+          "agro_art": 932850,
+          "agro_tpd": 17900
+        },
         "potential_damage_details": {
           "artillery": 932850,
           "planes": 0,
@@ -3153,7 +3245,9 @@
               "damage_main_ap": 912
             },
             "damage_received_inverse_percentage": 1.3743992497948658,
-            "damage_received_percentage": 12.181818181818182
+            "damage_received_percentage": 12.181818181818182,
+            "spotting_damage": 1135,
+            "spotting_damage_percentage": 100.0
           },
           "531066550": {
             "damage_dealt": 764,
@@ -3190,7 +3284,9 @@
               "damage_main_ap": 8460
             },
             "damage_received_inverse_percentage": 6.7810086324398,
-            "damage_received_percentage": 77.53246753246754
+            "damage_received_percentage": 77.53246753246754,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "556799485": {
             "damage_dealt": 0,
@@ -3224,7 +3320,9 @@
               "damage_main_he": 1188
             },
             "damage_received_inverse_percentage": 2.178018150151251,
-            "damage_received_percentage": 10.285714285714285
+            "damage_received_percentage": 10.285714285714285,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 11.42020539522171,
@@ -3247,6 +3345,9 @@
         },
         "kills": 0,
         "potential_damage": 348900,
+        "potential_damage_by_type": {
+          "agro_art": 348900
+        },
         "potential_damage_details": {
           "artillery": 348900,
           "planes": 0,
@@ -3439,7 +3540,9 @@
               "damage_main_ap": 16835
             },
             "damage_received_inverse_percentage": 7.209651096113978,
-            "damage_received_percentage": 39.624242424242425
+            "damage_received_percentage": 39.624242424242425,
+            "spotting_damage": 912,
+            "spotting_damage_percentage": 14.444092492872981
           },
           "530012201": {
             "damage_dealt": 10068,
@@ -3473,7 +3576,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 2742,
+            "spotting_damage_percentage": 43.42730440291416
           },
           "530391934": {
             "damage_dealt": 0,
@@ -3507,7 +3612,9 @@
               "damage_main_ap": 18700
             },
             "damage_received_inverse_percentage": 26.229048320359073,
-            "damage_received_percentage": 37.77777777777778
+            "damage_received_percentage": 37.77777777777778,
+            "spotting_damage": 1928,
+            "spotting_damage_percentage": 30.535318340196387
           },
           "531066550": {
             "damage_dealt": 0,
@@ -3541,7 +3648,9 @@
               "damage_main_ap": 11186
             },
             "damage_received_inverse_percentage": 8.470392245948812,
-            "damage_received_percentage": 22.597979797979797
+            "damage_received_percentage": 22.597979797979797,
+            "spotting_damage": 732,
+            "spotting_damage_percentage": 11.593284764016472
           },
           "556799485": {
             "damage_dealt": 1433,
@@ -3575,7 +3684,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 4.034625250250101,
@@ -3599,6 +3710,9 @@
         },
         "kills": 0,
         "potential_damage": 414800,
+        "potential_damage_by_type": {
+          "agro_art": 414800
+        },
         "potential_damage_details": {
           "artillery": 414800,
           "planes": 0,
@@ -4081,7 +4195,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 18700,
+            "spotting_damage_percentage": 49.387280794422146
           },
           "-268683123": {
             "damage_dealt": 46451,
@@ -4121,7 +4237,9 @@
               "damage_main_ap": 12803
             },
             "damage_received_inverse_percentage": 79.07137110676933,
-            "damage_received_percentage": 16.016016016016017
+            "damage_received_percentage": 16.016016016016017,
+            "spotting_damage": 3488,
+            "spotting_damage_percentage": 9.211916332136067
           },
           "-268683124": {
             "damage_dealt": 69949,
@@ -4160,7 +4278,9 @@
               "damage_main_ap": 17573
             },
             "damage_received_inverse_percentage": 100.0,
-            "damage_received_percentage": 22.5085550666946
+            "damage_received_percentage": 22.5085550666946,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683127": {
             "damage_dealt": 8806,
@@ -4197,7 +4317,9 @@
               "damage_main_ap": 10683
             },
             "damage_received_inverse_percentage": 28.742466637968146,
-            "damage_received_percentage": 12.43452755080662
+            "damage_received_percentage": 12.43452755080662,
+            "spotting_damage": 3928,
+            "spotting_damage_percentage": 10.373969997887174
           },
           "-268683128": {
             "damage_dealt": 61440,
@@ -4237,7 +4359,9 @@
               "damage_main_ap": 11504
             },
             "damage_received_inverse_percentage": 100.0,
-            "damage_received_percentage": 15.864701911213539
+            "damage_received_percentage": 15.864701911213539,
+            "spotting_damage": 11748,
+            "spotting_damage_percentage": 31.026832875554618
           },
           "-268683129": {
             "damage_dealt": 0,
@@ -4272,7 +4396,9 @@
               "damage_main_he": 9616
             },
             "damage_received_inverse_percentage": 89.8191560616209,
-            "damage_received_percentage": 18.730358265241986
+            "damage_received_percentage": 18.730358265241986,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683131": {
             "damage_dealt": 20697,
@@ -4311,7 +4437,9 @@
               "damage_main_he": 4477
             },
             "damage_received_inverse_percentage": 70.24231259742099,
-            "damage_received_percentage": 5.769723211583677
+            "damage_received_percentage": 5.769723211583677,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683132": {
             "damage_dealt": 45095,
@@ -4349,7 +4477,9 @@
               "damage_main_ap": 7454
             },
             "damage_received_inverse_percentage": 24.493953732912725,
-            "damage_received_percentage": 8.676117978443559
+            "damage_received_percentage": 8.676117978443559,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 33.55433898031711,
@@ -4374,6 +4504,10 @@
         },
         "kills": 4,
         "potential_damage": 1534582,
+        "potential_damage_by_type": {
+          "agro_art": 1505300,
+          "agro_tpd": 29282
+        },
         "potential_damage_details": {
           "artillery": 1505300,
           "planes": 0,
@@ -4834,7 +4968,9 @@
               "damage_bomb": 10068
             },
             "damage_received_inverse_percentage": 87.54021389444397,
-            "damage_received_percentage": 17.63098907256935
+            "damage_received_percentage": 17.63098907256935,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683122": {
             "damage_dealt": 1407,
@@ -4871,7 +5007,9 @@
               "damage_main_he": 1173
             },
             "damage_received_inverse_percentage": 60.557563242127,
-            "damage_received_percentage": 2.0541468198374897
+            "damage_received_percentage": 2.0541468198374897,
+            "spotting_damage": 1683,
+            "spotting_damage_percentage": 30.47808764940239
           },
           "-268683123": {
             "damage_dealt": 3488,
@@ -4905,7 +5043,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683125": {
             "damage_dealt": 34928,
@@ -4944,7 +5084,9 @@
               "damage_main_ap": 12747
             },
             "damage_received_inverse_percentage": 38.26376135404775,
-            "damage_received_percentage": 40.49978985710283
+            "damage_received_percentage": 40.49978985710283,
+            "spotting_damage": 2948,
+            "spotting_damage_percentage": 53.38645418326693
           },
           "-268683126": {
             "damage_dealt": 23103,
@@ -4983,7 +5125,9 @@
               "damage_main_ap": 9893
             },
             "damage_received_inverse_percentage": 30.70477682067345,
-            "damage_received_percentage": 20.599257495096666
+            "damage_received_percentage": 20.599257495096666,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683127": {
             "damage_dealt": 17645,
@@ -5021,7 +5165,9 @@
               "damage_main_ap": 2593
             },
             "damage_received_inverse_percentage": 14.248816185966422,
-            "damage_received_percentage": 9.274306528439338
+            "damage_received_percentage": 9.274306528439338,
+            "spotting_damage": 891,
+            "spotting_damage_percentage": 16.135458167330675
           },
           "-268683129": {
             "damage_dealt": 19890,
@@ -5059,7 +5205,9 @@
               "damage_main_he": 912
             },
             "damage_received_inverse_percentage": 5.090421969189551,
-            "damage_received_percentage": 1.5970860184925748
+            "damage_received_percentage": 1.5970860184925748,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683130": {
             "damage_dealt": 1911,
@@ -5095,7 +5243,9 @@
               "damage_main_ap": 4765
             },
             "damage_received_inverse_percentage": 23.593780946722124,
-            "damage_received_percentage": 8.344424208461753
+            "damage_received_percentage": 8.344424208461753,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 23.44568505584496,
@@ -5120,6 +5270,10 @@
         },
         "kills": 3,
         "potential_damage": 836300,
+        "potential_damage_by_type": {
+          "agro_air": 15300,
+          "agro_art": 821000
+        },
         "potential_damage_details": {
           "artillery": 821000,
           "planes": 15300,
@@ -5470,8 +5624,22 @@
           }
         }
       ],
-      "controller_potential_damage": 712700,
-      "controller_spotting_damage": 12028,
+      "controller_potential_damage": {
+        "by_type": {
+          "main_ap": 669700,
+          "main_he": 33600,
+          "secondary": 9400
+        },
+        "total": 712700
+      },
+      "controller_spotting_damage": {
+        "by_type": {
+          "main_ap": 3487,
+          "main_he": 4819,
+          "secondary": 3722
+        },
+        "total": 12028
+      },
       "db_id": 530391934,
       "display_name": "AndreBohm",
       "division_id": null,
@@ -5543,7 +5711,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683123": {
             "damage_dealt": 11393,
@@ -5580,7 +5750,9 @@
               "damage_main_ap": 3642
             },
             "damage_received_inverse_percentage": 20.928628893230663,
-            "damage_received_percentage": 20.968391962692152
+            "damage_received_percentage": 20.968391962692152,
+            "spotting_damage": 4730,
+            "spotting_damage_percentage": 39.32163937151883
           },
           "-268683124": {
             "damage_dealt": 2395,
@@ -5614,7 +5786,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683127": {
             "damage_dealt": 15609,
@@ -5649,7 +5823,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 4989,
+            "spotting_damage_percentage": 41.47476930750686
           },
           "-268683128": {
             "damage_dealt": 11748,
@@ -5684,7 +5860,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683131": {
             "damage_dealt": 11450,
@@ -5721,7 +5899,9 @@
               "damage_main_he": 2100
             },
             "damage_received_inverse_percentage": 29.757687402579,
-            "damage_received_percentage": 12.090506074039956
+            "damage_received_percentage": 12.090506074039956,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683132": {
             "damage_dealt": 0,
@@ -5755,7 +5935,9 @@
               "damage_main_ap": 11627
             },
             "damage_received_inverse_percentage": 38.20649316508938,
-            "damage_received_percentage": 66.9411019632679
+            "damage_received_percentage": 66.9411019632679,
+            "spotting_damage": 2310,
+            "spotting_damage_percentage": 19.20359132097431
           }
         },
         "distance_traveled": 29.059280194044124,
@@ -5779,6 +5961,9 @@
         },
         "kills": 1,
         "potential_damage": 712700,
+        "potential_damage_by_type": {
+          "agro_art": 712700
+        },
         "potential_damage_details": {
           "artillery": 712700,
           "planes": 0,
@@ -6270,7 +6455,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 18700,
+            "spotting_damage_percentage": 95.45199326221224
           },
           "-268683122": {
             "damage_dealt": 8955,
@@ -6307,7 +6494,9 @@
               "damage_main_he": 764
             },
             "damage_received_inverse_percentage": 39.442436757873,
-            "damage_received_percentage": 0.9435826499357771
+            "damage_received_percentage": 0.9435826499357771,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683125": {
             "damage_dealt": 13824,
@@ -6346,7 +6535,9 @@
               "damage_main_ap": 24251
             },
             "damage_received_inverse_percentage": 61.73623864595225,
-            "damage_received_percentage": 46.084873036261236
+            "damage_received_percentage": 46.084873036261236,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683126": {
             "damage_dealt": 41308,
@@ -6387,7 +6578,9 @@
               "damage_tpd_normal": 10704
             },
             "damage_received_inverse_percentage": 69.29522317932654,
-            "damage_received_percentage": 32.78702697361921
+            "damage_received_percentage": 32.78702697361921,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683127": {
             "damage_dealt": 12126,
@@ -6421,7 +6614,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 891,
+            "spotting_damage_percentage": 4.54800673778776
           },
           "-268683129": {
             "damage_dealt": 12122,
@@ -6457,7 +6652,9 @@
               "damage_main_he": 912
             },
             "damage_received_inverse_percentage": 5.090421969189551,
-            "damage_received_percentage": 1.1263709119652208
+            "damage_received_percentage": 1.1263709119652208,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683130": {
             "damage_dealt": 32539,
@@ -6494,7 +6691,9 @@
               "damage_main_ap": 15431
             },
             "damage_received_inverse_percentage": 76.40621905327788,
-            "damage_received_percentage": 19.058146428218556
+            "damage_received_percentage": 19.058146428218556,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           }
         },
         "distance_traveled": 31.601031327992683,
@@ -6518,6 +6717,10 @@
         },
         "kills": 2,
         "potential_damage": 634276,
+        "potential_damage_by_type": {
+          "agro_art": 569000,
+          "agro_tpd": 65276
+        },
         "potential_damage_details": {
           "artillery": 569000,
           "planes": 0,
@@ -6984,7 +7187,9 @@
               "damage_rocket": 1433
             },
             "damage_received_inverse_percentage": 12.459786105556038,
-            "damage_received_percentage": 4.218055514673416
+            "damage_received_percentage": 4.218055514673416,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683122": {
             "damage_dealt": 1188,
@@ -7018,7 +7223,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683123": {
             "damage_dealt": 0,
@@ -7050,7 +7257,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 3488,
+            "spotting_damage_percentage": 16.622188333968737
           },
           "-268683125": {
             "damage_dealt": 25862,
@@ -7085,7 +7294,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 743,
+            "spotting_damage_percentage": 3.5407929851315285
           },
           "-268683126": {
             "damage_dealt": 0,
@@ -7117,7 +7328,9 @@
             },
             "damage_received_by_type_full": {},
             "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_percentage": 0.0,
+            "spotting_damage": 0,
+            "spotting_damage_percentage": null
           },
           "-268683127": {
             "damage_dealt": 22260,
@@ -7155,7 +7368,9 @@
               "damage_main_ap": 17215
             },
             "damage_received_inverse_percentage": 57.00871717606544,
-            "damage_received_percentage": 62.37011744620729
+            "damage_received_percentage": 62.37011744620729,
+            "spotting_damage": 594,
+            "spotting_damage_percentage": 2.8307281738467407
           },
           "-268683132": {
             "damage_dealt": 5235,
@@ -7193,7 +7408,9 @@
               "damage_main_ap": 9759
             },
             "damage_received_inverse_percentage": 37.299553101997894,
-            "damage_received_percentage": 33.4118270391193
+            "damage_received_percentage": 33.4118270391193,
+            "spotting_damage": 16159,
+            "spotting_damage_percentage": 77.006290507053
           }
         },
         "distance_traveled": 23.311779533755047,
@@ -7216,6 +7433,11 @@
         },
         "kills": 2,
         "potential_damage": 547496,
+        "potential_damage_by_type": {
+          "agro_air": 8800,
+          "agro_art": 492700,
+          "agro_tpd": 45996
+        },
         "potential_damage_details": {
           "artillery": 492700,
           "planes": 8800,

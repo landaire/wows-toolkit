@@ -184,7 +184,7 @@ fn measure_column_widths(
                         + ROW_ACTIONS_WIDTH
                         + status_count as f32 * (icon_default + gap_1);
                     if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
                 }
@@ -204,7 +204,7 @@ fn measure_column_widths(
                         text_w
                     };
                     if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
                 }
@@ -216,7 +216,7 @@ fn measure_column_widths(
                     let cell = cell_value(row, col, debug);
                     let mut row_w = text_width(cell.text.into(), window, false);
                     if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
+                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
                 }

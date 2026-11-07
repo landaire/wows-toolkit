@@ -103,12 +103,13 @@ pub struct NormalizedPlayer {
     /// exists; individual fields carry their own `Option`-ness (e.g. `damage`
     /// is `None` on old-format results that omit the key).
     pub server_results: Option<ServerResults>,
-    /// Self-player controller spotting total (`Spot` category), the fallback the
-    /// UI uses when the server omits `scouting_damage`. `None` for non-self.
-    pub controller_spotting_damage: Option<u64>,
-    /// Self-player controller potential total (`Agro` category), the fallback the
+    /// Self-player controller spotting (`Spot` category), the fallback the UI
+    /// uses when the server omits `scouting_damage`, and the only per-type
+    /// split of spotting there is. `None` for non-self.
+    pub controller_spotting_damage: Option<ControllerDamage>,
+    /// Self-player controller potential (`Agro` category), the fallback the
     /// UI uses when there is no resolved results object. `None` for non-self.
-    pub controller_potential_damage: Option<u64>,
+    pub controller_potential_damage: Option<ControllerDamage>,
     pub observed_results: ObservedResults,
     pub skill_info: SkillInfo,
     pub build: Option<TranslatedBuild>,
@@ -229,7 +230,16 @@ impl NormalizedPlayer {
         self.server_results
             .as_ref()
             .and_then(|results| results.spotting_damage)
-            .or_else(|| self.is_self.then_some(self.controller_spotting_damage).flatten())
+            .or_else(|| self.self_controller_spotting().map(|controller| controller.total))
+    }
+
+    /// Per-type split of spotting damage. The results carry none, so only the
+    /// recording player has one, from the controller. Its lines need not sum
+    /// to [`Self::spotting_damage`]: that total is the server figure when
+    /// present, and the controller's float totals are truncated per group, so
+    /// the two can differ by a few points.
+    pub fn spotting_damage_breakdown(&self) -> Option<DamageBreakdown<'_>> {
+        self.self_controller_spotting().map(ControllerDamage::breakdown)
     }
 
     /// Potential damage on the same rule as [`Self::spotting_damage`]: the
@@ -237,8 +247,28 @@ impl NormalizedPlayer {
     pub fn potential_damage(&self) -> Option<u64> {
         match self.server_results.as_ref() {
             Some(results) => Some(results.potential_damage),
-            None => self.is_self.then_some(self.controller_potential_damage).flatten(),
+            None => self.self_controller_potential().map(|controller| controller.total),
         }
+    }
+
+    /// Per-type split of [`Self::potential_damage`], from the same source as
+    /// the total.
+    pub fn potential_damage_breakdown(&self) -> Option<DamageBreakdown<'_>> {
+        match self.server_results.as_ref() {
+            Some(results) => Some(DamageBreakdown::Results {
+                descriptions: &POTENTIAL_DAMAGE_DESCRIPTIONS,
+                by_type: &results.potential_damage_by_type,
+            }),
+            None => self.self_controller_potential().map(ControllerDamage::breakdown),
+        }
+    }
+
+    fn self_controller_spotting(&self) -> Option<&ControllerDamage> {
+        self.controller_spotting_damage.as_ref().filter(|_| self.is_self)
+    }
+
+    fn self_controller_potential(&self) -> Option<&ControllerDamage> {
+        self.controller_potential_damage.as_ref().filter(|_| self.is_self)
     }
 }
 
@@ -362,18 +392,29 @@ fn clan_color_rgb(player: &Player) -> u32 {
     }
 }
 
-/// Sum of self-player controller damage for a category, used as the controller
+/// Self-player controller damage for a category, used as the controller
 /// fallback (spotting for `Spot`, potential for `Agro`) when the server results
-/// omit or lack the value. Ported from the numeric part of the toolkit's
-/// `build_damage_stat_total`/`build_damage_stat_fallback`.
-fn damage_stat_total(stats: &[DamageStatEntry], category: DamageStatCategory) -> Option<u64> {
+/// omit or lack the value. `None` when the category recorded no damage.
+fn controller_damage(stats: &[DamageStatEntry], category: DamageStatCategory) -> Option<ControllerDamage> {
     let mut total = 0.0f64;
+    let mut grouped: BTreeMap<ControllerWeaponGroup, f64> = BTreeMap::new();
     for entry in stats {
-        if entry.category == Recognized::Known(category) {
-            total += entry.total;
+        if entry.category != Recognized::Known(category) {
+            continue;
         }
+        total += entry.total;
+        *grouped.entry(ControllerWeaponGroup::of(&entry.weapon)).or_default() += entry.total;
     }
-    if total > 0.0 { Some(total as u64) } else { None }
+    if total <= 0.0 {
+        return None;
+    }
+
+    // The stats are float totals; truncate each group the same way as the
+    // total, which may leave the groups a few points short of it.
+    let by_type =
+        grouped.into_iter().map(|(group, damage)| (group, damage as u64)).filter(|(_, damage)| *damage > 0).collect();
+
+    Some(ControllerDamage { total: total as u64, by_type })
 }
 
 /// Build the 9-field per-type damage breakdown from a key lookup. A key mapping
@@ -459,11 +500,13 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
     let hits = Some(if is_air_carrier { plane_hits } else { main_hits });
 
     let mut potential_damage = 0u64;
+    let mut potential_damage_by_type = BTreeMap::new();
     for (key, _) in POTENTIAL_DAMAGE_DESCRIPTIONS {
         if let Some(num) = get_u64_or_f64(pr, key)
             && num > 0
         {
             potential_damage += num;
+            potential_damage_by_type.insert(key.to_string(), num);
         }
     }
     let potential_damage_details = PotentialDamage {
@@ -484,6 +527,8 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
     }
     let received_damage_details =
         damage_breakdown(|k| pr.get(format!("received_{k}").as_str()).and_then(|v| v.as_u64()));
+
+    let spotting_damage = get_u64_or_f64(pr, "scouting_damage");
 
     let mut damage_interactions: HashMap<AccountId, DamageInteraction> = HashMap::new();
     let mut fires_dealt = None;
@@ -520,6 +565,12 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
                 interaction.damage_dealt_percentage = (all_damage as f64 / total_damage as f64) * 100.0;
             }
 
+            // Read like the damage keys above: an absent key records nothing.
+            interaction.spotting_damage = get_u64_or_f64(victim_data, "scouting_damage").unwrap_or(0);
+            interaction.spotting_damage_percentage = spotting_damage
+                .filter(|total| *total > 0 && interaction.spotting_damage > 0)
+                .map(|total| (interaction.spotting_damage as f64 / total as f64) * 100.0);
+
             damage_interactions.insert(victim_id, interaction);
         }
 
@@ -538,9 +589,10 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
         hits_details,
         hits,
         hits_by_type,
-        spotting_damage: pr.get("scouting_damage").and_then(|v| v.as_u64()),
+        spotting_damage,
         potential_damage,
         potential_damage_details,
+        potential_damage_by_type,
         received_damage,
         received_damage_details,
         received_damage_by_type,
@@ -662,8 +714,8 @@ fn build_player(
     // (potential). Computed regardless of whether server_results is present.
     let (controller_spotting_damage, controller_potential_damage) = if is_self {
         (
-            damage_stat_total(report.self_damage_stats(), DamageStatCategory::Spot),
-            damage_stat_total(report.self_damage_stats(), DamageStatCategory::Agro),
+            controller_damage(report.self_damage_stats(), DamageStatCategory::Spot),
+            controller_damage(report.self_damage_stats(), DamageStatCategory::Agro),
         )
     } else {
         (None, None)
@@ -964,7 +1016,8 @@ mod tests {
             "distance": 42.5,
             "ships_killed": 2,
             "interactions": {
-                "111": { "damage_main_ap": 30000u64, "damage_fire": 2000u64, "fires": 3, "citadels": 1 }
+                "111": { "damage_main_ap": 30000u64, "damage_fire": 2000u64, "fires": 3, "citadels": 1, "scouting_damage": 6000u64 },
+                "112": { "scouting_damage": 2000u64 }
             }
         });
 
@@ -984,6 +1037,10 @@ mod tests {
         assert_eq!(sr.potential_damage_details.artillery, 100000);
         assert_eq!(sr.potential_damage_details.torpedoes, 5000);
         assert_eq!(sr.potential_damage_details.planes, 0);
+        assert_eq!(
+            sr.potential_damage_by_type,
+            BTreeMap::from([("agro_art".to_string(), 100000), ("agro_tpd".to_string(), 5000)])
+        );
         assert_eq!(sr.received_damage, 5000);
         assert_eq!(sr.received_damage_details.he, Some(4000));
         assert_eq!(sr.received_damage_details.fire, Some(1000));
@@ -1009,6 +1066,14 @@ mod tests {
         assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_MAIN_AP), Some(&30000));
         assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_FIRE), Some(&2000));
         assert!((interaction.damage_dealt_percentage - 64.0).abs() < 1e-9);
+        assert_eq!(interaction.spotting_damage, 6000);
+        assert!((interaction.spotting_damage_percentage.expect("total present") - 75.0).abs() < 1e-9);
+
+        // A victim this player only spotted still gets an interaction.
+        let spotted_only = sr.damage_interactions.get(&AccountId(112)).expect("victim 112 interaction present");
+        assert_eq!(spotted_only.damage_dealt, 0);
+        assert_eq!(spotted_only.spotting_damage, 2000);
+        assert!((spotted_only.spotting_damage_percentage.expect("total present") - 25.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1020,7 +1085,7 @@ mod tests {
             "hits_main_he": 5u64,
             "received_damage_fire": 700u64,
             "interactions": {
-                "222": { "damage_main_he": 1200u64, "fires": 2 }
+                "222": { "damage_main_he": 1200u64, "fires": 2, "scouting_damage": 900u64 }
             }
         });
 
@@ -1038,6 +1103,9 @@ mod tests {
         assert_eq!(interaction.damage_dealt_by_type_full.get(DAMAGE_MAIN_HE), Some(&1200));
         // With no total `damage`, the dealt percentage stays 0 (matches original).
         assert_eq!(interaction.damage_dealt_percentage, 0.0);
+        // With no total `scouting_damage`, the spotting share is unknown.
+        assert_eq!(interaction.spotting_damage, 900);
+        assert_eq!(interaction.spotting_damage_percentage, None);
         assert_eq!(sr.fires_dealt, Some(2));
         assert_eq!(sr.floods_dealt, Some(0));
         assert_eq!(sr.citadels_dealt, Some(0));
@@ -1065,5 +1133,39 @@ mod tests {
 
         let surface = extract_server_results(&pr, false);
         assert_eq!(surface.hits, Some(3), "main-battery HE only for non-carriers");
+    }
+
+    /// Weapon variants fold into one group, other categories are left out,
+    /// and the total keeps its fractional part until the end.
+    #[test]
+    fn controller_damage_groups_weapon_variants_of_one_category() {
+        use wowsunpack::game_types::DamageStatWeapon;
+
+        let entry = |weapon: DamageStatWeapon, category: DamageStatCategory, total: f64| DamageStatEntry {
+            weapon: Recognized::Known(weapon),
+            category: Recognized::Known(category),
+            count: 1,
+            total,
+        };
+        let stats = [
+            entry(DamageStatWeapon::MainAp, DamageStatCategory::Spot, 1000.5),
+            entry(DamageStatWeapon::MainAiAp, DamageStatCategory::Spot, 500.25),
+            entry(DamageStatWeapon::Torpedo, DamageStatCategory::Spot, 300.0),
+            entry(DamageStatWeapon::TorpedoDeep, DamageStatCategory::Spot, 200.0),
+            entry(DamageStatWeapon::MainHe, DamageStatCategory::Agro, 9999.0),
+        ];
+
+        let spot = controller_damage(&stats, DamageStatCategory::Spot).expect("spotting recorded");
+        assert_eq!(spot.total, 2000);
+        assert_eq!(
+            spot.by_type,
+            BTreeMap::from([(ControllerWeaponGroup::MainAp, 1500), (ControllerWeaponGroup::Torpedo, 500)])
+        );
+        assert_eq!(
+            serde_json::to_value(&spot).expect("serializes"),
+            json!({ "total": 2000, "by_type": { "main_ap": 1500, "torpedo": 500 } })
+        );
+
+        assert!(controller_damage(&stats, DamageStatCategory::Ally).is_none());
     }
 }

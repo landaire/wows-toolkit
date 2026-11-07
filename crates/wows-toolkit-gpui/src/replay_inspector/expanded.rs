@@ -1,11 +1,12 @@
 //! Expanded row content: achievements, ribbons, and damage events (Name
 //! column), captain build (modernizations, signals, loadout, captain skills,
 //! consumables; Skills column), and per-victim damage interaction breakdowns
-//! (ActualDamage/ReceivedDamage columns). Ported from the egui app's
-//! `ui/replay_parser/mod.rs` `if 0.0 < expandedness { match column { ... } }`
+//! (ActualDamage/ReceivedDamage/SpottingDamage columns). Ported from the egui
+//! app's `ui/replay_parser/mod.rs` `if 0.0 < expandedness { match column { ... } }`
 //! block (`mod.rs:1834-2088`) plus its `render_skill_grid`/
 //! `render_modernization_slots`/`render_signals`/`render_consumable_inventory`/
-//! `dealt_damage_details`/`received_damage_details` helpers.
+//! `dealt_damage_details`/`received_damage_details`/`spotting_damage_details`
+//! helpers.
 //!
 //! Like the egui original, this port nests each column's expanded content
 //! inside that column's own cell: `render_column_detail` returns just one
@@ -81,10 +82,10 @@ enum DamageDirection {
 /// `if 0.0 < expandedness { match column { ... } }` arms (`mod.rs:1834-2088`):
 /// each column draws its own detail under its own cell -- Name's achievements,
 /// ribbons, damage events and effective fire chance under Name, Skills' build
-/// under Skills, the damage breakdowns under ActualDamage/ReceivedDamage, and
-/// the Potential/Spotting/Hits breakdowns under those columns. `all_rows`
-/// resolves a damage interaction's victim/attacker `db_id` into a ship name,
-/// and `alt_held` turns the breakdown's percentages around.
+/// under Skills, the damage breakdowns under ActualDamage/ReceivedDamage/
+/// SpottingDamage, and the Potential/Hits breakdowns under those columns.
+/// `all_rows` resolves a damage interaction's victim/attacker `db_id` into a
+/// ship name, and `alt_held` turns the breakdown's percentages around.
 #[allow(clippy::too_many_arguments)]
 pub fn render_column_detail(
     ix: usize,
@@ -106,7 +107,7 @@ pub fn render_column_detail(
             render_nda_gated_breakdown(row.potential_damage_breakdown.as_deref(), row, debug)
         }
         ReplayColumn::Hits => render_nda_gated_breakdown(row.hits_breakdown.as_deref(), row, debug),
-        ReplayColumn::SpottingDamage => row.spotting_damage_breakdown.as_deref().map(breakdown_grid),
+        ReplayColumn::SpottingDamage => render_spotting_section(row, all_rows),
         _ => None,
     }
 }
@@ -117,15 +118,21 @@ pub fn render_column_detail(
 /// structurally aligned with `render_column_detail` above -- same match arms,
 /// same per-section gating -- so the two stay in sync as either one changes;
 /// each arm below carries a terse note on which `render_*` it mirrors.
-/// Deliberately does not take `all_rows`: unlike `render_damage_section`, this
-/// only measures the ActualDamage/ReceivedDamage ammo-type breakdown
-/// paragraph, not the per-victim interaction lines (those need another row's
-/// `ship_name` to size, and the breakdown paragraph is already the wider of
-/// the two in practice). Modernizations and signals are excluded everywhere:
+/// For ActualDamage/ReceivedDamage this only measures the ammo-type breakdown
+/// paragraph, not the per-victim interaction lines (the breakdown paragraph
+/// is already the wider of the two in practice). SpottingDamage measures its
+/// per-victim lines through `all_rows`, since most rows have no per-type
+/// split to size the column by. Modernizations and signals are excluded everywhere:
 /// `modernization_slots_view`/`signals_view` both use `h_flex().flex_wrap()`,
 /// which wraps onto new lines instead of pushing the column wider, so they
 /// must never drive a column's measured width.
-pub(super) fn expanded_detail_width(col: ReplayColumn, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+pub(super) fn expanded_detail_width(
+    col: ReplayColumn,
+    row: &PlayerRow,
+    all_rows: &[PlayerRow],
+    debug: bool,
+    window: &mut Window,
+) -> f32 {
     match col {
         ReplayColumn::Name => name_section_width(row, debug, window),
         ReplayColumn::Skills => build_section_width(row, debug, window),
@@ -140,7 +147,9 @@ pub(super) fn expanded_detail_width(col: ReplayColumn, row: &PlayerRow, debug: b
         }
         ReplayColumn::Hits => nda_gated_breakdown_width(row.hits_breakdown.as_deref(), row, debug, window),
         ReplayColumn::SpottingDamage => {
-            row.spotting_damage_breakdown.as_deref().map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0)
+            let breakdown =
+                row.spotting_damage_breakdown.as_deref().map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0);
+            breakdown.max(breakdown_grid_width(&spotting_target_rows(row, all_rows), window))
         }
         _ => 0.0,
     }
@@ -1256,6 +1265,59 @@ fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDire
     }
 }
 
+/// SpottingDamage expanded content: the recording player's per-type split
+/// (`row.spotting_damage_breakdown`), then a per-victim grid of
+/// `amount (pct%)` against ship name, mirroring the egui app's
+/// `spotting_damage_details`. Not NDA-gated, like the collapsed cell: the
+/// figure is damage allies dealt, which says nothing about this row's ship.
+fn render_spotting_section(row: &PlayerRow, all_rows: &[PlayerRow]) -> Option<AnyElement> {
+    let breakdown = row.spotting_damage_breakdown.as_deref();
+    let per_ship = spotting_target_rows(row, all_rows);
+    if breakdown.is_none() && per_ship.is_empty() {
+        return None;
+    }
+
+    let mut col = v_flex().gap_1();
+
+    if let Some(rows) = breakdown {
+        col = col.child(breakdown_grid(rows));
+        if !per_ship.is_empty() {
+            col = col.child(Separator::horizontal());
+        }
+    }
+
+    if !per_ship.is_empty() {
+        col = col.child(breakdown_grid(&per_ship));
+    }
+
+    Some(col.into_any_element())
+}
+
+/// One line per spotted victim, largest share first, skipping victims with
+/// no spotting damage and those `all_rows` does not name. The share is left
+/// off when the results carry no spotting total to divide by.
+fn spotting_target_rows(row: &PlayerRow, all_rows: &[PlayerRow]) -> Vec<BreakdownRow> {
+    let Some(interactions) = row.damage_interactions.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut entries: Vec<_> = interactions.iter().filter(|(_, interaction)| interaction.spotting_damage > 0).collect();
+    entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction.spotting_damage));
+
+    entries
+        .into_iter()
+        .filter_map(|(account_id, interaction)| {
+            let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
+            let amount = separate_number(interaction.spotting_damage);
+            let value = match interaction.spotting_damage_percentage {
+                Some(pct) => format!("{amount} ({pct:.0}%)"),
+                None => amount,
+            };
+            Some(BreakdownRow { label: other.ship_name.clone(), value })
+        })
+        .collect()
+}
+
 // `use super::*` here would also pull in `gpui_kit::*` (glob-reexported at the
 // top of this file), and combined with this file's heavy element-builder
 // chains that blows the compiler's macro/name-resolution recursion limit
@@ -1266,6 +1328,8 @@ fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDire
 mod tests {
     use wows_replay_insights::battle_report::DamageInteraction;
     use wows_replay_insights::battle_report::RibbonResult;
+    use wows_replays::types::AccountId;
+    use wows_toolkit_viewmodel::breakdown::BreakdownRow;
     use wowsunpack::game_params::skill_grid_data::SkillGridRow;
     use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
     use wowsunpack::game_params::types::CrewSkillName;
@@ -1285,6 +1349,7 @@ mod tests {
     use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
     use super::skill_grid_width;
+    use super::spotting_target_rows;
     use crate::replay_inspector::test_support::base_row;
     use crate::replay_inspector::test_support::fire_chance_result;
     use wows_replays::types::Relation;
@@ -1425,6 +1490,51 @@ mod tests {
 
         assert!((interaction_percentage(&i, DamageDirection::Dealt, true) - 71.2).abs() < 1e-9);
         assert!((interaction_percentage(&i, DamageDirection::Received, true) - 9.4).abs() < 1e-9);
+    }
+
+    /// Largest share first; a victim with no spotting damage, or one no row
+    /// names, gets no line.
+    #[test]
+    fn spotting_lines_list_named_victims_by_amount() {
+        let spotted = |spotting_damage: u64, spotting_damage_percentage: Option<f64>| DamageInteraction {
+            spotting_damage,
+            spotting_damage_percentage,
+            ..Default::default()
+        };
+        let mut row = base_row(1, Relation::new(0), true);
+        row.damage_interactions = Some(
+            [
+                (AccountId(2), spotted(1_000, Some(20.0))),
+                (AccountId(3), spotted(4_000, Some(80.0))),
+                (AccountId(4), spotted(0, None)),
+                (AccountId(9), spotted(500, Some(10.0))),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let mut low = base_row(2, Relation::new(2), false);
+        low.ship_name = "Low".to_string();
+        let mut high = base_row(3, Relation::new(2), false);
+        high.ship_name = "High".to_string();
+        let none = base_row(4, Relation::new(2), false);
+
+        assert_eq!(
+            spotting_target_rows(&row, &[low, high, none]),
+            vec![
+                BreakdownRow { label: "High".to_string(), value: "4,000 (80%)".to_string() },
+                BreakdownRow { label: "Low".to_string(), value: "1,000 (20%)".to_string() },
+            ]
+        );
+
+        // Without a spotting total there is no share to show.
+        let mut row = base_row(1, Relation::new(0), true);
+        row.damage_interactions = Some([(AccountId(3), spotted(4_000, None))].into_iter().collect());
+        let mut high = base_row(3, Relation::new(2), false);
+        high.ship_name = "High".to_string();
+        assert_eq!(
+            spotting_target_rows(&row, &[high]),
+            vec![BreakdownRow { label: "High".to_string(), value: "4,000".to_string() }]
+        );
     }
 
     fn skill_tier(skill_count: usize) -> SkillGridRow {

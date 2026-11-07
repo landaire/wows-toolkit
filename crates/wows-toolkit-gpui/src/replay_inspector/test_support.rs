@@ -199,6 +199,7 @@ pub(crate) fn fixture_normalized_battle_report() -> NormalizedBattleReport {
             spotting_damage: Some(8_000),
             potential_damage: 20_000,
             potential_damage_details: PotentialDamage { artillery: 20_000, torpedoes: 0, planes: 0 },
+            potential_damage_by_type: BTreeMap::from([("agro_art".to_string(), 20_000)]),
             received_damage: 4_000,
             received_damage_details: Damage { he: Some(4_000), ..Default::default() },
             received_damage_by_type: BTreeMap::from([("damage_main_he".to_string(), 4_000)]),

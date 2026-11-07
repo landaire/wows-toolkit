@@ -111,6 +111,12 @@ pub struct DamageInteraction {
     /// % of the attacker's total dealt damage
     pub damage_received_inverse_percentage: f64,
     pub damage_received_inverse_percentage_text: String,
+    /// Damage allies dealt to this victim while this player spotted it
+    pub spotting_damage: u64,
+    pub spotting_damage_text: String,
+    /// % of this player's total spotting damage; empty when the results carry
+    /// no total
+    pub spotting_damage_percentage_text: String,
 }
 
 impl DamageInteraction {
@@ -358,6 +364,14 @@ impl PlayerReport {
 
     pub fn spotting_damage_hover_text(&self) -> Option<&RichText> {
         self.spotting_damage_hover_text.as_ref()
+    }
+
+    /// Whether any victim carries spotting damage, which is what the
+    /// per-victim spotting lines list.
+    pub fn has_spotting_targets(&self) -> bool {
+        self.damage_interactions
+            .as_ref()
+            .is_some_and(|interactions| interactions.values().any(|interaction| interaction.spotting_damage > 0))
     }
 
     pub fn potential_damage(&self) -> Option<u64> {

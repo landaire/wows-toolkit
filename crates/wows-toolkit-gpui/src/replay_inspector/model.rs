@@ -25,7 +25,6 @@ use wows_replay_insights::battle_report::HITS_DESCRIPTIONS;
 use wows_replay_insights::battle_report::Hits;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::battle_report::NormalizedPlayer;
-use wows_replay_insights::battle_report::POTENTIAL_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::PotentialDamage;
 use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::RibbonResult;
@@ -129,18 +128,12 @@ pub struct PlayerRow {
 
     pub spotting_damage: Option<u64>,
     pub spotting_damage_text: Option<String>,
-    /// Always `None`: the self-player controller-fallback breakdown
-    /// (`build_damage_stat_hover_text`) needs the raw `self_damage_stats()`
-    /// list, which `NormalizedBattleReport` does not carry. Only the numeric
-    /// total (`spotting_damage`) survives; this is a documented, narrow gap
-    /// (self player only, hover text only).
+    /// The recording player's per-type split only; the results carry none
+    /// for anyone. The per-victim split is in `damage_interactions`.
     pub spotting_damage_breakdown: Option<Vec<BreakdownRow>>,
 
     pub potential_damage: Option<u64>,
     pub potential_damage_text: Option<String>,
-    /// `None` in the self-player controller-fallback case for the same
-    /// reason as `spotting_damage_breakdown`; `Some` whenever server
-    /// results are present (fully reproducible from `ServerResults`).
     pub potential_damage_breakdown: Option<Vec<BreakdownRow>>,
     pub potential_damage_report: Option<PotentialDamage>,
 
@@ -731,35 +724,16 @@ impl PlayerRow {
             None => (None, None, None, None),
         };
 
-        // The breakdown is always None; see the field doc comment.
         let spotting_damage = np.spotting_damage();
         let spotting_damage_text = spotting_damage.map(separate_number);
+        let spotting_damage_breakdown =
+            np.spotting_damage_breakdown().map(|split| breakdown::damage_rows(&split, None));
 
         let potential_damage = np.potential_damage();
         let potential_damage_text = potential_damage.map(separate_number);
-        // Only the results object carries a breakdown; the controller total
-        // the recording player falls back to is a single figure.
-        let (potential_damage_breakdown, potential_damage_report) = match server {
-            Some(sr) => {
-                let total = sr.potential_damage;
-                let art = sr.potential_damage_details.artillery;
-                let tpd = sr.potential_damage_details.torpedoes;
-                let air = sr.potential_damage_details.planes;
-                // Depth-charge agro is the only potential key the 3-field
-                // report drops; recover it from the total (total == art +
-                // tpd + air + dbomb by construction).
-                let dbomb = total.saturating_sub(art + tpd + air);
-                let lines = breakdown_rows(&POTENTIAL_DAMAGE_DESCRIPTIONS, |key| match key {
-                    "agro_art" => art,
-                    "agro_tpd" => tpd,
-                    "agro_air" => air,
-                    "agro_dbomb" => dbomb,
-                    _ => 0,
-                });
-                (Some(lines), Some(sr.potential_damage_details.clone()))
-            }
-            None => (None, None),
-        };
+        let potential_damage_breakdown =
+            np.potential_damage_breakdown().map(|split| breakdown::damage_rows(&split, None));
+        let potential_damage_report = server.map(|sr| sr.potential_damage_details.clone());
 
         let time_lived_secs = np.time_lived_secs;
         let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
@@ -831,7 +805,7 @@ impl PlayerRow {
             hits_breakdown,
             spotting_damage,
             spotting_damage_text,
-            spotting_damage_breakdown: None,
+            spotting_damage_breakdown,
             potential_damage,
             potential_damage_text,
             potential_damage_breakdown,
@@ -938,6 +912,49 @@ mod tests {
         assert!(enemy_row.actual_damage_report.is_none());
         assert!(enemy_row.actual_damage_breakdown.is_none());
         assert!(enemy_row.fires.is_none());
+    }
+
+    /// Without a results object the recording player's spotting and potential
+    /// totals come from the controller, and so do their per-type lines.
+    #[test]
+    fn the_self_controller_fallback_carries_its_breakdown() {
+        use std::collections::BTreeMap;
+
+        use wows_replay_insights::battle_report::ControllerDamage;
+        use wows_replay_insights::battle_report::ControllerWeaponGroup;
+
+        let mut normalized = test_support::fixture_normalized_battle_report();
+        let self_player = normalized.players.iter_mut().find(|p| p.is_self).expect("self player present");
+        self_player.server_results = None;
+        self_player.controller_spotting_damage = Some(ControllerDamage {
+            total: 3_000,
+            by_type: BTreeMap::from([(ControllerWeaponGroup::MainAp, 2_000), (ControllerWeaponGroup::Torpedo, 1_000)]),
+        });
+        self_player.controller_potential_damage =
+            Some(ControllerDamage { total: 9_000, by_type: BTreeMap::from([(ControllerWeaponGroup::MainHe, 9_000)]) });
+
+        let model = ReplayReportModel::build(
+            &normalized,
+            |species| species.name().to_string(),
+            |_ship_index| None,
+            str::to_string,
+        );
+        let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
+
+        assert_eq!(self_row.spotting_damage, Some(3_000));
+        assert_eq!(
+            self_row.spotting_damage_breakdown,
+            Some(vec![
+                BreakdownRow { label: "AP".to_string(), value: "2,000".to_string() },
+                BreakdownRow { label: "Torps".to_string(), value: "1,000".to_string() },
+            ])
+        );
+        assert_eq!(self_row.potential_damage, Some(9_000));
+        assert_eq!(
+            self_row.potential_damage_breakdown,
+            Some(vec![BreakdownRow { label: "HE".to_string(), value: "9,000".to_string() }])
+        );
+        assert!(self_row.potential_damage_report.is_none());
     }
 
     #[test]
