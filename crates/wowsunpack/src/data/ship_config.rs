@@ -13,6 +13,7 @@ use crate::game_types::GameParamId;
 use crate::rpc::typedefs::ArgValue;
 
 const EXTERIOR_KILL_TAG_STATE_MIN_VERSION: Version = Version::base(15, 9, 0);
+const MODERNIZATION_SLOT_LISTS_MIN_VERSION: Version = Version::base(15, 10, 0);
 
 /// Per-exterior kill-tag visibility override added to ship descriptions in 15.9.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,9 +173,26 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
         let Some(count) = take_u32(i) else { return Vec::new() };
         (0..count).map_while(|_| take_u32(i)).collect()
     }
+    // From 15.10 each modernization slot is the mounted upgrade followed by a
+    // count-prefixed list of upgrade ids for that slot, which is skipped.
+    fn take_modernization_slot_lists(i: &mut &[u8]) -> Vec<u32> {
+        let Some(count) = take_u32(i) else { return Vec::new() };
+        let mut mounted = Vec::new();
+        for _ in 0..count {
+            let (Some(id), Some(list_len)) = (take_u32(i), take_u32(i)) else { break };
+            // Sliced for the same reason as the color schemes below.
+            *i = i.get((list_len as usize).saturating_mul(4)..).unwrap_or_default();
+            mounted.push(id);
+        }
+        mounted
+    }
 
     // ModernizationSlots
-    let modernization = take_section(i);
+    let modernization = if version.is_at_least(&MODERNIZATION_SLOT_LISTS_MIN_VERSION) {
+        take_modernization_slot_lists(i)
+    } else {
+        take_section(i)
+    };
     // ExteriorSlots (signals, camos, flags)
     let exteriors = take_section(i);
     // Bits 0 and 1 enable camouflage and signal auto-buy. Higher bits select
@@ -612,6 +630,35 @@ mod tests {
         assert!(config.abilities().is_empty());
         assert_eq!(config.naval_flag(), None);
         assert_eq!(config.last_boarded_crew(), None);
+    }
+
+    /// The recording player's Des Moines in a 15.10 replay: slot 0 empty, then
+    /// five mounted upgrades, each followed by its slot's id list.
+    #[test]
+    fn parse_v15_10_modernization_slot_lists() {
+        const WORDS: &[u32] = &[
+            1, 4179572720, 80, 15, 3338416112, 3341791216, 0, 3340152816, 3335368688, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            6, 0, 4, 4262645680, 4253208496, 4254257072, 4261597104, 4273131440, 2, 4273131440, 4221751216, 4264742832,
+            4, 4281520048, 4287811504, 4264742832, 4275228592, 4267888560, 3, 4202876848, 4269985712, 4267888560,
+            4184002480, 4, 4265791408, 4184002480, 4266839984, 4218605488, 4263694256, 3, 4216508336, 4263694256,
+            4280471472, 8, 4287459248, 4286410672, 4278022064, 4285362096, 4289556400, 4285427632, 4264161200,
+            4263342000, 0, 0, 0, 6, 4284653488, 4283604912, 4202864560, 4280459184, 0, 0, 1, 4272811952, 4, 0, 0, 0, 0,
+            14, 0, 0, 60,
+        ];
+        let blob: Vec<u8> = WORDS.iter().flat_map(|word| word.to_le_bytes()).collect();
+        let ids = |raw: &[u32]| -> Vec<Option<GameParamId>> {
+            raw.iter().map(|&id| (id != 0).then(|| GameParamId::from(id))).collect()
+        };
+
+        let config = parse_ship_config(&blob, &Version::base(15, 10, 0)).unwrap();
+
+        assert_eq!(config.units().len(), 15);
+        assert_eq!(config.modernization(), ids(&[0, 4273131440, 4264742832, 4267888560, 4184002480, 4263694256]));
+        assert_eq!(config.exteriors().len(), 8);
+        assert_eq!(config.exterior_kill_tags(), Some(Vec::new()).as_deref());
+        assert_eq!(config.abilities(), ids(&[4284653488, 4283604912, 4202864560, 4280459184, 0, 0]));
+        assert_eq!(config.ensigns(), ids(&[4272811952]));
+        assert_eq!(config.naval_flag(), Some(14));
     }
 
     #[test]
