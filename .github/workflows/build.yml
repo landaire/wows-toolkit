@@ -389,9 +389,13 @@ jobs:
           EOF
 
       - name: Create .dmg
+        # hdiutil's size estimate from -srcfolder can leave the image too small
+        # for the GPUI binary, so size it from the bundle with headroom.
         run: |
+          size_mb=$(( $(du -sm "WoWs Toolkit.app" | cut -f1) * 12 / 10 + 32 ))
           hdiutil create -volname "WoWs Toolkit" \
             -srcfolder "WoWs Toolkit.app" \
+            -size "${size_mb}m" \
             -ov -format UDZO \
             "wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg"
 
