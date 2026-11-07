@@ -22,6 +22,7 @@
 //! skill also takes, for each cheaper tier it leaves empty, the skill of that
 //! tier that leaves the stat best, listed under `tier_fillers`.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -42,6 +43,7 @@ use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::SkillPointCost;
 
+use crate::commanders::Commander;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AbilityModifiers;
@@ -302,6 +304,13 @@ pub(crate) struct Planner<'a> {
     game: &'a GameData,
     ship: &'a Ship,
 
+    /// The captain skill table builds draw from: the standard one, or the
+    /// commander's with improved entries in place.
+    skills: Cow<'a, [CrewSkill]>,
+
+    /// The commander whose improved skills `skills` holds.
+    commander: Option<&'a Commander>,
+
     /// Module combinations that fit, stock first, each with the names of
     /// its modules that are not stock.
     selections: Vec<(ShipUpgradeSelection, Vec<String>)>,
@@ -371,7 +380,14 @@ impl<'f, V> StatPlan<'f, V> {
 
 impl<'a> Planner<'a> {
     pub(crate) fn new(game: &'a GameData, ship: &'a Ship) -> Self {
-        let skill_items = game.skills.iter().enumerate().filter_map(|(index, skill)| {
+        Self::for_commander(game, ship, None)
+    }
+
+    /// Builds with `commander`'s improved skills in place of the standard
+    /// ones.
+    pub(crate) fn for_commander(game: &'a GameData, ship: &'a Ship, commander: Option<&'a Commander>) -> Self {
+        let skills = game.skill_table(commander);
+        let skill_items = skills.iter().enumerate().filter_map(|(index, skill)| {
             game.skill_points(skill, ship.class)
                 .map(|points| (Item::Skill { index, points: SkillPointCost::new(points) }, skill))
         });
@@ -394,6 +410,8 @@ impl<'a> Planner<'a> {
         Self {
             game,
             ship,
+            skills,
+            commander,
             selections: game.module_combinations(ship),
             items,
             triggered,
@@ -442,7 +460,7 @@ impl<'a> Planner<'a> {
     /// English name of an item.
     pub(crate) fn name(&self, item: Item) -> String {
         match item {
-            Item::Skill { index, .. } => self.game.skill_name(&self.game.skills[index]),
+            Item::Skill { index, .. } => self.game.skill_name(&self.skills[index]),
             Item::Upgrade(index) => self.game.upgrades[index].name.clone(),
         }
     }
@@ -499,15 +517,16 @@ impl<'a> Planner<'a> {
         let mut loadout = self.game.stock_loadout();
         loadout.activate(&self.abilities);
         if let Some(index) = triggered {
-            loadout.triggers = Triggers::Skill(self.game.skills[index].internal_name().clone());
+            loadout.triggers = Triggers::Skill(self.skills[index].internal_name().clone());
         }
         for &item in items {
             match item {
                 Item::Skill { index, points } => {
-                    let skill = &self.game.skills[index];
+                    let skill = &self.skills[index];
                     let name = self.game.skill_name(skill);
+                    let improved = self.commander.is_some_and(|commander| commander.improved_skill(skill).is_some());
                     loadout.labels.insert(skill.internal_name().as_str().to_owned(), name.clone());
-                    loadout.applied_skills.push(AppliedSkill { name, points: points.get() });
+                    loadout.applied_skills.push(AppliedSkill { name, points: points.get(), improved });
                     loadout.skills.push(skill.clone());
                 }
                 Item::Upgrade(index) => {
@@ -751,7 +770,7 @@ impl<'a> Planner<'a> {
         let Item::Skill { index, .. } = item else {
             return None;
         };
-        self.game.skill_trigger_sentence(&self.game.skills[index])
+        self.game.skill_trigger_sentence(&self.skills[index])
     }
 }
 

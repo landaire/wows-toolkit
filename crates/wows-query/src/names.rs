@@ -28,6 +28,7 @@ pub enum NameKind {
     Skill,
     Upgrade,
     Consumable,
+    Commander,
 }
 
 /// How a name was read when it is not an exact English name, or when several

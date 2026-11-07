@@ -21,6 +21,8 @@ use wows_query::armor_trace::RayOutcome;
 use wows_query::armor_trace::TraceWeapon;
 use wows_query::citadel::CitadelProfileArgs;
 use wows_query::citadel::Turtleback;
+use wows_query::commanders::CommanderArgs;
+use wows_query::commanders::CommanderSearchArgs;
 use wows_query::consumables::ShipConsumablesArgs;
 use wows_query::firing_arcs::BatteryArcs;
 use wows_query::firing_arcs::FiringArcsArgs;
@@ -2001,4 +2003,76 @@ fn des_moines_he_fire_chance_against_yamato_and_a_tier_6_cruiser() {
         against("Yamato", &["Fire Prevention Expert"]),
         against("Leander", &[]),
     ]);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn unique_commanders_show_improved_skills_and_talents() {
+    for (commander, snapshot) in [
+        ("Jean-Jacques Honore", "commander_honore"),
+        ("Yamamoto Isoroku", "commander_yamamoto"),
+        ("Halsey", "commander_halsey"),
+        ("John Doe", "commander_john_doe"),
+    ] {
+        let output = game()
+            .commander(&CommanderArgs { commander: commander.to_owned(), ship: None })
+            .expect("commander resolves");
+        insta::assert_yaml_snapshot!(snapshot, output);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn honore_improves_adrenaline_rush_on_colbert() {
+    for (commander, snapshot) in
+        [(None, "colbert_adrenaline_rush_standard"), (Some("Jean-Jacques Honore"), "colbert_adrenaline_rush_honore")]
+    {
+        let stats = game()
+            .ship_stats(&ShipStatsArgs {
+                ship: "Colbert".to_owned(),
+                skills: Some(vec!["Adrenaline Rush".to_owned()]),
+                upgrades: Some(vec!["Main Battery Modification 3".to_owned()]),
+                hp_percent: Some(Percent::new(1.0)),
+                commander: commander.map(str::to_owned),
+                ..Default::default()
+            })
+            .expect("Colbert takes the skill and upgrade");
+        insta::assert_yaml_snapshot!(snapshot, stats);
+    }
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn yamamoto_talents_are_listed_as_alternatives_on_yamato() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs {
+            ship: "Yamato".to_owned(),
+            skills: Some(vec!["Adrenaline Rush".to_owned()]),
+            commander: Some("Yamamoto Isoroku".to_owned()),
+            ..Default::default()
+        })
+        .expect("Yamamoto commands Yamato");
+    insta::assert_yaml_snapshot!(stats.talents);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn topete_talents_leave_damage_control_and_repair_party_reload_on_castilla() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs {
+            ship: "Castilla".to_owned(),
+            commander: Some("Pascual Cervera y Topete".to_owned()),
+            ..Default::default()
+        })
+        .expect("Topete commands Castilla");
+    insta::assert_yaml_snapshot!(stats.talents);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn commander_search_finds_hp_restoration() {
+    let search = game()
+        .commander_search(&CommanderSearchArgs { effect: Some("restores HP".to_owned()), ..Default::default() })
+        .expect("search runs");
+    insta::assert_yaml_snapshot!(search);
 }

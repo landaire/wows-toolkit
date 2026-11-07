@@ -10,6 +10,7 @@ use wowsunpack::game_params::ttx::HealthFraction;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::CrewSkillModifier;
 
+use crate::commanders::Commander;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
@@ -26,12 +27,19 @@ pub(crate) struct LoadoutRequest<'a> {
 
     /// Remaining health for health-scaled effects, 0 to 100.
     pub(crate) hp_percent: Option<Percent>,
+
+    /// The unique commander whose improved skills replace the standard ones.
+    pub(crate) commander: Option<&'a Commander>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AppliedSkill {
     pub name: String,
     pub points: u8,
+
+    /// The commander's improved version replaces the standard skill.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub improved: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -56,6 +64,7 @@ pub(crate) struct AbilityModifiers {
 }
 
 /// A loadout resolved against one ship.
+#[derive(Clone)]
 pub(crate) struct ResolvedLoadout {
     pub(crate) skills: Vec<CrewSkill>,
     pub(crate) applied_skills: Vec<AppliedSkill>,
@@ -113,10 +122,11 @@ impl GameData {
             if skills.iter().any(|chosen| chosen.internal_name() == skill.internal_name()) {
                 continue;
             }
+            let improved = request.commander.and_then(|commander| commander.improved_skill(skill));
             let name = self.skill_name(skill);
             labels.insert(skill.internal_name().as_str().to_owned(), name.clone());
-            applied_skills.push(AppliedSkill { name, points });
-            skills.push(skill.clone());
+            applied_skills.push(AppliedSkill { name, points, improved: improved.is_some() });
+            skills.push(improved.unwrap_or(skill).clone());
         }
 
         let mut chosen: Vec<&crate::upgrades::Upgrade> = Vec::new();

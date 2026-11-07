@@ -19,6 +19,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::armor_assessment::ComparisonCache;
+use crate::commanders::Commander;
 use crate::consumables::consumable_names;
 use crate::error::LoadError;
 use crate::gameparams::RawParamsSlot;
@@ -59,8 +60,12 @@ pub struct GameData {
 
     pub(crate) ships: Vec<Ship>,
 
-    /// The captain skill table. Every crew in a build shares it.
+    /// The standard captain skill table, which most crews share. Unique
+    /// commanders carry their own table with improved entries.
     pub(crate) skills: Vec<CrewSkill>,
+
+    /// Unique commanders with improved skills or talents.
+    pub(crate) commanders: Vec<Commander>,
 
     /// Upgrades that occupy a slot.
     pub(crate) upgrades: Vec<Upgrade>,
@@ -74,6 +79,7 @@ pub struct GameData {
     pub(crate) skill_names: NameIndex<usize>,
     pub(crate) upgrade_names: NameIndex<usize>,
     pub(crate) consumable_names: NameIndex<String>,
+    pub(crate) commander_names: NameIndex<usize>,
 
     /// Raw GameParams, opened or built on first use.
     pub(crate) raw_params: RawParamsSlot,
@@ -162,11 +168,7 @@ impl GameData {
         Ship::mark_test_copies(&mut ships);
         Ship::mark_replicas(&mut ships);
 
-        let skills = provider
-            .params()
-            .iter()
-            .find_map(|param| param.crew().and_then(|crew| crew.skills()).map(<[CrewSkill]>::to_vec))
-            .unwrap_or_default();
+        let skills = standard_skills(&provider);
 
         let upgrades: Vec<Upgrade> =
             provider.params().iter().filter_map(|param| Upgrade::from_param(&provider, param)).collect();
@@ -185,6 +187,7 @@ impl GameData {
         let skill_names = skill_names(&provider, &version, &skills);
         let upgrade_names = upgrade_names(&upgrades);
         let consumable_names = consumable_names(&provider);
+        let (commanders, commander_names) = Commander::index(&provider, &skills);
 
         Self {
             version,
@@ -192,17 +195,33 @@ impl GameData {
             vfs,
             ships,
             skills,
+            commanders,
             upgrades,
             research_predecessors,
             ship_names,
             skill_names,
             upgrade_names,
             consumable_names,
+            commander_names,
             raw_params,
             armor_comparisons,
             ricochet_standards: OnceLock::new(),
         }
     }
+}
+
+/// The skill table most crews share. Crews that share a table share one
+/// allocation (`share_crew_skills`), so tables are counted by address.
+fn standard_skills(provider: &GameMetadataProvider) -> Vec<CrewSkill> {
+    let mut tables: Vec<(&[CrewSkill], usize)> = Vec::new();
+    for skills in provider.params().iter().filter_map(|param| param.crew().and_then(|crew| crew.skills())) {
+        match tables.iter_mut().find(|(table, _)| std::ptr::eq(*table, skills)) {
+            Some((_, count)) => *count += 1,
+            None => tables.push((skills, 1)),
+        }
+    }
+
+    tables.into_iter().rev().max_by_key(|(_, count)| *count).map(|(table, _)| table.to_vec()).unwrap_or_default()
 }
 
 /// The directory of the newest build listed in a dump root's `builds.toml`.

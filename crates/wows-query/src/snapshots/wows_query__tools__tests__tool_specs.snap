@@ -325,7 +325,7 @@ expression: specs()
         type: boolean
         description: Leave out ships in closed testing. Defaults to false.
 - name: ship_stats
-  description: "Port stat card of one ship with stock modules, followed by stats computed from it: main battery barrels, salvo damage and damage per minute per ammo type, dispersion at the stock firing range, torpedo tubes, time to use every charge of a consumable, fire starts per minute per armament and in total, and fire and flooding. Fire chance reduction is how much less likely any shell is to set the ship on fire than its listed fire chance; it comes from the hull and grows with tier (49.95% on a tier 10 hull and on every aircraft carrier, 13.32% on a stock tier 5 hull and 16.65% on its upgraded hull) and Fire Prevention Expert multiplies what is left by 0.9. Also fires that can burn at once (usually 4, 1 on submarines; Fire Prevention Expert merges two into one), fire and flooding duration, damage per second in percent of maximum health and damage of one whole fire or flood. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, and fires_per_minute, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. fires_per_minute counts every armament that can start fires: main battery ammo with a fire chance, each secondary gun group, carrier and hybrid squadrons and air strikes, with projectiles per minute and the fire chance of one projectile; its total is what answers which ship starts the most fires, and Inertia Fuse for HE Shells appears as an alternative because it halves shell fire chance. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change. special_ability_active switches on the ship's F key ability (ship_special_ability says what it is): Combat Instructions apply their effects, e.g. a longer secondary range; Burst Fire or Modified Shells switch the main battery, and build_stats then gives burst_fire (shots_per_burst, shot_interval, reload_after_burst, cycle) and each main battery ammo's damage_per_minute over a full burst cycle with during_burst, the rate while a burst fires; changes lists what the ability changes against the standard stock card."
+  description: "Port stat card of one ship with stock modules, followed by stats computed from it: main battery barrels, salvo damage and damage per minute per ammo type, dispersion at the stock firing range, torpedo tubes, time to use every charge of a consumable, fire starts per minute per armament and in total, and fire and flooding. Fire chance reduction is how much less likely any shell is to set the ship on fire than its listed fire chance; it comes from the hull and grows with tier (49.95% on a tier 10 hull and on every aircraft carrier, 13.32% on a stock tier 5 hull and 16.65% on its upgraded hull) and Fire Prevention Expert multiplies what is left by 0.9. Also fires that can burn at once (usually 4, 1 on submarines; Fire Prevention Expert merges two into one), fire and flooding duration, damage per second in percent of maximum health and damage of one whole fire or flood. Without skills and upgrades, build_stats gives main battery reload and range, secondary range, torpedo reload, torpedoes_per_minute, the damage per minute and per second of each main battery ammo, secondary gun group and torpedo, and fires_per_minute, each with builds: base, best-fit build (assumed) and alternatives. torpedoes_per_minute counts the tubes, and the loader groups when the game reloads only some launchers at a time (submarine groups name bow, stern or rotating), and states the limit. Damage rates are theoretical maxima: every shell or torpedo hits for full damage, without fires, flooding, citadel or armor; gun rates also give the barrels bearing broadside and bow-on. fires_per_minute counts every armament that can start fires: main battery ammo with a fire chance, each secondary gun group, carrier and hybrid squadrons and air strikes, with projectiles per minute and the fire chance of one projectile; its total is what answers which ship starts the most fires, and Inertia Fuse for HE Shells appears as an alternative because it halves shell fire chance. tier_fillers are skills taken only to fill cheaper skill tiers; they are not conditions. With captain skills and upgrades, lists the stats they change, from and to, and which skill or upgrade caused each change. special_ability_active switches on the ship's F key ability (ship_special_ability says what it is): Combat Instructions apply their effects, e.g. a longer secondary range; Burst Fire or Modified Shells switch the main battery, and build_stats then gives burst_fire (shots_per_burst, shot_interval, reload_after_burst, cycle) and each main battery ammo's damage_per_minute over a full burst cycle with during_burst, the rate while a burst fires; changes lists what the ability changes against the standard stock card. With commander (a unique commander such as \"Jean-Jacques Honore\"), the commander's improved skills replace the standard ones in skills (marked improved) and build_stats, and talents lists each talent that changes a stat: its activation condition, the activations counted and the changes. Talents are never applied to changes or stats."
   input_schema:
     type: object
     additionalProperties: false
@@ -352,6 +352,9 @@ expression: specs()
       special_ability_active:
         type: boolean
         description: "Switch on the ship's special ability (its F key): Combat Instructions apply their effects; an alternative fire mode such as Burst Fire switches the main battery to it, with its reload, shells and effects. Defaults to false."
+      commander:
+        type: string
+        description: "Unique commander, e.g. \"Jean-Jacques Honore\": their improved versions replace the standard skills taken, and their talents that change a stat are listed under `talents`."
       full_card:
         type: boolean
         description: "Include the full stat card. Defaults to true without skills or upgrades and false with them, when only the changes are listed."
@@ -651,6 +654,35 @@ expression: specs()
         description: "Upgrades by name, e.g. [\"Engine Boost Modification 1\"], applied to the consumable stats."
     required:
       - ship
+- name: commander
+  description: "One unique (legendary) commander by name, e.g. \"Yamamoto Isoroku\", \"Halsey\", \"Jean-Jacques Honore\", \"John Doe\": the nations and ships they serve on, their improved captain skills with the standard and improved effects per class, and their talents: battle types, what activates them, effects per activation, activations per battle and the effects after every activation. With ship, only that ship's class. Pass the commander to ship_stats to apply the improved skills to a ship."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      commander:
+        type: string
+        description: "Unique commander name, e.g. \"Yamamoto Isoroku\", \"Halsey\", \"Jean-Jacques Honore\" or \"John Doe\"."
+      ship:
+        type: string
+        description: "Only describe the commander for this ship's class, e.g. \"Yamato\"."
+    required:
+      - commander
+- name: commander_search
+  description: "Find unique commanders by what their improved skills or talents do, e.g. effect \"restores HP\", \"reload\", \"fires\", by nation, or by a ship they can command. Each commander lists only the improved skills and talents that match. Omit effect to list every unique commander with improved skills or talents."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      effect:
+        type: string
+        description: "Words an improved skill or talent must mention in its name, condition or effects, e.g. \"restores HP\", \"heal\", \"reload\", \"speed\", \"fires\". Omit to list every unique commander."
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"Japan\", \"USA\", \"United_Kingdom\", \"Pan_Asia\"."
+      ship:
+        type: string
+        description: "Only commanders who serve on this ship, with effects for its class."
 - name: gameparams_query
   description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys` (no leading dot; `.keys` reads a field named keys), then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available. A ship's costGold is a nominal value, not what the ship sells for; never quote it as a price."
   input_schema:

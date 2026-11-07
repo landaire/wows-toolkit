@@ -29,6 +29,8 @@ use crate::builds::Outcome;
 use crate::builds::Planner;
 use crate::builds::StatPlan;
 use crate::builds::round;
+use crate::commanders::Commander;
+use crate::commanders::TalentStatChanges;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::fires::FireRates;
@@ -66,6 +68,9 @@ pub struct ShipStatsArgs {
     /// Switch on the ship's special ability (its F key): Combat Instructions apply their effects; an alternative fire mode such as Burst Fire switches the main battery to it, with its reload, shells and effects. Defaults to false.
     pub special_ability_active: Option<bool>,
 
+    /// Unique commander, e.g. "Jean-Jacques Honore": their improved versions replace the standard skills taken, and their talents that change a stat are listed under `talents`.
+    pub commander: Option<String>,
+
     /// Include the full stat card. Defaults to true without skills or upgrades and false with them, when only the changes are listed.
     pub full_card: Option<bool>,
 }
@@ -82,7 +87,7 @@ pub struct ShipStatsOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub special_ability: Vec<String>,
 
-    /// Without skills and upgrades: weapon stats on the best-fit build.
+    /// Without skills and upgrades: weapon stats on the best-fit build, with the commander's improved skills when one is given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build_stats: Option<WeaponBuilds>,
 
@@ -102,6 +107,12 @@ pub struct ShipStatsOutput {
     /// Stats that differ from the stock card, with what changed them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<StatChange>,
+
+    /// The commander's talents that change stats on this card, each after
+    /// the activations given. Talents activate in battle on their condition
+    /// and are not applied to `changes` or `stats`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub talents: Vec<TalentStatChanges>,
 
     /// "Label (qualifier): value" lines of the port stat card, stock modules.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -187,11 +198,20 @@ impl GameData {
     pub fn ship_stats(&self, args: &ShipStatsArgs) -> Result<ShipStatsOutput, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
+        let commander = match args.commander.as_deref() {
+            Some(name) => {
+                let commander = self.resolve_commander(name, &mut interpretations)?;
+                self.check_serves(commander, ship)?;
+                Some(commander)
+            }
+            None => None,
+        };
         let request = LoadoutRequest {
             skills: args.skills.as_deref().unwrap_or_default(),
             upgrades: args.upgrades.as_deref().unwrap_or_default(),
             conditions_met: args.conditions_met.unwrap_or(false),
             hp_percent: args.hp_percent,
+            commander,
         };
         let mut loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
 
@@ -226,7 +246,18 @@ impl GameData {
 
         let stats = if args.full_card.unwrap_or(!modified) { stat_lines(&card, self) } else { Vec::new() };
 
-        let build_stats = if loadout.is_empty() { Some(self.weapon_builds(ship, ability.as_ref())?) } else { None };
+        let build_stats =
+            if loadout.is_empty() { Some(self.weapon_builds(ship, ability.as_ref(), commander)?) } else { None };
+        let talents = match commander {
+            Some(commander) => self.talent_stat_changes(
+                ship,
+                commander,
+                &loadout,
+                &card,
+                ability.as_ref().and_then(|ability| ability.burst),
+            )?,
+            None => Vec::new(),
+        };
 
         Ok(ShipStatsOutput {
             interpretations,
@@ -238,14 +269,21 @@ impl GameData {
             upgrades: loadout.applied_upgrades,
             active_conditions: card.active_conditions,
             changes,
+            talents,
             stats,
         })
     }
 
-    fn weapon_builds(&self, ship: &Ship, ability: Option<&ActiveAbility>) -> Result<WeaponBuilds, QueryError> {
+    fn weapon_builds(
+        &self,
+        ship: &Ship,
+        ability: Option<&ActiveAbility>,
+        commander: Option<&Commander>,
+    ) -> Result<WeaponBuilds, QueryError> {
+        let planner = Planner::for_commander(self, ship, commander);
         let planner = match ability {
-            Some(ability) => Planner::new(self, ship).with_ability(ability.modifiers.clone(), ability.burst),
-            None => Planner::new(self, ship),
+            Some(ability) => planner.with_ability(ability.modifiers.clone(), ability.burst),
+            None => planner,
         };
         let seconds = |value: Option<wowsunpack::game_params::ttx::model::Seconds>| {
             value.map(|value| Seconds::new(round(value.value())))
@@ -404,7 +442,7 @@ pub(crate) fn changes(
 
 /// Derived stats that differ between the cards, with the loadout inputs that
 /// moved the card stats and build modifiers they are computed from.
-fn derived_changes(
+pub(crate) fn derived_changes(
     baseline: &[DerivedRow],
     candidate: &[DerivedRow],
     attributions: &[AttributionLine],

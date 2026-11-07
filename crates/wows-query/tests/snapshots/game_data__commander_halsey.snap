@@ -1,0 +1,90 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: output
+---
+interpretations:
+  - input: Halsey
+    resolved: William F. Halsey Jr.
+    kind: commander
+    method: partial
+commander:
+  name: William F. Halsey Jr.
+  nations:
+    - USA
+  improved_skills:
+    - name: Gun Feeder
+      classes:
+        - classes:
+            - destroyer
+            - cruiser
+            - battleship
+          points: 1
+          standard:
+            - "-40% Main battery shell type switching time"
+          improved:
+            - "-60% Main battery shell type switching time"
+    - name: Grease the Gears
+      classes:
+        - classes:
+            - destroyer
+            - cruiser
+          points: 1
+          standard:
+            - +15% Main battery traverse speed
+          improved:
+            - +20% Main battery traverse speed
+        - classes:
+            - battleship
+          points: 2
+          standard:
+            - +20% Main battery traverse speed
+          improved:
+            - +25% Main battery traverse speed
+  talents:
+    - name: Implacable
+      variants:
+        - battle_types: "Random, Co-op, Ranked and Brawl battles"
+          condition: "Activates upon dealing damage to six ships. Damage dealt to each ship must amount to at least 20% of her base HP.\n\nCan be activated once per battle."
+          activations_per_battle: 1
+          activations:
+            - effects:
+                - "-20% Main battery reload time"
+                - "-10% Torpedo tube reload time"
+                - "-20% Aircraft preparation time"
+        - battle_types: Operations
+          condition: "Activates upon dealing damage to nine ships. Damage dealt to each ship must amount to at least 20% of her base HP.\n\nCan be activated once per battle."
+          activations_per_battle: 1
+          activations:
+            - effects:
+                - "-15% Main battery reload time"
+                - "-15% Torpedo tube reload time"
+                - "-15% Aircraft preparation time"
+    - name: Speed Is Life
+      variants:
+        - battle_types: "Random, Co-op, Ranked and Brawl battles"
+          condition: Activates upon dealing a certain amount of torpedo damage.
+          progression: "The effect increases with damage dealt, up to 2 times per battle."
+          activations_per_battle: 2
+          activations:
+            - activation: 1
+              condition: Activates upon dealing 30000 HP of torpedo damage.
+              effects:
+                - +2% Ship speed
+            - activation: 2
+              condition: Activates upon dealing 60000 HP of torpedo damage.
+              effects:
+                - +5% Ship speed
+        - battle_types: Operations
+          condition: Activates upon dealing a certain amount of torpedo damage.
+          progression: "The effect increases with damage dealt, up to 2 times per battle."
+          activations_per_battle: 2
+          activations:
+            - activation: 1
+              condition: Activates upon dealing 30000 HP of torpedo damage.
+              effects:
+                - +4% Ship speed
+            - activation: 2
+              condition: Activates upon dealing 60000 HP of torpedo damage.
+              effects:
+                - +8% Ship speed
+talent_restrictions: Unavailable in Clan and Training Battles.

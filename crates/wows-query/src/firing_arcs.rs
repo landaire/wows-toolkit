@@ -429,6 +429,7 @@ impl GameData {
             upgrades: args.upgrades.as_deref().unwrap_or_default(),
             conditions_met: false,
             hp_percent: None,
+            commander: None,
         };
         let loadout = self.resolve_loadout(ship, &request, &mut interpretations)?;
         let target = match args.target_ship.as_deref() {

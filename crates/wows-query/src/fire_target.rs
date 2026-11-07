@@ -80,6 +80,7 @@ impl GameData {
                 upgrades: request.upgrades,
                 conditions_met: false,
                 hp_percent: None,
+                commander: None,
             },
             interpretations,
         )?;

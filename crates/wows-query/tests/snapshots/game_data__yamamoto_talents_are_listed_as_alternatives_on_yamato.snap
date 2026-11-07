@@ -1,0 +1,109 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: stats.talents
+---
+- talent: Second Wind
+  condition: Activates upon destroying a certain number of ships.
+  activations: 1
+  activation_condition: Activates upon destroying 2 ships.
+  changes:
+    - stat: Main Battery Reload Time
+      from: 30.0 s
+      to: 28.5 s
+      because:
+        - Second Wind x0.95 (-1.5)
+    - stat: Minimum Shell Type Switching Time
+      from: 30.0 s
+      to: 28.5 s
+      because:
+        - Second Wind x0.95 (-1.5)
+    - stat: Main battery damage per minute (HE)
+      from: 131400 hp/min
+      to: 138316 hp/min
+      because:
+        - Second Wind x0.95 (-1.5)
+    - stat: Main battery damage per minute (AP)
+      from: 266400 hp/min
+      to: 280421 hp/min
+      because:
+        - Second Wind x0.95 (-1.5)
+    - stat: "Fire starts per minute, all armament, every projectile hitting"
+      from: 39.38 fires/min
+      to: 39.71 fires/min
+      because:
+        - Second Wind x0.95 (-1.5)
+    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+      from: 6.30 fires/min
+      to: 6.63 fires/min
+      because:
+        - Second Wind x0.95 (-1.5)
+- talent: Second Wind
+  condition: Activates upon destroying a certain number of ships.
+  activations: 2
+  activation_condition: Activates upon destroying 5 ships.
+  changes:
+    - stat: Main Battery Reload Time
+      from: 30.0 s
+      to: 22.5 s
+      because:
+        - Second Wind x0.75 (-7.5)
+    - stat: Minimum Shell Type Switching Time
+      from: 30.0 s
+      to: 22.5 s
+      because:
+        - Second Wind x0.75 (-7.5)
+    - stat: Main battery damage per minute (HE)
+      from: 131400 hp/min
+      to: 175201 hp/min
+      because:
+        - Second Wind x0.75 (-7.5)
+    - stat: Main battery damage per minute (AP)
+      from: 266400 hp/min
+      to: 355202 hp/min
+      because:
+        - Second Wind x0.75 (-7.5)
+    - stat: "Fire starts per minute, all armament, every projectile hitting"
+      from: 39.38 fires/min
+      to: 41.48 fires/min
+      because:
+        - Second Wind x0.75 (-7.5)
+    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+      from: 6.30 fires/min
+      to: 8.40 fires/min
+      because:
+        - Second Wind x0.75 (-7.5)
+- talent: Second Wind
+  condition: Activates upon destroying a certain number of ships.
+  activations: 3
+  activation_condition: Activates upon destroying 7 ships.
+  changes:
+    - stat: Main Battery Reload Time
+      from: 30.0 s
+      to: 18.0 s
+      because:
+        - Second Wind x0.6 (-12)
+    - stat: Minimum Shell Type Switching Time
+      from: 30.0 s
+      to: 18.0 s
+      because:
+        - Second Wind x0.6 (-12)
+    - stat: Main battery damage per minute (HE)
+      from: 131400 hp/min
+      to: 219001 hp/min
+      because:
+        - Second Wind x0.6 (-12)
+    - stat: Main battery damage per minute (AP)
+      from: 266400 hp/min
+      to: 444002 hp/min
+      because:
+        - Second Wind x0.6 (-12)
+    - stat: "Fire starts per minute, all armament, every projectile hitting"
+      from: 39.38 fires/min
+      to: 43.58 fires/min
+      because:
+        - Second Wind x0.6 (-12)
+    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+      from: 6.30 fires/min
+      to: 10.50 fires/min
+      because:
+        - Second Wind x0.6 (-12)

@@ -101,6 +101,22 @@ pub enum QueryError {
     #[error("{query:?} matches several upgrades: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousUpgrade { query: String, candidates: Vec<String> },
 
+    #[error(
+        "no unique commander matches {query:?}; {}",
+        did_you_mean(suggestions, "use the commander's English name, e.g. \"Yamamoto Isoroku\"")
+    )]
+    CommanderNotFound { query: String, suggestions: Vec<String> },
+
+    #[error("{query:?} matches several unique commanders: {}; ask again with the exact name", candidates.join(", "))]
+    AmbiguousCommander { query: String, candidates: Vec<String> },
+
+    #[error(
+        "{commander} does not serve on {ship}; they serve on ships of {}{}",
+        nations.join(", "),
+        if ships.is_empty() { String::new() } else { format!(" and on {}", ships.join(", ")) }
+    )]
+    CommanderNotForShip { commander: String, ship: String, nations: Vec<String>, ships: Vec<String> },
+
     #[error("upgrade {upgrade} does not fit {ship}")]
     UpgradeNotApplicable { upgrade: String, ship: String },
 
@@ -238,6 +254,7 @@ impl QueryError {
             | Self::AmbiguousPlate { candidates, .. }
             | Self::AmbiguousSkill { candidates, .. }
             | Self::AmbiguousUpgrade { candidates, .. }
+            | Self::AmbiguousCommander { candidates, .. }
             | Self::AmbiguousConsumable { candidates, .. }
             | Self::AmbiguousModule { candidates, .. } => candidates,
             _ => &[],
@@ -250,6 +267,7 @@ impl QueryError {
             Self::ShipNotFound { suggestions, .. }
             | Self::SkillNotFound { suggestions, .. }
             | Self::UpgradeNotFound { suggestions, .. }
+            | Self::CommanderNotFound { suggestions, .. }
             | Self::ConsumableNotFound { suggestions, .. }
             | Self::StatNotFound { suggestions, .. } => suggestions,
             _ => &[],

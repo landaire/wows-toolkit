@@ -1,0 +1,229 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: stats.talents
+---
+- talent: Resuelto
+  condition: "Activates upon destroying or assisting in destroying every two enemy ships.\n\nCan be activated up to four times per battle."
+  activations: 1
+  changes:
+    - stat: Main Battery Reload Time
+      from: 13.0 s
+      to: 12.7 s
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: Minimum Shell Type Switching Time
+      from: 13.0 s
+      to: 12.7 s
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: Torpedo Tube Reload Time
+      from: 106.0 s
+      to: 103.4 s
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: Main battery damage per minute (AP)
+      from: 255462 hp/min
+      to: 262012 hp/min
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: Main battery damage per minute (HE)
+      from: 143308 hp/min
+      to: 146982 hp/min
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: "Fire starts per minute, all armament, every projectile hitting"
+      from: 28.73 fires/min
+      to: 28.90 fires/min
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+      from: 6.65 fires/min
+      to: 6.82 fires/min
+      because:
+        - Resuelto x0.975 (-0.325)
+- talent: Resuelto
+  condition: "Activates upon destroying or assisting in destroying every two enemy ships.\n\nCan be activated up to four times per battle."
+  activations: 4
+  changes:
+    - stat: Main Battery Reload Time
+      from: 13.0 s
+      to: 11.7 s
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: Minimum Shell Type Switching Time
+      from: 13.0 s
+      to: 11.7 s
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: Torpedo Tube Reload Time
+      from: 106.0 s
+      to: 95.8 s
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: Main battery damage per minute (AP)
+      from: 255462 hp/min
+      to: 282688 hp/min
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: Main battery damage per minute (HE)
+      from: 143308 hp/min
+      to: 158581 hp/min
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: "Fire starts per minute, all armament, every projectile hitting"
+      from: 28.73 fires/min
+      to: 29.43 fires/min
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+      from: 6.65 fires/min
+      to: 7.35 fires/min
+      because:
+        - Resuelto x0.904 (-1.252)
+- talent: La Orden se Cumplirá
+  condition: "Activates when your ship's HP falls to 75%, 50%, and 25% of her total HP (once per threshold).\n\nCan be activated up to three times."
+  activations: 1
+  changes:
+    - stat: Consumable Reload Time (crashCrew)
+      from: 60.0 s
+      to: 58.2 s
+      because:
+        - La Orden se Cumplirá x0.97 (-1.8)
+    - stat: Consumable Reload Time (regenCrew)
+      from: 80.0 s
+      to: 77.6 s
+      because:
+        - La Orden se Cumplirá x0.97 (-2.4)
+    - stat: Consumable Reload Time (sonar)
+      from: 120.0 s
+      to: 112.8 s
+      because:
+        - La Orden se Cumplirá x0.94 (-7.2)
+    - stat: Consumable Reload Time (scout)
+      from: 240.0 s
+      to: 225.6 s
+      because:
+        - La Orden se Cumplirá x0.94 (-14.4)
+    - stat: Consumable Reload Time (fighter)
+      from: 90.0 s
+      to: 84.6 s
+      because:
+        - La Orden se Cumplirá x0.94 (-5.4)
+    - stat: Time to use every charge (regenCrew)
+      from: 324.0 s
+      to: 316.8 s
+      because:
+        - La Orden se Cumplirá x0.97 (-2.4)
+    - stat: Time to use every charge (sonar)
+      from: 660.0 s
+      to: 638.4 s
+      because:
+        - La Orden se Cumplirá x0.94 (-7.2)
+    - stat: Time to use every charge (scout)
+      from: 1360.0 s
+      to: 1302.4 s
+      because:
+        - La Orden se Cumplirá x0.94 (-14.4)
+    - stat: Time to use every charge (fighter)
+      from: 450.0 s
+      to: 433.8 s
+      because:
+        - La Orden se Cumplirá x0.94 (-5.4)
+- talent: La Orden se Cumplirá
+  condition: "Activates when your ship's HP falls to 75%, 50%, and 25% of her total HP (once per threshold).\n\nCan be activated up to three times."
+  activations: 2
+  changes:
+    - stat: Consumable Reload Time (crashCrew)
+      from: 60.0 s
+      to: 56.5 s
+      because:
+        - La Orden se Cumplirá x0.941 (-3.546)
+    - stat: Consumable Reload Time (regenCrew)
+      from: 80.0 s
+      to: 75.3 s
+      because:
+        - La Orden se Cumplirá x0.941 (-4.728)
+    - stat: Consumable Reload Time (sonar)
+      from: 120.0 s
+      to: 106.0 s
+      because:
+        - La Orden se Cumplirá x0.884 (-13.968)
+    - stat: Consumable Reload Time (scout)
+      from: 240.0 s
+      to: 212.1 s
+      because:
+        - La Orden se Cumplirá x0.884 (-27.936)
+    - stat: Consumable Reload Time (fighter)
+      from: 90.0 s
+      to: 79.5 s
+      because:
+        - La Orden se Cumplirá x0.884 (-10.476)
+    - stat: Time to use every charge (regenCrew)
+      from: 324.0 s
+      to: 309.8 s
+      because:
+        - La Orden se Cumplirá x0.941 (-4.728)
+    - stat: Time to use every charge (sonar)
+      from: 660.0 s
+      to: 618.1 s
+      because:
+        - La Orden se Cumplirá x0.884 (-13.968)
+    - stat: Time to use every charge (scout)
+      from: 1360.0 s
+      to: 1248.3 s
+      because:
+        - La Orden se Cumplirá x0.884 (-27.936)
+    - stat: Time to use every charge (fighter)
+      from: 450.0 s
+      to: 418.6 s
+      because:
+        - La Orden se Cumplirá x0.884 (-10.476)
+- talent: La Orden se Cumplirá
+  condition: "Activates when your ship's HP falls to 75%, 50%, and 25% of her total HP (once per threshold).\n\nCan be activated up to three times."
+  activations: 3
+  changes:
+    - stat: Consumable Reload Time (crashCrew)
+      from: 60.0 s
+      to: 54.8 s
+      because:
+        - La Orden se Cumplirá x0.913 (-5.24)
+    - stat: Consumable Reload Time (regenCrew)
+      from: 80.0 s
+      to: 73.0 s
+      because:
+        - La Orden se Cumplirá x0.913 (-6.986)
+    - stat: Consumable Reload Time (sonar)
+      from: 120.0 s
+      to: 99.7 s
+      because:
+        - La Orden se Cumplirá x0.831 (-20.33)
+    - stat: Consumable Reload Time (scout)
+      from: 240.0 s
+      to: 199.3 s
+      because:
+        - La Orden se Cumplirá x0.831 (-40.66)
+    - stat: Consumable Reload Time (fighter)
+      from: 90.0 s
+      to: 74.8 s
+      because:
+        - La Orden se Cumplirá x0.831 (-15.247)
+    - stat: Time to use every charge (regenCrew)
+      from: 324.0 s
+      to: 303.0 s
+      because:
+        - La Orden se Cumplirá x0.913 (-6.986)
+    - stat: Time to use every charge (sonar)
+      from: 660.0 s
+      to: 599.0 s
+      because:
+        - La Orden se Cumplirá x0.831 (-20.33)
+    - stat: Time to use every charge (scout)
+      from: 1360.0 s
+      to: 1197.4 s
+      because:
+        - La Orden se Cumplirá x0.831 (-40.66)
+    - stat: Time to use every charge (fighter)
+      from: 450.0 s
+      to: 404.3 s
+      because:
+        - La Orden se Cumplirá x0.831 (-15.247)
