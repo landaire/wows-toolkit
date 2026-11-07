@@ -843,7 +843,7 @@ impl Derivation<'_> {
 
         for card in &self.stats.consumables {
             let consumable = &card.stats;
-            let (AmmoCount::Finite(charges), Some(work_time)) = (consumable.charges, consumable.work_time) else {
+            let (Some(AmmoCount::Finite(charges)), Some(work_time)) = (consumable.charges, consumable.work_time) else {
                 continue;
             };
             let cycle = work_time.value() + consumable.reload_time.value();

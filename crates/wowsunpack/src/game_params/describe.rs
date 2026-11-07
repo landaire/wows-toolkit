@@ -602,11 +602,12 @@ mod tests {
         let cat = AbilityCategory::builder()
             .consumable_type("foo".to_string())
             .icon_id("icon".to_string())
-            .num_consumables(crate::game_types::ChargeCount::Finite(2))
-            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased {
+                charges: crate::game_types::ChargeCount::Finite(2),
+                work_time: 10.0,
+            })
             .preparation_time(0.0)
             .reload_time(5.0)
-            .work_time(10.0)
             .effect_fields(fields)
             .build();
 

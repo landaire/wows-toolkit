@@ -76,4 +76,14 @@ slots:
         reload_s: 80
         action_time_s: 28
         heal_percent_per_s: 0.5
+        heal:
+          per_charge:
+            hp: 7084
+            percent_of_max_hp: 14
+            max_hp: 50600
+          per_battle:
+            hp: 28336
+            percent_of_max_hp: 56
+            max_hp: 50600
+          note: "Repair Party heal ceilings: per_charge is heal_percent_per_s x action time x max_hp, per_battle every charge used for its whole action time (or the whole capacity of a time-based Repair Party). The Repair Party restores only repairable damage: each damage type leaves a share of its damage that can never be healed, so a charge restores its full amount only when the ship has taken at least that much repairable damage. max_hp is that of the hull the values use: the stock hull at base and in the top-level values, the best-fit build's hull in builds.best, and it includes skills and upgrades that add HP."
 note: "Each slot carries one consumable in battle. A slot with a choice carries only the option the player picks in port, so options of one slot are never carried together."

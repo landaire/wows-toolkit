@@ -1,0 +1,149 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: julio_with_instructions
+---
+special_ability:
+  - "Combat Instructions: Armor-Piercing Barrage"
+AP:
+  ammo: AP
+  damage: 3150
+  barrels: 6
+  rates:
+    stat: main battery AP damage rate
+    unit: HP/min
+    builds:
+      base:
+        damage_per_minute: 354375
+        damage_per_second: 5906.3
+        bearing: 90
+        all_barrels_ceiling: 354375
+        by_bearing:
+          - bearing: 0
+            starboard: 236250
+            port: 236250
+          - bearing: 30
+            starboard: 354375
+            port: 354375
+          - bearing: 45
+            starboard: 354375
+            port: 354375
+          - bearing: 60
+            starboard: 354375
+            port: 354375
+          - bearing: 90
+            starboard: 354375
+            port: 354375
+          - bearing: 120
+            starboard: 354375
+            port: 354375
+          - bearing: 135
+            starboard: 354375
+            port: 354375
+          - bearing: 150
+            starboard: 236250
+            port: 236250
+          - bearing: 180
+            starboard: 118125
+            port: 118125
+      best:
+        value:
+          damage_per_minute: 455686
+          damage_per_second: 7594.8
+          bearing: 90
+          all_barrels_ceiling: 455686
+          by_bearing:
+            - bearing: 0
+              starboard: 303790
+              port: 303790
+            - bearing: 30
+              starboard: 455686
+              port: 455686
+            - bearing: 45
+              starboard: 455686
+              port: 455686
+            - bearing: 60
+              starboard: 455686
+              port: 455686
+            - bearing: 90
+              starboard: 455686
+              port: 455686
+            - bearing: 120
+              starboard: 455686
+              port: 455686
+            - bearing: 135
+              starboard: 455686
+              port: 455686
+            - bearing: 150
+              starboard: 303790
+              port: 303790
+            - bearing: 180
+              starboard: 151895
+              port: 151895
+        assumed:
+          - Extra-Heavy Ammunition
+          - Main Battery and AA Specialist
+          - Main Battery Modification 3
+        tier_fillers:
+          - Consumable Specialist
+      alternatives:
+        - label: without Extra-Heavy Ammunition
+          value:
+            damage_per_minute: 423894
+            damage_per_second: 7064.9
+            bearing: 90
+            all_barrels_ceiling: 423894
+          assumed:
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+            - Consumable Enhancements
+        - label: without Main Battery and AA Specialist
+          value:
+            damage_per_minute: 432901
+            damage_per_second: 7215
+            bearing: 90
+            all_barrels_ceiling: 432901
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+        - label: without Main Battery Modification 3
+          value:
+            damage_per_minute: 401003
+            damage_per_second: 6683.4
+            bearing: 90
+            all_barrels_ceiling: 401003
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery and AA Specialist
+          tier_fillers:
+            - Consumable Specialist
+        - label: with Fearless Brawler active
+          value:
+            damage_per_minute: 506317
+            damage_per_second: 8438.6
+            bearing: 90
+            all_barrels_ceiling: 506317
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+            - Fearless Brawler
+          tier_fillers:
+            - Consumable Specialist
+          note: Reduces main battery reload time while your ship remains detected by an enemy.
+        - label: with Main Battery Reload Booster active
+          value:
+            damage_per_minute: 911371
+            damage_per_second: 15189.5
+            bearing: 90
+            all_barrels_ceiling: 911371
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+          note: "Only while Main Battery Reload Booster is active: 80 s of use per battle in activations of at least 1 s, 5 s between activations, stock build. It multiplies the main battery reload time by 0.5."

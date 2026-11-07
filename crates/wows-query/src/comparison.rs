@@ -49,6 +49,7 @@ use crate::builds::Outcome;
 use crate::builds::Planner;
 use crate::builds::StatAmount;
 use crate::builds::StatPlan;
+use crate::consumables::Capacity;
 use crate::consumables::consumable_stats;
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -1512,12 +1513,17 @@ impl GameData {
                         let param = self.provider().game_param_by_name(ability)?;
                         let category = param.ability()?.get_category(variant)?;
                         let stats = consumable_stats(self.consumable_name(ability, category), category, bundle);
-                        let charges = match stats.charges {
-                            Charges::Limited(1) => "1 charge".to_owned(),
-                            Charges::Limited(count) => format!("{count} charges"),
-                            Charges::Unlimited => "unlimited charges".to_owned(),
+                        let uses = match (stats.charges, stats.capacity_s) {
+                            (Some(Charges::Limited(1)), _) => "1 charge".to_owned(),
+                            (Some(Charges::Limited(count)), _) => format!("{count} charges"),
+                            (Some(Charges::Unlimited), _) => "unlimited charges".to_owned(),
+                            (None, Some(Capacity::Limited(capacity))) => format!("{} s of use", capacity.value()),
+                            (None, Some(Capacity::Unlimited)) => "unlimited use".to_owned(),
+                            (None, None) => {
+                                return Some(format!("{} ({} s reload)", stats.name, stats.reload_s.value()));
+                            }
                         };
-                        Some(format!("{} ({charges}, {} s reload)", stats.name, stats.reload_s.value()))
+                        Some(format!("{} ({uses}, {} s reload)", stats.name, stats.reload_s.value()))
                     })
                     .collect();
                 (!options.is_empty()).then(|| options.join(" or "))

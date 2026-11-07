@@ -31,6 +31,7 @@ use crate::game_params::ttx::provenance::Recorder;
 use crate::game_params::ttx::provenance::ShipStatsProvenance;
 use crate::game_params::ttx::selection::ShipUpgradeSelection;
 use crate::game_params::types::ArmorMap;
+use crate::game_params::types::ConsumableCapacity;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::Km;
 use crate::game_params::types::Param;
@@ -426,11 +427,11 @@ fn record_consumable_stats<R: Recorder>(
         );
     }
 
-    // charges: always present. Provenance records numeric rows only, so an
+    // charges: COUNT_BASED only. Provenance records numeric rows only, so an
     // unlimited pool has no attribution.
     match (base_stats.charges, stats.charges) {
-        (AmmoCount::Infinite, AmmoCount::Infinite) => {}
-        (AmmoCount::Finite(base_n), AmmoCount::Finite(final_n)) => {
+        (None, None) | (Some(AmmoCount::Infinite), Some(AmmoCount::Infinite)) => {}
+        (Some(AmmoCount::Finite(base_n)), Some(AmmoCount::Finite(final_n))) => {
             rec.record(
                 TtxStat::ConsumableCharges,
                 Some(label),
@@ -474,8 +475,11 @@ fn record_consumable_stats<R: Recorder>(
         );
     }
 
-    // max_capacity: Some only for TIME_BASED consumables
-    if let (Some(base_mc), Some(final_mc)) = (base_stats.max_capacity, stats.max_capacity) {
+    // max_capacity: Some only for TIME_BASED consumables; an unlimited pool
+    // has no numeric row to attribute.
+    if let (Some(ConsumableCapacity::Seconds(base_mc)), Some(ConsumableCapacity::Seconds(final_mc))) =
+        (base_stats.max_capacity, stats.max_capacity)
+    {
         rec.record(TtxStat::ConsumableMaxCapacity, Some(label), base_mc, base_source.clone(), final_mc, |b| {
             for m in &applied.max_capacity {
                 match m.op {
@@ -1290,11 +1294,12 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("sonar".to_string())
             .group(ConsumableGroup::Ship)
-            .num_consumables(ChargeCount::Finite(SONAR_BASE_CHARGES))
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased {
+                charges: ChargeCount::Finite(SONAR_BASE_CHARGES),
+                work_time: SONAR_WORK_TIME_S,
+            })
             .preparation_time(0.0)
             .reload_time(SONAR_RELOAD_S)
-            .work_time(SONAR_WORK_TIME_S)
             .effect_fields(BTreeMap::new())
             .build()
     }

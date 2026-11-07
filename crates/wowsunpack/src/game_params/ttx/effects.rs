@@ -1166,11 +1166,12 @@ mod tests {
         let cat = AbilityCategory::builder()
             .consumable_type("scout".to_string())
             .group(crate::game_params::types::ConsumableGroup::Ship)
-            .num_consumables(crate::game_types::ChargeCount::Finite(2))
-            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased {
+                charges: crate::game_types::ChargeCount::Finite(2),
+                work_time: 20.0,
+            })
             .preparation_time(0.0)
             .reload_time(240.0)
-            .work_time(20.0)
             .effect_fields(fields)
             .build();
         let ability = Ability::builder()
@@ -1244,11 +1245,12 @@ mod tests {
         let cat = AbilityCategory::builder()
             .consumable_type("speedBoosters".to_string())
             .group(crate::game_params::types::ConsumableGroup::Ship)
-            .num_consumables(crate::game_types::ChargeCount::Finite(3))
-            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased {
+                charges: crate::game_types::ChargeCount::Finite(3),
+                work_time: 120.0,
+            })
             .preparation_time(0.0)
             .reload_time(180.0)
-            .work_time(120.0)
             .effect_fields(fields)
             .modifiers(vec![uniform_modifier("GMIdealRadius", 0.9)])
             .build();
@@ -1321,11 +1323,12 @@ mod tests {
         let cat = AbilityCategory::builder()
             .consumable_type("crashCrew".to_string())
             .group(crate::game_params::types::ConsumableGroup::Ship)
-            .num_consumables(crate::game_types::ChargeCount::Unlimited)
-            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased {
+                charges: crate::game_types::ChargeCount::Unlimited,
+                work_time: 15.0,
+            })
             .preparation_time(0.0)
             .reload_time(120.0)
-            .work_time(15.0)
             .effect_fields(fields)
             .build();
         let ability = Ability::builder()

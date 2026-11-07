@@ -1,0 +1,168 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: consumables
+---
+ship:
+  name: Valparaíso
+  index: PVSB719
+  tier: 9
+  class: battleship
+  nation: Pan_America
+  group: special
+  category: premium
+  status: released
+slots:
+  - slot: 2
+    options:
+      - name: Repair Party
+        type: regenCrew
+        charges: 6
+        reload_s: 80
+        action_time_s: 8
+        heal_percent_per_s: 2.1
+        heal:
+          per_charge:
+            hp: 12029
+            percent_of_max_hp: 16.8
+            max_hp: 71600
+          per_battle:
+            hp: 72173
+            percent_of_max_hp: 100.8
+            max_hp: 71600
+          note: "Repair Party heal ceilings: per_charge is heal_percent_per_s x action time x max_hp, per_battle every charge used for its whole action time (or the whole capacity of a time-based Repair Party). The Repair Party restores only repairable damage: each damage type leaves a share of its damage that can never be healed, so a charge restores its full amount only when the ship has taken at least that much repairable damage. max_hp is that of the hull the values use: the stock hull at base and in the top-level values, the best-fit build's hull in builds.best, and it includes skills and upgrades that add HP."
+        builds:
+          action_time:
+            stat: Repair Party action time
+            unit: s
+            builds:
+              base: 8
+              best:
+                value: 9.68
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value: 8.8
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value: 8.8
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+          charges:
+            stat: Repair Party charges
+            unit: charges
+            builds:
+              base: 6
+              best:
+                value: 7
+                assumed:
+                  - Emergency Repair Expert
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value: 6
+                  assumed: []
+          reload:
+            stat: Repair Party reload
+            unit: s
+            builds:
+              base: 80
+              best:
+                value: 77.6
+                assumed:
+                  - Emergency Repair Specialist
+              alternatives:
+                - label: without Emergency Repair Specialist
+                  value: 80
+                  assumed: []
+          heal_per_charge:
+            stat: Repair Party heal per charge
+            unit: HP
+            builds:
+              base:
+                hp: 12029
+                percent_of_max_hp: 16.8
+                max_hp: 71600
+              best:
+                value:
+                  hp: 14555
+                  percent_of_max_hp: 20.33
+                  max_hp: 71600
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value:
+                    hp: 13232
+                    percent_of_max_hp: 18.48
+                    max_hp: 71600
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 13232
+                    percent_of_max_hp: 18.48
+                    max_hp: 71600
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+          heal_per_battle:
+            stat: Repair Party heal per battle
+            unit: HP
+            builds:
+              base:
+                hp: 72173
+                percent_of_max_hp: 100.8
+                max_hp: 71600
+              best:
+                value:
+                  hp: 101884
+                  percent_of_max_hp: 142.3
+                  max_hp: 71600
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value:
+                    hp: 79390
+                    percent_of_max_hp: 110.88
+                    max_hp: 71600
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 92622
+                    percent_of_max_hp: 129.36
+                    max_hp: 71600
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training

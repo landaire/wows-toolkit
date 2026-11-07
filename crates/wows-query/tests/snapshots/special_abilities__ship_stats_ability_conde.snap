@@ -402,6 +402,19 @@ build_stats:
                 - Consumable Specialist
                 - Focus Fire Training
               note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+            - label: with Main Battery Reload Booster active
+              value:
+                damage_per_minute: 413698
+                damage_per_second: 6895
+                bearing: 90
+                all_barrels_ceiling: 413698
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Only while Main Battery Reload Booster is active: 4 charges of 15 s, 80 s cooldown, stock build. It multiplies the main battery reload time by 0.5."
       burst_damage: 148800
       during_burst:
         stat: main battery AP damage rate during a burst
@@ -628,6 +641,19 @@ build_stats:
                 - Consumable Specialist
                 - Focus Fire Training
               note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+            - label: with Main Battery Reload Booster active
+              value:
+                damage_per_minute: 237670
+                damage_per_second: 3961.2
+                bearing: 90
+                all_barrels_ceiling: 237670
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+              tier_fillers:
+                - Consumable Specialist
+                - Focus Fire Training
+              note: "Only while Main Battery Reload Booster is active: 4 charges of 15 s, 80 s cooldown, stock build. It multiplies the main battery reload time by 0.5."
       burst_damage: 81600
       during_burst:
         stat: main battery HE damage rate during a burst
@@ -1270,6 +1296,7 @@ build_stats:
     - "torpedo_reload_buffs are consumables, such as Auxiliary and Torpedo Weaponry Coordination, whose buff multiplies the launcher reload time by reload_factor_while_active for action_time; a reload in progress speeds up while it lasts. Their torpedoes_per_minute and torpedo_damage average one cycle of action_time + cooldown with the consumable used whenever it is ready: the launcher reload rate times (cooldown + action_time / reload_factor_while_active) / (action_time + cooldown), against one target and with every launcher as for the launcher reload. They hold only while charges last, charges x (action_time + cooldown); then the plain rates apply. With a choice, the ship carries the consumable only in place of the slot's other options."
     - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
     - "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval."
+    - "The main battery alternative \"with Main Battery Reload Booster active\" is the rate while the booster runs: the main battery reload time times main_battery_reload_factor. It holds only while the booster is active; with special_ability_active it is the rate with both the special ability and the booster active."
   fires_per_minute:
     total:
       stat: "fire starts per minute, all armament"

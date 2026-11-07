@@ -4,6 +4,7 @@ use wowsunpack::Rc;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::modifiers::ModifierError;
+use wowsunpack::game_params::types::ConsumableLifecycle;
 use wowsunpack::game_params::types::CrewSkillModifier;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
@@ -204,14 +205,25 @@ fn resolve_slots<P: GameParamProvider>(
         };
 
         let consumable_type_raw = category.consumable_type_raw();
-        let base_charges = category.num_consumables();
+        // A slot tracks charges and an action time, which a TIME_BASED pool
+        // does not have.
+        let ConsumableLifecycle::CountBased { charges: base_charges, work_time: base_work_time } = category.lifecycle()
+        else {
+            tracing::debug!(
+                ship = ship.index(),
+                slot_index,
+                variant_name,
+                "resolve_slots: time-based consumable has no charges to track"
+            );
+            continue;
+        };
         let bonus_for_slot =
             if base_charges.is_unlimited() { 0 } else { modifiers.consumable_charge_bonus(consumable_type_raw) };
         let total_charges = base_charges.saturating_add(bonus_for_slot);
 
         let work_factor = modifiers.consumable_work_time_factor(consumable_type_raw);
         let reload_factor = modifiers.consumable_reload_factor(consumable_type_raw);
-        let work_time = Duration::from_secs_f32((category.work_time() * work_factor).max(0.0));
+        let work_time = Duration::from_secs_f32((base_work_time * work_factor).max(0.0));
         let reload_time = Duration::from_secs_f32((category.reload_time() * reload_factor).max(0.0));
 
         let regen_factor = modifiers.regeneration_hp_speed_factor();

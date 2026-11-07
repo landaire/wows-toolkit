@@ -89,6 +89,16 @@ slots:
         reload_s: 80
         action_time_s: 28
         heal_percent_per_s: 0.66
+        heal:
+          per_charge:
+            hp: 14987
+            percent_of_max_hp: 18.48
+            max_hp: 81100
+          per_battle:
+            hp: 59949
+            percent_of_max_hp: 73.92
+            max_hp: 81100
+          note: "Repair Party heal ceilings: per_charge is heal_percent_per_s x action time x max_hp, per_battle every charge used for its whole action time (or the whole capacity of a time-based Repair Party). The Repair Party restores only repairable damage: each damage type leaves a share of its damage that can never be healed, so a charge restores its full amount only when the ship has taken at least that much repairable damage. max_hp is that of the hull the values use: the stock hull at base and in the top-level values, the best-fit build's hull in builds.best, and it includes skills and upgrades that add HP."
         builds:
           action_time:
             stat: Repair Party action time
@@ -147,6 +157,84 @@ slots:
                 - label: without Emergency Repair Specialist
                   value: 80
                   assumed: []
+          heal_per_charge:
+            stat: Repair Party heal per charge
+            unit: HP
+            builds:
+              base:
+                hp: 14987
+                percent_of_max_hp: 18.48
+                max_hp: 81100
+              best:
+                value:
+                  hp: 18135
+                  percent_of_max_hp: 22.36
+                  max_hp: 81100
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value:
+                    hp: 16486
+                    percent_of_max_hp: 20.33
+                    max_hp: 81100
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 16486
+                    percent_of_max_hp: 20.33
+                    max_hp: 81100
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
+          heal_per_battle:
+            stat: Repair Party heal per battle
+            unit: HP
+            builds:
+              base:
+                hp: 59949
+                percent_of_max_hp: 73.92
+                max_hp: 81100
+              best:
+                value:
+                  hp: 90673
+                  percent_of_max_hp: 111.8
+                  max_hp: 81100
+                assumed:
+                  - Emergency Repair Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Emergency Repair Specialist
+                  - AA Defense and ASW Expert
+                  - Focus Fire Training
+              alternatives:
+                - label: without Emergency Repair Expert
+                  value:
+                    hp: 65944
+                    percent_of_max_hp: 81.31
+                    max_hp: 81100
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 82430
+                    percent_of_max_hp: 101.64
+                    max_hp: 81100
+                  assumed:
+                    - Emergency Repair Expert
+                  tier_fillers:
+                    - Emergency Repair Specialist
+                    - AA Defense and ASW Expert
+                    - Focus Fire Training
   - slot: 3
     options:
       - name: Gun Crew Assistance

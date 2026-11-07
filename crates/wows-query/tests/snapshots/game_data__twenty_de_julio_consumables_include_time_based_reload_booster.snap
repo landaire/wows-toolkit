@@ -1,0 +1,321 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: consumables
+---
+ship:
+  name: 20 de Julio
+  index: PVSD010
+  tier: 10
+  class: destroyer
+  nation: Pan_America
+  group: upgradeable
+  category: tech_tree
+  status: released
+slots:
+  - slot: 1
+    options:
+      - name: Damage Control Party
+        type: crashCrew
+        charges: unlimited
+        reload_s: 40
+        action_time_s: 5
+        builds:
+          action_time:
+            stat: Damage Control Party action time
+            unit: s
+            builds:
+              base: 5
+              best:
+                value: 7.7
+                assumed:
+                  - Damage Control Party Modification 1
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Damage Control Party Modification 1
+                  value: 5.5
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value: 7
+                  assumed:
+                    - Damage Control Party Modification 1
+          charges:
+            stat: Damage Control Party charges
+            unit: charges
+            builds:
+              base: unlimited
+              best:
+                value: unlimited
+                assumed: []
+          reload:
+            stat: Damage Control Party reload
+            unit: s
+            builds:
+              base: 40
+              best:
+                value: 40
+                assumed: []
+  - slot: 2
+    options:
+      - name: Engine Boost
+        type: speedBoosters
+        charges: 3
+        reload_s: 120
+        action_time_s: 120
+        builds:
+          action_time:
+            stat: Engine Boost action time
+            unit: s
+            builds:
+              base: 120
+              best:
+                value: 188.76
+                assumed:
+                  - Consumable Enhancements
+                  - Engine Boost Modification 1
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Enhancements
+                  value: 171.6
+                  assumed:
+                    - Engine Boost Modification 1
+                    - Ship Consumable Modification 1
+                - label: without Engine Boost Modification 1
+                  value: 145.2
+                  assumed:
+                    - Consumable Enhancements
+                    - Ship Consumable Modification 1
+                  tier_fillers:
+                    - Consumable Specialist
+                - label: without Ship Consumable Modification 1
+                  value: 171.6
+                  assumed:
+                    - Consumable Enhancements
+                    - Engine Boost Modification 1
+                  tier_fillers:
+                    - Consumable Specialist
+          charges:
+            stat: Engine Boost charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 4
+                assumed:
+                  - Superintendent
+                tier_fillers:
+                  - Consumable Specialist
+                  - Extra-Heavy Ammunition
+              alternatives:
+                - label: without Superintendent
+                  value: 3
+                  assumed: []
+          reload:
+            stat: Engine Boost reload
+            unit: s
+            builds:
+              base: 120
+              best:
+                value: 111
+                assumed:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Specialist
+                  value: 120
+                  assumed: []
+  - slot: 3
+    options:
+      - name: Repair Party
+        type: regenCrew
+        charges: 3
+        reload_s: 80
+        action_time_s: 20
+        heal_percent_per_s: 1
+        heal:
+          per_charge:
+            hp: 3760
+            percent_of_max_hp: 20
+            max_hp: 18800
+          per_battle:
+            hp: 11280
+            percent_of_max_hp: 60
+            max_hp: 18800
+          note: "Repair Party heal ceilings: per_charge is heal_percent_per_s x action time x max_hp, per_battle every charge used for its whole action time (or the whole capacity of a time-based Repair Party). The Repair Party restores only repairable damage: each damage type leaves a share of its damage that can never be healed, so a charge restores its full amount only when the ship has taken at least that much repairable damage. max_hp is that of the hull the values use: the stock hull at base and in the top-level values, the best-fit build's hull in builds.best, and it includes skills and upgrades that add HP."
+        builds:
+          action_time:
+            stat: Repair Party action time
+            unit: s
+            builds:
+              base: 20
+              best:
+                value: 22
+                assumed:
+                  - Ship Consumable Modification 1
+              alternatives:
+                - label: without Ship Consumable Modification 1
+                  value: 20
+                  assumed: []
+          charges:
+            stat: Repair Party charges
+            unit: charges
+            builds:
+              base: 3
+              best:
+                value: 4
+                assumed:
+                  - Superintendent
+                tier_fillers:
+                  - Consumable Specialist
+                  - Extra-Heavy Ammunition
+              alternatives:
+                - label: without Superintendent
+                  value: 3
+                  assumed: []
+          reload:
+            stat: Repair Party reload
+            unit: s
+            builds:
+              base: 80
+              best:
+                value: 80
+                assumed: []
+          heal_per_charge:
+            stat: Repair Party heal per charge
+            unit: HP
+            builds:
+              base:
+                hp: 3760
+                percent_of_max_hp: 20
+                max_hp: 18800
+              best:
+                value:
+                  hp: 4906
+                  percent_of_max_hp: 22
+                  max_hp: 22300
+                assumed:
+                  - Survivability Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Consumable Specialist
+                  - Extra-Heavy Ammunition
+              alternatives:
+                - label: without Survivability Expert
+                  value:
+                    hp: 4136
+                    percent_of_max_hp: 22
+                    max_hp: 18800
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 4460
+                    percent_of_max_hp: 20
+                    max_hp: 22300
+                  assumed:
+                    - Survivability Expert
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Extra-Heavy Ammunition
+          heal_per_battle:
+            stat: Repair Party heal per battle
+            unit: HP
+            builds:
+              base:
+                hp: 11280
+                percent_of_max_hp: 60
+                max_hp: 18800
+              best:
+                value:
+                  hp: 19624
+                  percent_of_max_hp: 88
+                  max_hp: 22300
+                assumed:
+                  - Superintendent
+                  - Survivability Expert
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Consumable Specialist
+                  - Extra-Heavy Ammunition
+              alternatives:
+                - label: without Superintendent
+                  value:
+                    hp: 14718
+                    percent_of_max_hp: 66
+                    max_hp: 22300
+                  assumed:
+                    - Survivability Expert
+                    - Ship Consumable Modification 1
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Extra-Heavy Ammunition
+                - label: without Survivability Expert
+                  value:
+                    hp: 16544
+                    percent_of_max_hp: 88
+                    max_hp: 18800
+                  assumed:
+                    - Superintendent
+                    - Ship Consumable Modification 1
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Extra-Heavy Ammunition
+                - label: without Ship Consumable Modification 1
+                  value:
+                    hp: 17840
+                    percent_of_max_hp: 80
+                    max_hp: 22300
+                  assumed:
+                    - Superintendent
+                    - Survivability Expert
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Extra-Heavy Ammunition
+  - slot: 4
+    options:
+      - name: Main Battery Reload Booster
+        type: artilleryBoosters
+        reload_s: 5
+        capacity_s: 80
+        min_activation_s: 1
+        main_battery_reload_factor: 0.5
+        builds:
+          capacity:
+            stat: Main Battery Reload Booster capacity
+            unit: s
+            builds:
+              base: 80
+              best:
+                value: 88.15
+                assumed:
+                  - Superintendent
+                  - Ship Consumable Modification 1
+                tier_fillers:
+                  - Consumable Specialist
+                  - Extra-Heavy Ammunition
+              alternatives:
+                - label: without Superintendent
+                  value: 82
+                  assumed:
+                    - Ship Consumable Modification 1
+                - label: without Ship Consumable Modification 1
+                  value: 86
+                  assumed:
+                    - Superintendent
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Extra-Heavy Ammunition
+          reload:
+            stat: Main Battery Reload Booster reload
+            unit: s
+            builds:
+              base: 5
+              best:
+                value: 4.63
+                assumed:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Consumable Specialist
+                  value: 5
+                  assumed: []

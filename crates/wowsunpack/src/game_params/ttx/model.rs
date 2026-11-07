@@ -7,6 +7,7 @@
 
 use crate::game_params::ttx::consumables::ConsumableCard;
 use crate::game_params::ttx::labels::TtxStat;
+use crate::game_params::types::ConsumableCapacity;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
 use crate::game_params::types::MetersPerSecond;
@@ -516,9 +517,15 @@ fn push_consumable_rows(
         let s = &c.stats;
         item(rows, TtxStat::ConsumableReloadTime, q, Some(StatValue::Seconds(s.reload_time)));
         item(rows, TtxStat::ConsumablePreparationTime, q, s.preparation_time.map(StatValue::Seconds));
-        item(rows, TtxStat::ConsumableCharges, q, Some(StatValue::Ammo(s.charges)));
+        item(rows, TtxStat::ConsumableCharges, q, s.charges.map(StatValue::Ammo));
         item(rows, TtxStat::ConsumableWorkTime, q, s.work_time.map(StatValue::Seconds));
-        item(rows, TtxStat::ConsumableMaxCapacity, q, s.max_capacity.map(StatValue::Float));
+        // The client labels an unlimited pool as infinite capacity
+        // (`IDS_PARAMS_MODIFIER_CONSUMABLES_INFINITY_CAPACITY`).
+        let capacity = s.max_capacity.map(|capacity| match capacity {
+            ConsumableCapacity::Seconds(seconds) => StatValue::Float(seconds),
+            ConsumableCapacity::Unlimited => StatValue::Ammo(AmmoCount::Infinite),
+        });
+        item(rows, TtxStat::ConsumableMaxCapacity, q, capacity);
         item(rows, TtxStat::ConsumableDetectionRadius, q, s.detection_radius.map(StatValue::Meters));
         item(rows, TtxStat::ConsumableRegenerationHpSpeed, q, s.regeneration_hp_speed.map(StatValue::Float));
         item(rows, TtxStat::ConsumableSmokeRadius, q, s.smoke_radius.map(StatValue::Km));
@@ -1022,7 +1029,7 @@ mod tests {
         use crate::game_params::ttx::consumables::EffectiveConsumable;
         use crate::recognized::Recognized;
 
-        // A card with all 14 EffectiveConsumable fields present so every
+        // A card with every EffectiveConsumable field present so every
         // Consumable* TtxStat variant is reachable from rows().
         let full_consumable = ConsumableCard {
             consumable: Recognized::Unknown("test".to_string()),
@@ -1030,9 +1037,11 @@ mod tests {
             stats: EffectiveConsumable {
                 reload_time: Seconds::from(1.0),
                 preparation_time: Some(Seconds::from(1.0)),
-                charges: AmmoCount::Finite(1),
+                charges: Some(AmmoCount::Finite(1)),
                 work_time: Some(Seconds::from(1.0)),
-                max_capacity: Some(1.0),
+                max_capacity: Some(ConsumableCapacity::Seconds(1.0)),
+                min_work_time: Some(Seconds::from(1.0)),
+                capacity_regen: Some(1.0),
                 detection_radius: Some(Meters::from(1.0)),
                 regeneration_hp_speed: Some(1.0),
                 smoke_radius: Some(Km::from(1.0)),
@@ -1148,9 +1157,11 @@ mod tests {
             stats: EffectiveConsumable {
                 reload_time: Seconds::from(120.0),
                 preparation_time: Some(Seconds::from(0.0)),
-                charges: AmmoCount::Infinite,
+                charges: Some(AmmoCount::Infinite),
                 work_time: Some(Seconds::from(15.0)),
                 max_capacity: None,
+                min_work_time: None,
+                capacity_regen: None,
                 detection_radius: None,
                 regeneration_hp_speed: None,
                 smoke_radius: None,

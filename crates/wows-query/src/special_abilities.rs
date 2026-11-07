@@ -29,6 +29,7 @@ use wowsunpack::game_params::ttx::special_abilities::CombatInstructions;
 use wowsunpack::game_params::ttx::special_abilities::ProgressEvent;
 use wowsunpack::game_params::ttx::special_abilities::ProgressTrigger;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::ConsumableLifecycle;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::builds::round;
@@ -547,7 +548,9 @@ impl GameData {
                 else {
                     continue;
                 };
-                let ChargeCount::Finite(count) = category.num_consumables() else {
+                // Unlimited and time-based pools give no fixed number of uses.
+                let ConsumableLifecycle::CountBased { charges: ChargeCount::Finite(count), .. } = category.lifecycle()
+                else {
                     return None;
                 };
                 counted.push(MeterSource {

@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::Serializer;
 use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Percent;
@@ -10,8 +11,11 @@ use wowsunpack::game_params::translations::translate_consumable;
 use wowsunpack::game_params::ttx::consumables::EffectiveConsumable;
 use wowsunpack::game_params::ttx::consumables::effective_consumable;
 use wowsunpack::game_params::ttx::model::AmmoCount;
+use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::AbilityCategory;
+use wowsunpack::game_params::types::ConsumableCapacity;
+use wowsunpack::game_params::types::ConsumableLifecycle;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::buffs::BuffDuration;
@@ -24,7 +28,9 @@ use crate::builds::Extract;
 use crate::builds::Item;
 use crate::builds::Outcome;
 use crate::builds::Planner;
+use crate::builds::StatAmount;
 use crate::builds::StatPlan;
+use crate::builds::StatUnit;
 use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -56,6 +62,14 @@ pub(crate) const CONSUMABLE_ALIASES: &[(&str, &str)] = &[
 
 /// Length of a Random Battle, for whether an extra charge can be used.
 const MATCH: Seconds = Seconds::new(1200.0);
+
+/// GameParams consumable type of the Main Battery Reload Booster.
+pub(crate) const MAIN_BATTERY_RELOAD_BOOSTER: &str = "artilleryBoosters";
+
+/// GameParams consumable type of the Repair Party.
+const REPAIR_PARTY: &str = "regenCrew";
+
+const HEAL_NOTE: &str = "Repair Party heal ceilings: per_charge is heal_percent_per_s x action time x max_hp, per_battle every charge used for its whole action time (or the whole capacity of a time-based Repair Party). The Repair Party restores only repairable damage: each damage type leaves a share of its damage that can never be healed, so a charge restores its full amount only when the ship has taken at least that much repairable damage. max_hp is that of the hull the values use: the stock hull at base and in the top-level values, the best-fit build's hull in builds.best, and it includes skills and upgrades that add HP.";
 
 const SLOT_NOTE: &str = "Each slot carries one consumable in battle. A slot with a choice carries only the option the player picks in port, so options of one slot are never carried together.";
 
@@ -119,7 +133,13 @@ pub struct ConsumableStats {
     #[serde(rename = "type")]
     pub kind: String,
 
-    pub charges: Charges,
+    /// Count-based consumables only. Absent for time-based consumables,
+    /// which draw on capacity_s instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charges: Option<Charges>,
+
+    /// Cooldown after each use. A time-based consumable is ready again this
+    /// long after an activation ends.
     pub reload_s: Seconds,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,6 +160,10 @@ pub struct ConsumableStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heal_percent_per_s: Option<Percent>,
 
+    /// Repair Party: HP restored by one charge and per battle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heal: Option<RepairHeal>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub smoke_radius_km: Option<Km>,
 
@@ -149,9 +173,24 @@ pub struct ConsumableStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fighters: Option<f32>,
 
-    /// Usage pool of time-based consumables.
+    /// Time-based consumables: seconds of use per battle, spent in
+    /// activations of at least min_activation_s with reload_s between them.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capacity_s: Option<Seconds>,
+    pub capacity_s: Option<Capacity>,
+
+    /// Time-based consumables: the shortest activation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_activation_s: Option<Seconds>,
+
+    /// Time-based consumables whose capacity refills: seconds of capacity
+    /// regained per second after an activation ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity_regen_per_s: Option<f32>,
+
+    /// Main Battery Reload Booster: multiplier of the main battery reload
+    /// time while active, e.g. 0.5 halves the reload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_battery_reload_factor: Option<ReloadMultiplier>,
 
     /// The buff it applies, for consumables used on an allied ship or that buff your own.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,10 +211,87 @@ pub struct ConsumableBuilds {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub charges: Option<BuildStat<Charges>>,
 
+    /// Time-based consumables with a limited capacity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<BuildStat<Seconds>>,
+
     pub reload: BuildStat<Seconds>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub smoke_lifetime: Option<BuildStat<Seconds>>,
+
+    /// Repair Party: HP one charge restores.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heal_per_charge: Option<BuildStat<HealAmount>>,
+
+    /// Repair Party: HP every charge restores together, leaving out charges
+    /// the battle is too short to use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heal_per_battle: Option<BuildStat<HealAmount>>,
+}
+
+/// Seconds of use of a time-based consumable, or unlimited.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Capacity {
+    Limited(Seconds),
+    Unlimited,
+}
+
+impl Serialize for Capacity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Limited(seconds) => seconds.serialize(serializer),
+            Self::Unlimited => serializer.serialize_str("unlimited"),
+        }
+    }
+}
+
+/// Multiplier of the main battery reload time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ReloadMultiplier(pub f32);
+
+/// HP a Repair Party restores, and as a share of the maximum HP it is for.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct HealAmount {
+    pub hp: Hp,
+    pub percent_of_max_hp: Percent,
+    pub max_hp: Hp,
+}
+
+impl HealAmount {
+    fn new(hp: f32, max_hp: Hp) -> Self {
+        Self { hp: Hp::from(hp.round()), percent_of_max_hp: Percent::new(round(hp / max_hp.value() * 100.0)), max_hp }
+    }
+}
+
+impl StatAmount for HealAmount {
+    fn amount(self) -> f32 {
+        self.hp.value()
+    }
+}
+
+impl StatUnit for HealAmount {
+    const UNIT: &'static str = "HP";
+}
+
+/// HP ceilings of a Repair Party on one maximum HP.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RepairHeal {
+    /// One charge used for its whole action time. Absent for a time-based
+    /// Repair Party.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_charge: Option<HealAmount>,
+
+    /// Every charge used for its whole action time, or the whole capacity of
+    /// a time-based Repair Party. Absent when unlimited.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_battle: Option<HealAmount>,
+
+    pub note: &'static str,
 }
 
 impl GameData {
@@ -199,6 +315,7 @@ impl GameData {
         let effects = self.effective_modifiers(ship, &loadout)?;
         let bundle = effects.build.modifiers.bundle();
         let planner = loadout.is_empty().then(|| Planner::new(self, ship));
+        let mut card_max_hp = None;
 
         let mut slots = Vec::new();
         let ability_slots = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default();
@@ -224,6 +341,18 @@ impl GameData {
                     ship.class.species(),
                     BuffDuration::of_consumable(stats.action_time_s),
                 );
+                if category.consumable_type_raw() == REPAIR_PARTY {
+                    let max_hp = match card_max_hp {
+                        Some(max_hp) => max_hp,
+                        None => {
+                            let card = self.card(ship, &loadout)?;
+                            let max_hp = card.stats.durability.as_ref().and_then(|durability| durability.health);
+                            card_max_hp = Some(max_hp);
+                            max_hp
+                        }
+                    };
+                    stats.heal = max_hp.and_then(|max_hp| repair_heal(category, bundle, max_hp));
+                }
                 if let Some(planner) = &planner {
                     stats.builds = Some(consumable_builds(planner, &stats.name, category)?);
                 }
@@ -278,8 +407,8 @@ impl GameData {
     }
 }
 
-/// Action time, charges, reload and smoke lifetime of one consumable on its
-/// best-fit build.
+/// Action time, charges, capacity, reload, smoke lifetime and Repair Party
+/// heal of one consumable on its best-fit build.
 pub(crate) fn consumable_builds(
     planner: &Planner<'_>,
     name: &str,
@@ -297,14 +426,47 @@ pub(crate) fn consumable_builds(
     let smoke_lifetime = planner.plan(&consumable_plan(name, "smoke lifetime", Better::Higher, &|outcome| {
         effective(&outcome.bundle).smoke_lifetime.map(|time| Seconds::new(round(time.value())))
     }))?;
+    let capacity = planner.plan(&consumable_plan(name, "capacity", Better::Higher, &|outcome| {
+        match effective(&outcome.bundle).max_capacity? {
+            ConsumableCapacity::Seconds(seconds) => Some(Seconds::new(round(seconds))),
+            // Modifiers never limit an unlimited pool.
+            ConsumableCapacity::Unlimited => None,
+        }
+    }))?;
 
-    let exclude = |planner: &Planner<'_>, singles: &[(Item, Charges)]| unusable_charges(planner, category, singles);
-    let extract = |outcome: &Outcome| Some(charges(effective(&outcome.bundle).charges));
+    let exclude_charges = |planner: &Planner<'_>, singles: &[(Item, Charges)]| {
+        unusable_charges(planner, category, singles.iter().map(|(item, _)| *item))
+    };
+    let extract = |outcome: &Outcome| effective(&outcome.bundle).charges.map(charges);
     let charge_plan =
-        StatPlan { exclude: Some(&exclude), ..consumable_plan(name, "charges", Better::Higher, &extract) };
+        StatPlan { exclude: Some(&exclude_charges), ..consumable_plan(name, "charges", Better::Higher, &extract) };
     let charges = planner.plan(&charge_plan)?;
 
-    Ok(ConsumableBuilds { action_time, charges, reload, smoke_lifetime })
+    let (heal_per_charge, heal_per_battle) = if category.consumable_type_raw() == REPAIR_PARTY {
+        let heal = |outcome: &Outcome| {
+            let max_hp = outcome.stats.durability.as_ref()?.health?;
+            repair_heal(category, &outcome.bundle, max_hp)
+        };
+        let per_charge = |outcome: &Outcome| heal(outcome).and_then(|heal| heal.per_charge);
+        let per_battle = |outcome: &Outcome| heal(outcome).and_then(|heal| heal.per_battle);
+        let exclude_heal = |planner: &Planner<'_>, singles: &[(Item, HealAmount)]| {
+            unusable_charges(planner, category, singles.iter().map(|(item, _)| *item))
+        };
+        // The hull module sets the maximum HP the heal is a share of.
+        let per_charge_plan =
+            StatPlan { modules: true, ..consumable_plan(name, "heal per charge", Better::Higher, &per_charge) };
+        let per_battle_plan = StatPlan {
+            modules: true,
+            exclude: Some(&exclude_heal),
+            ..consumable_plan(name, "heal per battle", Better::Higher, &per_battle)
+        };
+
+        (planner.plan(&per_charge_plan)?, planner.plan(&per_battle_plan)?)
+    } else {
+        (None, None)
+    };
+
+    Ok(ConsumableBuilds { action_time, charges, capacity, reload, smoke_lifetime, heal_per_charge, heal_per_battle })
 }
 
 pub(crate) fn consumable_plan<'f, V>(
@@ -319,32 +481,34 @@ pub(crate) fn consumable_plan<'f, V>(
 /// Extra charges the best-fit build leaves out because using every charge
 /// back to back would outlast a match (shipbuilds `unburnable_consumable_charge`).
 /// A cruiser's or destroyer's Repair Party is used as damage comes in, not
-/// back to back, so its charges always count.
+/// back to back, so its charges always count. `items` are the items that
+/// change the stat, each judged on a build with it alone.
 fn unusable_charges(
     planner: &Planner<'_>,
     category: &AbilityCategory,
-    singles: &[(Item, Charges)],
+    items: impl Iterator<Item = Item>,
 ) -> Result<Vec<Exclusion>, QueryError> {
-    let reactive = category.consumable_type_raw() == "regenCrew"
+    let reactive = category.consumable_type_raw() == REPAIR_PARTY
         && matches!(planner.ship().class, ShipClass::Cruiser | ShipClass::Destroyer);
     if reactive {
         return Ok(Vec::new());
     }
 
     let mut exclusions = Vec::new();
-    for (item, total) in singles {
-        let Charges::Limited(count) = *total else {
+    for item in items {
+        let outcome = planner.with_items(&[item])?;
+        let EffectiveConsumable { work_time, reload_time, charges, .. } =
+            effective_consumable(category, &outcome.bundle).0;
+        let Some(AmmoCount::Finite(count)) = charges else {
             continue;
         };
-        let outcome = planner.with_items(&[*item])?;
-        let EffectiveConsumable { work_time, reload_time, .. } = effective_consumable(category, &outcome.bundle).0;
         let cycle = work_time.map_or(0.0, |time| time.value()) + reload_time.value();
         // Charge counts are far below f32's exact integer range.
         #[allow(clippy::cast_precision_loss)]
         let needed = count as f32 * cycle;
         if needed > MATCH.value() {
             exclusions.push(Exclusion {
-                item: *item,
+                item,
                 note: format!(
                     "{count} charges of {} s action and reload take {} s, longer than a {} s match: the extra charge cannot be used",
                     round(cycle),
@@ -377,7 +541,7 @@ pub(crate) fn consumable_stats(name: String, category: &AbilityCategory, bundle:
     ConsumableStats {
         name,
         kind,
-        charges: charges(stats.charges),
+        charges: stats.charges.map(charges),
         reload_s: Seconds::new(round(stats.reload_time.value())),
         action_time_s: stats.work_time.map(|time| Seconds::new(round(time.value()))),
         preparation_s: stats
@@ -392,10 +556,67 @@ pub(crate) fn consumable_stats(name: String, category: &AbilityCategory, bundle:
         smoke_radius_km: stats.smoke_radius.map(|radius| Km::new(round(radius.value()))),
         smoke_lifetime_s: stats.smoke_lifetime.map(|time| Seconds::new(round(time.value()))),
         fighters: stats.fighters_count,
-        capacity_s: stats.max_capacity.map(|capacity| Seconds::new(round(capacity))),
+        capacity_s: stats.max_capacity.map(|capacity| match capacity {
+            ConsumableCapacity::Seconds(seconds) => Capacity::Limited(Seconds::new(round(seconds))),
+            ConsumableCapacity::Unlimited => Capacity::Unlimited,
+        }),
+        min_activation_s: stats.min_work_time.map(|time| Seconds::new(round(time.value()))),
+        capacity_regen_per_s: stats.capacity_regen.filter(|regen| *regen > 0.0).map(round),
+        main_battery_reload_factor: main_battery_reload_factor(category),
+        heal: None,
         buff: None,
         builds: None,
     }
+}
+
+/// The main battery reload time multiplier of a Main Battery Reload Booster,
+/// its `logic.boostCoeff` (`CommonConsumables/Logic/Ship.MainBatteryBooster`
+/// sets it as the reload coefficient; no modifier changes it). `None` for
+/// other consumables.
+pub(crate) fn main_battery_reload_factor(category: &AbilityCategory) -> Option<ReloadMultiplier> {
+    if category.consumable_type_raw() != MAIN_BATTERY_RELOAD_BOOSTER {
+        return None;
+    }
+
+    category.effect_fields().get("boostCoeff").map(|coeff| ReloadMultiplier(*coeff))
+}
+
+/// Repair Party heal ceilings under `bundle` on `max_hp`. `None` for a
+/// consumable without a heal rate.
+fn repair_heal(category: &AbilityCategory, bundle: &ModifierBundle, max_hp: Hp) -> Option<RepairHeal> {
+    let (stats, _) = effective_consumable(category, bundle);
+    let fraction = stats.regeneration_hp_speed?;
+    // The flat rate takes the same modifier as the fraction
+    // (ConsumableUtils.py:139-140); a category without one heals only the
+    // fraction.
+    let flat = category.regeneration_hp_speed_units().map_or(0.0, |units| units * bundle.coef("regenerationHPSpeed"));
+    let per_second = fraction * max_hp.value() + flat;
+
+    let (per_charge, per_battle) = match category.lifecycle() {
+        ConsumableLifecycle::CountBased { .. } => {
+            let per_charge = stats.work_time.map(|time| per_second * time.value());
+            let per_battle = match (per_charge, stats.charges) {
+                // Charge counts are far below f32's exact integer range.
+                #[allow(clippy::cast_precision_loss)]
+                (Some(per_charge), Some(AmmoCount::Finite(count))) => Some(per_charge * count as f32),
+                _ => None,
+            };
+            (per_charge, per_battle)
+        }
+        ConsumableLifecycle::TimeBased { .. } => {
+            let per_battle = match stats.max_capacity {
+                Some(ConsumableCapacity::Seconds(seconds)) => Some(per_second * seconds),
+                Some(ConsumableCapacity::Unlimited) | None => None,
+            };
+            (None, per_battle)
+        }
+    };
+
+    Some(RepairHeal {
+        per_charge: per_charge.map(|hp| HealAmount::new(hp, max_hp)),
+        per_battle: per_battle.map(|hp| HealAmount::new(hp, max_hp)),
+        note: HEAL_NOTE,
+    })
 }
 
 /// English consumable names, GameParams names and types, and

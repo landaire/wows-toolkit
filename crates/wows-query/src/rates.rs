@@ -49,8 +49,12 @@ use crate::builds::StatAmount;
 use crate::builds::StatPlan;
 use crate::builds::StatUnit;
 use crate::builds::round;
+use crate::consumables::Capacity;
+use crate::consumables::ReloadMultiplier;
 use crate::consumables::consumable_builds;
 use crate::consumables::consumable_plan;
+use crate::consumables::consumable_stats;
+use crate::consumables::main_battery_reload_factor;
 use crate::consumables::slot_choice;
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -70,6 +74,8 @@ const TORPEDO_NOTE: &str = "torpedoes_per_minute = 60 x tubes_per_reload / reloa
 const BOOSTER_NOTE: &str = "torpedo_reload_booster is the Torpedo Reload Booster consumable, not the launcher reload: torpedo_reload is how long the launchers take to reload, shortened by skills and upgrades such as Fill the Tubes and Torpedo Tubes Modification 2. Activated while the launchers still need launchers_loaded_in_s or more, the booster loads every launcher still reloading within launchers_loaded_in_s, giving up any reload progress, then cools down for cooldown once action_time ends. Its torpedoes_per_minute and torpedo_damage average one booster cycle with the booster used whenever it is ready: one booster salvo plus the salvos on the launcher reload until it is ready again, salvos_per_cycle in cycle_s, against one target and with every launcher as for the launcher reload. They hold only while charges last, charges x cycle_s; then the plain rates apply. With a choice, the ship carries the booster only in place of the slot's other options.";
 
 const BUFF_NOTE: &str = "torpedo_reload_buffs are consumables, such as Auxiliary and Torpedo Weaponry Coordination, whose buff multiplies the launcher reload time by reload_factor_while_active for action_time; a reload in progress speeds up while it lasts. Their torpedoes_per_minute and torpedo_damage average one cycle of action_time + cooldown with the consumable used whenever it is ready: the launcher reload rate times (cooldown + action_time / reload_factor_while_active) / (action_time + cooldown), against one target and with every launcher as for the launcher reload. They hold only while charges last, charges x (action_time + cooldown); then the plain rates apply. With a choice, the ship carries the consumable only in place of the slot's other options.";
+
+const MAIN_BATTERY_BOOSTER_NOTE: &str = "The main battery alternative \"with Main Battery Reload Booster active\" is the rate while the booster runs: the main battery reload time times main_battery_reload_factor. It holds only while the booster is active; with special_ability_active it is the rate with both the special ability and the booster active.";
 
 /// Rates on the best-fit build.
 #[derive(Debug, Clone, Serialize)]
@@ -576,6 +582,13 @@ struct CooldownAbility {
     modifiers: Vec<AbilityModifiers>,
 }
 
+/// The Main Battery Reload Booster a ship can carry, as a build label.
+struct MainBatteryBooster {
+    label: String,
+    note: String,
+    reload_factor: ReloadMultiplier,
+}
+
 /// A rate with a per-bearing table, kept on the base and best builds.
 trait BearingTable {
     fn drop_table(&mut self);
@@ -640,6 +653,7 @@ impl GameData {
         kinds.sort();
         let mut main_battery_damage = Vec::new();
         let standard = planner.burst().map_or(Cadence::Standard, Cadence::Cycle);
+        let booster = self.main_battery_booster(planner)?;
         for kind in kinds {
             let shells: Vec<_> = stock
                 .stats
@@ -656,18 +670,40 @@ impl GameData {
 
             let label = format!("main battery {kind} damage rate");
             let extract = |outcome: &Outcome| {
-                main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, standard)
+                main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, standard, None)
             };
             let Some(mut rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? else {
                 continue;
             };
 
+            if let Some(booster) = &booster {
+                let label = format!("main battery {kind} damage rate {}", booster.label);
+                let extract = |outcome: &Outcome| {
+                    let battery = &layouts.main_battery[outcome.selection];
+                    main_battery_rate(outcome, battery, &kind, standard, Some(booster.reload_factor))
+                };
+                if let Some(active) = planner.best(&StatPlan::new(label, Better::Higher, &extract))? {
+                    rates.builds.alternatives.push(BuildAlternative {
+                        label: booster.label.clone(),
+                        value: active.best.value,
+                        assumed: active.best.assumed,
+                        tier_fillers: active.best.tier_fillers,
+                        note: Some(booster.note.clone()),
+                    });
+                }
+            }
             tables_on_base_and_best(&mut rates);
             let mut ammo = AmmoDamage::new(kind.clone(), Vec::new(), damage, barrels, rates);
             if let Some(burst) = planner.burst() {
                 let label = format!("main battery {kind} damage rate during a burst");
                 let extract = |outcome: &Outcome| {
-                    main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, Cadence::InBurst(burst))
+                    main_battery_rate(
+                        outcome,
+                        &layouts.main_battery[outcome.selection],
+                        &kind,
+                        Cadence::InBurst(burst),
+                        None,
+                    )
                 };
                 ammo.during_burst = planner.plan(&StatPlan::new(label, Better::Higher, &extract))?;
                 if let Some(during) = &mut ammo.during_burst {
@@ -727,6 +763,9 @@ impl GameData {
         }
         if planner.burst().is_some() && !main_battery_damage.is_empty() {
             rate_notes.push(BURST_NOTE);
+        }
+        if booster.is_some() && !main_battery_damage.is_empty() {
+            rate_notes.push(MAIN_BATTERY_BOOSTER_NOTE);
         }
 
         Ok(Rates {
@@ -1021,6 +1060,56 @@ impl GameData {
         found
     }
 
+    /// The first Main Battery Reload Booster the ship can carry. `None`
+    /// without one.
+    fn main_battery_booster(&self, planner: &Planner<'_>) -> Result<Option<MainBatteryBooster>, QueryError> {
+        let is_booster = |category: &AbilityCategory| main_battery_reload_factor(category).is_some();
+        let Some(slot) = self.consumable_slots(planner.ship(), &is_booster).into_iter().next() else {
+            return Ok(None);
+        };
+        let Some(category) = self
+            .provider()
+            .game_param_by_name(&slot.ability)
+            .and_then(|param| param.ability().and_then(|ability| ability.get_category(&slot.variant)).cloned())
+        else {
+            return Ok(None);
+        };
+        let Some(reload_factor) = main_battery_reload_factor(&category) else {
+            return Ok(None);
+        };
+
+        // Uses on the stock build; ship_consumables gives them on other builds.
+        let stock = planner.stock()?;
+        let stats = consumable_stats(slot.name.clone(), &category, &stock.bundle);
+        let uses = match (stats.charges, stats.action_time_s, stats.capacity_s) {
+            (Some(Charges::Limited(count)), Some(action), _) => {
+                format!("{count} charges of {} s, {} s cooldown", action.value(), stats.reload_s.value())
+            }
+            (Some(Charges::Unlimited), Some(action), _) => {
+                format!("unlimited charges of {} s, {} s cooldown", action.value(), stats.reload_s.value())
+            }
+            (_, _, Some(Capacity::Limited(capacity))) => format!(
+                "{} s of use per battle in activations of at least {} s, {} s between activations",
+                capacity.value(),
+                stats.min_activation_s.map_or(0.0, |time| time.value()),
+                stats.reload_s.value()
+            ),
+            _ => format!("{} s cooldown", stats.reload_s.value()),
+        };
+        let carried = match &slot.choice {
+            Some(choice) => {
+                format!(" Its slot offers a choice ({choice}); the ship carries it only in place of the others.")
+            }
+            None => String::new(),
+        };
+        let note = format!(
+            "Only while {} is active: {uses}, stock build. It multiplies the main battery reload time by {}.{carried}",
+            slot.name, reload_factor.0
+        );
+
+        Ok(Some(MainBatteryBooster { label: format!("with {} active", slot.name), note, reload_factor }))
+    }
+
     /// The ship's special ability as a build to compare consumable cycles
     /// with, unless `planner` switches it on in every build already.
     fn cooldown_ability(&self, planner: &Planner<'_>) -> Result<Option<CooldownAbility>, QueryError> {
@@ -1163,9 +1252,18 @@ fn loader_limit(layout: &TorpedoLayout) -> Option<String> {
     Some(sentences.join(" "))
 }
 
-fn main_battery_rate(outcome: &Outcome, battery: &Battery, kind: &str, cadence: Cadence) -> Option<DamageRate> {
+/// `booster`, when given, multiplies the reload time while a Main Battery
+/// Reload Booster is active.
+fn main_battery_rate(
+    outcome: &Outcome,
+    battery: &Battery,
+    kind: &str,
+    cadence: Cadence,
+    booster: Option<ReloadMultiplier>,
+) -> Option<DamageRate> {
     let artillery = outcome.stats.artillery.as_ref()?;
-    let reload = cadence.salvo_time(Seconds::new(artillery.reload_time?.value()));
+    let factor = booster.map_or(1.0, |booster| booster.0);
+    let reload = cadence.salvo_time(Seconds::new(artillery.reload_time?.value() * factor));
     let shells: Vec<&ShellStats> = artillery
         .shells
         .iter()

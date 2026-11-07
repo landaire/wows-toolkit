@@ -23,6 +23,7 @@ use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::provenance::Op;
 use crate::game_params::types::AbilityCategory;
+use crate::game_params::types::ConsumableCapacity;
 use crate::game_params::types::ConsumableGroup;
 use crate::game_params::types::ConsumableLifecycle;
 use crate::game_params::types::Km;
@@ -171,13 +172,22 @@ pub struct EffectiveConsumable {
     /// (ConsumableUtils.py:116). `None` when the category lists no
     /// `preparationTime`.
     pub preparation_time: Option<Seconds>,
-    /// Resource pool. COUNT_BASED uses `numConsumables` plus the additional-count
+    /// COUNT_BASED charge pool, `numConsumables` plus the additional-count
     /// bonuses (ConsumableUtils.py:122-128); an unlimited pool is
-    /// [`AmmoCount::Infinite`] and never made finite by modifiers.
-    pub charges: AmmoCount,
-    /// TIME_BASED capacity pool, `maxCapacity * getConsumableCapacity`
-    /// (ConsumableUtils.py:166-167). `None` for COUNT_BASED consumables.
-    pub max_capacity: Option<f32>,
+    /// [`AmmoCount::Infinite`] and never made finite by modifiers. `None` for
+    /// TIME_BASED consumables, which have no charges.
+    pub charges: Option<AmmoCount>,
+    /// TIME_BASED capacity pool, `maxCapacity * getConsumableCapacity` for a
+    /// limited pool (ConsumableUtils.py:186-188). `None` for COUNT_BASED
+    /// consumables.
+    pub max_capacity: Option<ConsumableCapacity>,
+    /// TIME_BASED shortest activation, `minWorkTime * getConsumableMinWorkTime`
+    /// (ConsumableUtils.py:191). `None` for COUNT_BASED consumables.
+    pub min_work_time: Option<Seconds>,
+    /// TIME_BASED capacity regained per second after an activation,
+    /// `capacityRegenCoeff * getConsumableCapacityRegen` (ConsumableUtils.py:190).
+    /// `None` for COUNT_BASED consumables.
+    pub capacity_regen: Option<f32>,
     /// Detection radius in meters (radar / hydro / sublocator). Read from the base
     /// category (`distShip` / `hydrophoneWaveRadius`); no consumable detection-radius
     /// modifier exists in `updateConsumableParams`, so this is the base value.
@@ -412,41 +422,41 @@ pub fn effective_consumable(
     let reload_time = Seconds::from(category.reload_time() * reload_coeff);
     let preparation_time = category.preparation_time().map(|time| Seconds::from(time * reload_coeff));
 
-    let lifecycle = category.lifecycle();
-
-    // workTime is multiplied only for COUNT_BASED consumables (ConsumableUtils.py:120);
-    // TIME_BASED consumables have no port workTime stat (capacity/minWorkTime govern).
-    let work_time = match lifecycle {
-        ConsumableLifecycle::CountBased => {
+    // workTime and the charge pool belong to COUNT_BASED consumables
+    // (ConsumableUtils.py:119-128); the capacity pool, minWorkTime and
+    // capacityRegenCoeff to TIME_BASED ones (ConsumableUtils.py:185-191).
+    let mut work_time = None;
+    let mut charges = None;
+    let mut max_capacity = None;
+    let mut min_work_time = None;
+    let mut capacity_regen = None;
+    match category.lifecycle() {
+        ConsumableLifecycle::CountBased { charges: base_charges, work_time: base_work_time } => {
             let wt = consumable_work_time_coeff(modifiers, type_name, group, &mut applied.work_time);
-            Some(Seconds::from(category.work_time() * wt))
+            work_time = Some(Seconds::from(base_work_time * wt));
+            charges = Some(match base_charges {
+                ChargeCount::Unlimited => AmmoCount::Infinite,
+                ChargeCount::Finite(base_count) => {
+                    let added = additional_consumables_count(modifiers, type_name, &mut applied.charges)
+                        + additional_consumables_for_group(modifiers, group, &mut applied.charges);
+                    // ConsumableUtils.py:128 `max(0, numConsumables + added)`
+                    let total = (base_count as f32 + added).max(0.0);
+                    AmmoCount::Finite(total.round() as u32)
+                }
+            });
         }
-        ConsumableLifecycle::TimeBased => None,
-    };
-
-    // charges: COUNT_BASED applies numConsumables + additional counts
-    // (ConsumableUtils.py:122-128). An unlimited pool stays Infinite regardless of
-    // modifiers.
-    let charges = match (category.num_consumables(), lifecycle) {
-        (ChargeCount::Unlimited, _) => AmmoCount::Infinite,
-        (ChargeCount::Finite(base_count), ConsumableLifecycle::CountBased) => {
-            let added = additional_consumables_count(modifiers, type_name, &mut applied.charges)
-                + additional_consumables_for_group(modifiers, group, &mut applied.charges);
-            // ConsumableUtils.py:128 `max(0, numConsumables + added)`
-            let total = (base_count as f32 + added).max(0.0);
-            AmmoCount::Finite(total.round() as u32)
+        ConsumableLifecycle::TimeBased { capacity, min_work_time: base_min_work_time, capacity_regen_coeff } => {
+            max_capacity = Some(match capacity {
+                ConsumableCapacity::Unlimited => ConsumableCapacity::Unlimited,
+                ConsumableCapacity::Seconds(seconds) => ConsumableCapacity::Seconds(
+                    seconds * consumable_capacity_coeff(modifiers, type_name, group, &mut applied.max_capacity),
+                ),
+            });
+            // ModifiersApply.py getConsumableMinWorkTime / getConsumableCapacityRegen
+            min_work_time = Some(Seconds::from(base_min_work_time * modifiers.coef("consumableMinimumWorkTimeCoeff")));
+            capacity_regen = Some(capacity_regen_coeff * modifiers.coef("consumableCapacityRegenCoeff"));
         }
-        (ChargeCount::Finite(base_count), ConsumableLifecycle::TimeBased) => AmmoCount::Finite(base_count),
-    };
-
-    // maxCapacity for TIME_BASED consumables (ConsumableUtils.py:166-167). Absent for
-    // COUNT_BASED.
-    let max_capacity = match lifecycle {
-        ConsumableLifecycle::TimeBased => category
-            .max_capacity()
-            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group, &mut applied.max_capacity)),
-        ConsumableLifecycle::CountBased => None,
-    };
+    }
 
     // regenerationHPSpeed: REGEN_CREW only, `*= regenerationHPSpeed` modifier
     // (ConsumableUtils.py:140). The base is read off the typed accessor.
@@ -544,6 +554,8 @@ pub fn effective_consumable(
             preparation_time,
             charges,
             max_capacity,
+            min_work_time,
+            capacity_regen,
             detection_radius,
             regeneration_hp_speed,
             smoke_radius,
@@ -613,11 +625,12 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("crashCrew".to_string())
             .group(ConsumableGroup::Ship)
-            .num_consumables(ChargeCount::Unlimited)
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased {
+                charges: ChargeCount::Unlimited,
+                work_time: CRASH_CREW_WORK_TIME_S,
+            })
             .preparation_time(0.0)
             .reload_time(CRASH_CREW_RELOAD_S)
-            .work_time(CRASH_CREW_WORK_TIME_S)
             .effect_fields(fields)
             .build()
     }
@@ -628,11 +641,12 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("sonar".to_string())
             .group(ConsumableGroup::Ship)
-            .num_consumables(ChargeCount::Finite(SONAR_BASE_CHARGES))
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased {
+                charges: ChargeCount::Finite(SONAR_BASE_CHARGES),
+                work_time: SONAR_WORK_TIME_S,
+            })
             .preparation_time(0.0)
             .reload_time(SONAR_RELOAD_S)
-            .work_time(SONAR_WORK_TIME_S)
             .effect_fields(BTreeMap::new())
             .build()
     }
@@ -647,11 +661,12 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("smokeGenerator".to_string())
             .group(ConsumableGroup::Ship)
-            .num_consumables(ChargeCount::Finite(SMOKE_BASE_CHARGES))
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased {
+                charges: ChargeCount::Finite(SMOKE_BASE_CHARGES),
+                work_time: SMOKE_WORK_TIME_S,
+            })
             .preparation_time(0.0)
             .reload_time(SMOKE_RELOAD_S)
-            .work_time(SMOKE_WORK_TIME_S)
             .effect_fields(fields)
             .build()
     }
@@ -666,11 +681,9 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("callFighters".to_string())
             .group(ConsumableGroup::Squadron)
-            .num_consumables(ChargeCount::Unlimited)
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased { charges: ChargeCount::Unlimited, work_time: 60.0 })
             .preparation_time(0.0)
             .reload_time(60.0)
-            .work_time(60.0)
             .effect_fields(fields)
             .build()
     }
@@ -682,11 +695,9 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("fighter".to_string())
             .group(ConsumableGroup::Ship)
-            .num_consumables(ChargeCount::Finite(3))
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased { charges: ChargeCount::Finite(3), work_time: 60.0 })
             .preparation_time(0.0)
             .reload_time(90.0)
-            .work_time(60.0)
             .effect_fields(fields)
             .build()
     }
@@ -699,11 +710,9 @@ mod tests {
         AbilityCategory::builder()
             .consumable_type("regenerateHealth".to_string())
             .group(ConsumableGroup::Squadron)
-            .num_consumables(ChargeCount::Unlimited)
-            .lifecycle(ConsumableLifecycle::CountBased)
+            .lifecycle(ConsumableLifecycle::CountBased { charges: ChargeCount::Unlimited, work_time: 60.0 })
             .preparation_time(0.0)
             .reload_time(60.0)
-            .work_time(60.0)
             .effect_fields(fields)
             .build()
     }
@@ -729,8 +738,9 @@ mod tests {
         assert_eq!(eff.reload_time, Seconds::from(CRASH_CREW_RELOAD_S));
         assert_eq!(eff.preparation_time, Some(Seconds::from(0.0)));
         assert_eq!(eff.work_time, Some(Seconds::from(CRASH_CREW_WORK_TIME_S)));
-        assert_eq!(eff.charges, AmmoCount::Infinite);
+        assert_eq!(eff.charges, Some(AmmoCount::Infinite));
         assert_eq!(eff.max_capacity, None);
+        assert_eq!(eff.min_work_time, None);
     }
 
     /// An equipped `ConsumableReloadTime` coefficient (real modifier name, base 1.0,
@@ -771,7 +781,7 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let (eff, _applied) = effective_consumable(&cat, &bundle);
-        assert_eq!(eff.charges, AmmoCount::Infinite);
+        assert_eq!(eff.charges, Some(AmmoCount::Infinite));
     }
 
     /// A finite base count gains the additive per-type and group bonuses: SONAR_BASE_CHARGES + GROUP_BONUS
@@ -784,7 +794,7 @@ mod tests {
         let bundle =
             ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("test modifiers are all known");
         let (eff, _applied) = effective_consumable(&cat, &bundle);
-        assert_eq!(eff.charges, AmmoCount::Finite(SONAR_CHARGES_WITH_GROUP));
+        assert_eq!(eff.charges, Some(AmmoCount::Finite(SONAR_CHARGES_WITH_GROUP)));
     }
 
     /// A finite base count with no modifiers is unchanged.
@@ -792,7 +802,39 @@ mod tests {
     fn finite_charges_base_unchanged() {
         let cat = finite_sonar();
         let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
-        assert_eq!(eff.charges, AmmoCount::Finite(SONAR_BASE_CHARGES));
+        assert_eq!(eff.charges, Some(AmmoCount::Finite(SONAR_BASE_CHARGES)));
+    }
+
+    /// A TIME_BASED pool (`PCY067_ArtilleryBoosterPremium_TimeBased.PAM_DD_High`:
+    /// maxCapacity 80, minWorkTime 1, reloadTime 5) has no charges or action
+    /// time, and its capacity takes the per-type capacity coefficient.
+    #[test]
+    fn time_based_pool_scales_capacity() {
+        let cat = AbilityCategory::builder()
+            .consumable_type("artilleryBoosters".to_string())
+            .group(ConsumableGroup::Ship)
+            .lifecycle(ConsumableLifecycle::TimeBased {
+                capacity: ConsumableCapacity::Seconds(80.0),
+                min_work_time: 1.0,
+                capacity_regen_coeff: 0.0,
+            })
+            .preparation_time(0.0)
+            .reload_time(5.0)
+            .build();
+
+        let (base, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Destroyer));
+        assert_eq!(base.charges, None);
+        assert_eq!(base.work_time, None);
+        assert_eq!(base.max_capacity, Some(ConsumableCapacity::Seconds(80.0)));
+        assert_eq!(base.min_work_time, Some(Seconds::from(1.0)));
+        assert_eq!(base.capacity_regen, Some(0.0));
+        assert_eq!(base.reload_time, Seconds::from(5.0));
+
+        let mods = [modifier("artilleryBoostersCapacityCoeff", 1.25)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
+        let (boosted, _applied) = effective_consumable(&cat, &bundle);
+        assert_eq!(boosted.max_capacity, Some(ConsumableCapacity::Seconds(100.0)));
     }
 
     /// The per-type `sonarWorkTimeCoeff` gate fires for `sonar`: SONAR_WORK_TIME_S * SONAR_WORK_COEFF

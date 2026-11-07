@@ -2624,6 +2624,86 @@ fn new_jersey_consumables_heal_allies() {
     insta::assert_yaml_snapshot!(consumables);
 }
 
+/// 20 de Julio's fourth slot holds a time-based Main Battery Reload Booster:
+/// a pool of seconds of use with no charges or action time.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn twenty_de_julio_consumables_include_time_based_reload_booster() {
+    let consumables =
+        game().call_tool("ship_consumables", json!({ "ship": "20 de Julio" })).expect("20 de Julio exists");
+
+    let booster = &consumables["slots"][3]["options"][0];
+    assert_eq!(booster["type"], "artilleryBoosters", "{consumables:#}");
+    assert_eq!(booster["capacity_s"], 80.0, "{booster:#}");
+    assert!(booster.get("charges").is_none(), "{booster:#}");
+    insta::assert_yaml_snapshot!(consumables);
+}
+
+/// AP damage rates of 20 de Julio with its time-based booster active, with
+/// and without Combat Instructions, and of Kleber with its count-based one.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn main_battery_damage_with_reload_booster_active() {
+    let ap_rates = |ship: &str, special_ability_active: bool| -> serde_json::Value {
+        let stats = game()
+            .call_tool("ship_stats", json!({ "ship": ship, "special_ability_active": special_ability_active }))
+            .expect("ship exists");
+        let ap = stats["build_stats"]["main_battery_damage"]
+            .as_array()
+            .expect("ship has main battery damage")
+            .iter()
+            .find(|ammo| ammo["ammo"] == "AP")
+            .expect("ship fires AP")
+            .clone();
+        json!({ "special_ability": stats["special_ability"], "AP": ap })
+    };
+
+    let julio = ap_rates("20 de Julio", false);
+    let julio_with_instructions = ap_rates("20 de Julio", true);
+    for rates in [&julio, &julio_with_instructions] {
+        let builds = &rates["AP"]["rates"]["builds"];
+        let boosted = builds["alternatives"]
+            .as_array()
+            .expect("alternatives listed")
+            .iter()
+            .find(|alternative| alternative["label"] == "with Main Battery Reload Booster active")
+            .expect("booster alternative listed");
+        let best = builds["best"]["value"]["damage_per_minute"].as_f64().expect("best rate");
+        let active = boosted["value"]["damage_per_minute"].as_f64().expect("booster rate");
+        assert!((active / best - 2.0).abs() < 0.01, "{rates:#}");
+    }
+    insta::assert_yaml_snapshot!("twenty_de_julio_ap_damage_with_reload_booster", julio);
+    insta::assert_yaml_snapshot!(
+        "twenty_de_julio_ap_damage_with_instructions_and_reload_booster",
+        julio_with_instructions
+    );
+
+    let kleber = game().call_tool("ship_stats", json!({ "ship": "Kleber" })).expect("Kleber exists");
+    let alternatives = kleber["build_stats"]["main_battery_damage"][0]["rates"]["builds"]["alternatives"]
+        .as_array()
+        .expect("alternatives listed");
+    assert!(
+        alternatives.iter().any(|alternative| alternative["label"] == "with Main Battery Reload Booster active"),
+        "{alternatives:#?}"
+    );
+}
+
+/// Valparaiso's Repair Party: HP per charge and per battle on the stock and
+/// best-fit builds.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn valparaiso_repair_party_heal() {
+    let consumables = game()
+        .call_tool("ship_consumables", json!({ "ship": "Valparaiso", "consumable": "Repair Party" }))
+        .expect("Valparaiso has a Repair Party");
+    let accented = game()
+        .call_tool("ship_consumables", json!({ "ship": "Valpara\u{ed}so", "consumable": "Repair Party" }))
+        .expect("the accented name resolves");
+    assert_eq!(consumables["slots"], accented["slots"]);
+
+    insta::assert_yaml_snapshot!(consumables);
+}
+
 /// Every squadron's ordnance states its fire chance, 0 when it cannot start
 /// fires, with the best-fit build that raises it.
 #[test]

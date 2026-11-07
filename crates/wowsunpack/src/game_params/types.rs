@@ -1895,25 +1895,53 @@ impl ConsumableGroup {
     }
 }
 
-/// Client `ConsumableLifeCycleType` (`ConsumableConstants.py`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Client `ConsumableLifeCycleType` (`ConsumableConstants.py`) with the fields
+/// of its GameParams schema class (`CountBasedConsumable`,
+/// `TimeBasedConsumable`). A TIME_BASED category has no `numConsumables` or
+/// `workTime`.
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum ConsumableLifecycle {
-    /// A fixed number of charges, each active for `workTime`.
-    CountBased,
-    /// A capacity pool drained while active (`maxCapacity`).
-    TimeBased,
+    /// A fixed number of charges, each active for `work_time`.
+    CountBased {
+        /// `numConsumables`: the base charge pool before build modifiers.
+        charges: crate::game_types::ChargeCount,
+        /// `workTime`, seconds.
+        work_time: f32,
+    },
+    /// A pool of seconds of use, drained while active and spent in
+    /// activations separated by `reloadTime`.
+    TimeBased {
+        /// `maxCapacity`.
+        capacity: ConsumableCapacity,
+        /// `minWorkTime`, seconds: the shortest activation.
+        min_work_time: f32,
+        /// `capacityRegenCoeff`: seconds of capacity regained per second
+        /// once an activation ends. Zero when the pool does not refill.
+        capacity_regen_coeff: f32,
+    },
 }
 
-impl ConsumableLifecycle {
-    /// Parse the GameParams `lifeCycleType` value (`0` or `1`). `None` for any
-    /// other value.
+/// `maxCapacity` of a TIME_BASED consumable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ConsumableCapacity {
+    Unlimited,
+    /// Seconds of use per battle before build modifiers.
+    Seconds(f32),
+}
+
+impl ConsumableCapacity {
+    /// Parse a GameParams `maxCapacity`, where `-1` marks an unlimited pool
+    /// (`UsageFuncs._CheckIsConsumableLimited`). `None` for any other
+    /// negative value.
     pub fn from_game_params(value: f32) -> Option<Self> {
-        if value == 0.0 {
-            Some(Self::CountBased)
-        } else if value == 1.0 {
-            Some(Self::TimeBased)
+        if value == -1.0 {
+            Some(Self::Unlimited)
+        } else if value >= 0.0 {
+            Some(Self::Seconds(value))
         } else {
             None
         }
@@ -1931,16 +1959,11 @@ pub struct AbilityCategory {
     group: Option<ConsumableGroup>,
     #[cfg_attr(feature = "serde", serde(default))]
     icon_id: Option<String>,
-    num_consumables: crate::game_types::ChargeCount,
     lifecycle: ConsumableLifecycle,
     /// `preparationTime`, seconds. `None` when the category does not list it.
     #[cfg_attr(feature = "serde", serde(default))]
     preparation_time: Option<f32>,
-    /// `maxCapacity` of a TIME_BASED pool. `None` when absent or negative.
-    #[cfg_attr(feature = "serde", serde(default))]
-    max_capacity: Option<f32>,
     reload_time: f32,
-    work_time: f32,
     /// Detection radius for ships (radar, hydro, sublocator). BigWorld units.
     #[cfg_attr(feature = "serde", serde(default))]
     dist_ship: Option<BigWorldDistance>,
@@ -2009,10 +2032,6 @@ impl AbilityCategory {
         self.icon_id.as_deref()
     }
 
-    pub fn work_time(&self) -> f32 {
-        self.work_time
-    }
-
     pub fn reload_time(&self) -> f32 {
         self.reload_time
     }
@@ -2021,17 +2040,8 @@ impl AbilityCategory {
         self.preparation_time
     }
 
-    /// `numConsumables`: the base charge pool before build modifiers.
-    pub fn num_consumables(&self) -> crate::game_types::ChargeCount {
-        self.num_consumables
-    }
-
     pub fn lifecycle(&self) -> ConsumableLifecycle {
         self.lifecycle
-    }
-
-    pub fn max_capacity(&self) -> Option<f32> {
-        self.max_capacity
     }
 
     /// Detection radius in meters.

@@ -771,29 +771,11 @@ fn build_modifier_param(param_data: &pickled::Dict, defaults: Option<&pickled::D
     ModifierParam::builder().classes(classes).levels(levels).build()
 }
 
-/// `None` when the category lacks `consumableType` or `numConsumables`, or
-/// carries a `numConsumables` or `lifeCycleType` the client does not define.
+/// `None` when the category lacks `consumableType` or `reloadTime`, carries a
+/// `lifeCycleType` or `maxCapacity` the client does not define, or is
+/// COUNT_BASED without a valid `numConsumables` and a `workTime`.
 fn build_ability_category(category_data: &pickled::Dict) -> Option<AbilityCategory> {
-    let reload_time =
-        if let Some(reload_time) = category_data.get(&HashableValue::String("reloadTime".to_owned().into())) {
-            if let Some(reload_time) = reload_time.i64_ref() {
-                *reload_time as f32
-            } else {
-                *reload_time.f64_ref().expect("workTime is not a f64") as f32
-            }
-        } else {
-            panic!("could not get reloadTime");
-        };
-
-    let work_time = if let Some(work_time) = category_data.get(&HashableValue::String("workTime".to_owned().into())) {
-        if let Some(work_time) = work_time.i64_ref() {
-            *work_time as f32
-        } else {
-            *work_time.f64_ref().expect("workTime is not a f64") as f32
-        }
-    } else {
-        panic!("could not get reloadTime");
-    };
+    let reload_time = read_float(category_data, "reloadTime")?;
 
     // Detection radius fields. Newer clients nest these under a "logic" sub-object;
     // older ones (e.g. 0.9.x) put them directly on the category. Read from "logic"
@@ -866,19 +848,17 @@ fn build_ability_category(category_data: &pickled::Dict) -> Option<AbilityCatego
         .filter(|team| !team.is_empty());
 
     let consumable_type = game_param_to_type!(category_data, "consumableType", Option<String>)?;
-    let num_consumables =
-        ChargeCount::from_game_params(game_param_to_type!(category_data, "numConsumables", Option<i64>)?)?;
     // The client's ConsumableLifeCycleType default is COUNT_BASED when the
     // category omits lifeCycleType.
     let lifecycle = match read_f32("lifeCycleType") {
-        Some(value) => ConsumableLifecycle::from_game_params(value)?,
-        None => ConsumableLifecycle::CountBased,
+        None => count_based_lifecycle(category_data)?,
+        Some(0.0) => count_based_lifecycle(category_data)?,
+        Some(1.0) => time_based_lifecycle(category_data)?,
+        Some(_) => return None,
     };
     let group = game_param_to_type!(category_data, "group", Option<String>)
         .and_then(|group| ConsumableGroup::from_game_str(&group));
     let icon_id = game_param_to_type!(category_data, "iconIDs", Option<String>).filter(|icon| !icon.is_empty());
-    // GameParams writes a negative maxCapacity on categories without a capacity pool.
-    let max_capacity = read_f32("maxCapacity").filter(|capacity| *capacity >= 0.0);
 
     Some(
         AbilityCategory::builder()
@@ -891,12 +871,9 @@ fn build_ability_category(category_data: &pickled::Dict) -> Option<AbilityCatego
             .consumable_type(consumable_type)
             .maybe_group(group)
             .maybe_icon_id(icon_id)
-            .num_consumables(num_consumables)
             .lifecycle(lifecycle)
             .maybe_preparation_time(read_float(category_data, "preparationTime"))
-            .maybe_max_capacity(max_capacity)
             .reload_time(reload_time)
-            .work_time(work_time)
             .maybe_dist_ship(dist_ship)
             .maybe_dist_torpedo(dist_torpedo)
             .maybe_hydrophone_wave_radius(hydrophone_wave_radius)
@@ -907,8 +884,32 @@ fn build_ability_category(category_data: &pickled::Dict) -> Option<AbilityCatego
     )
 }
 
+/// `None` without a `numConsumables` the client defines or a `workTime`.
+fn count_based_lifecycle(category_data: &pickled::Dict) -> Option<ConsumableLifecycle> {
+    let charges = ChargeCount::from_game_params(game_param_to_type!(category_data, "numConsumables", Option<i64>)?)?;
+    let work_time = read_float(category_data, "workTime")?;
+
+    Some(ConsumableLifecycle::CountBased { charges, work_time })
+}
+
+/// Absent fields take the defaults of the client's `TimeBasedConsumable`
+/// schema class: an unlimited pool, a 10 s shortest activation and no
+/// refill. `None` for a `maxCapacity` the client does not define.
+fn time_based_lifecycle(category_data: &pickled::Dict) -> Option<ConsumableLifecycle> {
+    let capacity = match read_float(category_data, "maxCapacity") {
+        Some(value) => ConsumableCapacity::from_game_params(value)?,
+        None => ConsumableCapacity::Unlimited,
+    };
+
+    Some(ConsumableLifecycle::TimeBased {
+        capacity,
+        min_work_time: read_float(category_data, "minWorkTime").unwrap_or(10.0),
+        capacity_regen_coeff: read_float(category_data, "capacityRegenCoeff").unwrap_or(0.0),
+    })
+}
+
 fn build_ability(ability_data: &pickled::Dict) -> Ability {
-    let test_key = HashableValue::String("numConsumables".to_string().into());
+    let test_key = HashableValue::String("consumableType".to_string().into());
     let categories: HashMap<String, AbilityCategory> =
         HashMap::from_iter(ability_data.iter().filter_map(|(key, value)| {
             // GameParams pickled categories arrive as either Value::Dict or
@@ -921,7 +922,7 @@ fn build_ability(ability_data: &pickled::Dict) -> Ability {
             }
             let name = key.string_ref().unwrap().inner().to_owned();
             let Some(category) = build_ability_category(&inner) else {
-                tracing::warn!(category = %name, "ability category lacks a valid consumableType, numConsumables or lifeCycleType");
+                tracing::warn!(category = %name, "ability category lacks a valid reloadTime, lifeCycleType or charge pool");
                 return None;
             };
             Some((name, category))
@@ -3314,38 +3315,84 @@ mod camera_tests {
     #[test]
     fn build_ability_category_converts_game_params_markers() {
         let category = |extra: Vec<(HashableValue, Value)>| -> pickled::Dict {
-            let mut data = vec![
-                (pk("reloadTime"), fv(60.0)),
-                (pk("workTime"), fv(10.0)),
-                (pk("consumableType"), sv("smokeGenerator")),
-            ];
+            let mut data = vec![(pk("reloadTime"), fv(60.0)), (pk("consumableType"), sv("smokeGenerator"))];
             data.extend(extra);
             data.into_iter().collect()
         };
 
         let unlimited = build_ability_category(&category(vec![
             (pk("numConsumables"), Value::I64(-1)),
+            (pk("workTime"), fv(10.0)),
             (pk("group"), sv("squadron")),
             (pk("iconIDs"), sv("")),
-            (pk("lifeCycleType"), Value::I64(1)),
-            (pk("maxCapacity"), Value::I64(-1)),
         ]))
         .expect("valid category");
-        assert_eq!(unlimited.num_consumables(), ChargeCount::Unlimited);
+        assert_eq!(
+            unlimited.lifecycle(),
+            ConsumableLifecycle::CountBased { charges: ChargeCount::Unlimited, work_time: 10.0 }
+        );
         assert_eq!(unlimited.group(), Some(ConsumableGroup::Squadron));
         assert_eq!(unlimited.icon_id(), None);
-        assert_eq!(unlimited.lifecycle(), ConsumableLifecycle::TimeBased);
-        assert_eq!(unlimited.max_capacity(), None);
         assert_eq!(unlimited.preparation_time(), None);
 
-        let finite =
-            build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(2))])).expect("valid category");
-        assert_eq!(finite.num_consumables(), ChargeCount::Finite(2));
+        let finite = build_ability_category(&category(vec![
+            (pk("numConsumables"), Value::I64(2)),
+            (pk("workTime"), fv(10.0)),
+            (pk("lifeCycleType"), Value::I64(0)),
+        ]))
+        .expect("valid category");
+        assert_eq!(
+            finite.lifecycle(),
+            ConsumableLifecycle::CountBased { charges: ChargeCount::Finite(2), work_time: 10.0 }
+        );
         assert_eq!(finite.group(), None);
-        assert_eq!(finite.lifecycle(), ConsumableLifecycle::CountBased);
 
-        assert!(build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(-2))])).is_none());
+        assert!(
+            build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(-2)), (pk("workTime"), fv(10.0))]))
+                .is_none()
+        );
+        assert!(build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(2))])).is_none());
         assert!(build_ability_category(&category(Vec::new())).is_none());
+        assert!(build_ability_category(&category(vec![(pk("lifeCycleType"), Value::I64(2))])).is_none());
+    }
+
+    /// TIME_BASED categories carry neither `numConsumables` nor `workTime`, as
+    /// `PCY067_ArtilleryBoosterPremium_TimeBased.PAM_DD_High` shows.
+    #[test]
+    fn build_ability_category_reads_time_based_pool() {
+        let category = |capacity: Value| -> pickled::Dict {
+            vec![
+                (pk("reloadTime"), fv(5.0)),
+                (pk("consumableType"), sv("artilleryBoosters")),
+                (pk("lifeCycleType"), Value::I64(1)),
+                (pk("maxCapacity"), capacity),
+                (pk("minWorkTime"), fv(1.0)),
+                (pk("capacityRegenCoeff"), fv(0.0)),
+                (pk("logic"), dict(vec![(pk("boostCoeff"), fv(0.5))])),
+            ]
+            .into_iter()
+            .collect()
+        };
+
+        let booster = build_ability_category(&category(fv(80.0))).expect("valid category");
+        assert_eq!(
+            booster.lifecycle(),
+            ConsumableLifecycle::TimeBased {
+                capacity: ConsumableCapacity::Seconds(80.0),
+                min_work_time: 1.0,
+                capacity_regen_coeff: 0.0,
+            }
+        );
+        assert_eq!(booster.reload_time(), 5.0);
+        assert_eq!(booster.effect_fields().get("boostCoeff"), Some(&0.5));
+
+        let unlimited = build_ability_category(&category(Value::I64(-1))).expect("valid category");
+        assert!(matches!(
+            unlimited.lifecycle(),
+            ConsumableLifecycle::TimeBased { capacity: ConsumableCapacity::Unlimited, .. }
+        ));
+
+        assert!(build_ability_category(&category(fv(-2.0))).is_none());
     }
 
     /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real shape:
