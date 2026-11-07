@@ -10,6 +10,7 @@ use crate::armor_trace::TraceWeapon;
 use crate::armor_trace::WeaponAmmo;
 use crate::replay_worker::ByteCount;
 use crate::shells::Ammo;
+use crate::ships::ShipClass;
 use crate::ships::Tier;
 
 /// Failure to load a game data build.
@@ -86,11 +87,22 @@ pub enum QueryError {
     )]
     SkillNotFound { query: String, suggestions: Vec<String> },
 
-    #[error("captain skill {skill} is not in the {class} skill tree")]
-    SkillNotForClass { skill: String, class: &'static str },
+    #[error("{}", skill_not_for_class(query, skill, *class, ship.as_deref(), classes))]
+    SkillNotForClass {
+        query: String,
+        /// English name of the skill `query` resolved to.
+        skill: String,
+        class: ShipClass,
+        ship: Option<String>,
+        /// Classes whose skill tree has the skill.
+        classes: Vec<ShipClass>,
+    },
 
     #[error("{query:?} matches several captain skills: {}; ask again with the exact name", candidates.join(", "))]
     AmbiguousSkill { query: String, candidates: Vec<String> },
+
+    #[error("{ship} does not end a tech tree line; name a tier 10 tech tree ship")]
+    NotLineEnd { ship: String },
 
     #[error(
         "no upgrade matches {query:?}; {}",
@@ -169,6 +181,9 @@ pub enum QueryError {
 
     #[error("no stat matches {query:?}; {}", did_you_mean(suggestions, "list stat names with stat_names"))]
     StatNotFound { query: String, suggestions: Vec<String> },
+
+    #[error("no stat matches {query:?}; use stat {stat} with qualifier {:?}", ammo.label())]
+    StatNameNamesAmmo { query: String, stat: String, ammo: Ammo },
 
     #[error("stat {stat} is yes or no, not a number; it cannot be compared")]
     StatNotNumeric { stat: &'static str },
@@ -444,6 +459,27 @@ fn did_you_mean(suggestions: &[String], hint: &str) -> String {
     }
 
     format!("did you mean: {}?", suggestions.join(", "))
+}
+
+/// "Survivability Expert (SE) is not in the battleship skill tree (G.
+/// Kurfuerst); it is in the destroyer, cruiser and aircraft carrier trees".
+fn skill_not_for_class(
+    query: &str,
+    skill: &str,
+    class: ShipClass,
+    ship: Option<&str>,
+    classes: &[ShipClass],
+) -> String {
+    let named = if query.eq_ignore_ascii_case(skill) { skill.to_owned() } else { format!("{skill} ({query})") };
+    let ship = ship.map(|ship| format!(" ({ship})")).unwrap_or_default();
+    let labels: Vec<String> = classes.iter().map(|class| class.label().replace('_', " ")).collect();
+    let elsewhere = match labels.split_last() {
+        None => String::new(),
+        Some((only, [])) => format!("; it is in the {only} tree"),
+        Some((last, rest)) => format!("; it is in the {} and {last} trees", rest.join(", ")),
+    };
+
+    format!("{named} is not in the {} skill tree{ship}{elsewhere}", class.label().replace('_', " "))
 }
 
 /// "Aki has no AP bombs; its Suisei dive bombers carry HE bombs, its main

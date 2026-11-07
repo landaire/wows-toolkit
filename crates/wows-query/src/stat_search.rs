@@ -30,6 +30,7 @@ use wowsunpack::game_params::ttx::model::AmmoCount;
 use wowsunpack::game_params::ttx::model::StatRow;
 use wowsunpack::game_params::ttx::model::StatValue;
 use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
+use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::SkillPointCost;
@@ -140,7 +141,7 @@ pub struct StatCondition {
     /// Threshold in the unit stat_names lists for the stat.
     pub value: f32,
 
-    /// Only the row with this qualifier: ammo type for shells ("HE", "AP", "CS"), torpedo name as values show it, secondary mount or consumable name. Omit to accept any row.
+    /// Only the row with this qualifier: ammo type for shells ("HE", "AP", "SAP"), torpedo name as values show it, secondary mount or consumable name. Omit to accept any row.
     pub qualifier: Option<String>,
 }
 
@@ -363,6 +364,11 @@ pub struct RankedShip {
     /// With conditions: how the ship meets them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meets: Option<ConditionMatch>,
+
+    /// The row the value comes from when the stat has several, e.g. "main
+    /// battery 483 mm HE".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row: Option<String>,
 }
 
 /// Arguments for `stat_names`.
@@ -942,10 +948,11 @@ impl GameData {
     ) -> Ranking {
         const RANK_RULE: &str = "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
 
+        let row_names = RowNames::default();
         let mut entries: Vec<RankEntry<'_>> = Vec::new();
         let mut lacking_stat = 0;
         for (ship, meets) in candidates {
-            match self.rank_builds(ship, rank) {
+            match self.rank_builds(ship, rank, &row_names) {
                 Ok(Some(builds)) => entries.push(RankEntry { ship, builds, meets }),
                 Ok(None) => lacking_stat += 1,
                 Err(error) => undetermined.push(UndeterminedShip {
@@ -956,7 +963,7 @@ impl GameData {
         }
 
         entries.sort_by(|left, right| {
-            let (left_value, right_value) = (left.builds.best.value.0, right.builds.best.value.0);
+            let (left_value, right_value) = (left.builds.best.value.value, right.builds.best.value.value);
             let order = match rank.order {
                 RankOrder::Asc => left_value.total_cmp(&right_value),
                 RankOrder::Desc => right_value.total_cmp(&left_value),
@@ -965,7 +972,7 @@ impl GameData {
         });
 
         let limit = rank.limit.0;
-        let printed = |index: usize| entries.get(index).map(|entry| shown(entry.builds.best.value.0));
+        let printed = |index: usize| entries.get(index).map(|entry| shown(entry.builds.best.value.value));
         let tied_beyond_limit = (limit..entries.len())
             .filter(|&index| printed(index) == printed(limit - 1))
             .map(|index| entries[index].ship.listing_label())
@@ -991,12 +998,13 @@ impl GameData {
             .map(|(RankEntry { ship, builds, meets }, (position, tied))| RankedShip {
                 rank: position,
                 ship: ship.listing_label(),
-                value: format_value(builds.best.value.0, unit),
-                base: format_value(builds.base.0, unit),
+                value: format_value(builds.best.value.value, unit),
+                base: format_value(builds.base.value, unit),
                 build: builds.best.assumed,
                 tier_fillers: builds.best.tier_fillers,
                 tied,
                 meets,
+                row: builds.best.value.row.and_then(|row| row_names.label(self, rank.stat, row)),
             })
             .collect();
         let omitted = (ranked > ships.len()).then(|| ranked - ships.len());
@@ -1006,16 +1014,21 @@ impl GameData {
 
     /// Base and best-fit build value of the rank stat, `None` when the ship
     /// lacks it.
-    fn rank_builds(&self, ship: &Ship, rank: &Rank) -> Result<Option<Builds<Amount>>, QueryError> {
+    fn rank_builds(
+        &self,
+        ship: &Ship,
+        rank: &Rank,
+        row_names: &RowNames,
+    ) -> Result<Option<Builds<Amount>>, QueryError> {
         match rank.stat {
             SearchStat::Card(stat) => {
                 let planner = Planner::new(self, ship);
                 let extract = |outcome: &builds::Outcome| {
                     let rows = outcome.stats.rows();
-                    extreme(
-                        rank.order,
-                        card_values(self, &rows, stat, rank.qualifier.as_deref()).map(|(_, value)| value),
-                    )
+                    let caliber = main_battery_caliber(rank.stat, &rows);
+                    let values = card_values(self, &rows, stat, rank.qualifier.as_deref())
+                        .map(|(row, value)| Amount { value, row: row_names.id(row.qualifier.as_deref(), caliber) });
+                    extreme(rank.order, values)
                 };
 
                 planned_builds(&planner, rank, &extract)
@@ -1035,8 +1048,13 @@ impl GameData {
                         provider: self.provider(),
                     }
                     .rows();
-                    let values =
-                        derived_rows(self, &rows, stat, rank.qualifier.as_deref()).map(|row| row.value.as_f32());
+                    let caliber = (rank.stat.shell_battery() == Some(Battery::Main))
+                        .then(|| main_battery_caliber(rank.stat, &outcome.stats.rows()))
+                        .flatten();
+                    let values = derived_rows(self, &rows, stat, rank.qualifier.as_deref()).map(|row| Amount {
+                        value: row.value.as_f32(),
+                        row: row_names.id(row.qualifier.as_deref(), caliber),
+                    });
                     extreme(rank.order, values)
                 };
 
@@ -1045,8 +1063,9 @@ impl GameData {
             SearchStat::Armor { zone, bound } => {
                 let value = armor_value(&zone_spans(&plates(ship)), zone, bound);
                 Ok(value.map(|value| {
-                    let best = BuildValue { value: Amount(value), assumed: Vec::new(), tier_fillers: Vec::new() };
-                    Builds { base: Amount(value), best, alternatives: Vec::new() }
+                    let amount = Amount { value, row: None };
+                    let best = BuildValue { value: amount, assumed: Vec::new(), tier_fillers: Vec::new() };
+                    Builds { base: amount, best, alternatives: Vec::new() }
                 }))
             }
             SearchStat::Ricochet { ammo, bound } => {
@@ -1055,7 +1074,8 @@ impl GameData {
                 let extract = |outcome: &builds::Outcome| {
                     let shells = main_battery_ricochet(self, ship, selections[outcome.selection]);
                     let angles = shells.iter().filter(|(shell_ammo, _)| *shell_ammo == ammo);
-                    extreme(rank.order, angles.map(|(_, angles)| bound.angle(angles)))
+                    let values = angles.map(|(_, angles)| Amount { value: bound.angle(angles), row: None });
+                    extreme(rank.order, values)
                 };
 
                 planned_builds(&planner, rank, &extract)
@@ -1449,11 +1469,9 @@ impl<'a> ShipSearch<'a> {
             .zip(readings)
             .filter_map(|(condition, readings)| {
                 let reading = condition.best(readings)?;
-                let battery = condition.stat.shell_battery().map(Battery::label).map(str::to_owned);
-                let row = reading.qualifier.as_deref().map(|qualifier| self.game.qualifier_name(qualifier));
-                let qualifier: Vec<String> = battery.into_iter().chain(row).collect();
-                let qualifier =
-                    if qualifier.is_empty() { String::new() } else { format!(" ({})", qualifier.join(" ")) };
+                let qualifier = row_label(self.game, condition.stat, None, reading.qualifier.as_deref())
+                    .map(|label| format!(" ({label})"))
+                    .unwrap_or_default();
                 Some(format!(
                     "{}{qualifier}: {}",
                     condition.stat.name(),
@@ -1634,13 +1652,15 @@ struct Rank {
 
 impl Rank {
     fn describe(&self) -> String {
-        let qualifier = self.qualifier.as_deref().map(|qualifier| format!(" ({qualifier})")).unwrap_or_default();
+        let rows: Vec<&str> =
+            self.stat.shell_battery().map(Battery::label).into_iter().chain(self.qualifier.as_deref()).collect();
+        let rows = if rows.is_empty() { String::new() } else { format!(" ({})", rows.join(" ")) };
         let order = match self.order {
             RankOrder::Asc => "lowest first",
             RankOrder::Desc => "highest first",
         };
 
-        format!("{}{qualifier} ({}), {order}", self.stat.name(), self.stat.unit().name())
+        format!("{}{rows} ({}), {order}", self.stat.name(), self.stat.unit().name())
     }
 }
 
@@ -1651,13 +1671,57 @@ struct RankEntry<'a> {
     meets: Option<ConditionMatch>,
 }
 
-/// A stat value in its search `Unit`, for the build planner.
+/// A stat value in its search `Unit`, for the build planner, with the row it
+/// comes from.
 #[derive(Debug, Clone, Copy)]
-struct Amount(f32);
+struct Amount {
+    value: f32,
+    row: Option<RowId>,
+}
 
 impl StatAmount for Amount {
     fn amount(self) -> f32 {
-        self.0
+        self.value
+    }
+}
+
+/// Index of a row in [`RowNames`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RowId(usize);
+
+/// A ranked row: its qualifier and, for main battery shell stats, the gun
+/// caliber in mm.
+#[derive(Debug, Clone, PartialEq)]
+struct RowKey {
+    qualifier: String,
+    caliber: Option<f32>,
+}
+
+/// Rows seen while ranking, so an [`Amount`] names its row and stays `Copy`
+/// as the planner requires.
+#[derive(Default)]
+struct RowNames(RefCell<Vec<RowKey>>);
+
+impl RowNames {
+    fn id(&self, qualifier: Option<&str>, caliber: Option<f32>) -> Option<RowId> {
+        let qualifier = qualifier?;
+        let mut keys = self.0.borrow_mut();
+        let found = keys.iter().position(|key| key.qualifier == qualifier && key.caliber == caliber);
+        let index = match found {
+            Some(index) => index,
+            None => {
+                keys.push(RowKey { qualifier: qualifier.to_owned(), caliber });
+                keys.len() - 1
+            }
+        };
+
+        Some(RowId(index))
+    }
+
+    fn label(&self, game: &GameData, stat: SearchStat, id: RowId) -> Option<String> {
+        let key = &self.0.borrow()[id.0];
+
+        row_label(game, stat, key.caliber, Some(&key.qualifier))
     }
 }
 
@@ -1706,6 +1770,9 @@ fn resolve_stat(query: &str) -> Result<SearchStat, QueryError> {
     if let Some(stat) = TtxStat::ALL.iter().find(|stat| search_key(stat.field_key()) == key) {
         return Err(QueryError::StatNotNumeric { stat: stat.field_key() });
     }
+    if let Some((stat, ammo)) = per_ammo_stat(query, &names) {
+        return Err(QueryError::StatNameNamesAmmo { query: query.to_owned(), stat, ammo });
+    }
 
     match fuzzy::closest(&key, names.iter().map(|(key, name)| fuzzy::Candidate::primary(key, name))) {
         Fuzzy::Unique(name) => {
@@ -1729,6 +1796,23 @@ fn resolve_stat(query: &str) -> Result<SearchStat, QueryError> {
             Err(QueryError::StatNotFound { query: query.to_owned(), suggestions })
         }
     }
+}
+
+/// The per-ammo stat and ammo type a query such as "artillery.he.penetration"
+/// means: a shell stat with the ammo type in place of "shells".
+fn per_ammo_stat(query: &str, names: &[(String, String)]) -> Option<(String, Ammo)> {
+    let query = query.trim().to_ascii_lowercase();
+    let mut segments = query.splitn(3, '.');
+    let (group, ammo, field) = (segments.next()?, segments.next()?, segments.next()?);
+    let ammo = match ammo {
+        "ap" => Ammo::Ap,
+        "he" => Ammo::He,
+        "sap" | "cs" => Ammo::Sap,
+        _ => return None,
+    };
+    let key = search_key(&format!("{group}.shells.{field}"));
+
+    names.iter().find(|(stat_key, _)| *stat_key == key).map(|(_, name)| (name.clone(), ammo))
 }
 
 /// Loadout inputs behind the failing conditions' stats, following derived
@@ -1925,18 +2009,22 @@ fn derived_rows<'r>(
     stat: DerivedStat,
     qualifier: Option<&'r str>,
 ) -> impl Iterator<Item = &'r DerivedRow> + 'r {
-    rows.iter()
-        .filter(move |row| row.stat == stat && qualifier_matches(game, row.qualifier.as_deref(), qualifier))
+    rows.iter().filter(move |row| row.stat == stat && qualifier_matches(game, row.qualifier.as_deref(), qualifier))
 }
 
 /// Whether `row` is the row `wanted` names, a projectile by GameParams name
-/// or English name. No wanted qualifier accepts any row.
+/// or English name, or a shell by ammo type ("SAP" for "CS"). No wanted
+/// qualifier accepts any row.
 fn qualifier_matches(game: &GameData, row: Option<&str>, wanted: Option<&str>) -> bool {
     let Some(wanted) = wanted.map(str::trim) else {
         return true;
     };
 
-    row.is_some_and(|row| row.eq_ignore_ascii_case(wanted) || game.qualifier_name(row).eq_ignore_ascii_case(wanted))
+    row.is_some_and(|row| {
+        row.eq_ignore_ascii_case(wanted)
+            || game.qualifier_name(row).eq_ignore_ascii_case(wanted)
+            || AmmoType::from_game_str(row).display_name().eq_ignore_ascii_case(wanted)
+    })
 }
 
 fn armor_value(armor: &BTreeMap<&'static str, ThicknessSpan>, zone: ArmorZone, bound: Bound) -> Option<f32> {
@@ -1950,13 +2038,36 @@ fn armor_value(armor: &BTreeMap<&'static str, ThicknessSpan>, zone: ArmorZone, b
 }
 
 /// The lowest ("asc") or highest ("desc") of a ship's rows.
-fn extreme(order: RankOrder, values: impl Iterator<Item = f32>) -> Option<Amount> {
-    let value = match order {
-        RankOrder::Asc => values.min_by(f32::total_cmp),
-        RankOrder::Desc => values.max_by(f32::total_cmp),
-    };
+fn extreme(order: RankOrder, values: impl Iterator<Item = Amount>) -> Option<Amount> {
+    match order {
+        RankOrder::Asc => values.min_by(|left, right| left.value.total_cmp(&right.value)),
+        RankOrder::Desc => values.max_by(|left, right| left.value.total_cmp(&right.value)),
+    }
+}
 
-    value.map(Amount)
+/// What a row of `stat` stands for, e.g. "main battery 483 mm HE"; `None`
+/// when neither battery nor row needs naming.
+fn row_label(game: &GameData, stat: SearchStat, caliber: Option<f32>, qualifier: Option<&str>) -> Option<String> {
+    let battery = stat.shell_battery().map(Battery::label).map(str::to_owned);
+    let caliber = caliber.map(|caliber| format_value(caliber, Unit::Millimeters));
+    let row = qualifier.map(|qualifier| match battery {
+        // Shell rows are keyed by GameParams ammo type, "CS" for SAP.
+        Some(_) => AmmoType::from_game_str(qualifier).display_name().to_owned(),
+        None => game.qualifier_name(qualifier),
+    });
+    let parts: Vec<String> = battery.into_iter().chain(caliber).chain(row).collect();
+
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// Caliber in mm of the main battery guns when `stat` is a main battery shell
+/// stat, so a ranked row names the shell.
+fn main_battery_caliber(stat: SearchStat, rows: &[StatRow]) -> Option<f32> {
+    if stat.shell_battery() != Some(Battery::Main) {
+        return None;
+    }
+
+    rows.iter().find(|row| row.stat == TtxStat::GunCaliber).and_then(|row| row.value.as_f32())
 }
 
 /// Base and best-fit build of a stat the planner computes. A stat the stock

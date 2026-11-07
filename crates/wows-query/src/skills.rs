@@ -146,9 +146,10 @@ impl GameData {
 
         let mut skills = self.match_skills(&args.skill, &mut interpretations)?;
         if let Some(class) = class {
+            let all = skills.clone();
             skills.retain(|skill| self.skill_points(skill, class).is_some());
             if skills.is_empty() {
-                return Err(QueryError::SkillNotForClass { skill: args.skill.clone(), class: class.label() });
+                return Err(self.skill_not_for_class(&args.skill, &all, class, ship.map(|ship| ship.name.as_str())));
             }
         }
 
@@ -197,14 +198,32 @@ impl GameData {
         &self,
         query: &str,
         class: ShipClass,
+        ship: &str,
         interpretations: &mut Interpretations,
     ) -> Result<(&CrewSkill, u8), QueryError> {
         let skills = self.match_skills(query, interpretations)?;
 
         skills
+            .iter()
+            .find_map(|skill| self.skill_points(skill, class).map(|points| (*skill, points)))
+            .ok_or_else(|| self.skill_not_for_class(query, &skills, class, Some(ship)))
+    }
+
+    /// `skills` are every skill `query` matched; none is in `class`'s tree.
+    fn skill_not_for_class(
+        &self,
+        query: &str,
+        skills: &[&CrewSkill],
+        class: ShipClass,
+        ship: Option<&str>,
+    ) -> QueryError {
+        let classes = ShipClass::ALL
             .into_iter()
-            .find_map(|skill| self.skill_points(skill, class).map(|points| (skill, points)))
-            .ok_or_else(|| QueryError::SkillNotForClass { skill: query.to_owned(), class: class.label() })
+            .filter(|other| skills.iter().any(|skill| self.skill_points(skill, *other).is_some()))
+            .collect();
+        let skill = skills.first().map_or_else(|| query.to_owned(), |skill| self.skill_name(skill));
+
+        QueryError::SkillNotForClass { query: query.to_owned(), skill, class, ship: ship.map(str::to_owned), classes }
     }
 
     /// Skills a player-written name, abbreviation or internal name refers

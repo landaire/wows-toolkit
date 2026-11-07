@@ -118,7 +118,7 @@ impl GameData {
         let mut applied_skills = Vec::new();
         let mut labels = HashMap::new();
         for query in request.skills {
-            let (skill, points) = self.resolve_skill_for_class(query, ship.class, interpretations)?;
+            let (skill, points) = self.resolve_skill_for_class(query, ship.class, &ship.name, interpretations)?;
             if skills.iter().any(|chosen| chosen.internal_name() == skill.internal_name()) {
                 continue;
             }

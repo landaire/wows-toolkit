@@ -1,0 +1,26 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1523
+expression: ranked
+---
+- stat: "artillery.shells.penetration (main battery) (mm), highest first"
+  ships:
+    - "1 \"T10 Preussen (battleship, Germany)\" \"142 mm\": \"main battery 457 mm HE\""
+    - "1 \"T10 Thunderer (battleship, United_Kingdom)\" \"142 mm\": \"main battery 457 mm HE\""
+    - "3 \"T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR]\" \"131 mm\": \"main battery 419 mm HE\""
+    - "3 \"T10 G. Kurfürst (battleship, Germany)\" \"131 mm\": \"main battery 420 mm HE\""
+    - "3 \"T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]\" \"131 mm\": \"main battery 420 mm HE\""
+- stat: "artillery.shells.penetration (main battery HE) (mm), highest first"
+  ships:
+    - "1 \"T10 Preussen (battleship, Germany)\" \"142 mm\": \"main battery 457 mm HE\""
+    - "1 \"T10 Thunderer (battleship, United_Kingdom)\" \"142 mm\": \"main battery 457 mm HE\""
+    - "3 \"T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR]\" \"131 mm\": \"main battery 419 mm HE\""
+    - "3 \"T10 G. Kurfürst (battleship, Germany)\" \"131 mm\": \"main battery 420 mm HE\""
+    - "3 \"T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]\" \"131 mm\": \"main battery 420 mm HE\""
+- stat: "artillery.shells.penetration (main battery SAP) (mm), highest first"
+  ships:
+    - "1 \"T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]\" \"114 mm\": \"main battery 457 mm SAP\""
+    - "2 \"T10 C. Colombo (battleship, Italy)\" \"96 mm\": \"main battery 381 mm SAP\""
+    - "2 \"T10 A. Vespucci (battleship, Italy, test)\" \"96 mm\": \"main battery 381 mm SAP\""
+    - "4 \"T10 Conte Verde (battleship, Italy)\" \"54 mm\": \"main battery 203 mm SAP\""
+    - "4 \"T10 Venezia (cruiser, Italy)\" \"54 mm\": \"main battery 203 mm SAP\""

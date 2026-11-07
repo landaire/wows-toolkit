@@ -15,6 +15,7 @@ use wowsunpack::game_params::types::Experience;
 
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipFilter;
@@ -41,6 +42,9 @@ pub struct TechTreeLinesArgs {
 
     /// Class of the tier 10 ship the line ends at.
     pub class: Option<ShipClass>,
+
+    /// The tier 10 ship the line ends at, by name or common alias, e.g. "Harugumo".
+    pub tier_10_ship: Option<String>,
 
     /// Lowest tier whose ships are costed. Defaults to 8.
     #[schemars(range(min = 1, max = 10))]
@@ -78,6 +82,9 @@ pub enum LineOrder {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TechTreeLinesOutput {
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     /// Tiers whose ships are costed.
     pub tiers: TierRange,
 
@@ -332,6 +339,18 @@ impl GameData {
 
         let paths = self.line_paths();
 
+        let mut interpretations = Interpretations::default();
+        let end = match args.tier_10_ship.as_deref() {
+            Some(name) => {
+                let ship = self.resolve_ship(name, &mut interpretations)?;
+                if !paths.iter().any(|path| std::ptr::eq(&self.ships[path.end()], ship)) {
+                    return Err(QueryError::NotLineEnd { ship: ship.name.clone() });
+                }
+                Some(ship)
+            }
+            None => None,
+        };
+
         // Every line counts toward sharing, including those the filters leave out.
         let mut lines_through: HashMap<usize, BTreeSet<usize>> = HashMap::new();
         for path in &paths {
@@ -351,6 +370,7 @@ impl GameData {
         let mut lines: Vec<TechTreeLine> = paths
             .iter()
             .filter(|path| filter.matches(&self.ships[path.end()]))
+            .filter(|path| end.is_none_or(|end| std::ptr::eq(&self.ships[path.end()], end)))
             .map(|path| self.tech_tree_line(path, tiers, &lines_through))
             .collect();
 
@@ -374,7 +394,7 @@ impl GameData {
         lines.truncate(args.limit.unwrap_or(DEFAULT_LIMIT));
         let omitted = (total > lines.len()).then(|| total - lines.len());
 
-        Ok(TechTreeLinesOutput { tiers, sort_by, total, lines, omitted })
+        Ok(TechTreeLinesOutput { interpretations, tiers, sort_by, total, lines, omitted })
     }
 
     /// Every research path from a tier 1 ship to a released tier 10 tech

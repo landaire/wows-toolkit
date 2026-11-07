@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1528
+expression: error.to_string()
+---
+no stat matches "artillery.he.penetration"; use stat artillery.shells.penetration with qualifier "HE"

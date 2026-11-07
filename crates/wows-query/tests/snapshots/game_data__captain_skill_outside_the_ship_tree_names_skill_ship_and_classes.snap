@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1542
+expression: error.to_string()
+---
+Survivability Expert (SE) is not in the battleship skill tree (G. Kurfürst); it is in the destroyer, cruiser and aircraft carrier trees

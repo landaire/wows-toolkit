@@ -1498,8 +1498,69 @@ fn stat_search_ranks_derived_and_ricochet_stats() {
     insta::assert_yaml_snapshot!(ranked);
 }
 
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_main_battery_penetration_by_row() {
+    let ranked: Vec<serde_json::Value> = [None, Some("HE"), Some("SAP")]
+        .into_iter()
+        .map(|qualifier| {
+            let mut rank = json!({ "stat": "artillery.shells.penetration", "order": "desc", "limit": 5 });
+            if let Some(qualifier) = qualifier {
+                rank["qualifier"] = json!(qualifier);
+            }
+            let search = game()
+                .call_tool("stat_search", json!({ "rank": rank, "min_tier": 10, "max_tier": 10 }))
+                .expect("rank resolves");
+            let ships: Vec<String> = search["ranking"]["ships"]
+                .as_array()
+                .expect("ships is a list")
+                .iter()
+                .map(|ship| format!("{} {} {}: {}", ship["rank"], ship["ship"], ship["value"], ship["row"]))
+                .collect();
+            json!({ "stat": search["ranking"]["stat"], "ships": ships })
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(ranked);
+
+    let error = game()
+        .call_tool("stat_search", json!({ "rank": { "stat": "artillery.he.penetration", "order": "desc" } }))
+        .expect_err("ammo type is a qualifier, not part of the stat name");
+    insta::assert_snapshot!(error.to_string());
+}
+
 fn undetermined(search: &serde_json::Value) -> u64 {
     search.get("undetermined").and_then(|ships| ships.as_array()).map_or(0, |ships| ships.len() as u64)
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn captain_skill_outside_the_ship_tree_names_skill_ship_and_classes() {
+    let error = game()
+        .call_tool("captain_skill", json!({ "skill": "SE", "ship": "GK" }))
+        .expect_err("Survivability Expert is not in the battleship tree");
+
+    insta::assert_snapshot!(error.to_string());
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_by_tier_10_ship() {
+    let lines: Vec<String> = ["Essex", "Harugumo", "DM"]
+        .into_iter()
+        .map(|ship| {
+            let lines = game()
+                .tech_tree_lines(&TechTreeLinesArgs { tier_10_ship: Some(ship.to_owned()), ..Default::default() })
+                .expect("the ship ends a line");
+            assert_eq!(lines.total, 1);
+            lines.lines[0].path.join(" > ")
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(lines);
+
+    let error = game()
+        .tech_tree_lines(&TechTreeLinesArgs { tier_10_ship: Some("Missouri".to_owned()), ..Default::default() })
+        .expect_err("Missouri is a premium ship");
+    insta::assert_snapshot!(error.to_string());
 }
 
 #[test]
