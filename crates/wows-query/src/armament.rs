@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde::Serializer;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
+use wows_ship_stats::mounts::BarrelCount;
+use wows_ship_stats::mounts::MountCount;
 use wows_ship_stats::mounts::selected_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::translations::translate_unit;
@@ -56,16 +58,6 @@ where
         }
     }
 }
-
-/// Number of gun mounts or torpedo launchers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(transparent)]
-pub struct MountCount(pub u32);
-
-/// Number of barrels or tubes, on one mount or on several.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(transparent)]
-pub struct BarrelCount(pub u32);
 
 /// The armament of one ship with one module selection.
 #[derive(Debug, Clone, Serialize)]

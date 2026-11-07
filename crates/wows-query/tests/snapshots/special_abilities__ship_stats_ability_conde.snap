@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
-assertion_line: 86
 expression: stats
 ---
 ship:
@@ -178,9 +177,71 @@ build_stats:
       stat: torpedoes per minute
       unit: torpedoes/min
       builds:
-        base: 4.36
+        base:
+          torpedoes_per_minute: 2.18
+          bearing: 90
+          all_launchers_ceiling: 4.36
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 2.18
+              port: 2.18
+            - bearing: 45
+              starboard: 2.18
+              port: 2.18
+            - bearing: 60
+              starboard: 2.18
+              port: 2.18
+            - bearing: 90
+              starboard: 2.18
+              port: 2.18
+            - bearing: 120
+              starboard: 2.18
+              port: 2.18
+            - bearing: 135
+              starboard: 2.18
+              port: 2.18
+            - bearing: 150
+              starboard: 2.18
+              port: 2.18
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
-          value: 5.7
+          value:
+            torpedoes_per_minute: 2.85
+            bearing: 90
+            all_launchers_ceiling: 5.7
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 2.85
+                port: 2.85
+              - bearing: 45
+                starboard: 2.85
+                port: 2.85
+              - bearing: 60
+                starboard: 2.85
+                port: 2.85
+              - bearing: 90
+                starboard: 2.85
+                port: 2.85
+              - bearing: 120
+                starboard: 2.85
+                port: 2.85
+              - bearing: 135
+                starboard: 2.85
+                port: 2.85
+              - bearing: 150
+                starboard: 2.85
+                port: 2.85
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Fill the Tubes
             - Torpedo Tubes Modification 2
@@ -188,11 +249,17 @@ build_stats:
             - Consumable Specialist
         alternatives:
           - label: without Fill the Tubes
-            value: 5.13
+            value:
+              torpedoes_per_minute: 2.57
+              bearing: 90
+              all_launchers_ceiling: 5.13
             assumed:
               - Torpedo Tubes Modification 2
           - label: without Torpedo Tubes Modification 2
-            value: 4.85
+            value:
+              torpedoes_per_minute: 2.42
+              bearing: 90
+              all_launchers_ceiling: 4.85
             assumed:
               - Fill the Tubes
             tier_fillers:
@@ -762,12 +829,72 @@ build_stats:
         unit: HP/min
         builds:
           base:
-            damage_per_minute: 64727
-            damage_per_second: 1078.8
+            damage_per_minute: 32364
+            damage_per_second: 539.4
+            bearing: 90
+            all_barrels_ceiling: 64727
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 32364
+                port: 32364
+              - bearing: 45
+                starboard: 32364
+                port: 32364
+              - bearing: 60
+                starboard: 32364
+                port: 32364
+              - bearing: 90
+                starboard: 32364
+                port: 32364
+              - bearing: 120
+                starboard: 32364
+                port: 32364
+              - bearing: 135
+                starboard: 32364
+                port: 32364
+              - bearing: 150
+                starboard: 32364
+                port: 32364
+              - bearing: 180
+                starboard: 0
+                port: 0
           best:
             value:
-              damage_per_minute: 97302
-              damage_per_second: 1621.7
+              damage_per_minute: 48651
+              damage_per_second: 810.9
+              bearing: 90
+              all_barrels_ceiling: 97302
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 48651
+                  port: 48651
+                - bearing: 45
+                  starboard: 48651
+                  port: 48651
+                - bearing: 60
+                  starboard: 48651
+                  port: 48651
+                - bearing: 90
+                  starboard: 48651
+                  port: 48651
+                - bearing: 120
+                  starboard: 48651
+                  port: 48651
+                - bearing: 135
+                  starboard: 48651
+                  port: 48651
+                - bearing: 150
+                  starboard: 48651
+                  port: 48651
+                - bearing: 180
+                  starboard: 0
+                  port: 0
             assumed:
               - Pack a Punch
               - Fill the Tubes
@@ -777,8 +904,10 @@ build_stats:
           alternatives:
             - label: without Pack a Punch
               value:
-                damage_per_minute: 84611
-                damage_per_second: 1410.2
+                damage_per_minute: 42305
+                damage_per_second: 705.1
+                bearing: 90
+                all_barrels_ceiling: 84611
               assumed:
                 - Fill the Tubes
                 - Torpedo Tubes Modification 2
@@ -786,8 +915,10 @@ build_stats:
                 - Consumable Specialist
             - label: without Fill the Tubes
               value:
-                damage_per_minute: 87572
-                damage_per_second: 1459.5
+                damage_per_minute: 43786
+                damage_per_second: 729.8
+                bearing: 90
+                all_barrels_ceiling: 87572
               assumed:
                 - Pack a Punch
                 - Torpedo Tubes Modification 2
@@ -796,16 +927,325 @@ build_stats:
                 - Focus Fire Training
             - label: without Torpedo Tubes Modification 2
               value:
-                damage_per_minute: 82707
-                damage_per_second: 1378.5
+                damage_per_minute: 41354
+                damage_per_second: 689.2
+                bearing: 90
+                all_barrels_ceiling: 82707
               assumed:
                 - Pack a Punch
                 - Fill the Tubes
               tier_fillers:
                 - Consumable Specialist
+  torpedo_reload_buffs:
+    - consumable: Auxiliary and Torpedo Weaponry Coordination
+      choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+      reload_factor_while_active: 0.8
+      charges:
+        stat: Auxiliary and Torpedo Weaponry Coordination charges
+        unit: charges
+        builds:
+          base: 3
+          best:
+            value: 4
+            assumed:
+              - Superintendent
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          alternatives:
+            - label: without Superintendent
+              value: 3
+              assumed: []
+      action_time:
+        stat: Auxiliary and Torpedo Weaponry Coordination action time
+        unit: s
+        builds:
+          base: 30
+          best:
+            value: 33
+            assumed:
+              - Ship Consumable Modification 1
+          alternatives:
+            - label: without Ship Consumable Modification 1
+              value: 30
+              assumed: []
+      cooldown:
+        stat: Auxiliary and Torpedo Weaponry Coordination cooldown
+        unit: s
+        builds:
+          base: 120
+          best:
+            value: 120
+            assumed: []
+      torpedoes_per_minute:
+        stat: torpedoes per minute with Auxiliary and Torpedo Weaponry Coordination
+        unit: torpedoes/min
+        builds:
+          base:
+            torpedoes_per_minute: 2.29
+            bearing: 90
+            all_launchers_ceiling: 4.58
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 2.29
+                port: 2.29
+              - bearing: 45
+                starboard: 2.29
+                port: 2.29
+              - bearing: 60
+                starboard: 2.29
+                port: 2.29
+              - bearing: 90
+                starboard: 2.29
+                port: 2.29
+              - bearing: 120
+                starboard: 2.29
+                port: 2.29
+              - bearing: 135
+                starboard: 2.29
+                port: 2.29
+              - bearing: 150
+                starboard: 2.29
+                port: 2.29
+              - bearing: 180
+                starboard: 0
+                port: 0
+          best:
+            value:
+              torpedoes_per_minute: 3.01
+              bearing: 90
+              all_launchers_ceiling: 6.01
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 45
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 60
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 90
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 120
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 135
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 150
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 180
+                  starboard: 0
+                  port: 0
+            assumed:
+              - Fill the Tubes
+              - Ship Consumable Modification 1
+              - Torpedo Tubes Modification 2
+            tier_fillers:
+              - Consumable Specialist
+          alternatives:
+            - label: without Fill the Tubes
+              value:
+                torpedoes_per_minute: 2.71
+                bearing: 90
+                all_launchers_ceiling: 5.41
+              assumed:
+                - Ship Consumable Modification 1
+                - Torpedo Tubes Modification 2
+            - label: without Ship Consumable Modification 1
+              value:
+                torpedoes_per_minute: 2.99
+                bearing: 90
+                all_launchers_ceiling: 5.99
+              assumed:
+                - Fill the Tubes
+                - Torpedo Tubes Modification 2
+              tier_fillers:
+                - Consumable Specialist
+            - label: without Torpedo Tubes Modification 2
+              value:
+                torpedoes_per_minute: 2.55
+                bearing: 90
+                all_launchers_ceiling: 5.11
+              assumed:
+                - Fill the Tubes
+                - Ship Consumable Modification 1
+              tier_fillers:
+                - Consumable Specialist
+            - label: with AA Defense and ASW Expert active
+              value:
+                torpedoes_per_minute: 3.11
+                bearing: 90
+                all_launchers_ceiling: 6.21
+              assumed:
+                - Fill the Tubes
+                - Ship Consumable Modification 1
+                - Torpedo Tubes Modification 2
+                - AA Defense and ASW Expert
+              tier_fillers:
+                - Consumable Specialist
+                - Heavy AP Shells
+              note: "Improves your ship's characteristics when her AA guns are active."
+      torpedo_damage:
+        - ammo: 550 mm 23DT
+          damage: 14833
+          barrels: 8
+          rates:
+            stat: 550 mm 23DT damage rate with Auxiliary and Torpedo Weaponry Coordination
+            unit: HP/min
+            builds:
+              base:
+                damage_per_minute: 33982
+                damage_per_second: 566.4
+                bearing: 90
+                all_barrels_ceiling: 67964
+                by_bearing:
+                  - bearing: 0
+                    starboard: 0
+                    port: 0
+                  - bearing: 30
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 45
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 60
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 90
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 120
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 135
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 150
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 180
+                    starboard: 0
+                    port: 0
+              best:
+                value:
+                  damage_per_minute: 51275
+                  damage_per_second: 854.6
+                  bearing: 90
+                  all_barrels_ceiling: 102549
+                  by_bearing:
+                    - bearing: 0
+                      starboard: 0
+                      port: 0
+                    - bearing: 30
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 45
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 60
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 90
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 120
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 135
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 150
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 180
+                      starboard: 0
+                      port: 0
+                assumed:
+                  - Pack a Punch
+                  - Fill the Tubes
+                  - Ship Consumable Modification 1
+                  - Torpedo Tubes Modification 2
+                tier_fillers:
+                  - Consumable Specialist
+              alternatives:
+                - label: without Pack a Punch
+                  value:
+                    damage_per_minute: 44587
+                    damage_per_second: 743.1
+                    bearing: 90
+                    all_barrels_ceiling: 89173
+                  assumed:
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                  tier_fillers:
+                    - Consumable Specialist
+                - label: without Fill the Tubes
+                  value:
+                    damage_per_minute: 46147
+                    damage_per_second: 769.1
+                    bearing: 90
+                    all_barrels_ceiling: 92294
+                  assumed:
+                    - Pack a Punch
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                  tier_fillers:
+                    - Consumable Specialist
+                    - Focus Fire Training
+                - label: without Ship Consumable Modification 1
+                  value:
+                    damage_per_minute: 51084
+                    damage_per_second: 851.4
+                    bearing: 90
+                    all_barrels_ceiling: 102168
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Torpedo Tubes Modification 2
+                  tier_fillers:
+                    - Consumable Specialist
+                - label: without Torpedo Tubes Modification 2
+                  value:
+                    damage_per_minute: 43583
+                    damage_per_second: 726.4
+                    bearing: 90
+                    all_barrels_ceiling: 87167
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                  tier_fillers:
+                    - Consumable Specialist
+                - label: with AA Defense and ASW Expert active
+                  value:
+                    damage_per_minute: 52967
+                    damage_per_second: 882.8
+                    bearing: 90
+                    all_barrels_ceiling: 105934
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                    - AA Defense and ASW Expert
+                  tier_fillers:
+                    - Consumable Specialist
+                  note: "Improves your ship's characteristics when her AA guns are active."
   rate_notes:
-    - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
-    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+    - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+    - "torpedo_reload_buffs are consumables, such as Auxiliary and Torpedo Weaponry Coordination, whose buff multiplies the launcher reload time by reload_factor_while_active for action_time; a reload in progress speeds up while it lasts. Their torpedoes_per_minute and torpedo_damage average one cycle of action_time + cooldown with the consumable used whenever it is ready: the launcher reload rate times (cooldown + action_time / reload_factor_while_active) / (action_time + cooldown), against one target and with every launcher as for the launcher reload. They hold only while charges last, charges x (action_time + cooldown); then the plain rates apply. With a choice, the ship carries the consumable only in place of the slot's other options."
+    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
     - "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval."
   fires_per_minute:
     total:

@@ -276,7 +276,7 @@ impl GameData {
 
 /// Action time, charges, reload and smoke lifetime of one consumable on its
 /// best-fit build.
-fn consumable_builds(
+pub(crate) fn consumable_builds(
     planner: &Planner<'_>,
     name: &str,
     category: &AbilityCategory,
@@ -303,7 +303,12 @@ fn consumable_builds(
     Ok(ConsumableBuilds { action_time, charges, reload, smoke_lifetime })
 }
 
-fn consumable_plan<'f, V>(name: &str, stat: &str, better: Better, extract: Extract<'f, V>) -> StatPlan<'f, V> {
+pub(crate) fn consumable_plan<'f, V>(
+    name: &str,
+    stat: &str,
+    better: Better,
+    extract: Extract<'f, V>,
+) -> StatPlan<'f, V> {
     StatPlan::new(format!("{name} {stat}"), better, extract).for_consumable()
 }
 

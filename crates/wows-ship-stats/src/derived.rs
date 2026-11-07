@@ -7,6 +7,7 @@ use wows_core::units;
 use wows_core::units::DamagePerMinute;
 use wows_core::units::FiresPerMinute;
 use wows_core::units::Percent;
+use wows_core::units::TorpedoesPerMinute;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::constants::DispersionEllipse;
@@ -16,6 +17,7 @@ use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::model::Seconds;
 use wowsunpack::game_params::ttx::model::ShellStats;
 use wowsunpack::game_params::ttx::model::ShipStats;
+use wowsunpack::game_params::ttx::model::torpedo_qualifier;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -34,6 +36,12 @@ use crate::resistance::FireResistance;
 use crate::resistance::Flooding;
 use crate::stat::Direction;
 use crate::stat::Unit;
+use crate::torpedoes::ReloadBooster;
+use crate::torpedoes::ReloadBuff;
+use crate::torpedoes::SalvosPerMinute;
+use crate::torpedoes::TORPEDO_RELOADER;
+use crate::torpedoes::TorpedoLayout;
+use crate::torpedoes::consumable_card_label;
 
 /// A stat derived from the port stat card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -100,6 +108,36 @@ pub enum DerivedStat {
     /// Chance one bomb, rocket or depth charge starts a fire, per aircraft.
     AircraftFireChance,
 
+    /// Torpedoes launched per minute against one target at the bearing where
+    /// the most launchers bear, every bearing launcher firing as soon as it is
+    /// loaded, with launchers that share loaders waiting their turn.
+    TorpedoesPerMinute,
+
+    /// The same with every launcher firing at once: a ceiling no single
+    /// target sees when the launchers do not all bear on one bearing.
+    TorpedoesPerMinuteAllLaunchers,
+
+    /// Torpedoes per minute against one target over one cycle of the
+    /// Torpedo Reload Booster used whenever it is ready. Only ships whose
+    /// consumables include one.
+    TorpedoesPerMinuteWithReloadBooster,
+    TorpedoesPerMinuteWithReloadBoosterAllLaunchers,
+
+    /// Torpedoes per minute against one target over one cycle of a
+    /// consumable that shortens the launcher reload while active, used
+    /// whenever it is ready. Only ships whose consumables include one.
+    TorpedoesPerMinuteWithReloadBuff,
+    TorpedoesPerMinuteWithReloadBuffAllLaunchers,
+
+    /// Torpedo damage per minute, per torpedo: the torpedoes per minute of
+    /// the matching stat times the damage of one.
+    TorpedoDamagePerMinute,
+    TorpedoDamagePerMinuteAllLaunchers,
+    TorpedoDamagePerMinuteWithReloadBooster,
+    TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers,
+    TorpedoDamagePerMinuteWithReloadBuff,
+    TorpedoDamagePerMinuteWithReloadBuffAllLaunchers,
+
     /// How much less likely shells are to set the ship on fire: 100 minus
     /// the hull's fire-node probability times the build's `burnProb`, in
     /// percent.
@@ -143,6 +181,18 @@ impl DerivedStat {
         DerivedStat::FiresPerMinuteSecondaryAllMounts,
         DerivedStat::FiresPerMinuteAircraft,
         DerivedStat::AircraftFireChance,
+        DerivedStat::TorpedoesPerMinute,
+        DerivedStat::TorpedoesPerMinuteAllLaunchers,
+        DerivedStat::TorpedoesPerMinuteWithReloadBooster,
+        DerivedStat::TorpedoesPerMinuteWithReloadBoosterAllLaunchers,
+        DerivedStat::TorpedoesPerMinuteWithReloadBuff,
+        DerivedStat::TorpedoesPerMinuteWithReloadBuffAllLaunchers,
+        DerivedStat::TorpedoDamagePerMinute,
+        DerivedStat::TorpedoDamagePerMinuteAllLaunchers,
+        DerivedStat::TorpedoDamagePerMinuteWithReloadBooster,
+        DerivedStat::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers,
+        DerivedStat::TorpedoDamagePerMinuteWithReloadBuff,
+        DerivedStat::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers,
         DerivedStat::FireChanceReduction,
         DerivedStat::FireZones,
         DerivedStat::FireDuration,
@@ -173,6 +223,28 @@ impl DerivedStat {
             Self::FiresPerMinuteSecondaryAllMounts => "fires_per_minute.secondary_all_mounts",
             Self::FiresPerMinuteAircraft => "fires_per_minute.aircraft",
             Self::AircraftFireChance => "aircraft.fire_chance",
+            Self::TorpedoesPerMinute => "torpedoes.torpedoes_per_minute",
+            Self::TorpedoesPerMinuteAllLaunchers => "torpedoes.torpedoes_per_minute_all_launchers",
+            Self::TorpedoesPerMinuteWithReloadBooster => "torpedoes.torpedoes_per_minute_with_reload_booster",
+            Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers => {
+                "torpedoes.torpedoes_per_minute_with_reload_booster_all_launchers"
+            }
+            Self::TorpedoesPerMinuteWithReloadBuff => "torpedoes.torpedoes_per_minute_with_reload_buff",
+            Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers => {
+                "torpedoes.torpedoes_per_minute_with_reload_buff_all_launchers"
+            }
+            Self::TorpedoDamagePerMinute => "torpedoes.torpedoes.damage_per_minute",
+            Self::TorpedoDamagePerMinuteAllLaunchers => "torpedoes.torpedoes.damage_per_minute_all_launchers",
+            Self::TorpedoDamagePerMinuteWithReloadBooster => {
+                "torpedoes.torpedoes.damage_per_minute_with_reload_booster"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers => {
+                "torpedoes.torpedoes.damage_per_minute_with_reload_booster_all_launchers"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBuff => "torpedoes.torpedoes.damage_per_minute_with_reload_buff",
+            Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers => {
+                "torpedoes.torpedoes.damage_per_minute_with_reload_buff_all_launchers"
+            }
             Self::FireChanceReduction => "durability.fire_chance_reduction",
             Self::FireZones => "durability.fire_zones",
             Self::FireDuration => "durability.fire_duration",
@@ -215,6 +287,42 @@ impl DerivedStat {
             }
             Self::FiresPerMinuteAircraft => "Aircraft fire starts per minute, all ordnance hitting",
             Self::AircraftFireChance => "Fire chance of one aircraft bomb, rocket or depth charge",
+            Self::TorpedoesPerMinute => {
+                "Torpedoes per minute against one target at its best bearing, launchers bearing on it only, on the launcher reload, loader limits applied, no consumable; not submarines"
+            }
+            Self::TorpedoesPerMinuteAllLaunchers => {
+                "Torpedoes per minute with every launcher firing at once, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees"
+            }
+            Self::TorpedoesPerMinuteWithReloadBooster => {
+                "Torpedoes per minute against one target at its best bearing over a full Torpedo Reload Booster cycle, the booster used whenever ready; only ships with the booster, not submarines"
+            }
+            Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers => {
+                "Torpedoes per minute with every launcher firing at once over a full Torpedo Reload Booster cycle, the booster used whenever ready: a ceiling no single target sees; only ships with the booster"
+            }
+            Self::TorpedoesPerMinuteWithReloadBuff => {
+                "Torpedoes per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready; only ships with one, not submarines"
+            }
+            Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers => {
+                "Torpedoes per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready: a ceiling no single target sees; only ships with one"
+            }
+            Self::TorpedoDamagePerMinute => {
+                "Torpedo damage per minute against one target at its best bearing, launchers bearing on it only, every torpedo hitting, on the launcher reload, loader limits applied, no consumable; not submarines"
+            }
+            Self::TorpedoDamagePerMinuteAllLaunchers => {
+                "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBooster => {
+                "Torpedo damage per minute against one target at its best bearing over a full Torpedo Reload Booster cycle, the booster used whenever ready, every torpedo hitting; only ships with the booster, not submarines"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers => {
+                "Torpedo damage per minute with every launcher firing at once over a full Torpedo Reload Booster cycle, the booster used whenever ready, every torpedo hitting: a ceiling no single target sees; only ships with the booster"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBuff => {
+                "Torpedo damage per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting; only ships with one, not submarines"
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers => {
+                "Torpedo damage per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting: a ceiling no single target sees; only ships with one"
+            }
             Self::FireChanceReduction => "Fire chance reduction against shells hitting the ship",
             Self::FireZones => "Fires that can burn at once",
             Self::FireDuration => "Fire duration",
@@ -230,7 +338,19 @@ impl DerivedStat {
         match self {
             Self::MainBatteryBarrels | Self::TorpedoTubes | Self::FireZones => Unit::Count,
             Self::MainBatterySalvoDamage | Self::FireDamage | Self::FloodDamage => Unit::Hp,
-            Self::MainBatteryDamagePerMinute => Unit::HpPerMinute,
+            Self::MainBatteryDamagePerMinute
+            | Self::TorpedoDamagePerMinute
+            | Self::TorpedoDamagePerMinuteAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBooster
+            | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBuff
+            | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers => Unit::HpPerMinute,
+            Self::TorpedoesPerMinute
+            | Self::TorpedoesPerMinuteAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBooster
+            | Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBuff
+            | Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers => Unit::TorpedoesPerMinute,
             Self::MainBatteryDispersionAtStockRange
             | Self::MainBatteryVerticalDispersionAtStockRange
             | Self::SecondaryDispersionAtStockRange
@@ -278,7 +398,19 @@ impl DerivedStat {
             | Self::FiresPerMinuteSecondaryGroup
             | Self::FiresPerMinuteSecondaryAllMounts
             | Self::FiresPerMinuteAircraft
-            | Self::AircraftFireChance => Some(Direction::Higher),
+            | Self::AircraftFireChance
+            | Self::TorpedoesPerMinute
+            | Self::TorpedoesPerMinuteAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBooster
+            | Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBuff
+            | Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers
+            | Self::TorpedoDamagePerMinute
+            | Self::TorpedoDamagePerMinuteAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBooster
+            | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBuff
+            | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers => Some(Direction::Higher),
         }
     }
 
@@ -314,6 +446,31 @@ impl DerivedStat {
 
             // The card lists no aircraft stat.
             Self::FiresPerMinuteAircraft | Self::AircraftFireChance => &[],
+            Self::TorpedoesPerMinute | Self::TorpedoesPerMinuteAllLaunchers => {
+                &[TtxStat::TorpedoReloadTime, TtxStat::LauncherNumBarrels]
+            }
+            Self::TorpedoesPerMinuteWithReloadBooster
+            | Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBuff
+            | Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers => &[
+                TtxStat::TorpedoReloadTime,
+                TtxStat::LauncherNumBarrels,
+                TtxStat::ConsumableWorkTime,
+                TtxStat::ConsumableReloadTime,
+            ],
+            Self::TorpedoDamagePerMinute | Self::TorpedoDamagePerMinuteAllLaunchers => {
+                &[TtxStat::TorpedoReloadTime, TtxStat::LauncherNumBarrels, TtxStat::TorpedoDamage]
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBooster
+            | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBuff
+            | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers => &[
+                TtxStat::TorpedoReloadTime,
+                TtxStat::LauncherNumBarrels,
+                TtxStat::TorpedoDamage,
+                TtxStat::ConsumableWorkTime,
+                TtxStat::ConsumableReloadTime,
+            ],
             Self::FireDamage | Self::FloodDamage => &[TtxStat::Health],
             Self::FireChanceReduction
             | Self::FireZones
@@ -352,6 +509,18 @@ impl DerivedStat {
             | Self::FiresPerMinuteSecondaryAllMounts
             | Self::FiresPerMinuteAircraft
             | Self::AircraftFireChance
+            | Self::TorpedoesPerMinute
+            | Self::TorpedoesPerMinuteAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBooster
+            | Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoesPerMinuteWithReloadBuff
+            | Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers
+            | Self::TorpedoDamagePerMinute
+            | Self::TorpedoDamagePerMinuteAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBooster
+            | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
+            | Self::TorpedoDamagePerMinuteWithReloadBuff
+            | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers
             | Self::FireZones => &[],
         }
     }
@@ -368,10 +537,57 @@ impl DerivedStat {
         )
     }
 
-    /// Whether it counts only the gun mounts bearing on one target, and so
-    /// needs [`Derivation::coverage`].
+    /// Whether it counts only the gun mounts or launchers bearing on one
+    /// target, and so needs [`Derivation::coverage`].
     pub fn reads_mount_bearings(self) -> bool {
-        !self.bearing_armaments().is_empty()
+        !self.bearing_armaments().is_empty() || self.reads_launcher_bearings()
+    }
+
+    /// Whether it counts only the torpedo launchers bearing on one target.
+    pub fn reads_launcher_bearings(self) -> bool {
+        self.launcher_ceiling().is_some()
+    }
+
+    /// The same rate with every launcher firing, for a one-target torpedo
+    /// rate.
+    pub fn launcher_ceiling(self) -> Option<DerivedStat> {
+        match self {
+            Self::TorpedoesPerMinute => Some(Self::TorpedoesPerMinuteAllLaunchers),
+            Self::TorpedoesPerMinuteWithReloadBooster => Some(Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers),
+            Self::TorpedoesPerMinuteWithReloadBuff => Some(Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers),
+            Self::TorpedoDamagePerMinute => Some(Self::TorpedoDamagePerMinuteAllLaunchers),
+            Self::TorpedoDamagePerMinuteWithReloadBooster => {
+                Some(Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers)
+            }
+            Self::TorpedoDamagePerMinuteWithReloadBuff => Some(Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers),
+            _ => None,
+        }
+    }
+
+    /// Which card rows of `source`, one of [`Self::sources`], feed a row of
+    /// this stat.
+    pub fn source_rows(self, source: TtxStat) -> SourceRows {
+        let averages_consumable = matches!(
+            self,
+            Self::TorpedoesPerMinuteWithReloadBooster
+                | Self::TorpedoesPerMinuteWithReloadBoosterAllLaunchers
+                | Self::TorpedoesPerMinuteWithReloadBuff
+                | Self::TorpedoesPerMinuteWithReloadBuffAllLaunchers
+                | Self::TorpedoDamagePerMinuteWithReloadBooster
+                | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
+                | Self::TorpedoDamagePerMinuteWithReloadBuff
+                | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers
+        );
+
+        match source {
+            // Every launcher counts; its rows are qualified by launcher index,
+            // not by torpedo.
+            TtxStat::LauncherNumBarrels => SourceRows::Every,
+            TtxStat::ConsumableWorkTime | TtxStat::ConsumableReloadTime if averages_consumable => {
+                SourceRows::Consumable
+            }
+            _ => SourceRows::Qualified,
+        }
     }
 
     /// The gun armaments it counts against one target.
@@ -410,6 +626,7 @@ pub enum DerivedValue {
     Meters(Meters),
     Seconds(Seconds),
     FiresPerMinute(FiresPerMinute),
+    TorpedoesPerMinute(TorpedoesPerMinute),
     Percent(Percent),
 }
 
@@ -422,6 +639,7 @@ impl DerivedValue {
             Self::Meters(meters) => meters.value(),
             Self::Seconds(seconds) => seconds.value(),
             Self::FiresPerMinute(rate) => rate.value(),
+            Self::TorpedoesPerMinute(rate) => rate.value(),
             Self::Percent(percent) => percent.value(),
         }
     }
@@ -436,9 +654,24 @@ impl fmt::Display for DerivedValue {
             Self::Meters(meters) => write!(f, "{:.0} m", meters.value()),
             Self::Seconds(seconds) => write!(f, "{seconds}"),
             Self::FiresPerMinute(rate) => write!(f, "{:.2} fires/min", rate.value()),
+            Self::TorpedoesPerMinute(rate) => write!(f, "{:.2} torpedoes/min", rate.value()),
             Self::Percent(percent) => write!(f, "{:.2}%", percent.value()),
         }
     }
+}
+
+/// Which card rows of a source stat feed a derived row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceRows {
+    /// Rows with the derived row's qualifier, or every row when either has
+    /// none.
+    Qualified,
+
+    /// Every row, whatever its qualifier.
+    Every,
+
+    /// Rows of the consumable named by [`DerivedRow::consumable`].
+    Consumable,
 }
 
 /// One derived stat value; `qualifier` names the ammo type, secondary mount
@@ -448,6 +681,11 @@ pub struct DerivedRow {
     pub stat: DerivedStat,
     pub qualifier: Option<String>,
     pub value: DerivedValue,
+
+    /// Card label of the consumable the value is averaged over, the
+    /// qualifier of that consumable's card rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumable: Option<String>,
 }
 
 /// Firing ranges of the stock ship, the distances the `AtStockRange`
@@ -498,6 +736,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::MainBatteryBarrels,
                 qualifier: None,
                 value: DerivedValue::Count(barrels),
+                consumable: None,
             });
         }
 
@@ -507,6 +746,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::MainBatterySalvoDamage,
                 qualifier: Some(qualifier.clone()),
                 value: DerivedValue::Hp(*salvo),
+                consumable: None,
             });
         }
 
@@ -525,6 +765,7 @@ impl Derivation<'_> {
                         salvo.value(),
                         units::Seconds::new(reload.value()),
                     )),
+                    consumable: None,
                 });
             }
         }
@@ -534,11 +775,13 @@ impl Derivation<'_> {
                 stat: DerivedStat::MainBatteryDispersionAtStockRange,
                 qualifier: None,
                 value: DerivedValue::Meters(ellipse.horizontal.to_meters()),
+                consumable: None,
             });
             rows.push(DerivedRow {
                 stat: DerivedStat::MainBatteryVerticalDispersionAtStockRange,
                 qualifier: None,
                 value: DerivedValue::Meters(ellipse.vertical.to_meters()),
+                consumable: None,
             });
         }
 
@@ -547,11 +790,13 @@ impl Derivation<'_> {
                 stat: DerivedStat::SecondaryDispersionAtStockRange,
                 qualifier: Some(label.clone()),
                 value: DerivedValue::Meters(ellipse.horizontal.to_meters()),
+                consumable: None,
             });
             rows.push(DerivedRow {
                 stat: DerivedStat::SecondaryVerticalDispersionAtStockRange,
                 qualifier: Some(label),
                 value: DerivedValue::Meters(ellipse.vertical.to_meters()),
+                consumable: None,
             });
         }
 
@@ -562,6 +807,7 @@ impl Derivation<'_> {
                     stat: DerivedStat::TorpedoTubes,
                     qualifier: None,
                     value: DerivedValue::Count(tubes),
+                    consumable: None,
                 });
             }
         }
@@ -576,6 +822,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::ConsumableAllChargesTime,
                 qualifier: Some(card.label.clone()),
                 value: DerivedValue::Seconds(Seconds::from(charges as f32 * cycle)),
+                consumable: None,
             });
         }
 
@@ -592,6 +839,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::FiresPerMinuteTotalAllMounts,
                 qualifier: None,
                 value: DerivedValue::FiresPerMinute(total),
+                consumable: None,
             });
         }
         // Aircraft fire starts do not depend on the bearing, so a ship
@@ -609,6 +857,7 @@ impl Derivation<'_> {
                     stat: DerivedStat::FiresPerMinuteTotal,
                     qualifier: None,
                     value: DerivedValue::FiresPerMinute(total.at(total.best())),
+                    consumable: None,
                 });
             }
             if let Some(secondaries) = secondary_fires_by_bearing(&fires, coverage) {
@@ -616,6 +865,7 @@ impl Derivation<'_> {
                     stat: DerivedStat::FiresPerMinuteSecondary,
                     qualifier: None,
                     value: DerivedValue::FiresPerMinute(secondaries.at(secondaries.best())),
+                    consumable: None,
                 });
             }
             for source in &fires {
@@ -630,6 +880,7 @@ impl Derivation<'_> {
                     stat,
                     qualifier: Some(source.qualifier.clone()),
                     value: DerivedValue::FiresPerMinute(by_bearing.at(by_bearing.best())),
+                    consumable: None,
                 });
             }
         }
@@ -643,6 +894,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::FiresPerMinuteSecondaryAllMounts,
                 qualifier: None,
                 value: DerivedValue::FiresPerMinute(secondary_ceiling.into_iter().sum()),
+                consumable: None,
             });
         }
         for source in
@@ -652,6 +904,7 @@ impl Derivation<'_> {
                 stat: DerivedStat::FiresPerMinuteAircraft,
                 qualifier: Some(source.qualifier.clone()),
                 value: DerivedValue::FiresPerMinute(source.fires_per_minute),
+                consumable: None,
             });
         }
         for source in
@@ -661,10 +914,104 @@ impl Derivation<'_> {
                 stat: DerivedStat::AircraftFireChance,
                 qualifier: Some(source.qualifier.clone()),
                 value: DerivedValue::Percent(source.fire_chance),
+                consumable: None,
             });
         }
 
+        rows.extend(self.torpedo_rate_rows());
         rows.extend(self.fire_and_flood_rows());
+
+        rows
+    }
+
+    /// Torpedoes and torpedo damage per minute against one target and with
+    /// every launcher firing, on the launcher reload, over a Torpedo Reload
+    /// Booster cycle and over a reload buff cycle.
+    fn torpedo_rate_rows(&self) -> Vec<DerivedRow> {
+        let Some(torpedoes) = &self.stats.torpedoes else {
+            return Vec::new();
+        };
+        let Some(reload) = torpedoes.reload_time.filter(|reload| reload.value() > 0.0) else {
+            return Vec::new();
+        };
+        let Some(layout) = TorpedoLayout::from_selection(self.ship, self.selection) else {
+            return Vec::new();
+        };
+
+        let cards = &self.stats.consumables;
+        let booster = ReloadBooster::of_ship(self.ship, self.provider, self.modifiers)
+            .and_then(|booster| layout.booster_salvos(reload, &booster))
+            .map(|salvos| (salvos, consumable_card_label(cards, TORPEDO_RELOADER)));
+        let buff = ReloadBuff::of_ship(self.ship, self.provider, self.modifiers)
+            .map(|buff| (buff.salvos_per_minute(reload), consumable_card_label(cards, &buff.consumable_type)));
+        let cadences = [
+            (TorpedoRateStats::ON_RELOAD, Some((SalvosPerMinute::on_reload(reload), None))),
+            (TorpedoRateStats::WITH_RELOAD_BOOSTER, booster),
+            (TorpedoRateStats::WITH_RELOAD_BUFF, buff),
+        ];
+        // Every cadence scales the same tubes per reload, so one bearing is
+        // best for all of them.
+        let one_target_tubes = self
+            .coverage
+            .and_then(|coverage| layout.tubes_per_reload_by_bearing(coverage))
+            .map(|by_bearing| by_bearing.at(by_bearing.best()));
+
+        let rates: Vec<CadenceRates> = cadences
+            .into_iter()
+            .filter_map(|(stats, cadence)| {
+                let (salvos, consumable) = cadence?;
+                let one_target = one_target_tubes.map(|tubes| salvos.torpedoes(tubes));
+
+                Some(CadenceRates {
+                    stats,
+                    one_target,
+                    all_launchers: layout.torpedoes_per_minute(salvos),
+                    consumable: consumable.map(str::to_owned),
+                })
+            })
+            .collect();
+        let damages: Vec<(String, f32)> = torpedoes
+            .torpedoes
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, torpedo)| Some((torpedo_qualifier(torpedo, idx), torpedo.damage?.value())))
+            .collect();
+
+        let mut rows = Vec::new();
+        for rate in &rates {
+            let scopes = [
+                (rate.stats.torpedoes, rate.one_target),
+                (rate.stats.torpedoes_all_launchers, Some(rate.all_launchers)),
+            ];
+            for (stat, torpedoes) in scopes {
+                let Some(torpedoes) = torpedoes else {
+                    continue;
+                };
+                rows.push(DerivedRow {
+                    stat,
+                    qualifier: None,
+                    value: DerivedValue::TorpedoesPerMinute(torpedoes),
+                    consumable: rate.consumable.clone(),
+                });
+            }
+        }
+        for rate in &rates {
+            let scopes =
+                [(rate.stats.damage, rate.one_target), (rate.stats.damage_all_launchers, Some(rate.all_launchers))];
+            for (stat, torpedoes) in scopes {
+                let Some(torpedoes) = torpedoes else {
+                    continue;
+                };
+                for (qualifier, damage) in &damages {
+                    rows.push(DerivedRow {
+                        stat,
+                        qualifier: Some(qualifier.clone()),
+                        value: DerivedValue::DamagePerMinute(DamagePerMinute::new(torpedoes.value() * damage)),
+                        consumable: rate.consumable.clone(),
+                    });
+                }
+            }
+        }
 
         rows
     }
@@ -681,7 +1028,7 @@ impl Derivation<'_> {
             return Vec::new();
         };
         let health = self.stats.durability.as_ref().and_then(|durability| durability.health);
-        let row = |stat, value| DerivedRow { stat, qualifier: None, value };
+        let row = |stat, value| DerivedRow { stat, qualifier: None, value, consumable: None };
         let percent = |value: f32| DerivedValue::Percent(units::Percent::new((value * 100.0).round() / 100.0));
         let damage = |percent_per_sec: f32, duration: Seconds| {
             health.map(|health| Hp::from(health.value() * percent_per_sec / 100.0 * duration.value()))
@@ -784,6 +1131,48 @@ impl Derivation<'_> {
             })
             .collect()
     }
+}
+
+/// The four stats of one torpedo reload cadence.
+#[derive(Debug, Clone, Copy)]
+struct TorpedoRateStats {
+    torpedoes: DerivedStat,
+    torpedoes_all_launchers: DerivedStat,
+    damage: DerivedStat,
+    damage_all_launchers: DerivedStat,
+}
+
+impl TorpedoRateStats {
+    const ON_RELOAD: Self = Self {
+        torpedoes: DerivedStat::TorpedoesPerMinute,
+        torpedoes_all_launchers: DerivedStat::TorpedoesPerMinuteAllLaunchers,
+        damage: DerivedStat::TorpedoDamagePerMinute,
+        damage_all_launchers: DerivedStat::TorpedoDamagePerMinuteAllLaunchers,
+    };
+    const WITH_RELOAD_BOOSTER: Self = Self {
+        torpedoes: DerivedStat::TorpedoesPerMinuteWithReloadBooster,
+        torpedoes_all_launchers: DerivedStat::TorpedoesPerMinuteWithReloadBoosterAllLaunchers,
+        damage: DerivedStat::TorpedoDamagePerMinuteWithReloadBooster,
+        damage_all_launchers: DerivedStat::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers,
+    };
+    const WITH_RELOAD_BUFF: Self = Self {
+        torpedoes: DerivedStat::TorpedoesPerMinuteWithReloadBuff,
+        torpedoes_all_launchers: DerivedStat::TorpedoesPerMinuteWithReloadBuffAllLaunchers,
+        damage: DerivedStat::TorpedoDamagePerMinuteWithReloadBuff,
+        damage_all_launchers: DerivedStat::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers,
+    };
+}
+
+/// Torpedoes per minute of one reload cadence.
+struct CadenceRates {
+    stats: TorpedoRateStats,
+
+    /// `None` without launcher bearings.
+    one_target: Option<TorpedoesPerMinute>,
+    all_launchers: TorpedoesPerMinute,
+
+    /// Card label of the consumable the cadence averages over.
+    consumable: Option<String>,
 }
 
 /// Damage of one salvo of a mount that lists `ammo` and has `barrels`: each

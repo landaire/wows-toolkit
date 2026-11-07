@@ -612,11 +612,6 @@ impl TorpedoesPerMinute {
         Self(v)
     }
 
-    /// Torpedoes launched per minute by `tubes` reloaded every `reload`.
-    pub fn from_reload(tubes: f32, reload: Seconds) -> Self {
-        Self(60.0 * tubes / reload.0)
-    }
-
     pub fn value(self) -> f32 {
         self.0
     }
@@ -753,6 +748,12 @@ impl Add for FiresPerMinute {
 impl Sum for FiresPerMinute {
     fn sum<I: Iterator<Item = FiresPerMinute>>(iter: I) -> FiresPerMinute {
         FiresPerMinute(iter.map(|rate| rate.0).sum())
+    }
+}
+impl Add for TorpedoesPerMinute {
+    type Output = TorpedoesPerMinute;
+    fn add(self, rhs: TorpedoesPerMinute) -> TorpedoesPerMinute {
+        TorpedoesPerMinute(self.0 + rhs.0)
     }
 }
 

@@ -10,6 +10,7 @@ pub mod fires;
 pub mod mounts;
 pub mod resistance;
 pub mod stat;
+pub mod torpedoes;
 
 pub use bearing::Bearing;
 pub use bearing::MountCoverage;
@@ -22,6 +23,7 @@ pub use derived::Derivation;
 pub use derived::DerivedRow;
 pub use derived::DerivedStat;
 pub use derived::DerivedValue;
+pub use derived::SourceRows;
 pub use derived::StockRanges;
 pub use derived::mount_salvo;
 pub use error::BuildError;

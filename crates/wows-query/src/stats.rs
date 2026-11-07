@@ -9,6 +9,7 @@ use wows_core::units::Seconds;
 use wows_ship_stats::Derivation;
 use wows_ship_stats::DerivedRow;
 use wows_ship_stats::DerivedStat;
+use wows_ship_stats::SourceRows;
 use wows_ship_stats::StockRanges;
 use wows_ship_stats::resistance::merges_fire_zones;
 use wowsunpack::game_params::ttx::AttributionLine;
@@ -459,14 +460,11 @@ pub(crate) fn derived_changes(
             keys.push(key);
         }
     }
-    let value = |rows: &[DerivedRow], (stat, qualifier): (DerivedStat, Option<&str>)| {
-        rows.iter().find(|row| row.stat == stat && row.qualifier.as_deref() == qualifier).map(|row| row.value)
-    };
-
     keys.into_iter()
         .filter_map(|key| {
-            let (from, to) = (value(baseline, key), value(candidate, key));
-            let (from, to) = (from.map(|value| value.to_string()), to.map(|value| value.to_string()));
+            let (from, to) = (derived_row(baseline, key), derived_row(candidate, key));
+            let consumable = to.or(from).and_then(|row| row.consumable.as_deref());
+            let (from, to) = (from.map(|row| row.value.to_string()), to.map(|row| row.value.to_string()));
             if from == to {
                 return None;
             }
@@ -475,10 +473,20 @@ pub(crate) fn derived_changes(
             let mut because: Vec<String> = Vec::new();
             // A whole-ship stat, such as total fire starts, draws on every
             // ammo type and gun group it adds up.
-            for line in attributions.iter().filter(|line| {
-                stat.sources().contains(&line.stat)
-                    && (line.qualifier.is_none() || qualifier.is_none() || line.qualifier.as_deref() == qualifier)
-            }) {
+            let feeds = |line: &AttributionLine| {
+                if !stat.sources().contains(&line.stat) {
+                    return false;
+                }
+
+                match stat.source_rows(line.stat) {
+                    SourceRows::Qualified => {
+                        line.qualifier.is_none() || qualifier.is_none() || line.qualifier.as_deref() == qualifier
+                    }
+                    SourceRows::Every => true,
+                    SourceRows::Consumable => consumable.is_some() && line.qualifier.as_deref() == consumable,
+                }
+            };
+            for line in attributions.iter().filter(|line| feeds(line)) {
                 for cause in causes(line, loadout, game) {
                     if !because.contains(&cause) {
                         because.push(cause);
@@ -494,6 +502,11 @@ pub(crate) fn derived_changes(
             Some(StatChange { stat: stat_label(stat.label(), qualifier, game), from, to, because })
         })
         .collect()
+}
+
+/// The row of `stat` with `qualifier`.
+fn derived_row<'r>(rows: &'r [DerivedRow], (stat, qualifier): (DerivedStat, Option<&str>)) -> Option<&'r DerivedRow> {
+    rows.iter().find(|row| row.stat == stat && row.qualifier.as_deref() == qualifier)
 }
 
 /// Chosen skills and upgrades that carry a modifier `stat` reads, with its

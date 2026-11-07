@@ -1,0 +1,458 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: rates(name)
+---
+torpedoes_per_minute:
+  launchers: 10
+  tubes: 40
+  loader_groups:
+    - launchers: 5
+      tubes: 20
+      loaders: 1
+      tubes_per_reload: 4
+    - launchers: 5
+      tubes: 20
+      loaders: 1
+      tubes_per_reload: 4
+  tubes_per_reload: 8
+  limit: "1 of the 5 launchers (4 of the 20 tubes) reloads at a time. 1 of the 5 launchers (4 of the 20 tubes) reloads at a time. 8 of the 40 tubes reload per reload time, not all 40."
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base:
+        torpedoes_per_minute: 2.96
+        bearing: 90
+        all_launchers_ceiling: 5.93
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 0
+            port: 0
+          - bearing: 45
+            starboard: 2.96
+            port: 2.96
+          - bearing: 60
+            starboard: 2.96
+            port: 2.96
+          - bearing: 90
+            starboard: 2.96
+            port: 2.96
+          - bearing: 120
+            starboard: 2.96
+            port: 2.96
+          - bearing: 135
+            starboard: 2.96
+            port: 2.96
+          - bearing: 150
+            starboard: 2.96
+            port: 2.96
+          - bearing: 180
+            starboard: 0
+            port: 0
+      best:
+        value:
+          torpedoes_per_minute: 3.87
+          bearing: 90
+          all_launchers_ceiling: 7.75
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 3.87
+              port: 3.87
+            - bearing: 60
+              starboard: 3.87
+              port: 3.87
+            - bearing: 90
+              starboard: 3.87
+              port: 3.87
+            - bearing: 120
+              starboard: 3.87
+              port: 3.87
+            - bearing: 135
+              starboard: 3.87
+              port: 3.87
+            - bearing: 150
+              starboard: 3.87
+              port: 3.87
+            - bearing: 180
+              starboard: 0
+              port: 0
+        assumed:
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+        tier_fillers:
+          - Consumable Specialist
+      alternatives:
+        - label: without Fill the Tubes
+          value:
+            torpedoes_per_minute: 3.49
+            bearing: 90
+            all_launchers_ceiling: 6.97
+          assumed:
+            - Torpedo Tubes Modification 2
+        - label: without Torpedo Tubes Modification 2
+          value:
+            torpedoes_per_minute: 3.29
+            bearing: 90
+            all_launchers_ceiling: 6.58
+          assumed:
+            - Fill the Tubes
+          tier_fillers:
+            - Consumable Specialist
+main_battery_damage:
+  - ammo: HE
+    damage: 2700
+    barrels: 4
+    rates:
+      stat: main battery HE damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 162000
+          damage_per_second: 2700
+          bearing: 90
+          all_barrels_ceiling: 216000
+          by_bearing:
+            - bearing: 0
+              starboard: 162000
+              port: 162000
+            - bearing: 30
+              starboard: 162000
+              port: 162000
+            - bearing: 45
+              starboard: 162000
+              port: 162000
+            - bearing: 60
+              starboard: 162000
+              port: 162000
+            - bearing: 90
+              starboard: 162000
+              port: 162000
+            - bearing: 120
+              starboard: 162000
+              port: 162000
+            - bearing: 135
+              starboard: 162000
+              port: 162000
+            - bearing: 150
+              starboard: 162000
+              port: 162000
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            damage_per_minute: 202500
+            damage_per_second: 3375
+            bearing: 90
+            all_barrels_ceiling: 270000
+            by_bearing:
+              - bearing: 0
+                starboard: 202500
+                port: 202500
+              - bearing: 30
+                starboard: 202500
+                port: 202500
+              - bearing: 45
+                starboard: 202500
+                port: 202500
+              - bearing: 60
+                starboard: 202500
+                port: 202500
+              - bearing: 90
+                starboard: 202500
+                port: 202500
+              - bearing: 120
+                starboard: 202500
+                port: 202500
+              - bearing: 135
+                starboard: 202500
+                port: 202500
+              - bearing: 150
+                starboard: 202500
+                port: 202500
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Heavy HE and SAP Shells
+            - Main Battery Modification 3
+          tier_fillers:
+            - Consumable Specialist
+            - Focus Fire Training
+        alternatives:
+          - label: without Heavy HE and SAP Shells
+            value:
+              damage_per_minute: 184091
+              damage_per_second: 3068.2
+              bearing: 90
+              all_barrels_ceiling: 245455
+            assumed:
+              - Main Battery Modification 3
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 178200
+              damage_per_second: 2970
+              bearing: 90
+              all_barrels_ceiling: 237600
+            assumed:
+              - Heavy HE and SAP Shells
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          - label: with Top Grade Gunner active
+            value:
+              damage_per_minute: 220109
+              damage_per_second: 3668.5
+              bearing: 90
+              all_barrels_ceiling: 293478
+            assumed:
+              - Heavy HE and SAP Shells
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+torpedo_damage:
+  - ammo: Type90 mod. 5
+    damage: 11833
+    barrels: 40
+    rates:
+      stat: Type90 mod. 5 damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 35062
+          damage_per_second: 584.4
+          bearing: 90
+          all_barrels_ceiling: 70123
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 35062
+              port: 35062
+            - bearing: 60
+              starboard: 35062
+              port: 35062
+            - bearing: 90
+              starboard: 35062
+              port: 35062
+            - bearing: 120
+              starboard: 35062
+              port: 35062
+            - bearing: 135
+              starboard: 35062
+              port: 35062
+            - bearing: 150
+              starboard: 35062
+              port: 35062
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            damage_per_minute: 52707
+            damage_per_second: 878.5
+            bearing: 90
+            all_barrels_ceiling: 105414
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 52707
+                port: 52707
+              - bearing: 60
+                starboard: 52707
+                port: 52707
+              - bearing: 90
+                starboard: 52707
+                port: 52707
+              - bearing: 120
+                starboard: 52707
+                port: 52707
+              - bearing: 135
+                starboard: 52707
+                port: 52707
+              - bearing: 150
+                starboard: 52707
+                port: 52707
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Pack a Punch
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+          tier_fillers:
+            - Consumable Specialist
+        alternatives:
+          - label: without Pack a Punch
+            value:
+              damage_per_minute: 45832
+              damage_per_second: 763.9
+              bearing: 90
+              all_barrels_ceiling: 91665
+            assumed:
+              - Fill the Tubes
+              - Torpedo Tubes Modification 2
+            tier_fillers:
+              - Consumable Specialist
+          - label: without Fill the Tubes
+            value:
+              damage_per_minute: 47436
+              damage_per_second: 790.6
+              bearing: 90
+              all_barrels_ceiling: 94873
+            assumed:
+              - Pack a Punch
+              - Torpedo Tubes Modification 2
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 44801
+              damage_per_second: 746.7
+              bearing: 90
+              all_barrels_ceiling: 89602
+            assumed:
+              - Pack a Punch
+              - Fill the Tubes
+            tier_fillers:
+              - Consumable Specialist
+  - ammo: Type 93 mod. 2 dw
+    damage: 20967
+    barrels: 40
+    rates:
+      stat: Type 93 mod. 2 dw damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 62123
+          damage_per_second: 1035.4
+          bearing: 90
+          all_barrels_ceiling: 124247
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 62123
+              port: 62123
+            - bearing: 60
+              starboard: 62123
+              port: 62123
+            - bearing: 90
+              starboard: 62123
+              port: 62123
+            - bearing: 120
+              starboard: 62123
+              port: 62123
+            - bearing: 135
+              starboard: 62123
+              port: 62123
+            - bearing: 150
+              starboard: 62123
+              port: 62123
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            damage_per_minute: 93388
+            damage_per_second: 1556.5
+            bearing: 90
+            all_barrels_ceiling: 186776
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 93388
+                port: 93388
+              - bearing: 60
+                starboard: 93388
+                port: 93388
+              - bearing: 90
+                starboard: 93388
+                port: 93388
+              - bearing: 120
+                starboard: 93388
+                port: 93388
+              - bearing: 135
+                starboard: 93388
+                port: 93388
+              - bearing: 150
+                starboard: 93388
+                port: 93388
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Pack a Punch
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+          tier_fillers:
+            - Consumable Specialist
+        alternatives:
+          - label: without Pack a Punch
+            value:
+              damage_per_minute: 81207
+              damage_per_second: 1353.5
+              bearing: 90
+              all_barrels_ceiling: 162414
+            assumed:
+              - Fill the Tubes
+              - Torpedo Tubes Modification 2
+            tier_fillers:
+              - Consumable Specialist
+          - label: without Fill the Tubes
+            value:
+              damage_per_minute: 84049
+              damage_per_second: 1400.8
+              bearing: 90
+              all_barrels_ceiling: 168099
+            assumed:
+              - Pack a Punch
+              - Torpedo Tubes Modification 2
+            tier_fillers:
+              - Consumable Specialist
+              - Focus Fire Training
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 79380
+              damage_per_second: 1323
+              bearing: 90
+              all_barrels_ceiling: 158760
+            assumed:
+              - Pack a Punch
+              - Fill the Tubes
+            tier_fillers:
+              - Consumable Specialist
+rate_notes:
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

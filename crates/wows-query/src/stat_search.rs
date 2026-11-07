@@ -40,6 +40,7 @@ use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::SkillPointCost;
+use wowsunpack::game_params::types::Species;
 
 use crate::armor::ThicknessSpan;
 use crate::armor::plates;
@@ -1091,11 +1092,33 @@ impl GameData {
                 };
 
                 let Some(plan) = rank_plan(&planner, rank, &extract)? else {
-                    // Gun fire starts against one target need the mount facings.
+                    // One-target fire starts and torpedo rates need the mount facings.
                     if stat.reads_mount_bearings() && coverages.iter().all(Option::is_none) {
+                        let bare = planner.bare(0)?;
                         let armaments = stat.bearing_armaments();
-                        let sources = fire_sources(&*planner.bare(0)?);
-                        if sources.iter().any(|source| armaments.contains(&source.armament)) {
+                        let sources = fire_sources(&bare);
+                        let fires = sources.iter().any(|source| armaments.contains(&source.armament));
+                        // Submarine tubes never get one-target figures, and a
+                        // ship whose ceiling row is absent lacks the stat.
+                        let submarine =
+                            ship.param.species().and_then(|species| species.known()) == Some(&Species::Submarine);
+                        let launches = !submarine
+                            && stat.launcher_ceiling().is_some_and(|ceiling| {
+                                Derivation {
+                                    ship: &ship.param,
+                                    selection: selections[0],
+                                    stats: &bare.stats,
+                                    modifiers: &bare.bundle,
+                                    merges_fire_zones: bare.merges_fire_zones,
+                                    stock_ranges,
+                                    provider: self.provider(),
+                                    coverage: None,
+                                }
+                                .rows()
+                                .iter()
+                                .any(|row| row.stat == ceiling)
+                            });
+                        if fires || launches {
                             return Err(QueryError::HullFacingsUnavailable { ship: ship.name.clone() });
                         }
                     }

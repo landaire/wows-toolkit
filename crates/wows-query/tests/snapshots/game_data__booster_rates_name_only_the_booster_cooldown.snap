@@ -1,0 +1,32 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: booster
+---
+- stat: "Torpedoes per minute against one target at its best bearing over a full Torpedo Reload Booster cycle, the booster used whenever ready; only ships with the booster, not submarines"
+  from: 9.11 torpedoes/min
+  to: 11.76 torpedoes/min
+  because:
+    - Torpedo Tubes Modification 2 x0.85 (-19.5)
+    - Fill the Tubes x0.9 (-11.05)
+    - Consumable Specialist x0.925 (-24.75)
+- stat: "Torpedoes per minute with every launcher firing at once over a full Torpedo Reload Booster cycle, the booster used whenever ready: a ceiling no single target sees; only ships with the booster"
+  from: 9.11 torpedoes/min
+  to: 11.76 torpedoes/min
+  because:
+    - Torpedo Tubes Modification 2 x0.85 (-19.5)
+    - Fill the Tubes x0.9 (-11.05)
+    - Consumable Specialist x0.925 (-24.75)
+- stat: "Torpedo damage per minute against one target at its best bearing over a full Torpedo Reload Booster cycle, the booster used whenever ready, every torpedo hitting; only ships with the booster, not submarines (533 mm Mk 17)"
+  from: 159494 hp/min
+  to: 205714 hp/min
+  because:
+    - Torpedo Tubes Modification 2 x0.85 (-19.5)
+    - Fill the Tubes x0.9 (-11.05)
+    - Consumable Specialist x0.925 (-24.75)
+- stat: "Torpedo damage per minute with every launcher firing at once over a full Torpedo Reload Booster cycle, the booster used whenever ready, every torpedo hitting: a ceiling no single target sees; only ships with the booster (533 mm Mk 17)"
+  from: 159494 hp/min
+  to: 205714 hp/min
+  because:
+    - Torpedo Tubes Modification 2 x0.85 (-19.5)
+    - Fill the Tubes x0.9 (-11.05)
+    - Consumable Specialist x0.925 (-24.75)

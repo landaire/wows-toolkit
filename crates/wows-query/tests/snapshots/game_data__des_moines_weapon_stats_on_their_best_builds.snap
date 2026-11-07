@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 892
 expression: stats.build_stats
 ---
 main_battery_reload:
@@ -397,7 +396,7 @@ secondary_damage:
               - Focus Fire Training
               - Heavy AP Shells
 rate_notes:
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
 fires_per_minute:
   total:
     stat: "fire starts per minute, all armament"

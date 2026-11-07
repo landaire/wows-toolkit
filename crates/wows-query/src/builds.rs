@@ -446,6 +446,17 @@ impl<'a> Planner<'a> {
         self
     }
 
+    /// The same builds with `abilities` switched on in each, in place of any
+    /// switched on here.
+    pub(crate) fn with_abilities_on(&self, abilities: Vec<AbilityModifiers>) -> Planner<'a> {
+        Self::for_commander(self.game, self.ship, self.commander).with_ability(abilities, self.burst)
+    }
+
+    /// Whether a ship ability is switched on in every build.
+    pub(crate) fn has_ability(&self) -> bool {
+        !self.abilities.is_empty()
+    }
+
     /// Bursts of the alternative fire mode switched on.
     pub(crate) fn burst(&self) -> Option<Burst> {
         self.burst

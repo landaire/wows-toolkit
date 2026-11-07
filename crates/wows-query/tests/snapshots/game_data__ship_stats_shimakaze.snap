@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 2079
 expression: stats.stats
 ---
 - "Hit Points: 17900"
@@ -80,6 +79,10 @@ expression: stats.stats
 - "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 5.64 fires/min"
 - "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 5.64 fires/min"
 - "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE): 5.64 fires/min"
+- "Torpedoes per minute against one target at its best bearing, launchers bearing on it only, on the launcher reload, loader limits applied, no consumable; not submarines: 6.00 torpedoes/min"
+- "Torpedoes per minute with every launcher firing at once, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees: 6.00 torpedoes/min"
+- "Torpedo damage per minute against one target at its best bearing, launchers bearing on it only, every torpedo hitting, on the launcher reload, loader limits applied, no consumable; not submarines (Type 93): 125800 hp/min"
+- "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees (Type 93): 125800 hp/min"
 - "Fire chance reduction against shells hitting the ship: 49.95%"
 - "Fires that can burn at once: 4"
 - "Fire duration: 30.0 s"

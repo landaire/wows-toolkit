@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 908
 expression: rates(name)
 ---
 torpedoes_per_minute:
@@ -11,9 +10,71 @@ torpedoes_per_minute:
     stat: torpedoes per minute
     unit: torpedoes/min
     builds:
-      base: 4.8
+      base:
+        torpedoes_per_minute: 4.8
+        bearing: 90
+        all_launchers_ceiling: 4.8
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 0
+            port: 0
+          - bearing: 45
+            starboard: 0
+            port: 0
+          - bearing: 60
+            starboard: 0
+            port: 0
+          - bearing: 90
+            starboard: 4.8
+            port: 4.8
+          - bearing: 120
+            starboard: 1.8
+            port: 1.8
+          - bearing: 135
+            starboard: 0
+            port: 0
+          - bearing: 150
+            starboard: 0
+            port: 0
+          - bearing: 180
+            starboard: 0
+            port: 0
       best:
-        value: 6.27
+        value:
+          torpedoes_per_minute: 6.27
+          bearing: 90
+          all_launchers_ceiling: 6.27
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 0
+              port: 0
+            - bearing: 90
+              starboard: 6.27
+              port: 6.27
+            - bearing: 120
+              starboard: 2.35
+              port: 2.35
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
@@ -22,11 +83,17 @@ torpedoes_per_minute:
           - Extra-Heavy Ammunition
       alternatives:
         - label: without Fill the Tubes
-          value: 5.65
+          value:
+            torpedoes_per_minute: 5.65
+            bearing: 90
+            all_launchers_ceiling: 5.65
           assumed:
             - Torpedo Tubes Modification 2
         - label: without Torpedo Tubes Modification 2
-          value: 5.33
+          value:
+            torpedoes_per_minute: 5.33
+            bearing: 90
+            all_launchers_ceiling: 5.33
           assumed:
             - Fill the Tubes
           tier_fillers:
@@ -287,10 +354,70 @@ torpedo_damage:
         base:
           damage_per_minute: 51360
           damage_per_second: 856
+          bearing: 90
+          all_barrels_ceiling: 51360
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 0
+              port: 0
+            - bearing: 90
+              starboard: 51360
+              port: 51360
+            - bearing: 120
+              starboard: 19260
+              port: 19260
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
             damage_per_minute: 67137
             damage_per_second: 1119
+            bearing: 90
+            all_barrels_ceiling: 67137
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 0
+                port: 0
+              - bearing: 60
+                starboard: 0
+                port: 0
+              - bearing: 90
+                starboard: 67137
+                port: 67137
+              - bearing: 120
+                starboard: 25176
+                port: 25176
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Fill the Tubes
             - Torpedo Tubes Modification 2
@@ -302,17 +429,21 @@ torpedo_damage:
             value:
               damage_per_minute: 60424
               damage_per_second: 1007.1
+              bearing: 90
+              all_barrels_ceiling: 60424
             assumed:
               - Torpedo Tubes Modification 2
           - label: without Torpedo Tubes Modification 2
             value:
               damage_per_minute: 57067
               damage_per_second: 951.1
+              bearing: 90
+              all_barrels_ceiling: 57067
             assumed:
               - Fill the Tubes
             tier_fillers:
               - Consumable Specialist
               - Extra-Heavy Ammunition
 rate_notes:
-  - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 908
 expression: rates(name)
 ---
 torpedoes_per_minute:
@@ -11,9 +10,71 @@ torpedoes_per_minute:
     stat: torpedoes per minute
     unit: torpedoes/min
     builds:
-      base: 6
+      base:
+        torpedoes_per_minute: 6
+        bearing: 90
+        all_launchers_ceiling: 6
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 0
+            port: 0
+          - bearing: 45
+            starboard: 0
+            port: 0
+          - bearing: 60
+            starboard: 6
+            port: 6
+          - bearing: 90
+            starboard: 6
+            port: 6
+          - bearing: 120
+            starboard: 6
+            port: 6
+          - bearing: 135
+            starboard: 0
+            port: 0
+          - bearing: 150
+            starboard: 0
+            port: 0
+          - bearing: 180
+            starboard: 0
+            port: 0
       best:
-        value: 10.18
+        value:
+          torpedoes_per_minute: 10.18
+          bearing: 90
+          all_launchers_ceiling: 10.18
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 10.18
+              port: 10.18
+            - bearing: 90
+              starboard: 10.18
+              port: 10.18
+            - bearing: 120
+              starboard: 10.18
+              port: 10.18
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         assumed:
           - Type F3
           - Fill the Tubes
@@ -23,12 +84,18 @@ torpedoes_per_minute:
           - Extra-Heavy Ammunition
       alternatives:
         - label: without Fill the Tubes
-          value: 9.16
+          value:
+            torpedoes_per_minute: 9.16
+            bearing: 90
+            all_launchers_ceiling: 9.16
           assumed:
             - Type F3
             - Torpedo Quick Reload System
         - label: without Torpedo Quick Reload System
-          value: 7.63
+          value:
+            torpedoes_per_minute: 7.63
+            bearing: 90
+            all_launchers_ceiling: 7.63
           assumed:
             - Type F3
             - Fill the Tubes
@@ -290,10 +357,70 @@ torpedo_damage:
         base:
           damage_per_minute: 125800
           damage_per_second: 2096.7
+          bearing: 90
+          all_barrels_ceiling: 125800
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 125800
+              port: 125800
+            - bearing: 90
+              starboard: 125800
+              port: 125800
+            - bearing: 120
+              starboard: 125800
+              port: 125800
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
             damage_per_minute: 186370
             damage_per_second: 3106.2
+            bearing: 90
+            all_barrels_ceiling: 186370
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 0
+                port: 0
+              - bearing: 60
+                starboard: 186370
+                port: 186370
+              - bearing: 90
+                starboard: 186370
+                port: 186370
+              - bearing: 120
+                starboard: 186370
+                port: 186370
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Fill the Tubes
             - Torpedo Quick Reload System
@@ -305,12 +432,16 @@ torpedo_damage:
             value:
               damage_per_minute: 167733
               damage_per_second: 2795.6
+              bearing: 90
+              all_barrels_ceiling: 167733
             assumed:
               - Torpedo Quick Reload System
           - label: without Torpedo Quick Reload System
             value:
               damage_per_minute: 139778
               damage_per_second: 2329.6
+              bearing: 90
+              all_barrels_ceiling: 139778
             assumed:
               - Fill the Tubes
             tier_fillers:
@@ -328,10 +459,70 @@ torpedo_damage:
         base:
           damage_per_minute: 139804
           damage_per_second: 2330.1
+          bearing: 90
+          all_barrels_ceiling: 139804
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 139804
+              port: 139804
+            - bearing: 90
+              starboard: 139804
+              port: 139804
+            - bearing: 120
+              starboard: 139804
+              port: 139804
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
             damage_per_minute: 207117
             damage_per_second: 3451.9
+            bearing: 90
+            all_barrels_ceiling: 207117
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 0
+                port: 0
+              - bearing: 60
+                starboard: 207117
+                port: 207117
+              - bearing: 90
+                starboard: 207117
+                port: 207117
+              - bearing: 120
+                starboard: 207117
+                port: 207117
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Type 93 mod. 3
             - Fill the Tubes
@@ -344,6 +535,8 @@ torpedo_damage:
             value:
               damage_per_minute: 186405
               damage_per_second: 3106.8
+              bearing: 90
+              all_barrels_ceiling: 186405
             assumed:
               - Type 93 mod. 3
               - Torpedo Quick Reload System
@@ -351,6 +544,8 @@ torpedo_damage:
             value:
               damage_per_minute: 155338
               damage_per_second: 2589
+              bearing: 90
+              all_barrels_ceiling: 155338
             assumed:
               - Type 93 mod. 3
               - Fill the Tubes
@@ -369,10 +564,70 @@ torpedo_damage:
         base:
           damage_per_minute: 146794
           damage_per_second: 2446.6
+          bearing: 90
+          all_barrels_ceiling: 146794
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 146794
+              port: 146794
+            - bearing: 90
+              starboard: 146794
+              port: 146794
+            - bearing: 120
+              starboard: 146794
+              port: 146794
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
             damage_per_minute: 217472
             damage_per_second: 3624.5
+            bearing: 90
+            all_barrels_ceiling: 217472
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 0
+                port: 0
+              - bearing: 60
+                starboard: 217472
+                port: 217472
+              - bearing: 90
+                starboard: 217472
+                port: 217472
+              - bearing: 120
+                starboard: 217472
+                port: 217472
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Type F3
             - Fill the Tubes
@@ -385,6 +640,8 @@ torpedo_damage:
             value:
               damage_per_minute: 195725
               damage_per_second: 3262.1
+              bearing: 90
+              all_barrels_ceiling: 195725
             assumed:
               - Type F3
               - Torpedo Quick Reload System
@@ -392,6 +649,8 @@ torpedo_damage:
             value:
               damage_per_minute: 163104
               damage_per_second: 2718.4
+              bearing: 90
+              all_barrels_ceiling: 163104
             assumed:
               - Type F3
               - Fill the Tubes
@@ -399,5 +658,5 @@ torpedo_damage:
               - Consumable Specialist
               - Extra-Heavy Ammunition
 rate_notes:
-  - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

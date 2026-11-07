@@ -904,24 +904,73 @@ fn rates(name: &str) -> wows_query::rates::Rates {
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn weapon_rates_on_their_best_builds() {
-    for name in ["Yamato", "Shimakaze", "Smaland", "Orzel", "Barfleur"] {
-        insta::assert_yaml_snapshot!(format!("weapon_rates_{name}"), rates(name));
+    for name in ["Yamato", "Shimakaze", "Smaland", "Orzel", "Barfleur", "La Pampa", "Yodo", "Zao", "Kitakami"] {
+        insta::assert_yaml_snapshot!(format!("weapon_rates_{}", name.replace(' ', "_")), rates(name));
     }
 }
 
 /// Barfleur's one loader serves both launchers; Orzel's bow and stern groups
 /// reload two launchers each; Shimakaze reloads every launcher at once.
+/// Every launcher counts: the ceiling of the one-target figure.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn torpedoes_per_minute_follow_the_loaders() {
     let base = |name: &str| {
         let rate = rates(name).torpedoes_per_minute.expect("the ship has torpedoes");
-        (rate.tubes.0, rate.rate.builds.base.value())
+        let base = rate.rate.builds.base;
+        // Submarine rates have no bearing and count every launcher already.
+        (rate.tubes.0, base.all_launchers_ceiling.unwrap_or(base.torpedoes_per_minute).value())
     };
 
     assert_eq!(base("Barfleur"), (10, 5.26));
     assert_eq!(base("Orzel"), (12, 7.74));
     assert_eq!(base("Shimakaze"), (15, 6.0));
+}
+
+/// Consumable Specialist shortens every consumable's cooldown; the booster
+/// rates name only the change to the Torpedo Reload Booster's own. With
+/// the reload upgrades the shorter cooldown fits one salvo fewer per cycle.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn booster_rates_name_only_the_booster_cooldown() {
+    let stats = game()
+        .ship_stats(&ShipStatsArgs {
+            ship: "La Pampa".to_owned(),
+            skills: Some(vec!["Consumable Specialist".to_owned(), "Fill the Tubes".to_owned()]),
+            upgrades: Some(vec!["Torpedo Tubes Modification 2".to_owned()]),
+            ..Default::default()
+        })
+        .expect("La Pampa exists");
+    let booster: Vec<_> =
+        stats.changes.iter().filter(|change| change.stat.contains("Torpedo Reload Booster cycle")).collect();
+
+    assert!(!booster.is_empty(), "{:?}", stats.changes);
+    insta::assert_yaml_snapshot!(booster);
+}
+
+/// The 10 ships with the highest torpedo damage per minute against one
+/// target on the launcher reload, over a Torpedo Reload Booster cycle and
+/// over a reload buff cycle, and with every launcher firing at once.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn torpedo_damage_per_minute_ranks_ships() {
+    let rank = |stat: &str| -> Vec<String> {
+        let arguments = json!({ "rank": { "stat": stat, "order": "desc", "limit": 10 }, "exclude_test_ships": true });
+        let search = game().call_tool("stat_search", arguments).expect("rank resolves");
+        search["ranking"]["ships"]
+            .as_array()
+            .expect("ships is a list")
+            .iter()
+            .map(|ship| format!("{} {} {}", ship["rank"], ship["ship"].as_str().unwrap_or_default(), ship["value"]))
+            .collect()
+    };
+
+    insta::assert_yaml_snapshot!(json!({
+        "one_target": rank("torpedoes.torpedoes.damage_per_minute"),
+        "one_target_with_reload_booster": rank("torpedoes.torpedoes.damage_per_minute_with_reload_booster"),
+        "one_target_with_reload_buff": rank("torpedoes.torpedoes.damage_per_minute_with_reload_buff"),
+        "all_launchers_ceiling": rank("torpedoes.torpedoes.damage_per_minute_all_launchers"),
+    }));
 }
 
 fn fire_rates(name: &str) -> wows_query::fires::FireRates {

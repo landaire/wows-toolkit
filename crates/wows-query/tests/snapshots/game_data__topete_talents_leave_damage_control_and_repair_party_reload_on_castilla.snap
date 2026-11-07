@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 2255
 expression: stats.talents
 ---
 - talent: Resuelto
@@ -47,6 +46,46 @@ expression: stats.talents
       to: 6.82 fires/min
       because:
         - Resuelto x0.975 (-0.325)
+    - stat: "Torpedoes per minute against one target at its best bearing, launchers bearing on it only, on the launcher reload, loader limits applied, no consumable; not submarines"
+      from: 2.83 torpedoes/min
+      to: 2.90 torpedoes/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedoes per minute with every launcher firing at once, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees"
+      from: 5.66 torpedoes/min
+      to: 5.81 torpedoes/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedoes per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready; only ships with one, not submarines"
+      from: 2.97 torpedoes/min
+      to: 3.05 torpedoes/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedoes per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready: a ceiling no single target sees; only ships with one"
+      from: 5.94 torpedoes/min
+      to: 6.10 torpedoes/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedo damage per minute against one target at its best bearing, launchers bearing on it only, every torpedo hitting, on the launcher reload, loader limits applied, no consumable; not submarines (533 mm Mk IX ES)"
+      from: 47075 hp/min
+      to: 48283 hp/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees (533 mm Mk IX ES)"
+      from: 94151 hp/min
+      to: 96565 hp/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedo damage per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting; only ships with one, not submarines (533 mm Mk IX ES)"
+      from: 49429 hp/min
+      to: 50697 hp/min
+      because:
+        - Resuelto x0.975 (-2.65)
+    - stat: "Torpedo damage per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting: a ceiling no single target sees; only ships with one (533 mm Mk IX ES)"
+      from: 98858 hp/min
+      to: 101393 hp/min
+      because:
+        - Resuelto x0.975 (-2.65)
 - talent: Resuelto
   condition: "Activates upon destroying or assisting in destroying every two enemy ships.\n\nCan be activated up to four times per battle."
   activations: 4
@@ -91,6 +130,46 @@ expression: stats.talents
       to: 7.35 fires/min
       because:
         - Resuelto x0.904 (-1.252)
+    - stat: "Torpedoes per minute against one target at its best bearing, launchers bearing on it only, on the launcher reload, loader limits applied, no consumable; not submarines"
+      from: 2.83 torpedoes/min
+      to: 3.13 torpedoes/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedoes per minute with every launcher firing at once, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees"
+      from: 5.66 torpedoes/min
+      to: 6.26 torpedoes/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedoes per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready; only ships with one, not submarines"
+      from: 2.97 torpedoes/min
+      to: 3.29 torpedoes/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedoes per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready: a ceiling no single target sees; only ships with one"
+      from: 5.94 torpedoes/min
+      to: 6.58 torpedoes/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedo damage per minute against one target at its best bearing, launchers bearing on it only, every torpedo hitting, on the launcher reload, loader limits applied, no consumable; not submarines (533 mm Mk IX ES)"
+      from: 47075 hp/min
+      to: 52093 hp/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees (533 mm Mk IX ES)"
+      from: 94151 hp/min
+      to: 104185 hp/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedo damage per minute against one target at its best bearing over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting; only ships with one, not submarines (533 mm Mk IX ES)"
+      from: 49429 hp/min
+      to: 54697 hp/min
+      because:
+        - Resuelto x0.904 (-10.209)
+    - stat: "Torpedo damage per minute with every launcher firing at once over a full cycle of a consumable that shortens the launcher reload while active (Auxiliary and Torpedo Weaponry Coordination), used whenever ready, every torpedo hitting: a ceiling no single target sees; only ships with one (533 mm Mk IX ES)"
+      from: 98858 hp/min
+      to: 109394 hp/min
+      because:
+        - Resuelto x0.904 (-10.209)
 - talent: La Orden se Cumplirá
   condition: "Activates when your ship's HP falls to 75%, 50%, and 25% of her total HP (once per threshold).\n\nCan be activated up to three times."
   activations: 1

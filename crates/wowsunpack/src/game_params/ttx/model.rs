@@ -427,7 +427,7 @@ fn shell_qualifier(shell: &ShellStats, idx: usize) -> String {
 }
 
 /// The qualifier for a torpedo row: the projectile `name`, else the index.
-fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
+pub fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
     if torp.name.is_empty() { idx.to_string() } else { torp.name.clone() }
 }
 

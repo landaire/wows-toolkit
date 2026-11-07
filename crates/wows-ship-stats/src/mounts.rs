@@ -1,9 +1,20 @@
 //! The weapon mounts a ship carries with a module selection.
 
+use serde::Serialize;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::types::MountPoint;
 use wowsunpack::game_params::types::Param;
+
+/// Number of gun mounts or torpedo launchers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct MountCount(pub u32);
+
+/// Number of barrels or tubes, on one mount or on several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct BarrelCount(pub u32);
 
 /// Every mount of one component type for the selected hull and modules. Guns
 /// and torpedoes are modules of their own; the hull lists the components

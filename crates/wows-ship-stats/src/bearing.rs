@@ -1,4 +1,5 @@
-//! Target bearings, and which gun mounts bear on one distant target at each.
+//! Target bearings, and which gun mounts and torpedo launchers bear on one
+//! distant target at each.
 //!
 //! The server gives every secondary mount a target of its own
 //! (`state.atba.atbaTargets`, one entity per gun), and a mount fires only
@@ -17,6 +18,7 @@ use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::types::MountPoint;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::Species;
 
 use crate::mounts::aiming_mounts;
 
@@ -78,19 +80,31 @@ pub const TABLE_BEARINGS: [Bearing; 9] = [
     Bearing::new(180),
 ];
 
-/// Bearings at which each aiming main battery and secondary mount bears, by
-/// hardpoint, for one hull and module selection.
+/// Bearings at which each aiming main battery and secondary mount and each
+/// torpedo launcher bears, by hardpoint, for one hull and module selection.
 #[derive(Debug, Clone, Default)]
 pub struct MountCoverage {
     by_hardpoint: HashMap<String, [bool; 360]>,
+
+    /// Whether the torpedo launchers are covered. Submarine tubes aim by
+    /// firing sectors this model leaves out.
+    launchers: bool,
 }
 
 impl MountCoverage {
-    /// `None` when the hull model gives no facing for some aiming mount.
+    /// `None` when the hull model gives no facing for some aiming mount or
+    /// launcher.
     pub fn new(ship: &Param, selection: &ShipUpgradeSelection, facings: &HashMap<String, Degrees>) -> Option<Self> {
+        let submarine = ship.species().and_then(|species| species.known()) == Some(&Species::Submarine);
+        let component_types: &[ComponentType] = if submarine {
+            &[ComponentType::Artillery, ComponentType::Atba]
+        } else {
+            &[ComponentType::Artillery, ComponentType::Atba, ComponentType::Torpedoes]
+        };
+
         let mut by_hardpoint = HashMap::new();
-        for component_type in [ComponentType::Artillery, ComponentType::Atba] {
-            for (mount, _) in aiming_mounts(ship, selection, component_type) {
+        for component_type in component_types {
+            for (mount, _) in aiming_mounts(ship, selection, *component_type) {
                 let facing = *facings.get(mount.hp_name())?;
                 let mut bears = [false; 360];
                 for bearing in Bearing::all() {
@@ -100,7 +114,7 @@ impl MountCoverage {
             }
         }
 
-        Some(Self { by_hardpoint })
+        Some(Self { by_hardpoint, launchers: !submarine })
     }
 
     /// The bearings at which the mount on `hardpoint` bears, by bearing
@@ -113,6 +127,11 @@ impl MountCoverage {
     /// hardpoint with no aiming mount.
     pub fn bears(&self, hardpoint: &str, bearing: Bearing) -> bool {
         self.row(hardpoint).is_some_and(|bears| bears[bearing.index()])
+    }
+
+    /// Whether it covers the torpedo launchers.
+    pub fn covers_launchers(&self) -> bool {
+        self.launchers
     }
 }
 
@@ -178,6 +197,21 @@ where
         }
 
         Self { values }
+    }
+}
+
+impl<V> PerBearing<V>
+where
+    V: Copy,
+{
+    /// `value(bearing)` at every bearing.
+    pub fn from_fn(value: impl Fn(Bearing) -> V) -> Self {
+        Self { values: std::array::from_fn(|idx| value(Bearing(idx as u16))) }
+    }
+
+    /// `convert` applied to the value at every bearing.
+    pub fn map<U>(&self, convert: impl Fn(V) -> U) -> PerBearing<U> {
+        PerBearing { values: self.values.map(convert) }
     }
 }
 
