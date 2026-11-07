@@ -1,13 +1,12 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 2160
 expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),\nfire_lines(\"Yamato\", &[\"Fire Prevention Expert\", \"Basics of Survivability\"],\n&[\"Damage Control System Modification 1\",\n\"Damage Control System Modification 2\"],),]"
 ---
 - ship: Yamato
   lines:
     - "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 39.38 fires/min"
     - "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 28.82 fires/min"
-    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD903_ASW_T10): 28.00%"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (Type 1 No. 25 Mk 2 mod. 1 depth charge on Kawanishi H6K): 28.00%"
     - "Fire chance reduction against shells hitting the ship: 49.95%"
     - "Fires that can burn at once: 4"
     - "Fire duration: 60.0 s"
@@ -21,7 +20,7 @@ expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),
   lines:
     - "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 22.95 fires/min"
     - "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 15.33 fires/min"
-    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD904_ASW_T5): 16.00%"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (Type 99 No. 6 Mk 2 mod. 1 depth charge on Kawanishi H8K): 16.00%"
     - "Fire chance reduction against shells hitting the ship: 13.32%"
     - "Fires that can burn at once: 4"
     - "Fire duration: 60.0 s"
@@ -35,7 +34,7 @@ expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),
   lines:
     - "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 39.38 fires/min"
     - "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 28.82 fires/min"
-    - "Fire chance of one aircraft bomb, rocket or depth charge (PJAD903_ASW_T10): 28.00%"
+    - "Fire chance of one aircraft bomb, rocket or depth charge (Type 1 No. 25 Mk 2 mod. 1 depth charge on Kawanishi H6K): 28.00%"
     - "Fire chance reduction against shells hitting the ship: 57.21%"
     - "Fires that can burn at once: 3"
     - "Fire duration: 43.4 s"

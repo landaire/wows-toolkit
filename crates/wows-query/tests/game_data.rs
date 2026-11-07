@@ -2243,7 +2243,7 @@ fn des_moines_he_fire_chance_against_yamato_and_a_tier_6_cruiser() {
             .expect("firing arcs resolve");
         let main = battery(&arcs, Weapon::MainBattery);
         let he = main.ammo.iter().find(|ammo| ammo.ammo == "HE").expect("Des Moines fires HE").clone();
-        (arcs.target, he.projectiles, he.all_barrels)
+        (arcs.target, he.projectiles, he.arcs.starboard, he.arcs.bow)
     };
 
     insta::assert_yaml_snapshot!([
@@ -2251,6 +2251,18 @@ fn des_moines_he_fire_chance_against_yamato_and_a_tier_6_cruiser() {
         against("Yamato", &["Fire Prevention Expert"]),
         against("Leander", &[]),
     ]);
+}
+
+/// Thunderer's HE salvo fire chance by arc, with no target: p is the shell's
+/// own fire chance.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn thunderer_he_salvo_fire_chance() {
+    let arcs = firing_arcs("Thunderer", None, &[]);
+    let main = battery(&arcs, Weapon::MainBattery);
+    let he = main.ammo.iter().find(|ammo| ammo.ammo == "HE").expect("Thunderer fires HE");
+
+    insta::assert_yaml_snapshot!((&he.projectiles, &he.arcs));
 }
 
 #[test]
@@ -2356,4 +2368,69 @@ fn new_jersey_consumables_heal_allies() {
         .ship_consumables(&ShipConsumablesArgs { ship: "New Jersey".to_owned(), ..Default::default() })
         .expect("New Jersey exists");
     insta::assert_yaml_snapshot!(consumables);
+}
+
+/// Every squadron's ordnance states its fire chance, 0 when it cannot start
+/// fires, with the best-fit build that raises it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn carrier_ordnance_lists_its_fire_chance() {
+    let lines = |ship: &str| -> Vec<serde_json::Value> {
+        let aircraft = game().call_tool("ship_aircraft", json!({ "ship": ship })).expect("ship has aircraft");
+        aircraft["squadrons"]
+            .as_array()
+            .expect("squadrons is a list")
+            .iter()
+            .map(|squadron| {
+                json!({
+                    "role": squadron["role"],
+                    "aircraft": squadron["aircraft"],
+                    "ordnance": squadron["ordnance"]["name"],
+                    "kind": squadron["ordnance"]["kind"],
+                    "fire_chance_pct": squadron["ordnance"]["fire_chance_pct"],
+                    "fire_chance": squadron["fire_chance"]["builds"],
+                })
+            })
+            .collect()
+    };
+
+    for (ship, snapshot) in [
+        ("United States", "carrier_ordnance_fire_chance_united_states"),
+        ("Midway", "carrier_ordnance_fire_chance_midway"),
+        ("Saipan", "carrier_ordnance_fire_chance_saipan"),
+        ("E. Loewenhardt", "carrier_ordnance_fire_chance_loewenhardt"),
+    ] {
+        insta::assert_yaml_snapshot!(snapshot, lines(ship));
+    }
+}
+
+/// The ten bombs and rockets with the highest fire chance per projectile,
+/// each naming the ordnance and what carries it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn top_ten_aircraft_ordnance_by_fire_chance() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({ "rank": { "stat": "aircraft.fire_chance", "order": "desc", "limit": 10 }, "exclude_test_ships": true }),
+        )
+        .expect("rank resolves");
+    let ranking = &search["ranking"];
+    let ships: Vec<String> = ranking["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .map(|ship| {
+            format!(
+                "{} {}: {} ({}), build {}",
+                ship["rank"],
+                ship["ship"].as_str().unwrap_or_default(),
+                ship["value"].as_str().unwrap_or_default(),
+                ship["row"].as_str().unwrap_or_default(),
+                ship["build"],
+            )
+        })
+        .collect();
+
+    insta::assert_yaml_snapshot!(json!({ "stat": ranking["stat"], "ships": ships }));
 }

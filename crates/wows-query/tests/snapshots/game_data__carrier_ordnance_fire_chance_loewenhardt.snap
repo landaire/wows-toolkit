@@ -1,0 +1,44 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: lines(ship)
+---
+- role: rocket_planes
+  aircraft: Bf 109T
+  ordnance: Panzerbrechend L/4.8
+  kind: rocket
+  fire_chance_pct: 0
+  fire_chance: ~
+- role: dive_bombers
+  aircraft: Ju.87 C
+  ordnance: SC 1000
+  kind: bomb
+  fire_chance_pct: 69
+  fire_chance:
+    base: 69
+    best:
+      value: 74
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 69
+        assumed: []
+- role: torpedo_bombers
+  aircraft: Ju.87 C
+  ordnance: LT F5a
+  kind: torpedo
+  fire_chance_pct: 0
+  fire_chance: ~
+- role: air_strike
+  aircraft: Blohm&Voss BV.138C
+  ordnance: SC-50
+  kind: depth_charge
+  fire_chance_pct: 19
+  fire_chance:
+    base: 19
+    best:
+      value: 19
+      assumed: []

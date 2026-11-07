@@ -31,7 +31,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 11.01
-        salvo_at_least_one_fire_pct: 43.2
+        salvo_fire_chance_pct: 43.2
         salvo_expected_fires: 0.55
     stern:
       bearing: 155
@@ -39,7 +39,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 15200
       fire:
         fires_per_minute: 8.81
-        salvo_at_least_one_fire_pct: 36.4
+        salvo_fire_chance_pct: 36.4
         salvo_expected_fires: 0.44
     starboard:
       bearing: 90
@@ -47,7 +47,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 11.01
-        salvo_at_least_one_fire_pct: 43.2
+        salvo_fire_chance_pct: 43.2
         salvo_expected_fires: 0.55
     port:
       bearing: 270
@@ -55,14 +55,14 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 11.01
-        salvo_at_least_one_fire_pct: 43.2
+        salvo_fire_chance_pct: 43.2
         salvo_expected_fires: 0.55
   all_barrels:
     barrels: 10
     damage: 19000
     fire:
       fires_per_minute: 11.01
-      salvo_at_least_one_fire_pct: 43.2
+      salvo_fire_chance_pct: 43.2
       salvo_expected_fires: 0.55
 - - stat: Chances of Causing a Fire on Target (HE)
     from: 11%
@@ -85,7 +85,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 12.01
-        salvo_at_least_one_fire_pct: 46.2
+        salvo_fire_chance_pct: 46.2
         salvo_expected_fires: 0.6
     stern:
       bearing: 155
@@ -93,7 +93,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 15200
       fire:
         fires_per_minute: 9.61
-        salvo_at_least_one_fire_pct: 39.1
+        salvo_fire_chance_pct: 39.1
         salvo_expected_fires: 0.48
     starboard:
       bearing: 90
@@ -101,7 +101,7 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 12.01
-        salvo_at_least_one_fire_pct: 46.2
+        salvo_fire_chance_pct: 46.2
         salvo_expected_fires: 0.6
     port:
       bearing: 270
@@ -109,12 +109,12 @@ expression: "(&stock.target, he(&stock), &demolition.loadout_changes, he(&demoli
       damage: 19000
       fire:
         fires_per_minute: 12.01
-        salvo_at_least_one_fire_pct: 46.2
+        salvo_fire_chance_pct: 46.2
         salvo_expected_fires: 0.6
   all_barrels:
     barrels: 10
     damage: 19000
     fire:
       fires_per_minute: 12.01
-      salvo_at_least_one_fire_pct: 46.2
+      salvo_fire_chance_pct: 46.2
       salvo_expected_fires: 0.6

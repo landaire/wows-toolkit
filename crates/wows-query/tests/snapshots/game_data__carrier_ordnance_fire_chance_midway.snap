@@ -1,0 +1,116 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: lines(ship)
+---
+- role: rocket_planes
+  aircraft: F4U Corsair
+  ordnance: HVAR 127 mm
+  kind: rocket
+  fire_chance_pct: 7
+  fire_chance:
+    base: 7
+    best:
+      value: 8
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 7
+        assumed: []
+- role: rocket_planes
+  aircraft: F8F Bearcat
+  ordnance: HVAR 127 mm
+  kind: rocket
+  fire_chance_pct: 7
+  fire_chance:
+    base: 7
+    best:
+      value: 8
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 7
+        assumed: []
+- role: rocket_planes
+  aircraft: F8F Bearcat
+  ordnance: Tiny Tim
+  kind: rocket
+  fire_chance_pct: 33
+  fire_chance:
+    base: 33
+    best:
+      value: 34
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 33
+        assumed: []
+- role: dive_bombers
+  aircraft: AD-1 Skyraider
+  ordnance: AN-M66
+  kind: bomb
+  fire_chance_pct: 64
+  fire_chance:
+    base: 64
+    best:
+      value: 69
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 64
+        assumed: []
+- role: dive_bombers
+  aircraft: BTD Destroyer
+  ordnance: AN-M66
+  kind: bomb
+  fire_chance_pct: 64
+  fire_chance:
+    base: 64
+    best:
+      value: 69
+      assumed:
+        - Pyrotechnician
+      tier_fillers:
+        - Direction Center for Interceptors
+        - Secondary Armament Expert
+    alternatives:
+      - label: without Pyrotechnician
+        value: 64
+        assumed: []
+- role: torpedo_bombers
+  aircraft: AD-1 Skyraider
+  ordnance: Torpedo Mk.7 mod. 1
+  kind: torpedo
+  fire_chance_pct: 0
+  fire_chance: ~
+- role: torpedo_bombers
+  aircraft: BTD Destroyer
+  ordnance: Torpedo Mk.7 mod. 1
+  kind: torpedo
+  fire_chance_pct: 0
+  fire_chance: ~
+- role: air_strike
+  aircraft: Consolidated PB4Y-2 Privateer
+  ordnance: 650 lb Depth Bomb Mk 38
+  kind: depth_charge
+  fire_chance_pct: 28
+  fire_chance:
+    base: 28
+    best:
+      value: 28
+      assumed: []

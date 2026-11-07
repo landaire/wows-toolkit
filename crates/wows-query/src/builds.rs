@@ -34,6 +34,7 @@ use wows_core::units::FiresPerMinute;
 use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
+use wows_core::units::Percent;
 use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
 use wows_ship_stats::Triggers;
@@ -129,6 +130,16 @@ impl StatAmount for FiresPerMinute {
 
 impl StatUnit for FiresPerMinute {
     const UNIT: &'static str = "fires/min";
+}
+
+impl StatAmount for Percent {
+    fn amount(self) -> f32 {
+        self.value()
+    }
+}
+
+impl StatUnit for Percent {
+    const UNIT: &'static str = "%";
 }
 
 /// Number of charges, or unlimited.

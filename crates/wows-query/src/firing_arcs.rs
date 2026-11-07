@@ -55,7 +55,7 @@ use crate::stats::changes;
 
 const BEARING_NOTE: &str = "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie.";
 
-const FIRE_NOTE: &str = "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. With a target, p is the shell's fire chance times the target's fire_chance_factor (its hull's fire-node probability, lower at higher tiers, times its build's burnProb, e.g. x0.9 with Fire Prevention Expert), capped at 100%. Not applied: the fire limit (target fire_zones fires at once), fire duration and the Damage Control Party consumable.";
+const FIRE_NOTE: &str = "Fire figures assume every bearing shell hits and the guns fire at their reload. p is the chance one hit starts a fire: with a target, the shell's fire chance times the target's fire_chance_factor (its hull's fire-node probability, lower at higher tiers, times its build's burnProb, e.g. x0.9 with Fire Prevention Expert), capped at 100%. salvo_fire_chance_pct = 1 - (1 - p)^n over the n shells of one salvo that bear, the chance the salvo starts at least one fire; it is exact for independent hits on a ship not yet burning. salvo_expected_fires = n x p and fires_per_minute = 60 / reload_s x n x p, summed over mounts, overstate: a burning zone cannot start a second fire and a ship has 4 fire zones (target fire_zones, 3 with Fire Prevention Expert), so several hits in one zone start one fire. Not applied: fire duration and the Damage Control Party consumable.";
 
 const NO_TARGET_NOTE: &str = "No target ship: p is the shell's fire chance alone. The target's hull and build lower it (x0.5005 on a tier 10 hull); give target_ship to apply them.";
 
@@ -250,8 +250,9 @@ pub struct Projectile {
 pub struct FireRate {
     pub fires_per_minute: f32,
 
-    /// 1 - product of (1 - p) over the salvo's shells, percent.
-    pub salvo_at_least_one_fire_pct: Percent,
+    /// Chance the salvo starts at least one fire: 1 - product of (1 - p)
+    /// over its shells, percent.
+    pub salvo_fire_chance_pct: Percent,
 
     /// Sum of p over the salvo's shells.
     pub salvo_expected_fires: f32,
@@ -888,7 +889,7 @@ fn arc_salvo(bearing: Option<Bearing>, mounts: impl Iterator<Item = MountSalvo>)
 
     let fire = (total.expected_fires > 0.0).then(|| FireRate {
         fires_per_minute: round_to(total.fires_per_minute, 100.0),
-        salvo_at_least_one_fire_pct: Percent::new(round_to(Percent::from_fraction(1.0 - total.no_fire).value(), 10.0)),
+        salvo_fire_chance_pct: Percent::new(round_to(Percent::from_fraction(1.0 - total.no_fire).value(), 10.0)),
         salvo_expected_fires: round_to(total.expected_fires, 100.0),
     });
 
@@ -1012,7 +1013,7 @@ mod tests {
             salvo.fire,
             Some(FireRate {
                 fires_per_minute: 6.0,
-                salvo_at_least_one_fire_pct: Percent::new(46.9),
+                salvo_fire_chance_pct: Percent::new(46.9),
                 salvo_expected_fires: 0.6
             })
         );

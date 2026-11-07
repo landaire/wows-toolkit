@@ -26,12 +26,21 @@ squadrons:
       name: P.u.W. 160 kg
       param: PHPB024_PuW_160kg_AS_HE
       damage: 6800
+      fire_chance_pct: 39
       fall_time_coef: 1
       he_penetration_mm: 37
     air_strike:
       charges: 2
       reload_s: 100
       range_km: 13
+    fire_chance:
+      stat: Fokker T.V. fire chance per projectile
+      unit: "%"
+      builds:
+        base: 39
+        best:
+          value: 39
+          assumed: []
     vs_plate:
       result: penetrates
       penetration_mm: 37

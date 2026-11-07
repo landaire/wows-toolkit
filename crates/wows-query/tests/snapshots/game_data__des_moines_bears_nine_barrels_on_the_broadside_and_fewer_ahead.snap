@@ -13,7 +13,7 @@ ship:
   status: released
 notes:
   - "Bearing is the target's direction from the bow, clockwise: 0 bow, 90 starboard, 180 stern, 270 port. Bow is 331-29, stern 151-209, starboard 30-150, port 210-330. The target is distant, so every mount sees it at the same bearing; mount positions on the hull are ignored. Each arc's salvo is at the bearing inside it where the most damage bears, nearest the arc's centre on a tie."
-  - "Fire figures assume every bearing shell hits and the guns fire at their reload. fires_per_minute = 60 / reload_s x barrels bearing x p, summed over mounts. With a target, p is the shell's fire chance times the target's fire_chance_factor (its hull's fire-node probability, lower at higher tiers, times its build's burnProb, e.g. x0.9 with Fire Prevention Expert), capped at 100%. Not applied: the fire limit (target fire_zones fires at once), fire duration and the Damage Control Party consumable."
+  - "Fire figures assume every bearing shell hits and the guns fire at their reload. p is the chance one hit starts a fire: with a target, the shell's fire chance times the target's fire_chance_factor (its hull's fire-node probability, lower at higher tiers, times its build's burnProb, e.g. x0.9 with Fire Prevention Expert), capped at 100%. salvo_fire_chance_pct = 1 - (1 - p)^n over the n shells of one salvo that bear, the chance the salvo starts at least one fire; it is exact for independent hits on a ship not yet burning. salvo_expected_fires = n x p and fires_per_minute = 60 / reload_s x n x p, summed over mounts, overstate: a burning zone cannot start a second fire and a ship has 4 fire zones (target fire_zones, 3 with Fire Prevention Expert), so several hits in one zone start one fire. Not applied: fire duration and the Damage Control Party consumable."
   - "No target ship: p is the shell's fire chance alone. The target's hull and build lower it (x0.5005 on a tier 10 hull); give target_ship to apply them."
   - "Dispersion is the main battery shell ellipse at the range. How many shells hit depends on the target's size, angle and the aim point; this tool does not estimate hits."
 batteries:
@@ -87,7 +87,7 @@ batteries:
             damage: 16800
             fire:
               fires_per_minute: 9.16
-              salvo_at_least_one_fire_pct: 59.5
+              salvo_fire_chance_pct: 59.5
               salvo_expected_fires: 0.84
           stern:
             bearing: 180
@@ -95,7 +95,7 @@ batteries:
             damage: 8400
             fire:
               fires_per_minute: 4.58
-              salvo_at_least_one_fire_pct: 36.4
+              salvo_fire_chance_pct: 36.4
               salvo_expected_fires: 0.42
           starboard:
             bearing: 90
@@ -103,7 +103,7 @@ batteries:
             damage: 25200
             fire:
               fires_per_minute: 13.75
-              salvo_at_least_one_fire_pct: 74.3
+              salvo_fire_chance_pct: 74.3
               salvo_expected_fires: 1.26
           port:
             bearing: 270
@@ -111,14 +111,14 @@ batteries:
             damage: 25200
             fire:
               fires_per_minute: 13.75
-              salvo_at_least_one_fire_pct: 74.3
+              salvo_fire_chance_pct: 74.3
               salvo_expected_fires: 1.26
         all_barrels:
           barrels: 9
           damage: 25200
           fire:
             fires_per_minute: 13.75
-            salvo_at_least_one_fire_pct: 74.3
+            salvo_fire_chance_pct: 74.3
             salvo_expected_fires: 1.26
   - weapon: secondaries
     mounts: 6
@@ -161,7 +161,7 @@ batteries:
             damage: 10800
             fire:
               fires_per_minute: 3
-              salvo_at_least_one_fire_pct: 26.5
+              salvo_fire_chance_pct: 26.5
               salvo_expected_fires: 0.3
           stern:
             bearing: 180
@@ -169,7 +169,7 @@ batteries:
             damage: 10800
             fire:
               fires_per_minute: 3
-              salvo_at_least_one_fire_pct: 26.5
+              salvo_fire_chance_pct: 26.5
               salvo_expected_fires: 0.3
           starboard:
             bearing: 90
@@ -177,7 +177,7 @@ batteries:
             damage: 14400
             fire:
               fires_per_minute: 4
-              salvo_at_least_one_fire_pct: 33.7
+              salvo_fire_chance_pct: 33.7
               salvo_expected_fires: 0.4
           port:
             bearing: 270
@@ -185,7 +185,7 @@ batteries:
             damage: 14400
             fire:
               fires_per_minute: 4
-              salvo_at_least_one_fire_pct: 33.7
+              salvo_fire_chance_pct: 33.7
               salvo_expected_fires: 0.4
 dispersion:
   range_km: 15.83

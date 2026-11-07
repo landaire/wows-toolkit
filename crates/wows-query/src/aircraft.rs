@@ -10,9 +10,13 @@ use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::MetersPerSecond;
 use wows_core::units::Millimeters;
+use wows_core::units::Percent;
 use wows_core::units::Seconds;
+use wows_ship_stats::FireArmament;
+use wows_ship_stats::FireInputs;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::translations::translate_unit;
+use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::components::PlaneSlot;
 use wowsunpack::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
 use wowsunpack::game_params::ttx::model::Hp;
@@ -22,8 +26,14 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Projectile;
 
+use crate::builds::Better;
+use crate::builds::BuildStat;
+use crate::builds::Outcome;
+use crate::builds::Planner;
+use crate::builds::StatPlan;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::firing_arcs::round_to;
 use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::shell_ammo;
@@ -131,6 +141,12 @@ pub struct Squadron {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub air_strike: Option<AirStrike>,
 
+    /// Fire chance of one projectile: base and best-fit build, with the
+    /// skills that raise it. Absent when no module combination gives it a
+    /// fire chance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fire_chance: Option<BuildStat<Percent>>,
+
     /// The ordnance against `thickness_mm`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vs_plate: Option<PlateVerdict>,
@@ -213,6 +229,10 @@ pub struct Ordnance {
     /// + damage` (`getTorpedoDamage`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub damage: Option<Hp>,
+
+    /// Chance one bomb, rocket or other projectile starts a fire on a hit,
+    /// without skills, as the port shows it. 0 when it cannot start fires.
+    pub fire_chance_pct: Percent,
 
     /// `fallingTimeCoef`, the multiplier on the bomb's fall time.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +335,11 @@ impl GameData {
         };
 
         let mut squadrons = self.squadrons(ship);
+        let planner = Planner::new(self, ship);
+        for squadron in &mut squadrons {
+            squadron.fire_chance = self.ordnance_fire_chance(&planner, squadron)?;
+        }
+
         if let Some(thickness) = thickness {
             for squadron in &mut squadrons {
                 squadron.vs_plate = squadron.ordnance.as_ref().map(|ordnance| ordnance_vs_plate(ordnance, thickness));
@@ -421,6 +446,7 @@ impl GameData {
             speed_with_ordnance_knots: aircraft.speed_with_ordnance(),
             ordnance,
             air_strike: None,
+            fire_chance: None,
             vs_plate: None,
         })
     }
@@ -430,6 +456,48 @@ impl GameData {
         translate_unit(param.name(), self.provider())
             .map(|name| clean(&name))
             .unwrap_or_else(|| param.name().to_owned())
+    }
+
+    /// Fire chance of one projectile of `squadron` on its best-fit build,
+    /// read from the fire sources the build gives the ship. `None` when no
+    /// module combination gives the squadron a fire chance.
+    fn ordnance_fire_chance(
+        &self,
+        planner: &Planner<'_>,
+        squadron: &Squadron,
+    ) -> Result<Option<BuildStat<Percent>>, QueryError> {
+        let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+        let chance = |outcome: &Outcome| {
+            FireInputs {
+                ship: &planner.ship().param,
+                selection: selections[outcome.selection],
+                stats: &outcome.stats,
+                modifiers: &outcome.bundle,
+                provider: self.provider(),
+            }
+            .sources()
+            .into_iter()
+            .find(|source| {
+                matches!(source.armament, FireArmament::Squadron | FireArmament::AirStrike)
+                    && source.qualifier == squadron.aircraft_param
+            })
+            .map(|source| Percent::new(round_to(source.fire_chance.value(), 100.0)))
+        };
+
+        let mut carrying = None;
+        for selection in 0..selections.len() {
+            if chance(&*planner.bare(selection)?).is_some() {
+                carrying = Some(selection);
+                break;
+            }
+        }
+
+        let Some(selection) = carrying else {
+            return Ok(None);
+        };
+
+        let label = format!("{} fire chance per projectile", squadron.aircraft);
+        planner.plan(&StatPlan::new(label, Better::Higher, &chance).on_selection(selection))
     }
 }
 
@@ -500,6 +568,10 @@ fn ordnance(param: &Param, name: String, aircraft: &Aircraft) -> Option<Ordnance
         name,
         param: param.name().to_owned(),
         damage: damage.map(Hp::from),
+        // A projectile without `burnProb` takes the client's ammo default of
+        // 0 (m65e88a3f.py); AP ordnance carries a negative one, which
+        // `calculateBurnChance` floors at 0 (`max(initialBurnProb, 0)`).
+        fire_chance_pct: Percent::new(round_to(projectile.burn_prob().unwrap_or(0.0).max(0.0) * 100.0, 100.0)),
         fall_time_coef: projectile.falling_time_coef(),
         he_penetration_mm,
         sap_penetration_mm,
@@ -535,6 +607,7 @@ mod tests {
             name: "Mk. 1".to_owned(),
             param: "PAPB110_Midway_stock".to_owned(),
             damage: Some(Hp::from(11200.0)),
+            fire_chance_pct: Percent::new(0.0),
             fall_time_coef: None,
             he_penetration_mm: he,
             sap_penetration_mm: None,

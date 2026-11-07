@@ -25,6 +25,7 @@ squadrons:
       name: Type 5
       param: PJPT606_ISE_STOCK
       damage: 2767
+      fire_chance_pct: 0
       fall_time_coef: 1
     vs_plate:
       result: not_applicable
@@ -41,11 +42,20 @@ squadrons:
       name: Type 99 No. 6 Mk 2 mod. 1
       param: PJPD103_depth_T5
       damage: 2900
+      fire_chance_pct: 16
       fall_time_coef: 1.5
     air_strike:
       charges: 1
       reload_s: 20
       range_km: 8
+    fire_chance:
+      stat: Kawanishi H8K fire chance per projectile
+      unit: "%"
+      builds:
+        base: 16
+        best:
+          value: 16
+          assumed: []
     vs_plate:
       result: not_applicable
       reason: strikes below the waterline and does not test plates

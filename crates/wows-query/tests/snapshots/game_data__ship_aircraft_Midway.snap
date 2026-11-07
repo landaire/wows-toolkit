@@ -26,8 +26,25 @@ squadrons:
       name: HVAR 127 mm
       param: PAPR110_Midway_stock
       damage: 2000
+      fire_chance_pct: 7
       fall_time_coef: 0.1
       he_penetration_mm: 33
+    fire_chance:
+      stat: F4U Corsair fire chance per projectile
+      unit: "%"
+      builds:
+        base: 7
+        best:
+          value: 8
+          assumed:
+            - Pyrotechnician
+          tier_fillers:
+            - Direction Center for Interceptors
+            - Secondary Armament Expert
+        alternatives:
+          - label: without Pyrotechnician
+            value: 7
+            assumed: []
   - role: rocket_planes
     module_upgrade: true
     aircraft: F8F Bearcat
@@ -42,8 +59,25 @@ squadrons:
       name: HVAR 127 mm
       param: PAPR210_Midway_top
       damage: 2000
+      fire_chance_pct: 7
       fall_time_coef: 0.1
       he_penetration_mm: 33
+    fire_chance:
+      stat: F8F Bearcat fire chance per projectile
+      unit: "%"
+      builds:
+        base: 7
+        best:
+          value: 8
+          assumed:
+            - Pyrotechnician
+          tier_fillers:
+            - Direction Center for Interceptors
+            - Secondary Armament Expert
+        alternatives:
+          - label: without Pyrotechnician
+            value: 7
+            assumed: []
   - role: rocket_planes
     module_upgrade: true
     aircraft: F8F Bearcat
@@ -58,8 +92,25 @@ squadrons:
       name: Tiny Tim
       param: PAPR310_Midway_top
       damage: 5400
+      fire_chance_pct: 33
       fall_time_coef: 0.2
       he_penetration_mm: 68
+    fire_chance:
+      stat: F8F Bearcat fire chance per projectile
+      unit: "%"
+      builds:
+        base: 33
+        best:
+          value: 34
+          assumed:
+            - Pyrotechnician
+          tier_fillers:
+            - Direction Center for Interceptors
+            - Secondary Armament Expert
+        alternatives:
+          - label: without Pyrotechnician
+            value: 33
+            assumed: []
   - role: dive_bombers
     aircraft: AD-1 Skyraider
     aircraft_param: PAAD110_Midway_stock
@@ -73,8 +124,25 @@ squadrons:
       name: AN-M66
       param: PAPB110_Midway_stock
       damage: 11200
+      fire_chance_pct: 64
       fall_time_coef: 1
       he_penetration_mm: 67
+    fire_chance:
+      stat: AD-1 Skyraider fire chance per projectile
+      unit: "%"
+      builds:
+        base: 64
+        best:
+          value: 69
+          assumed:
+            - Pyrotechnician
+          tier_fillers:
+            - Direction Center for Interceptors
+            - Secondary Armament Expert
+        alternatives:
+          - label: without Pyrotechnician
+            value: 64
+            assumed: []
   - role: dive_bombers
     module_upgrade: true
     aircraft: BTD Destroyer
@@ -89,8 +157,25 @@ squadrons:
       name: AN-M66
       param: PAPB210_Midway_top
       damage: 11200
+      fire_chance_pct: 64
       fall_time_coef: 1
       he_penetration_mm: 67
+    fire_chance:
+      stat: BTD Destroyer fire chance per projectile
+      unit: "%"
+      builds:
+        base: 64
+        best:
+          value: 69
+          assumed:
+            - Pyrotechnician
+          tier_fillers:
+            - Direction Center for Interceptors
+            - Secondary Armament Expert
+        alternatives:
+          - label: without Pyrotechnician
+            value: 64
+            assumed: []
   - role: torpedo_bombers
     aircraft: AD-1 Skyraider
     aircraft_param: PAAB110_Midway_stock
@@ -103,6 +188,7 @@ squadrons:
       name: Torpedo Mk.7 mod. 1
       param: PAPT110_Midway_stock
       damage: 5067
+      fire_chance_pct: 0
       fall_time_coef: 1
   - role: torpedo_bombers
     module_upgrade: true
@@ -117,6 +203,7 @@ squadrons:
       name: Torpedo Mk.7 mod. 1
       param: PAPT210_Midway_top
       damage: 5067
+      fire_chance_pct: 0
       fall_time_coef: 1
   - role: air_strike
     aircraft: Consolidated PB4Y-2 Privateer
@@ -130,8 +217,17 @@ squadrons:
       name: 650 lb Depth Bomb Mk 38
       param: PAPD110_depth_CV_10
       damage: 4900
+      fire_chance_pct: 28
       fall_time_coef: 1.5
     air_strike:
       charges: 1
       reload_s: 25
       range_km: 8
+    fire_chance:
+      stat: Consolidated PB4Y-2 Privateer fire chance per projectile
+      unit: "%"
+      builds:
+        base: 28
+        best:
+          value: 28
+          assumed: []

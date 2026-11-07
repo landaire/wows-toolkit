@@ -393,11 +393,24 @@ impl GameData {
     }
 
     /// A stat row qualifier as players read it: a projectile's English name in
-    /// place of its GameParams name, any other qualifier unchanged.
+    /// place of its GameParams name, an aircraft's ordnance and English name
+    /// in place of the aircraft's, any other qualifier unchanged.
     pub(crate) fn qualifier_name(&self, qualifier: &str) -> String {
-        let is_projectile =
-            self.provider().game_param_by_name(qualifier).is_some_and(|entry| entry.projectile().is_some());
-        if is_projectile { self.projectile_name(qualifier) } else { qualifier.to_owned() }
+        let Some(entry) = self.provider().game_param_by_name(qualifier) else {
+            return qualifier.to_owned();
+        };
+        if entry.projectile().is_some() {
+            return self.projectile_name(qualifier);
+        }
+        if entry.aircraft().is_none() {
+            return qualifier.to_owned();
+        }
+
+        // Every role carries the same ordnance; the role only labels it.
+        match self.squadron(qualifier, SquadronRole::DiveBombers).and_then(|squadron| squadron.ordnance) {
+            Some(ordnance) => format!("{} {} on {}", ordnance.name, ordnance.kind.label(), self.aircraft_name(&entry)),
+            None => self.aircraft_name(&entry),
+        }
     }
 }
 

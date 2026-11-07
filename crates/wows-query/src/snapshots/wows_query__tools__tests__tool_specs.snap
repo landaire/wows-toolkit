@@ -121,7 +121,7 @@ expression: specs()
     required:
       - ship
 - name: ship_aircraft
-  description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile and HE penetration, plus air strike charges, reload and range. With thickness_mm, says whether each ordnance defeats that plate."
+  description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile, HE penetration and fire chance per projectile, plus air strike charges, reload and range. ordnance.fire_chance_pct is the port value without skills and is 0 when the ordnance cannot start fires; fire_chance gives base and best-fit build with the skills that raise it. With thickness_mm, says whether each ordnance defeats that plate."
   input_schema:
     type: object
     additionalProperties: false
@@ -435,7 +435,7 @@ expression: specs()
         type: boolean
         description: "Include event, clan-battle and retired variants. Defaults to false."
 - name: ship_firing_arcs
-  description: "Which guns and torpedo tubes of one ship bear on a target at each bearing: barrels bearing bow-on, stern-on (within 30 degrees) and on each broadside, where all barrels bear or never, damage of one salvo per ammo type, fires per minute and fire chance per salvo assuming every shell hits, and main battery dispersion at a range. Optional skills, upgrades and modules; guns or torpedoes that fit only another hull need that hull in modules too. Optional target_ship applies the target's fire resistance: each shell's fire chance on that target is its fire chance times the target's fire_chance_factor, from its hull's tier and from target_skills and target_upgrades such as Fire Prevention Expert."
+  description: "Which guns and torpedo tubes of one ship bear on a target at each bearing: barrels bearing bow-on, stern-on (within 30 degrees) and on each broadside, where all barrels bear or never, damage of one salvo per ammo type, fires per minute and the fire chance of one salvo assuming every shell hits, and main battery dispersion at a range. salvo_fire_chance_pct is the chance a salvo starts at least one fire, 1 - (1 - p)^n over its n bearing shells with p the chance per hit; use it to answer \"fire chance of a salvo\" rather than adding shell chances. Optional skills, upgrades and modules; guns or torpedoes that fit only another hull need that hull in modules too. Optional target_ship applies the target's fire resistance: each shell's fire chance on that target is its fire chance times the target's fire_chance_factor, from its hull's tier and from target_skills and target_upgrades such as Fire Prevention Expert."
   input_schema:
     type: object
     additionalProperties: false

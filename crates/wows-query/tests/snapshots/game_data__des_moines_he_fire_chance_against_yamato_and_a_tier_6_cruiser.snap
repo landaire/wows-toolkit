@@ -25,12 +25,20 @@ expression: "[against(\"Yamato\", &[]), against(\"Yamato\", &[\"Fire Prevention 
       reload_s: 5.5
       fire_chance_pct: 14
       fire_chance_on_target_pct: 7.01
-  - barrels: 9
+  - bearing: 90
+    barrels: 9
     damage: 25200
     fire:
       fires_per_minute: 6.88
-      salvo_at_least_one_fire_pct: 48
+      salvo_fire_chance_pct: 48
       salvo_expected_fires: 0.63
+  - bearing: 0
+    barrels: 6
+    damage: 16800
+    fire:
+      fires_per_minute: 4.59
+      salvo_fire_chance_pct: 35.3
+      salvo_expected_fires: 0.42
 - - ship:
       name: Yamato
       index: PJSB018
@@ -57,12 +65,20 @@ expression: "[against(\"Yamato\", &[]), against(\"Yamato\", &[\"Fire Prevention 
       reload_s: 5.5
       fire_chance_pct: 14
       fire_chance_on_target_pct: 6.31
-  - barrels: 9
+  - bearing: 90
+    barrels: 9
     damage: 25200
     fire:
       fires_per_minute: 6.19
-      salvo_at_least_one_fire_pct: 44.4
+      salvo_fire_chance_pct: 44.4
       salvo_expected_fires: 0.57
+  - bearing: 0
+    barrels: 6
+    damage: 16800
+    fire:
+      fires_per_minute: 4.13
+      salvo_fire_chance_pct: 32.4
+      salvo_expected_fires: 0.38
 - - ship:
       name: Leander
       index: PBSC106
@@ -83,9 +99,17 @@ expression: "[against(\"Yamato\", &[]), against(\"Yamato\", &[\"Fire Prevention 
       reload_s: 5.5
       fire_chance_pct: 14
       fire_chance_on_target_pct: 11.2
-  - barrels: 9
+  - bearing: 90
+    barrels: 9
     damage: 25200
     fire:
       fires_per_minute: 11
-      salvo_at_least_one_fire_pct: 65.7
+      salvo_fire_chance_pct: 65.7
       salvo_expected_fires: 1.01
+  - bearing: 0
+    barrels: 6
+    damage: 16800
+    fire:
+      fires_per_minute: 7.33
+      salvo_fire_chance_pct: 51
+      salvo_expected_fires: 0.67

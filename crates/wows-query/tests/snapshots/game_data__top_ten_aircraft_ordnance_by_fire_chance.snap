@@ -1,0 +1,16 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({ \"stat\": ranking[\"stat\"], \"ships\": ships })"
+---
+stat: "aircraft.fire_chance (percent 0-100), highest first"
+ships:
+  - "1 T11 United States (aircraft_carrier, USA): 96% (AN-M56A1 bomb on A-2 Savage), build [\"Pyrotechnician\"]"
+  - "2 T10 Hildebrand (cruiser, Germany): 78% (PC 1000 bomb on Ta 152C-1/R14), build null"
+  - "3 T6 E. Loewenhardt (aircraft_carrier, Germany): 74% (SC 1000 bomb on Ju.87 C), build [\"Pyrotechnician\"]"
+  - "4 T8 Theseus (aircraft_carrier, United_Kingdom): 71% (2000 lb H.C. Bomb Mk.I skip bomb on Sea Hornet), build [\"Pyrotechnician\"]"
+  - "5 T10 Midway (aircraft_carrier, USA): 69% (AN-M66 bomb on BTD Destroyer), build [\"Pyrotechnician\"]"
+  - "5 T8 Saipan (aircraft_carrier, USA) [replicas: Saipan B, Sanzang]: 69% (AN-M66 bomb on BTD Destroyer), build [\"Pyrotechnician\"]"
+  - "7 T10 M. Immelmann (aircraft_carrier, Germany): 68% (SC 1000 skip bomb on Ta 152C-1/R14), build [\"Pyrotechnician\"]"
+  - "8 T10 F. D. Roosevelt (aircraft_carrier, USA): 65% (AN-M66 bomb on TB2D Skypirate), build [\"Pyrotechnician\"]"
+  - "9 T10 Ocean (aircraft_carrier, United_Kingdom): 57% (500 lb G.P. Bomb Mk.II bomb on de Havilland Sea Vampire), build [\"Pyrotechnician\"]"
+  - "9 T8 Lexington (aircraft_carrier, USA): 57% (AN-M65 bomb on SB2C Helldiver), build [\"Pyrotechnician\"]"

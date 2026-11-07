@@ -1,0 +1,42 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "(&he.projectiles, &he.arcs)"
+---
+- - name: 457 mm HE Mk II
+    param: PBPA047_457MM_MII_HE
+    caliber_mm: 457
+    damage: 8200
+    reload_s: 26
+    fire_chance_pct: 63
+- bow:
+    bearing: 0
+    barrels: 4
+    damage: 32800
+    fire:
+      fires_per_minute: 5.82
+      salvo_fire_chance_pct: 98.1
+      salvo_expected_fires: 2.52
+  stern:
+    bearing: 180
+    barrels: 4
+    damage: 32800
+    fire:
+      fires_per_minute: 5.82
+      salvo_fire_chance_pct: 98.1
+      salvo_expected_fires: 2.52
+  starboard:
+    bearing: 90
+    barrels: 8
+    damage: 65600
+    fire:
+      fires_per_minute: 11.63
+      salvo_fire_chance_pct: 100
+      salvo_expected_fires: 5.04
+  port:
+    bearing: 270
+    barrels: 8
+    damage: 65600
+    fire:
+      fires_per_minute: 11.63
+      salvo_fire_chance_pct: 100
+      salvo_expected_fires: 5.04
