@@ -292,7 +292,7 @@ jobs:
   macos:
     name: macOS
     needs: create-release
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       APP_BINARY: ${{ needs.create-release.outputs.binary }}
       APP_TARGET: ${{ needs.create-release.outputs.target }}
