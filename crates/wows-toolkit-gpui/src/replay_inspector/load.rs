@@ -1051,6 +1051,25 @@ fn embedded_constants() -> &'static Value {
     })
 }
 
+/// The constants a replay recorded on `build`/`version` decodes with.
+pub(crate) fn decode_constants(
+    loaded: &LoadedGameData,
+    build: u32,
+    version: Version,
+    game_data: &GameDataCache,
+) -> GameConstants {
+    let (constants_json, _) = resolve_constants(build, &version, game_data);
+    merge_decode_constants(loaded, &constants_json, version)
+}
+
+/// The build's game constants overlaid with its resolved versioned constants.
+fn merge_decode_constants(loaded: &LoadedGameData, constants_json: &Value, version: Version) -> GameConstants {
+    let mut constants = loaded.base_constants.clone();
+    constants.merge_replay_constants(constants_json, version);
+    wowsunpack::game_constants::apply_version_consumables(constants.common_mut(), version);
+    constants
+}
+
 /// One parsed replay: the presentation model, plus the [`LoadedGameData`] it
 /// was parsed against. Callers that need to resolve icon bytes for the
 /// model's rows (ship-class, achievement, ribbon, captain-skill, consumable,
@@ -1189,10 +1208,7 @@ pub(crate) fn parse_replay_with_alts(
     let loaded = game_data.get_or_load_build_for(build, Some(&version))?;
 
     let (constants_json, constants_fit) = resolve_constants(build, &version, game_data);
-
-    let mut constants = loaded.base_constants.clone();
-    constants.merge_replay_constants(&constants_json, version);
-    wowsunpack::game_constants::apply_version_consumables(constants.common_mut(), version);
+    let constants = merge_decode_constants(&loaded, &constants_json, version);
 
     // Whether the stream was read to its end, which is what tells a battle with
     // no results from one whose tail was never reached.

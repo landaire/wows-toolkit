@@ -8,9 +8,12 @@
 
 use wowsunpack::data::Version;
 use wowsunpack::rpc::entitydefs::EntitySpec;
+use wowsunpack::rpc::typedefs::ArgValue;
 
 use crate::ReplayFile;
 use crate::analyzer::decoder::PlayerStateData;
+use crate::analyzer::decoder::player_states_from_blob;
+use crate::game_constants::GameConstants;
 use crate::packet2::PacketType;
 use crate::packet2::Parser;
 use crate::types::ArenaId;
@@ -26,10 +29,45 @@ pub struct ArenaState {
 /// Walk a replay's stream to the first `onArenaStateReceived` and read the
 /// arena id and roster off it.
 ///
+/// `constants` supplies the build's roster member maps. Without them the
+/// roster is read with the parser's built-in layout for `version`.
+pub fn scan_arena_state(
+    specs: &[EntitySpec],
+    version: Version,
+    replay: &ReplayFile,
+    constants: &GameConstants,
+) -> Option<ArenaState> {
+    walk_to_arena_state(specs, version, replay, |arena_id, roster| {
+        let players = roster
+            .map(|blob| {
+                player_states_from_blob(
+                    blob,
+                    &version,
+                    Some(constants.player_num_member_map()),
+                    Some(constants.bot_num_member_map()),
+                )
+            })
+            .unwrap_or_default();
+        ArenaState { arena_id, players }
+    })
+}
+
+/// Walk a replay's stream to find the first `onArenaStateReceived` and
+/// extract its arena id. Lets callers reject merge candidates that
+/// don't belong to the same match *before* a full re-parse is kicked off.
+pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
+    walk_to_arena_state(specs, version, replay, |arena_id, _| arena_id)
+}
+
 /// Only `args[0]` and `args[3]` are touched. The full decode of this method
 /// also reads `args[2]`, whose parser panics on an unexpected shape, and this
 /// runs against files the game is still writing.
-pub fn scan_arena_state(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaState> {
+fn walk_to_arena_state<T>(
+    specs: &[EntitySpec],
+    version: Version,
+    replay: &ReplayFile,
+    read: impl FnOnce(ArenaId, Option<&[u8]>) -> T,
+) -> Option<T> {
     let mut parser = Parser::with_version(specs, version);
     let mut remaining = replay.packet_data();
     while !remaining.is_empty() {
@@ -40,34 +78,24 @@ pub fn scan_arena_state(specs: &[EntitySpec], version: Version, replay: &ReplayF
         if em.method != "onArenaStateReceived" {
             continue;
         }
-        let Some(wowsunpack::rpc::typedefs::ArgValue::Int64(arena_id)) = em.args.first() else {
+        let Some(ArgValue::Int64(arena_id)) = em.args.first() else {
             continue;
         };
-        let players = match em.args.get(3) {
-            Some(wowsunpack::rpc::typedefs::ArgValue::Blob(blob)) => {
-                crate::analyzer::decoder::player_states_from_blob(blob, &version)
-            }
-            _ => Vec::new(),
+        let roster = match em.args.get(3) {
+            Some(ArgValue::Blob(blob)) => Some(*blob),
+            _ => None,
         };
-        return Some(ArenaState { arena_id: ArenaId::from(*arena_id), players });
+        return Some(read(ArenaId::from(*arena_id), roster));
     }
     None
-}
-
-/// Walk a replay's stream to find the first `onArenaStateReceived` and
-/// extract its arena id. Lets callers reject merge candidates that
-/// don't belong to the same match *before* a full re-parse is kicked off.
-pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
-    scan_arena_state(specs, version, replay).map(|state| state.arena_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `scan_arena_state` is the one walk; `scan_arena_id` must be a
-    /// projection of it, so a stream with no `onArenaStateReceived` has to
-    /// give the same answer through both.
+    /// `scan_arena_state` and `scan_arena_id` share one walk, so a stream with
+    /// no `onArenaStateReceived` has to give the same answer through both.
     #[test]
     fn an_empty_stream_yields_no_arena_state() {
         let replay = ReplayFile::from_parts(
@@ -76,7 +104,7 @@ mod tests {
             Vec::new(),
         );
 
-        assert!(scan_arena_state(&[], Version::default(), &replay).is_none());
+        assert!(scan_arena_state(&[], Version::default(), &replay, &GameConstants::defaults()).is_none());
         assert!(scan_arena_id(&[], Version::default(), &replay).is_none());
     }
 
@@ -88,7 +116,7 @@ mod tests {
     fn a_stream_read_apart_from_its_metadata_scans_the_same_way() {
         let replay = ReplayFile::from_decrypted_parts(EMPTY_META.as_bytes().to_vec(), Vec::new()).expect("meta parses");
 
-        assert!(scan_arena_state(&[], Version::default(), &replay).is_none());
+        assert!(scan_arena_state(&[], Version::default(), &replay, &GameConstants::defaults()).is_none());
     }
 
     const EMPTY_META: &str = r#"{

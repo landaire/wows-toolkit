@@ -22,6 +22,4 @@ pub use wowsunpack::recognized::Recognized;
 #[cfg(feature = "parsing")]
 mod decode;
 #[cfg(feature = "parsing")]
-pub(crate) use decode::player_states_from_blob;
-#[cfg(feature = "parsing")]
 pub use decode::*;

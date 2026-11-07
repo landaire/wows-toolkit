@@ -185,7 +185,7 @@ fn try_scan(source: &LiveRosterSource, build: u32, build_cache: &BuildDataCache)
     let metadata = guard.game_metadata.as_ref()?;
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
-    scan_arena_state(metadata.entity_specs(), version, &replay_file)
+    scan_arena_state(metadata.entity_specs(), version, &replay_file, &guard.game_constants)
 }
 
 /// Read the match as one replay, however its two halves are stored.

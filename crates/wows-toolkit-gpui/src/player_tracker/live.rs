@@ -33,7 +33,10 @@ use wows_toolkit_viewmodel::match_stats::build_request;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-use wowsunpack::game_params::provider::GameMetadataProvider;
+
+use crate::replay_inspector::GameDataCache;
+use crate::replay_inspector::LoadedGameData;
+use crate::replay_inspector::load::decode_constants;
 
 /// How often the replays directory is checked for a battle in progress.
 ///
@@ -194,7 +197,7 @@ pub const SCAN_RETRY_BUDGET: Duration = Duration::from_secs(90);
 ///
 /// `None` means "not yet": the stream is short, still being written, or the
 /// packet carrying the roster has not been flushed. Retried by the caller.
-pub fn scan_arena(source: &LiveSource, provider: &GameMetadataProvider) -> Option<ArenaState> {
+pub fn scan_arena(source: &LiveSource, loaded: &LoadedGameData, game_data: &GameDataCache) -> Option<ArenaState> {
     let meta = std::fs::read(&source.arena_info).ok()?;
     let packets = std::fs::read(&source.stream).ok()?;
     // Both halves are re-read per attempt, so an attempt that raced the game
@@ -202,7 +205,12 @@ pub fn scan_arena(source: &LiveSource, provider: &GameMetadataProvider) -> Optio
     let replay = ReplayFile::from_decrypted_parts(meta, packets).ok()?;
 
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
-    scan_arena_state(provider.entity_specs(), version, &replay)
+    // Constants are versioned by build; without one the parser's built-in layout applies.
+    let constants = match version.build_number() {
+        Some(build) => decode_constants(loaded, build, version, game_data),
+        None => loaded.base_constants().clone(),
+    };
+    scan_arena_state(loaded.provider().entity_specs(), version, &replay, &constants)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -448,7 +456,7 @@ mod scan_tests {
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
         let loaded = game_data.get_or_load_build(build).expect("the build's game data loads");
 
-        let state = scan_arena(&LiveSource::in_dir(&dir), loaded.provider()).expect("the roster scans");
+        let state = scan_arena(&LiveSource::in_dir(&dir), &loaded, &game_data).expect("the roster scans");
         let humans = state.players.iter().filter(|player| !player.is_bot()).count();
         println!("arena {:?}: {} players, {humans} of them human", state.arena_id, state.players.len());
 

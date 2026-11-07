@@ -1151,7 +1151,9 @@ impl PlayerTrackerView {
     /// is keyed on `started_at`, so a scan that outlives its battle is
     /// dropped rather than landing on the next one.
     fn start_live_scan(&mut self, started_at: Timestamp, cx: &mut Context<Self>) {
-        let (Some(replay_dir), Some(metadata)) = (self.replay_dir.clone(), self.live_metadata.clone()) else {
+        let (Some(replay_dir), Some(metadata), Some(game_data)) =
+            (self.replay_dir.clone(), self.live_metadata.clone(), self.game_data.clone())
+        else {
             return;
         };
         self.stats = StatsState::Scanning;
@@ -1165,7 +1167,8 @@ impl PlayerTrackerView {
                 let attempt = {
                     let source = source.clone();
                     let metadata = metadata.clone();
-                    cx.background_spawn(async move { live::scan_arena(&source, metadata.provider()) }).await
+                    let game_data = game_data.clone();
+                    cx.background_spawn(async move { live::scan_arena(&source, &metadata, &game_data) }).await
                 };
                 if let Some(state) = attempt {
                     break Some(state);

@@ -161,6 +161,7 @@ impl PlayerStateData {
     pub(crate) const KEY_CLAN_COLOR: &'static str = "clanColor";
     pub(crate) const KEY_CLAN_ID: &'static str = "clanID";
     pub(crate) const KEY_CLAN_TAG: &'static str = "clanTag";
+    pub(crate) const KEY_CREW_CONFIG_DUMP: &'static str = "crewConfigDump";
     pub(crate) const KEY_CREW_PARAMS: &'static str = "crewParams";
     pub(crate) const KEY_DOG_TAG: &'static str = "dogTag";
     pub(crate) const KEY_FRAGS_COUNT: &'static str = "fragsCount";
@@ -223,50 +224,62 @@ impl PlayerStateData {
         raw_with_names
     }
 
+    /// Roster fields are indexed by the sorted position of their names: the
+    /// client serializes the dict via `enumerate(sorted(...))`.
+    fn sorted_key_map(mut fields: Vec<&'static str>) -> HashMap<&'static str, i64> {
+        fields.sort_unstable();
+        fields.into_iter().zip(0..).collect()
+    }
+
     fn player_key_map(version: &Version) -> HashMap<&'static str, i64> {
         // 15.9 adds shipFrags to vehicle data, shifting later roster fields.
         if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
-            let mut h = HashMap::new();
-            h.insert(Self::KEY_ACCOUNT_DBID, 0);
-            h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
-            h.insert(Self::KEY_AVATAR_ID, 2);
-            h.insert(Self::KEY_CAMOUFLAGE_INFO, 3);
-            h.insert(Self::KEY_CLAN_COLOR, 4);
-            h.insert(Self::KEY_CLAN_ID, 5);
-            h.insert(Self::KEY_CLAN_TAG, 6);
-            h.insert(Self::KEY_CREW_PARAMS, 7);
-            h.insert(Self::KEY_DOG_TAG, 8);
-            h.insert(Self::KEY_FRAGS_COUNT, 9);
-            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 10);
-            h.insert(Self::KEY_ID, 11);
-            h.insert(Self::KEY_INVITATIONS_ENABLED, 12);
-            h.insert(Self::KEY_IS_ABUSER, 13);
-            h.insert(Self::KEY_IS_ALIVE, 14);
-            h.insert(Self::KEY_IS_BOT, 15);
-            h.insert(Self::KEY_IS_CLIENT_LOADED, 16);
-            h.insert(Self::KEY_IS_CONNECTED, 17);
-            h.insert(Self::KEY_IS_HIDDEN, 18);
-            h.insert(Self::KEY_IS_LEAVER, 19);
-            h.insert(Self::KEY_IS_PRE_BATTLE_OWNER, 20);
-            h.insert(Self::KEY_IS_T_SHOOTER, 21);
-            h.insert(Self::KEY_KEY_TARGET_MARKERS, 22);
-            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 23);
-            h.insert(Self::KEY_MAX_HEALTH, 24);
-            h.insert(Self::KEY_NAME, 25);
-            h.insert(Self::KEY_PLAYER_MODE, 26);
-            h.insert(Self::KEY_PRE_BATTLE_ID_ON_START, 27);
-            h.insert(Self::KEY_PRE_BATTLE_SIGN, 28);
-            h.insert(Self::KEY_PREBATTLE_ID, 29);
-            h.insert(Self::KEY_REALM, 30);
-            h.insert(Self::KEY_SHIP_COMPONENTS, 31);
-            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 32);
-            h.insert(Self::KEY_SHIP_FRAGS, 33);
-            h.insert(Self::KEY_SHIP_ID, 34);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 35);
-            h.insert(Self::KEY_SKIN_ID, 36);
-            h.insert(Self::KEY_TEAM_ID, 37);
-            h.insert(Self::KEY_TTK_STATUS, 38);
-            h
+            let mut fields = vec![
+                Self::KEY_ACCOUNT_DBID,
+                Self::KEY_ANTI_ABUSE_ENABLED,
+                Self::KEY_AVATAR_ID,
+                Self::KEY_CAMOUFLAGE_INFO,
+                Self::KEY_CLAN_COLOR,
+                Self::KEY_CLAN_ID,
+                Self::KEY_CLAN_TAG,
+                Self::KEY_CREW_PARAMS,
+                Self::KEY_DOG_TAG,
+                Self::KEY_FRAGS_COUNT,
+                Self::KEY_FRIENDLY_FIRE_ENABLED,
+                Self::KEY_ID,
+                Self::KEY_INVITATIONS_ENABLED,
+                Self::KEY_IS_ABUSER,
+                Self::KEY_IS_ALIVE,
+                Self::KEY_IS_BOT,
+                Self::KEY_IS_CLIENT_LOADED,
+                Self::KEY_IS_CONNECTED,
+                Self::KEY_IS_HIDDEN,
+                Self::KEY_IS_LEAVER,
+                Self::KEY_IS_PRE_BATTLE_OWNER,
+                Self::KEY_IS_T_SHOOTER,
+                Self::KEY_KEY_TARGET_MARKERS,
+                Self::KEY_KILLED_BUILDINGS_COUNT,
+                Self::KEY_MAX_HEALTH,
+                Self::KEY_NAME,
+                Self::KEY_PLAYER_MODE,
+                Self::KEY_PRE_BATTLE_ID_ON_START,
+                Self::KEY_PRE_BATTLE_SIGN,
+                Self::KEY_PREBATTLE_ID,
+                Self::KEY_REALM,
+                Self::KEY_SHIP_COMPONENTS,
+                Self::KEY_SHIP_CONFIG_DUMP,
+                Self::KEY_SHIP_FRAGS,
+                Self::KEY_SHIP_ID,
+                Self::KEY_SHIP_PARAMS_ID,
+                Self::KEY_SKIN_ID,
+                Self::KEY_TEAM_ID,
+                Self::KEY_TTK_STATUS,
+            ];
+            // 15.10 adds crewConfigDump, shifting every field after clanTag.
+            if version.is_at_least(&Version::from_client_exe("15,10,0,0")) {
+                fields.push(Self::KEY_CREW_CONFIG_DUMP);
+            }
+            Self::sorted_key_map(fields)
         } else if version.is_at_least(&Version::from_client_exe("0,11,11,0")) {
             // This 38-field layout is stable from 0.11.11 through 15.8.
             let mut h = HashMap::new();
@@ -447,49 +460,44 @@ impl PlayerStateData {
     /// Bot key mapping — bots have a different (smaller) set of fields with different indices.
     fn bot_key_map(version: &Version) -> HashMap<&'static str, i64> {
         if version.is_at_least(&Version::from_client_exe("0,12,8,0")) {
-            // 15.9 adds shipFrags to vehicle data for bots as well as players.
-            let team_id_index = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) { 27 } else { 26 };
-            let ttk_status_index = team_id_index + 1;
-            let mut h = HashMap::new();
-            h.insert(Self::KEY_ACCOUNT_DBID, 0);
-            h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
-            h.insert(Self::KEY_CAMOUFLAGE_INFO, 2);
-            h.insert(Self::KEY_CLAN_COLOR, 3);
-            h.insert(Self::KEY_CLAN_ID, 4);
-            h.insert(Self::KEY_CLAN_TAG, 5);
-            h.insert(Self::KEY_CREW_PARAMS, 6);
-            h.insert(Self::KEY_DOG_TAG, 7);
-            h.insert(Self::KEY_FRAGS_COUNT, 8);
-            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 9);
-            h.insert(Self::KEY_ID, 10);
-            h.insert(Self::KEY_IS_ABUSER, 11);
-            h.insert(Self::KEY_IS_ALIVE, 12);
-            h.insert(Self::KEY_IS_BOT, 13);
-            h.insert(Self::KEY_IS_HIDDEN, 14);
-            h.insert(Self::KEY_IS_T_SHOOTER, 15);
-            // Fields are indexed by alphabetical sort position of their names
-            // (the client serializes the shared-data dict via `enumerate(sorted(...))`),
-            // and "keyTargetMarkers" sorts before "killedBuildingsCount".
-            h.insert(Self::KEY_KEY_TARGET_MARKERS, 16);
-            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 17);
-            h.insert(Self::KEY_MAX_HEALTH, 18);
-            h.insert(Self::KEY_NAME, 19);
-            h.insert(Self::KEY_REALM, 20);
-            h.insert(Self::KEY_SHIP_COMPONENTS, 21);
-            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 22);
+            let mut fields = vec![
+                Self::KEY_ACCOUNT_DBID,
+                Self::KEY_ANTI_ABUSE_ENABLED,
+                Self::KEY_CAMOUFLAGE_INFO,
+                Self::KEY_CLAN_COLOR,
+                Self::KEY_CLAN_ID,
+                Self::KEY_CLAN_TAG,
+                Self::KEY_CREW_PARAMS,
+                Self::KEY_DOG_TAG,
+                Self::KEY_FRAGS_COUNT,
+                Self::KEY_FRIENDLY_FIRE_ENABLED,
+                Self::KEY_ID,
+                Self::KEY_IS_ABUSER,
+                Self::KEY_IS_ALIVE,
+                Self::KEY_IS_BOT,
+                Self::KEY_IS_HIDDEN,
+                Self::KEY_IS_T_SHOOTER,
+                Self::KEY_KEY_TARGET_MARKERS,
+                Self::KEY_KILLED_BUILDINGS_COUNT,
+                Self::KEY_MAX_HEALTH,
+                Self::KEY_NAME,
+                Self::KEY_REALM,
+                Self::KEY_SHIP_COMPONENTS,
+                Self::KEY_SHIP_CONFIG_DUMP,
+                Self::KEY_SHIP_ID,
+                Self::KEY_SHIP_PARAMS_ID,
+                Self::KEY_SKIN_ID,
+                Self::KEY_TEAM_ID,
+                Self::KEY_TTK_STATUS,
+            ];
+            // 15.9 adds shipFrags and 15.10 adds crewConfigDump, as for players.
             if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
-                h.insert(Self::KEY_SHIP_FRAGS, 23);
-                h.insert(Self::KEY_SHIP_ID, 24);
-                h.insert(Self::KEY_SHIP_PARAMS_ID, 25);
-                h.insert(Self::KEY_SKIN_ID, 26);
-            } else {
-                h.insert(Self::KEY_SHIP_ID, 23);
-                h.insert(Self::KEY_SHIP_PARAMS_ID, 24);
-                h.insert(Self::KEY_SKIN_ID, 25);
+                fields.push(Self::KEY_SHIP_FRAGS);
             }
-            h.insert(Self::KEY_TEAM_ID, team_id_index);
-            h.insert(Self::KEY_TTK_STATUS, ttk_status_index);
-            h
+            if version.is_at_least(&Version::from_client_exe("15,10,0,0")) {
+                fields.push(Self::KEY_CREW_CONFIG_DUMP);
+            }
+            Self::sorted_key_map(fields)
         } else {
             // For older versions, bots weren't separately tracked or had
             // the same layout as players. Fall back to player key map.
@@ -841,11 +849,7 @@ impl PlayerStateData {
 /// blob into player records. Kept out of `DecodedPacketPayload` so a caller
 /// that only wants the roster does not go through arms that panic on the
 /// other arguments of those methods.
-pub(crate) fn player_states_from_blob(blob: &[u8], version: &Version) -> Vec<PlayerStateData> {
-    player_states_from_blob_with_member_maps(blob, version, None, None)
-}
-
-pub(crate) fn player_states_from_blob_with_member_maps(
+pub(crate) fn player_states_from_blob(
     blob: &[u8],
     version: &Version,
     player_member_map: Option<&HashMap<String, i64>>,
@@ -3127,6 +3131,161 @@ mod player_key_map_tests {
         let player = PlayerStateData::from_values(values, mapped, &v(15, 9, 0)).expect("ship and team present");
 
         assert_eq!(player.crew_params_id(), Some(GameParamId::from(3_556_943_696u32)));
+    }
+
+    /// The client's published `PLAYER_NUM_MEMBER_MAP` / `BOT_NUM_MEMBER_MAP`,
+    /// ordered by index.
+    const V15_9_PLAYER_FIELDS: &[&str] = &[
+        "accountDBID",
+        "antiAbuseEnabled",
+        "avatarId",
+        "camouflageInfo",
+        "clanColor",
+        "clanID",
+        "clanTag",
+        "crewParams",
+        "dogTag",
+        "fragsCount",
+        "friendlyFireEnabled",
+        "id",
+        "invitationsEnabled",
+        "isAbuser",
+        "isAlive",
+        "isBot",
+        "isClientLoaded",
+        "isConnected",
+        "isHidden",
+        "isLeaver",
+        "isPreBattleOwner",
+        "isTShooter",
+        "keyTargetMarkers",
+        "killedBuildingsCount",
+        "maxHealth",
+        "name",
+        "playerMode",
+        "preBattleIdOnStart",
+        "preBattleSign",
+        "prebattleId",
+        "realm",
+        "shipComponents",
+        "shipConfigDump",
+        "shipFrags",
+        "shipId",
+        "shipParamsId",
+        "skinId",
+        "teamId",
+        "ttkStatus",
+    ];
+    const V15_10_PLAYER_FIELDS: &[&str] = &[
+        "accountDBID",
+        "antiAbuseEnabled",
+        "avatarId",
+        "camouflageInfo",
+        "clanColor",
+        "clanID",
+        "clanTag",
+        "crewConfigDump",
+        "crewParams",
+        "dogTag",
+        "fragsCount",
+        "friendlyFireEnabled",
+        "id",
+        "invitationsEnabled",
+        "isAbuser",
+        "isAlive",
+        "isBot",
+        "isClientLoaded",
+        "isConnected",
+        "isHidden",
+        "isLeaver",
+        "isPreBattleOwner",
+        "isTShooter",
+        "keyTargetMarkers",
+        "killedBuildingsCount",
+        "maxHealth",
+        "name",
+        "playerMode",
+        "preBattleIdOnStart",
+        "preBattleSign",
+        "prebattleId",
+        "realm",
+        "shipComponents",
+        "shipConfigDump",
+        "shipFrags",
+        "shipId",
+        "shipParamsId",
+        "skinId",
+        "teamId",
+        "ttkStatus",
+    ];
+    const V15_10_BOT_FIELDS: &[&str] = &[
+        "accountDBID",
+        "antiAbuseEnabled",
+        "camouflageInfo",
+        "clanColor",
+        "clanID",
+        "clanTag",
+        "crewConfigDump",
+        "crewParams",
+        "dogTag",
+        "fragsCount",
+        "friendlyFireEnabled",
+        "id",
+        "isAbuser",
+        "isAlive",
+        "isBot",
+        "isHidden",
+        "isTShooter",
+        "keyTargetMarkers",
+        "killedBuildingsCount",
+        "maxHealth",
+        "name",
+        "realm",
+        "shipComponents",
+        "shipConfigDump",
+        "shipFrags",
+        "shipId",
+        "shipParamsId",
+        "skinId",
+        "teamId",
+        "ttkStatus",
+    ];
+
+    fn indexed(fields: &[&'static str]) -> HashMap<&'static str, i64> {
+        fields.iter().copied().zip(0..).collect()
+    }
+
+    #[test]
+    fn fallback_layouts_match_the_clients_member_maps() {
+        assert_eq!(PlayerStateData::player_key_map(&v(15, 9, 0)), indexed(V15_9_PLAYER_FIELDS));
+        assert_eq!(PlayerStateData::player_key_map(&v(15, 10, 0)), indexed(V15_10_PLAYER_FIELDS));
+        assert_eq!(PlayerStateData::bot_key_map(&v(15, 10, 0)), indexed(V15_10_BOT_FIELDS));
+    }
+
+    /// Read with the 15.9 layout, a 15.10 human's isAlive lands on isBot and
+    /// prebattleId on realm, so every player decodes as a bot without a realm.
+    #[test]
+    fn v15_10_human_is_not_read_as_a_bot() {
+        let version = v(15, 10, 0);
+        let raw_values = HashMap::from([
+            (0, Value::I64(1_003_924_023)),
+            (15, Value::Bool(true)),
+            (16, Value::Bool(false)),
+            (30, Value::I64(0)),
+            (31, Value::String("NA".to_string().into())),
+            (35, Value::I64(438_335)),
+            (36, Value::I64(4_076_779_344)),
+            (37, Value::I64(4_156_157_872)),
+            (38, Value::I64(1)),
+        ]);
+        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &version, false);
+        let player = PlayerStateData::from_values(raw_values, mapped_values, &version).expect("ship and team present");
+
+        assert!(!player.is_bot());
+        assert_eq!(player.realm(), Some("NA"));
+        assert_eq!(player.entity_id(), EntityId::from(438_335u32));
+        assert_eq!(player.ship_params_id(), Some(GameParamId::from(4_076_779_344u32)));
+        assert_eq!(player.team_id(), 1);
     }
 }
 
