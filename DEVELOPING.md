@@ -40,6 +40,12 @@ nix develop
 cargo build -p wows_toolkit --release
 ```
 
+On Linux, start the app through `bin/with-host-graphics`. A binary built in the dev shell cannot find your system's graphics drivers on its own. The wrapper adds their directory to `LD_LIBRARY_PATH` for that one command. The dev shell does not add it for everything, because Nix-built tools, `nix` included, break when they load the system's copies of their libraries.
+
+```bash
+bin/with-host-graphics target/release/wows_toolkit
+```
+
 ### Manual setup (without Nix)
 
 If you prefer not to use Nix on Linux or macOS:

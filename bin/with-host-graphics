@@ -1,0 +1,27 @@
+#!/bin/sh
+# Runs a command with the host's graphics driver directory on LD_LIBRARY_PATH.
+#
+# wgpu dlopens libvulkan.so.1, and the Vulkan loader then loads the machine's
+# drivers, which link against other libraries in the same directory (libLLVM
+# for Mesa, libnvidia-* for NVIDIA). A Nix-built binary does not search the
+# host's library directories, so a GUI started from the dev shell needs that
+# directory added. The dev shell does not add it globally: every Nix-built
+# tool would then resolve libraries missing from its own closure to the host's
+# copies, and nix itself crashes loading the host's libcurl.
+#
+# Appended, not prefixed, so the Nix glibc and libstdc++ still win.
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: with-host-graphics <command> [args...]" >&2
+    exit 2
+fi
+
+for dir in /run/opengl-driver/lib /usr/lib64 /usr/lib; do
+    if [ -e "$dir/libvulkan.so.1" ]; then
+        LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$dir
+    fi
+done
+export LD_LIBRARY_PATH
+
+exec "$@"

@@ -280,28 +280,14 @@
             lib.optionalString stdenv.hostPlatform.isLinux
             "${lib.makeLibraryPath buildInputs}";
 
-          # wgpu loads Vulkan by dlopen-ing libvulkan.so.1 at runtime, and the
-          # loader then discovers the machine's ICDs. The nix vulkan-loader
-          # cannot see a non-NixOS host's system ICDs, so GUI rendering needs the
-          # host's own Vulkan stack. Append the host graphics lib dir (NixOS:
-          # /run/opengl-driver/lib; FHS distros: /usr/lib64) so libvulkan.so.1
-          # and the system drivers resolve. Appended, not prefixed, so the nix
-          # glibc and libstdc++ still win.
           shellHook =
             # bin/buck2 runs the Buck2 release toolchains/buck2 pins; ./bootstrap.sh
-            # installs the DotSlash it runs through.
+            # installs the DotSlash it runs through. bin/with-host-graphics starts
+            # the GUI with the host's graphics drivers.
             ''
               if [ -x "$PWD/bin/buck2" ]; then
                 export PATH="$PWD/bin:$PATH"
               fi
-            ''
-            + lib.optionalString stdenv.hostPlatform.isLinux ''
-              for _gfx in /run/opengl-driver/lib /usr/lib64 /usr/lib; do
-                if [ -e "$_gfx/libvulkan.so.1" ]; then
-                  export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$_gfx"
-                fi
-              done
-              unset _gfx
             '';
 
         };

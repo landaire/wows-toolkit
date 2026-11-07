@@ -132,8 +132,8 @@ check_host_tools
 
 say "Provisioning the toolchain"
 cd "$root"
-# Run from inside a devShell, LD_LIBRARY_PATH can carry the host's driver
-# directory, and nix crashes loading host libraries from it.
+# nix must not load libraries from the calling shell's LD_LIBRARY_PATH, which a
+# dev shell or a manually exported driver directory can fill.
 env -u LD_LIBRARY_PATH nix develop --command nu scripts/refresh-buck-toolchain.nu
 
 say "Run bin/buck2 in place of buck2, or add $root/bin to PATH. Then:"
