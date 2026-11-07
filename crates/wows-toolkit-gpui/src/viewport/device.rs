@@ -1,274 +1,389 @@
-//! Owned wgpu device for the armor viewport plus the CPU-readback bridge into a
-//! gpui_kit `RenderImage`.
+//! The armor viewport's use of GPUI's own wgpu device.
 //!
-//! gpui_kit renders the app through its own backend (DirectX on Windows); this
-//! module stands up a separate, standalone wgpu-29 device the viewport renders
-//! into offscreen. The resolved pixels are read back on the CPU and handed to
-//! gpui_kit as a `RenderImage` for display via `img()`.
+//! The viewport draws on the device GPUI draws the window with, into a dynamic
+//! texture GPUI samples in its own pass, so a frame never leaves the GPU. GPUI
+//! publishes its context once the first window exists and replaces it after
+//! device loss. [`SharedSceneDevice`] follows those generations. Everything a
+//! pane made on a device (pipeline, targets, mesh buffers) is owned through
+//! its [`SceneDevice`], which is dropped as soon as GPUI retires the device;
+//! the viewports upload again on the next one when they render.
 
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::rc::Weak;
+use std::sync::Once;
 
-use gpui_kit::RenderImage;
-use image::Frame;
+use gpui_kit::App;
+use gpui_kit::AppContext as _;
+use gpui_kit::Bounds;
+use gpui_kit::DevicePixels;
+use gpui_kit::EntityId;
+use gpui_kit::Pixels;
+use gpui_kit::Window;
+use gpui_kit::size;
+use gpui_wgpu::WgpuAppContext;
+use gpui_wgpu::WgpuContext;
+use gpui_wgpu::WgpuContextGeneration;
+use gpui_wgpu::WgpuDynamicTexture;
+use gpui_wgpu::wgpu;
 
-use crate::viewport::camera::ArcballCamera;
 use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::MeshRelease;
+use crate::viewport::renderer::SceneAttachments;
+use crate::viewport::renderer::SceneColorTarget;
 use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::Vec3;
-use crate::viewport::types::Vertex;
+use crate::viewport::types::TargetSize;
 
-/// A standalone wgpu instance/adapter/device/queue owned by the armor viewport.
-/// Created once; the `Arc<Device>`/`Arc<Queue>` are shared with every render.
-pub struct GpuContext {
-    pub instance: wgpu::Instance,
-    pub adapter: wgpu::Adapter,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+#[derive(Debug, thiserror::Error)]
+pub enum SceneDeviceError {
+    /// The platform draws this window without wgpu, so there is no device to
+    /// share.
+    #[error("the window is not drawn through wgpu")]
+    NoWgpuContext,
+    #[error("GPUI could not allocate a {width}x{height} viewport texture: {reason:#}")]
+    Texture { width: u32, height: u32, reason: anyhow::Error },
+    #[error("the viewport frame could not be drawn: {reason:#}")]
+    Render { reason: anyhow::Error },
+    #[error("the viewport texture could not be painted: {reason:#}")]
+    Paint { reason: anyhow::Error },
 }
 
-/// Which adapter the armor viewport draws on.
-///
-/// gpui chooses the one the window is drawn through and offers no say in it, but
-/// this device is the viewport's own, so the command line steers it: the egui
-/// app's `--gpu-adapter` and `--cpu-renderer` mean this here.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum AdapterChoice {
-    /// Whatever wgpu calls the fastest, which is a graphics card where there is
-    /// one.
-    #[default]
-    Fastest,
-    /// The adapter whose name contains this, ignoring case. A name that matches
-    /// nothing leaves the viewport on the fastest rather than refusing to draw:
-    /// the reader asked for a preference, not for no armor viewer.
-    Named(String),
-    /// A CPU adapter, which on Windows is WARP.
-    Cpu,
+/// GPUI's device with the pipeline the viewport draws with on it. The pane's
+/// [`SharedSceneDevice`] holds the only lasting reference; viewports hold
+/// weak ones, so dropping it there releases everything below.
+pub struct SceneDevice {
+    context: WgpuContext,
+    generation: WgpuContextGeneration,
+    pipeline: GpuPipeline,
+    /// Each viewport's render target.
+    targets: RefCell<HashMap<EntityId, SceneTarget>>,
+    /// The mesh buffers of the viewports drawing on this device.
+    meshes: RefCell<Vec<MeshRelease>>,
 }
 
-/// What the command line asked for, for the device to read when it is stood up.
-///
-/// A launch-time decision read from a place the whole process shares, because the
-/// device is created long after the arguments are parsed and by code that has no
-/// business taking them as a parameter.
-static CHOICE: std::sync::OnceLock<AdapterChoice> = std::sync::OnceLock::new();
-
-/// Records what the command line asked for. Once per process; a second call is
-/// ignored.
-pub fn choose_adapter(choice: AdapterChoice) {
-    let _ = CHOICE.set(choice);
+/// A [`SceneDevice`] compiled on a background thread, before it takes on the
+/// UI thread's bookkeeping.
+struct Compiled {
+    context: WgpuContext,
+    generation: WgpuContextGeneration,
+    pipeline: GpuPipeline,
 }
 
-/// Every adapter this machine offers the viewport, as a reader asking for the
-/// list wants to see them.
-pub fn describe_adapters() -> String {
-    let instance = wgpu::Instance::default();
-    let mut lines = String::new();
-    for adapter in pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all())) {
-        let info = adapter.get_info();
-        lines.push_str(&format!(
-            "{} ({:?}, {:?}, driver {} {})
-",
-            info.name, info.device_type, info.backend, info.driver, info.driver_info
-        ));
+impl SceneDevice {
+    /// The color target the viewport renders for `context`. GPUI picks the
+    /// texture format per context, and whether the device can render it
+    /// through an sRGB view; a one-pixel texture reports both.
+    fn color_target(context: &WgpuContext) -> Result<SceneColorTarget, SceneDeviceError> {
+        let probe = context
+            .create_dynamic_texture(size(DevicePixels(1), DevicePixels(1)))
+            .map_err(|reason| SceneDeviceError::Texture { width: 1, height: 1, reason })?;
+        Ok(match probe.srgb_view_format() {
+            Some(format) => SceneColorTarget::Srgb(format),
+            None => SceneColorTarget::ShaderEncoded(probe.format()),
+        })
     }
-    if lines.is_empty() {
-        lines.push_str("No display adapter this build can draw on.\n");
-    }
-    lines
-}
 
-impl GpuContext {
-    /// Stand up the owned device. Blocks on adapter/device requests via pollster.
-    pub fn new() -> anyhow::Result<Self> {
-        let instance = wgpu::Instance::default();
-        let choice = CHOICE.get().cloned().unwrap_or_default();
-        let adapter = match pick_adapter(&instance, &choice) {
-            Some(found) => found,
-            // Nothing matched what was asked for, so wgpu's own pick stands: a
-            // preference that cannot be met is not a reason to draw nothing.
-            None => pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-                apply_limit_buckets: false,
-            }))
-            .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?,
-        };
-
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("armor_viewport_device"),
-                ..Default::default()
-            }))
-            .map_err(|e| anyhow::anyhow!("failed to create wgpu device: {e}"))?;
-
-        // Said once, because this device is not the one the app draws through:
-        // gpui picks its own and exposes no choice, so a viewport landing on a
-        // different GPU than the window is worth being able to read off the log.
-        let info = adapter.get_info();
+    /// Compiles the pipeline on `context`'s device. Slow enough to keep off
+    /// the UI thread.
+    fn build(context: WgpuContext, generation: WgpuContextGeneration, color: SceneColorTarget) -> Compiled {
+        let pipeline = GpuPipeline::new(&context.device, &context.queue, color);
+        let info = context.adapter.get_info();
         tracing::info!(
-            "armor viewport device: {} ({:?}, {:?}, driver {})",
+            "armor viewport renders on GPUI's device: {} ({:?}, {:?}, driver {}), {generation:?}, {color:?}",
             info.name,
             info.device_type,
             info.backend,
             info.driver_info
         );
 
-        Ok(Self { instance, adapter, device: Arc::new(device), queue: Arc::new(queue) })
+        Compiled { context, generation, pipeline }
     }
 
-    /// Build the shared GPU pipeline for this device.
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn pipeline(&self) -> GpuPipeline {
-        GpuPipeline::new(&self.device, &self.queue)
+    fn new(compiled: Compiled) -> Self {
+        let Compiled { context, generation, pipeline } = compiled;
+        Self { context, generation, pipeline, targets: RefCell::default(), meshes: RefCell::default() }
     }
-}
 
-/// The adapter `choice` names, where this machine has one.
-///
-/// `None` where it does not, which leaves wgpu's own pick to stand.
-fn pick_adapter(instance: &wgpu::Instance, choice: &AdapterChoice) -> Option<wgpu::Adapter> {
-    let offered: Vec<wgpu::Adapter> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
-    match choice {
-        AdapterChoice::Fastest => None,
-        AdapterChoice::Named(named) => {
-            let wanted = named.to_lowercase();
-            offered.into_iter().find(|adapter| adapter.get_info().name.to_lowercase().contains(&wanted))
+    pub fn device(&self) -> &wgpu::Device {
+        &self.context.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.context.queue
+    }
+
+    pub fn pipeline(&self) -> &GpuPipeline {
+        &self.pipeline
+    }
+
+    fn is_lost(&self) -> bool {
+        self.context.device_lost()
+    }
+
+    /// Whether this is GPUI's current device and it is not lost.
+    pub fn is_current(&self) -> bool {
+        !self.is_lost() && gpui_wgpu::app_context().is_some_and(|app| app.generation == self.generation)
+    }
+
+    /// Releases `viewport`'s mesh buffers along with this device.
+    pub fn track(&self, viewport: &Viewport3D) {
+        self.meshes.borrow_mut().push(viewport.mesh_release());
+    }
+
+    /// Paints `view`'s scene at `bounds`, `size` device pixels, drawing
+    /// `viewport` into it first when `redraw` is set or the target is new.
+    /// Returns whether it drew. Call during paint, so the frame being drawn
+    /// samples the new contents.
+    pub fn paint_view(
+        &self,
+        view: EntityId,
+        viewport: &Viewport3D,
+        redraw: bool,
+        size: TargetSize,
+        window: &mut Window,
+        bounds: Bounds<Pixels>,
+    ) -> Result<bool, SceneDeviceError> {
+        let mut targets = self.targets.borrow_mut();
+        let mut redraw = redraw;
+        if targets.get(&view).is_none_or(|target| target.size() != size) {
+            // Released before the replacement is allocated.
+            targets.remove(&view);
+            targets.insert(view, self.create_target(size)?);
+            redraw = true;
         }
-        AdapterChoice::Cpu => {
-            offered.into_iter().find(|adapter| adapter.get_info().device_type == wgpu::DeviceType::Cpu)
+        let target = &targets[&view];
+
+        let drew = redraw
+            && match target.render(self, viewport, window) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!("armor viewport: {error}");
+                    false
+                }
+            };
+        target.paint(window, bounds)?;
+        Ok(drew)
+    }
+
+    /// Releases `view`'s target.
+    pub fn forget_view(&self, view: EntityId) {
+        self.targets.borrow_mut().remove(&view);
+    }
+
+    fn create_target(&self, size: TargetSize) -> Result<SceneTarget, SceneDeviceError> {
+        let texture_size = gpui_kit::size(DevicePixels(size.width() as i32), DevicePixels(size.height() as i32));
+        let texture = self
+            .context
+            .create_dynamic_texture(texture_size)
+            .map_err(|reason| SceneDeviceError::Texture { width: size.width(), height: size.height(), reason })?;
+        let attachments = SceneAttachments::new(self.device(), &self.pipeline, size);
+
+        Ok(SceneTarget { texture, attachments })
+    }
+}
+
+impl Drop for SceneDevice {
+    fn drop(&mut self) {
+        for meshes in self.meshes.get_mut() {
+            meshes.release();
         }
     }
 }
 
-/// Convert a tightly-packed sRGB RGBA8 readback (`width * height * 4`) from
-/// `Viewport3D::render_offscreen_rgba` into a gpui_kit `RenderImage`.
-///
-/// gpui_kit stores images as BGRA, so the R and B bytes are swapped in place before
-/// the buffer is wrapped in an `image::Frame`.
-pub fn readback_to_render_image(width: u32, height: u32, mut rgba: Vec<u8>) -> Arc<RenderImage> {
-    for px in rgba.as_chunks_mut::<4>().0 {
-        px.swap(0, 2);
-    }
-    let buffer =
-        image::RgbaImage::from_raw(width, height, rgba).expect("readback buffer length equals width * height * 4");
-    Arc::new(RenderImage::new(vec![Frame::new(buffer)]))
+/// One viewport's render target: the texture GPUI samples and the attachments
+/// that resolve into it.
+struct SceneTarget {
+    texture: WgpuDynamicTexture,
+    attachments: SceneAttachments,
 }
 
-/// Build a unit cube centered at the origin with one flat color on every vertex.
-/// Normals are placeholders (the cube renders unlit); winding is irrelevant since
-/// the pipeline is double-sided.
-pub fn unit_cube(color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
-    let corners = [
-        [-0.5, -0.5, -0.5],
-        [0.5, -0.5, -0.5],
-        [0.5, 0.5, -0.5],
-        [-0.5, 0.5, -0.5],
-        [-0.5, -0.5, 0.5],
-        [0.5, -0.5, 0.5],
-        [0.5, 0.5, 0.5],
-        [-0.5, 0.5, 0.5],
-    ];
-    let vertices: Vec<Vertex> =
-        corners.iter().map(|&position| Vertex { position, normal: [0.0, 0.0, 1.0], color, uv: [0.0, 0.0] }).collect();
-    #[rustfmt::skip]
-    let indices: Vec<u32> = vec![
-        0, 1, 2, 0, 2, 3, // back
-        4, 6, 5, 4, 7, 6, // front
-        0, 4, 5, 0, 5, 1, // bottom
-        3, 2, 6, 3, 6, 7, // top
-        0, 3, 7, 0, 7, 4, // left
-        1, 5, 6, 1, 6, 2, // right
-    ];
-    (vertices, indices)
-}
-
-/// Render a single colored test cube offscreen and return the raw sRGB RGBA8
-/// readback. The Task-1 risk-gate primitive: owned device -> offscreen render ->
-/// CPU readback.
-pub fn render_test_cube_rgba(
-    ctx: &GpuContext,
-    pipeline: &GpuPipeline,
-    size: (u32, u32),
-    color: [f32; 4],
-) -> Option<(u32, u32, Vec<u8>)> {
-    let mut viewport = Viewport3D::new();
-    let (vertices, indices) = unit_cube(color);
-    viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
-    viewport.camera = ArcballCamera::from_bounds(Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
-    viewport.render_offscreen_rgba(&ctx.device, &ctx.queue, pipeline, size)
-}
-
-/// Render the test cube and wrap the readback as a gpui_kit image for display.
-pub fn render_test_cube_image(
-    ctx: &GpuContext,
-    pipeline: &GpuPipeline,
-    size: (u32, u32),
-    color: [f32; 4],
-) -> Option<Arc<RenderImage>> {
-    let (w, h, rgba) = render_test_cube_rgba(ctx, pipeline, size, color)?;
-    Some(readback_to_render_image(w, h, rgba))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `readback_to_render_image` swaps R and B in place so the RGBA readback
-    /// becomes BGRA (gpui's `RenderImage` pixel layout); alpha is untouched.
-    #[test]
-    fn readback_to_render_image_swaps_r_and_b_to_bgra() {
-        let rgba = vec![10u8, 20, 30, 40];
-        let image = readback_to_render_image(1, 1, rgba.clone());
-        let swapped = image.as_bytes(0).expect("single-frame image has frame 0");
-        assert_eq!(swapped[0], rgba[2]);
-        assert_eq!(swapped[1], rgba[1]);
-        assert_eq!(swapped[2], rgba[0]);
-        assert_eq!(swapped[3], rgba[3]);
+impl SceneTarget {
+    fn size(&self) -> TargetSize {
+        self.attachments.size()
     }
 
-    /// The risk gate: an owned wgpu device renders a green cube offscreen, the
-    /// pixels read back, and the center pixel is the mesh color (not the clear
-    /// color), with an sRGB-plausible value.
-    ///
-    /// Needs a real GPU adapter, as the egui app's own render smoke test does.
-    /// Run with:
-    ///
-    /// ```text
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture owned_device_renders_cube_and_reads_back_center_pixel
-    /// ```
-    #[test]
-    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
-    fn owned_device_renders_cube_and_reads_back_center_pixel() {
-        let Ok(ctx) = GpuContext::new() else {
-            panic!("owned wgpu device creation failed - no adapter available");
+    /// Draws `viewport` into the texture. The work is submitted before GPUI's
+    /// own, so the frame GPUI draws next samples it.
+    fn render(&self, scene: &SceneDevice, viewport: &Viewport3D, window: &mut Window) -> Result<(), SceneDeviceError> {
+        let draw = |resolve_target: &wgpu::TextureView| {
+            viewport.render(scene.device(), scene.queue(), scene.pipeline(), &self.attachments, resolve_target);
+            Ok(())
         };
-        let pipeline = ctx.pipeline();
-        let size = (256u32, 256u32);
-        let color = [0.0, 0.8, 0.0, 1.0]; // green cube
+        let drawn = match scene.pipeline().color() {
+            SceneColorTarget::Srgb(_) => self.texture.render_srgb(window, draw),
+            SceneColorTarget::ShaderEncoded(_) => self.texture.render(window, draw),
+        };
 
-        let (w, h, rgba) =
-            render_test_cube_rgba(&ctx, &pipeline, size, color).expect("offscreen render produced no pixels");
-        assert_eq!((w, h), size);
-        assert_eq!(rgba.len(), (w * h * 4) as usize);
+        drawn.map_err(|reason| SceneDeviceError::Render { reason })
+    }
 
-        let cx = w / 2;
-        let cy = h / 2;
-        let idx = ((cy * w + cx) * 4) as usize;
-        let (r, g, b, a) = (rgba[idx], rgba[idx + 1], rgba[idx + 2], rgba[idx + 3]);
-        eprintln!("center pixel RGBA = ({r}, {g}, {b}, {a})");
+    /// Paints the texture at `bounds`. Call during paint.
+    fn paint(&self, window: &mut Window, bounds: Bounds<Pixels>) -> Result<(), SceneDeviceError> {
+        self.texture.paint(window, bounds).map_err(|reason| SceneDeviceError::Paint { reason })
+    }
+}
 
-        // Clear color is a dark blue-grey (~97, 97, 109 after sRGB encode); the
-        // cube face is saturated green. Assert green dominates by a wide margin.
-        assert!(g > 150, "center green channel {g} too low - looks like the clear color, not the cube");
-        assert!(g > r + 60, "green {g} does not dominate red {r} - center is not the green cube");
-        assert!(g > b + 60, "green {g} does not dominate blue {b} - center is not the green cube");
-        assert_eq!(a, 255, "cube is opaque");
+/// What a pane's viewports last learned of GPUI's device.
+#[derive(Default)]
+enum SharedState {
+    /// No viewport has asked yet.
+    #[default]
+    Unknown,
+    /// The pipeline for this generation is compiling on a background thread.
+    Building {
+        generation: WgpuContextGeneration,
+        /// The views that asked meanwhile, notified once it is done.
+        waiters: Vec<EntityId>,
+    },
+    Ready(Rc<SceneDevice>),
+    /// This generation's device is lost or released; GPUI has not published
+    /// a replacement yet.
+    Lost(WgpuContextGeneration),
+    Failed {
+        generation: Option<WgpuContextGeneration>,
+        error: Rc<SceneDeviceError>,
+    },
+}
 
-        // sRGB plausibility: linear 0.8 sRGB-encodes to ~231. A non-sRGB target
-        // would store linear*255 = 204. The MSAA-resolved center of a solid face
-        // sits near 231, well above 204, confirming the sRGB write path.
-        assert!(g >= 210, "green {g} below the sRGB-encoded value (~231); sRGB encoding looks wrong");
+thread_local! {
+    /// Every pane's device state on the UI thread, which is where GPUI
+    /// reports a retired device.
+    static PANES: RefCell<Vec<Weak<RefCell<SharedState>>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Drops each pane's device of `generation`, and with it every target and
+/// mesh buffer made on it, so GPUI can free the device before it makes the
+/// next one.
+fn retire(generation: WgpuContextGeneration) {
+    let panes: Vec<_> = PANES.with(|panes| panes.borrow().iter().filter_map(Weak::upgrade).collect());
+    for pane in panes {
+        // Busy only if GPUI reports the loss from inside a viewport's own
+        // call, which then sees the device lost on its next render.
+        let Ok(mut state) = pane.try_borrow_mut() else { continue };
+        if matches!(&*state, SharedState::Ready(scene) if scene.generation == generation) {
+            *state = SharedState::Lost(generation);
+        }
+    }
+}
+
+/// GPUI's current device as every viewport of one pane shares it, so the
+/// viewports share one pipeline too.
+#[derive(Clone)]
+pub struct SharedSceneDevice(Rc<RefCell<SharedState>>);
+
+impl Default for SharedSceneDevice {
+    fn default() -> Self {
+        static HOOK: Once = Once::new();
+        HOOK.call_once(|| {
+            gpui_wgpu::on_device_lost(|retired| {
+                // Off the UI thread there are no panes to visit.
+                let _ = PANES.try_with(|_| retire(retired.generation));
+            });
+        });
+
+        let state = Rc::new(RefCell::new(SharedState::Unknown));
+        PANES.with(|panes| {
+            let mut panes = panes.borrow_mut();
+            panes.retain(|pane| pane.strong_count() > 0);
+            panes.push(Rc::downgrade(&state));
+        });
+        Self(state)
+    }
+}
+
+impl SharedSceneDevice {
+    /// The scene device on GPUI's current context. The first ask of each
+    /// generation starts building it in the background and returns
+    /// `Ok(None)`; `waiter` is notified when it is ready. `Ok(None)` also
+    /// while that context's device is lost and GPUI has not replaced it yet.
+    pub fn current(&self, waiter: EntityId, cx: &mut App) -> Result<Option<Rc<SceneDevice>>, Rc<SceneDeviceError>> {
+        let app = gpui_wgpu::app_context();
+        let generation = app.as_ref().map(|app| app.generation);
+        let mut state = self.0.borrow_mut();
+        match &mut *state {
+            SharedState::Ready(scene) if Some(scene.generation) == generation && !scene.is_lost() => {
+                return Ok(Some(Rc::clone(scene)));
+            }
+            SharedState::Building { generation: building, waiters } if Some(*building) == generation => {
+                if !waiters.contains(&waiter) {
+                    waiters.push(waiter);
+                }
+                return Ok(None);
+            }
+            SharedState::Lost(lost) if generation.is_none_or(|generation| generation == *lost) => return Ok(None),
+            SharedState::Failed { generation: failed, error } if *failed == generation => return Err(Rc::clone(error)),
+            _ => {}
+        }
+
+        // Released before anything is built on the replacement device. Views
+        // waiting on an earlier generation's build wait on this one instead.
+        let mut waiters = match std::mem::take(&mut *state) {
+            SharedState::Building { waiters, .. } => waiters,
+            _ => Vec::new(),
+        };
+        if !waiters.contains(&waiter) {
+            waiters.push(waiter);
+        }
+        let failed = |state: &mut SharedState, generation, error: SceneDeviceError, cx: &mut App| {
+            let error = Rc::new(error);
+            *state = SharedState::Failed { generation, error: Rc::clone(&error) };
+            // Views waiting on an earlier build show the failure too.
+            for other in waiters.iter().filter(|other| **other != waiter) {
+                cx.notify(*other);
+            }
+            error
+        };
+        let Some(WgpuAppContext { context, generation }) = app else {
+            return Err(failed(&mut state, None, SceneDeviceError::NoWgpuContext, cx));
+        };
+        if context.device_lost() {
+            *state = SharedState::Lost(generation);
+            return Ok(None);
+        }
+        let color = match SceneDevice::color_target(&context) {
+            Ok(color) => color,
+            Err(error) => {
+                tracing::error!("armor viewport cannot render: {error}");
+                return Err(failed(&mut state, Some(generation), error, cx));
+            }
+        };
+
+        *state = SharedState::Building { generation, waiters };
+        drop(state);
+        let built = cx.background_spawn(async move { SceneDevice::build(context, generation, color) });
+        let shared = self.clone();
+        cx.spawn(async move |cx| {
+            let built = built.await;
+            cx.update(|cx| shared.finish_build(built, cx));
+        })
+        .detach();
+        Ok(None)
+    }
+
+    /// Takes a device built in the background, unless a later generation's
+    /// build has replaced the one it was for, and tells the waiting views.
+    fn finish_build(&self, built: Compiled, cx: &mut App) {
+        let waiters = {
+            let mut state = self.0.borrow_mut();
+            let SharedState::Building { generation, waiters } = &mut *state else { return };
+            if *generation != built.generation {
+                return;
+            }
+            let waiters = std::mem::take(waiters);
+            *state = SharedState::Ready(Rc::new(SceneDevice::new(built)));
+            waiters
+        };
+        for waiter in waiters {
+            cx.notify(waiter);
+        }
+    }
+
+    /// The scene device a viewport already built, without building one.
+    pub fn existing(&self) -> Option<Rc<SceneDevice>> {
+        match &*self.0.borrow() {
+            SharedState::Ready(scene) if scene.is_current() => Some(Rc::clone(scene)),
+            _ => None,
+        }
     }
 }

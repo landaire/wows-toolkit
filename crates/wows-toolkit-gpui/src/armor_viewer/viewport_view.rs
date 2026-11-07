@@ -1,4 +1,4 @@
-//! Armor viewport view: wraps the offscreen-rendered `img()` (Task 1) with
+//! Armor viewport view: the 3D scene drawn into a GPUI dynamic texture, with
 //! gpui_kit mouse/scroll/key input driving the copied `viewport_3d` arcball
 //! camera, plus a gpui-native redraw of the navigation gizmo overlaid on top.
 //! Milestone 3 Task 6 adds CPU plate picking on top of the same mouse-move
@@ -11,17 +11,18 @@
 //! when the hovered plate or `plate_visibility` actually changes.
 //!
 //! Rendering is on-demand: `Viewport3D::is_dirty()` (set by any camera
-//! mutation or mesh change) gates the expensive offscreen render + CPU
-//! readback + `RenderImage` rebuild, done once per notified frame rather
-//! than every frame. Hovering the gizmo only repaints the cheap CPU overlay
-//! (no GPU work). Milestone 5 Task 9a moved wgpu device creation up to
-//! `ArmorViewerPane` (`SharedGpu`), created once and shared across every
-//! viewport rather than one owned device per view; this view starts in
-//! `GpuState::Initializing` and shows a brief status message until the pane
-//! hands it the shared `Arc<GpuContext>`/`Arc<GpuPipeline>` via `set_gpu`.
+//! mutation or mesh change) gates the GPU draw, done during paint into a
+//! dynamic texture on GPUI's own device that GPUI then samples like an image,
+//! so the gizmo, tooltips and popovers composite over it in the usual paint
+//! order. Hovering the gizmo only repaints the cheap CPU overlay (no GPU
+//! work). Every viewport of a pane shares one `SharedSceneDevice`; when GPUI
+//! retires its device, the meshes and target made on it are released at once,
+//! and the viewport uploads again on the new one when it renders (`sync_gpu`).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
+use std::rc::Weak;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -37,6 +38,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use gpui_wgpu::wgpu;
 use rust_i18n::t;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::camo_textures::CamoSchemeId;
@@ -83,15 +85,15 @@ use wows_toolkit_viewmodel::armor::arc::isolate;
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
-use crate::viewport::device::GpuContext;
-use crate::viewport::device::readback_to_render_image;
+use crate::viewport::device::SceneDevice;
+use crate::viewport::device::SharedSceneDevice;
 use crate::viewport::gizmo;
-use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::LAYER_OVERLAY;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
+use crate::viewport::types::TargetSize;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
@@ -383,20 +385,30 @@ impl HeldMotion {
     }
 }
 
-/// Lifecycle of the shared wgpu device backing this viewport. The device
-/// itself is created once by `ArmorViewerPane` (`SharedGpu`) and handed down
-/// via [`ViewportView::set_gpu`]/[`ViewportView::set_gpu_failed`] once ready,
-/// so every viewport in the multi-pane split (`dock::ViewportDock`, Task 9b)
-/// renders through the same `Arc<GpuContext>`/`Arc<GpuPipeline>` instead of
-/// standing up its own device.
+/// Whether this viewport has GPUI's device to draw on.
 enum GpuState {
-    /// Waiting on the pane's shared device to finish initializing.
-    Initializing,
-    Ready {
-        ctx: Arc<GpuContext>,
-        pipeline: Arc<GpuPipeline>,
-    },
+    /// The pipeline is compiling, or GPUI's device is lost and not yet
+    /// replaced.
+    Waiting,
+    /// Weak: the pane holds the device, and drops it, with the target and
+    /// mesh buffers made on it, as soon as GPUI retires it.
+    Ready(Weak<SceneDevice>),
     Failed(String),
+}
+
+impl GpuState {
+    /// The device another viewport of the pane already built, so a compare
+    /// pane can upload at once. None is built here: a pane whose tab is never
+    /// opened compiles no pipelines; the first render starts the build.
+    fn from_shared(shared: &SharedSceneDevice, viewport: &Viewport3D) -> Self {
+        match shared.existing() {
+            Some(scene) => {
+                scene.track(viewport);
+                Self::Ready(Rc::downgrade(&scene))
+            }
+            None => Self::Waiting,
+        }
+    }
 }
 
 /// The currently hovered armor plate (CPU picking result), if any: its key
@@ -500,15 +512,18 @@ pub(crate) struct SyncedSettings {
 
 pub struct ViewportView {
     focus_handle: FocusHandle,
+    /// This view, which its target on the device is kept under.
+    entity_id: EntityId,
     viewport: Viewport3D,
+    /// GPUI's device as this pane's viewports share it.
+    scene_devices: SharedSceneDevice,
     gpu: GpuState,
     /// World-space bounding box used to frame the camera on reset/double-click.
     model_bounds: Option<(Vec3, Vec3)>,
     /// The container's window-space bounds as of the last paint. `None` until
-    /// the first layout pass; the redraw and every screen-space projection
-    /// (gizmo hit test, camera aspect) wait on it.
+    /// the first layout pass; every screen-space projection (gizmo hit test,
+    /// picking) waits on it.
     last_bounds: Option<Bounds<Pixels>>,
-    image: Option<Arc<RenderImage>>,
     drag: Option<DragState>,
     gizmo_hover: Option<(Axis, bool)>,
     /// Whether the currently-held left button went down inside the gizmo box,
@@ -524,9 +539,8 @@ pub struct ViewportView {
     /// Whether the held-key movement ticker is currently running, so a
     /// second key-down does not stack a duplicate ticker.
     key_ticking: bool,
-    /// A ship picked in the sidebar before the owned wgpu device finished
-    /// initializing. `set_gpu` uploads this once the device becomes ready,
-    /// then clears it.
+    /// A ship picked in the sidebar while GPUI's device was unavailable.
+    /// `sync_gpu` uploads this once the device is back, then clears it.
     pending_armor: Option<Arc<LoadedShipArmor>>,
     /// The ship being loaded into this viewport, if one is. Set by the pane
     /// (`set_ship_loading`), which owns the load; the viewport shows it in
@@ -820,20 +834,30 @@ fn color_rgb(color: gpui_kit::Hsla) -> [f32; 3] {
 impl EventEmitter<ViewportChange> for ViewportView {}
 
 impl ViewportView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(scene_devices: SharedSceneDevice, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let display_settings = upload::DisplaySettings::default();
         let (display_sliders, display_slider_subscriptions) = Self::build_display_sliders(cx, display_settings);
         let lighting = LightingSettings::default();
         let (lighting_sliders, lighting_slider_subscriptions) = Self::build_lighting_sliders(cx, &lighting);
         let (lighting_colors, lighting_color_subscriptions) = Self::build_lighting_colors(window, cx, &lighting);
+        let viewport = Viewport3D::new();
+        let gpu = GpuState::from_shared(&scene_devices, &viewport);
+        // The target lives on the device; a closed viewport gives it back.
+        cx.on_release(|this: &mut Self, _| {
+            if let Some(scene) = this.scene() {
+                scene.forget_view(this.entity_id);
+            }
+        })
+        .detach();
         Self {
             focus_handle,
-            viewport: Viewport3D::new(),
-            gpu: GpuState::Initializing,
+            entity_id: cx.entity_id(),
+            viewport,
+            gpu,
+            scene_devices,
             model_bounds: None,
             last_bounds: None,
-            image: None,
             drag: None,
             gizmo_hover: None,
             gizmo_press_in_box: false,
@@ -1195,11 +1219,11 @@ impl ViewportView {
     /// meshes, uploads the new ones (`upload::upload_armor_to_viewport`,
     /// which also frames the camera on the model's bounds and marks the
     /// viewport dirty), and updates `model_bounds` so double-click-to-reset
-    /// frames the new ship. If the owned wgpu device has not finished
-    /// initializing yet, stashes `armor` in `pending_armor` instead;
-    /// `apply_gpu_result` uploads it as soon as the device becomes ready.
+    /// frames the new ship. While GPUI's device is unavailable, stashes
+    /// `armor` in `pending_armor` instead; `sync_gpu` uploads it once the
+    /// device is back.
     pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, cx: &mut Context<Self>) {
-        if matches!(self.gpu, GpuState::Ready { .. }) {
+        if self.scene().is_some() {
             self.upload_armor_now(armor);
             self.pending_armor = None;
         } else {
@@ -1228,9 +1252,9 @@ impl ViewportView {
     /// generation guard discards its result instead of overwriting this
     /// (possibly different) ship's freshly uploaded armor.
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
-        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
-        let device = ctx.device.clone();
-        let queue = ctx.queue.clone();
+        let Some(scene) = self.scene() else { return };
+        let device = scene.device();
+        let queue = scene.queue();
         self.reload_generation += 1;
         self.part_visibility.clear();
         self.plate_visibility.clear();
@@ -1278,12 +1302,12 @@ impl ViewportView {
             show_hidden_only: self.show_hidden_only,
         };
         self.mesh_triangle_info =
-            upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility, self.display_settings);
+            upload_armor_to_viewport(&mut self.viewport, device, &armor, visibility, self.display_settings);
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
-            &device,
-            &queue,
-            pipeline,
+            device,
+            queue,
+            scene.pipeline(),
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
@@ -1307,32 +1331,54 @@ impl ViewportView {
         self.current_armor = Some(armor);
     }
 
-    /// Adopts the pane's shared wgpu device once it finishes initializing
-    /// (`ArmorViewerPane`'s `SharedGpu` background task): transitions to
-    /// `GpuState::Ready` and uploads whatever a ship selection stashed in
-    /// `pending_armor` while the device was not ready yet. Called once per
-    /// viewport by the pane -- for a viewport created after the shared device
-    /// is already `Ready` (Task 9b's later panes), the pane calls this
-    /// immediately instead of waiting on a new background task.
-    ///
-    /// With nothing to show, the viewport draws no scene at all: `render`
-    /// puts the egui app's own empty-state message there instead
-    /// (`ui/tab.rs`'s `ui.armor.select_ship`).
-    pub(crate) fn set_gpu(&mut self, ctx: Arc<GpuContext>, pipeline: Arc<GpuPipeline>, cx: &mut Context<Self>) {
-        self.gpu = GpuState::Ready { ctx, pipeline };
-        if let Some(armor) = self.pending_armor.take() {
-            self.upload_armor_now(armor);
-            // The comparison needs a hull, and the one it was asked for arrived
-            // before the device did, so it found none and did nothing.
-            if let Some((taken, shells)) = self.pane.as_ref().and_then(|pane| pane.upgrade()).and_then(|pane| {
-                let loaded = self.loaded_param_index().map(str::to_owned);
-                pane.read(cx).incoming().to_compare(loaded.as_deref())
-            }) {
-                self.compare_incoming(&taken, &shells, cx);
-            }
+    /// The device meshes are uploaded to, while there is one.
+    fn scene(&self) -> Option<Rc<SceneDevice>> {
+        match &self.gpu {
+            GpuState::Ready(scene) => scene.upgrade(),
+            GpuState::Waiting | GpuState::Failed(_) => None,
         }
-        self.viewport.mark_dirty();
-        cx.notify();
+    }
+
+    /// Follows GPUI's device. On a new device, uploads whatever a ship
+    /// selection stashed in `pending_armor` while there was none, or uploads
+    /// the current ship again: meshes and targets made on an earlier device
+    /// are released with it and cannot be drawn on this one.
+    fn sync_gpu(&mut self, cx: &mut Context<Self>) {
+        let current = self.scene_devices.current(self.entity_id, cx);
+        if let (Ok(Some(scene)), Some(held)) = (&current, self.scene())
+            && Rc::ptr_eq(scene, &held)
+        {
+            return;
+        }
+
+        if matches!(self.gpu, GpuState::Ready(_)) {
+            self.viewport.clear();
+        }
+        self.gpu = match current {
+            Ok(Some(scene)) => {
+                scene.track(&self.viewport);
+                GpuState::Ready(Rc::downgrade(&scene))
+            }
+            Ok(None) => GpuState::Waiting,
+            Err(error) => GpuState::Failed(error.to_string()),
+        };
+        if !matches!(self.gpu, GpuState::Ready(_)) {
+            return;
+        }
+
+        let Some(armor) = self.pending_armor.take() else {
+            self.reupload_current_armor(cx);
+            return;
+        };
+        self.upload_armor_now(armor);
+        // The comparison needs a hull, and the one it was asked for arrived
+        // while there was no device, so it found none and did nothing.
+        if let Some((taken, shells)) = self.pane.as_ref().and_then(|pane| pane.upgrade()).and_then(|pane| {
+            let loaded = self.loaded_param_index().map(str::to_owned);
+            pane.read(cx).incoming().to_compare(loaded.as_deref())
+        }) {
+            self.compare_incoming(&taken, &shells, cx);
+        }
     }
 
     /// The ship this viewport is showing, if any. Read by the pane's chrome,
@@ -1472,12 +1518,9 @@ impl ViewportView {
     /// Cheap enough for a drag: the armor is not touched, only the camera and
     /// the one marker saying where it is aimed.
     fn refresh_perspective(&mut self, cx: &mut Context<Self>) {
-        let device = match &self.gpu {
-            GpuState::Ready { ctx, .. } => Some(ctx.device.clone()),
-            _ => None,
-        };
+        let scene = self.scene();
         let Some(bounds) = self.model_bounds else { return };
-        self.aim_perspective(device.as_deref(), bounds);
+        self.aim_perspective(scene.as_deref().map(SceneDevice::device), bounds);
         self.viewport.mark_dirty();
         cx.notify();
     }
@@ -1934,36 +1977,24 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Adopts the pane's shared-device init failure: shows `reason` instead
-    /// of the viewport, matching the previous per-viewport failure path.
-    pub(crate) fn set_gpu_failed(&mut self, reason: String, cx: &mut Context<Self>) {
-        self.gpu = GpuState::Failed(reason);
-        cx.notify();
-    }
-
-    /// Re-runs the offscreen render and rebuilds the displayed `RenderImage`
-    /// if (and only if) the viewport is dirty and the container's size is
-    /// known. Drops the previous frame's atlas tile before presenting the
-    /// new one.
-    fn redraw_if_needed(&mut self, window: &mut Window) {
-        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
-        if !self.viewport.is_dirty() {
-            return;
-        }
-        let Some(bounds) = self.last_bounds else { return };
-        let width = (bounds.size.width.as_f32().round() as u32).max(1);
-        let height = (bounds.size.height.as_f32().round() as u32).max(1);
-        let Some((w, h, rgba)) =
-            self.viewport.render_offscreen_rgba(&ctx.device, &ctx.queue, pipeline, (width, height))
-        else {
+    /// Paints the scene at `bounds`, drawing it again first if it changed or
+    /// the target no longer matches the painted size in device pixels. Runs
+    /// during paint, so the frame being drawn samples the new contents.
+    fn paint_scene(&mut self, bounds: Bounds<Pixels>, window: &mut Window) {
+        let Some(scene) = self.scene() else { return };
+        let scale = window.scale_factor();
+        let Some(size) = TargetSize::new(
+            (bounds.size.width.as_f32() * scale).round() as u32,
+            (bounds.size.height.as_f32() * scale).round() as u32,
+        ) else {
             return;
         };
-        let new_image = readback_to_render_image(w, h, rgba);
-        if let Some(old) = self.image.take() {
-            let _ = window.drop_image(old);
+
+        match scene.paint_view(self.entity_id, &self.viewport, self.viewport.is_dirty(), size, window, bounds) {
+            Ok(true) => self.viewport.clear_dirty(),
+            Ok(false) => {}
+            Err(error) => tracing::warn!("armor viewport: {error}"),
         }
-        self.image = Some(new_image);
-        self.viewport.clear_dirty();
     }
 
     /// Where the navigation gizmo sits, or `None` while there is no ship for
@@ -2534,7 +2565,7 @@ impl ViewportView {
     }
 
     fn is_gpu_ready(&self) -> bool {
-        matches!(self.gpu, GpuState::Ready { .. })
+        self.scene().is_some()
     }
 
     /// CPU-picks at `position` (screen space) and updates `self.hovered` to
@@ -2618,7 +2649,7 @@ impl ViewportView {
         if let Some((_, old_id)) = self.hover_highlight.take() {
             self.viewport.remove_mesh(old_id);
         }
-        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
@@ -2627,7 +2658,7 @@ impl ViewportView {
         };
         let mesh_id = picking_ui::upload_plate_highlight(
             &mut self.viewport,
-            &ctx.device,
+            scene.device(),
             &armor,
             key,
             visibility,
@@ -2647,7 +2678,7 @@ impl ViewportView {
         if let Some((_, old_id)) = self.sidebar_highlight.take() {
             self.viewport.remove_mesh(old_id);
         }
-        let GpuState::Ready { ctx, .. } = &self.gpu else { return };
+        let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
@@ -2658,7 +2689,7 @@ impl ViewportView {
         let mesh_id = match &key {
             SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
                 &mut self.viewport,
-                &ctx.device,
+                scene.device(),
                 &armor,
                 zone,
                 visibility,
@@ -2666,7 +2697,7 @@ impl ViewportView {
             ),
             SidebarHighlightKey::Part(zone, part) => picking_ui::upload_part_highlight(
                 &mut self.viewport,
-                &ctx.device,
+                scene.device(),
                 &armor,
                 zone,
                 part,
@@ -2675,7 +2706,7 @@ impl ViewportView {
             ),
             SidebarHighlightKey::Plate(pk) => picking_ui::upload_plate_highlight(
                 &mut self.viewport,
-                &ctx.device,
+                scene.device(),
                 &armor,
                 pk,
                 visibility,
@@ -2933,17 +2964,16 @@ impl ViewportView {
     /// than waiting for the next mouse-move. The popover's sidebar-hover
     /// highlight, if active, is likewise rebuilt against the fresh geometry.
     fn reupload_current_armor(&mut self, cx: &mut Context<Self>) {
-        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
+        let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
-        let device = ctx.device.clone();
-        let queue = ctx.queue.clone();
+        let device = scene.device();
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
         self.mesh_triangle_info =
-            upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility, self.display_settings);
+            upload::reupload_armor_plates(&mut self.viewport, device, &armor, visibility, self.display_settings);
         // `viewport.clear()` (inside the armor re-upload above) wipes every
         // mesh, hull included -- top the hull back up now that the armor pass
         // is done, keeping the two upload paths decoupled (a hull-only change
@@ -2951,9 +2981,9 @@ impl ViewportView {
         // whatever `Viewport3D::clear` just destroyed.
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
-            &device,
-            &queue,
-            pipeline,
+            device,
+            scene.queue(),
+            scene.pipeline(),
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
@@ -2981,14 +3011,14 @@ impl ViewportView {
             };
             let (vertices, indices, hovers) = camera_rings::build_camera_rings(&request);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
             self.ring_hovers = hovers;
         }
 
         if self.display_settings.show_ship_center {
             let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
-            self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
         }
 
         if !self.hits.is_empty() {
@@ -2999,7 +3029,7 @@ impl ViewportView {
                 self.display_settings.marker_opacity,
             );
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
 
@@ -3010,7 +3040,7 @@ impl ViewportView {
             let color = TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()];
             let (vertices, indices) = trajectory::build_mesh(cast, color, scale);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
 
@@ -3020,7 +3050,7 @@ impl ViewportView {
             let shapes: Vec<&wowsunpack::models::geometry::SplashBox> = data.boxes.iter().collect();
             let (vertices, indices, _labels) = splash::build_splash_box_wireframes(&shapes);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
 
@@ -3028,7 +3058,7 @@ impl ViewportView {
             let (vertices, indices) =
                 splash::build_splash_cube_mesh(result.impact_point, result.half_extent, splash::CUBE_COLOR);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
 
@@ -3040,12 +3070,12 @@ impl ViewportView {
                 gaps::build_gap_mesh(&armor, visibility, self.display_settings.show_zero_mm);
             self.gap_count = count;
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
         // After the passes that read the visibility filter, which borrows this
         // viewport while the lock wants it back.
-        self.apply_perspective(&device, &armor);
+        self.apply_perspective(device, &armor);
 
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
@@ -3092,15 +3122,13 @@ impl ViewportView {
     /// cheap even on a ship with a large armor mesh set. A no-op if the GPU
     /// device isn't ready or there is no armor loaded.
     fn reupload_hull(&mut self) {
-        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
+        let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
-        let device = ctx.device.clone();
-        let queue = ctx.queue.clone();
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
-            &device,
-            &queue,
-            pipeline,
+            scene.device(),
+            scene.queue(),
+            scene.pipeline(),
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
@@ -3410,9 +3438,7 @@ impl ViewportView {
                 return;
             }
         };
-        let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };
-        let device = ctx.device.clone();
-        let queue = ctx.queue.clone();
+        let Some(scene) = self.scene() else { return };
 
         // Resolve the selected camo by name while `self.current_armor` is
         // still the OLD armor (both old and new `camo_scheme_infos` are
@@ -3460,16 +3486,16 @@ impl ViewportView {
         };
         self.mesh_triangle_info = upload::reupload_armor_plates(
             &mut self.viewport,
-            &device,
+            scene.device(),
             &armor,
             visibility_filter,
             self.display_settings,
         );
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
-            &device,
-            &queue,
-            pipeline,
+            scene.device(),
+            scene.queue(),
+            scene.pipeline(),
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
@@ -3583,11 +3609,11 @@ impl ViewportView {
 }
 
 impl Render for ViewportView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.redraw_if_needed(window);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_gpu(cx);
 
         let status: Option<String> = match &self.gpu {
-            GpuState::Initializing => Some(t!("ui.armor.initializing").into_owned().to_string()),
+            GpuState::Waiting => Some(t!("ui.armor.initializing").into_owned().to_string()),
             GpuState::Failed(reason) => Some(t!("ui.armor.init_failed", reason = reason).to_string()),
             GpuState::Ready { .. } => None,
         };
@@ -3600,8 +3626,9 @@ impl Render for ViewportView {
         let loading_ship = self.ship_loading.clone();
         let empty_state = (self.current_armor.is_none() && loading_ship.is_none())
             .then(|| status.clone().unwrap_or_else(|| t!("ui.armor.select_ship").into_owned()));
-        let image_child = match (loading_ship, empty_state, self.image.clone()) {
-            (Some(name), _, _) => h_flex()
+        let scene_shown = loading_ship.is_none() && empty_state.is_none() && status.is_none();
+        let image_child = if let Some(name) = loading_ship {
+            h_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
@@ -3613,19 +3640,17 @@ impl Render for ViewportView {
                         .text_color(crate::theme::text_dim())
                         .child(t!("ui.armor.loading_named_ship", ship = name).to_string()),
                 )
-                .into_any_element(),
-            (None, None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
-            (None, message, _) => h_flex()
+                .into_any_element()
+        } else if let Some(message) = empty_state.or(status) {
+            h_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(message.or(status).unwrap_or_else(|| t!("ui.armor.rendering").into_owned())),
-                )
-                .into_any_element(),
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(message))
+                .into_any_element()
+        } else {
+            // The scene itself is painted by `overlay`, under the gizmo.
+            div().size_full().into_any_element()
         };
 
         let camera_snapshot = self.viewport.camera.clone();
@@ -3636,21 +3661,19 @@ impl Render for ViewportView {
         let hover = self.gizmo_hover;
         let weak = cx.weak_entity();
         let overlay = canvas(
-            move |bounds: Bounds<Pixels>, _window, cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    if this.last_bounds != Some(bounds) {
-                        this.last_bounds = Some(bounds);
-                        this.viewport.mark_dirty();
-                        cx.notify();
-                    }
-                });
-                bounds
-            },
-            move |bounds, bounds_again, window, cx| {
-                if gizmo_drawn {
-                    draw_gizmo_overlay(bounds_again, &camera_snapshot, hover, window, cx);
+            {
+                let weak = weak.clone();
+                move |bounds: Bounds<Pixels>, _window, cx| {
+                    let _ = weak.update(cx, |this, _cx| this.last_bounds = Some(bounds));
                 }
-                let _ = bounds;
+            },
+            move |bounds, (), window, cx| {
+                if scene_shown {
+                    let _ = weak.update(cx, |this, _cx| this.paint_scene(bounds, window));
+                }
+                if gizmo_drawn {
+                    draw_gizmo_overlay(bounds, &camera_snapshot, hover, window, cx);
+                }
             },
         )
         // `inset_0`, not `size_full`: an absolute element with no insets is
@@ -3907,12 +3930,10 @@ fn remap_camo_selection(
 }
 
 /// [`decode_active_camo`] against a cache, for callers already on the UI
-/// thread. A free function (not a `&mut Self` method) so it can run while a
-/// caller already holds a `&self.gpu` borrow (`ViewportView` methods use
-/// `let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };` at
-/// the top of every re-upload path) without a whole-self mutable-borrow
-/// conflict; only `camo_texture_cache` needs `&mut`, passed in directly
-/// rather than through `&mut self`.
+/// thread. A free function (not a `&mut Self` method) so a caller can run it
+/// mid-way through a re-upload without a whole-self mutable-borrow conflict;
+/// only `camo_texture_cache` needs `&mut`, passed in directly rather than
+/// through `&mut self`.
 fn recompute_active_camo(
     selected_camo: Option<CamoSchemeId>,
     camo_texture_cache: &mut CamoTextureCache,

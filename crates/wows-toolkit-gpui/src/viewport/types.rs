@@ -1,4 +1,6 @@
 extern crate nalgebra as na;
+use gpui_wgpu::wgpu;
+
 /// 3D vector type used throughout the crate. Alias for `nalgebra::Vector3<f32>`.
 pub type Vec3 = na::Vector3<f32>;
 
@@ -91,6 +93,32 @@ impl Vertex {
             wgpu::VertexAttribute { offset: 40, shader_location: 3, format: wgpu::VertexFormat::Float32x2 },
         ],
     };
+}
+
+/// A render target's size in device pixels. Both sides are at least one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TargetSize {
+    width: u32,
+    height: u32,
+}
+
+impl TargetSize {
+    /// `None` for a side of zero, which no texture can have.
+    pub fn new(width: u32, height: u32) -> Option<Self> {
+        (width > 0 && height > 0).then_some(Self { width, height })
+    }
+
+    pub fn width(self) -> u32 {
+        self.width
+    }
+
+    pub fn height(self) -> u32 {
+        self.height
+    }
+
+    pub fn extent(self) -> wgpu::Extent3d {
+        wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 }
+    }
 }
 
 /// Opaque handle to a mesh uploaded to the GPU.

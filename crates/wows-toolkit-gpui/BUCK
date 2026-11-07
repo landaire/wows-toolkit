@@ -39,6 +39,7 @@ GPUI_DEPS = [
     "//third-party/rust:fontdb",
     "//third-party/rust:futures",
     "//third-party/rust:gettext",
+    "//third-party/rust:gpui-fast-wgpu",
     "//third-party/rust:gpui-kit",
     "//third-party/rust:humansize",
     "//third-party/rust:image",
@@ -46,7 +47,6 @@ GPUI_DEPS = [
     "//third-party/rust:nalgebra",
     "//third-party/rust:notify",
     "//third-party/rust:parking_lot",
-    "//third-party/rust:pollster",
     "//third-party/rust:regex",
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
@@ -68,7 +68,6 @@ GPUI_DEPS = [
     "//third-party/rust:unidecode",
     "//third-party/rust:walkdir",
     "//third-party/rust:web-time",
-    "//third-party/rust:wgpu",
     "//third-party/rust:zip",
 ]
 

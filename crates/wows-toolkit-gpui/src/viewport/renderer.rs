@@ -1,6 +1,10 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::rc::Weak;
 
 extern crate nalgebra as na;
+use gpui_wgpu::wgpu;
 use na::Rotation3;
 use na::Vector3;
 
@@ -11,6 +15,7 @@ use crate::viewport::picking::PickableMesh;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
+use crate::viewport::types::TargetSize;
 use crate::viewport::types::Uniforms;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
@@ -31,6 +36,17 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+// Set where the target has no sRGB view (GLES): the shader stores encoded color
+// itself, and blending and the MSAA resolve then act on encoded values.
+override ENCODE_SRGB: bool = false;
+
+fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
+    let clamped = clamp(linear, vec3<f32>(0.0), vec3<f32>(1.0));
+    let low = clamped * 12.92;
+    let high = 1.055 * pow(clamped, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(high, low, clamped <= vec3<f32>(0.0031308));
+}
 
 @group(1) @binding(0) var diffuse_texture: texture_2d<f32>;
 @group(1) @binding(1) var diffuse_sampler: sampler;
@@ -95,16 +111,52 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
         color = base_color.rgb * lighting + vec3<f32>(directional, directional, directional);
     }
 
+    if (ENCODE_SRGB) {
+        color = srgb_encode(color);
+    }
     return vec4(color, base_color.a);
 }
 "#;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const MSAA_SAMPLE_COUNT: u32 = 4;
+
+/// The color format the scene is drawn in, and where its sRGB encoding happens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneColorTarget {
+    /// An sRGB format: the hardware encodes the shader's linear output, and
+    /// blending and the MSAA resolve act on linear values.
+    Srgb(wgpu::TextureFormat),
+    /// A linear format the device offers no sRGB view of. The shader encodes.
+    ShaderEncoded(wgpu::TextureFormat),
+}
+
+impl SceneColorTarget {
+    pub fn format(self) -> wgpu::TextureFormat {
+        match self {
+            Self::Srgb(format) | Self::ShaderEncoded(format) => format,
+        }
+    }
+
+    /// `color` as the attachment stores it. A clear value bypasses the shader,
+    /// so a shader-encoded target is cleared to the encoded value.
+    fn clear_value(self, color: wgpu::Color) -> wgpu::Color {
+        let encode = |linear: f64| {
+            let linear = linear.clamp(0.0, 1.0);
+            if linear <= 0.0031308 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 }
+        };
+        match self {
+            Self::Srgb(_) => color,
+            Self::ShaderEncoded(_) => {
+                wgpu::Color { r: encode(color.r), g: encode(color.g), b: encode(color.b), a: color.a }
+            }
+        }
+    }
+}
 
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
+    color: SceneColorTarget,
     /// Pipeline with depth writes enabled — used for opaque geometry (armor).
     pipeline: wgpu::RenderPipeline,
     /// Pipeline without depth writes — used for transparent hull geometry.
@@ -120,7 +172,7 @@ pub struct GpuPipeline {
 }
 
 impl GpuPipeline {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, color: SceneColorTarget) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport_3d_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -175,15 +227,17 @@ impl GpuPipeline {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         };
 
+        let encode_srgb =
+            [("ENCODE_SRGB", if matches!(color, SceneColorTarget::ShaderEncoded(_)) { 1.0 } else { 0.0 })];
         let fragment_state = wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
-                format: COLOR_FORMAT,
+                format: color.format(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &encode_srgb, ..Default::default() },
         };
 
         let primitive_state = wgpu::PrimitiveState {
@@ -311,6 +365,7 @@ impl GpuPipeline {
         });
 
         Self {
+            color,
             pipeline,
             pipeline_no_depth_write,
             pipeline_overlay,
@@ -319,6 +374,10 @@ impl GpuPipeline {
             default_sampler,
             fallback_texture_bind_group,
         }
+    }
+
+    pub fn color(&self) -> SceneColorTarget {
+        self.color
     }
 
     /// Create a texture bind group from RGBA8 pixel data.
@@ -365,6 +424,82 @@ impl GpuPipeline {
     }
 }
 
+/// The uniform sets one frame binds: model space with hull lighting, world
+/// space, and model space unlit.
+struct SceneUniforms {
+    model_lit: Uniforms,
+    world: Uniforms,
+    model_unlit: Uniforms,
+}
+
+/// A uniform buffer and the bind group that exposes it to the shader.
+struct UniformSlot {
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl UniformSlot {
+    fn new(device: &wgpu::Device, pipeline: &GpuPipeline, label: &str) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &pipeline.uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+        });
+
+        Self { buffer, bind_group }
+    }
+}
+
+/// What one viewport draws a frame with before resolving it into a target:
+/// the multisampled color and depth attachments, and the uniform buffers
+/// each frame rewrites.
+pub struct SceneAttachments {
+    size: TargetSize,
+    msaa_color: wgpu::TextureView,
+    depth: wgpu::TextureView,
+    model_lit: UniformSlot,
+    world: UniformSlot,
+    model_unlit: UniformSlot,
+}
+
+impl SceneAttachments {
+    pub fn new(device: &wgpu::Device, pipeline: &GpuPipeline, size: TargetSize) -> Self {
+        let attachment = |label: &str, format: wgpu::TextureFormat| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: size.extent(),
+                    mip_level_count: 1,
+                    sample_count: MSAA_SAMPLE_COUNT,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+
+        Self {
+            size,
+            msaa_color: attachment("viewport_3d_msaa_color", pipeline.color.format()),
+            depth: attachment("viewport_3d_depth", DEPTH_FORMAT),
+            model_lit: UniformSlot::new(device, pipeline, "viewport_3d_model_lit_uniforms"),
+            world: UniformSlot::new(device, pipeline, "viewport_3d_world_uniforms"),
+            model_unlit: UniformSlot::new(device, pipeline, "viewport_3d_model_unlit_uniforms"),
+        }
+    }
+
+    pub fn size(&self) -> TargetSize {
+        self.size
+    }
+}
+
 /// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
 /// - Layers <= LAYER_OPAQUE_MAX: depth-writing pipeline (opaque armor).
 /// - LAYER_HULL: no-depth-write pipeline with depth test (transparent hull, behind armor).
@@ -391,12 +526,30 @@ struct GpuMesh {
     lit: bool,
 }
 
+/// Drops a viewport's mesh buffers from outside it, for a device that is
+/// being released.
+pub struct MeshRelease(Weak<RefCell<HashMap<MeshId, GpuMesh>>>);
+
+impl MeshRelease {
+    /// Drops the buffers. The viewport keeps its pick data and uploads its
+    /// meshes again on the next device.
+    pub fn release(&self) {
+        if let Some(meshes) = self.0.upgrade()
+            && let Ok(mut meshes) = meshes.try_borrow_mut()
+        {
+            meshes.clear();
+        }
+    }
+}
+
 /// A complete 3D viewport instance. Each consumer (armor pane, replay viewer, etc.)
-/// creates one of these. Holds its own camera and scene meshes; rendering goes
-/// through `render_offscreen_rgba` into a CPU-readback buffer.
+/// creates one of these. Holds its own camera and scene meshes; [`Self::render`]
+/// draws them into a caller-owned target.
 pub struct Viewport3D {
     pub camera: ArcballCamera,
-    meshes: HashMap<MeshId, GpuMesh>,
+    /// Shared so the device the buffers were made on can release them when
+    /// it is lost (`MeshRelease`).
+    meshes: Rc<RefCell<HashMap<MeshId, GpuMesh>>>,
     pick_data: HashMap<MeshId, PickableMesh>,
     next_mesh_id: u64,
     pub clear_color: wgpu::Color,
@@ -429,7 +582,7 @@ impl Viewport3D {
     pub fn new() -> Self {
         Self {
             camera: ArcballCamera::default(),
-            meshes: HashMap::new(),
+            meshes: Rc::default(),
             pick_data: HashMap::new(),
             next_mesh_id: 0,
             clear_color: wgpu::Color { r: 0.12, g: 0.12, b: 0.18, a: 1.0 },
@@ -460,7 +613,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: false,
@@ -508,7 +661,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: false,
@@ -555,7 +708,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: false,
@@ -598,7 +751,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: true,
@@ -642,7 +795,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: false,
@@ -679,7 +832,7 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes.insert(
+        self.meshes.borrow_mut().insert(
             id,
             GpuMesh {
                 world_space: false,
@@ -700,14 +853,14 @@ impl Viewport3D {
 
     /// Remove a mesh and free GPU resources.
     pub fn remove_mesh(&mut self, id: MeshId) {
-        self.meshes.remove(&id);
+        self.meshes.borrow_mut().remove(&id);
         self.pick_data.remove(&id);
         self.needs_redraw = true;
     }
 
     /// Set mesh visibility.
     pub fn set_visible(&mut self, id: MeshId, visible: bool) {
-        if let Some(mesh) = self.meshes.get_mut(&id)
+        if let Some(mesh) = self.meshes.borrow_mut().get_mut(&id)
             && mesh.visible != visible
         {
             mesh.visible = visible;
@@ -717,7 +870,7 @@ impl Viewport3D {
 
     /// Clear all meshes.
     pub fn clear(&mut self) {
-        self.meshes.clear();
+        self.meshes.borrow_mut().clear();
         self.pick_data.clear();
         self.needs_redraw = true;
     }
@@ -729,14 +882,14 @@ impl Viewport3D {
 
     /// Mark a mesh as world-space (unaffected by model_roll).
     pub fn set_world_space(&mut self, id: MeshId, world_space: bool) {
-        if let Some(mesh) = self.meshes.get_mut(&id) {
+        if let Some(mesh) = self.meshes.borrow_mut().get_mut(&id) {
             mesh.world_space = world_space;
         }
     }
 
     /// Mark a mesh as lit (participates in hull lighting). Default is unlit.
     pub fn set_lit(&mut self, id: MeshId, lit: bool) {
-        if let Some(mesh) = self.meshes.get_mut(&id) {
+        if let Some(mesh) = self.meshes.borrow_mut().get_mut(&id) {
             mesh.lit = lit;
             self.needs_redraw = true;
         }
@@ -747,24 +900,25 @@ impl Viewport3D {
         self.needs_redraw
     }
 
-    /// Clear the redraw flag after a frame has been presented. The egui
-    /// presentation path used to do this as part of its own `render`; the
-    /// gpui_kit armor viewport calls it right after a successful on-demand
-    /// `render_offscreen_rgba` + image rebuild.
+    /// Clear the redraw flag once a frame of the current scene has been drawn.
     pub fn clear_dirty(&mut self) {
         self.needs_redraw = false;
     }
 
     /// Returns true if the viewport has any meshes to render.
     pub fn has_meshes(&self) -> bool {
-        !self.meshes.is_empty()
+        !self.meshes.borrow().is_empty()
     }
 
-    /// Build the three per-frame uniform sets from the current camera, model
-    /// rotation, and lighting: `(model_lit, world, model_unlit)`. Consumed by the
-    /// offscreen readback path (`render_offscreen_rgba`).
-    fn scene_uniforms(&self, size: (u32, u32)) -> (Uniforms, Uniforms, Uniforms) {
-        let aspect = size.0 as f32 / size.1 as f32;
+    /// A handle the device the meshes were made on uses to release them.
+    pub fn mesh_release(&self) -> MeshRelease {
+        MeshRelease(Rc::downgrade(&self.meshes))
+    }
+
+    /// Build the per-frame uniform sets from the current camera, model
+    /// rotation, and lighting.
+    fn scene_uniforms(&self, size: TargetSize) -> SceneUniforms {
+        let aspect = size.width() as f32 / size.height() as f32;
         let model_mat = {
             let has_roll = self.model_roll.abs() > 1e-6;
             let has_yaw = self.model_yaw.abs() > 1e-6;
@@ -830,34 +984,57 @@ impl Viewport3D {
 
         let model_unlit_uniforms = Uniforms { light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0], ..uniforms };
 
-        (uniforms, world_uniforms, model_unlit_uniforms)
+        SceneUniforms { model_lit: uniforms, world: world_uniforms, model_unlit: model_unlit_uniforms }
     }
 
-    /// Record the scene draw into `encoder` against the given MSAA color, resolve
-    /// color, and depth views. Sorts meshes by layer and binds the matching
-    /// pipeline/uniform group per mesh. Used by `render_offscreen_rgba`.
-    #[allow(clippy::too_many_arguments)]
+    /// Draws the scene into `resolve_target`, a single-sample view in the
+    /// pipeline's color format and the attachments' size, and submits the work
+    /// on `queue`.
+    pub fn render(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &GpuPipeline,
+        attachments: &SceneAttachments,
+        resolve_target: &wgpu::TextureView,
+    ) {
+        let uniforms = self.scene_uniforms(attachments.size);
+        queue.write_buffer(&attachments.model_lit.buffer, 0, bytemuck::bytes_of(&uniforms.model_lit));
+        queue.write_buffer(&attachments.world.buffer, 0, bytemuck::bytes_of(&uniforms.world));
+        queue.write_buffer(&attachments.model_unlit.buffer, 0, bytemuck::bytes_of(&uniforms.model_unlit));
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_encoder") });
+        self.encode_scene_pass(&mut encoder, pipeline, attachments, resolve_target);
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Record the scene draw into `encoder`, resolving into `resolve_target`.
+    /// Sorts meshes by layer and binds the matching pipeline/uniform group per
+    /// mesh.
     fn encode_scene_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pipeline: &GpuPipeline,
-        msaa_color_view: &wgpu::TextureView,
-        resolve_color_view: &wgpu::TextureView,
-        depth_view: &wgpu::TextureView,
-        model_lit_bg: &wgpu::BindGroup,
-        model_unlit_bg: &wgpu::BindGroup,
-        world_bg: &wgpu::BindGroup,
+        attachments: &SceneAttachments,
+        resolve_target: &wgpu::TextureView,
     ) {
+        let model_lit_bg = &attachments.model_lit.bind_group;
+        let world_bg = &attachments.world.bind_group;
+        let model_unlit_bg = &attachments.model_unlit.bind_group;
+        let clear = pipeline.color.clear_value(self.clear_color);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("viewport_3d_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: msaa_color_view,
-                resolve_target: Some(resolve_color_view),
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
+                view: &attachments.msaa_color,
+                resolve_target: Some(resolve_target),
+                // The resolve carries the frame; the multisampled color is not
+                // read again.
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Discard },
                 depth_slice: None,
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
+                view: &attachments.depth,
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
                 stencil_ops: None,
             }),
@@ -869,8 +1046,9 @@ impl Viewport3D {
         pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
         // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
+        let meshes = self.meshes.borrow();
         let mut sorted: Vec<(MeshId, &GpuMesh)> =
-            self.meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
+            meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
         sorted.sort_by_key(|(_, m)| m.layer);
 
         let mut current_layer_kind: i32 = -1; // force first set_pipeline
@@ -928,145 +1106,6 @@ impl Viewport3D {
         }
     }
 
-    /// Render the current scene to an offscreen target and read the pixels back as
-    /// tightly-packed sRGB RGBA8 (`width * height * 4`). Runs entirely on the owned
-    /// wgpu device with no window surface, so it is usable headless. Returns
-    /// `(width, height, rgba)`.
-    pub fn render_offscreen_rgba(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        pipeline: &GpuPipeline,
-        size: (u32, u32),
-    ) -> Option<(u32, u32, Vec<u8>)> {
-        if size.0 == 0 || size.1 == 0 {
-            return None;
-        }
-
-        // Transient render targets allocated per call (MSAA color + resolve + depth).
-        let msaa_color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_offscreen_msaa_color"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: MSAA_SAMPLE_COUNT,
-            dimension: wgpu::TextureDimension::D2,
-            format: COLOR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let msaa_color_view = msaa_color.create_view(&Default::default());
-
-        // Resolve target is COPY_SRC (not TEXTURE_BINDING) since we read it back.
-        let resolve_color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_offscreen_color"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: COLOR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let resolve_color_view = resolve_color.create_view(&Default::default());
-
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_offscreen_depth"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: MSAA_SAMPLE_COUNT,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let depth_view = depth.create_view(&Default::default());
-
-        // Per-call uniform buffers + bind groups.
-        let (uniforms, world_uniforms, model_unlit_uniforms) = self.scene_uniforms(size);
-        use wgpu::util::DeviceExt;
-        let make = |contents: &[u8], label: &str| {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &pipeline.uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-            })
-        };
-        let model_lit_bg = make(bytemuck::bytes_of(&uniforms), "viewport_3d_offscreen_uniforms");
-        let world_bg = make(bytemuck::bytes_of(&world_uniforms), "viewport_3d_offscreen_world_uniforms");
-        let model_unlit_bg = make(bytemuck::bytes_of(&model_unlit_uniforms), "viewport_3d_offscreen_model_unlit");
-
-        let mut encoder = device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_offscreen_encoder") });
-
-        self.encode_scene_pass(
-            &mut encoder,
-            pipeline,
-            &msaa_color_view,
-            &resolve_color_view,
-            &depth_view,
-            &model_lit_bg,
-            &model_unlit_bg,
-            &world_bg,
-        );
-
-        // Copy the resolved color into a readback buffer. bytes_per_row must be a
-        // multiple of 256, so pad each row and strip the padding after mapping.
-        let unpadded_bpr = size.0 * 4;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
-        let padded_bpr = unpadded_bpr.div_ceil(align) * align;
-        let buffer_size = (padded_bpr * size.1) as u64;
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_3d_offscreen_readback"),
-            size: buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &resolve_color,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bpr),
-                    rows_per_image: Some(size.1),
-                },
-            },
-            wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-        );
-
-        queue.submit(std::iter::once(encoder.finish()));
-
-        // Map and block until the GPU work completes.
-        let slice = readback.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |_| {});
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
-
-        let Ok(mapped) = slice.get_mapped_range() else {
-            return None;
-        };
-        let mut rgba = vec![0u8; (unpadded_bpr * size.1) as usize];
-        for row in 0..size.1 as usize {
-            let src = row * padded_bpr as usize;
-            let dst = row * unpadded_bpr as usize;
-            rgba[dst..dst + unpadded_bpr as usize].copy_from_slice(&mapped[src..src + unpadded_bpr as usize]);
-        }
-        drop(mapped);
-        readback.unmap();
-
-        Some((size.0, size.1, rgba))
-    }
-
     /// Transform a world-space ray into model space (inverse of model matrix).
     /// The model matrix is Ry(yaw) * Rz(-roll), so the inverse is Rz(+roll) * Ry(-yaw).
     fn ray_to_model_space(&self, origin: Vec3, dir: Vec3) -> (Vec3, Vec3) {
@@ -1108,10 +1147,11 @@ impl Viewport3D {
 
     /// Collect pickable mesh references with visibility info.
     fn pick_mesh_refs(&self) -> Vec<(MeshId, &PickableMesh, bool)> {
+        let meshes = self.meshes.borrow();
         self.pick_data
             .iter()
             .map(|(id, mesh)| {
-                let visible = self.meshes.get(id).is_some_and(|m| m.visible);
+                let visible = meshes.get(id).is_some_and(|m| m.visible);
                 (*id, mesh, visible)
             })
             .collect()

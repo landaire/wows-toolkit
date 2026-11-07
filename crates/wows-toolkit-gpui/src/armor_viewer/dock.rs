@@ -71,10 +71,7 @@ impl ViewportDock {
         Self { panes: vec![viewport], active_ix: 0, split: Axis::Horizontal }
     }
 
-    /// Every pane currently in the dock, in display order. `ArmorViewerPane`
-    /// reads this to fan a shared-GPU-device result out to every pane
-    /// (`apply_gpu_result`), including ones added after the device was
-    /// already ready.
+    /// Every pane currently in the dock, in display order.
     pub fn panes(&self) -> &[Entity<ViewportView>] {
         &self.panes
     }
@@ -107,8 +104,7 @@ impl ViewportDock {
 
     /// Pushes `viewport` onto the split and makes it the active pane, so the
     /// next ship selection loads into it. Called by `ArmorViewerPane`'s
-    /// "Compare" handler after handing the new pane the shared GPU device
-    /// (or leaving it `Initializing` if the device isn't ready yet).
+    /// "Compare" handler.
     pub fn add_pane(&mut self, viewport: Entity<ViewportView>, cx: &mut Context<Self>) {
         self.panes.push(viewport);
         self.active_ix = self.panes.len() - 1;

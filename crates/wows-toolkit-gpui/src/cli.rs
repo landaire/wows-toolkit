@@ -6,9 +6,8 @@
 //! accepted for as long as one of them can still update into this binary.
 //!
 //! The egui app's renderer flags are taken as far as they mean anything here.
-//! gpui picks the adapter it draws the window through and offers no say in it,
-//! but the armor viewport stands up a `wgpu` device of its own, so
-//! `--gpu-adapter`, `--cpu-renderer` and `--list-gpus` steer and report that one.
+//! `--gpu-adapter`, `--cpu-renderer` and `--list-gpus` steer and report the
+//! adapter GPUI draws the window with, which the armor viewport draws on too.
 //! `--no-hardening` skips the process mitigations, which this port applies.
 //! `--gpu-safe-mode` names a rung of a ladder that has no counterpart here, so it
 //! is still refused rather than parsed and ignored.
@@ -18,6 +17,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use clap::Subcommand;
+use gpui_wgpu::WgpuAdapterPreference;
+use gpui_wgpu::wgpu;
 
 #[derive(Clone, Debug, Default, Parser)]
 #[command(name = "wows-toolkit-gpui", version, about)]
@@ -25,15 +26,15 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Draw the armor viewport on the CPU (WARP) rather than a graphics card.
+    /// Draw the window on the CPU (WARP, llvmpipe) rather than a graphics card.
     #[arg(long, conflicts_with = "gpu_adapter")]
     pub cpu_renderer: bool,
 
-    /// Draw the armor viewport on the adapter whose name contains NAME.
+    /// Draw the window on the adapter whose name contains NAME.
     #[arg(long, value_name = "NAME")]
     pub gpu_adapter: Option<String>,
 
-    /// List the adapters the armor viewport can draw on, and exit.
+    /// List the adapters the window can be drawn on, and exit.
     #[arg(long)]
     pub list_gpus: bool,
 
@@ -46,16 +47,14 @@ pub struct Cli {
 }
 
 impl Cli {
-    /// Which adapter the armor viewport's own device should take.
-    pub fn adapter_choice(&self) -> crate::viewport::device::AdapterChoice {
-        use crate::viewport::device::AdapterChoice;
-
+    /// Which adapter GPUI's renderer should prefer.
+    pub fn adapter_preference(&self) -> WgpuAdapterPreference {
         if self.cpu_renderer {
-            return AdapterChoice::Cpu;
+            return WgpuAdapterPreference::Software;
         }
         match &self.gpu_adapter {
-            Some(named) => AdapterChoice::Named(named.clone()),
-            None => AdapterChoice::Fastest,
+            Some(named) => WgpuAdapterPreference::NameContains(named.clone()),
+            None => WgpuAdapterPreference::SystemDefault,
         }
     }
 
@@ -133,6 +132,56 @@ pub fn parse() -> Invocation {
             std::process::exit(err.exit_code());
         }
     }
+}
+
+/// The `--list-gpus` report: every adapter GPUI's renderer chooses from.
+pub fn adapter_report() -> String {
+    format_adapters(&gpui_wgpu::describe_adapters())
+}
+
+/// Logs the adapter GPUI draws on, and warns when `--gpu-adapter` named
+/// none GPUI could use. Call once the first window is open, which is when
+/// GPUI picks it. GPUI reports a miss through `log`, which the log file does
+/// not take.
+pub fn log_adapter(asked: &Cli) {
+    let Some(app) = gpui_wgpu::app_context() else {
+        tracing::info!("GPUI draws without wgpu, so --gpu-adapter and --cpu-renderer do not apply");
+        return;
+    };
+    let info = app.context.adapter.get_info();
+    tracing::info!(
+        "GPUI draws on {} ({:?}, {:?}, driver {} {})",
+        info.name,
+        info.device_type,
+        info.backend,
+        info.driver,
+        info.driver_info
+    );
+
+    if let Some(named) = &asked.gpu_adapter
+        && !info.name.to_lowercase().contains(&named.to_lowercase())
+    {
+        tracing::warn!(
+            "--gpu-adapter {named:?} matched no adapter GPUI could draw on; the adapters are:\n{}",
+            adapter_report()
+        );
+    }
+}
+
+fn format_adapters(adapters: &[wgpu::AdapterInfo]) -> String {
+    if adapters.is_empty() {
+        return "No display adapter this build can draw on.\n".to_owned();
+    }
+
+    adapters
+        .iter()
+        .map(|info| {
+            format!(
+                "{} ({:?}, {:?}, driver {} {})\n",
+                info.name, info.device_type, info.backend, info.driver, info.driver_info
+            )
+        })
+        .collect()
 }
 
 /// A writer onto the console that launched this process, if there was one.
@@ -237,21 +286,19 @@ mod tests {
         assert!(refused.is_err(), "there is no ladder to take a rung of");
     }
 
-    /// The renderer flags that do mean something are taken, and steer the one
-    /// device this port picks: the armor viewport's own.
+    /// The renderer flags that do mean something are taken, and steer the
+    /// adapter GPUI draws with.
     #[test]
     fn the_renderer_flags_that_mean_something_are_taken() {
-        use crate::viewport::device::AdapterChoice;
-
         let bare = Cli::try_parse_from(["wows-toolkit-gpui"]).expect("a bare launch");
-        assert_eq!(bare.adapter_choice(), AdapterChoice::Fastest);
+        assert_eq!(bare.adapter_preference(), WgpuAdapterPreference::SystemDefault);
         assert_eq!(bare.hardening(), wows_toolkit_hardening::Hardening::Apply);
 
         let on_cpu = Cli::try_parse_from(["wows-toolkit-gpui", "--cpu-renderer"]).expect("--cpu-renderer");
-        assert_eq!(on_cpu.adapter_choice(), AdapterChoice::Cpu);
+        assert_eq!(on_cpu.adapter_preference(), WgpuAdapterPreference::Software);
 
         let named = Cli::try_parse_from(["wows-toolkit-gpui", "--gpu-adapter", "nvidia"]).expect("--gpu-adapter");
-        assert_eq!(named.adapter_choice(), AdapterChoice::Named("nvidia".into()));
+        assert_eq!(named.adapter_preference(), WgpuAdapterPreference::NameContains("nvidia".into()));
 
         let bare_bones = Cli::try_parse_from(["wows-toolkit-gpui", "--no-hardening"]).expect("--no-hardening");
         assert_eq!(

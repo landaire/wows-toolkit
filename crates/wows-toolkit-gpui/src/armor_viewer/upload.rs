@@ -30,6 +30,7 @@
 
 use std::collections::HashMap;
 
+use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 
@@ -663,8 +664,7 @@ mod tests {
 
     /// Needs a local game install and a real GPU adapter: loads one real
     /// ship's armor (mirrors `load_ship.rs`'s own real-install test), uploads
-    /// it into a fresh `Viewport3D` on an owned wgpu device (the same
-    /// `GpuContext::new()` `viewport::device`'s risk-gate test uses), and
+    /// it into a fresh `Viewport3D` on the test-only `HeadlessDevice`, and
     /// renders it offscreen -- proving the whole T4 pipeline (catalog ->
     /// load -> upload -> camera framing -> render) end to end without a
     /// windowed app. Asserts the render actually shows thickness-colored
@@ -679,7 +679,9 @@ mod tests {
     #[test]
     #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]
     fn upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry() {
-        use crate::viewport::device::GpuContext;
+        use crate::viewport::headless::HeadlessDevice;
+        use crate::viewport::headless::SRGB_TARGET;
+        use crate::viewport::types::TargetSize;
 
         let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
             .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
@@ -721,8 +723,8 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index));
 
-        let ctx = GpuContext::new().expect("owned wgpu device creation failed - no adapter available");
-        let pipeline = ctx.pipeline();
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let size = TargetSize::new(512, 512).expect("a nonzero size");
         let mut viewport = Viewport3D::new();
 
         let empty_part = HashMap::new();
@@ -730,7 +732,7 @@ mod tests {
         let display = DisplaySettings::default();
         let mesh_triangle_info = upload_armor_to_viewport(
             &mut viewport,
-            &ctx.device,
+            &headless.device,
             &armor,
             VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             display,
@@ -760,7 +762,7 @@ mod tests {
             (viewport.camera.target, viewport.camera.distance, viewport.camera.azimuth, viewport.camera.elevation);
         let reuploaded = reupload_armor_plates(
             &mut viewport,
-            &ctx.device,
+            &headless.device,
             &armor,
             VisibilityFilter { part: &empty_part, plate: &plate_visibility, show_hidden_only: false },
             display,
@@ -780,9 +782,8 @@ mod tests {
         assert_eq!(viewport.camera.azimuth, azimuth_before, "re-upload for a visibility toggle must not rotate");
         assert_eq!(viewport.camera.elevation, elevation_before, "re-upload for a visibility toggle must not rotate");
 
-        let (w, h, rgba) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
-            .expect("offscreen render produced no pixels");
+        let rgba = headless.render_rgba(&viewport, size);
+        let (w, h) = (size.width(), size.height());
         assert_eq!(rgba.len(), (w * h * 4) as usize);
 
         let clear = viewport.clear_color;
@@ -816,14 +817,12 @@ mod tests {
         let no_edges = DisplaySettings { show_plate_edges: false, ..display };
         reupload_armor_plates(
             &mut viewport,
-            &ctx.device,
+            &headless.device,
             &armor,
             VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             no_edges,
         );
-        let (_, _, rgba_no_edges) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
-            .expect("offscreen render produced no pixels");
+        let rgba_no_edges = headless.render_rgba(&viewport, size);
         let black_pixels_no_edges =
             rgba_no_edges.as_chunks::<4>().0.iter().filter(|px| px[0] < 20 && px[1] < 20 && px[2] < 20).count();
         assert!(
@@ -838,14 +837,12 @@ mod tests {
         let dim = DisplaySettings { armor_opacity: 0.3, ..no_edges };
         reupload_armor_plates(
             &mut viewport,
-            &ctx.device,
+            &headless.device,
             &armor,
             VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             dim,
         );
-        let (_, _, rgba_dim) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
-            .expect("offscreen render produced no pixels");
+        let rgba_dim = headless.render_rgba(&viewport, size);
         let avg_clear_distance = |rgba: &[u8]| -> f64 {
             let mut total = 0i64;
             let mut n = 0i64;

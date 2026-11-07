@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
 

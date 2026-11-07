@@ -83,7 +83,7 @@ fn main() {
     }
     if let cli::Invocation::ListGpus = &invocation {
         let title = format!("{} display adapters", wows_toolkit_config::APP_NAME);
-        cli::report_startup_message(&title, &viewport::device::describe_adapters(), false);
+        cli::report_startup_message(&title, &cli::adapter_report(), false);
         std::process::exit(0);
     }
     let asked = match &invocation {
@@ -92,7 +92,8 @@ fn main() {
         // asked of it.
         _ => cli::Cli::default(),
     };
-    viewport::device::choose_adapter(asked.adapter_choice());
+    // Before the first window, whose renderer picks the adapter.
+    gpui_wgpu::set_adapter_preference(asked.adapter_preference());
 
     // `ring` and `aws_lc_rs` are both enabled in the dependency graph (octocrab
     // pulls hyper-rustls with its defaults), so rustls cannot pick a provider by
@@ -181,6 +182,7 @@ fn main() {
                 .expect("failed to open window");
             let app_entity = app_entity.expect("App entity created inside open_window's build_root_view");
             heap_profile::mark("window.open");
+            cli::log_adapter(&asked);
 
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;

@@ -147,19 +147,18 @@ something here steer the one device this port does pick.
 
     What has no counterpart here is the renderer ladder. The egui app resolves six
     rungs, remembers which one worked, pins the Vulkan ICD and ranks Vulkan above
-    DX12 to dodge the DXGI window-drag stutter (`gpu/select.rs`, `main.rs:302-376`);
-    gpui draws through Direct3D 11 on Windows and walks the adapters itself
-    (`gpui-pre-windows`'s `directx_devices.rs`), with nothing an application can
-    choose, so there is no ladder to port and no ICD to pin.
+    DX12 to dodge the DXGI window-drag stutter (`gpu/select.rs`, `main.rs:302-376`).
+    The port draws every window through GPUI's `wgpu` renderer, which picks the
+    backend itself, so there is no ladder to port and no ICD to pin.
 
-    The armor viewport stands up a `wgpu` device of its own, though, and that one
-    is the port's to pick: `--gpu-adapter NAME` puts it on the adapter whose name
-    contains NAME, `--cpu-renderer` puts it on WARP, `--list-gpus` says what this
-    machine offers and exits, and the device says in the log which adapter it got,
-    since nothing can make it and the window agree. `--no-hardening` skips the
-    process mitigations, which this port applies and had no way to turn off.
-    `--gpu-safe-mode` names a rung of the ladder that is not here, so it is still
-    refused by name rather than parsed and ignored.
+    The adapter is the port's to pick, though, and the armor viewport renders on
+    the same device as the window: `--gpu-adapter NAME` puts GPUI on the adapter
+    whose name contains NAME, `--cpu-renderer` puts it on a software adapter,
+    `--list-gpus` says what this machine offers and exits, and the log says which
+    adapter the first window got, or that NAME matched none. `--no-hardening`
+    skips the process mitigations, which this port applies and had no way to turn
+    off. `--gpu-safe-mode` names a rung of the ladder that is not here, so it is
+    still refused by name rather than parsed and ignored.
 
 ## Reach: surfaces and entry points
 

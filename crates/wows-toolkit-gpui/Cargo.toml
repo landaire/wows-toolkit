@@ -13,18 +13,19 @@ publish = false
 # `gpui-fast-*` family. Pinned by branch; the committed Cargo.lock pins the
 # exact commit.
 gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "wows-toolkit", default-features = false, features = ["component", "assets", "gpui-fast"] }
+# GPUI's wgpu renderer (library `gpui_wgpu`): the armor viewport draws on
+# GPUI's own device into a texture GPUI samples, releases what it made there
+# when GPUI reports the device lost, and the command line steers the adapter
+# GPUI picks. Its `wgpu` re-export is the one the viewport uses, so the two
+# cannot drift.
+gpui-fast-wgpu = "0.1.14"
 anyhow = "1"
 # Matches gpui's own `image` version so Cargo unifies both into one crate
 # instance instead of resolving two. Only "png" is enabled: the game ships
 # ship-class icons as PNG, and that is the only format `icons.rs` decodes.
 image = { version = "0.25", default-features = false, features = ["png"] }
-# The armor viewport owns its own wgpu device (offscreen render + CPU readback
-# into a gpui image), so no wgpu type crosses into GPUI Kit. Same major as GPUI
-# Kit's and the workspace's, so the build carries one wgpu.
-wgpu = { workspace = true }
 nalgebra = "0.34"
 bytemuck = "1"
-pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 # The collaborative session mesh, shared with the egui app so both front ends

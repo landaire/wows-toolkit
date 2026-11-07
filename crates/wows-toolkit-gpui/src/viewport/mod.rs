@@ -1,14 +1,13 @@
 //! Reusable 3D viewport rendering engine.
 //!
 //! This module provides a generic 3D viewport that renders colored triangle
-//! meshes to an offscreen texture, reads the pixels back on the CPU, and hands
-//! them to gpui_kit as a `RenderImage`. It owns its own wgpu device (see `device`)
-//! and has no knowledge of game-specific data.
+//! meshes on GPUI's own wgpu device into a dynamic texture GPUI samples in its
+//! normal pass (see `device`). It has no knowledge of game-specific data.
 //!
 //! Ported from the egui app's `viewport_3d` module: the wgpu pipeline, shader,
 //! mesh handling, matrix math, and CPU picking are reused verbatim; the egui
 //! presentation path (on-screen texture registration, `egui::Response` input,
-//! `egui::Painter` gizmo drawing) is dropped in favor of an offscreen readback
+//! `egui::Painter` gizmo drawing) is dropped in favor of the dynamic texture
 //! and plain-typed camera/picking signatures.
 //!
 //! The full public surface (textured meshes, overlays, picking variants, the
@@ -19,6 +18,8 @@
 pub mod camera;
 pub mod device;
 pub mod gizmo;
+#[cfg(test)]
+pub mod headless;
 pub mod picking;
 pub mod renderer;
 pub mod types;

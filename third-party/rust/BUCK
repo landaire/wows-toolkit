@@ -16052,6 +16052,12 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "gpui-fast-wgpu",
+    actual = ":gpui-fast-wgpu-0.1",
+    visibility = ["PUBLIC"],
+)
+
 cargo.rust_library(
     name = "gpui-fast-wgpu-0.1",
     srcs = [":gpui-fast-ad75764e51727957.git"],

@@ -20,6 +20,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::div;
 use gpui_kit::px;
+use gpui_wgpu::wgpu;
 
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::thickness_to_color;
