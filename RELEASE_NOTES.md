@@ -12,16 +12,30 @@ per-commit history lives in `CHANGELOG.md`.
 - Replay rows indexed by an earlier parser refresh once, so a corrected victory or loss remains correct after leaving the inspector.
 - Player action menus can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
 - The command palette can copy application, game-data, constants-fetch, and recent-crash information for bug reports.
+- Replay directory tabs have a Directory Stats button. It opens a Stats tab for every replay in the directory and its subdirectories, and reports which replays it skipped and why.
+- Search results have a Render to Clipboard button that renders the replay to video and copies the file.
+- Current Match looks up player stats only after you open the Current Match view.
+- Replay listing no longer fails while loading game data when the replay folder is on a file system without file creation times, such as an NTFS drive mounted on Linux.
+- Opening a replay with an unrecognized ship configuration layout no longer stalls.
 
 ### Armor viewer
 
 - Changing a trajectory's range updates its path through every armor plate.
+- Detonation results name the correct compartment. A shell that ricochets off or shatters on a plate detonates outside the compartment behind it, and internal decks and bulkheads no longer move a detonation out of the citadel.
+- The 3D viewport shows colors at the correct brightness. They were previously too dark.
+- Dragging to pan moves the camera along the screen axes at every view angle. Shift+arrow keys also pan the camera.
+
+### Interface
+
+- File and folder pickers no longer freeze the window while they are open.
+- The remaining untranslated UI text is translated in every supported language.
 
 ### Game data and compatibility
 
 - GitHub constants checks remain available after the application fetches versioned constants in a background worker.
-- Bundled replay constants match WoWs 15.10.
+- Bundled replay constants match WoWs 15.10, and game data for 15.10 can be downloaded.
 - Ship configuration and captain skill parsing handles current packet data, including the 15.9 exterior state layout, and older replay layouts.
+- Ships in 15.9 and later replays show their consumables again, and bots are placed on the correct team.
 
 ## 1.0.2
 
