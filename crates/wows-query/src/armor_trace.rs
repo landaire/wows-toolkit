@@ -49,6 +49,7 @@ use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
 use crate::ships::Ship;
+use crate::ships::ShipClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -166,6 +167,11 @@ pub struct ArmorTraceOutput {
     /// Ammo types the weapon has that could not be traced, when ammo was not given.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<SkippedAmmo>,
+
+    /// With an AP trace and an HE or SAP trace of the same weapon: which to
+    /// load, from AP's citadel rate and the zones each one damages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ammo_choice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -526,6 +532,7 @@ impl GameData {
             target: target.label(),
             target_hull: hull_name,
             target_angle_deg: target_angle,
+            ammo_choice: ammo_choice(weapon, &traces, target),
             traces,
             skipped,
         })
@@ -1304,6 +1311,91 @@ fn common_assumptions(model: &WeaponModel) -> Vec<&'static str> {
     }
 
     assumptions
+}
+
+/// Which of the main battery's AP and HE (or SAP) traces to load against the
+/// target. AP is the choice when it detonates inside the citadel often;
+/// otherwise HE or SAP, which damage the zones whose first plate they
+/// defeat. `None` for other weapons, whose ammo players do not choose.
+fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Option<String> {
+    if weapon != TraceWeapon::MainBattery {
+        return None;
+    }
+    let ap = traces.iter().find(|trace| trace.weapon.ammo == Ammo::Ap)?;
+    let same_weapon =
+        |ammo: Ammo| traces.iter().find(|trace| trace.weapon.source == ap.weapon.source && trace.weapon.ammo == ammo);
+    let other = same_weapon(Ammo::He).or_else(|| same_weapon(Ammo::Sap))?;
+    let other_ammo = other.weapon.ammo.label();
+
+    let citadel = percent(ap.citadel.detonating_inside, ap.citadel.rays_over_citadel);
+    match ap.citadel.fraction {
+        Some(fraction) if fraction >= 0.25 => {
+            return Some(format!(
+                "Load AP: it detonates inside {}'s citadel on {citadel} of the rays over it.",
+                target.name
+            ));
+        }
+        Some(fraction) if fraction >= 0.05 => {
+            return Some(format!(
+                "AP detonates inside {}'s citadel on {citadel} of the rays over it: load AP for shots aimed at the citadel, {other_ammo} otherwise.",
+                target.name
+            ));
+        }
+        _ => {}
+    }
+
+    let ap_citadel = match ap.citadel.fraction {
+        None if matches!(target.class, ShipClass::Destroyer | ShipClass::Submarine) => {
+            format!("{} has no citadel", target.name)
+        }
+        None => format!("AP crosses no citadel plate of {} from this direction", target.name),
+        Some(_) if ap.citadel.detonating_inside == 0 => format!("AP never detonates inside {}'s citadel", target.name),
+        Some(_) => format!("AP rarely detonates inside {}'s citadel ({citadel})", target.name),
+    };
+    let ap_zones: Vec<&str> = ap
+        .zones
+        .iter()
+        .filter(|zone| {
+            zone.outcomes
+                .iter()
+                .max_by_key(|(_, count)| **count)
+                .is_some_and(|(outcome, _)| *outcome == RayOutcome::Penetration)
+        })
+        .map(|zone| zone.zone.as_str())
+        .collect();
+    let ap_pens = match ap_zones.as_slice() {
+        [] => String::new(),
+        zones => format!("; it penetrates most often in {}", zones.join(", ")),
+    };
+
+    let total: usize = other.zones.iter().map(|zone| zone.rays).sum();
+    let defeated: usize = other
+        .zones
+        .iter()
+        .map(|zone| {
+            zone.outcomes.get(&RayOutcome::Penetration).copied().unwrap_or(0)
+                + zone.outcomes.get(&RayOutcome::Citadel).copied().unwrap_or(0)
+        })
+        .sum();
+    let other_zones: Vec<&str> = other
+        .zones
+        .iter()
+        .filter(|zone| {
+            zone.outcomes.contains_key(&RayOutcome::Penetration) || zone.outcomes.contains_key(&RayOutcome::Citadel)
+        })
+        .map(|zone| zone.zone.as_str())
+        .collect();
+    let fires = if other.weapon.ammo == Ammo::He {
+        ", and every HE hit can start a fire, even one that shatters"
+    } else {
+        "; SAP starts no fires"
+    };
+
+    Some(format!(
+        "Load {other_ammo}: {ap_citadel}{ap_pens}. {other_ammo} defeats the first plate on {} of the area it strikes ({}){fires}.",
+        percent(defeated, total),
+        if other_zones.is_empty() { "no zone".to_owned() } else { other_zones.join(", ") },
+    ))
 }
 
 fn percent(part: usize, whole: usize) -> String {

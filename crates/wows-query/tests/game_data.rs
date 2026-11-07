@@ -1830,6 +1830,29 @@ fn aki_bombs_are_traced_with_the_ordnance_it_carries() {
     insta::assert_snapshot!("aki_ap_bombs_error", ap.to_string());
 }
 
+/// Against a flat Borodino at 12 km, Utrecht's 128 mm AP never reaches the
+/// citadel, so HE is the load; Zao's 310 mm AP citadels it often.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ammo_choice_follows_the_ap_citadel_rate() {
+    let choices: Vec<_> = ["Utrecht", "Des Moines", "Zao"]
+        .into_iter()
+        .map(|shooter| {
+            let trace = game()
+                .armor_trace(&ArmorTraceArgs {
+                    shooter: shooter.to_owned(),
+                    target_ship: "Borodino".to_owned(),
+                    range_km: Some(Km::new(12.0)),
+                    target_angle_deg: Some(Degrees::new(0.0)),
+                    ..Default::default()
+                })
+                .expect("ships resolve");
+            (shooter, trace.ammo_choice)
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(choices);
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn des_moines_ap_citadels_a_broadside_hindenburg_at_10_km() {

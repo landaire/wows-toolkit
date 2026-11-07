@@ -1,0 +1,10 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: choices
+---
+- - Utrecht
+  - "Load HE: AP never detonates inside Borodino's citadel; it penetrates most often in Bow, Casemate, Stern. HE defeats the first plate on 55% of the area it strikes (Superstructure, Bow, Stern), and every HE hit can start a fire, even one that shatters."
+- - Des Moines
+  - "AP detonates inside Borodino's citadel on 18% of the rays over it: load AP for shots aimed at the citadel, HE otherwise."
+- - Zao
+  - "Load AP: it detonates inside Borodino's citadel on 38% of the rays over it."
