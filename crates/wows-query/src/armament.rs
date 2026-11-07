@@ -19,6 +19,7 @@ use wowsunpack::game_params::types::MountPoint;
 use crate::aircraft::OrdnanceKind;
 use crate::aircraft::Squadron;
 use crate::aircraft::SquadronRole;
+use crate::consumables::slot_choice;
 use crate::data::GameData;
 use crate::firing_arcs::round_to;
 use crate::modules::Module;
@@ -177,6 +178,11 @@ pub struct AirStrikeLine {
 pub struct ConsumableChoice {
     /// 1-based.
     pub slot: usize,
+
+    /// "choose one of: A, B" when the slot offers several consumables.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>,
+
     pub options: Vec<String>,
 }
 
@@ -344,7 +350,11 @@ impl GameData {
                         Some(self.consumable_name(ability, category))
                     })
                     .collect();
-                (!options.is_empty()).then_some(ConsumableChoice { slot: index + 1, options })
+                (!options.is_empty()).then(|| ConsumableChoice {
+                    slot: index + 1,
+                    choice: slot_choice(&options),
+                    options,
+                })
             })
             .collect()
     }

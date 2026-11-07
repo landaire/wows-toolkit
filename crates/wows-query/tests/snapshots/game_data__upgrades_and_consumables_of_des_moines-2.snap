@@ -28,6 +28,7 @@ slots:
         reload_s: 60
         action_time_s: 5
   - slot: 2
+    choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
     options:
       - name: Auxiliary and Torpedo Weaponry Coordination
         type: auxTorpBooster
@@ -48,6 +49,7 @@ slots:
         ship_detection_m: 5000
         torpedo_detection_m: 3500
   - slot: 3
+    choice: "choose one of: Surveillance Radar, Fighters, Spotting Aircraft"
     options:
       - name: Surveillance Radar
         type: rls
@@ -74,3 +76,4 @@ slots:
         reload_s: 80
         action_time_s: 28
         heal_percent_per_s: 0.5
+note: "Each slot carries one consumable in battle. A slot with a choice carries only the option the player picks in port, so options of one slot are never carried together."

@@ -47,10 +47,12 @@ expression: overviews
         options:
           - Damage Control Party
       - slot: 2
+        choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
         options:
           - Auxiliary and Torpedo Weaponry Coordination
           - Hydroacoustic Search
       - slot: 3
+        choice: "choose one of: Surveillance Radar, Fighters, Spotting Aircraft"
         options:
           - Surveillance Radar
           - Fighters
@@ -102,6 +104,7 @@ expression: overviews
         options:
           - Damage Control Party
       - slot: 2
+        choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
         options:
           - Auxiliary and Torpedo Weaponry Coordination
           - Hydroacoustic Search
@@ -154,6 +157,7 @@ expression: overviews
         options:
           - Auxiliary and Torpedo Weaponry Coordination
       - slot: 3
+        choice: "choose one of: Surveillance Radar, Hydroacoustic Search"
         options:
           - Surveillance Radar
           - Hydroacoustic Search

@@ -56,6 +56,8 @@ pub(crate) const CONSUMABLE_ALIASES: &[(&str, &str)] = &[
 /// Length of a Random Battle, for whether an extra charge can be used.
 const MATCH: Seconds = Seconds::new(1200.0);
 
+const SLOT_NOTE: &str = "Each slot carries one consumable in battle. A slot with a choice carries only the option the player picks in port, so options of one slot are never carried together.";
+
 /// Arguments for `ship_consumables`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -89,12 +91,22 @@ pub struct ShipConsumables {
 
     /// Consumable slots in port order. A slot with several options mounts one of them.
     pub slots: Vec<ConsumableSlot>,
+
+    /// Present when a slot offers a choice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConsumableSlot {
     /// 1-based.
     pub slot: usize,
+
+    /// "choose one of: A, B" when the slot offers several consumables,
+    /// including those `consumable` leaves out of `options`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>,
+
     pub options: Vec<ConsumableStats>,
 }
 
@@ -190,6 +202,7 @@ impl GameData {
         let mut slots = Vec::new();
         let ability_slots = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default();
         for (index, slot) in ability_slots.iter().enumerate() {
+            let mut names = Vec::new();
             let mut options = Vec::new();
             for (ability, variant) in slot {
                 let Some(param) = self.provider().game_param_by_name(ability) else {
@@ -198,11 +211,12 @@ impl GameData {
                 let Some(category) = param.ability().and_then(|ability| ability.get_category(variant)) else {
                     continue;
                 };
+                let name = self.consumable_name(ability, category);
+                names.push(name.clone());
                 if wanted.as_ref().is_some_and(|types| !types.iter().any(|kind| kind == category.consumable_type_raw()))
                 {
                     continue;
                 }
-                let name = self.consumable_name(ability, category);
                 let mut stats = consumable_stats(name, category, bundle);
                 stats.buff =
                     self.consumable_buff(category, ship.class.species(), stats.action_time_s.map(|time| time.value()));
@@ -212,7 +226,7 @@ impl GameData {
                 options.push(stats);
             }
             if !options.is_empty() {
-                slots.push(ConsumableSlot { slot: index + 1, options });
+                slots.push(ConsumableSlot { slot: index + 1, choice: slot_choice(&names), options });
             }
         }
         if slots.is_empty()
@@ -221,12 +235,15 @@ impl GameData {
             return Err(QueryError::ConsumableNotOnShip { consumable: query.to_owned(), ship: ship.name.clone() });
         }
 
+        let note = slots.iter().any(|slot| slot.choice.is_some()).then_some(SLOT_NOTE);
+
         Ok(ShipConsumables {
             interpretations,
             ship: ship.summary(),
             skills: loadout.applied_skills,
             upgrades: loadout.applied_upgrades,
             slots,
+            note,
         })
     }
 
@@ -336,6 +353,12 @@ fn charges(count: AmmoCount) -> Charges {
         AmmoCount::Finite(count) => Charges::Limited(count),
         AmmoCount::Infinite => Charges::Unlimited,
     }
+}
+
+/// "choose one of: A, B" for a consumable slot with several options, `None`
+/// for a slot with one.
+pub(crate) fn slot_choice(names: &[String]) -> Option<String> {
+    (names.len() > 1).then(|| format!("choose one of: {}", names.join(", ")))
 }
 
 pub(crate) fn consumable_stats(name: String, category: &AbilityCategory, bundle: &ModifierBundle) -> ConsumableStats {

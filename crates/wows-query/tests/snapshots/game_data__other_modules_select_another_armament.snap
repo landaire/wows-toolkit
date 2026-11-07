@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 208
 expression: selected
 ---
 - ship: Gearing
@@ -38,6 +37,7 @@ expression: selected
         options:
           - Smoke Generator
       - slot: 3
+        choice: "choose one of: Engine Boost, Auxiliary and Torpedo Weaponry Coordination"
         options:
           - Engine Boost
           - Auxiliary and Torpedo Weaponry Coordination
@@ -78,6 +78,7 @@ expression: selected
         options:
           - Auxiliary and Torpedo Weaponry Coordination
       - slot: 3
+        choice: "choose one of: Surveillance Radar, Spotting Aircraft, Fighters"
         options:
           - Surveillance Radar
           - Spotting Aircraft

@@ -193,6 +193,7 @@ slots:
                 value: 180
                 assumed: []
   - slot: 4
+    choice: "choose one of: Auxiliary and Torpedo Armament Assistance, Spotting Aircraft, Fighters"
     options:
       - name: Auxiliary and Torpedo Armament Assistance
         type: tacticalBuffAuxBoost
@@ -375,3 +376,4 @@ slots:
               best:
                 value: 180
                 assumed: []
+note: "Each slot carries one consumable in battle. A slot with a choice carries only the option the player picks in port, so options of one slot are never carried together."
