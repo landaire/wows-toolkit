@@ -4224,7 +4224,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
+ "windows-link 0.2.1",
  "windows-result 0.4.1",
 ]
 
@@ -4666,7 +4666,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=rebase-upstream-2026-11#9cf1073cd49f5667d8e3de7bb4b751c4210122c9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4707,7 +4707,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=rebase-upstream-2026-11#9cf1073cd49f5667d8e3de7bb4b751c4210122c9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4754,7 +4754,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=rebase-upstream-2026-11#9cf1073cd49f5667d8e3de7bb4b751c4210122c9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5077,7 +5077,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=rebase-upstream-2026-11#9cf1073cd49f5667d8e3de7bb4b751c4210122c9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -5093,7 +5093,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=rebase-upstream-2026-11#9cf1073cd49f5667d8e3de7bb4b751c4210122c9"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#84dd9d49e61877cedf140c04a5f33a517752b4e9"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -9281,7 +9281,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -12831,7 +12831,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa 0.40.0",
+ "skrifa 0.44.0",
  "yazi",
  "zeno",
 ]

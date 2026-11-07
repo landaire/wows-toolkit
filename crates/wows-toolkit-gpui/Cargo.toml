@@ -11,7 +11,7 @@ publish = false
 # the bundled icon set. GPUI ships as the `gpui-pre-*` crates.io family that
 # Kit depends on for us, so there is no git source to unify and no `[patch]`
 # block. Pinned by branch; the committed Cargo.lock pins the exact commit.
-gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "rebase-upstream-2026-11" }
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "wows-toolkit" }
 anyhow = "1"
 # Matches gpui's own `image` version so Cargo unifies both into one crate
 # instance instead of resolving two. Only "png" is enabled: the game ships
@@ -166,7 +166,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wows_buck_build)'] }
 # pointer/keyboard dispatch used by the interaction tests. Enabling it here
 # keeps it out of release builds; `.test_support()` in the views is inert
 # without it.
-gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "rebase-upstream-2026-11", features = ["test-support"] }
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "wows-toolkit", features = ["test-support"] }
 jiff = "0.2"
 # Lets the tests point `storage_dir` at a temporary directory, so no test
 # reads or writes the running user's own data.

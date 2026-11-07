@@ -18,9 +18,9 @@ git_fetch(
 )
 
 git_fetch(
-    name = "gpui-component-02d04445eff6b244.git",
+    name = "gpui-component-4b41a7423599ac4d.git",
     repo = "https://github.com/landaire-contrib/gpui-component",
-    rev = "9cf1073cd49f5667d8e3de7bb4b751c4210122c9",
+    rev = "84dd9d49e61877cedf140c04a5f33a517752b4e9",
     sub_targets = ["crates/assets"],
     visibility = [],
 )
@@ -15325,13 +15325,13 @@ buildscript_run(
 
 cargo.rust_library(
     name = "gpui-base-0.9",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "gpui_base",
-    crate_root = "gpui-component-02d04445eff6b244/crates/base/src/lib.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/base/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_base",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/base",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/base",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Behavior, interaction, and infrastructure foundations for GPUI applications.",
         "CARGO_PKG_NAME": "gpui-base",
@@ -15404,13 +15404,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-component-0.9",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "gpui_component",
-    crate_root = "gpui-component-02d04445eff6b244/crates/component/src/lib.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/component/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_component",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/component",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/component",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "GPUI Component: the styled component library of GPUI Kit, with 60+ desktop UI components for GPUI.",
         "CARGO_PKG_NAME": "gpui-component",
@@ -15486,13 +15486,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-component-macros-0.9",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "gpui_component_macros",
-    crate_root = "gpui-component-02d04445eff6b244/crates/component-macros/src/lib.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/component-macros/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_component_macros",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/component-macros",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/component-macros",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Procedural macros for GPUI Component, the styled layer of GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-component-macros",
@@ -15521,13 +15521,13 @@ alias(
 
 cargo.rust_library(
     name = "gpui-kit-0.9",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "gpui_kit",
-    crate_root = "gpui-component-02d04445eff6b244/crates/kit/src/lib.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/kit/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_kit",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/kit",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/kit",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "GPUI Kit: one dependency for building desktop applications with GPUI, GPUI Base, GPUI Component and default assets.",
         "CARGO_PKG_NAME": "gpui-kit",
@@ -15565,13 +15565,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-kit-assets-0.9",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "gpui_kit_assets",
-    crate_root = "gpui-component-02d04445eff6b244/crates/assets/src/lib.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/assets/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_kit_assets",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/assets",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/assets",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Default bundled assets for GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-kit-assets",
@@ -15614,13 +15614,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-kit-assets-0.9-build-script-build",
-    srcs = [":gpui-component-02d04445eff6b244.git"],
+    srcs = [":gpui-component-4b41a7423599ac4d.git"],
     crate = "build_script_build",
-    crate_root = "gpui-component-02d04445eff6b244/crates/assets/build.rs",
+    crate_root = "gpui-component-4b41a7423599ac4d/crates/assets/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-component-02d04445eff6b244/crates/assets",
+        "CARGO_MANIFEST_DIR": "gpui-component-4b41a7423599ac4d/crates/assets",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Default bundled assets for GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-kit-assets",
@@ -15647,7 +15647,7 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    manifest_dir = ":gpui-component-02d04445eff6b244.git[crates/assets]",
+    manifest_dir = ":gpui-component-4b41a7423599ac4d.git[crates/assets]",
     version = "0.9.0",
 )
 
@@ -43106,7 +43106,7 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":skrifa-0.40",
+        ":skrifa-0.44",
         ":yazi-0.2",
         ":zeno-0.3",
     ],
