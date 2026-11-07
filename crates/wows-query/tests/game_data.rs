@@ -954,7 +954,7 @@ fn tier_10_battleship_comparison() {
 }
 
 /// Chateaurenault's torpedo loses half its damage past 8 km, which only the
-/// per-torpedo factors show.
+/// per-torpedo factors show; destroyers get no armor factors.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn chateaurenault_against_tier_10_destroyers() {
@@ -969,6 +969,22 @@ fn chateaurenault_against_tier_10_destroyers() {
     let chateaurenault = &comparison.ships[0];
     let torpedo = chateaurenault.torpedoes.first().expect("Chateaurenault carries torpedoes");
     assert!(torpedo.damage_by_distance.as_deref().is_some_and(|falloff| falloff.contains("50% from")), "{torpedo:?}");
+    assert!(comparison.ships.iter().all(|ship| ship.matchups.is_empty()));
+    assert!(comparison.factors.iter().all(|factor| !factor.starts_with("bb_ap") && !factor.contains("overmatch")));
+    insta::assert_yaml_snapshot!(comparison);
+}
+
+/// Des Moines, Hawaii and Zao against the shooter groups of tier 10.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_matchups_against_hawaii_and_zao() {
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs {
+            ships: Some(vec!["Des Moines".to_owned(), "Hawaii".to_owned(), "Za\u{14d}".to_owned()]),
+            ..Default::default()
+        })
+        .expect("tier 10 cruisers compare");
+    assert!(comparison.ships.iter().all(|ship| !ship.matchups.is_empty()), "{comparison:?}");
     insta::assert_yaml_snapshot!(comparison);
 }
 

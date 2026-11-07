@@ -68,7 +68,7 @@ pub const ARMOR_COMPARISONS_KIND: &str = "armor-comparisons-v1";
 
 /// Revision of the tracing and outcome rules behind a peer table. Bump it
 /// whenever a change alters traced rates, so stored tables are traced again.
-const TABLE_REVISION: u32 = 3;
+const TABLE_REVISION: u32 = 4;
 
 /// Distance between neighbouring rays of every assessment trace. Peers are
 /// traced with the same spacing so their rates compare.
@@ -184,7 +184,7 @@ impl ShooterRole {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::DestroyerAp => "destroyer AP",
             Self::LightCruiserAp => "light cruiser AP",
@@ -226,7 +226,7 @@ impl Aspect {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Broadside => "broadside",
             Self::Angled30 => "angled 30 deg",
@@ -262,7 +262,7 @@ impl RangeBand {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Close => "close, 5 to 10 km",
             Self::Moderate => "moderate, 12 to 15 km",
@@ -472,6 +472,48 @@ pub struct PreparationFailure {
     pub error: QueryError,
 }
 
+/// One ship's rates against one shooter group at one band and aspect, each
+/// with the peers' rates in the same condition.
+#[derive(Debug, Clone)]
+pub(crate) struct Matchup {
+    /// e.g. "battleship AP 406 mm".
+    pub(crate) shooter: String,
+
+    /// English name of the ship that fires for the group.
+    pub(crate) shooter_ship: String,
+    pub(crate) role: ShooterRole,
+    pub(crate) band: RangeBand,
+
+    /// Sampled ranges of the band within the shooter's reach.
+    pub(crate) ranges: Vec<Km>,
+    pub(crate) aspect: Aspect,
+
+    /// AP that detonates in the citadel. `None` for HE and SAP and without
+    /// citadel plates; the peers are those with citadel plates.
+    pub(crate) citadel: Option<Measured>,
+
+    /// Citadel and penetration hits.
+    pub(crate) damaging: Measured,
+
+    /// AP that leaves the ship without detonating; `None` for HE and SAP.
+    pub(crate) overpenetration: Option<Measured>,
+}
+
+/// A rate of one ship and the same rate of each peer.
+#[derive(Debug, Clone)]
+pub(crate) struct Measured {
+    pub(crate) value: Percent,
+    pub(crate) peers: Vec<f32>,
+}
+
+/// One ship's matchups against the shooters of its tier's peer table.
+#[derive(Debug, Clone)]
+pub(crate) struct ShipMatchups {
+    /// Tiers of the peers the rates compare with.
+    pub(crate) peer_tiers: TierRange,
+    pub(crate) matchups: Vec<Matchup>,
+}
+
 /// The shooters an assessment traces, with the weapon at every range sampled.
 struct ShooterSet {
     tiers: TierRange,
@@ -634,6 +676,7 @@ struct PeerCondition {
     condition: Condition,
     citadel: Percent,
     damaging: Percent,
+    overpenetration: Option<Percent>,
     fuse_armed: Option<Percent>,
 }
 
@@ -686,8 +729,12 @@ pub(crate) struct ComparisonCache {
     /// is traced once.
     tables: Mutex<HashMap<ComparisonKey, TableSlot>>,
 
-    /// Held while a table is traced, so a request and the background
-    /// preparation together use at most half the processors.
+    /// Ships a table lacks, such as test ships, traced against its shooters,
+    /// by table and GameParams index. Kept in memory only.
+    untabled: Mutex<HashMap<(ComparisonKey, String), Arc<PeerMetrics>>>,
+
+    /// Held while a table or untabled ships are traced, so a request and the
+    /// background preparation together use at most half the processors.
     tracing: Mutex<()>,
 }
 
@@ -696,8 +743,43 @@ impl ComparisonCache {
         Self {
             dir: cache_root.map(|root| root.join(ARMOR_COMPARISONS_KIND).join(build.to_string())),
             tables: Mutex::new(HashMap::new()),
+            untabled: Mutex::new(HashMap::new()),
             tracing: Mutex::new(()),
         }
+    }
+
+    /// The metrics of `ships`, none of them in `key`'s table, traced by
+    /// `trace` on first use.
+    fn untabled(
+        &self,
+        key: ComparisonKey,
+        ships: &[(&Ship, ArmorFingerprint)],
+        trace: impl Fn(&Ship, ArmorFingerprint) -> Result<PeerMetrics, QueryError> + Sync,
+    ) -> Result<Vec<Arc<PeerMetrics>>, QueryError> {
+        let cached = |ship: &Ship| {
+            let untabled = self.untabled.lock().unwrap_or_else(PoisonError::into_inner);
+            untabled.get(&(key, ship.param.index().to_owned())).cloned()
+        };
+        let mut found: Vec<Option<Arc<PeerMetrics>>> = ships.iter().map(|(ship, _)| cached(ship)).collect();
+        if found.iter().any(Option::is_none) {
+            let _tracing = self.tracing.lock().unwrap_or_else(PoisonError::into_inner);
+            // Another request may have traced some while this one waited.
+            for (slot, (ship, _)) in found.iter_mut().zip(ships) {
+                if slot.is_none() {
+                    *slot = cached(ship);
+                }
+            }
+            let missing: Vec<usize> = (0..ships.len()).filter(|index| found[*index].is_none()).collect();
+            let traced = parallel_map(&missing, |&index| trace(ships[index].0, ships[index].1));
+            for (index, metrics) in missing.into_iter().zip(traced) {
+                let metrics = Arc::new(metrics?);
+                let mut untabled = self.untabled.lock().unwrap_or_else(PoisonError::into_inner);
+                untabled.insert((key, ships[index].0.param.index().to_owned()), Arc::clone(&metrics));
+                found[index] = Some(metrics);
+            }
+        }
+
+        Ok(found.into_iter().flatten().collect())
     }
 
     fn table(
@@ -1076,6 +1158,7 @@ impl GameData {
                     condition: *condition,
                     citadel: summary.rates.citadel_pct,
                     damaging: summary.damaging,
+                    overpenetration: summary.rates.overpenetration_pct,
                     fuse_armed: summary.rates.fuse_armed_pct,
                 });
             }
@@ -1093,6 +1176,80 @@ impl GameData {
                 turtleback: geometry.shape.turtleback.is_some(),
             }),
         })
+    }
+
+    /// Each of `ships`, all of `class` and `tier`, against every shooter
+    /// group of that tier's peer table at each band and aspect, with the
+    /// table's peers' rates. A ship the table lacks, such as a test ship, is
+    /// traced against the same shooters once per process. `None` for a ship
+    /// without an armor model.
+    pub(crate) fn matchups(
+        &self,
+        class: ShipClass,
+        tier: Tier,
+        ships: &[&Ship],
+    ) -> Result<Vec<Option<ShipMatchups>>, QueryError> {
+        /// Where a ship's metrics come from.
+        enum Located {
+            /// Index into the table's peers.
+            Listed(usize),
+
+            /// Index into the untabled ships.
+            Untabled(usize),
+            WithoutArmorModel,
+        }
+
+        let set = self.shooter_set(tier)?;
+        let key = ComparisonKey { class, tier };
+        let table = self.armor_comparisons.table(key, &set.signature(), || self.trace_peers(key, &set))?;
+
+        let found = parallel_map(ships, |ship| -> Result<Result<usize, Option<ArmorFingerprint>>, QueryError> {
+            if let Some(index) = table.peers.iter().position(|peer| peer.index == ship.param.index()) {
+                return Ok(Ok(index));
+            }
+            let Some(meshes) = self.stock_meshes(ship)? else {
+                return Ok(Err(None));
+            };
+
+            // Ships sharing a listed peer's armor model, such as collaboration
+            // copies, are listed once in the table.
+            let fingerprint = ArmorFingerprint::from_meshes(&meshes);
+            Ok(table.peers.iter().position(|peer| peer.fingerprint == fingerprint).ok_or(Some(fingerprint)))
+        });
+        let mut untabled: Vec<(&Ship, ArmorFingerprint)> = Vec::new();
+        let mut located = Vec::with_capacity(ships.len());
+        for (ship, found) in ships.iter().zip(found) {
+            located.push(match found? {
+                Ok(index) => Located::Listed(index),
+                Err(Some(fingerprint)) => {
+                    untabled.push((ship, fingerprint));
+                    Located::Untabled(untabled.len() - 1)
+                }
+                Err(None) => Located::WithoutArmorModel,
+            });
+        }
+        let traced = self
+            .armor_comparisons
+            .untabled(key, &untabled, |ship, fingerprint| self.peer_metrics(ship, fingerprint, &set))?;
+
+        let peer_tiers = TierRange::adjacent(tier);
+        Ok(located
+            .into_iter()
+            .map(|located| {
+                let metrics: &PeerMetrics = match located {
+                    Located::Listed(index) => &table.peers[index],
+                    Located::Untabled(index) => &traced[index],
+                    Located::WithoutArmorModel => return None,
+                };
+                let peers: Vec<&PeerMetrics> = table
+                    .peers
+                    .iter()
+                    .filter(|peer| peer.index != metrics.index && peer.fingerprint != metrics.fingerprint)
+                    .collect();
+
+                Some(ShipMatchups { peer_tiers, matchups: matchups_of(metrics, &peers, &set) })
+            })
+            .collect())
     }
 }
 
@@ -1679,6 +1836,48 @@ fn percent(value: f32) -> Percent {
 fn round1(value: f32) -> f32 {
     // Adding zero turns a negative zero into zero.
     (value * 10.0).round() / 10.0 + 0.0
+}
+
+/// The rates of `metrics` against each shooter group at each band and
+/// aspect, with the same rates of `peers`.
+fn matchups_of(metrics: &PeerMetrics, peers: &[&PeerMetrics], set: &ShooterSet) -> Vec<Matchup> {
+    let with_citadel: Vec<&PeerMetrics> = peers.iter().copied().filter(|peer| peer.citadel.is_some()).collect();
+
+    metrics
+        .conditions
+        .iter()
+        .map(|entry| {
+            let shooter = &set.shooters[entry.shooter.0];
+            let measured = |value: Percent, peers: &[&PeerMetrics], field: fn(&PeerCondition) -> Option<Percent>| {
+                let peers = peers
+                    .iter()
+                    .filter_map(|peer| {
+                        let same = peer
+                            .conditions
+                            .iter()
+                            .find(|other| other.shooter == entry.shooter && other.condition == entry.condition)?;
+                        field(same)
+                    })
+                    .map(Percent::value)
+                    .collect();
+                Measured { value, peers }
+            };
+            let citadel = (shooter.report.ammo == Ammo::Ap && metrics.citadel.is_some())
+                .then(|| measured(entry.citadel, &with_citadel, |same| Some(same.citadel)));
+
+            Matchup {
+                shooter: shooter.report.group.clone(),
+                shooter_ship: shooter.name.clone(),
+                role: shooter.report.role,
+                band: entry.condition.band,
+                ranges: shooter.ranges(entry.condition.band),
+                aspect: entry.condition.aspect,
+                citadel,
+                damaging: measured(entry.damaging, peers, |same| Some(same.damaging)),
+                overpenetration: entry.overpenetration.map(|value| measured(value, peers, |same| same.overpenetration)),
+            }
+        })
+        .collect()
 }
 
 fn is_zero(value: &usize) -> bool {

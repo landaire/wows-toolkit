@@ -106,6 +106,8 @@ ships:
         builds:
           - "speed 82.69 kn with Swift Fish, Torpedo Tubes Modification 1; 75 kn without"
           - "reaction_time 8.11 s with Swift Fish, Torpedo Tubes Modification 1; 8.94 s without"
+    signals:
+      - "Kites well: within 30 deg of the stern 4 of 6 main battery barrels bear and all bear from 45 deg off the stern."
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Engine Boost (3 charges, 90 s reload)"
@@ -209,6 +211,9 @@ ships:
         builds:
           - "speed 83.79 kn with Swift Fish, Torpedo Tubes Modification 1; 76 kn without"
           - "reaction_time 8 s with Swift Fish, Torpedo Tubes Modification 1; 8.82 s without"
+    signals:
+      - "Kites well: within 30 deg of the stern 4 of 6 main battery barrels bear and all bear from 30 deg off the stern."
+      - "Its torpedo launchers bear only from 56 deg off the bow, so a launch needs a wide turn toward broadside."
     unique_upgrade: "Torpedo Quick Reload System (unique upgrade), taken for: torpedo_reload, torpedo_dpm, torpedoes_per_minute"
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
@@ -271,6 +276,9 @@ ships:
         builds:
           - "speed 83.79 kn with Swift Fish, Torpedo Tubes Modification 1; 76 kn without"
           - "reaction_time 7.11 s with Swift Fish, Torpedo Tubes Modification 1; 7.84 s without"
+    signals:
+      - "Kites well: within 30 deg of the stern 4 of 4 main battery barrels bear and all bear from 28 deg off the stern."
+      - "Its torpedo launchers bear only from 63 deg off the bow, so a launch needs a wide turn toward broadside."
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Engine Boost (4 charges, 100 s reload)"
@@ -278,8 +286,8 @@ ships:
       - "Surveillance Radar (3 charges, 120 s reload)"
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
-  - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships."
+  - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
   - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."

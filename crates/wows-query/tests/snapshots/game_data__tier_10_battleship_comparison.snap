@@ -43,6 +43,10 @@ factors:
   - "speed (kn, higher is better): top speed"
   - "rudder_shift (s, lower is better): rudder shift time"
   - "turning_circle (m, lower is better): turning circle radius"
+  - "bb_ap_citadel (%, lower is better): broadside AP hits of the most common battleship caliber of its matchmaking at 12 to 14 km that detonate in the citadel, from armor_assessment"
+  - "bb_ap_overpenetration (%, higher is better): the same hits that overpenetrate, doing little damage"
+  - "bow_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest bow plate above the waterline"
+  - "stern_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest stern plate above the waterline"
 torpedo_factors:
   - "speed (kn, higher is better): torpedo speed"
   - "range (km, higher is better): torpedo range"
@@ -87,6 +91,10 @@ ships:
       speed: "33 (rank 7/43, p81)"
       rudder_shift: "16.75 (rank 12/43, p74)"
       turning_circle: "1160 (rank 43/43, p0)"
+      bb_ap_citadel: "7.2 (rank 33/43, p24)"
+      bb_ap_overpenetration: "43.4 (rank 3/43, p95)"
+      bow_overmatch: "87.7 (rank 38/43, p0)"
+      stern_overmatch: "87.7 (rank 34/43, p10)"
     outliers:
       - "health 70000 HP: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "repair_party_heal 40%: better than 95% of the 41 other tier 10 battleships (rank 1/42)"
@@ -96,6 +104,11 @@ ships:
       - "secondary_range 10.08 km: worse than all 42 other tier 10 battleships (rank 43/43)"
       - "concealment 10.6 km: better than all 42 other tier 10 battleships (rank 1/43)"
       - "turning_circle 1160 m: worse than all 42 other tier 10 battleships (rank 43/43)"
+      - "bb_ap_overpenetration 43.4%: better than 95% of the 42 other tier 10 battleships (rank 3/43)"
+      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration: broadside 3.3%: better than 91% of the 81 other tier 9-11 battleships (rank 6/82)"
+      - "vs battleship AP 406 mm (Minnesota), 12-14 km, citadel: angled 45 deg 7.7%: worse than 93% of the 81 other tier 9-11 battleships (rank 76/82)"
+      - "vs battleship AP 406 mm (Minnesota), 12-14 km, overpenetration: broadside 43.4%: better than 94% of the 81 other tier 9-11 battleships (rank 6/82); angled 30 deg 39.9%: better than 95% of the 81 other tier 9-11 battleships (rank 5/82); angled 45 deg 37.3%: better than 95% of the 81 other tier 9-11 battleships (rank 5/82)"
+      - "vs battleship AP 457 mm (Georgia), 12-14 km, overpenetration: broadside 45%: better than 95% of the 81 other tier 9-11 battleships (rank 5/82); angled 30 deg 41.2%: better than 95% of the 81 other tier 9-11 battleships (rank 5/82); angled 45 deg 38.6%: better than 95% of the 81 other tier 9-11 battleships (rank 5/82)"
     torpedoes:
       - torpedo: 533 mm Mk IXM
         values:
@@ -110,6 +123,46 @@ ships:
         builds:
           - speed 65.1 kn with Torpedo Tubes Modification 1; 62 kn without
           - reaction_time 7.44 s with Torpedo Tubes Modification 1; 7.81 s without
+    matchups:
+      - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 20.2% (rank 15/82, p83), overpenetration 11.9% (rank 24/82, p70)"
+          angled_30: "citadel 0% (rank 1/82, p0), damaging 22.3% (rank 14/82, p84), overpenetration 8.3% (rank 22/82, p72)"
+          angled_45: "citadel 0% (rank 1/82, p0), damaging 32.2% (rank 27/82, p65), overpenetration 5.4% (rank 16/82, p78)"
+      - shooter: "light cruiser AP 152 mm (Edinburgh), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 64.7% (rank 47/82, p43), overpenetration 3.3% (rank 6/82, p91)"
+          angled_30: "citadel 0% (rank 1/82, p1), damaging 63% (rank 47/82, p43), overpenetration 3.4% (rank 14/82, p84)"
+          angled_45: "citadel 0% (rank 1/82, p1), damaging 56.8% (rank 38/82, p54), overpenetration 2.8% (rank 26/82, p59)"
+      - shooter: "heavy cruiser AP 203 mm (Hindenburg), 12-14 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 22% (rank 61/82, p26), overpenetration 20.3% (rank 50/82, p36)"
+          angled_30: "citadel 0% (rank 1/82, p0), damaging 24.3% (rank 41/82, p51), overpenetration 16.8% (rank 23/82, p73)"
+          angled_45: "citadel 0% (rank 1/82, p6), damaging 21.3% (rank 33/82, p60), overpenetration 12.6% (rank 49/82, p40)"
+      - shooter: "battleship AP 406 mm (Minnesota), 12-14 km"
+        aspects:
+          broadside: "citadel 7.2% (rank 60/82, p27), damaging 31.6% (rank 65/82, p21), overpenetration 43.4% (rank 6/82, p94)"
+          angled_30: "citadel 7.9% (rank 69/82, p16), damaging 32.3% (rank 66/82, p20), overpenetration 39.9% (rank 5/82, p95)"
+          angled_45: "citadel 7.7% (rank 76/82, p7), damaging 32.7% (rank 68/82, p17), overpenetration 37.3% (rank 5/82, p95)"
+      - shooter: "battleship AP 457 mm (Georgia), 12-14 km"
+        aspects:
+          broadside: "citadel 7.2% (rank 52/82, p37), damaging 30.3% (rank 70/82, p15), overpenetration 45% (rank 5/82, p95)"
+          angled_30: "citadel 7.9% (rank 67/82, p19), damaging 31.5% (rank 66/82, p20), overpenetration 41.2% (rank 5/82, p95)"
+          angled_45: "citadel 8.2% (rank 73/82, p11), damaging 32% (rank 64/82, p22), overpenetration 38.6% (rank 5/82, p95)"
+      - shooter: "cruiser HE 203 mm (Ibuki), 5-10 km"
+        aspects:
+          broadside: "damaging 61% (rank 40/82, p52)"
+          angled_30: "damaging 60.7% (rank 40/82, p52)"
+          angled_45: "damaging 61.2% (rank 40/82, p52)"
+      - shooter: "SAP 203 mm (Amalfi), 5-10 km"
+        aspects:
+          broadside: "damaging 55.2% (rank 26/82, p68)"
+          angled_30: "damaging 55.2% (rank 25/82, p70)"
+          angled_45: "damaging 54% (rank 25/82, p70)"
+    signals:
+      - "Kites poorly: within 30 deg of the stern 2 of 6 main battery barrels bear and all bear from 30 deg off the stern."
+      - "Bow-on it is exposed: 87.7% of tier 8-11 battleships overmatch its 25 mm bow plating; within 30 deg of the bow 4 of 6 main battery barrels bear and all bear from 30 deg off the bow."
+      - "Battleship AP mostly passes through it: battleship AP 406 mm (Minnesota) at 12-14 km, 43.4% of broadside hits overpenetrate, more than 94% of tier 9-11 battleships. Overpenetration-prone plating is a strength against battleships."
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (2 charges, 80 s reload)"
@@ -145,6 +198,10 @@ ships:
       speed: "29.6 (rank 27/43, p33)"
       rudder_shift: "16.02 (rank 6/43, p83)"
       turning_circle: "960 (rank 27/43, p31)"
+      bb_ap_citadel: "0 (rank 1/43, p81)"
+      bb_ap_overpenetration: "27.2 (rank 36/43, p14)"
+      bow_overmatch: "5.74 (rank 1/43, p19)"
+      stern_overmatch: "5.74 (rank 1/43, p26)"
     outliers:
       - "main_battery_reload 32.56 s: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "main_battery_range 19.94 km: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
@@ -153,6 +210,50 @@ ships:
       - "bow_barrels 100%: better than 93% of the 42 other tier 10 battleships (rank 1/43)"
       - "all_bear_from_bow 23 deg: better than 93% of the 42 other tier 10 battleships (rank 2/43)"
       - "aa_range 4.6 km: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
+      - "vs destroyer AP 127 mm (Benson), 5-10 km, overpenetration: broadside 5.8%: worse than 93% of the 81 other tier 9-11 battleships (rank 76/82); angled 30 deg 4%: worse than 96% of the 81 other tier 9-11 battleships (rank 79/82)"
+      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration: broadside 1.1%: worse than 90% of the 81 other tier 9-11 battleships (rank 74/82)"
+      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, overpenetration: broadside 13.7%: worse than 99% of the 81 other tier 9-11 battleships (rank 81/82); angled 30 deg 9.3%: worse than 99% of the 81 other tier 9-11 battleships (rank 81/82); angled 45 deg 10.1%: worse than 91% of the 81 other tier 9-11 battleships (rank 75/82)"
+      - "vs battleship AP 406 mm (Minnesota), 12-14 km, overpenetration: angled 30 deg 23.7%: worse than 91% of the 81 other tier 9-11 battleships (rank 75/82); angled 45 deg 19.6%: worse than 91% of the 81 other tier 9-11 battleships (rank 75/82)"
+      - "vs battleship AP 457 mm (Georgia), 12-14 km, overpenetration: broadside 28.2%: worse than 90% of the 81 other tier 9-11 battleships (rank 74/82)"
+    matchups:
+      - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 29.9% (rank 35/82, p58), overpenetration 5.8% (rank 76/82, p7)"
+          angled_30: "citadel 0% (rank 1/82, p0), damaging 25.5% (rank 21/82, p75), overpenetration 4% (rank 79/82, p2)"
+          angled_45: "citadel 0% (rank 1/82, p0), damaging 30.7% (rank 18/82, p79), overpenetration 4.5% (rank 40/82, p48)"
+      - shooter: "light cruiser AP 152 mm (Edinburgh), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 62% (rank 43/82, p48), overpenetration 1.1% (rank 74/82, p9)"
+          angled_30: "citadel 0% (rank 1/82, p1), damaging 60.8% (rank 42/82, p49), overpenetration 2.2% (rank 44/82, p36)"
+          angled_45: "citadel 0% (rank 1/82, p1), damaging 57.7% (rank 40/82, p49), overpenetration 2.6% (rank 36/82, p53)"
+      - shooter: "heavy cruiser AP 203 mm (Hindenburg), 12-14 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p0), damaging 26.4% (rank 68/82, p16), overpenetration 13.7% (rank 81/82, p1)"
+          angled_30: "citadel 0% (rank 1/82, p0), damaging 29.3% (rank 58/82, p28), overpenetration 9.3% (rank 81/82, p1)"
+          angled_45: "citadel 0% (rank 1/82, p6), damaging 26.9% (rank 52/82, p37), overpenetration 10.1% (rank 75/82, p7)"
+      - shooter: "battleship AP 406 mm (Minnesota), 12-14 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/82, p83), damaging 34.6% (rank 72/82, p12), overpenetration 27.2% (rank 71/82, p12)"
+          angled_30: "citadel 0% (rank 1/82, p78), damaging 33.5% (rank 70/82, p14), overpenetration 23.7% (rank 75/82, p7)"
+          angled_45: "citadel 0.5% (rank 28/82, p60), damaging 32.4% (rank 65/82, p20), overpenetration 19.6% (rank 75/82, p9)"
+      - shooter: "battleship AP 457 mm (Georgia), 12-14 km"
+        aspects:
+          broadside: "citadel 2.6% (rank 15/82, p79), damaging 22.1% (rank 44/82, p44), overpenetration 28.2% (rank 74/82, p10)"
+          angled_30: "citadel 0.1% (rank 12/82, p85), damaging 33.6% (rank 69/82, p15), overpenetration 24.7% (rank 73/82, p9)"
+          angled_45: "citadel 0.3% (rank 7/82, p88), damaging 34.2% (rank 67/82, p19), overpenetration 20.7% (rank 71/82, p14)"
+      - shooter: "cruiser HE 203 mm (Ibuki), 5-10 km"
+        aspects:
+          broadside: "damaging 52.5% (rank 24/82, p72)"
+          angled_30: "damaging 52.2% (rank 24/82, p72)"
+          angled_45: "damaging 51.8% (rank 23/82, p73)"
+      - shooter: "SAP 203 mm (Amalfi), 5-10 km"
+        aspects:
+          broadside: "damaging 44.3% (rank 13/82, p85)"
+          angled_30: "damaging 45.5% (rank 16/82, p81)"
+          angled_45: "damaging 45.4% (rank 17/82, p80)"
+    signals:
+      - "Kites well: within 30 deg of the stern 8 of 16 main battery barrels bear and all bear from 36 deg off the stern."
+      - "Bow-in suits it: within 30 deg of the bow 16 of 16 main battery barrels bear and all bear from 23 deg off the bow; only 5.74% of tier 8-11 battleships overmatch its 32 mm bow plating."
     unique_upgrade: "Improved Rangefinders (unique upgrade), taken for: dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
@@ -193,6 +294,10 @@ ships:
       speed: "29.5 (rank 30/43, p19)"
       rudder_shift: "16.56 (rank 11/43, p76)"
       turning_circle: "880 (rank 7/43, p86)"
+      bb_ap_citadel: "0.8 (rank 15/43, p64)"
+      bb_ap_overpenetration: "35.3 (rank 21/43, p52)"
+      bow_overmatch: "87.7 (rank 38/43, p0)"
+      stern_overmatch: "87.7 (rank 34/43, p10)"
     outliers:
       - "health 68300 HP: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
       - "main_battery_reload 20.24 s: better than 90% of the 42 other tier 10 battleships (rank 5/43)"
@@ -205,6 +310,8 @@ ships:
       - "concealment 12.26 km: better than 90% of the 42 other tier 10 battleships (rank 5/43)"
       - "torpedo Type 93 mod. 3 flood_coefficient 4.06x: better than all 5 other torpedo options of tier 10 battleships (rank 1/6)"
       - "torpedo Type 93 mod. 3 reaction_time 9 s: worse than all 5 other torpedo options of tier 10 battleships (rank 6/6)"
+      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration: broadside 3.4%: better than 94% of the 82 other tier 9-11 battleships (rank 5/83)"
+      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, citadel: angled 45 deg 0.2%: worse than 96% of the 82 other tier 9-11 battleships (rank 80/83)"
     torpedoes:
       - torpedo: Type 93 mod. 3
         values:
@@ -219,6 +326,45 @@ ships:
         builds:
           - speed 70.35 kn with Torpedo Tubes Modification 1; 67 kn without
           - reaction_time 9 s with Torpedo Tubes Modification 1; 9.45 s without
+    matchups:
+      - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/83, p0), damaging 33.5% (rank 46/83, p45), overpenetration 11.3% (rank 33/83, p61)"
+          angled_30: "citadel 0% (rank 1/83, p0), damaging 33.6% (rank 47/83, p44), overpenetration 7.6% (rank 35/83, p57)"
+          angled_45: "citadel 0% (rank 1/83, p0), damaging 36.8% (rank 38/83, p55), overpenetration 5% (rank 27/83, p68)"
+      - shooter: "light cruiser AP 152 mm (Edinburgh), 5-10 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/83, p0), damaging 58.1% (rank 33/83, p61), overpenetration 3.4% (rank 5/83, p94)"
+          angled_30: "citadel 0% (rank 1/83, p1), damaging 58.3% (rank 33/83, p61), overpenetration 3.3% (rank 15/83, p82)"
+          angled_45: "citadel 0% (rank 1/83, p1), damaging 57.1% (rank 39/83, p54), overpenetration 3.2% (rank 16/83, p78)"
+      - shooter: "heavy cruiser AP 203 mm (Hindenburg), 12-14 km"
+        aspects:
+          broadside: "citadel 0% (rank 1/83, p0), damaging 7.7% (rank 13/83, p84), overpenetration 19.9% (rank 56/83, p32)"
+          angled_30: "citadel 0% (rank 1/83, p0), damaging 20% (rank 23/83, p73), overpenetration 16.5% (rank 25/83, p70)"
+          angled_45: "citadel 0.2% (rank 80/83, p2), damaging 20.8% (rank 32/83, p61), overpenetration 15.5% (rank 19/83, p77)"
+      - shooter: "battleship AP 406 mm (Minnesota), 12-14 km"
+        aspects:
+          broadside: "citadel 0.8% (rank 20/83, p76), damaging 20.7% (rank 31/83, p63), overpenetration 35.3% (rank 41/83, p51)"
+          angled_30: "citadel 0.8% (rank 33/83, p60), damaging 21.2% (rank 34/83, p59), overpenetration 33.8% (rank 25/83, p68)"
+          angled_45: "citadel 1.3% (rank 55/83, p33), damaging 21.3% (rank 43/83, p49), overpenetration 31.8% (rank 17/83, p80)"
+      - shooter: "battleship AP 457 mm (Georgia), 12-14 km"
+        aspects:
+          broadside: "citadel 0.8% (rank 11/83, p88), damaging 20.3% (rank 32/83, p62), overpenetration 35.9% (rank 41/83, p50)"
+          angled_30: "citadel 0.8% (rank 19/83, p78), damaging 21% (rank 32/83, p62), overpenetration 34.1% (rank 28/83, p67)"
+          angled_45: "citadel 1.4% (rank 31/83, p62), damaging 20.8% (rank 24/83, p72), overpenetration 32.5% (rank 16/83, p82)"
+      - shooter: "cruiser HE 203 mm (Ibuki), 5-10 km"
+        aspects:
+          broadside: "damaging 75.3% (rank 67/83, p20)"
+          angled_30: "damaging 74% (rank 66/83, p21)"
+          angled_45: "damaging 74% (rank 66/83, p20)"
+      - shooter: "SAP 203 mm (Amalfi), 5-10 km"
+        aspects:
+          broadside: "damaging 66% (rank 46/83, p45)"
+          angled_30: "damaging 64.6% (rank 44/83, p48)"
+          angled_45: "damaging 64.7% (rank 45/83, p46)"
+    signals:
+      - "Kites with its guns (within 30 deg of the stern 9 of 15 main battery barrels bear and all bear from 40 deg off the stern), but 87.7% of tier 8-11 battleships overmatch its 25 mm stern plating."
+      - "Bow-on it is exposed: 87.7% of tier 8-11 battleships overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 15 main battery barrels bear and all bear from 40 deg off the bow."
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (4 charges, 80 s reload)"
@@ -227,8 +373,8 @@ ships:
       - Modified Shells (+28% AP shell armor penetration capability)
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
-  - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships."
+  - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
   - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."

@@ -547,7 +547,7 @@ impl SearchStat {
     fn caution(self) -> Option<&'static str> {
         match self {
             Self::Armor { .. } | Self::Card(TtxStat::ArmorMin | TtxStat::ArmorMax) => Some(
-                "Nominal plate thickness ranks plates, not protection: the belt, bulge and decks in front of a zone decide what reaches it. For how well ships are protected, use armor_assessment (citadel and penetration rates).",
+                "Nominal plate thickness ranks plates, not protection: the belt, bulge and decks in front of a zone decide what reaches it. For how well ships are protected, use armor_assessment or ship_comparison (citadel and penetration rates).",
             ),
             Self::Card(_) | Self::Derived(_) | Self::Ricochet { .. } => None,
         }
