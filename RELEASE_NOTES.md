@@ -4,6 +4,21 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.0.5
+
+### Replay analysis
+
+- Current Match finds the players in 15.10 battles and looks up their stats again. The client added a roster field, which made every player look like a bot.
+- 15.10 replays show teammates in friendly colors with their names, including in event battles.
+- Event capture zones are drawn where they are in the battle instead of in a row along the top of the map.
+- The Replay Inspector breaks down spotting damage. Hover or expand a player's spotting figure to see how much each spotted ship took, and for your own ship which weapon types dealt it.
+- Potential damage keeps its breakdown when a replay has no battle results.
+
+### Replay renders
+
+- Long names and messages in the activity panel wrap instead of running off the edge.
+- Activity panel rows alternate background shades, and new entries slide into place.
+
 ## 1.0.4
 
 ### Replay analysis
