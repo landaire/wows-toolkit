@@ -14,7 +14,6 @@ per-commit history lives in `CHANGELOG.md`.
 - The command palette can copy application, game-data, constants-fetch, and recent-crash information for bug reports.
 - The command palette can open any ship in ShipTool.
 - Replay directory tabs have a Directory Stats button. It opens a Stats tab for every replay in the directory and its subdirectories, and reports which replays it skipped and why.
-- Search results have a Render to Clipboard button that renders the replay to video and copies the file.
 - Current Match looks up player stats only after you open the Current Match view.
 - Replay listing no longer fails while loading game data when the replay folder is on a file system without file creation times, such as an NTFS drive mounted on Linux.
 - Opening a replay with an unrecognized ship configuration layout no longer stalls.

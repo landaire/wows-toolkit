@@ -4686,21 +4686,6 @@ impl WowsToolkitApp {
                     self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
                 }
             }
-            SearchOpenAction::RenderToClipboard => {
-                if !request.path.exists() {
-                    self.tab_state.toasts.lock().warning(t!("ui.search.open_missing"));
-                    return;
-                }
-                // Same path as the replay listing's "Render to Clipboard" menu entry.
-                let viewer = ToolkitTabViewer { tab_state: &mut self.tab_state };
-                let Some((paths, build_cache)) = viewer.batch_render_inputs(vec![request.path]) else {
-                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
-                    return;
-                };
-                let ctx = viewer.batch_render_context(build_cache);
-                let task = crate::replay::renderer::batch_render_to_clipboard(paths, ctx);
-                self.tab_state.background_tasks.push(task);
-            }
         }
     }
 

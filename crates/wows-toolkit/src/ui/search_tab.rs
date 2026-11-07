@@ -73,9 +73,6 @@ pub enum SearchOpenAction {
     Inspect,
     /// Open the replay's renderer.
     Render,
-    /// Render the replay's video in the background and put the file on the
-    /// clipboard.
-    RenderToClipboard,
 }
 
 /// A replay the search results table asked to open.
@@ -627,10 +624,10 @@ const fn column_extent(column: ResultColumn) -> (f32, f32) {
     }
 }
 
-/// The action column holds four buttons whose combined width depends on the
+/// The action column holds three buttons whose combined width depends on the
 /// locale's word for "Open", so it is sized from its content like every other
 /// column rather than from a constant that only holds in English.
-const ACTION_COLUMN_EXTENT: (f32, f32) = (140.0, 340.0);
+const ACTION_COLUMN_EXTENT: (f32, f32) = (120.0, 320.0);
 
 /// Every column is resizable. That is what the user asked for, and it is also
 /// what makes auto-sizing work at all: `egui_table` only records a measured
@@ -673,9 +670,6 @@ struct ResultsTable<'a> {
     copy_path: Option<std::path::PathBuf>,
     /// The replay whose play button was clicked, to be rendered.
     render_path: Option<std::path::PathBuf>,
-    /// The replay whose clipboard button was clicked, to be rendered to video
-    /// and copied.
-    render_clipboard_path: Option<std::path::PathBuf>,
     /// Whether any row's preview icon was under the pointer this frame.
     preview_icon_hovered: bool,
     /// The theme's real `widgets.noninteractive.bg_stroke`, captured by
@@ -731,9 +725,9 @@ impl ResultsTable<'_> {
         }
     }
 
-    /// Open, copy path, the play button -- click to render, dwell-gated
-    /// hover for the compact map preview -- and render to clipboard, each
-    /// acting on this row's own replay.
+    /// Open, copy path, and the play button -- click to render, dwell-gated
+    /// hover for the compact map preview -- each acting on this row's own
+    /// replay.
     fn actions_ui(&mut self, ui: &mut egui::Ui, row: usize) {
         let hit = &self.hits[row];
         let exists = hit.replay_path.exists();
@@ -764,12 +758,6 @@ impl ResultsTable<'_> {
         // that carried it and the compact preview behaves identically.
         if preview_response.clicked() {
             self.render_path = Some(hit.replay_path.clone());
-        }
-
-        let clipboard_btn =
-            ui.add(egui::Button::new(icons::CLIPBOARD)).on_hover_text(t!("ui.replay.context.render_to_clipboard"));
-        if clipboard_btn.clicked() {
-            self.render_clipboard_path = Some(hit.replay_path.clone());
         }
 
         // The render above needs only `hit.replay_path`; the mtime exists
@@ -934,21 +922,17 @@ fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: 
 
 use wows_toolkit_viewmodel::search::ship_display_name;
 
-/// What a table pass asked to open, given the paths it reports.
+/// What a table pass asked to open, given the two paths it reports.
 ///
-/// The play, clipboard and Open buttons are separate widgets on the same row,
-/// so one pass raises at most one of them. The impossible frame that carries
-/// several resolves to the most specific: a render, then a clipboard render.
+/// The play button and the Open button are separate widgets on the same row, so
+/// one pass raises at most one of them. A render wins the impossible frame that
+/// carries both, being the more specific of the two.
 fn search_open_request(
     render_path: Option<std::path::PathBuf>,
-    render_clipboard_path: Option<std::path::PathBuf>,
     open_path: Option<std::path::PathBuf>,
 ) -> Option<SearchOpenRequest> {
     render_path
         .map(|path| SearchOpenRequest { path, action: SearchOpenAction::Render })
-        .or_else(|| {
-            render_clipboard_path.map(|path| SearchOpenRequest { path, action: SearchOpenAction::RenderToClipboard })
-        })
         .or_else(|| open_path.map(|path| SearchOpenRequest { path, action: SearchOpenAction::Inspect }))
 }
 
@@ -1144,21 +1128,12 @@ impl ToolkitTabViewer<'_> {
             open_path: None,
             copy_path: None,
             render_path: None,
-            render_clipboard_path: None,
             preview_icon_hovered: false,
             // Overwritten by `show_results_table` before the table draws.
             noninteractive_bg_stroke: egui::Stroke::NONE,
         };
         show_results_table(ui, &mut delegate);
-        let ResultsTable {
-            sort_clicked,
-            open_path,
-            copy_path,
-            render_path,
-            render_clipboard_path,
-            preview_icon_hovered,
-            ..
-        } = delegate;
+        let ResultsTable { sort_clicked, open_path, copy_path, render_path, preview_icon_hovered, .. } = delegate;
 
         // No row's preview icon was hovered this frame, whether the pointer
         // left the table entirely or is sitting over a different column:
@@ -1178,7 +1153,7 @@ impl ToolkitTabViewer<'_> {
 
         // Both actions target the workspace that owns the replay's directory,
         // which the app resolves once the dock has finished drawing.
-        if let Some(request) = search_open_request(render_path, render_clipboard_path, open_path) {
+        if let Some(request) = search_open_request(render_path, open_path) {
             self.tab_state.pending_search_open = Some(request);
         }
 
@@ -1870,7 +1845,6 @@ mod tests {
         sort_clicked: Option<SortColumn>,
         open_path: Option<std::path::PathBuf>,
         copy_path: Option<std::path::PathBuf>,
-        render_clipboard_path: Option<std::path::PathBuf>,
         render_path: Option<std::path::PathBuf>,
     }
 
@@ -1974,7 +1948,6 @@ mod tests {
                     open_path: None,
                     copy_path: None,
                     render_path: None,
-                    render_clipboard_path: None,
                     preview_icon_hovered: false,
                     noninteractive_bg_stroke: egui::Stroke::NONE,
                 };
@@ -1984,7 +1957,6 @@ mod tests {
                     open_path: delegate.open_path,
                     copy_path: delegate.copy_path,
                     render_path: delegate.render_path,
-                    render_clipboard_path: delegate.render_clipboard_path,
                 };
             });
             output.textures_delta.clear();
@@ -2867,27 +2839,6 @@ mod tests {
         }
     }
 
-    /// The clipboard button carries its own row and asks for nothing else, so a
-    /// click on it never also opens the renderer window.
-    #[test]
-    fn clicking_a_rows_clipboard_button_asks_to_render_that_rows_replay_to_the_clipboard() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let hits = hits_with_real_files(dir.path());
-        let mut harness = TableHarness::new(hits.clone());
-        let clipboards = button_per_row(&harness, icons::CLIPBOARD, hits.len());
-
-        for (row, hit) in hits.iter().enumerate() {
-            let asked = harness.click(clipboards[row]);
-            assert_eq!(
-                asked.render_clipboard_path.as_deref(),
-                Some(hit.replay_path.as_path()),
-                "row {row}'s clipboard button asked to render {:?}",
-                asked.render_clipboard_path
-            );
-            assert_eq!(asked.render_path, None, "row {row}'s clipboard button also opened the renderer");
-        }
-    }
-
     /// The two actions are different actions. Without this, a cell that wired
     /// the play button to the Open button's response would satisfy the test
     /// above and open the inspector for every play_button click.
@@ -3001,27 +2952,22 @@ mod tests {
         assert_eq!(harness.preview_state.pending_request(), None, "a hit with no mtime armed a preview");
     }
 
-    /// The paths a pass reports map onto their own actions. A mapping that
-    /// sent two of them to the same action would leave every widget test above
-    /// passing.
+    /// The two paths a pass reports map onto the two actions. A mapping that
+    /// sent both to the inspector, or both to the renderer, would leave every
+    /// widget test above passing.
     #[test]
     fn each_reported_path_becomes_its_own_kind_of_request() {
         let rendered = std::path::PathBuf::from("D:/a/rendered.wowsreplay");
-        let copied = std::path::PathBuf::from("D:/a/copied.wowsreplay");
         let opened = std::path::PathBuf::from("D:/a/opened.wowsreplay");
 
         assert_eq!(
-            search_open_request(Some(rendered.clone()), None, None),
+            search_open_request(Some(rendered.clone()), None),
             Some(SearchOpenRequest { path: rendered.clone(), action: SearchOpenAction::Render })
         );
         assert_eq!(
-            search_open_request(None, Some(copied.clone()), None),
-            Some(SearchOpenRequest { path: copied.clone(), action: SearchOpenAction::RenderToClipboard })
-        );
-        assert_eq!(
-            search_open_request(None, None, Some(opened.clone())),
+            search_open_request(None, Some(opened.clone())),
             Some(SearchOpenRequest { path: opened.clone(), action: SearchOpenAction::Inspect })
         );
-        assert_eq!(search_open_request(None, None, None), None, "a pass that clicked nothing must ask for nothing");
+        assert_eq!(search_open_request(None, None), None, "a pass that clicked nothing must ask for nothing");
     }
 }
