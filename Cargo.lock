@@ -440,7 +440,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -451,7 +451,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1905,7 +1905,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2837,7 +2837,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3681,7 +3681,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4641,7 +4641,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -4764,9 +4764,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ee67914f779fdcfce4c7f59f6ba8fa68f680bd137648b25a801cd5d9cb1b8ab"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "accesskit 0.24.1",
  "anyhow",
@@ -4835,9 +4834,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-apple"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cdf402e4a795abb27cd9545a6b519f123f4f2b8050fc7f6e7e25e376f34867d"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "anyhow",
  "async-task",
@@ -4875,9 +4873,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-linux"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59c465cccb420a54d2abc14af42ce82ecb1ea473b531ddbd299eb4e15ae2dd83"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_unix 0.22.1",
@@ -4920,9 +4917,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macos"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d809f618f836aff7fc654c00c3f6e64d41abd83713140998dd83e8ad6906b1e9"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_macos 0.26.3",
@@ -4937,6 +4933,7 @@ dependencies = [
  "futures",
  "gpui-fast",
  "gpui-fast-apple",
+ "gpui-fast-wgpu",
  "gpui-pre-collections",
  "gpui-pre-scheduler",
  "gpui-pre-util",
@@ -4961,9 +4958,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macros"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46724abd05d2c874cc31e1996bb862539c5735780dd363cb550469003a6e5140"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4973,9 +4969,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-platform"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb75fcc655a819d87a75180f32528d26b869b421a53c5974046c6e2948c46ecf"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -4990,7 +4985,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-web"
-version = "0.1.13"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -5018,9 +5014,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-wgpu"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a3be892e9d079745739d0e52e397fd43b61d215de4fd1477bb554a9bcf0c7e1"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5032,6 +5027,9 @@ dependencies = [
  "image",
  "itertools 0.14.0",
  "log",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-metal 0.3.2",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -5046,17 +5044,16 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-windows"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "088654835f1408e1aaa79afcc316530461a14fa1c4e543d47b1881b6ced63f19"
+version = "0.1.14"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_windows 0.34.0",
  "anyhow",
  "dunce",
- "etagere",
  "futures",
  "gpui-fast",
+ "gpui-fast-wgpu",
  "gpui-pre-collections",
  "gpui-pre-scheduler",
  "gpui-pre-util",
@@ -6066,7 +6063,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.6.1",
+ "windows-registry 0.4.0",
 ]
 
 [[package]]
@@ -6081,7 +6078,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -8359,7 +8356,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -10161,7 +10158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "petgraph",
@@ -10180,7 +10177,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -10413,7 +10410,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11418,7 +11415,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11431,7 +11428,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11509,7 +11506,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12363,7 +12360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13037,7 +13034,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13801,7 +13798,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -14916,7 +14913,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

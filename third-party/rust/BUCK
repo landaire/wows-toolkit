@@ -25,6 +25,17 @@ git_fetch(
     visibility = [],
 )
 
+git_fetch(
+    name = "gpui-fast-ad75764e51727957.git",
+    repo = "https://github.com/landaire-contrib/gpui-fast",
+    rev = "4a978514a48e6c4227f06678419b4f3a3dc05a5b",
+    sub_targets = [
+        "gpui_apple",
+        "gpui_windows",
+    ],
+    visibility = [],
+)
+
 alias(
     name = "ab_glyph",
     actual = ":ab_glyph-0.2",
@@ -1358,7 +1369,7 @@ cargo.rust_library(
     },
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.60"],
         ),
     },
     visibility = [],
@@ -1396,7 +1407,7 @@ cargo.rust_library(
     deps = [
         ":anstyle-1",
         ":once_cell_polyfill-1",
-        ":windows-sys-0.61",
+        ":windows-sys-0.60",
     ],
 )
 
@@ -6118,7 +6129,7 @@ cargo.rust_library(
     },
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-sys-0.59"],
+            deps = [":windows-sys-0.52"],
         ),
     },
     visibility = [],
@@ -9327,7 +9338,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.60"],
         ),
     },
     visibility = [],
@@ -12241,7 +12252,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.52"],
         ),
     },
     visibility = [],
@@ -15208,7 +15219,7 @@ cargo.rust_library(
     ],
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-0.62"],
+            deps = [":windows-0.58"],
         ),
     },
     visibility = [],
@@ -15519,32 +15530,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-0.1.13.crate",
-    sha256 = "7ee67914f779fdcfce4c7f59f6ba8fa68f680bd137648b25a801cd5d9cb1b8ab",
-    size_bytes = 1066420,
-    strip_prefix = "gpui-fast-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-0.1",
-    srcs = [":gpui-fast-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui",
-    crate_root = "gpui-fast-0.1.13.crate/src/gpui.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui/src/gpui.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui",
-        "CARGO_MANIFEST_DIR": "gpui-fast-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui",
         "CARGO_PKG_AUTHORS": "Nathan Sobo <nathan@zed.dev>:Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15647,32 +15649,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-apple-0.1.13.crate",
-    sha256 = "6cdf402e4a795abb27cd9545a6b519f123f4f2b8050fc7f6e7e25e376f34867d",
-    size_bytes = 310659,
-    strip_prefix = "gpui-fast-apple-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-apple/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-apple-0.1",
-    srcs = [":gpui-fast-apple-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_apple",
-    crate_root = "gpui-fast-apple-0.1.13.crate/src/gpui_apple.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_apple/src/gpui_apple.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_apple",
-        "CARGO_MANIFEST_DIR": "gpui-fast-apple-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_apple",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_apple: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-apple",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :gpui-fast-apple-0.1-build-script-run[out_dir])",
     },
@@ -15727,21 +15720,21 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-fast-apple-0.1-build-script-build",
-    srcs = [":gpui-fast-apple-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "build_script_build",
-    crate_root = "gpui-fast-apple-0.1.13.crate/build.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_apple/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-fast-apple-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_apple",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_apple: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-apple",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15763,7 +15756,7 @@ buildscript_run(
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15771,35 +15764,27 @@ buildscript_run(
         "font-kit",
         "runtime_shaders",
     ],
-    version = "0.1.13",
-)
-
-http_archive(
-    name = "gpui-fast-linux-0.1.13.crate",
-    sha256 = "59c465cccb420a54d2abc14af42ce82ecb1ea473b531ddbd299eb4e15ae2dd83",
-    size_bytes = 203418,
-    strip_prefix = "gpui-fast-linux-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-linux/0.1.13/download"],
-    visibility = [],
+    manifest_dir = ":gpui-fast-ad75764e51727957.git[gpui_apple]",
+    version = "0.1.14",
 )
 
 cargo.rust_library(
     name = "gpui-fast-linux-0.1",
-    srcs = [":gpui-fast-linux-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_linux",
-    crate_root = "gpui-fast-linux-0.1.13.crate/src/gpui_linux.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_linux/src/gpui_linux.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_linux",
-        "CARGO_MANIFEST_DIR": "gpui-fast-linux-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_linux",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_linux: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-linux",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15864,32 +15849,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-macos-0.1.13.crate",
-    sha256 = "d809f618f836aff7fc654c00c3f6e64d41abd83713140998dd83e8ad6906b1e9",
-    size_bytes = 127086,
-    strip_prefix = "gpui-fast-macos-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-macos/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-macos-0.1",
-    srcs = [":gpui-fast-macos-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_macos",
-    crate_root = "gpui-fast-macos-0.1.13.crate/src/gpui_macos.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_macos/src/gpui_macos.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_macos",
-        "CARGO_MANIFEST_DIR": "gpui-fast-macos-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_macos",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_macos: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-macos",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -15915,6 +15891,7 @@ cargo.rust_library(
         ":futures-0.3",
         ":gpui-fast-0.1",
         ":gpui-fast-apple-0.1",
+        ":gpui-fast-wgpu-0.1",
         ":gpui-pre-collections-0.3",
         ":gpui-pre-scheduler-0.3",
         ":gpui-pre-util-0.3",
@@ -15938,32 +15915,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-macros-0.1.13.crate",
-    sha256 = "46724abd05d2c874cc31e1996bb862539c5735780dd363cb550469003a6e5140",
-    size_bytes = 27860,
-    strip_prefix = "gpui-fast-macros-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-macros/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-macros-0.1",
-    srcs = [":gpui-fast-macros-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_macros",
-    crate_root = "gpui-fast-macros-0.1.13.crate/src/gpui_macros.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_macros/src/gpui_macros.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_macros",
-        "CARGO_MANIFEST_DIR": "gpui-fast-macros-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_macros",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_macros: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-macros",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
@@ -15976,32 +15944,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-platform-0.1.13.crate",
-    sha256 = "eb75fcc655a819d87a75180f32528d26b869b421a53c5974046c6e2948c46ecf",
-    size_bytes = 55669,
-    strip_prefix = "gpui-fast-platform-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-platform/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-platform-0.1",
-    srcs = [":gpui-fast-platform-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_platform",
-    crate_root = "gpui-fast-platform-0.1.13.crate/src/gpui_platform.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_platform/src/gpui_platform.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_platform",
-        "CARGO_MANIFEST_DIR": "gpui-fast-platform-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_platform",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_platform: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-platform",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -16045,38 +16004,21 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-web-0.1",
-    srcs = [
-        "vendor/gpui-fast-web/src/canvas_fallback.rs",
-        "vendor/gpui-fast-web/src/canvas_text.rs",
-        "vendor/gpui-fast-web/src/dispatcher.rs",
-        "vendor/gpui-fast-web/src/display.rs",
-        "vendor/gpui-fast-web/src/events.rs",
-        "vendor/gpui-fast-web/src/glyph_cache.rs",
-        "vendor/gpui-fast-web/src/gpui_web.rs",
-        "vendor/gpui-fast-web/src/http_client.rs",
-        "vendor/gpui-fast-web/src/ime_mirror.rs",
-        "vendor/gpui-fast-web/src/keyboard.rs",
-        "vendor/gpui-fast-web/src/logging.rs",
-        "vendor/gpui-fast-web/src/platform.rs",
-        "vendor/gpui-fast-web/src/run_replacements.rs",
-        "vendor/gpui-fast-web/src/text_system.rs",
-        "vendor/gpui-fast-web/src/viewport.rs",
-        "vendor/gpui-fast-web/src/window.rs",
-    ],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_web",
-    crate_root = "vendor/gpui-fast-web/src/gpui_web.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_web/src/gpui_web.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_web",
-        "CARGO_MANIFEST_DIR": "vendor/gpui-fast-web",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_web",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_web: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-web",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -16110,32 +16052,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-wgpu-0.1.13.crate",
-    sha256 = "7a3be892e9d079745739d0e52e397fd43b61d215de4fd1477bb554a9bcf0c7e1",
-    size_bytes = 135826,
-    strip_prefix = "gpui-fast-wgpu-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-wgpu/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-wgpu-0.1",
-    srcs = [":gpui-fast-wgpu-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_wgpu",
-    crate_root = "gpui-fast-wgpu-0.1.13.crate/src/gpui_wgpu.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_wgpu/src/gpui_wgpu.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_wgpu",
-        "CARGO_MANIFEST_DIR": "gpui-fast-wgpu-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_wgpu",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_wgpu: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-wgpu",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
@@ -16145,6 +16078,13 @@ cargo.rust_library(
             named_deps = {
                 "font_kit": ":zed-font-kit-0.14",
             },
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":objc2-core-foundation-0.3",
+                ":objc2-core-video-0.3",
+                ":objc2-metal-0.3",
+            ],
         ),
         "wasm32": dict(
             deps = [":web-sys-0.3"],
@@ -16177,32 +16117,23 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "gpui-fast-windows-0.1.13.crate",
-    sha256 = "088654835f1408e1aaa79afcc316530461a14fa1c4e543d47b1881b6ced63f19",
-    size_bytes = 200450,
-    strip_prefix = "gpui-fast-windows-0.1.13",
-    urls = ["https://static.crates.io/crates/gpui-fast-windows/0.1.13/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "gpui-fast-windows-0.1",
-    srcs = [":gpui-fast-windows-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "gpui_windows",
-    crate_root = "gpui-fast-windows-0.1.13.crate/src/gpui_windows.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_windows/src/gpui_windows.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_windows",
-        "CARGO_MANIFEST_DIR": "gpui-fast-windows-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_windows",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_windows: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-windows",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :gpui-fast-windows-0.1-build-script-run[out_dir])",
     },
@@ -16218,9 +16149,9 @@ cargo.rust_library(
         ":accesskit_windows-0.34",
         ":anyhow-1",
         ":dunce-1",
-        ":etagere-0.2",
         ":futures-0.3",
         ":gpui-fast-0.1",
+        ":gpui-fast-wgpu-0.1",
         ":gpui-pre-collections-0.3",
         ":gpui-pre-scheduler-0.3",
         ":gpui-pre-util-0.3",
@@ -16241,21 +16172,21 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-fast-windows-0.1-build-script-build",
-    srcs = [":gpui-fast-windows-0.1.13.crate"],
+    srcs = [":gpui-fast-ad75764e51727957.git"],
     crate = "build_script_build",
-    crate_root = "gpui-fast-windows-0.1.13.crate/build.rs",
+    crate_root = "gpui-fast-ad75764e51727957/gpui_windows/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-fast-windows-0.1.13.crate",
+        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_windows",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_windows: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-windows",
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
-        "CARGO_PKG_VERSION": "0.1.13",
+        "CARGO_PKG_VERSION": "0.1.14",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
@@ -16272,10 +16203,11 @@ buildscript_run(
         "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/gpui-fast",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "13",
+        "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    version = "0.1.13",
+    manifest_dir = ":gpui-fast-ad75764e51727957.git[gpui_windows]",
+    version = "0.1.14",
 )
 
 alias(
@@ -18652,7 +18584,7 @@ cargo.rust_library(
                 ":socket2-0.6",
                 ":tokio-1",
                 ":tracing-0.1",
-                ":windows-registry-0.6",
+                ":windows-registry-0.4",
             ],
         ),
     },
@@ -27096,7 +27028,7 @@ cargo.rust_library(
     platform = {
         "windows-msvc": dict(
             named_deps = {
-                "windows": ":windows-sys-0.61",
+                "windows": ":windows-sys-0.60",
             },
         ),
     },
@@ -33634,7 +33566,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":heck-0.5",
-        ":itertools-0.14",
+        ":itertools-0.11",
         ":log-0.4",
         ":multimap-0.10",
         ":petgraph-0.8",
@@ -33679,7 +33611,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":anyhow-1",
-        ":itertools-0.14",
+        ":itertools-0.11",
         ":proc-macro2-1",
         ":quote-1",
         ":syn-2",
@@ -38407,7 +38339,7 @@ cargo.rust_library(
             named_deps = {
                 "libc_errno": ":errno-0.3",
             },
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.52"],
         ),
     },
     rustc_flags = ["@$(location :rustix-1-build-script-run[rustc_flags])"],
@@ -38741,7 +38673,7 @@ cargo.rust_library(
             ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.52"],
         ),
     },
     visibility = [],
@@ -41867,7 +41799,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
+            deps = [":windows-sys-0.60"],
         ),
     },
     visibility = [],
@@ -43861,7 +43793,7 @@ cargo.rust_library(
         "windows-msvc": dict(
             deps = [
                 ":getrandom-0.4",
-                ":windows-sys-0.61",
+                ":windows-sys-0.52",
             ],
         ),
     },
@@ -50796,7 +50728,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = [":windows-sys-0.61"],
+    deps = [":windows-sys-0.52"],
 )
 
 http_archive(
@@ -50834,6 +50766,9 @@ cargo.rust_library(
         "Win32",
         "Win32_Foundation",
         "Win32_Graphics",
+        "Win32_Graphics_Direct3D12",
+        "Win32_Graphics_Dxgi",
+        "Win32_Graphics_Dxgi_Common",
         "Win32_Graphics_Gdi",
         "Win32_Graphics_GdiPlus",
         "Win32_System",
@@ -51291,6 +51226,37 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "windows-link-0.1.3.crate",
+    sha256 = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a",
+    size_bytes = 6154,
+    strip_prefix = "windows-link-0.1.3",
+    urls = ["https://static.crates.io/crates/windows-link/0.1.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "windows-link-0.1",
+    srcs = [":windows-link-0.1.3.crate"],
+    crate = "windows_link",
+    crate_root = "windows-link-0.1.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "windows_link",
+        "CARGO_MANIFEST_DIR": "windows-link-0.1.3.crate",
+        "CARGO_PKG_AUTHORS": "Microsoft",
+        "CARGO_PKG_DESCRIPTION": "Linking for Windows",
+        "CARGO_PKG_NAME": "windows-link",
+        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
+        "CARGO_PKG_VERSION": "0.1.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+)
+
+http_archive(
     name = "windows-link-0.2.1.crate",
     sha256 = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
     size_bytes = 6133,
@@ -51357,6 +51323,46 @@ cargo.rust_library(
     deps = [
         ":windows-core-0.62",
         ":windows-link-0.2",
+    ],
+)
+
+http_archive(
+    name = "windows-registry-0.4.0.crate",
+    sha256 = "4286ad90ddb45071efd1a66dfa43eb02dd0dfbae1545ad6cc3c51cf34d7e8ba3",
+    size_bytes = 12572,
+    strip_prefix = "windows-registry-0.4.0",
+    urls = ["https://static.crates.io/crates/windows-registry/0.4.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "windows-registry-0.4",
+    srcs = [":windows-registry-0.4.0.crate"],
+    crate = "windows_registry",
+    crate_root = "windows-registry-0.4.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "windows_registry",
+        "CARGO_MANIFEST_DIR": "windows-registry-0.4.0.crate",
+        "CARGO_PKG_AUTHORS": "Microsoft",
+        "CARGO_PKG_DESCRIPTION": "Windows registry",
+        "CARGO_PKG_NAME": "windows-registry",
+        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
+        "CARGO_PKG_VERSION": "0.4.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":windows-result-0.3",
+        ":windows-strings-0.3",
+        ":windows-targets-0.53",
     ],
 )
 
@@ -51443,6 +51449,39 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "windows-result-0.3.4.crate",
+    sha256 = "56f42bd332cc6c8eac5af113fc0c1fd6a8fd2aa08a0119358686e5160d0586c6",
+    size_bytes = 13418,
+    strip_prefix = "windows-result-0.3.4",
+    urls = ["https://static.crates.io/crates/windows-result/0.3.4/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "windows-result-0.3",
+    srcs = [":windows-result-0.3.4.crate"],
+    crate = "windows_result",
+    crate_root = "windows-result-0.3.4.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "windows_result",
+        "CARGO_MANIFEST_DIR": "windows-result-0.3.4.crate",
+        "CARGO_PKG_AUTHORS": "Microsoft",
+        "CARGO_PKG_DESCRIPTION": "Windows error handling",
+        "CARGO_PKG_NAME": "windows-result",
+        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
+        "CARGO_PKG_VERSION": "0.3.4",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["std"],
+    visibility = [],
+    deps = [":windows-link-0.1"],
+)
+
+http_archive(
     name = "windows-result-0.4.1.crate",
     sha256 = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5",
     size_bytes = 13381,
@@ -51518,6 +51557,39 @@ cargo.rust_library(
 )
 
 http_archive(
+    name = "windows-strings-0.3.1.crate",
+    sha256 = "87fa48cc5d406560701792be122a10132491cff9d0aeb23583cc2dcafc847319",
+    size_bytes = 13922,
+    strip_prefix = "windows-strings-0.3.1",
+    urls = ["https://static.crates.io/crates/windows-strings/0.3.1/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "windows-strings-0.3",
+    srcs = [":windows-strings-0.3.1.crate"],
+    crate = "windows_strings",
+    crate_root = "windows-strings-0.3.1.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "windows_strings",
+        "CARGO_MANIFEST_DIR": "windows-strings-0.3.1.crate",
+        "CARGO_PKG_AUTHORS": "Microsoft",
+        "CARGO_PKG_DESCRIPTION": "Windows string types",
+        "CARGO_PKG_NAME": "windows-strings",
+        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
+        "CARGO_PKG_VERSION": "0.3.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["std"],
+    visibility = [],
+    deps = [":windows-link-0.1"],
+)
+
+http_archive(
     name = "windows-strings-0.5.1.crate",
     sha256 = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091",
     size_bytes = 13966,
@@ -51588,10 +51660,18 @@ cargo.rust_library(
         "Win32_Graphics_Dwm",
         "Win32_Graphics_Gdi",
         "Win32_Media",
+        "Win32_Networking",
+        "Win32_Networking_WinSock",
         "Win32_Security",
+        "Win32_Security_Cryptography",
+        "Win32_Storage",
+        "Win32_Storage_FileSystem",
         "Win32_System",
         "Win32_System_Com",
         "Win32_System_Com_StructuredStorage",
+        "Win32_System_Console",
+        "Win32_System_Diagnostics",
+        "Win32_System_Diagnostics_Debug",
         "Win32_System_LibraryLoader",
         "Win32_System_Ole",
         "Win32_System_SystemInformation",
@@ -51696,13 +51776,18 @@ cargo.rust_library(
     features = [
         "Win32",
         "Win32_Foundation",
+        "Win32_Globalization",
         "Win32_Graphics",
         "Win32_Graphics_Gdi",
+        "Win32_Networking",
+        "Win32_Networking_WinSock",
         "Win32_Security",
         "Win32_Security_Credentials",
         "Win32_Storage",
         "Win32_Storage_FileSystem",
         "Win32_System",
+        "Win32_System_Com",
+        "Win32_System_Console",
         "Win32_System_DataExchange",
         "Win32_System_IO",
         "Win32_System_Memory",
@@ -51760,7 +51845,6 @@ cargo.rust_library(
         "Wdk_System_IO",
         "Win32",
         "Win32_Foundation",
-        "Win32_Globalization",
         "Win32_Graphics",
         "Win32_Graphics_Dwm",
         "Win32_NetworkManagement",
