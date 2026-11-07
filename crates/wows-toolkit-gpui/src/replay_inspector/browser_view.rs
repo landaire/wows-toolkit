@@ -1566,13 +1566,13 @@ impl Render for ReplayBrowser {
         // running says nothing, and the egui popup drops it the moment the
         // first frame lands.
         let stalled = self.preview.is_stalled();
-        let preview_map: Option<AnyElement> = match (self.preview.frame(), self.preview.awaits_preview()) {
-            (Some(frame), _) => Some(
+        let preview_map: Option<AnyElement> = match (self.preview.texture(), self.preview.awaits_preview()) {
+            (Some(texture), _) => Some(
                 div()
                     .relative()
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
-                    .child(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
+                    .child(crate::frame_texture::frame_view(texture, None).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
                     .when(stalled, |this| {
                         this.child(
                             h_flex().absolute().inset_0().items_center().justify_center().child(Spinner::new().large()),

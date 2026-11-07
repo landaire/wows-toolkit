@@ -16,9 +16,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
-use gpui_kit::RenderImage;
-use image::GenericImageView;
-use image::Rgb;
 use image::RgbImage;
 use rust_i18n::t;
 use wows_battle_world::ids::ShotTracking;
@@ -46,6 +43,7 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 
+use crate::frame_texture::BgraFrame;
 use crate::replay_inspector::GameDataCache;
 use crate::replay_inspector::LoadedGameData;
 
@@ -353,7 +351,7 @@ pub fn bake_from_file(
     edge: PreviewEdge,
     cancel: &AtomicBool,
     on_map: impl FnOnce(PreviewFrames),
-    on_frame: impl FnMut(Arc<RenderImage>),
+    on_frame: impl FnMut(BgraFrame),
 ) -> Result<(), PreviewError> {
     // Noted before anything is read, so a forget at any point in the bake is
     // seen by the check after the walk.
@@ -580,7 +578,7 @@ pub fn map_frame(map_name: &str, game_data: &GameDataCache, edge: PreviewEdge) -
     // rather than a canvas the renderer drew it into, so there is no HUD
     // strip to crop.
     let art = assets::load_map_image(map_name, loaded.vfs())?;
-    Some(PreviewFrames { frames: vec![scaled_image(&art, edge)], complete: true })
+    Some(PreviewFrames { frames: vec![scaled_frame(&art, edge)], complete: true })
 }
 
 /// Draws one map with `commands` on it, and nothing else.
@@ -598,14 +596,14 @@ pub fn render_map(
     game_data: &crate::replay_inspector::GameDataCache,
     view: wows_minimap_renderer::viewport::MapViewport,
     commands: &[DrawCommand],
-) -> Option<Arc<RenderImage>> {
+) -> Option<BgraFrame> {
     let loaded = game_data.newest_loaded()?;
     let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
     let canvas = {
         let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         renderer.render_at(view, commands)
     };
-    Some(map_only_image(canvas))
+    Some(map_only_frame(&canvas))
 }
 
 /// The same, over art the caller holds rather than art this build ships.
@@ -623,14 +621,14 @@ pub fn render_map_art(
     game_data: &crate::replay_inspector::GameDataCache,
     view: wows_minimap_renderer::viewport::MapViewport,
     commands: &[DrawCommand],
-) -> Option<Arc<RenderImage>> {
+) -> Option<BgraFrame> {
     let loaded = game_data.newest_loaded()?;
     let renderer = renderer_for_art(held_as, art, loaded.vfs());
     let canvas = {
         let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         renderer.render_at(view, commands)
     };
-    Some(map_only_image(canvas))
+    Some(map_only_frame(&canvas))
 }
 
 /// The renderer kept for `held_as`, built over `art` if there is not one yet.
@@ -665,18 +663,9 @@ fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> Shar
 ///
 /// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
 /// than the map by that strip, so the crop is the strip taken off the top.
-fn map_only_image(canvas: RgbImage) -> Arc<RenderImage> {
+fn map_only_frame(canvas: &RgbImage) -> BgraFrame {
     let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
-    let mut bgra = Vec::with_capacity((side * side * 4) as usize);
-    for y in 0..side {
-        for x in 0..side {
-            let pixel = canvas.get_pixel(x, y + HUD_HEIGHT);
-            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-        }
-    }
-    let buffer = image::RgbaImage::from_raw(side, side, bgra)
-        .expect("the buffer is four bytes per pixel of the size it was built at");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
+    BgraFrame::from_rgb_square(canvas, HUD_HEIGHT, side)
 }
 
 /// Walks `replay`'s battle once, keeping the commands of the frames a preview
@@ -731,7 +720,7 @@ fn rasterise(
     frames: &[Vec<DrawCommand>],
     edge: PreviewEdge,
     cancel: &AtomicBool,
-    mut on_frame: impl FnMut(Arc<RenderImage>),
+    mut on_frame: impl FnMut(BgraFrame),
 ) -> Result<(), PreviewError> {
     let options = paint_options();
     let edge = edge.for_track(frames.len());
@@ -742,7 +731,7 @@ fn rasterise(
         // Dead ships are shown, as the egui popup shows them.
         let painted = commands.iter().filter(|command| should_draw_command(command, &options, true));
         let canvas = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(painted);
-        on_frame(to_image(&canvas, edge));
+        on_frame(to_frame(&canvas, edge));
     }
     Ok(())
 }
@@ -750,7 +739,7 @@ fn rasterise(
 /// The map `renderer` draws, with nothing over it, as a track of one frame.
 fn map_only_frames(renderer: &SharedPreviewRenderer, edge: PreviewEdge) -> PreviewFrames {
     let canvas = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(std::iter::empty());
-    PreviewFrames { frames: vec![to_image(&canvas, edge)], complete: true }
+    PreviewFrames { frames: vec![to_frame(&canvas, edge)], complete: true }
 }
 
 /// The edge length, in logical pixels, a preview is drawn at.
@@ -791,14 +780,13 @@ impl PreviewEdge {
     }
 }
 
-/// A rendered preview: every frame as an image gpui can draw.
+/// A rendered preview: every frame as BGRA pixels, ready to upload.
 ///
-/// Decoded, not encoded: a `gpui::Image` carries compressed bytes that gpui
-/// decodes when it paints and caches by id, and a track is far more frames
-/// than that cache holds, so every frame of the loop would decode again --
-/// and paint nothing until it finished.
+/// Decoded, not encoded: a track is played by writing its current frame into
+/// one texture per tick, and decoding a frame on every pass of the loop would
+/// cost more than the upload.
 pub struct PreviewFrames {
-    frames: Vec<Arc<RenderImage>>,
+    frames: Vec<BgraFrame>,
     /// Whether every frame of the track is here. An unfinished track plays
     /// forward and holds on its newest frame; looping a track that is two
     /// frames long so far reads as a stutter, not as playback.
@@ -812,7 +800,7 @@ impl PreviewFrames {
     }
 
     /// Adopts one more rasterised frame.
-    pub fn push(&mut self, frame: Arc<RenderImage>) {
+    pub fn push(&mut self, frame: BgraFrame) {
         self.frames.push(frame);
     }
 
@@ -822,7 +810,7 @@ impl PreviewFrames {
     }
 
     /// Whether every frame of the track has been rasterised. Only the tests
-    /// read this back; playback asks [`Self::at`].
+    /// read this back; playback asks [`Self::index_at`].
     #[cfg(test)]
     pub fn is_complete(&self) -> bool {
         self.complete
@@ -830,87 +818,80 @@ impl PreviewFrames {
 
     /// How many frames the bake produced. Only the tests and the Search
     /// tab's own test accessor read this back; what plays is decided by
-    /// [`Self::at`].
+    /// [`Self::index_at`].
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.frames.len()
     }
 
-    /// Every frame, for a caller releasing the track's textures.
-    pub fn images(self) -> Vec<Arc<RenderImage>> {
-        self.frames
-    }
-
-    /// The frame to show `elapsed` into the preview, looping.
+    /// Which frame to show `elapsed` into the preview, looping.
     ///
     /// `None` only when there are no frames at all, which is a track that
     /// baked nothing.
-    pub fn at(&self, elapsed: std::time::Duration) -> Option<Arc<RenderImage>> {
+    pub fn index_at(&self, elapsed: std::time::Duration) -> Option<usize> {
         if self.frames.is_empty() {
             return None;
         }
         let step = (elapsed.as_millis() / FRAME_INTERVAL.as_millis().max(1)) as usize;
         let index = if self.complete { step % self.frames.len() } else { step.min(self.frames.len() - 1) };
-        self.frames.get(index).cloned()
+
+        Some(index)
+    }
+
+    pub fn frame(&self, index: usize) -> Option<&BgraFrame> {
+        self.frames.get(index)
     }
 }
 
-/// The map out of a rendered canvas, as an image gpui can paint straight from.
+/// The map out of a rendered canvas, at `edge`.
 ///
 /// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas taller than the
 /// map by that strip, so the strip is cropped off: scaling the canvas whole
 /// would squash the map, since the canvas is not square and the preview is.
-fn to_image(canvas: &RgbImage, edge: PreviewEdge) -> Arc<RenderImage> {
+fn to_frame(canvas: &RgbImage, edge: PreviewEdge) -> BgraFrame {
     let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
+    if side == edge.pixels() {
+        return BgraFrame::from_rgb_square(canvas, HUD_HEIGHT, side);
+    }
     let map = image::imageops::crop_imm(canvas, 0, HUD_HEIGHT, side, side);
-    scaled_image(&*map, edge)
+
+    BgraFrame::from_rgb(&scaled(&*map, edge))
 }
 
-/// `map` scaled to `edge` and handed over as BGRA, which is the layout
-/// `RenderImage` stores.
+/// `art` at `edge`.
+fn scaled_frame(art: &RgbImage, edge: PreviewEdge) -> BgraFrame {
+    if art.dimensions() == (edge.pixels(), edge.pixels()) {
+        return BgraFrame::from_rgb(art);
+    }
+
+    BgraFrame::from_rgb(&scaled(art, edge))
+}
+
+/// `map` resampled to `edge` square.
 ///
 /// Lanczos rather than a triangle filter: on a scale-one display the renderer
 /// composes at twice the drawn size, and a triangle filter halves that into a
-/// blur over every name and icon edge. The renderer composes every frame
-/// over opaque map art, so the alpha channel added here is fully opaque by
-/// construction.
-fn scaled_image(map: &impl GenericImageView<Pixel = Rgb<u8>>, edge: PreviewEdge) -> Arc<RenderImage> {
-    let edge = edge.pixels();
-    let mut bgra = Vec::with_capacity((edge * edge * 4) as usize);
-    if map.dimensions() == (edge, edge) {
-        for (_, _, pixel) in map.pixels() {
-            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-        }
-    } else {
-        let scaled = image::imageops::resize(map, edge, edge, image::imageops::FilterType::Lanczos3);
-        for pixel in scaled.pixels() {
-            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-        }
-    }
-    let buffer = image::RgbaImage::from_raw(edge, edge, bgra)
-        .expect("the buffer is four bytes per pixel of the size it was built at");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
+/// blur over every name and icon edge.
+fn scaled(map: &impl image::GenericImageView<Pixel = image::Rgb<u8>>, edge: PreviewEdge) -> RgbImage {
+    image::imageops::resize(map, edge.pixels(), edge.pixels(), image::imageops::FilterType::Lanczos3)
 }
 
 #[cfg(test)]
 mod tests {
     use super::FRAME_INTERVAL;
     use super::PreviewFrames;
+    use crate::frame_texture::BgraFrame;
     use std::sync::Arc;
     use std::time::Duration;
 
+    /// The pixels are irrelevant to the timing rule; a one pixel frame stands
+    /// in for a rendered one.
+    fn pixel() -> BgraFrame {
+        BgraFrame::from_rgb(&image::RgbImage::new(1, 1))
+    }
+
     fn frames(count: usize) -> PreviewFrames {
-        // The images themselves are irrelevant to the timing rule; a one
-        // pixel frame stands in for a rendered one.
-        PreviewFrames {
-            frames: (0..count)
-                .map(|_| {
-                    let buffer = image::RgbaImage::from_raw(1, 1, vec![0, 0, 0, 255]).expect("one pixel");
-                    Arc::new(gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)]))
-                })
-                .collect(),
-            complete: true,
-        }
+        PreviewFrames { frames: (0..count).map(|_| pixel()).collect(), complete: true }
     }
 
     /// A track still being rasterised plays forward and holds on its newest
@@ -918,17 +899,18 @@ mod tests {
     #[test]
     fn an_unfinished_track_holds_on_its_newest_frame_and_a_finished_one_loops() {
         let mut track = PreviewFrames::streaming();
-        let one = frames(1);
-        track.push(one.at(Duration::ZERO).expect("one frame"));
-        track.push(frames(1).at(Duration::ZERO).expect("one frame"));
+        track.push(pixel());
+        track.push(pixel());
 
         // Two frames in, well past the end of what has been rasterised.
         let past_the_end = FRAME_INTERVAL * 5;
-        assert!(track.at(past_the_end).is_some(), "an unfinished track holds rather than showing nothing");
+        assert_eq!(track.index_at(past_the_end), Some(1), "an unfinished track holds on its newest frame");
         assert!(!track.is_complete());
 
         track.finish();
-        assert!(track.is_complete(), "a finished track loops");
+        assert!(track.is_complete());
+        assert_eq!(track.index_at(past_the_end), Some(1), "a finished track loops");
+        assert_eq!(track.index_at(FRAME_INTERVAL * 4), Some(0));
     }
 
     /// A frame is handed over decoded and at the physical size it is drawn:
@@ -945,11 +927,11 @@ mod tests {
 
         let rendered = image::RgbImage::from_pixel(MINIMAP_SIZE, CANVAS_HEIGHT, image::Rgb([9, 9, 9]));
         let edge_at = |scale_factor: f32| {
-            let image = super::to_image(&rendered, PreviewEdge::for_scale_factor(scale_factor));
-            let size = image.size(0);
+            let frame = super::to_frame(&rendered, PreviewEdge::for_scale_factor(scale_factor));
+            let size = frame.size();
             assert_eq!(size.width.0, size.height.0, "the preview is square");
             assert_eq!(
-                image.as_bytes(0).expect("frame 0").len(),
+                frame.bytes().len(),
                 (size.width.0 * size.height.0 * 4) as usize,
                 "four bytes per pixel, ready to upload"
             );
@@ -975,17 +957,19 @@ mod tests {
         let rendered =
             image::RgbImage::from_fn(MINIMAP_SIZE, CANVAS_HEIGHT, |_, y| if y < HUD_HEIGHT { hud } else { map });
 
-        let image = super::to_image(&rendered, PreviewEdge::for_scale_factor(2.0));
+        let frame = super::to_frame(&rendered, PreviewEdge::for_scale_factor(2.0));
 
-        let bgra = image.as_bytes(0).expect("frame 0");
-        assert!(bgra.chunks(4).all(|pixel| pixel == [255, 0, 0, 255]), "every pixel is the map's blue, stored BGRA");
+        assert!(
+            frame.bytes().chunks(4).all(|pixel| pixel == [255, 0, 0, 255]),
+            "every pixel is the map's blue, stored BGRA"
+        );
     }
 
     #[test]
     fn a_track_with_no_frames_shows_nothing() {
         let empty = frames(0);
         assert_eq!(empty.len(), 0);
-        assert!(empty.at(Duration::ZERO).is_none());
+        assert!(empty.index_at(Duration::ZERO).is_none());
     }
 
     /// Each frame is held for the display interval, and the track loops
@@ -993,10 +977,7 @@ mod tests {
     #[test]
     fn frames_advance_on_the_interval_and_then_loop() {
         let track = frames(3);
-        let shown = |elapsed: Duration| {
-            let frame = track.at(elapsed).expect("a frame");
-            track.frames.iter().position(|candidate| Arc::ptr_eq(candidate, &frame)).expect("one of ours")
-        };
+        let shown = |elapsed: Duration| track.index_at(elapsed).expect("a frame");
 
         assert_eq!(shown(Duration::ZERO), 0);
         assert_eq!(shown(FRAME_INTERVAL / 2), 0, "a frame is held for the whole interval");

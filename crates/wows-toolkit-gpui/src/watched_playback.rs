@@ -25,6 +25,8 @@ use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
 
 use crate::collab::ReplayId;
+use crate::frame_texture::FrameTexture;
+use crate::frame_texture::frame_view;
 use crate::replay_inspector::GameDataCache;
 
 /// How often the frames the session has sent are looked for.
@@ -71,8 +73,9 @@ pub struct WatchedPlayback {
     /// The commands the last frame carried, and where the host was when it drew
     /// them.
     latest: Option<(Vec<DrawCommand>, HostClock)>,
-    /// The frame as drawn. `None` until one has arrived and been rasterised.
-    drawn: Option<Arc<RenderImage>>,
+    /// The frame as drawn. Holds nothing until one has arrived and been
+    /// rasterised.
+    drawn: FrameTexture,
     /// One raster at a time: the cost is a map-sized image, and frames arrive
     /// faster than that on a fast playback. A frame that arrives during one is
     /// drawn when it finishes.
@@ -118,7 +121,7 @@ impl WatchedPlayback {
             game_data,
             frames,
             latest: None,
-            drawn: None,
+            drawn: FrameTexture::new(),
             rasterising: false,
             stale: false,
             _tick: None,
@@ -192,13 +195,12 @@ impl WatchedPlayback {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
-                if drawn.is_some() {
-                    this.drawn = drawn;
+                if drawn.is_none_or(|drawn| !this.drawn.present(drawn, cx)) {
+                    cx.notify();
                 }
                 if std::mem::take(&mut this.stale) {
                     this.redraw(cx);
                 }
-                cx.notify();
             });
         })
         .detach();
@@ -273,10 +275,10 @@ impl Render for WatchedPlayback {
             .track_focus(&self.focus_handle)
             .child(self.render_clock(cx))
             .child(div().h(px(1.)).bg(border))
-            .when_some(self.drawn.clone(), |this, drawn| {
-                this.child(div().flex_1().min_h(px(0.)).child(img(drawn).size_full().object_fit(ObjectFit::Contain)))
+            .when(self.drawn.size().is_some(), |this| {
+                this.child(div().flex_1().min_h(px(0.)).child(frame_view(&self.drawn, None).size_full()))
             })
-            .when(self.drawn.is_none(), |this| {
+            .when(self.drawn.size().is_none(), |this| {
                 this.child(
                     v_flex()
                         .flex_1()

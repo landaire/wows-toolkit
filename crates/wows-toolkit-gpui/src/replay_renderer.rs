@@ -25,6 +25,9 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::armor_viewer::catalog::ShipEntry;
+use crate::frame_texture::BgraFrame;
+use crate::frame_texture::FrameTexture;
+use crate::frame_texture::frame_view;
 use crate::minimap_preview::SharedPreviewRenderer;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -192,7 +195,7 @@ pub struct ReplayRendererPanel {
     renderer: Option<SharedPreviewRenderer>,
     /// The frame on screen. Stays put while the next one is drawn, so the
     /// viewport never blanks.
-    frame: Option<Arc<RenderImage>>,
+    frame: FrameTexture,
     /// Which frame of the track that is, or is being drawn for.
     at: usize,
     playing: bool,
@@ -485,7 +488,7 @@ impl ReplayRendererPanel {
             title,
             state: State::Baking,
             renderer: None,
-            frame: None,
+            frame: FrameTexture::new(),
             at: 0,
             playing: false,
             export: None,
@@ -625,7 +628,7 @@ impl ReplayRendererPanel {
                 map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
             }),
             renderer: None,
-            frame: None,
+            frame: FrameTexture::new(),
             at: 0,
             playing: false,
             export: None,
@@ -1073,9 +1076,8 @@ impl ReplayRendererPanel {
     /// the strip is not at the element's own top edge.
     fn hud_strip(&self) -> Option<(Pixels, Pixels, Pixels)> {
         let bounds = self.drawn.get()?;
-        let frame = self.frame.as_ref()?;
         let scale = self.drawn_scale()?;
-        let size = frame.size(0);
+        let size = self.frame.size()?;
         let drawn_width = size.width.0 as f32 * scale;
         let drawn_height = size.height.0 as f32 * scale;
         let left = (bounds.size.width.as_f32() - drawn_width) / 2.0;
@@ -1820,19 +1822,22 @@ impl ReplayRendererPanel {
                 // buried under a ship, and before the HUD, which the target
                 // puts on top of everything on the map.
                 shown.extend(drawn_on);
-                let (image, regions) = {
+                let (frame, regions) = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     let (frame, regions) = drawing.render_regions(view, &shown);
-                    (to_image(frame), regions)
+                    (BgraFrame::from_rgb(&frame), regions)
                 };
-                (renderer, image, regions)
+                (renderer, frame, regions)
             });
-            let (renderer, image, regions) = drawn.await;
+            let (renderer, frame, regions) = drawn.await;
             let _ = this.update(cx, |this, cx| {
                 this.renderer = Some(renderer);
-                this.frame = Some(image);
+                // The regions are only read against the pointer, so a frame
+                // that reached the window needs no re-render of the view.
+                if !this.frame.present(frame, cx) {
+                    cx.notify();
+                }
                 this.regions = regions;
-                cx.notify();
                 if std::mem::take(&mut this.redraw_wanted) {
                     this.draw_current(cx);
                 }
@@ -1975,7 +1980,7 @@ impl ReplayRendererPanel {
     fn set_at(&mut self, at: usize, cx: &mut Context<Self>) {
         let last = self.frame_count().saturating_sub(1);
         let at = at.min(last);
-        if at == self.at && self.frame.is_some() {
+        if at == self.at && self.frame.size().is_some() {
             return;
         }
         self.at = at;
@@ -2109,8 +2114,7 @@ impl ReplayRendererPanel {
     /// nothing knows where it is.
     fn drawn_scale(&self) -> Option<f32> {
         let bounds = self.drawn.get()?;
-        let frame = self.frame.as_ref()?;
-        let size = frame.size(0);
+        let size = self.frame.size()?;
         let (width, height) = (size.width.0 as f32, size.height.0 as f32);
         if width <= 0.0 || height <= 0.0 {
             return None;
@@ -2173,9 +2177,8 @@ impl ReplayRendererPanel {
     /// the edge is nothing.
     fn canvas_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let bounds = self.drawn.get()?;
-        let frame = self.frame.as_ref()?;
         let scale = self.drawn_scale()?;
-        let size = frame.size(0);
+        let size = self.frame.size()?;
         let drawn_width = size.width.0 as f32 * scale;
         let drawn_height = size.height.0 as f32 * scale;
         let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - drawn_width) / 2.0;
@@ -2637,7 +2640,7 @@ impl ReplayRendererPanel {
     fn seed_frame_for_test(&mut self) {
         let width = wows_minimap_renderer::MINIMAP_SIZE;
         let height = wows_minimap_renderer::CANVAS_HEIGHT;
-        self.frame = Some(to_image(image::RgbImage::new(width, height)));
+        self.frame.hold_for_test(BgraFrame::from_rgb(&image::RgbImage::new(width, height)));
         self.set_drawn_for_test(gpui_kit::Bounds {
             origin: gpui_kit::point(px(0.), px(0.)),
             size: gpui_kit::size(px(width as f32), px(height as f32)),
@@ -2795,8 +2798,8 @@ impl ReplayRendererPanel {
                 )
                 .child(div().text_sm().text_color(crate::theme::text_dim()).child(reason.clone()))
                 .into_any_element(),
-            State::Ready(_) => match self.frame.clone() {
-                Some(frame) => {
+            State::Ready(_) => match self.frame.size() {
+                Some(_) => {
                     let drawn = Rc::clone(&self.drawn);
                     div()
                         .id("replay-renderer-viewport")
@@ -2807,17 +2810,9 @@ impl ReplayRendererPanel {
                         .items_center()
                         .justify_center()
                         .when(!self.view.is_whole_map(), |this| this.cursor_grab())
-                        .child(img(frame).size_full())
                         // Where the frame landed, which is the only way a
                         // pointer position can be turned into a map one.
-                        .child(
-                            canvas(
-                                move |bounds, _window, _cx| drawn.set(Some(bounds)),
-                                |_bounds, _state, _window, _cx| {},
-                            )
-                            .absolute()
-                            .inset_0(),
-                        )
+                        .child(frame_view(&self.frame, Some(drawn)).size_full())
                         .children(self.hud_strip().zip(self.advantage_hover()).map(|((left, top, height), lines)| {
                             div()
                                 .id("replay-renderer-advantage-hover")
@@ -3539,18 +3534,6 @@ fn tool_for_key(key: &str) -> Option<Tool> {
         "m" => Tool::Measurement,
         _ => return None,
     })
-}
-
-/// One rasterised frame, as an image gpui can draw.
-fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
-    let (width, height) = frame.dimensions();
-    let mut bgra = Vec::with_capacity((width * height * 4) as usize);
-    for pixel in frame.pixels() {
-        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-    }
-    let buffer = image::RgbaImage::from_raw(width, height, bgra)
-        .expect("the buffer is four bytes per pixel of the size it was built at");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
 
 /// Where a render goes.
@@ -6721,7 +6704,7 @@ mod tests {
             .update(cx, |panel, window, cx| {
                 panel.seed_frame_for_test();
                 // A viewport twice as wide as the canvas is tall.
-                let frame = panel.frame.as_ref().expect("a frame was seeded").size(0);
+                let frame = panel.frame.size().expect("a frame was seeded");
                 let (w, h) = (frame.width.0 as f32, frame.height.0 as f32);
                 panel.set_drawn_for_test(gpui_kit::Bounds {
                     origin: gpui_kit::point(px(0.), px(0.)),

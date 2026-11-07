@@ -18,6 +18,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use gpui_kit::App;
 use gpui_kit::Context;
 use gpui_kit::Render;
 use gpui_kit::SharedString;
@@ -25,6 +26,7 @@ use gpui_kit::Task;
 use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
 
+use crate::frame_texture::FrameTexture;
 use crate::minimap_preview::FRAME_INTERVAL;
 use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
@@ -49,6 +51,9 @@ struct Shown {
     /// spinner would come down the moment it did and the reader would watch a
     /// motionless map with nothing saying more is coming.
     map_only: bool,
+    /// Which frame of the track the texture holds, so a tick that lands on
+    /// the same frame uploads nothing.
+    presented: Option<usize>,
 }
 
 /// The hover state behind one surface's preview: what is being watched, what
@@ -60,11 +65,9 @@ pub struct PreviewHover {
     /// hover.
     watched: Option<(PathBuf, Instant)>,
     shown: Option<Shown>,
-    /// Tracks whose textures are still held by the window. gpui keeps an
-    /// image's texture until it is told to let go, and only a `Window` can be
-    /// told; the surface hands them back on its next render
-    /// (`sync_with_window`).
-    released: Vec<PreviewFrames>,
+    /// The current frame of whatever track is shown, written in place on
+    /// every tick.
+    texture: FrameTexture,
     /// Whether a bake is in flight, so the surface can say the preview is
     /// coming rather than showing nothing for the seconds it takes to read
     /// the replay and load the build it was recorded on. Stays set while the
@@ -109,7 +112,7 @@ impl Default for PreviewHover {
             dwell: Dwell::new(),
             watched: None,
             shown: None,
-            released: Vec::new(),
+            texture: FrameTexture::new(),
             baking: false,
             expecting: false,
             failed: None,
@@ -125,25 +128,18 @@ impl Default for PreviewHover {
 }
 
 impl PreviewHover {
-    /// The frame to draw now, if a preview is playing.
-    pub fn frame(&self) -> Option<Arc<gpui_kit::RenderImage>> {
+    /// The texture to paint, if a preview has a frame to show.
+    pub fn texture(&self) -> Option<&FrameTexture> {
         let shown = self.shown.as_ref()?;
-        shown.frames.at(shown.started.elapsed())
+        shown.presented.map(|_| &self.texture)
     }
 
-    /// Releases the textures of every track that is no longer showing, and
-    /// takes the window's scale factor for the frames baked next.
+    /// Takes the window's scale factor for the frames baked next.
     ///
     /// Called from the owning view's `render`, which is where a `Window` is
-    /// at hand. Without it a hover over a dozen replays leaves a dozen
-    /// tracks' frames resident.
+    /// at hand.
     pub fn sync_with_window(&mut self, window: &mut gpui_kit::Window) {
         self.edge = PreviewEdge::for_scale_factor(window.scale_factor());
-        for track in self.released.drain(..) {
-            for image in track.images() {
-                let _ = window.drop_image(image);
-            }
-        }
     }
 
     /// The row under the pointer, whether or not its preview has baked yet.
@@ -231,7 +227,13 @@ impl PreviewHover {
     pub(crate) fn seed_playing_for_test(&mut self, frames: PreviewFrames) {
         self.baking = true;
         // A track, not the still map: this seeds the playing case.
-        self.shown = Some(Shown { frames, started: Instant::now(), last_frame: Instant::now(), map_only: false });
+        self.shown = Some(Shown {
+            frames,
+            started: Instant::now(),
+            last_frame: Instant::now(),
+            map_only: false,
+            presented: None,
+        });
     }
 
     /// How many frames the current preview has. Test-only.
@@ -310,15 +312,30 @@ impl PreviewHover {
         cx.notify();
     }
 
-    /// Stops showing the current track and hands its frames back to the
-    /// window to have their textures released.
+    /// Stops showing the current track and releases its texture.
     ///
     /// Not kept for a return visit: a track's frames are tens of megabytes,
     /// and the battle's commands are kept instead (`minimap_preview`), which
     /// rasterise again in a few frames' time.
     fn drop_shown(&mut self) {
-        let Some(shown) = self.shown.take() else { return };
-        self.released.push(shown.frames);
+        if self.shown.take().is_some() {
+            self.texture.clear();
+        }
+    }
+
+    /// Uploads the frame the clock has reached, unless the texture already
+    /// holds it. Returns whether the view must repaint to show it, which is
+    /// when it could not reach the window yet.
+    fn present_current(&mut self, cx: &mut App) -> bool {
+        let Some(shown) = self.shown.as_mut() else { return false };
+        let Some(index) = shown.frames.index_at(shown.started.elapsed()) else { return false };
+        if shown.presented == Some(index) {
+            return false;
+        }
+        let Some(frame) = shown.frames.frame(index) else { return false };
+
+        shown.presented = Some(index);
+        !self.texture.present(frame.clone(), cx)
     }
 
     fn cancel_bake(&mut self) {
@@ -332,13 +349,19 @@ impl PreviewHover {
 
     /// Puts up the still map standing in for a track that has not arrived,
     /// unless one is already up: replacing a map with another build's art of
-    /// the same map would only stutter. A map that is not shown was never
-    /// painted, so it holds no texture to release.
+    /// the same map would only stutter.
     fn show_map<V: Render>(&mut self, frames: PreviewFrames, cx: &mut Context<V>) {
         if self.shown.is_some() {
             return;
         }
-        self.shown = Some(Shown { frames, started: Instant::now(), last_frame: Instant::now(), map_only: true });
+        self.shown = Some(Shown {
+            frames,
+            started: Instant::now(),
+            last_frame: Instant::now(),
+            map_only: true,
+            presented: None,
+        });
+        let _ = self.present_current(cx);
         cx.notify();
     }
 
@@ -409,7 +432,8 @@ impl PreviewHover {
             while let Some(frame) = futures::StreamExt::next(&mut frame_rx).await {
                 let alive = view.update(cx, |view, cx| {
                     let this = field(view);
-                    if !started {
+                    let first = !started;
+                    if first {
                         started = true;
                         this.drop_shown();
                         this.shown = Some(Shown {
@@ -417,6 +441,7 @@ impl PreviewHover {
                             started: Instant::now(),
                             last_frame: Instant::now(),
                             map_only: false,
+                            presented: None,
                         });
                         this.start_ticker(cx, field);
                     }
@@ -424,7 +449,9 @@ impl PreviewHover {
                         shown.frames.push(frame);
                         shown.last_frame = Instant::now();
                     }
-                    cx.notify();
+                    if this.present_current(cx) || first {
+                        cx.notify();
+                    }
                 });
                 if alive.is_err() {
                     return;
@@ -465,21 +492,28 @@ impl PreviewHover {
         }));
     }
 
-    /// Redraws the owning view every frame interval for as long as a preview
-    /// is showing: the frames are a track played against the clock, and
-    /// nothing else in the view would ask for those repaints.
+    /// Uploads the frame the clock has reached every frame interval for as
+    /// long as a preview is showing: the frames are a track played against
+    /// the clock, and nothing else in the view would ask for them.
     fn start_ticker<V: Render>(&mut self, cx: &mut Context<V>, field: fn(&mut V) -> &mut Self) {
         self._ticker = Some(cx.spawn(async move |view, cx| {
+            let mut stalled = false;
             loop {
                 cx.background_executor().timer(FRAME_INTERVAL).await;
                 let playing = view.update(cx, |view, cx| {
                     let this = field(view);
-                    if this.shown.is_some() {
-                        cx.notify();
-                        true
-                    } else {
-                        false
+                    if this.shown.is_none() {
+                        return false;
                     }
+                    // A frame that could not reach the window yet goes up
+                    // with the next paint, and a stall that starts or ends
+                    // brings the spinner up or down.
+                    let missed = this.present_current(cx);
+                    let stall_changed = std::mem::replace(&mut stalled, this.is_stalled()) != stalled;
+                    if missed || stall_changed {
+                        cx.notify();
+                    }
+                    true
                 });
                 if !matches!(playing, Ok(true)) {
                     return;

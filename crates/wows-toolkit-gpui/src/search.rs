@@ -2312,8 +2312,13 @@ impl Render for SearchView {
         // goes up as soon as a bake starts, holding open water until the first
         // frame lands, so the map arrives in place rather than the popup growing
         // around it.
-        let preview_art: Option<AnyElement> = match self.preview.frame() {
-            Some(frame) => Some(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH)).into_any_element()),
+        let preview_art: Option<AnyElement> = match self.preview.texture() {
+            Some(texture) => Some(
+                crate::frame_texture::frame_view(texture, None)
+                    .w(px(PREVIEW_WIDTH))
+                    .h(px(PREVIEW_WIDTH))
+                    .into_any_element(),
+            ),
             None if self.preview.awaits_preview() => Some(
                 div()
                     .id("search-preview-placeholder")

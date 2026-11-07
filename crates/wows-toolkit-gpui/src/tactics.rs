@@ -38,6 +38,9 @@ use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_types::WorldPos;
 
+use crate::frame_texture::BgraFrame;
+use crate::frame_texture::FrameTexture;
+use crate::frame_texture::frame_view;
 use crate::replay_inspector::GameDataCache;
 
 /// A board's walk of the replays recorded layouts nothing had before.
@@ -746,9 +749,9 @@ pub struct TacticsBoard {
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
     _preset_name_subscription: Subscription,
     _ship_search_subscription: Subscription,
-    /// The map as it was last rasterised. `None` until one is drawn, which is
-    /// what the placeholder stands in for.
-    drawn: Option<Arc<RenderImage>>,
+    /// The map as it was last rasterised. Holds nothing until one is drawn,
+    /// which is what the placeholder stands in for.
+    drawn: FrameTexture,
     /// Whether the last attempt to draw the map found no art for it, which is
     /// what the board says rather than claiming to still be drawing.
     no_art: bool,
@@ -879,7 +882,7 @@ impl TacticsBoard {
             _collab_tick: None,
             window: None,
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
-            drawn: None,
+            drawn: FrameTexture::new(),
             no_art: false,
             view: wows_minimap_renderer::viewport::MapViewport::default(),
             panning: None,
@@ -1205,7 +1208,7 @@ impl TacticsBoard {
     /// which nothing can be placed against either way.
     fn letterbox(&self) -> Option<Letterbox> {
         let bounds = self.painted.get()?;
-        let size = self.drawn.as_ref()?.size(0);
+        let size = self.drawn.size()?;
         Letterbox::fitting(bounds, (size.width.0 as f32, size.height.0 as f32))
     }
 
@@ -2407,7 +2410,7 @@ impl TacticsBoard {
     /// one is running is drawn as soon as it lands.
     fn redraw(&mut self, cx: &mut Context<Self>) {
         let Some(map) = self.map.clone() else {
-            self.drawn = None;
+            self.drawn.clear();
             cx.notify();
             return;
         };
@@ -2465,11 +2468,11 @@ impl TacticsBoard {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
-                this.no_art = drawn.is_none();
-                if let Some(drawn) = drawn {
-                    this.drawn = Some(drawn);
+                let art_changed = std::mem::replace(&mut this.no_art, drawn.is_none()) != this.no_art;
+                let shown = drawn.is_some_and(|drawn| this.drawn.present(drawn, cx));
+                if !shown || art_changed {
+                    cx.notify();
                 }
-                cx.notify();
                 if std::mem::take(&mut this.stale) {
                     this.redraw(cx);
                 }
@@ -2552,7 +2555,7 @@ fn rasterise(
     view: wows_minimap_renderer::viewport::MapViewport,
     caps: &[BoardCapPoint],
     annotations: &[wt_collab_client::types::Annotation],
-) -> Option<Arc<RenderImage>> {
+) -> Option<BgraFrame> {
     let loaded = game_data.newest_loaded()?;
     // The measurements a peer sent, where this build ships none for the map.
     let map = match drawing.info.cloned() {
@@ -3328,7 +3331,7 @@ impl TacticsBoard {
 
     /// The map itself, or what is standing in its way.
     fn render_map(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(drawn) = self.drawn.clone() else {
+        if self.drawn.size().is_none() {
             return div()
                 .flex_1()
                 .min_h(px(0.))
@@ -3345,7 +3348,7 @@ impl TacticsBoard {
                     t!("ui.tactics.drawing").to_string()
                 })
                 .into_any_element();
-        };
+        }
 
         let board = cx.entity();
 
@@ -3366,20 +3369,9 @@ impl TacticsBoard {
                     .h_full()
                     .max_w(relative(1.0))
                     .aspect_ratio(1.0)
-                    .child(img(drawn).size_full().object_fit(ObjectFit::Contain))
                     // Pointer and overlay geometry use the visible square,
                     // rather than the wider viewport around it.
-                    .child(
-                        canvas(
-                            {
-                                let painted = std::rc::Rc::clone(&self.painted);
-                                move |bounds, _window, _cx| painted.set(Some(bounds))
-                            },
-                            |_bounds, _state, _window, _cx| {},
-                        )
-                        .absolute()
-                        .inset_0(),
-                    )
+                    .child(frame_view(&self.drawn, Some(std::rc::Rc::clone(&self.painted))).size_full())
                     .children(self.rotation_handle_overlay()),
             )
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
