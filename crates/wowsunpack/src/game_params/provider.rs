@@ -1905,6 +1905,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     upgrade_name.clone(),
                     crate::game_params::ttx::components::ArtilleryComponentStats {
                         max_dist: read_float(&arty_data, keys::MAX_DIST).map(Meters::from),
+                        sigma_count: read_float(&arty_data, keys::SIGMA_COUNT),
                         guns,
                     },
                 );
@@ -2019,19 +2020,23 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             }
         }
 
-        // Fire control is a standalone _Suo upgrade naming an FC component whose
-        // only displayed stat is maxDistCoef (PreprocessedFireControl.py:7); store
-        // the coef keyed by upgrade name. The artillery factory multiplies it into
-        // main-battery range.
+        // Fire control is a standalone _Suo upgrade naming an FC component with
+        // maxDistCoef and sigmaCountCoef (PreprocessedFireControl.py:7); store both
+        // keyed by upgrade name.
         if uc_type == keys::UC_TYPE_SUO
             && let Some(fc_comp) = upgrade_dict
                 .get(&pk(keys::COMPONENTS))
                 .and_then(|v| v.dict_or_object_dict())
                 .and_then(|c| c.inner().get(&pk(keys::COMP_FIRE_CONTROL)).and_then(read_first_string))
             && let Some(fc_data) = ship_data.get(&pk(&fc_comp)).and_then(|v| v.dict_or_object_dict())
-            && let Some(coef) = read_float(&fc_data.inner(), keys::MAX_DIST_COEF)
+            && let Some(max_dist_coef) = read_float(&fc_data.inner(), keys::MAX_DIST_COEF)
         {
-            ttx_components.fire_controls.insert(upgrade_name.clone(), coef);
+            // The client's `FireControl.sigmaCountCoef` default.
+            let sigma_count_coef = read_float(&fc_data.inner(), keys::SIGMA_COUNT_COEF).unwrap_or(1.0);
+            ttx_components.fire_controls.insert(
+                upgrade_name.clone(),
+                crate::game_params::ttx::components::FireControlStats { max_dist_coef, sigma_count_coef },
+            );
         }
 
         // Only process _Hull upgrades -- they define the complete config for a hull loadout
@@ -2779,16 +2784,16 @@ impl GameMetadataProvider {
                 let damage = read_opt_f32("damage");
                 let visibility_factor = read_opt_f32("visibilityFactor");
                 let torpedo_type = param_data.get(&pk("torpedoType")).and_then(|v| v.i64_ref().copied());
+                // Pairs are pickled as lists or tuples.
                 let read_pairs = |key: &str| -> Option<Vec<(f32, f32)>> {
-                    param_data.get(&pk(key)).and_then(|v| v.list_ref()).map(|list| {
-                        list.inner()
+                    param_data.get(&pk(key)).map(|value| {
+                        read_sequence(value)
                             .iter()
                             .filter_map(|item| {
-                                let pair = item.list_ref()?;
-                                let pair = pair.inner();
-                                let coeff = pair.first().and_then(|v| v.f64_ref().map(|f| *f as f32))?;
-                                let dist = pair.get(1).and_then(|v| v.f64_ref().map(|f| *f as f32))?;
-                                Some((coeff, dist))
+                                let pair = read_sequence(item);
+                                let dist = value_f32(pair.first()?)?;
+                                let coeff = value_f32(pair.get(1)?)?;
+                                Some((dist, coeff))
                             })
                             .collect()
                     })
@@ -2826,6 +2831,8 @@ impl GameMetadataProvider {
                         .maybe_visibility_factor(visibility_factor)
                         .maybe_distance_of_damage(distance_of_damage)
                         .maybe_torpedo_type(torpedo_type)
+                        .maybe_maneuver_dist(read_opt_f32("maneuverDist").map(BigWorldDistance::from))
+                        .maybe_arming_time(read_opt_f32("armingTime"))
                         .maybe_ignore_classes(ignore_classes)
                         .maybe_plane_ammo_type(
                             param_data
@@ -3049,6 +3056,8 @@ mod camera_tests {
             (pk("torpedoType"), iv(1)),
             (pk("distanceOfDamage"), list(vec![list(vec![fv(83.33), fv(0.1)]), list(vec![fv(86.66), fv(1.0)])])),
             (pk("ignoreClasses"), list(vec![sv("Cruiser"), sv("Destroyer")])),
+            (pk("maneuverDist"), fv(20.0)),
+            (pk("armingTime"), iv(1)),
         ]);
         let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
         let param = GameMetadataProvider::parse_single_param(&proj, &params_dict, None).expect("param parsed");
@@ -3062,6 +3071,8 @@ mod camera_tests {
         assert_eq!(projectile.torpedo_type(), Some(1));
         assert_eq!(projectile.distance_of_damage(), Some(&[(83.33, 0.1), (86.66, 1.0)][..]));
         assert_eq!(projectile.ignore_classes(), Some(&["Cruiser".to_string(), "Destroyer".to_string()][..]));
+        assert_eq!(projectile.maneuver_dist().map(|d| d.value()), Some(20.0));
+        assert_eq!(projectile.arming_time(), Some(1.0));
     }
 
     #[test]
@@ -3763,6 +3774,7 @@ mod camera_tests {
         assert_eq!(ttx.fire_control_max_dist_coef("PAUS821_Suo"), Some(1.0));
         assert_eq!(ttx.fire_control_max_dist_coef("PAUS822_Suo"), Some(1.1));
         assert_eq!(ttx.fire_control_max_dist_coef("NoSuchUpgrade"), None);
+        assert_eq!(ttx.fire_control_sigma_count_coef("PAUS822_Suo"), Some(1.0));
     }
 
     /// A ship with no `_Suo` upgrade extracts no fire-control entries.

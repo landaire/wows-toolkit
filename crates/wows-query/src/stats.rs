@@ -408,7 +408,7 @@ impl GameData {
 /// Horizontal main battery dispersion of `outcome` at `range` even past the
 /// build's own firing range, so a build that shortens the range does not read
 /// as tighter.
-fn extended_horizontal_dispersion(planner: &Planner<'_>, outcome: &Outcome, range: Km) -> Option<Meters> {
+pub(crate) fn extended_horizontal_dispersion(planner: &Planner<'_>, outcome: &Outcome, range: Km) -> Option<Meters> {
     let profile = artillery_dispersion(&planner.ship().param, planner.selection(outcome.selection), &outcome.bundle)?;
     let profile = ArtilleryDispersion { max_range: Km::new(profile.max_range.value().max(range.value())), ..profile };
 

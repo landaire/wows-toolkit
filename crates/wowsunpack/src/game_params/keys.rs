@@ -243,6 +243,10 @@ pub const VISIBILITY_PERISCOPE: &str = "PERISCOPE";
 pub const MAX_DIST: &str = "maxDist";
 // Fire-control range coefficient (PreprocessedFireControl.py:7; stock 1.0).
 pub const MAX_DIST_COEF: &str = "maxDistCoef";
+// Main battery shell distribution width in standard deviations, and the
+// fire-control coefficient on it (client FireControl default 1.0).
+pub const SIGMA_COUNT: &str = "sigmaCount";
+pub const SIGMA_COUNT_COEF: &str = "sigmaCountCoef";
 pub const AMMO_LIST: &str = "ammoList";
 pub const SHOT_DELAY: &str = "shotDelay";
 pub const ROTATION_SPEED: &str = "rotationSpeed";

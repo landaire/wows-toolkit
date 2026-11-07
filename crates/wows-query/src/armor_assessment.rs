@@ -1654,7 +1654,7 @@ fn span(ranges: &[Km]) -> String {
     }
 }
 
-fn class_plural(class: ShipClass) -> &'static str {
+pub(crate) fn class_plural(class: ShipClass) -> &'static str {
     match class {
         ShipClass::Destroyer => "destroyers",
         ShipClass::Cruiser => "cruisers",

@@ -91,6 +91,26 @@ pub fn artillery_dispersion(
     })
 }
 
+/// Main battery `sigmaCount` for an equipped loadout: the artillery
+/// component's value times the selected fire control's `sigmaCountCoef` and
+/// the `GMSigmaCount` modifier. Higher puts more shells near the aim point.
+/// `None` when the ship has no main battery in `selection` or its component
+/// lacks the value.
+pub fn artillery_sigma(ship: &Param, selection: &ShipUpgradeSelection, modifiers: &ModifierBundle) -> Option<f32> {
+    /// A selection without a fire control module leaves sigma unchanged.
+    const WITHOUT_FIRE_CONTROL: f32 = 1.0;
+
+    let components = ship.vehicle()?.ttx_components()?;
+    let sigma = selection.artillery.as_deref().and_then(|name| components.artillery(name))?.sigma_count?;
+    let fc_coef = selection
+        .fire_control
+        .as_deref()
+        .and_then(|name| components.fire_control_sigma_count_coef(name))
+        .unwrap_or(WITHOUT_FIRE_CONTROL);
+
+    Some(sigma * fc_coef * modifiers.coef("GMSigmaCount"))
+}
+
 /// `SMALL_SHELL_MAX_DIAMETER` (meters), the `isSmallGun` caliber gate
 /// (Modifiers/__init__.py:19 `barrelDiameter < SMALL_SHELL_MAX_DIAMETER`). The
 /// straight `.py` decompile zeroes this compiled-module float; the real value
@@ -698,6 +718,7 @@ mod tests {
     use crate::game_params::ttx::components::ArtilleryComponentStats;
     use crate::game_params::ttx::components::ArtilleryGunStats;
     use crate::game_params::ttx::components::EngineComponentStats;
+    use crate::game_params::ttx::components::FireControlStats;
     use crate::game_params::ttx::components::HullComponentStats;
     use crate::game_params::ttx::components::ShipTtxComponents;
     use crate::game_params::ttx::components::TorpedoLauncherStats;
@@ -782,7 +803,15 @@ mod tests {
             delim: None,
             ammo: vec!["PAPA127_127mm_HE".to_string()],
         };
-        ArtilleryComponentStats { max_dist: Some(Meters::from(11130.0)), guns: vec![gun(), gun(), gun()] }
+        ArtilleryComponentStats {
+            max_dist: Some(Meters::from(11130.0)),
+            sigma_count: Some(2.0),
+            guns: vec![gun(), gun(), gun()],
+        }
+    }
+
+    fn stock_fire_control(max_dist_coef: f32) -> FireControlStats {
+        FireControlStats { max_dist_coef, sigma_count_coef: 1.0 }
     }
 
     fn gearing_he() -> Projectile {
@@ -873,7 +902,7 @@ mod tests {
         components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
         components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
         components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
-        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), stock_fire_control(1.0));
         components.stock_selection = ShipUpgradeSelection::new(
             Some("PAUH911_Gearing_1945".to_string()),
             Some("PAUE903_D10_ENG_STOCK".to_string()),
@@ -905,7 +934,7 @@ mod tests {
         components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
         components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), arty);
         components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
-        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), stock_fire_control(1.0));
         components.stock_selection = ShipUpgradeSelection::new(
             Some("PAUH911_Gearing_1945".to_string()),
             Some("PAUE903_D10_ENG_STOCK".to_string()),
@@ -942,6 +971,16 @@ mod tests {
 
         let no_arty = ShipUpgradeSelection { artillery: None, ..sel };
         assert!(artillery_dispersion(&ship, &no_arty, &ModifierBundle::empty(Species::Destroyer)).is_none());
+    }
+
+    #[test]
+    fn artillery_sigma_reads_the_selected_artillery() {
+        let ship = gearing_ship();
+        let sel = ShipUpgradeSelection::stock(&ship);
+        assert_eq!(artillery_sigma(&ship, &sel, &ModifierBundle::empty(Species::Destroyer)), Some(2.0));
+
+        let no_arty = ShipUpgradeSelection { artillery: None, ..sel };
+        assert!(artillery_sigma(&ship, &no_arty, &ModifierBundle::empty(Species::Destroyer)).is_none());
     }
 
     #[test]
@@ -1015,7 +1054,7 @@ mod tests {
         components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
         components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
         components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
-        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.2);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), stock_fire_control(1.2));
         components.stock_selection = ShipUpgradeSelection::new(
             Some("PAUH911_Gearing_1945".to_string()),
             Some("PAUE903_D10_ENG_STOCK".to_string()),
@@ -1042,7 +1081,7 @@ mod tests {
         let big_gun = ArtilleryGunStats { barrel_diameter: Some(Meters::from(0.152)), ..ArtilleryGunStats::default() };
         components.artillery.insert(
             "A".to_string(),
-            ArtilleryComponentStats { max_dist: Some(Meters::from(15000.0)), guns: vec![big_gun] },
+            ArtilleryComponentStats { max_dist: Some(Meters::from(15000.0)), sigma_count: None, guns: vec![big_gun] },
         );
         components.stock_selection =
             ShipUpgradeSelection::new(Some("H".to_string()), None, Some("A".to_string()), None, None);
@@ -1365,7 +1404,7 @@ mod tests {
         components.engines.insert("PAUE903_D10_ENG_STOCK".to_string(), EngineComponentStats { speed_coef: Some(0.0) });
         components.artillery.insert("PAUA903_D10_ART_STOCK".to_string(), gearing_artillery());
         components.torpedoes.insert("PAUT902_D10_NEW_STOCK".to_string(), vec![gearing_launcher()]);
-        components.fire_controls.insert("PAUS911_Suo".to_string(), 1.0);
+        components.fire_controls.insert("PAUS911_Suo".to_string(), stock_fire_control(1.0));
         components.stock_selection = ShipUpgradeSelection::new(
             Some("PAUH911_Gearing_1945".to_string()),
             Some("PAUE903_D10_ENG_STOCK".to_string()),

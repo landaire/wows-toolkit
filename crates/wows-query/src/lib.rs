@@ -16,6 +16,7 @@ pub mod buffs;
 pub mod builds;
 pub mod citadel;
 pub mod commanders;
+pub mod comparison;
 pub mod concealment;
 pub mod consumables;
 pub mod data;

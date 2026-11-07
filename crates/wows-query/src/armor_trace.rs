@@ -76,7 +76,10 @@ pub enum AmmoSource {
     MainBattery,
     SecondaryBattery,
     /// A squadron that drops bombs.
-    Squadron { aircraft: String, role: SquadronRole },
+    Squadron {
+        aircraft: String,
+        role: SquadronRole,
+    },
 }
 
 impl AmmoSource {
@@ -574,7 +577,8 @@ impl GameData {
         let shells = self.shells(shooter);
         let mut weapons = Vec::new();
 
-        for (battery, source) in [(Battery::Main, AmmoSource::MainBattery), (Battery::Secondary, AmmoSource::SecondaryBattery)]
+        for (battery, source) in
+            [(Battery::Main, AmmoSource::MainBattery), (Battery::Secondary, AmmoSource::SecondaryBattery)]
         {
             let ammo: BTreeSet<Ammo> =
                 shells.iter().filter(|shell| shell.battery == battery).map(|shell| shell.ammo).collect();
@@ -925,7 +929,12 @@ fn trace_weapon(weapon: Weapon, target: &TraceTarget) -> Result<AmmoTrace, Query
     Ok(AmmoTrace {
         weapon: weapon.traced,
         arrival: weapon.arrival,
-        rays: RayCounts { spacing_m: target.spacing, cast: grid.cast, struck_ship: struck, entered_water_first: underwater },
+        rays: RayCounts {
+            spacing_m: target.spacing,
+            cast: grid.cast,
+            struck_ship: struck,
+            entered_water_first: underwater,
+        },
         citadel,
         citadel_face,
         zones,

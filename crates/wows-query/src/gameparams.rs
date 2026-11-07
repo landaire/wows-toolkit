@@ -239,6 +239,26 @@ impl GameData {
         self.raw_params.get().map_err(|source| QueryError::RawParams { source })
     }
 
+    /// One raw GameParams entry by name, as JSON. `None` when the store
+    /// lacks it.
+    pub(crate) fn raw_entry(&self, name: &str) -> Result<Option<serde_json::Value>, QueryError> {
+        let store = self.raw_params()?;
+        let Some(entry) = store.find(name) else {
+            return Ok(None);
+        };
+        let parsed = store.read(entry).and_then(|json| {
+            serde_json::from_slice(&json).map_err(|_| RawParamsError::DamagedRecord { name: name.to_owned() })
+        });
+
+        match parsed {
+            Ok(value) => Ok(Some(value)),
+            Err(error) => {
+                self.raw_params.discard(&store, &error);
+                Err(QueryError::RawParams { source: Arc::new(error) })
+            }
+        }
+    }
+
     /// Runs a jq filter over selected raw GameParams entries in a worker
     /// process (see [`crate::jq_worker`]).
     pub fn gameparams_query(&self, args: &GameParamsQueryArgs) -> Result<GameParamsQueryOutput, QueryError> {

@@ -110,6 +110,7 @@ expression: stats.stats
 - "Main battery damage per minute (AP): 266400 hp/min"
 - "Main battery horizontal dispersion at stock firing range: 276 m"
 - "Main battery vertical dispersion at stock firing range: 221 m"
+- "Main battery sigma, standard deviations of the shell distribution within the dispersion ellipse; higher puts more shells near the aim point: 2.10"
 - "Secondary horizontal dispersion at stock secondary range (155 mm): 446 m"
 - "Secondary vertical dispersion at stock secondary range (155 mm): 446 m"
 - "Secondary horizontal dispersion at stock secondary range (127 mm): 446 m"

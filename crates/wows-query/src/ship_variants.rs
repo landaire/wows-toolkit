@@ -348,7 +348,8 @@ impl GameData {
         let pinned = named
             .iter()
             .find(|ship| {
-                ship.param.index().eq_ignore_ascii_case(identifier) || ship.param.name().eq_ignore_ascii_case(identifier)
+                ship.param.index().eq_ignore_ascii_case(identifier)
+                    || ship.param.name().eq_ignore_ascii_case(identifier)
             })
             .map(|ship| ship.param.id());
         let families: BTreeSet<&str> = named.iter().map(|ship| ship.family_key.as_str()).collect();
@@ -375,7 +376,10 @@ impl GameData {
         };
         ranked.sort_by(|left, right| key(left).cmp(&key(right)).then_with(|| by_name(left, right)));
         let Some((&mut ship, alternatives)) = ranked.split_first_mut() else {
-            return Err(QueryError::ShipNotFound { query: query.to_owned(), suggestions: vec![resolved_name.to_owned()] });
+            return Err(QueryError::ShipNotFound {
+                query: query.to_owned(),
+                suggestions: vec![resolved_name.to_owned()],
+            });
         };
         alternatives.sort_by(|left, right| left.rank().cmp(&right.rank()).then_with(|| by_name(left, right)));
 
@@ -525,9 +529,11 @@ mod tests {
     /// stay ASCII.
     fn ascii(text: &str) -> String {
         text.chars()
-            .map(|character| {
-                if character.is_ascii() { character.to_string() } else { character.escape_unicode().to_string() }
-            })
+            .map(
+                |character| {
+                    if character.is_ascii() { character.to_string() } else { character.escape_unicode().to_string() }
+                },
+            )
             .collect()
     }
 

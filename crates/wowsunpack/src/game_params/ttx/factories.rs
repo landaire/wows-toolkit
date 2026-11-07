@@ -16,6 +16,7 @@ use crate::game_params::ttx::components::SecondaryComponentStats;
 use crate::game_params::ttx::components::SecondaryGun;
 use crate::game_params::ttx::components::TorpedoLauncherStats;
 use crate::game_params::ttx::constants;
+use crate::game_params::ttx::constants::BW_KNOTS_TO_MPS;
 use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
@@ -418,13 +419,16 @@ pub fn torpedo_stats<R: Recorder>(
         Km::from(value)
     });
 
-    // isDamageIncreasing: distanceOfDamage max-coeff dist > min-coeff dist (FactoryTorpedoes.py:103-120).
-    // distanceOfMaxDamage (line 119) also needs ammoParams.armingTime/maneuverDist,
-    // which are not on the parsed Projectile, so it stays None (no fabrication).
-    let is_damage_increasing = projectile.distance_of_damage().filter(|d| !d.is_empty()).map(|pairs| {
-        let coeff_at_min_dist = pairs.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
-        let coeff_at_max_dist = pairs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|p| p.0).unwrap_or(0.0);
-        coeff_at_max_dist > coeff_at_min_dist
+    // isDamageIncreasing and distanceOfMaxDamage (FactoryTorpedoes.py:131-147).
+    // Python's min and max keep the first of equal coefficients.
+    let falloff = projectile.distance_of_damage().filter(|pairs| !pairs.is_empty());
+    let first_by = |pairs: &[(f32, f32)], replaces: fn(f32, f32) -> bool| {
+        pairs.iter().copied().reduce(|kept, pair| if replaces(pair.1, kept.1) { pair } else { kept })
+    };
+    let is_damage_increasing = falloff.and_then(|pairs| {
+        let (dist_of_min, _) = first_by(pairs, |coeff, kept| coeff < kept)?;
+        let (dist_of_max, _) = first_by(pairs, |coeff, kept| coeff > kept)?;
+        Some(dist_of_max > dist_of_min)
     });
     if R::ON
         && let Some(flag) = is_damage_increasing
@@ -432,6 +436,17 @@ pub fn torpedo_stats<R: Recorder>(
         let v = if flag { 1.0 } else { 0.0 };
         rec.record(TtxStat::TorpedoIsDamageIncreasing, Some(qualifier), v, torp_src(), v, |_b| {});
     }
+
+    // The arming run plus the distance of the largest coefficient.
+    let distance_of_max_damage = falloff.and_then(|pairs| {
+        let (dist_of_max, _) = first_by(pairs, |coeff, kept| coeff > kept)?;
+        let run = torpedo_arming_run(projectile, speed?)?;
+        let value = (run + dist_of_max) * BW_TO_BALLISTIC / KM_TO_M;
+        if R::ON {
+            rec.record(TtxStat::TorpedoDistanceOfMaxDamage, Some(qualifier), value, torp_src(), value, |_b| {});
+        }
+        Some(Km::from(value))
+    });
 
     let disabled_underwater: Option<bool> = None;
     if R::ON
@@ -447,9 +462,19 @@ pub fn torpedo_stats<R: Recorder>(
         speed,
         range,
         visibility,
-        distance_of_max_damage: None,
+        distance_of_max_damage,
         is_damage_increasing,
         disabled_underwater,
+    }
+}
+
+/// BigWorld distance a torpedo runs before it arms: `maneuverDist`, or the
+/// distance covered in `armingTime` at `speed` when `maneuverDist` is not
+/// positive (FactoryTorpedoes.py:136-139).
+pub fn torpedo_arming_run(projectile: &Projectile, speed: Knots) -> Option<f32> {
+    match projectile.maneuver_dist() {
+        Some(run) if run.value() > 0.0 => Some(run.value()),
+        _ => Some(speed.value() * BW_KNOTS_TO_MPS * projectile.arming_time()?),
     }
 }
 
@@ -1976,12 +2001,37 @@ mod tests {
         assert!(approx(range, TORP_RANGE_KM), "got {range}");
         // visibility: TORP_VISIBILITY * 1.0 = TORP_VISIBILITY.
         assert_eq!(stats.visibility, Some(Km::from(TORP_VISIBILITY)));
-        // No distanceOfDamage on Gearing's torpedo -> is_damage_increasing None.
+        // No distanceOfDamage on Gearing's torpedo -> neither falloff field.
         assert!(stats.is_damage_increasing.is_none());
-        // distanceOfMaxDamage needs armingTime/maneuverDist (absent) -> None.
         assert!(stats.distance_of_max_damage.is_none());
         // Surface path -> disabledUnderwater not set.
         assert!(stats.disabled_underwater.is_none());
+    }
+
+    /// Chateaurenault's PFPT118_550_CHATEAURENAULT: full damage until 246.66
+    /// BW past a 20 BW arming run, half from 250 BW.
+    #[test]
+    fn torpedo_damage_falloff_distance() {
+        let projectile = Projectile::builder()
+            .ammo_type("torpedo".to_string())
+            .max_dist(crate::game_params::types::BigWorldDistance::from(666.66))
+            .speed(75.0)
+            .distance_of_damage(vec![(246.66, 1.0), (250.0, 0.5)])
+            .maneuver_dist(crate::game_params::types::BigWorldDistance::from(20.0))
+            .arming_time(1.0)
+            .build();
+        let stats = torpedo_stats(
+            "PFPT118_550_CHATEAURENAULT".to_string(),
+            &projectile,
+            &ModifierBundle::empty(Species::Destroyer),
+            "",
+            &ModifierSources::default(),
+            &mut Off,
+        );
+
+        let distance = stats.distance_of_max_damage.expect("distance of max damage").value();
+        assert!(approx(distance, (20.0 + 246.66) * 30.0 / 1000.0), "got {distance}");
+        assert_eq!(stats.is_damage_increasing, Some(false));
     }
 
     #[test]
@@ -2260,6 +2310,7 @@ mod tests {
         };
         ArtilleryComponentStats {
             max_dist: Some(Meters::from(15320.0)),
+            sigma_count: None,
             guns: vec![gun(), gun(), gun(), gun(), gun(), gun()],
         }
     }
@@ -2399,6 +2450,7 @@ mod tests {
         };
         ArtilleryComponentStats {
             max_dist: Some(Meters::from(15320.0)),
+            sigma_count: None,
             guns: vec![gun(), gun(), gun(), gun(), gun(), gun()],
         }
     }

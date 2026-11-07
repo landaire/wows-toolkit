@@ -3437,9 +3437,17 @@ pub struct Projectile {
     /// Detectability factor (km-scaled visibility coefficient).
     #[cfg_attr(feature = "serde", serde(default))]
     visibility_factor: Option<f32>,
-    /// Distance-keyed damage falloff pairs `(coeff, distBW)`. Empty on most torpedoes.
+    /// Distance-keyed damage falloff pairs `(distBW, coeff)`, counted from
+    /// the end of the arming run. Empty on most torpedoes.
     #[cfg_attr(feature = "serde", serde(default))]
     distance_of_damage: Option<Vec<(f32, f32)>>,
+    /// Torpedo arming run in BigWorld units (`maneuverDist`); 0 when the
+    /// run is `arming_time` at the torpedo's speed.
+    #[cfg_attr(feature = "serde", serde(default))]
+    maneuver_dist: Option<BigWorldDistance>,
+    /// Torpedo arming time in seconds (`armingTime`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    arming_time: Option<f32>,
     /// Torpedo type discriminant (e.g. 0 = normal, 1 = deep-water).
     #[cfg_attr(feature = "serde", serde(default))]
     torpedo_type: Option<i64>,
@@ -3551,6 +3559,14 @@ impl Projectile {
 
     pub fn distance_of_damage(&self) -> Option<&[(f32, f32)]> {
         self.distance_of_damage.as_deref()
+    }
+
+    pub fn maneuver_dist(&self) -> Option<BigWorldDistance> {
+        self.maneuver_dist
+    }
+
+    pub fn arming_time(&self) -> Option<f32> {
+        self.arming_time
     }
 
     pub fn torpedo_type(&self) -> Option<i64> {

@@ -73,6 +73,7 @@ expression: stats.stats
 - "Main battery damage per minute (AP): 137979 hp/min"
 - "Main battery horizontal dispersion at stock firing range: 100 m"
 - "Main battery vertical dispersion at stock firing range: 60 m"
+- "Main battery sigma, standard deviations of the shell distribution within the dispersion ellipse; higher puts more shells near the aim point: 2.00"
 - "Torpedo tubes, all launchers: 15"
 - "Time to use every charge (smokeGenerator): 540.0 s"
 - "Time to use every charge (speedBoosters): 720.0 s"

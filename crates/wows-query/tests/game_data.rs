@@ -23,6 +23,7 @@ use wows_query::citadel::CitadelProfileArgs;
 use wows_query::citadel::Turtleback;
 use wows_query::commanders::CommanderArgs;
 use wows_query::commanders::CommanderSearchArgs;
+use wows_query::comparison::ShipComparisonArgs;
 use wows_query::consumables::ShipConsumablesArgs;
 use wows_query::firing_arcs::BatteryArcs;
 use wows_query::firing_arcs::FiringArcsArgs;
@@ -931,6 +932,44 @@ fn unique_upgrades_and_the_ships_they_fit() {
 
     let colombo = game().ship_upgrades(&ship("C. Colombo")).expect("C. Colombo exists");
     insta::assert_yaml_snapshot!(colombo.unique_upgrades);
+}
+
+/// Incomparable, C. Colombo with its unique upgrade and Togasa, in testing,
+/// ranked among every tier 10 battleship.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tier_10_battleship_comparison() {
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Battleship),
+            tier: Some(Tier(10)),
+            ships: Some(vec!["Incomparable".to_owned(), "C. Colombo".to_owned(), "T\u{14d}gasa".to_owned()]),
+            ..Default::default()
+        })
+        .expect("tier 10 battleships compare");
+    assert_eq!(comparison.ships.len(), 3);
+    let colombo = &comparison.ships[1];
+    assert!(colombo.unique_upgrade.as_deref().is_some_and(|upgrade| upgrade.contains("dispersion")), "{colombo:?}");
+    insta::assert_yaml_snapshot!(comparison);
+}
+
+/// Chateaurenault's torpedo loses half its damage past 8 km, which only the
+/// per-torpedo factors show.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn chateaurenault_against_tier_10_destroyers() {
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Destroyer),
+            tier: Some(Tier(10)),
+            ships: Some(vec!["Chateaurenault".to_owned(), "Shimakaze".to_owned(), "Smaland".to_owned()]),
+            ..Default::default()
+        })
+        .expect("tier 10 destroyers compare");
+    let chateaurenault = &comparison.ships[0];
+    let torpedo = chateaurenault.torpedoes.first().expect("Chateaurenault carries torpedoes");
+    assert!(torpedo.damage_by_distance.as_deref().is_some_and(|falloff| falloff.contains("50% from")), "{torpedo:?}");
+    insta::assert_yaml_snapshot!(comparison);
 }
 
 #[test]

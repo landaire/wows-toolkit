@@ -792,8 +792,9 @@ pub struct TorpedoStats {
     pub range: Option<Km>,
     /// `visibilityFactor * torpedoVisibilityFactor` (FactoryTorpedoes.py:92).
     pub visibility: Option<Km>,
-    /// `distanceOfMaxDamage` (FactoryTorpedoes.py:119); arming-distance piece needs
-    /// data absent here (`armingTime`/`maneuverDist`), so left `None` (see factory note).
+    /// `distanceOfMaxDamage` (FactoryTorpedoes.py:131-147): the arming run plus
+    /// the distance of the largest `distanceOfDamage` coefficient. `None`
+    /// without `distanceOfDamage`.
     pub distance_of_max_damage: Option<Km>,
     /// `isDamageIncreasing` (FactoryTorpedoes.py:120).
     pub is_damage_increasing: Option<bool>,

@@ -286,10 +286,13 @@ impl TtxStat {
 
     /// A human-readable label derived from `field_key`, for stats with no catalog
     /// (port) label. E.g. `artillery.dispersion_vertical` -> `"Artillery Dispersion
-    /// Vertical"`. Always non-empty.
+    /// Vertical"`, `torpedoes.torpedoes.is_damage_increasing` -> `"Torpedoes Is
+    /// Damage Increasing"`. Always non-empty.
     pub fn fallback_label(self) -> String {
-        self.field_key()
-            .split(['.', '_'])
+        let mut words: Vec<&str> = self.field_key().split(['.', '_']).collect();
+        words.dedup();
+        words
+            .into_iter()
             .map(|word| {
                 let mut chars = word.chars();
                 match chars.next() {
@@ -530,6 +533,7 @@ mod tests {
     fn display_label_falls_back_to_humanized_field_key() {
         assert_eq!(TtxStat::ArtilleryDispersionVertical.fallback_label(), "Artillery Dispersion Vertical");
         assert_eq!(TtxStat::SecondaryDispersionVertical.fallback_label(), "Secondary Dispersion Vertical");
+        assert_eq!(TtxStat::TorpedoIsDamageIncreasing.fallback_label(), "Torpedoes Is Damage Increasing");
     }
 
     #[test]

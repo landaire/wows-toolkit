@@ -798,7 +798,8 @@ impl GameData {
             .ships
             .iter()
             .filter(|other| {
-                (other.family_key == ship.family_key || is_replica_of_ship(other)) && other.param.id() != ship.param.id()
+                (other.family_key == ship.family_key || is_replica_of_ship(other))
+                    && other.param.id() != ship.param.id()
             })
             .collect();
         variants.sort_by_key(|other| other.rank());

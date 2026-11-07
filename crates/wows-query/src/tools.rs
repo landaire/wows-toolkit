@@ -21,6 +21,7 @@ use crate::armor_trace::ArmorTraceArgs;
 use crate::citadel::CitadelProfileArgs;
 use crate::commanders::CommanderArgs;
 use crate::commanders::CommanderSearchArgs;
+use crate::comparison::ShipComparisonArgs;
 use crate::consumables::ShipConsumablesArgs;
 use crate::firing_arcs::FiringArcsArgs;
 use crate::game_modes::GameModeBuffsArgs;
@@ -181,6 +182,12 @@ const TOOLS: &[Tool] = &[
         call: |game, arguments| run(arguments, |args| game.armor_assessment(args)),
     },
     Tool {
+        name: "ship_comparison",
+        description: "Compare the ships of one class and tier (or tier range), optionally of one nation, on the factors that decide their strength, for questions such as \"worst tier 10 battleship\", \"why is X considered bad\" or \"is Incomparable better than C. Colombo\". Per factor the value on the ship's best-fit build (unique upgrades included), its rank in the group and the share of the group it beats, and outliers: values better or worse than 90% of the group. Factors: health, Repair Party heal; main battery reload, range, damage per minute, salvo damage and shell flight time per ammo, turret traverse, dispersion and sigma, fire starts, barrels bearing ahead and astern and the angles at which all bear; secondary damage and range; torpedo damage per minute, torpedoes per minute with loader limits, reload, launch angle off the bow and tubes per broadside; anti-aircraft damage and range; concealment by ships and aircraft; speed, rudder shift, turning circle. Per torpedo option: speed, range, damage, damage at the end of its run and damage by distance, flooding coefficient, detectability, reaction time and damage per minute, ranked among every torpedo option of the group. Nominal plate thickness is not compared; armor_assessment judges protection. Also lists consumables with slot alternatives, special abilities and the unique upgrade. Released and test ships are ranked; replicas are named in their original's entry. ships lists only those ships, still ranked against the whole group. No single score is given: weigh the factors for the question.",
+        schema: input_schema::<ShipComparisonArgs>,
+        call: |game, arguments| run(arguments, |args| game.ship_comparison(args)),
+    },
+    Tool {
         name: "turtleback_search",
         description: "Which ships have a turtleback: an armored deck sloping down behind a thicker belt to meet it near or below the waterline, read from each ship's 3D armor model. Filter by tier, class and nation. Returns considered and qualifying counts per class and per nation with shares, and the qualifying ships with deck thickness, slope and belt thickness. Ships sharing one armor model, such as collaboration copies, count once.",
         schema: input_schema::<TurtlebackSearchArgs>,
@@ -212,7 +219,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "stat_names",
-        description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness, which is nominal and not protection (use armor_assessment for that), stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range, and main battery AP and SAP ricochet angles, which game data states per shell.",
+        description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness, which is nominal and not protection (use armor_assessment for that), stats computed from the card, such as total main battery barrels, salvo damage, damage per minute, dispersion at the stock firing range and sigma, and main battery AP and SAP ricochet angles, which game data states per shell.",
         schema: input_schema::<StatNamesArgs>,
         call: |game, arguments| run(arguments, |args| Ok(game.stat_names(args))),
     },

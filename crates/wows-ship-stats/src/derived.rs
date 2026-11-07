@@ -20,6 +20,7 @@ use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::model::torpedo_qualifier;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
+use wowsunpack::game_params::ttx::orchestration::artillery_sigma;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Meters;
@@ -64,6 +65,10 @@ pub enum DerivedStat {
     /// distance ratio, and both stop at a range shorter than stock.
     MainBatteryDispersionAtStockRange,
     MainBatteryVerticalDispersionAtStockRange,
+
+    /// Main battery `sigmaCount` with the build applied: standard deviations
+    /// of the shell distribution that fit within the dispersion ellipse.
+    MainBatterySigma,
 
     /// The same per secondary mount, at the stock secondary range.
     SecondaryDispersionAtStockRange,
@@ -169,6 +174,7 @@ impl DerivedStat {
         DerivedStat::MainBatteryDamagePerMinute,
         DerivedStat::MainBatteryDispersionAtStockRange,
         DerivedStat::MainBatteryVerticalDispersionAtStockRange,
+        DerivedStat::MainBatterySigma,
         DerivedStat::SecondaryDispersionAtStockRange,
         DerivedStat::SecondaryVerticalDispersionAtStockRange,
         DerivedStat::TorpedoTubes,
@@ -211,6 +217,7 @@ impl DerivedStat {
             Self::MainBatteryDamagePerMinute => "artillery.shells.damage_per_minute",
             Self::MainBatteryDispersionAtStockRange => "artillery.dispersion_at_stock_range",
             Self::MainBatteryVerticalDispersionAtStockRange => "artillery.dispersion_vertical_at_stock_range",
+            Self::MainBatterySigma => "artillery.sigma",
             Self::SecondaryDispersionAtStockRange => "secondary.dispersion_at_stock_range",
             Self::SecondaryVerticalDispersionAtStockRange => "secondary.dispersion_vertical_at_stock_range",
             Self::TorpedoTubes => "torpedoes.tubes",
@@ -263,6 +270,9 @@ impl DerivedStat {
             Self::MainBatteryDamagePerMinute => "Main battery damage per minute",
             Self::MainBatteryDispersionAtStockRange => "Main battery horizontal dispersion at stock firing range",
             Self::MainBatteryVerticalDispersionAtStockRange => "Main battery vertical dispersion at stock firing range",
+            Self::MainBatterySigma => {
+                "Main battery sigma, standard deviations of the shell distribution within the dispersion ellipse; higher puts more shells near the aim point"
+            }
             Self::SecondaryDispersionAtStockRange => "Secondary horizontal dispersion at stock secondary range",
             Self::SecondaryVerticalDispersionAtStockRange => "Secondary vertical dispersion at stock secondary range",
             Self::TorpedoTubes => "Torpedo tubes, all launchers",
@@ -337,6 +347,7 @@ impl DerivedStat {
     pub fn unit(self) -> Unit {
         match self {
             Self::MainBatteryBarrels | Self::TorpedoTubes | Self::FireZones => Unit::Count,
+            Self::MainBatterySigma => Unit::Ratio,
             Self::MainBatterySalvoDamage | Self::FireDamage | Self::FloodDamage => Unit::Hp,
             Self::MainBatteryDamagePerMinute
             | Self::TorpedoDamagePerMinute
@@ -375,6 +386,7 @@ impl DerivedStat {
             Self::MainBatteryBarrels
             | Self::MainBatterySalvoDamage
             | Self::MainBatteryDamagePerMinute
+            | Self::MainBatterySigma
             | Self::TorpedoTubes
             | Self::FireChanceReduction => Some(Direction::Higher),
             Self::MainBatteryDispersionAtStockRange
@@ -425,6 +437,9 @@ impl DerivedStat {
             }
             Self::MainBatteryDispersionAtStockRange => &[TtxStat::ArtilleryDispersion],
             Self::MainBatteryVerticalDispersionAtStockRange => &[TtxStat::ArtilleryDispersionVertical],
+
+            // The card lists no sigma.
+            Self::MainBatterySigma => &[],
             Self::SecondaryDispersionAtStockRange => &[TtxStat::SecondaryDispersion],
             Self::SecondaryVerticalDispersionAtStockRange => &[TtxStat::SecondaryDispersionVertical],
             Self::TorpedoTubes => &[TtxStat::LauncherNumBarrels],
@@ -492,6 +507,7 @@ impl DerivedStat {
             Self::FloodDuration => &["hlCritTimeCoeff", "floodTime"],
             Self::FloodDamagePerSecond => &["vulnerabilityFlood"],
             Self::FloodDamage => &["hlCritTimeCoeff", "floodTime", "vulnerabilityFlood"],
+            Self::MainBatterySigma => &["GMSigmaCount"],
             Self::MainBatteryBarrels
             | Self::MainBatterySalvoDamage
             | Self::MainBatteryDamagePerMinute
@@ -628,6 +644,7 @@ pub enum DerivedValue {
     FiresPerMinute(FiresPerMinute),
     TorpedoesPerMinute(TorpedoesPerMinute),
     Percent(Percent),
+    Ratio(f32),
 }
 
 impl DerivedValue {
@@ -641,6 +658,7 @@ impl DerivedValue {
             Self::FiresPerMinute(rate) => rate.value(),
             Self::TorpedoesPerMinute(rate) => rate.value(),
             Self::Percent(percent) => percent.value(),
+            Self::Ratio(ratio) => ratio,
         }
     }
 }
@@ -656,6 +674,7 @@ impl fmt::Display for DerivedValue {
             Self::FiresPerMinute(rate) => write!(f, "{:.2} fires/min", rate.value()),
             Self::TorpedoesPerMinute(rate) => write!(f, "{:.2} torpedoes/min", rate.value()),
             Self::Percent(percent) => write!(f, "{:.2}%", percent.value()),
+            Self::Ratio(ratio) => write!(f, "{ratio:.2}"),
         }
     }
 }
@@ -781,6 +800,15 @@ impl Derivation<'_> {
                 stat: DerivedStat::MainBatteryVerticalDispersionAtStockRange,
                 qualifier: None,
                 value: DerivedValue::Meters(ellipse.vertical.to_meters()),
+                consumable: None,
+            });
+        }
+
+        if let Some(sigma) = artillery_sigma(self.ship, self.selection, self.modifiers) {
+            rows.push(DerivedRow {
+                stat: DerivedStat::MainBatterySigma,
+                qualifier: None,
+                value: DerivedValue::Ratio(sigma),
                 consumable: None,
             });
         }

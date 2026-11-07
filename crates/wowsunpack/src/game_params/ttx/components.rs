@@ -190,8 +190,25 @@ pub struct ArtilleryComponentStats {
     /// Raw component-level `maxDist` field (base gun range, meters; the factory
     /// divides by KM_TO_M to get km).
     pub max_dist: Option<Meters>,
+    /// Raw component-level `sigmaCount`: how many standard deviations of the
+    /// shell distribution fit within the dispersion ellipse. Higher puts more
+    /// shells near the aim point.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sigma_count: Option<f32>,
     /// Main-battery guns (`HP_AGM_*`) on this component.
     pub guns: Vec<ArtilleryGunStats>,
+}
+
+/// Coefficients of one fire-control component (`PreprocessedFireControl`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct FireControlStats {
+    /// `maxDistCoef`, which the `artillery` factory multiplies into
+    /// main-battery range. Stock is 1.0; range-extender options carry > 1.0.
+    pub max_dist_coef: f32,
+    /// `sigmaCountCoef`, which multiplies the main battery `sigmaCount`.
+    pub sigma_count_coef: f32,
 }
 
 /// Base stats for one secondary-battery (ATBA) component, raw from the ship's
@@ -378,12 +395,9 @@ pub struct ShipTtxComponents {
     /// A-hull, `B_ATBA` from its B-hull), so it is keyed like [`Self::hulls`].
     #[cfg_attr(feature = "serde", serde(default))]
     pub secondaries: HashMap<String, SecondaryComponentStats>,
-    /// Fire-control `maxDistCoef` per `_Suo` upgrade name. The FC component
-    /// contributes only this coefficient (PreprocessedFireControl.py:7), which the
-    /// `artillery` factory multiplies into main-battery range. Stock is 1.0;
-    /// range-extender FC options carry > 1.0.
+    /// Fire-control coefficients per `_Suo` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub fire_controls: HashMap<String, f32>,
+    pub fire_controls: HashMap<String, FireControlStats>,
     /// Components each `_Artillery` and `_Torpedoes` upgrade lists, one per
     /// hull it fits, e.g. `["A_Artillery", "B_Artillery"]`. A hull mounts the
     /// listed one its [`crate::game_params::types::HullUpgradeConfig`] names as
@@ -496,7 +510,12 @@ impl ShipTtxComponents {
 
     /// Look up the fire-control `maxDistCoef` for a given `_Suo` upgrade name.
     pub fn fire_control_max_dist_coef(&self, upgrade_name: &str) -> Option<f32> {
-        self.fire_controls.get(upgrade_name).copied()
+        self.fire_controls.get(upgrade_name).map(|stats| stats.max_dist_coef)
+    }
+
+    /// Look up the fire-control `sigmaCountCoef` for a given `_Suo` upgrade name.
+    pub fn fire_control_sigma_count_coef(&self, upgrade_name: &str) -> Option<f32> {
+        self.fire_controls.get(upgrade_name).map(|stats| stats.sigma_count_coef)
     }
 
     /// Every component a `_Artillery` or `_Torpedoes` upgrade lists.

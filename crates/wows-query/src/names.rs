@@ -563,8 +563,9 @@ impl<T: Clone + PartialEq> NameIndex<T> {
 
         // "SE" read as an initialism names Steady Eye or Sharp Edge; "Base
         // Expert" merely contains it.
-        let fits_initialism =
-            |entry: &&Entry<T>| shared_initialism.is_none() || initialism.iter().any(|fits| fits.target == entry.target);
+        let fits_initialism = |entry: &&Entry<T>| {
+            shared_initialism.is_none() || initialism.iter().any(|fits| fits.target == entry.target)
+        };
         let prefix: Vec<&Entry<T>> = named()
             .filter(|entry| entry.keys.iter().any(|name| name.starts_with(key.as_str())))
             .filter(fits_initialism)
