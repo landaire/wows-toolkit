@@ -1830,24 +1830,43 @@ fn aki_bombs_are_traced_with_the_ordnance_it_carries() {
     insta::assert_snapshot!("aki_ap_bombs_error", ap.to_string());
 }
 
-/// Against a flat Borodino at 12 km, Utrecht's 128 mm AP never reaches the
-/// citadel, so HE is the load; Zao's 310 mm AP citadels it often.
+/// AP is the load when most of the hull it strikes ends in a penetration,
+/// or when it gets through the turrets or reaches the citadel often:
+/// Utrecht's 128 mm AP pens only the ends and casemate of a flat Borodino at
+/// 12 km, so HE; Zao's citadels and a Des Moines turret duel at 8 km, so AP.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
-fn ammo_choice_follows_the_ap_citadel_rate() {
-    let choices: Vec<_> = ["Utrecht", "Des Moines", "Zao"]
-        .into_iter()
-        .map(|shooter| {
+fn ammo_choice_follows_the_ap_hull_penetration_share() {
+    struct Matchup {
+        shooter: &'static str,
+        target: &'static str,
+        range_km: f32,
+    }
+    let matchups = [
+        Matchup { shooter: "Utrecht", target: "Borodino", range_km: 12.0 },
+        Matchup { shooter: "Des Moines", target: "Borodino", range_km: 12.0 },
+        Matchup { shooter: "Zao", target: "Borodino", range_km: 12.0 },
+        Matchup { shooter: "Des Moines", target: "Des Moines", range_km: 8.0 },
+    ];
+    let choices: Vec<_> = matchups
+        .iter()
+        .map(|matchup| {
             let trace = game()
                 .armor_trace(&ArmorTraceArgs {
-                    shooter: shooter.to_owned(),
-                    target_ship: "Borodino".to_owned(),
-                    range_km: Some(Km::new(12.0)),
+                    shooter: matchup.shooter.to_owned(),
+                    target_ship: matchup.target.to_owned(),
+                    range_km: Some(Km::new(matchup.range_km)),
                     target_angle_deg: Some(Degrees::new(0.0)),
                     ..Default::default()
                 })
                 .expect("ships resolve");
-            (shooter, trace.ammo_choice)
+            format!(
+                "{} vs {} at {} km: {}",
+                matchup.shooter,
+                matchup.target,
+                matchup.range_km,
+                trace.ammo_choice.unwrap_or_default()
+            )
         })
         .collect();
     insta::assert_yaml_snapshot!(choices);

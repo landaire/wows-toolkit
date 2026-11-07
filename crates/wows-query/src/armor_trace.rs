@@ -49,7 +49,6 @@ use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
 use crate::ships::Ship;
-use crate::ships::ShipClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1314,9 +1313,11 @@ fn common_assumptions(model: &WeaponModel) -> Vec<&'static str> {
 }
 
 /// Which of the main battery's AP and HE (or SAP) traces to load against the
-/// target. AP is the choice when it detonates inside the citadel often;
-/// otherwise HE or SAP, which damage the zones whose first plate they
-/// defeat. `None` for other weapons, whose ammo players do not choose.
+/// target. AP is the choice when most of the hull it strikes ends in a
+/// penetration, a detonation inside the ship, rather than an
+/// overpenetration, ricochet or shatter; otherwise HE or SAP, which damage
+/// the zones whose first plate they defeat. `None` for other weapons, whose
+/// ammo players do not choose.
 fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Option<String> {
     if weapon != TraceWeapon::MainBattery {
         return None;
@@ -1327,75 +1328,168 @@ fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Opti
     let other = same_weapon(Ammo::He).or_else(|| same_weapon(Ammo::Sap))?;
     let other_ammo = other.weapon.ammo.label();
 
-    let citadel = percent(ap.citadel.detonating_inside, ap.citadel.rays_over_citadel);
-    match ap.citadel.fraction {
-        Some(fraction) if fraction >= 0.25 => {
-            return Some(format!(
-                "Load AP: it detonates inside {}'s citadel on {citadel} of the rays over it.",
-                target.name
-            ));
+    let ap_total: usize = ap.zones.iter().map(|zone| zone.rays).sum();
+    let ap_damaging: usize = ap.zones.iter().map(damaging_rays).sum();
+    // Zones under 2% of the struck area only add noise to the sentence.
+    let shares: Vec<ZoneShare> = ap.zones.iter().filter(|zone| zone.rays * 50 >= ap_total).map(ZoneShare::of).collect();
+    let penetrated: Vec<&ZoneShare> = shares.iter().filter(|share| share.mostly_damaging()).collect();
+    let mut failures: BTreeMap<RayOutcome, Vec<&str>> = BTreeMap::new();
+    for share in shares.iter().filter(|share| !share.mostly_damaging()) {
+        if let Some(outcome) = share.failure {
+            failures.entry(outcome).or_default().push(share.label);
         }
-        Some(fraction) if fraction >= 0.05 => {
-            return Some(format!(
-                "AP detonates inside {}'s citadel on {citadel} of the rays over it: load AP for shots aimed at the citadel, {other_ammo} otherwise.",
-                target.name
-            ));
-        }
-        _ => {}
     }
 
-    let ap_citadel = match ap.citadel.fraction {
-        None if matches!(target.class, ShipClass::Destroyer | ShipClass::Submarine) => {
-            format!("{} has no citadel", target.name)
-        }
-        None => format!("AP crosses no citadel plate of {} from this direction", target.name),
-        Some(_) if ap.citadel.detonating_inside == 0 => format!("AP never detonates inside {}'s citadel", target.name),
-        Some(_) => format!("AP rarely detonates inside {}'s citadel ({citadel})", target.name),
-    };
-    let ap_zones: Vec<&str> = ap
-        .zones
-        .iter()
-        .filter(|zone| {
-            zone.outcomes
-                .iter()
-                .max_by_key(|(_, count)| **count)
-                .is_some_and(|(outcome, _)| *outcome == RayOutcome::Penetration)
-        })
-        .map(|zone| zone.zone.as_str())
-        .collect();
-    let ap_pens = match ap_zones.as_slice() {
-        [] => String::new(),
-        zones => format!("; it penetrates most often in {}", zones.join(", ")),
-    };
+    let mut ap_text = String::new();
+    if !penetrated.is_empty() {
+        let zones: Vec<String> =
+            penetrated.iter().map(|share| format!("{} ({})", share.label, share.percent())).collect();
+        ap_text.push_str(&format!(" It penetrates most of the {}", join_and(&zones)));
+    }
+    let failed: Vec<String> =
+        failures.iter().map(|(outcome, zones)| format!("{} the {}", failure_verb(*outcome), join_and(zones))).collect();
+    if !failed.is_empty() {
+        ap_text.push_str(if penetrated.is_empty() { " It " } else { ", and " });
+        ap_text.push_str(&join_and(&failed));
+    }
+    if !ap_text.is_empty() {
+        ap_text.push('.');
+    }
+    let turrets_penetrated = penetrated.iter().any(|share| share.label == TURRETS);
+    if turrets_penetrated {
+        ap_text.push_str(" A hit through a turret's armor can knock the turret out.");
+    }
+    if ap.citadel.detonating_inside > 0 {
+        ap_text.push_str(&format!(
+            " It also detonates inside {}'s citadel on {} of the rays over it.",
+            target.name,
+            percent(ap.citadel.detonating_inside, ap.citadel.rays_over_citadel)
+        ));
+    }
 
-    let total: usize = other.zones.iter().map(|zone| zone.rays).sum();
-    let defeated: usize = other
-        .zones
-        .iter()
-        .map(|zone| {
-            zone.outcomes.get(&RayOutcome::Penetration).copied().unwrap_or(0)
-                + zone.outcomes.get(&RayOutcome::Citadel).copied().unwrap_or(0)
-        })
-        .sum();
-    let other_zones: Vec<&str> = other
-        .zones
-        .iter()
-        .filter(|zone| {
-            zone.outcomes.contains_key(&RayOutcome::Penetration) || zone.outcomes.contains_key(&RayOutcome::Citadel)
-        })
-        .map(|zone| zone.zone.as_str())
-        .collect();
+    let ap_share = percent(ap_damaging, ap_total);
+    if ap_damaging * 2 >= ap_total {
+        return Some(format!(
+            "Load AP: it penetrates, detonating inside the ship, on {ap_share} of the hull it strikes.{ap_text}"
+        ));
+    }
+    // Knocking out turrets or citadel hits often enough repay AP even where
+    // most of the hull, the superstructure above all, defeats it.
+    let citadels_often = ap.citadel.fraction.is_some_and(|fraction| fraction >= 0.25);
+    if turrets_penetrated || citadels_often {
+        let reason = match (turrets_penetrated, citadels_often) {
+            (true, true) => "it gets through the turrets and into the citadel often enough to repay it",
+            (true, false) => "it gets through the turrets often enough to repay it",
+            _ => "it reaches the citadel often enough to repay it",
+        };
+        return Some(format!(
+            "Load AP: {reason}, although it penetrates on only {ap_share} of the hull it strikes.{ap_text} Aim at those zones rather than the superstructure."
+        ));
+    }
+
+    let other_total: usize = other.zones.iter().map(|zone| zone.rays).sum();
+    let other_damaging: usize = other.zones.iter().map(damaging_rays).sum();
+    let other_zones: Vec<&str> =
+        other.zones.iter().filter(|zone| damaging_rays(zone) > 0).map(|zone| zone_label(&zone.zone)).collect();
     let fires = if other.weapon.ammo == Ammo::He {
         ", and every HE hit can start a fire, even one that shatters"
     } else {
         "; SAP starts no fires"
     };
+    let aim = if penetrated.is_empty() { "" } else { " AP still pays off on shots aimed at those zones." };
 
     Some(format!(
-        "Load {other_ammo}: {ap_citadel}{ap_pens}. {other_ammo} defeats the first plate on {} of the area it strikes ({}){fires}.",
-        percent(defeated, total),
-        if other_zones.is_empty() { "no zone".to_owned() } else { other_zones.join(", ") },
+        "Load {other_ammo}: AP penetrates on only {ap_share} of the hull it strikes; the rest overpenetrates, ricochets or shatters.{ap_text}{aim} {other_ammo} defeats the first plate on {} of the area it strikes ({}){fires}.",
+        percent(other_damaging, other_total),
+        if other_zones.is_empty() { "no zone".to_owned() } else { join_and(&other_zones) },
     ))
+}
+
+/// Rays that damage the ship: AP detonating inside it, or HE and SAP
+/// defeating the first plate.
+fn damaging_rays(zone: &ZoneSummary) -> usize {
+    [RayOutcome::Penetration, RayOutcome::Citadel]
+        .iter()
+        .map(|outcome| zone.outcomes.get(outcome).copied().unwrap_or(0))
+        .sum()
+}
+
+const TURRETS: &str = "turrets";
+
+/// One zone's AP rays as `ammo_choice` words them.
+struct ZoneShare {
+    label: &'static str,
+    rays: usize,
+
+    /// Rays that detonate inside the ship. For turrets, rays that get through
+    /// the turret armor, detonating or not, since that can knock the turret out.
+    defeated: usize,
+
+    /// The most common outcome among the other rays.
+    failure: Option<RayOutcome>,
+}
+
+impl ZoneShare {
+    fn of(zone: &ZoneSummary) -> Self {
+        let label = zone_label(&zone.zone);
+        let defeats = |outcome: &RayOutcome| match outcome {
+            RayOutcome::Penetration | RayOutcome::Citadel => true,
+            RayOutcome::Overpenetration => label == TURRETS,
+            RayOutcome::Ricochet | RayOutcome::Shatter | RayOutcome::Stopped => false,
+        };
+        let defeated = zone.outcomes.iter().filter(|(outcome, _)| defeats(outcome)).map(|(_, count)| count).sum();
+        let failure = zone
+            .outcomes
+            .iter()
+            .filter(|(outcome, _)| !defeats(outcome))
+            .max_by_key(|(_, count)| **count)
+            .map(|(outcome, _)| *outcome);
+        Self { label, rays: zone.rays, defeated, failure }
+    }
+
+    fn mostly_damaging(&self) -> bool {
+        self.defeated * 2 >= self.rays
+    }
+
+    fn percent(&self) -> String {
+        percent(self.defeated, self.rays)
+    }
+}
+
+/// A zone name as it reads in a sentence.
+fn zone_label(zone: &str) -> &'static str {
+    match zone {
+        "Bow" => "bow",
+        "Stern" => "stern",
+        "Casemate" => "casemate",
+        "Superstructure" => "superstructure",
+        "Citadel" => "citadel armor",
+        "Turret" => TURRETS,
+        "TorpedoProtection" => "torpedo protection",
+        "Hull" => "hull",
+        _ => "other armor",
+    }
+}
+
+fn failure_verb(outcome: RayOutcome) -> &'static str {
+    match outcome {
+        RayOutcome::Overpenetration => "overpenetrates",
+        RayOutcome::Ricochet => "ricochets off",
+        RayOutcome::Stopped => "is stopped by",
+        RayOutcome::Shatter | RayOutcome::Penetration | RayOutcome::Citadel => "shatters on",
+    }
+}
+
+/// "a", "a and b", "a, b and c".
+fn join_and<S: AsRef<str>>(items: &[S]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.as_ref().to_owned(),
+        [rest @ .., last] => {
+            let rest: Vec<&str> = rest.iter().map(AsRef::as_ref).collect();
+            format!("{} and {}", rest.join(", "), last.as_ref())
+        }
+    }
 }
 
 fn percent(part: usize, whole: usize) -> String {
