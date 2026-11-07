@@ -8,6 +8,10 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::WorldPos;
 
+use crate::components::BuffZone;
+use crate::components::BuffZoneData;
+use crate::components::CapturePoint;
+use crate::components::CapturePointData;
 use crate::components::GameId;
 use crate::components::MinimapPlacement;
 use crate::components::SmokeScreen;
@@ -112,7 +116,10 @@ pub fn handle_minimap_updates(updates: &[MinimapUpdate], world: &mut World, cloc
     }
 }
 
-/// Handle NonVolatilePosition: update SmokeScreen or WeatherZone entity position.
+/// Handle NonVolatilePosition: update the position of a smoke screen or interactive zone.
+///
+/// Interactive zones can be created at a staging position and moved into place later,
+/// as event capture points are.
 pub fn handle_non_volatile_position(entity_id: EntityId, position: WorldPos, world: &mut World) {
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else { return };
     let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
@@ -120,8 +127,16 @@ pub fn handle_non_volatile_position(entity_id: EntityId, position: WorldPos, wor
         if let Some(mut state) = er.get_mut::<SmokeScreenState>() {
             state.position = position;
         }
-    } else if er.contains::<WeatherZone>()
-        && let Some(mut data) = er.get_mut::<WeatherZoneData>()
+    } else if er.contains::<WeatherZone>() {
+        if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
+            data.0.position = position;
+        }
+    } else if er.contains::<CapturePoint>() {
+        if let Some(mut data) = er.get_mut::<CapturePointData>() {
+            data.0.position = Some(position);
+        }
+    } else if er.contains::<BuffZone>()
+        && let Some(mut data) = er.get_mut::<BuffZoneData>()
     {
         data.0.position = position;
     }
@@ -134,4 +149,39 @@ fn spawn_or_get(world: &mut World, id: EntityId) -> bevy_ecs::entity::Entity {
     let entity = world.spawn((GameId(id),)).id();
     world.resource_mut::<EntityIndex>().insert(id, entity);
     entity
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_replays::analyzer::battle_controller::state::CapturePointState;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    use super::*;
+    use crate::ingest::zones::handle_entity_property_zone;
+
+    /// Event capture points are created at a staging row along the map edge and moved
+    /// into place with NonVolatilePosition and a radius EntityProperty at battle start.
+    #[test]
+    fn capture_point_follows_non_volatile_position_and_radius() {
+        let mut world = World::new();
+        world.insert_resource(EntityIndex::default());
+
+        let id = EntityId::from(512790u32);
+        let staging = CapturePointState {
+            position: Some(WorldPos::new(-451.7, 0.0, 649.6)),
+            radius: Some(110.0),
+            is_enabled: true,
+            ..Default::default()
+        };
+        let entity = spawn_or_get(&mut world, id);
+        world.entity_mut(entity).insert((CapturePoint, CapturePointData(staging)));
+
+        let placed = WorldPos::new(-277.0, 0.0, 336.4);
+        handle_non_volatile_position(id, placed, &mut world);
+        handle_entity_property_zone(id, "radius", &ArgValue::Float32(80.0), &mut world);
+
+        let cp = &world.entity(entity).get::<CapturePointData>().unwrap().0;
+        assert_eq!(cp.position, Some(placed));
+        assert_eq!(cp.radius, Some(80.0));
+    }
 }

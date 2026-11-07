@@ -517,21 +517,39 @@ fn apply_smoke_points_update(ecs_entity: bevy_ecs::entity::Entity, action: &Upda
     }
 }
 
-/// Handle an EntityProperty for interactive zones: teamId on a CapturePoint entity.
+/// Handle an EntityProperty for interactive zones: teamId on a CapturePoint entity, and
+/// radius on any interactive zone.
 ///
 /// Mirrors the EntityProperty teamId arm in BattleController's packet loop.
 pub fn handle_entity_property_zone(entity_id: EntityId, property: &str, value: &ArgValue<'_>, world: &mut World) {
-    if property == "teamId"
-        && let Some(v) = value.as_i64()
-        && let Some(zone_ref) = world.resource::<InteractiveZoneIndex>().0.get(&entity_id).copied()
-        && let InteractiveZoneRef::CapturePoint(cp_idx) = zone_ref
-    {
-        let order = world.resource::<CapturePointOrder>().0.clone();
-        if let Some(&ecs_entity) = order.get(cp_idx)
-            && let Ok(mut er) = world.get_entity_mut(ecs_entity)
-            && let Some(mut data) = er.get_mut::<CapturePointData>()
-        {
-            data.0.team_id = v;
+    match property {
+        "teamId" => {
+            if let Some(v) = value.as_i64()
+                && let Some(zone_ref) = world.resource::<InteractiveZoneIndex>().0.get(&entity_id).copied()
+                && let InteractiveZoneRef::CapturePoint(cp_idx) = zone_ref
+            {
+                let order = world.resource::<CapturePointOrder>().0.clone();
+                if let Some(&ecs_entity) = order.get(cp_idx)
+                    && let Ok(mut er) = world.get_entity_mut(ecs_entity)
+                    && let Some(mut data) = er.get_mut::<CapturePointData>()
+                {
+                    data.0.team_id = v;
+                }
+            }
         }
+        "radius" => {
+            let Some(radius) = value.float_32_ref().copied() else { return };
+            let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else { return };
+            let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
+
+            if let Some(mut data) = er.get_mut::<CapturePointData>() {
+                data.0.radius = Some(radius);
+            } else if let Some(mut data) = er.get_mut::<BuffZoneData>() {
+                data.0.radius = Some(radius);
+            } else if let Some(mut data) = er.get_mut::<WeatherZoneData>() {
+                data.0.radius = Some(radius);
+            }
+        }
+        _ => {}
     }
 }
