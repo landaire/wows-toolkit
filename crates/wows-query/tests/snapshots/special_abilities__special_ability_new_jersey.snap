@@ -23,4 +23,4 @@ abilities:
     effects:
       - +20% Main battery AP shell damage
       - "-20% Maximum main battery shell dispersion"
-    uses_per_battle: "No limit per battle and no cooldown or charges: each use empties the meter, which must fill to 100% again before the next use."
+    uses_per_battle: "At most 4 per battle without captain skills or upgrades: only consumable uses fill the meter, and the ship carries up to 8 charges of them (Gun Crew Assistance 3; Auxiliary and Torpedo Armament Assistance 3, if taken over Spotting Aircraft or Fighters; Engineering Crew Assistance 2). 4 uses with every listed consumable taken and every charge earning the largest gain listed under charge; 1 when every charge earns the smallest gain and each slot with a choice holds another option. No cooldown: each use empties the meter, which must fill to 100% again before the next use."

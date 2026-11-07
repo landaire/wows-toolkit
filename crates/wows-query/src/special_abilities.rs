@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::game_types::ChargeCount;
 use wows_core::units::DamagePerMinute;
 use wows_core::units::Seconds;
 use wows_ship_stats::DerivedRow;
@@ -141,7 +142,7 @@ pub struct CombatInstructionsInfo {
     /// Changes while active.
     pub effects: Vec<String>,
 
-    pub uses_per_battle: &'static str,
+    pub uses_per_battle: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -391,7 +392,7 @@ impl GameData {
         let mut abilities: Vec<SpecialAbility> = instructions
             .into_iter()
             .map(|(instructions, hulls)| {
-                SpecialAbility::CombatInstructions(self.describe_instructions(instructions, hulls, species))
+                SpecialAbility::CombatInstructions(self.describe_instructions(ship, instructions, hulls, species))
             })
             .collect();
         for (mode, modules) in modes {
@@ -468,6 +469,7 @@ impl GameData {
 
     fn describe_instructions(
         &self,
+        ship: &Ship,
         instructions: &CombatInstructions,
         hulls: Vec<String>,
         species: wowsunpack::game_params::types::Species,
@@ -497,8 +499,85 @@ impl GameData {
             progress_loss,
             duration_s: instructions.duration.map(|duration| Seconds::new(duration.value())),
             effects: self.describe(&instructions.modifiers, species),
-            uses_per_battle: USES_PER_BATTLE,
+            uses_per_battle: self
+                .meter_budget(ship, &instructions.triggers)
+                .map_or_else(|| USES_PER_BATTLE.to_owned(), |budget| budget.describe()),
         }
+    }
+
+    /// The uses per battle of a meter that only consumable uses fill, from
+    /// the consumables' charges with no captain skills or upgrades. `None`
+    /// when any other event fills it, or when none of the ship's consumables
+    /// fill it.
+    fn meter_budget(&self, ship: &Ship, triggers: &[ProgressTrigger]) -> Option<MeterBudget> {
+        let mut gains: Vec<(&[String], f64)> = Vec::new();
+        for trigger in triggers {
+            match (&trigger.event, trigger.max_activations) {
+                (ProgressEvent::ConsumableUse { consumables }, None) if !consumables.is_empty() => {
+                    gains.push((consumables, f64::from(trigger.gain.0) / f64::from(trigger.required_count.max(1))));
+                }
+                _ => return None,
+            }
+        }
+
+        let mut most = 0.0;
+        let mut fewest = 0.0;
+        let mut charges = 0;
+        let mut sources = Vec::new();
+        for slot in ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default() {
+            let mut names = Vec::new();
+            let mut counted: Vec<MeterSource> = Vec::new();
+            for (ability, variant) in slot {
+                let Some(param) = self.provider().game_param_by_name(ability) else {
+                    continue;
+                };
+                let Some(category) = param.ability().and_then(|ability| ability.get_category(variant)) else {
+                    continue;
+                };
+                let name = self.consumable_name(ability, category);
+                names.push(name.clone());
+                let kind = category.consumable_type_raw();
+                let Some((smallest, largest)) = gains
+                    .iter()
+                    .filter(|(consumables, _)| consumables.iter().any(|listed| listed == kind))
+                    .map(|(_, gain)| *gain)
+                    .fold(None, |range: Option<(f64, f64)>, gain| {
+                        Some(range.map_or((gain, gain), |(low, high)| (low.min(gain), high.max(gain))))
+                    })
+                else {
+                    continue;
+                };
+                let ChargeCount::Finite(count) = category.num_consumables() else {
+                    return None;
+                };
+                counted.push(MeterSource {
+                    name,
+                    charges: count,
+                    least_progress: f64::from(count) * smallest,
+                    most_progress: f64::from(count) * largest,
+                    instead_of: Vec::new(),
+                });
+            }
+            if counted.is_empty() {
+                continue;
+            }
+
+            // A slot carries one of its options.
+            most += counted.iter().map(|source| source.most_progress).fold(0.0, f64::max);
+            if counted.len() == names.len() {
+                fewest += counted.iter().map(|source| source.least_progress).fold(f64::MAX, f64::min);
+            }
+            charges += counted.iter().map(|source| source.charges).max().unwrap_or(0);
+            for mut source in counted {
+                source.instead_of = names.iter().filter(|other| **other != source.name).cloned().collect();
+                sources.push(source);
+            }
+        }
+        if sources.is_empty() {
+            return None;
+        }
+
+        Some(MeterBudget { most: full_meters(most), fewest: full_meters(fewest), charges, sources })
     }
 
     /// "Hit an enemy ship with a main battery shell: +6.5%", as the client
@@ -677,6 +756,70 @@ fn activator_name(event: &ProgressEvent) -> String {
         ProgressEvent::AdjustmentShot { .. } => "AdjustmentShotActivator".to_owned(),
         ProgressEvent::VisibilityChanged { .. } => "VisibilityChangedActivator".to_owned(),
         ProgressEvent::Other { activator } => activator.clone(),
+    }
+}
+
+/// How many times the meter fills from `progress` percent.
+fn full_meters(progress: f64) -> u32 {
+    // Gains such as 6.5% sum with float error just below a whole meter.
+    ((progress + 1e-6) / 100.0).floor() as u32
+}
+
+/// A consumable whose use fills the meter.
+struct MeterSource {
+    name: String,
+    charges: u32,
+
+    /// Progress from all its charges at the smallest and the largest gain.
+    least_progress: f64,
+    most_progress: f64,
+
+    /// The other options of its slot.
+    instead_of: Vec<String>,
+}
+
+/// Combat Instructions uses one battle allows when only consumable uses
+/// fill the meter.
+struct MeterBudget {
+    /// Uses when every slot holds its best consumable and every charge earns
+    /// its largest gain.
+    most: u32,
+
+    /// Uses when slots with a choice hold an option that does not fill the
+    /// meter and every charge earns its smallest gain.
+    fewest: u32,
+
+    /// Charges with every slot holding its consumable with the most charges.
+    charges: u32,
+
+    sources: Vec<MeterSource>,
+}
+
+impl MeterBudget {
+    fn describe(&self) -> String {
+        let sources: Vec<String> = self
+            .sources
+            .iter()
+            .map(|source| match source.instead_of.as_slice() {
+                [] => format!("{} {}", source.name, source.charges),
+                others => format!("{} {}, if taken over {}", source.name, source.charges, others.join(" or ")),
+            })
+            .collect();
+        let range = if self.most == self.fewest {
+            String::new()
+        } else {
+            format!(
+                " {} uses with every listed consumable taken and every charge earning the largest gain listed under charge; {} when every charge earns the smallest gain and each slot with a choice holds another option.",
+                self.most, self.fewest
+            )
+        };
+
+        format!(
+            "At most {} per battle without captain skills or upgrades: only consumable uses fill the meter, and the ship carries up to {} charges of them ({}).{range} No cooldown: each use empties the meter, which must fill to 100% again before the next use.",
+            self.most,
+            self.charges,
+            sources.join("; ")
+        )
     }
 }
 
