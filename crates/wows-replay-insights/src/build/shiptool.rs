@@ -24,6 +24,11 @@ pub fn build_url(build: &ResolvedBuild) -> String {
     url
 }
 
+/// Builds a ShipTool link for a ship without a loadout.
+pub fn ship_url(ship_index: &str) -> String {
+    format!("{SHIPTOOL_BASE}?ship={ship_index}&utm_source={UTM_SOURCE}")
+}
+
 fn append_list<T>(url: &mut String, name: &str, values: impl IntoIterator<Item = T>)
 where
     T: Display,

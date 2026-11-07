@@ -4875,6 +4875,9 @@ impl WowsToolkitApp {
                 self.tab_state.armor_viewer.pending_ship_selection = Some(ship_index);
                 self.focus_tab(&Tab::ArmorViewer);
             }
+            PaletteAction::OpenInShipTool { ship_index } => {
+                ctx.open_url(OpenUrl::new_tab(wows_replay_insights::build::shiptool::ship_url(&ship_index)));
+            }
             PaletteAction::MyMatchesInShip { ship_id } => {
                 self.tab_state.pending_search_query = Some(seed::my_matches_in_ship(ship_id));
                 self.focus_tab(&Tab::Search);
@@ -5047,6 +5050,7 @@ impl eframe::App for WowsToolkitApp {
                         SubKind::Players => "Search players",
                         SubKind::MyShips => "Search ships you've played",
                         SubKind::ArmorShips => "Search ships to view armor",
+                        SubKind::ShipToolShips => "Search ships to open in ShipTool",
                     };
                     (palette.sub_entries(kind, db_pool, rt, ship_catalog), hint)
                 }

@@ -12,6 +12,7 @@ per-commit history lives in `CHANGELOG.md`.
 - Replay rows indexed by an earlier parser refresh once, so a corrected victory or loss remains correct after leaving the inspector.
 - Player action menus can open ship builds in ShipTool. EU WoWS Numbers links use the canonical domain.
 - The command palette can copy application, game-data, constants-fetch, and recent-crash information for bug reports.
+- The command palette can open any ship in ShipTool.
 - Replay directory tabs have a Directory Stats button. It opens a Stats tab for every replay in the directory and its subdirectories, and reports which replays it skipped and why.
 - Search results have a Render to Clipboard button that renders the replay to video and copies the file.
 - Current Match looks up player stats only after you open the Current Match view.

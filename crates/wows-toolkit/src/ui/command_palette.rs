@@ -29,6 +29,10 @@ pub enum PaletteAction {
     ViewArmor {
         ship_index: String,
     },
+    /// Open the ship's ShipTool page in the browser.
+    OpenInShipTool {
+        ship_index: String,
+    },
     MyMatchesInShip {
         ship_id: GameParamId,
     },
@@ -83,6 +87,7 @@ pub enum SubKind {
     Players,
     MyShips,
     ArmorShips,
+    ShipToolShips,
 }
 
 /// Bound applied to every on-demand sub-query (DB or in-memory).
@@ -101,7 +106,8 @@ pub struct CommandPalette {
     last_kind: Option<SubKind>,
     player_results: Vec<PlayerFacet>,
     ship_results: Vec<ShipFacet>,
-    armor_results: Vec<ShipEntry>,
+    /// Ship catalog matches, shared by the sub-modes that list every ship.
+    catalog_results: Vec<ShipEntry>,
 }
 
 impl CommandPalette {
@@ -133,6 +139,10 @@ impl CommandPalette {
         entries.push(egui_palette::Entry::new(
             "Open ship in Armor Viewer...",
             PaletteAction::EnterSub(SubKind::ArmorShips),
+        ));
+        entries.push(egui_palette::Entry::new(
+            "Open ship in ShipTool...",
+            PaletteAction::EnterSub(SubKind::ShipToolShips),
         ));
 
         entries
@@ -220,9 +230,9 @@ impl CommandPalette {
                         }
                     }
                 }
-                SubKind::ArmorShips => {
+                SubKind::ArmorShips | SubKind::ShipToolShips => {
                     if let Some(catalog) = catalog {
-                        self.armor_results =
+                        self.catalog_results =
                             catalog.search(&self.state.query, SUB_QUERY_LIMIT as usize).into_iter().cloned().collect();
                     }
                 }
@@ -252,7 +262,7 @@ impl CommandPalette {
                 })
                 .collect(),
             SubKind::ArmorShips => self
-                .armor_results
+                .catalog_results
                 .iter()
                 .map(|ship| {
                     egui_palette::Entry::new(
@@ -260,6 +270,17 @@ impl CommandPalette {
                         PaletteAction::ViewArmor { ship_index: ship.param_index.clone() },
                     )
                     .with_subtitle(format!("View armor (Tier {})", tier_roman(ship.tier)))
+                })
+                .collect(),
+            SubKind::ShipToolShips => self
+                .catalog_results
+                .iter()
+                .map(|ship| {
+                    egui_palette::Entry::new(
+                        ship.display_name.clone(),
+                        PaletteAction::OpenInShipTool { ship_index: ship.param_index.clone() },
+                    )
+                    .with_subtitle(format!("Open in ShipTool (Tier {})", tier_roman(ship.tier)))
                 })
                 .collect(),
         }
