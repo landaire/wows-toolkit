@@ -4,6 +4,17 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.0.4
+
+### Replay analysis
+
+- Builds in 15.10 replays show their upgrades, consumables and signals. The client changed how it records upgrade slots, which left most of each build empty.
+- 15.10 replays that were already indexed are read again once after you update.
+
+### Tools and builds
+
+- The macOS app is published again.
+
 ## 1.0.3
 
 ### Replay analysis

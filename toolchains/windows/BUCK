@@ -71,7 +71,7 @@ wix_msi(
     # MSI ProductVersion is numeric only, so a pre-release tag ships under its
     # release version. scripts/test-workspace-package-metadata.nu holds this to
     # the numeric core of the workspace version.
-    version = "1.0.3",
+    version = "1.0.4",
     out = "wows-toolkit-windows-x86_64-unsigned.msi",
     visibility = ["PUBLIC"],
 )

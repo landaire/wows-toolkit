@@ -35,7 +35,7 @@ members = [
 exclude = ["third-party/rust/vendor"]
 
 [workspace.package]
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -46,7 +46,7 @@ name = "wows-toolkit"
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
 wows-core = { version = "0.15.0", path = "crates/wows-core", default-features = false }
-wowsunpack = { version = "0.47.0", path = "crates/wowsunpack", default-features = false }
+wowsunpack = { version = "0.47.1", path = "crates/wowsunpack", default-features = false }
 wows_replays = { version = "0.48.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.41.0", path = "crates/minimap-renderer", default-features = false }
 wows-battle-world = { version = "0.15.0", path = "crates/wows-battle-world", default-features = false }
