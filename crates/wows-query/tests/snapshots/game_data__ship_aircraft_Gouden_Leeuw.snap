@@ -36,4 +36,4 @@ squadrons:
       result: penetrates
       penetration_mm: 37
 thickness_mm: 25
-rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. The server decides AP bombs and rockets; ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise the server decides and ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."

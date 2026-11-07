@@ -11,6 +11,7 @@ use wows_core::units::Meters;
 use wows_core::units::MetersPerSecond;
 use wows_core::units::Millimeters;
 use wows_core::units::Seconds;
+use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::translations::translate_unit;
 use wowsunpack::game_params::ttx::components::PlaneSlot;
 use wowsunpack::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
@@ -174,6 +175,18 @@ impl OrdnanceKind {
         }
     }
 
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Bomb => "bomb",
+            Self::SkipBomb => "skip bomb",
+            Self::Rocket => "rocket",
+            Self::Torpedo => "torpedo",
+            Self::DepthCharge => "depth charge",
+            Self::Mine => "mine",
+            Self::Other(kind) => kind,
+        }
+    }
+
     /// Weapons that strike below the waterline and never test a plate.
     fn is_underwater(&self) -> bool {
         matches!(self, Self::Torpedo | Self::DepthCharge | Self::Mine)
@@ -218,8 +231,9 @@ pub struct Ordnance {
     pub ap: Option<ApOrdnance>,
 }
 
-/// The fields that decide whether an AP bomb or rocket penetrates. The client
-/// has no formula combining them; the server decides.
+/// The fields that decide whether an AP bomb or rocket penetrates a plate it
+/// does not overmatch. The client has no formula combining them; the server
+/// decides.
 #[derive(Debug, Clone, Serialize)]
 pub struct ApOrdnance {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -270,6 +284,13 @@ pub enum PlateVerdict {
         penetration_mm: Millimeters,
     },
 
+    /// AP ordnance whose caliber exceeds 14.3 x the thickness. On impact the
+    /// game tests AP bombs and rockets with the AP shell mechanics, so the
+    /// plate cannot ricochet it.
+    Overmatches {
+        caliber_mm: Millimeters,
+    },
+
     /// Game data alone cannot decide; `reason` says why.
     Undetermined {
         reason: &'static str,
@@ -307,7 +328,7 @@ impl GameData {
             squadrons,
             thickness_mm: thickness,
             rule: thickness.map(|_| {
-                "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. The server decides AP bombs and rockets; ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
+                "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise the server decides and ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
             }),
         })
     }
@@ -415,7 +436,8 @@ impl GameData {
 /// Whether `ordnance` defeats a plate of `thickness`. HE and SAP compare
 /// their fixed penetration; no skill raises it for aircraft ordnance
 /// (`calculateHECSPenetration`, ModifiersApply.py:400-425, scales only main
-/// and secondary battery shells). AP bombs and rockets are undetermined: the
+/// and secondary battery shells). AP bombs and rockets overmatch by the shell
+/// rule; whether they penetrate a thicker plate is undetermined, as the
 /// client holds no formula for them and the server decides.
 pub fn ordnance_vs_plate(ordnance: &Ordnance, thickness: Millimeters) -> PlateVerdict {
     if ordnance.kind.is_underwater() {
@@ -426,8 +448,12 @@ pub fn ordnance_vs_plate(ordnance: &Ordnance, thickness: Millimeters) -> PlateVe
         Some(Ammo::He) => ordnance.he_penetration_mm,
         Some(Ammo::Sap) => ordnance.sap_penetration_mm,
         Some(Ammo::Ap) => {
-            return PlateVerdict::Undetermined {
-                reason: "the client has no AP bomb or rocket penetration formula; the server decides",
+            let caliber = ordnance.ap.as_ref().and_then(|ap| ap.caliber_mm);
+            return match caliber {
+                Some(caliber) if is_overmatch(caliber, thickness) => PlateVerdict::Overmatches { caliber_mm: caliber },
+                _ => PlateVerdict::Undetermined {
+                    reason: "the plate is not overmatched and the client has no AP bomb or rocket penetration formula; the server decides",
+                },
             };
         }
         None => return PlateVerdict::Undetermined { reason: "the ordnance has no known shell type" },
@@ -531,10 +557,30 @@ mod tests {
     }
 
     #[test]
-    fn ap_and_underwater_ordnance_are_not_decided_by_thickness() {
-        let ap = ordnance(OrdnanceKind::Bomb, Some(Ammo::Ap), None);
-        assert!(matches!(ordnance_vs_plate(&ap, Millimeters::new(32.0)), PlateVerdict::Undetermined { .. }));
+    fn ap_ordnance_overmatches_thin_plates_and_is_otherwise_undetermined() {
+        let mut bomb = ordnance(OrdnanceKind::SkipBomb, Some(Ammo::Ap), None);
+        bomb.ap = Some(ApOrdnance {
+            caliber_mm: Some(Millimeters::new(460.0)),
+            mass_kg: None,
+            speed_mps: None,
+            krupp: None,
+            normalization_deg: None,
+            ricochet_from_deg: None,
+            ricochet_always_from_deg: None,
+            fuse_time_s: None,
+            fuse_threshold_mm: None,
+            dive_angle_deg: None,
+        });
 
+        assert_eq!(
+            ordnance_vs_plate(&bomb, Millimeters::new(32.0)),
+            PlateVerdict::Overmatches { caliber_mm: Millimeters::new(460.0) }
+        );
+        assert!(matches!(ordnance_vs_plate(&bomb, Millimeters::new(33.0)), PlateVerdict::Undetermined { .. }));
+    }
+
+    #[test]
+    fn underwater_ordnance_does_not_test_plates() {
         let torpedo = ordnance(OrdnanceKind::Torpedo, None, None);
         assert!(matches!(ordnance_vs_plate(&torpedo, Millimeters::new(32.0)), PlateVerdict::NotApplicable { .. }));
     }

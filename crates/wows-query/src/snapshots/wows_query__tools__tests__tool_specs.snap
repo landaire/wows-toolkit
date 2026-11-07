@@ -153,7 +153,7 @@ expression: specs()
     required:
       - ship
 - name: penetration_search
-  description: "Find ships whose shells defeat a plate: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). SAP that also overmatches the plate cannot ricochet off it and is marked \"overmatches\"; HE never overmatches. Give thickness_mm, or target_ship with zone. Without ammo, returns separate HE, SAP and AP overmatch groups. Each group gives qualifying (ships that defeat the plate, listed in ships) and considered (ships under the same filters that fire that ammo), each as total and by_class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\". With a target ship and no tiers, searches the target's tier +-2."
+  description: "Find ships whose shells, bombs or rockets defeat a plate: HE or SAP penetration at least the thickness, or AP whose caliber overmatches it (caliber > 14.3 x thickness). SAP that also overmatches the plate cannot ricochet off it and is marked \"overmatches\"; HE never overmatches. AP bombs and rockets overmatch by the same rule. Give thickness_mm, or target_ship with zone. armament selects main_battery, secondary_battery, aircraft (carrier and ship-launched squadrons) and airstrike. Without it every armament is searched, each in its own groups; groups without armament are the main battery. For carriers, planes, bombs or rockets, pass armament [\"aircraft\"] or read the aircraft groups. Without ammo, returns separate HE, SAP and AP overmatch groups per armament. Each group gives qualifying (ships that defeat the plate, listed in ships with the weapon) and considered (ships under the same filters whose armament fires that ammo), each as total and by_class, and share_pct (qualifying as a percent of considered) and share_pct_by_class, which answers \"what percent of <class>\". With a target ship and no tiers, searches the target's tier +-2."
   input_schema:
     type: object
     additionalProperties: false
@@ -173,17 +173,21 @@ expression: specs()
           - AP
           - HE
           - SAP
-        description: "Only this shell type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer."
+        description: "Only this shell, bomb or rocket type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer."
       ifhe:
         type: boolean
-        description: Apply Inertia Fuse for HE Shells to HE penetration. Defaults to false.
-      battery:
-        type: string
-        enum:
-          - main
-          - secondary
-          - any
-        description: Which guns to consider. Defaults to main.
+        description: Apply Inertia Fuse for HE Shells to HE shell penetration. It does not apply to bombs and rockets. Defaults to false.
+      armament:
+        type: array
+        items:
+          description: "Weapons of a ship that the search tests, each reported in its own groups."
+          type: string
+          enum:
+            - main_battery
+            - secondary_battery
+            - aircraft
+            - airstrike
+        description: "Weapons to test, each reported in its own groups: \"main_battery\", \"secondary_battery\", \"aircraft\" (bombs and rockets of carrier squadrons and of squadrons other ships launch) and \"airstrike\" (air strike consumables). Select aircraft for questions about carriers, planes, bombs or rockets. Omit to test every armament; groups no ship under the filters fires are then left out."
       min_tier:
         type: integer
         description: "Lowest tier to include. With a target ship and no tier bounds, the target's tier +-2 is used."

@@ -6,6 +6,9 @@ use serde::Serialize;
 use wows_core::units::Millimeters;
 use wowsunpack::ballistics::is_overmatch;
 
+use crate::aircraft::OrdnanceKind;
+use crate::aircraft::Squadron;
+use crate::aircraft::SquadronRole;
 use crate::armor::zone_thickness;
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -24,22 +27,30 @@ use crate::ships::TierRange;
 
 const GROUP_LIMIT: usize = 40;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+/// Weapons of a ship that the search tests, each reported in its own groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum BatteryFilter {
-    #[default]
-    Main,
-    Secondary,
-    Any,
+pub enum Armament {
+    MainBattery,
+    SecondaryBattery,
+    Aircraft,
+    Airstrike,
 }
 
-impl BatteryFilter {
-    fn includes(self, battery: Battery) -> bool {
-        match self {
-            Self::Main => battery == Battery::Main,
-            Self::Secondary => battery == Battery::Secondary,
-            Self::Any => true,
+impl Armament {
+    fn from_battery(battery: Battery) -> Self {
+        match battery {
+            Battery::Main => Self::MainBattery,
+            Battery::Secondary => Self::SecondaryBattery,
         }
+    }
+
+    fn is_main_battery(&self) -> bool {
+        *self == Self::MainBattery
+    }
+
+    fn is_ordnance(self) -> bool {
+        matches!(self, Self::Aircraft | Self::Airstrike)
     }
 }
 
@@ -56,14 +67,14 @@ pub struct PenetrationSearchArgs {
     /// Zone or plate of the target ship: "Bow", "Stern", "Cit", "Cas", "SS", or a plate name from ship_armor. A zone uses its thinnest plate above the waterline.
     pub zone: Option<String>,
 
-    /// Only this shell type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer.
+    /// Only this shell, bomb or rocket type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer.
     pub ammo: Option<Ammo>,
 
-    /// Apply Inertia Fuse for HE Shells to HE penetration. Defaults to false.
+    /// Apply Inertia Fuse for HE Shells to HE shell penetration. It does not apply to bombs and rockets. Defaults to false.
     pub ifhe: Option<bool>,
 
-    /// Which guns to consider. Defaults to main.
-    pub battery: Option<BatteryFilter>,
+    /// Weapons to test, each reported in its own groups: "main_battery", "secondary_battery", "aircraft" (bombs and rockets of carrier squadrons and of squadrons other ships launch) and "airstrike" (air strike consumables). Select aircraft for questions about carriers, planes, bombs or rockets. Omit to test every armament; groups no ship under the filters fires are then left out.
+    pub armament: Option<Vec<Armament>>,
 
     /// Lowest tier to include. With a target ship and no tier bounds, the target's tier +-2 is used.
     pub min_tier: Option<Tier>,
@@ -133,16 +144,26 @@ pub struct PenetrationSearchOutput {
 
     pub ifhe: bool,
     pub rule: &'static str,
+
+    /// How bombs and rockets are tested; present with aircraft or airstrike groups.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ordnance_rule: Option<&'static str>,
+
     pub groups: Vec<PenetrationGroup>,
 }
 
-/// Ships that defeat the plate by one method, out of those that could.
+/// Ships that defeat the plate with one armament by one method, out of those
+/// that could.
 #[derive(Debug, Clone, Serialize)]
 pub struct PenetrationGroup {
+    /// Absent for the main battery.
+    #[serde(skip_serializing_if = "Armament::is_main_battery")]
+    pub armament: Armament,
+
     pub method: DefeatMethod,
 
-    /// Ships matching the filters whose chosen battery fires this method's
-    /// ammo with a known penetration or caliber.
+    /// Ships matching the filters whose armament fires this method's ammo
+    /// with a known penetration or caliber.
     pub considered: ShipCounts,
 
     /// Ships among those considered that defeat the plate; listed in `ships`.
@@ -151,19 +172,100 @@ pub struct PenetrationGroup {
     #[serde(flatten)]
     pub shares: Shares,
 
-    /// "T10 Gearing (destroyer, USA): main battery 127 mm HE, 21 mm pen", best
-    /// shell per ship. A SAP shell that also overmatches the plate, and so
-    /// cannot ricochet off it, ends with ", overmatches".
+    /// "T10 Gearing (destroyer, USA): main battery 127 mm HE, 21 mm pen" or
+    /// "T10 Shinano (aircraft_carrier, Japan): B7A Ryusei skip bombers, 460 mm
+    /// AP skip bomb (Type 99 No. 80 Mk. 7)", the best weapon per ship. A SAP
+    /// projectile that also overmatches the plate, and so cannot ricochet off
+    /// it, ends with ", overmatches".
     pub ships: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
 }
 
+/// One shell, bomb or rocket as the search compares it against a plate.
+#[derive(Debug, Clone)]
+struct Munition {
+    armament: Armament,
+    ammo: Ammo,
+
+    /// Known for shells and AP bombs and rockets. HE bombs and rockets list a
+    /// placeholder `bulletDiametr` (40 mm), so aircraft HE and SAP have none.
+    caliber: Option<Millimeters>,
+
+    /// HE or SAP penetration; for HE shells with Inertia Fuse for HE Shells
+    /// when requested.
+    penetration: Option<Millimeters>,
+
+    source: MunitionSource,
+}
+
+impl Munition {
+    fn from_shell(shell: Shell, ifhe: bool) -> Self {
+        let penetration = match shell.ammo {
+            Ammo::He if ifhe => shell.ifhe_penetration_mm,
+            Ammo::He | Ammo::Sap => shell.penetration_mm,
+            Ammo::Ap => None,
+        };
+
+        Self {
+            armament: Armament::from_battery(shell.battery),
+            ammo: shell.ammo,
+            caliber: Some(shell.caliber_mm),
+            penetration,
+            source: MunitionSource::Gun(shell.battery),
+        }
+    }
+
+    /// The bomb or rocket of `squadron`; `None` for torpedoes, mines, depth
+    /// charges and ordnance of no known shell type.
+    fn from_squadron(squadron: Squadron) -> Option<Self> {
+        let ordnance = squadron.ordnance?;
+        let ammo = ordnance.ammo?;
+
+        // Inertia Fuse for HE Shells does not apply to aircraft ordnance.
+        let (penetration, caliber) = match ammo {
+            Ammo::He => (ordnance.he_penetration_mm, None),
+            Ammo::Sap => (ordnance.sap_penetration_mm, None),
+            Ammo::Ap => (None, ordnance.ap.and_then(|ap| ap.caliber_mm)),
+        };
+        let armament = match squadron.role {
+            SquadronRole::AirStrike => Armament::Airstrike,
+            SquadronRole::RocketPlanes
+            | SquadronRole::DiveBombers
+            | SquadronRole::TorpedoBombers
+            | SquadronRole::SkipBombers => Armament::Aircraft,
+        };
+
+        Some(Self {
+            armament,
+            ammo,
+            caliber,
+            penetration,
+            source: MunitionSource::Squadron {
+                aircraft: squadron.aircraft,
+                role: squadron.role,
+                kind: ordnance.kind,
+                name: ordnance.name,
+            },
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+enum MunitionSource {
+    Gun(Battery),
+    Squadron { aircraft: String, role: SquadronRole, kind: OrdnanceKind, name: String },
+}
+
 impl GameData {
-    /// Ships whose shells defeat a plate: HE or SAP whose penetration is at
-    /// least the thickness, or AP whose caliber overmatches it.
+    /// Ships whose shells, bombs or rockets defeat a plate: HE or SAP whose
+    /// penetration is at least the thickness, or AP whose caliber overmatches
+    /// it.
     pub fn penetration_search(&self, args: &PenetrationSearchArgs) -> Result<PenetrationSearchOutput, QueryError> {
+        const EVERY_ARMAMENT: [Armament; 4] =
+            [Armament::MainBattery, Armament::SecondaryBattery, Armament::Aircraft, Armament::Airstrike];
+
         let mut interpretations = Interpretations::default();
         let target = match args.target_ship.as_deref() {
             Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
@@ -201,42 +303,56 @@ impl GameData {
         };
 
         let ifhe = args.ifhe.unwrap_or(false);
-        let battery = args.battery.unwrap_or_default();
+        let mut armaments = args.armament.clone().unwrap_or_else(|| EVERY_ARMAMENT.to_vec());
+        armaments.sort();
+        armaments.dedup();
+        if armaments.is_empty() {
+            return Err(QueryError::InvalidArguments { reason: "armament must name at least one armament" });
+        }
         let methods: Vec<DefeatMethod> = match args.ammo {
             Some(ammo) => vec![DefeatMethod::for_ammo(ammo)],
             None => vec![DefeatMethod::HePenetration, DefeatMethod::SapPenetration, DefeatMethod::ApOvermatch],
         };
+        let keys: Vec<(Armament, DefeatMethod)> =
+            armaments.iter().flat_map(|armament| methods.iter().map(move |method| (*armament, *method))).collect();
 
-        let mut considered: BTreeMap<DefeatMethod, Vec<&Ship>> = BTreeMap::new();
-        let mut hits: BTreeMap<DefeatMethod, Vec<(&Ship, Shell)>> = BTreeMap::new();
+        let mut considered: BTreeMap<(Armament, DefeatMethod), Vec<&Ship>> = BTreeMap::new();
+        let mut hits: BTreeMap<(Armament, DefeatMethod), Vec<(&Ship, Munition)>> = BTreeMap::new();
         let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
         ships.sort_by(|left, right| listing_order(left, right));
         for ship in ships {
-            let shells: Vec<Shell> =
-                self.shells(ship).into_iter().filter(|shell| battery.includes(shell.battery)).collect();
-            for &method in &methods {
-                if shells.iter().any(|shell| rating(shell, method, ifhe).is_some()) {
-                    considered.entry(method).or_default().push(ship);
+            let munitions = self.munitions(ship, &armaments, ifhe);
+            for &(armament, method) in &keys {
+                let fitting = || munitions.iter().filter(move |munition| munition.armament == armament);
+                if fitting().any(|munition| rating(munition, method).is_some()) {
+                    considered.entry((armament, method)).or_default().push(ship);
                 }
 
-                let best = shells
-                    .iter()
-                    .filter_map(|shell| strength(shell, method, thickness, ifhe).map(|strength| (shell, strength)))
+                let best = fitting()
+                    .filter_map(|munition| strength(munition, method, thickness).map(|strength| (munition, strength)))
                     .max_by(|(_, left), (_, right)| left.value().total_cmp(&right.value()));
-                if let Some((shell, _)) = best {
-                    hits.entry(method).or_default().push((ship, shell.clone()));
+                if let Some((munition, _)) = best {
+                    hits.entry((armament, method)).or_default().push((ship, munition.clone()));
                 }
             }
         }
 
-        let groups = methods
+        let groups: Vec<PenetrationGroup> = keys
             .iter()
-            .map(|method| {
-                let candidates = considered.remove(method).unwrap_or_default();
-                let found = hits.remove(method).unwrap_or_default();
-                group(*method, &candidates, &found, thickness, ifhe)
+            .filter_map(|key| {
+                let candidates = considered.remove(key).unwrap_or_default();
+                // Unrequested armaments appear only where some ship fires the ammo.
+                if candidates.is_empty() && args.armament.is_none() {
+                    return None;
+                }
+
+                let found = hits.remove(key).unwrap_or_default();
+                Some(group(key.0, key.1, &candidates, &found, thickness))
             })
             .collect();
+        let ordnance_rule = groups.iter().any(|group| group.armament.is_ordnance()).then_some(
+            "Bombs and rockets follow the same rules: on impact the game tests AP bombs and rockets with the AP shell mechanics, overmatch included. Inertia Fuse for HE Shells does not apply to them.",
+        );
 
         Ok(PenetrationSearchOutput {
             interpretations,
@@ -247,35 +363,43 @@ impl GameData {
             tier_source,
             ifhe,
             rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches.",
+            ordnance_rule,
             groups,
         })
     }
+
+    /// The shells, bombs and rockets `ship` fires or drops with `armaments`.
+    fn munitions(&self, ship: &Ship, armaments: &[Armament], ifhe: bool) -> Vec<Munition> {
+        let mut munitions = Vec::new();
+        if armaments.iter().any(|armament| !armament.is_ordnance()) {
+            munitions.extend(self.shells(ship).into_iter().map(|shell| Munition::from_shell(shell, ifhe)));
+        }
+        if armaments.iter().any(|armament| armament.is_ordnance()) {
+            munitions.extend(self.squadrons(ship).into_iter().filter_map(Munition::from_squadron));
+        }
+        munitions.retain(|munition| armaments.contains(&munition.armament));
+
+        munitions
+    }
 }
 
-/// What `method` compares against a plate for `shell`: caliber for AP
-/// overmatch, penetration for HE and SAP. `None` when the shell is of another
-/// ammo or the value is not known.
-fn rating(shell: &Shell, method: DefeatMethod, ifhe: bool) -> Option<Millimeters> {
-    match (method, shell.ammo) {
-        (DefeatMethod::ApOvermatch, Ammo::Ap) => Some(shell.caliber_mm),
-        (DefeatMethod::HePenetration, Ammo::He) => {
-            if ifhe {
-                shell.ifhe_penetration_mm
-            } else {
-                shell.penetration_mm
-            }
-        }
-        (DefeatMethod::SapPenetration, Ammo::Sap) => shell.penetration_mm,
+/// What `method` compares against a plate for `munition`: caliber for AP
+/// overmatch, penetration for HE and SAP. `None` when the munition is of
+/// another ammo or the value is not known.
+fn rating(munition: &Munition, method: DefeatMethod) -> Option<Millimeters> {
+    match (method, munition.ammo) {
+        (DefeatMethod::ApOvermatch, Ammo::Ap) => munition.caliber,
+        (DefeatMethod::HePenetration, Ammo::He) | (DefeatMethod::SapPenetration, Ammo::Sap) => munition.penetration,
         _ => None,
     }
 }
 
-/// How strongly `shell` defeats `thickness` by `method`, for choosing the
-/// best shell; `None` when it does not.
-fn strength(shell: &Shell, method: DefeatMethod, thickness: Millimeters, ifhe: bool) -> Option<Millimeters> {
-    let rating = rating(shell, method, ifhe)?;
+/// How strongly `munition` defeats `thickness` by `method`, for choosing the
+/// best one; `None` when it does not.
+fn strength(munition: &Munition, method: DefeatMethod, thickness: Millimeters) -> Option<Millimeters> {
+    let rating = rating(munition, method)?;
     let defeats = match method {
-        DefeatMethod::ApOvermatch => is_overmatch(shell.caliber_mm, thickness),
+        DefeatMethod::ApOvermatch => is_overmatch(rating, thickness),
         DefeatMethod::HePenetration | DefeatMethod::SapPenetration => rating >= thickness,
     };
 
@@ -283,20 +407,21 @@ fn strength(shell: &Shell, method: DefeatMethod, thickness: Millimeters, ifhe: b
 }
 
 fn group(
+    armament: Armament,
     method: DefeatMethod,
     considered: &[&Ship],
-    hits: &[(&Ship, Shell)],
+    hits: &[(&Ship, Munition)],
     thickness: Millimeters,
-    ifhe: bool,
 ) -> PenetrationGroup {
     let ships: Vec<String> =
-        hits.iter().take(GROUP_LIMIT).map(|(ship, shell)| describe_hit(ship, shell, thickness, ifhe)).collect();
+        hits.iter().take(GROUP_LIMIT).map(|(ship, munition)| describe_hit(ship, munition, thickness)).collect();
     let omitted = (hits.len() > ships.len()).then(|| hits.len() - ships.len());
 
     let considered = ShipCounts::from_ships(considered.iter().copied());
     let qualifying = ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship));
 
     PenetrationGroup {
+        armament,
         method,
         shares: Shares::new(&qualifying.by_class, &considered),
         considered,
@@ -306,21 +431,22 @@ fn group(
     }
 }
 
-fn describe_hit(ship: &Ship, shell: &Shell, thickness: Millimeters, ifhe: bool) -> String {
-    let battery = shell.battery.label();
-    let penetration = match shell.ammo {
-        Ammo::He if ifhe => shell.ifhe_penetration_mm,
-        Ammo::He | Ammo::Sap => shell.penetration_mm,
-        Ammo::Ap => None,
+fn describe_hit(ship: &Ship, munition: &Munition, thickness: Millimeters) -> String {
+    let caliber = munition.caliber.map(|mm| format!("{} mm ", mm.value())).unwrap_or_default();
+    let ammo = munition.ammo.label();
+    let penetration = munition.penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
+    let overmatch = if munition.ammo == Ammo::Sap && munition.caliber.is_some_and(|mm| is_overmatch(mm, thickness)) {
+        ", overmatches"
+    } else {
+        ""
     };
-    let penetration = penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
-    let overmatch =
-        if shell.ammo == Ammo::Sap && is_overmatch(shell.caliber_mm, thickness) { ", overmatches" } else { "" };
 
-    format!(
-        "{}: {battery} {} mm {}{penetration}{overmatch}",
-        ship.listing_label(),
-        shell.caliber_mm.value(),
-        shell.ammo.label()
-    )
+    let weapon = match &munition.source {
+        MunitionSource::Gun(battery) => format!("{} {caliber}{ammo}", battery.label()),
+        MunitionSource::Squadron { aircraft, role, kind, name } => {
+            format!("{aircraft} {}, {caliber}{ammo} {} ({name})", role.label(), kind.label())
+        }
+    };
+
+    format!("{}: {weapon}{penetration}{overmatch}", ship.listing_label())
 }

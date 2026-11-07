@@ -1,0 +1,42 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: groups
+---
+- armament: secondary_battery
+  method: sap_penetration
+  considered:
+    total: 9
+    by_class:
+      cruiser: 2
+      battleship: 4
+      submarine: 3
+  qualifying:
+    total: 6
+    by_class:
+      cruiser: 2
+      battleship: 4
+  share_pct: 66.7
+  share_pct_by_class:
+    cruiser: 100
+    battleship: 100
+    submarine: 0
+  ships:
+    - "T10 Napoli (cruiser, Italy) [replicas: Napoli B]: secondary battery 120 mm SAP, 42 mm pen"
+    - "T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]: secondary battery 135 mm SAP, 38 mm pen"
+    - "T10 Sicilia (battleship, Italy): secondary battery 152 mm SAP, 42 mm pen"
+    - "T9 Giuseppe Verdi (battleship, Italy) [replicas: Pilus Posterior]: secondary battery 120 mm SAP, 42 mm pen"
+    - "T9 Michelangelo (cruiser, Italy): secondary battery 120 mm SAP, 42 mm pen"
+    - "T8 M. Colonna (battleship, Italy) [replicas: BA Binah]: secondary battery 120 mm SAP, 42 mm pen"
+- armament: secondary_battery
+  method: ap_overmatch
+  considered:
+    total: 1
+    by_class:
+      cruiser: 1
+  qualifying:
+    total: 0
+    by_class: {}
+  share_pct: 0
+  share_pct_by_class:
+    cruiser: 0
+  ships: []

@@ -30,6 +30,8 @@ use wows_query::firing_arcs::ShipFiringArcs;
 use wows_query::firing_arcs::Weapon;
 use wows_query::game_modes::GameModeBuffsArgs;
 use wows_query::healing::HealingSourcesArgs;
+use wows_query::penetration::Armament;
+use wows_query::penetration::DefeatMethod;
 use wows_query::penetration::PenetrationSearchArgs;
 use wows_query::shells::Ammo;
 use wows_query::shells::Battery;
@@ -84,6 +86,7 @@ fn des_moines_bow_is_27_mm_above_water() {
             target_ship: Some("Des Moines".to_owned()),
             zone: Some("bow".to_owned()),
             ammo: Some(Ammo::Ap),
+            armament: Some(vec![Armament::MainBattery]),
             ..Default::default()
         })
         .expect("zone resolves");
@@ -101,6 +104,7 @@ fn des_moines_bow_sap_search_marks_overmatch() {
             target_ship: Some("Des Moines".to_owned()),
             zone: Some("bow".to_owned()),
             ammo: Some(Ammo::Sap),
+            armament: Some(vec![Armament::MainBattery]),
             ..Default::default()
         })
         .expect("zone resolves");
@@ -139,7 +143,11 @@ fn yamato_plates_sharing_a_game_name_are_told_apart() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn penetration_search_without_ammo_reports_every_method() {
     let search = game()
-        .penetration_search(&PenetrationSearchArgs { thickness_mm: Some(Millimeters::new(57.0)), ..Default::default() })
+        .penetration_search(&PenetrationSearchArgs {
+            thickness_mm: Some(Millimeters::new(57.0)),
+            armament: Some(vec![Armament::MainBattery]),
+            ..Default::default()
+        })
         .expect("thickness is valid");
 
     let groups: Vec<_> = search
@@ -147,6 +155,89 @@ fn penetration_search_without_ammo_reports_every_method() {
         .iter()
         .map(|group| json!({ "method": group.method, "qualifying": group.qualifying, "considered": group.considered }))
         .collect();
+    insta::assert_yaml_snapshot!(groups);
+}
+
+/// Tier 10 carriers against Des Moines' 27 mm bow: AP bombs and rockets wider
+/// than 386.1 mm overmatch it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_bow_aircraft_ap_overmatch() {
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            target_ship: Some("Des Moines".to_owned()),
+            zone: Some("bow".to_owned()),
+            ammo: Some(Ammo::Ap),
+            armament: Some(vec![Armament::Aircraft, Armament::Airstrike]),
+            class: Some(ShipClass::AircraftCarrier),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            ..Default::default()
+        })
+        .expect("zone resolves");
+    insta::assert_yaml_snapshot!(search);
+}
+
+/// Hybrid battleships' squadrons count as aircraft and Dutch air strikes as
+/// airstrike. Inertia Fuse for HE Shells leaves bomb penetration as it is.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tier_10_battleship_bombs_ignore_ifhe() {
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            thickness_mm: Some(Millimeters::new(50.0)),
+            ammo: Some(Ammo::He),
+            ifhe: Some(true),
+            armament: Some(vec![Armament::Aircraft, Armament::Airstrike]),
+            class: Some(ShipClass::Battleship),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            ..Default::default()
+        })
+        .expect("thickness is valid");
+    insta::assert_yaml_snapshot!(search.groups);
+}
+
+/// Without armament, every armament some ship fires gets its own groups.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn penetration_search_without_armament_reports_each_armament() {
+    let search = game()
+        .call_tool(
+            "penetration_search",
+            json!({ "target_ship": "Des Moines", "zone": "bow", "class": "aircraft_carrier", "min_tier": 10, "max_tier": 10 }),
+        )
+        .expect("zone resolves");
+    let groups: Vec<_> = search["groups"]
+        .as_array()
+        .expect("groups is a list")
+        .iter()
+        .map(|group| {
+            json!({
+                "armament": group["armament"],
+                "method": group["method"],
+                "considered": group["considered"]["total"],
+                "qualifying": group["qualifying"]["total"],
+                "share_pct": group["share_pct"],
+            })
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(groups);
+}
+
+/// AP and SAP secondaries against Des Moines' 27 mm bow.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_bow_secondary_ap_and_sap() {
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            target_ship: Some("Des Moines".to_owned()),
+            zone: Some("bow".to_owned()),
+            armament: Some(vec![Armament::SecondaryBattery]),
+            ..Default::default()
+        })
+        .expect("zone resolves");
+    let groups: Vec<_> = search.groups.iter().filter(|group| group.method != DefeatMethod::HePenetration).collect();
     insta::assert_yaml_snapshot!(groups);
 }
 
@@ -379,7 +470,7 @@ fn penetration_search_states_shares_per_class() {
     let search = game()
         .call_tool(
             "penetration_search",
-            json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "min_tier": 8, "max_tier": 11 }),
+            json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "armament": ["main_battery"], "min_tier": 8, "max_tier": 11 }),
         )
         .expect("zone resolves");
     let shares: Vec<_> = search["groups"]
@@ -1760,7 +1851,7 @@ fn penetration_search_leaves_out_replicas() {
             let search = game()
                 .call_tool(
                     "penetration_search",
-                    json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "include_replicas": include }),
+                    json!({ "target_ship": "Des Moines", "zone": "bow", "ammo": "AP", "armament": ["main_battery"], "include_replicas": include }),
                 )
                 .expect("zone resolves");
             let group = &search["groups"][0];

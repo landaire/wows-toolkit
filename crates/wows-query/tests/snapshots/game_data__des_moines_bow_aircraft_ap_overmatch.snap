@@ -1,0 +1,45 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+thickness_mm: 27
+target: "T10 Des Moines (cruiser, USA) bow"
+plates:
+  - "bow: Fore End Plating"
+  - "bow: Fore End Deck"
+tiers:
+  min: 10
+  max: 10
+tier_source: requested
+ifhe: false
+rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches."
+ordnance_rule: "Bombs and rockets follow the same rules: on impact the game tests AP bombs and rockets with the AP shell mechanics, overmatch included. Inertia Fuse for HE Shells does not apply to them."
+groups:
+  - armament: aircraft
+    method: ap_overmatch
+    considered:
+      total: 6
+      by_class:
+        aircraft_carrier: 6
+      test: 2
+    qualifying:
+      total: 3
+      by_class:
+        aircraft_carrier: 3
+    share_pct: 50
+    share_pct_by_class:
+      aircraft_carrier: 50
+    ships:
+      - "T10 Hakuryū (aircraft_carrier, Japan): J5N Tenrai dive bombers, 404 mm AP bomb (Type 99 No. 80 Mk. 5)"
+      - "T10 M. Richthofen (aircraft_carrier, Germany) [replicas: Süsshofen]: Fw 190G8 dive bombers, 406 mm AP bomb (PC 500)"
+      - "T10 Shinano (aircraft_carrier, Japan) [replicas: AL Shinano]: B7A Ryūsei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)"
+  - armament: airstrike
+    method: ap_overmatch
+    considered:
+      total: 0
+      by_class: {}
+    qualifying:
+      total: 0
+      by_class: {}
+    share_pct_by_class: {}
+    ships: []

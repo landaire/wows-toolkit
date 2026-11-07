@@ -1,0 +1,37 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search.groups
+---
+- armament: aircraft
+  method: he_penetration
+  considered:
+    total: 2
+    by_class:
+      battleship: 2
+  qualifying:
+    total: 2
+    by_class:
+      battleship: 2
+  share_pct: 100
+  share_pct_by_class:
+    battleship: 100
+  ships:
+    - "T10 Aki (battleship, Japan) [replicas: Aki G]: Aichi M6A2 Seiran dive bombers, HE bomb (Type 99 No. 80 Mk. 11), 61 mm pen"
+    - "T10 Louisiana (battleship, USA): BTD Destroyer dive bombers, HE bomb (AN-M65 Mod 1), 53 mm pen"
+- armament: airstrike
+  method: he_penetration
+  considered:
+    total: 2
+    by_class:
+      battleship: 2
+    test: 1
+  qualifying:
+    total: 1
+    by_class:
+      battleship: 1
+    test: 1
+  share_pct: 50
+  share_pct_by_class:
+    battleship: 50
+  ships:
+    - "T10 Neptunus (battleship, Netherlands, test): Fokker T.V. air strike, HE bomb (P.u.W. 300 kg), 50 mm pen"
