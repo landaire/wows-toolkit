@@ -323,6 +323,10 @@ pub struct Ranking {
 
     pub rule: &'static str,
 
+    /// What the stat does not measure, for nominal armor thickness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caution: Option<&'static str>,
+
     /// Ships with a value of the stat.
     pub ranked: usize,
 
@@ -514,13 +518,18 @@ impl SearchStat {
     }
 
     fn label(self, game: &GameData) -> String {
+        const NOMINAL: &str = "nominal plate thickness, not protection; see armor_assessment";
+
         match self {
+            Self::Card(stat @ (TtxStat::ArmorMin | TtxStat::ArmorMax)) => {
+                format!("{} ({NOMINAL})", clean(&stat_display_label(stat, game.provider())))
+            }
             Self::Card(stat) => clean(&stat_display_label(stat, game.provider())),
             Self::Armor { zone, bound: Bound::Min } => {
-                format!("Thinnest {} plate above the waterline", zone.key.replace('_', " "))
+                format!("Thinnest {} plate above the waterline ({NOMINAL})", zone.key.replace('_', " "))
             }
             Self::Armor { zone, bound: Bound::Max } => {
-                format!("Thickest {} plate above the waterline", zone.key.replace('_', " "))
+                format!("Thickest {} plate above the waterline ({NOMINAL})", zone.key.replace('_', " "))
             }
             Self::Derived(stat) => stat.label().to_owned(),
             Self::Ricochet { ammo, bound: RicochetBound::Start } => format!(
@@ -531,6 +540,16 @@ impl SearchStat {
                 "Main battery {} shell impact angle from the plate normal where every hit ricochets, from game data",
                 ammo.label()
             ),
+        }
+    }
+
+    /// What a ranking by the stat does not tell.
+    fn caution(self) -> Option<&'static str> {
+        match self {
+            Self::Armor { .. } | Self::Card(TtxStat::ArmorMin | TtxStat::ArmorMax) => Some(
+                "Nominal plate thickness ranks plates, not protection: the belt, bulge and decks in front of a zone decide what reaches it. For how well ships are protected, use armor_assessment (citadel and penetration rates).",
+            ),
+            Self::Card(_) | Self::Derived(_) | Self::Ricochet { .. } => None,
         }
     }
 
@@ -1030,7 +1049,16 @@ impl GameData {
             .collect();
         let omitted = (ranked > ships.len()).then(|| ranked - ships.len());
 
-        Ranking { stat: rank.describe(), rule: RANK_RULE, ranked, ships, tied_beyond_limit, omitted, lacking_stat }
+        Ranking {
+            stat: rank.describe(),
+            rule: RANK_RULE,
+            caution: rank.stat.caution(),
+            ranked,
+            ships,
+            tied_beyond_limit,
+            omitted,
+            lacking_stat,
+        }
     }
 
     /// Base and best-fit build value of the rank stat, `None` when the ship

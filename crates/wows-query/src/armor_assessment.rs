@@ -97,6 +97,10 @@ pub struct ArmorAssessmentOutput {
     pub ship: String,
     pub hull: String,
 
+    /// For a class without a citadel: that citadel metrics do not apply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub citadel_metrics: Option<&'static str>,
+
     /// Tiers the shooters were chosen from: the ship's matchmaking spread.
     pub shooter_tiers: TierRange,
     pub shooters: Vec<ShooterReport>,
@@ -823,6 +827,7 @@ impl GameData {
             interpretations,
             ship: ship.label(),
             hull: hull_name,
+            citadel_metrics: citadel_metrics(ship.class),
             shooter_tiers: set.tiers,
             shooters: set.shooters.iter().map(|shooter| shooter.report.clone()).collect(),
             bands,
@@ -1467,8 +1472,11 @@ fn verdict(
     };
     let shooters = || set.shooters.iter().enumerate().map(|(index, shooter)| (ShooterIndex(index), shooter));
     let mut sentences = Vec::new();
+    if let Some(note) = citadel_metrics(ship.class) {
+        sentences.push(format!("Citadel metrics {note}"));
+    }
 
-    if properties.citadel.is_some() {
+    if properties.citadel.is_some() && citadel_metrics(ship.class).is_none() {
         // A battleship meets battleship AP of both calibers; other ships the
         // most common battleship caliber and heavy cruiser AP.
         let first_battleship = shooters().find(|(_, shooter)| shooter.report.role == ShooterRole::BattleshipAp);
@@ -1574,6 +1582,7 @@ fn verdict(
     }
 
     match &properties.citadel {
+        _ if citadel_metrics(ship.class).is_some() => {}
         Some(citadel) => {
             let roof = citadel.roof_above_waterline_m.value();
             let position = if roof >= 0.0 {
@@ -1591,6 +1600,19 @@ fn verdict(
     }
 
     sentences.join(" ")
+}
+
+/// For a class without a citadel, why citadel metrics do not apply to it.
+fn citadel_metrics(class: ShipClass) -> Option<&'static str> {
+    match class {
+        ShipClass::Destroyer => Some(
+            "do not apply: destroyers have no citadel, so citadel rates are zero for every destroyer and a missing citadel is no weakness. Judge destroyer protection by health and by how often hits penetrate or overpenetrate.",
+        ),
+        ShipClass::Submarine => Some(
+            "do not apply: submarines have no citadel, so citadel rates are zero for every submarine and a missing citadel is no weakness.",
+        ),
+        ShipClass::Cruiser | ShipClass::Battleship | ShipClass::AircraftCarrier => None,
+    }
 }
 
 fn group_result(bands: &[BandReport], shooter: ShooterIndex, band: RangeBand) -> Option<&GroupResult> {

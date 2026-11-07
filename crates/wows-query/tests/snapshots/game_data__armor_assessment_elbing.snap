@@ -1,10 +1,10 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1207
 expression: assessment
 ---
 ship: "T10 Elbing (destroyer, Germany)"
 hull: Elbing
+citadel_metrics: "do not apply: destroyers have no citadel, so citadel rates are zero for every destroyer and a missing citadel is no weakness. Judge destroyer protection by health and by how often hits penetrate or overpenetrate."
 shooter_tiers:
   min: 8
   max: 11
@@ -909,7 +909,7 @@ comparison:
     - Burrows
     - Cassard
   copies: 1
-verdict: "Destroyer AP 127 mm (Benson) at 5-10 km: 40.6% of broadside hits detonate inside the ship (higher than all 74 tier 9-11 destroyers); 19.3% overpenetrate. Light cruiser AP 152 mm (Edinburgh) at 5-10 km: 83.2% of broadside hits detonate inside the ship (higher than 99% of 74 tier 9-11 destroyers); 2.9% overpenetrate. Fuse arming by destroyer AP 127 mm (Benson; a plate of 21 mm or more after normalization arms it) at 5-10 km: on 37.2% of broadside hits a plate arms the fuse of a shell that would otherwise overpenetrate, and it detonates inside (higher than all 74 tier 9-11 destroyers). Over all bands and aspects the arming plates are mostly casemate: Side Plating 25 mm and bow: Fore End Plating 19 mm. Elbing has no citadel plates."
+verdict: "Citadel metrics do not apply: destroyers have no citadel, so citadel rates are zero for every destroyer and a missing citadel is no weakness. Judge destroyer protection by health and by how often hits penetrate or overpenetrate. Destroyer AP 127 mm (Benson) at 5-10 km: 40.6% of broadside hits detonate inside the ship (higher than all 74 tier 9-11 destroyers); 19.3% overpenetrate. Light cruiser AP 152 mm (Edinburgh) at 5-10 km: 83.2% of broadside hits detonate inside the ship (higher than 99% of 74 tier 9-11 destroyers); 2.9% overpenetrate. Fuse arming by destroyer AP 127 mm (Benson; a plate of 21 mm or more after normalization arms it) at 5-10 km: on 37.2% of broadside hits a plate arms the fuse of a shell that would otherwise overpenetrate, and it detonates inside (higher than all 74 tier 9-11 destroyers). Over all bands and aspects the arming plates are mostly casemate: Side Plating 25 mm and bow: Fore End Plating 19 mm."
 assumptions:
   - "Shooter groups are the most common caliber of destroyer AP, light cruiser AP (155 mm and less), heavy cruiser AP, battleship AP (two calibers), cruiser HE and SAP among released ships of the shooter tiers, each counted by its largest main battery shell of that ammo; the ship whose shell is the median of that caliber by penetration fires for the group, a tech tree ship before its copies."
   - "Aspects are broadside and 30 and 45 deg angled, bow toward the shooter. Range bands are close (5, 7.5 and 10 km), moderate (12 and 14 km) and long (16 and 18 km, and 20 km for battleship shooters). A shooter fires only at ranges within its stock main battery range; a band's rates are the mean over the ranges it reaches, each weighted equally."

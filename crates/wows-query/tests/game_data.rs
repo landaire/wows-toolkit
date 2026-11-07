@@ -41,7 +41,11 @@ use wows_query::ships::ShipOverviewArgs;
 use wows_query::ships::Tier;
 use wows_query::skills::CaptainSkillArgs;
 use wows_query::skills::SkillTreeArgs;
+use wows_query::stat_search::RankLimit;
+use wows_query::stat_search::RankOrder;
 use wows_query::stat_search::StatNamesArgs;
+use wows_query::stat_search::StatRank;
+use wows_query::stat_search::StatSearchArgs;
 use wows_query::stats::ShipStatsArgs;
 use wows_query::tech_tree::Cost;
 use wows_query::tech_tree::CostPerPoint;
@@ -927,6 +931,17 @@ fn unique_upgrades_and_the_ships_they_fit() {
 
     let colombo = game().ship_upgrades(&ship("C. Colombo")).expect("C. Colombo exists");
     insta::assert_yaml_snapshot!(colombo.unique_upgrades);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn destroyer_armor_assessment_states_citadel_metrics_do_not_apply() {
+    let assessment = game()
+        .armor_assessment(&ArmorAssessmentArgs { ship: "Gearing".to_owned(), hull: None })
+        .expect("Gearing has an armor model");
+    assert!(assessment.citadel_metrics.is_some());
+    assert!(assessment.verdict.starts_with("Citadel metrics do not apply"), "{}", assessment.verdict);
+    assert!(!assessment.verdict.contains("no citadel plates"), "{}", assessment.verdict);
 }
 
 fn rates(name: &str) -> wows_query::rates::Rates {
@@ -2208,6 +2223,33 @@ fn stat_names_cover_the_shipbuilds_stats() {
         })
         .collect();
     insta::assert_yaml_snapshot!(table);
+}
+
+/// Armor stats rank nominal plate thickness; their labels and rankings say
+/// it is not protection.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn armor_stats_are_labelled_nominal() {
+    let output = game().stat_names(&StatNamesArgs {});
+    let armor: Vec<&String> = output.stats.iter().filter(|line| line.starts_with("armor.")).collect();
+    insta::assert_yaml_snapshot!(armor);
+
+    let search = game()
+        .stat_search(&StatSearchArgs {
+            rank: Some(StatRank {
+                stat: "armor.citadel.max".to_owned(),
+                order: RankOrder::Desc,
+                qualifier: None,
+                limit: Some(RankLimit(3)),
+            }),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            class: Some(ShipClass::Battleship),
+            ..Default::default()
+        })
+        .expect("search runs");
+    let ranking = search.ranking.expect("a rank was asked for");
+    assert!(ranking.caution.is_some_and(|caution| caution.contains("armor_assessment")), "{:?}", ranking.caution);
 }
 
 #[test]

@@ -1,0 +1,24 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: armor
+---
+- "armor.min (mm): Armor Min (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.max (mm): Armor Max (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.bow.min (mm): Thinnest bow plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.bow.max (mm): Thickest bow plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.stern.min (mm): Thinnest stern plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.stern.max (mm): Thickest stern plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.citadel.min (mm): Thinnest citadel plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.citadel.max (mm): Thickest citadel plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.casemate.min (mm): Thinnest casemate plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.casemate.max (mm): Thickest casemate plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.superstructure.min (mm): Thinnest superstructure plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.superstructure.max (mm): Thickest superstructure plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.turret.min (mm): Thinnest turret plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.turret.max (mm): Thickest turret plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.steering_gear.min (mm): Thinnest steering gear plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.steering_gear.max (mm): Thickest steering gear plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.torpedo_protection.min (mm): Thinnest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.torpedo_protection.max (mm): Thickest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.hull.min (mm): Thinnest hull plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"
+- "armor.hull.max (mm): Thickest hull plate above the waterline (nominal plate thickness, not protection; see armor_assessment)"

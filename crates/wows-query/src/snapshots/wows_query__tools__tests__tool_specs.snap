@@ -109,7 +109,7 @@ expression: specs()
         description: Most lines to list. Defaults to 20.
         minimum: 0
 - name: ship_armor
-  description: "Armor of one ship by hull zone: plate thickness above the waterline (thickness_mm when every plate is equal, else thinnest_mm and thickest_mm), and each plate by its in-game name led by its zone, e.g. \"bow: Fore End Deck\", with thickness in mm. Plates of 0 mm, which only close a zone for hit detection, are left out."
+  description: "Armor of one ship by hull zone: plate thickness above the waterline (thickness_mm when every plate is equal, else thinnest_mm and thickest_mm), and each plate by its in-game name led by its zone, e.g. \"bow: Fore End Deck\", with thickness in mm. Plates of 0 mm, which only close a zone for hit detection, are left out. Thickness is nominal, not protection: what reaches the citadel depends on every plate in front of it, which armor_assessment traces."
   input_schema:
     type: object
     additionalProperties: false
@@ -293,7 +293,7 @@ expression: specs()
     required:
       - ship
 - name: armor_assessment
-  description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers."
+  description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers. Destroyers and submarines have no citadel: citadel_metrics says citadel rates do not apply to them, and a missing citadel is no weakness."
   input_schema:
     type: object
     additionalProperties: false
@@ -481,7 +481,7 @@ expression: specs()
     required:
       - ship
 - name: stat_names
-  description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness, stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range, and main battery AP and SAP ricochet angles, which game data states per shell."
+  description: "Every stat stat_search can compare, as \"name (unit, per item): label\". Includes armor zone plate thickness, which is nominal and not protection (use armor_assessment for that), stats computed from the card, such as total main battery barrels, salvo damage, damage per minute and dispersion at the stock firing range, and main battery AP and SAP ricochet angles, which game data states per shell."
   input_schema:
     type: object
     additionalProperties: false
