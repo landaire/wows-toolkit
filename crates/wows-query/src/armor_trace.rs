@@ -471,6 +471,9 @@ struct TraceTarget<'a> {
     names: &'a PlateNames<'a>,
 }
 
+/// Ranges `armor_trace` compares the shell choice at.
+const RANGE_STEPS: [Km; 5] = [Km::new(4.0), Km::new(8.0), Km::new(12.0), Km::new(16.0), Km::new(20.0)];
+
 impl GameData {
     /// Casts a grid of parallel rays at `target` along the line of fire and
     /// runs `shooter`'s projectile through the armor each ray crosses.
@@ -525,16 +528,76 @@ impl GameData {
         let traces =
             weapons.into_iter().map(|weapon| trace_weapon(weapon, &trace_target)).collect::<Result<Vec<_>, _>>()?;
 
+        let ammo_choice = ammo_choice(weapon, &traces, target, target_angle).map(|choice| match args.range_km {
+            Some(range) => {
+                let traced: Vec<Ammo> = traces.iter().map(|trace| trace.weapon.ammo).collect();
+                let others = self.other_range_choices(shooter, args, &traced, range, choice.load, &trace_target);
+                format!("{}{others}", choice.text)
+            }
+            None => choice.text,
+        });
+
         Ok(ArmorTraceOutput {
             interpretations,
             shooter: shooter.label(),
             target: target.label(),
             target_hull: hull_name,
             target_angle_deg: target_angle,
-            ammo_choice: ammo_choice(weapon, &traces, target),
+            ammo_choice,
             traces,
             skipped,
         })
+    }
+
+    /// " At 16 km, load HE instead.": the nearest compared range closer and
+    /// farther than `range`, within the stock main battery's firing range, at
+    /// which the main battery shell choice differs from `load`.
+    fn other_range_choices(
+        &self,
+        shooter: &Ship,
+        args: &ArmorTraceArgs,
+        traced: &[Ammo],
+        range: Km,
+        load: Ammo,
+        target: &TraceTarget,
+    ) -> String {
+        let Some(reach) = self
+            .card(shooter, &self.stock_loadout())
+            .ok()
+            .and_then(|card| card.stats.artillery.as_ref().and_then(|artillery| artillery.range))
+        else {
+            return String::new();
+        };
+        let load_at = |step: Km| {
+            let args = ArmorTraceArgs { range_km: Some(step), ..args.clone() };
+            let traces: Vec<AmmoTrace> = traced
+                .iter()
+                .filter_map(|ammo| self.gun_weapon(shooter, &gun_request(Battery::Main, *ammo, &args)).ok())
+                .filter_map(|weapon| trace_weapon(weapon, target).ok())
+                .collect();
+            ammo_choice(TraceWeapon::MainBattery, &traces, target.ship, target.angle).map(|choice| choice.load)
+        };
+        let differing = |step: Km| load_at(step).filter(|other| *other != load).map(|other| (step, other));
+        let in_reach = |step: &Km| step.value() <= reach.value();
+        let closer = RANGE_STEPS
+            .iter()
+            .rev()
+            .copied()
+            .filter(in_reach)
+            .filter(|step| step.value() < range.value())
+            .find_map(differing);
+        let farther = RANGE_STEPS
+            .iter()
+            .copied()
+            .filter(in_reach)
+            .filter(|step| step.value() > range.value())
+            .find_map(differing);
+
+        closer
+            .into_iter()
+            .chain(farther)
+            .map(|(step, other)| format!(" At {} km, load {} instead.", step.value(), other.label()))
+            .collect()
     }
 
     /// The ammo types to trace: `args.ammo` when `weapon` fires or carries
@@ -1312,13 +1375,20 @@ fn common_assumptions(model: &WeaponModel) -> Vec<&'static str> {
     assumptions
 }
 
+/// The shell `ammo_choice` picks and its reasons.
+struct AmmoChoice {
+    load: Ammo,
+    text: String,
+}
+
 /// Which of the main battery's AP and HE (or SAP) traces to load against the
-/// target. AP is the choice when most of the hull it strikes ends in a
-/// penetration, a detonation inside the ship, rather than an
-/// overpenetration, ricochet or shatter; otherwise HE or SAP, which damage
-/// the zones whose first plate they defeat. `None` for other weapons, whose
-/// ammo players do not choose.
-fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Option<String> {
+/// target. AP is the choice whenever it penetrates, detonating inside the
+/// hull rather than overpenetrating, ricocheting or shattering, on most of a
+/// zone it strikes, gets through the turrets, or reaches the citadel often:
+/// its full penetrations hit hardest while the target allows them. Otherwise
+/// HE or SAP, which damage the zones whose first plate they defeat. `None`
+/// for other weapons, whose ammo players do not choose.
+fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship, angle: Degrees) -> Option<AmmoChoice> {
     if weapon != TraceWeapon::MainBattery {
         return None;
     }
@@ -1355,8 +1425,7 @@ fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Opti
     if !ap_text.is_empty() {
         ap_text.push('.');
     }
-    let turrets_penetrated = penetrated.iter().any(|share| share.label == TURRETS);
-    if turrets_penetrated {
+    if penetrated.iter().any(|share| share.label == TURRETS) {
         ap_text.push_str(" A hit through a turret's armor can knock the turret out.");
     }
     if ap.citadel.detonating_inside > 0 {
@@ -1367,24 +1436,22 @@ fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Opti
         ));
     }
 
+    let range = ap.arrival.range_km.map(|range| format!(" {} km", range.value())).unwrap_or_default();
+    let situation = if angle.value() == 0.0 {
+        format!("At{range} against a broadside {}", target.name)
+    } else {
+        format!("At{range} against {} angled {} deg", target.name, angle.value())
+    };
     let ap_share = percent(ap_damaging, ap_total);
-    if ap_damaging * 2 >= ap_total {
-        return Some(format!(
-            "Load AP: it penetrates, detonating inside the ship, on {ap_share} of the hull it strikes.{ap_text}"
-        ));
-    }
-    // Knocking out turrets or citadel hits often enough repay AP even where
-    // most of the hull, the superstructure above all, defeats it.
     let citadels_often = ap.citadel.fraction.is_some_and(|fraction| fraction >= 0.25);
-    if turrets_penetrated || citadels_often {
-        let reason = match (turrets_penetrated, citadels_often) {
-            (true, true) => "it gets through the turrets and into the citadel often enough to repay it",
-            (true, false) => "it gets through the turrets often enough to repay it",
-            _ => "it reaches the citadel often enough to repay it",
-        };
-        return Some(format!(
-            "Load AP: {reason}, although it penetrates on only {ap_share} of the hull it strikes.{ap_text} Aim at those zones rather than the superstructure."
-        ));
+    if !penetrated.is_empty() || citadels_often {
+        let aim = if penetrated.is_empty() { "" } else { " Aim at those zones rather than the superstructure." };
+        return Some(AmmoChoice {
+            load: Ammo::Ap,
+            text: format!(
+                "{situation}, load AP: it penetrates, detonating inside the hull, on {ap_share} of the hull it strikes.{ap_text}{aim}"
+            ),
+        });
     }
 
     let other_total: usize = other.zones.iter().map(|zone| zone.rays).sum();
@@ -1396,13 +1463,15 @@ fn ammo_choice(weapon: TraceWeapon, traces: &[AmmoTrace], target: &Ship) -> Opti
     } else {
         "; SAP starts no fires"
     };
-    let aim = if penetrated.is_empty() { "" } else { " AP still pays off on shots aimed at those zones." };
 
-    Some(format!(
-        "Load {other_ammo}: AP penetrates on only {ap_share} of the hull it strikes; the rest overpenetrates, ricochets or shatters.{ap_text}{aim} {other_ammo} defeats the first plate on {} of the area it strikes ({}){fires}.",
-        percent(other_damaging, other_total),
-        if other_zones.is_empty() { "no zone".to_owned() } else { join_and(&other_zones) },
-    ))
+    Some(AmmoChoice {
+        load: other.weapon.ammo,
+        text: format!(
+            "{situation}, load {other_ammo}: AP penetrates on only {ap_share} of the hull it strikes; the rest overpenetrates, ricochets or shatters.{ap_text} {other_ammo} defeats the first plate on {} of the area it strikes ({}){fires}.",
+            percent(other_damaging, other_total),
+            if other_zones.is_empty() { "no zone".to_owned() } else { join_and(&other_zones) },
+        ),
+    })
 }
 
 /// Rays that damage the ship: AP detonating inside it, or HE and SAP

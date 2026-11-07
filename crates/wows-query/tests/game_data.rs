@@ -1830,13 +1830,14 @@ fn aki_bombs_are_traced_with_the_ordnance_it_carries() {
     insta::assert_snapshot!("aki_ap_bombs_error", ap.to_string());
 }
 
-/// AP is the load when most of the hull it strikes ends in a penetration,
-/// or when it gets through the turrets or reaches the citadel often:
-/// Utrecht's 128 mm AP pens only the ends and casemate of a flat Borodino at
-/// 12 km, so HE; Zao's citadels and a Des Moines turret duel at 8 km, so AP.
+/// AP is the load whenever it penetrates most of a zone it strikes, gets
+/// through the turrets or reaches the citadel often, and the choice names
+/// the nearest compared range where it flips. Against a flat Borodino at
+/// 12 km Utrecht's 128 mm AP pens the ends and casemate, so AP; a Des Moines
+/// turret duel at 8 km is AP too; Des Moines against Yamato is HE.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
-fn ammo_choice_follows_the_ap_hull_penetration_share() {
+fn ammo_choice_follows_where_ap_penetrates() {
     struct Matchup {
         shooter: &'static str,
         target: &'static str,
@@ -1847,6 +1848,7 @@ fn ammo_choice_follows_the_ap_hull_penetration_share() {
         Matchup { shooter: "Des Moines", target: "Borodino", range_km: 12.0 },
         Matchup { shooter: "Zao", target: "Borodino", range_km: 12.0 },
         Matchup { shooter: "Des Moines", target: "Des Moines", range_km: 8.0 },
+        Matchup { shooter: "Des Moines", target: "Yamato", range_km: 12.0 },
     ];
     let choices: Vec<_> = matchups
         .iter()
