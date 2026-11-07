@@ -319,7 +319,13 @@ impl TorpedoLayout {
                     Some(direction) => format!("{} {} launchers", group.launchers.0, direction.label()),
                     None => format!("{} launchers", group.launchers.0),
                 };
-                format!("{} of the {launchers} ({} tubes) reload at a time.", group.loaders.0, group.tubes.0)
+                let verb = if group.loaders.0 == 1 { "reloads" } else { "reload" };
+                format!(
+                    "{} of the {launchers} ({} of the {} tubes) {verb} at a time.",
+                    group.loaders.0,
+                    round(group.tubes_per_reload),
+                    group.tubes.0
+                )
             })
             .collect();
         if sentences.is_empty() {

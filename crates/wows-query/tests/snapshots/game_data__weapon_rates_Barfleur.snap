@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 520
+assertion_line: 911
 expression: rates(name)
 ---
 torpedoes_per_minute:
@@ -12,7 +12,7 @@ torpedoes_per_minute:
       loaders: 1
       tubes_per_reload: 5
   tubes_per_reload: 5
-  limit: "1 of the 2 launchers (10 tubes) reload at a time. 5 of the 10 tubes reload per reload time, not all 10."
+  limit: "1 of the 2 launchers (5 of the 10 tubes) reloads at a time. 5 of the 10 tubes reload per reload time, not all 10."
   rate:
     stat: torpedoes per minute
     unit: torpedoes/min
