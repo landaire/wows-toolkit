@@ -18,6 +18,7 @@ eframe = { workspace = true, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "clipboard",     # Native clipboard access.
     "default_fonts", # Embed the default egui fonts.
+    "links",         # Open hyperlinks in the system browser.
     # "glow",
     "wgpu",
     "wayland",       # To support Linux (and CI)

@@ -10175,6 +10175,7 @@ cargo.rust_library(
         "accesskit",
         "clipboard",
         "default_fonts",
+        "links",
         "wayland",
         "wgpu",
         "wgpu_no_default_features",
@@ -10510,8 +10511,10 @@ cargo.rust_library(
         "arboard",
         "bytemuck",
         "clipboard",
+        "links",
         "smithay-clipboard",
         "wayland",
+        "webbrowser",
     ],
     platform = {
         "linux-x86_64": dict(
@@ -10538,6 +10541,7 @@ cargo.rust_library(
         ":profiling-1",
         ":raw-window-handle-0.6",
         ":web-time-1",
+        ":webbrowser-1",
         ":winit-0.30",
     ],
 )
@@ -49538,6 +49542,50 @@ cargo.rust_library(
         ),
     },
     visibility = [],
+)
+
+http_archive(
+    name = "webbrowser-1.2.6.crate",
+    sha256 = "fe8d20d0214027baf11b8b0cc307c1da7657d8f4db9aa956f7de27a6fb1acbd5",
+    size_bytes = 64036,
+    strip_prefix = "webbrowser-1.2.6",
+    urls = ["https://static.crates.io/crates/webbrowser/1.2.6/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "webbrowser-1",
+    srcs = [":webbrowser-1.2.6.crate"],
+    crate = "webbrowser",
+    crate_root = "webbrowser-1.2.6.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "webbrowser",
+        "CARGO_MANIFEST_DIR": "webbrowser-1.2.6.crate",
+        "CARGO_PKG_AUTHORS": "Amod Malviya @amodm",
+        "CARGO_PKG_DESCRIPTION": "Open URLs in web browsers available on a platform",
+        "CARGO_PKG_NAME": "webbrowser",
+        "CARGO_PKG_REPOSITORY": "https://github.com/amodm/webbrowser-rs",
+        "CARGO_PKG_VERSION": "1.2.6",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "macos-arm64": dict(
+            deps = [
+                ":objc2-0.6",
+                ":objc2-app-kit-0.3",
+                ":objc2-foundation-0.3",
+            ],
+        ),
+    },
+    visibility = [],
+    deps = [
+        ":log-0.4",
+        ":url-2",
+    ],
 )
 
 http_archive(
