@@ -170,6 +170,9 @@ expression: specs()
       zone:
         type: string
         description: "Zone or plate of the target ship: \"Bow\", \"Stern\", \"Cit\", \"Cas\", \"SS\", or a plate name from ship_armor. A zone uses its thinnest plate above the waterline."
+      shooter:
+        type: string
+        description: "Test only this ship, e.g. \"Montana\", for \"can X overmatch or pen Y\". Tier, class and nation filters then do not apply, and each group's verdict says whether the ship's best shell, bomb or rocket of that group defeats the plate."
       ammo:
         type: string
         enum:

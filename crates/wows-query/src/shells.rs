@@ -513,7 +513,7 @@ fn round_tenth(value: f32) -> f32 {
 }
 
 /// Thickest whole-mm plate `is_overmatch` accepts for `caliber`, `None` below 1 mm.
-fn thickest_overmatched_plate(caliber: Millimeters) -> Option<Millimeters> {
+pub(crate) fn thickest_overmatched_plate(caliber: Millimeters) -> Option<Millimeters> {
     let mut thickness = (caliber.value() / OVERMATCH_RATIO).ceil();
     while thickness >= 1.0 && !is_overmatch(caliber, Millimeters::new(thickness)) {
         thickness -= 1.0;

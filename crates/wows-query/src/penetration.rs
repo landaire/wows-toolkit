@@ -16,6 +16,7 @@ use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
+use crate::shells::thickest_overmatched_plate;
 use crate::ship_variants::listing_order;
 use crate::ships::Shares;
 use crate::ships::Ship;
@@ -66,6 +67,9 @@ pub struct PenetrationSearchArgs {
 
     /// Zone or plate of the target ship: "Bow", "Stern", "Cit", "Cas", "SS", or a plate name from ship_armor. A zone uses its thinnest plate above the waterline.
     pub zone: Option<String>,
+
+    /// Test only this ship, e.g. "Montana", for "can X overmatch or pen Y". Tier, class and nation filters then do not apply, and each group's verdict says whether the ship's best shell, bomb or rocket of that group defeats the plate.
+    pub shooter: Option<String>,
 
     /// Only this shell, bomb or rocket type. Omit to get separate HE penetration, SAP penetration and AP overmatch groups in one answer.
     pub ammo: Option<Ammo>,
@@ -118,8 +122,10 @@ pub enum TierSource {
     /// No tier bounds: every tier.
     All,
     Requested,
-    /// The target ship's tier +-2, the matchmaking spread.
     TargetMatchmaking,
+
+    /// One named shooter: tiers do not apply.
+    Shooter,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +187,12 @@ pub struct PenetrationGroup {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
+
+    /// With a shooter: whether its best munition of this group defeats the
+    /// plate, e.g. "Montana main battery 457 mm AP overmatches plates up to
+    /// 31 mm, so it overmatches this 27 mm plate."
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<String>,
 }
 
 /// One shell, bomb or rocket as the search compares it against a plate.
@@ -271,6 +283,10 @@ impl GameData {
             Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
             None => None,
         };
+        let shooter = match args.shooter.as_deref() {
+            Some(name) => Some(self.resolve_ship(name, &mut interpretations)?),
+            None => None,
+        };
 
         // A target zone is authoritative: models often add a thickness they
         // picked from ship_armor, and the zone rule is the one documented.
@@ -288,10 +304,11 @@ impl GameData {
         };
 
         let requested = TierRange::from_bounds(args.min_tier, args.max_tier);
-        let (tiers, tier_source) = match (requested, target) {
-            (Some(range), _) => (Some(range), TierSource::Requested),
-            (None, Some(ship)) => (Some(TierRange::around(ship.tier)), TierSource::TargetMatchmaking),
-            (None, None) => (None, TierSource::All),
+        let (tiers, tier_source) = match (shooter, requested, target) {
+            (Some(_), _, _) => (None, TierSource::Shooter),
+            (None, Some(range), _) => (Some(range), TierSource::Requested),
+            (None, None, Some(ship)) => (Some(TierRange::around(ship.tier)), TierSource::TargetMatchmaking),
+            (None, None, None) => (None, TierSource::All),
         };
         let filter = ShipFilter {
             tiers,
@@ -318,14 +335,25 @@ impl GameData {
 
         let mut considered: BTreeMap<(Armament, DefeatMethod), Vec<&Ship>> = BTreeMap::new();
         let mut hits: BTreeMap<(Armament, DefeatMethod), Vec<(&Ship, Munition)>> = BTreeMap::new();
-        let mut ships: Vec<&Ship> = self.ships.iter().filter(|ship| filter.matches(ship)).collect();
+        let mut strongest: BTreeMap<(Armament, DefeatMethod), Munition> = BTreeMap::new();
+        let mut ships: Vec<&Ship> = match shooter {
+            Some(ship) => vec![ship],
+            None => self.ships.iter().filter(|ship| filter.matches(ship)).collect(),
+        };
         ships.sort_by(|left, right| listing_order(left, right));
         for ship in ships {
             let munitions = self.munitions(ship, &armaments, ifhe);
             for &(armament, method) in &keys {
                 let fitting = || munitions.iter().filter(move |munition| munition.armament == armament);
-                if fitting().any(|munition| rating(munition, method).is_some()) {
-                    considered.entry((armament, method)).or_default().push(ship);
+                let rated = fitting()
+                    .filter_map(|munition| rating(munition, method).map(|rating| (munition, rating)))
+                    .max_by(|(_, left), (_, right)| left.value().total_cmp(&right.value()));
+                let Some((most_rated, _)) = rated else {
+                    continue;
+                };
+                considered.entry((armament, method)).or_default().push(ship);
+                if shooter.is_some() {
+                    strongest.insert((armament, method), most_rated.clone());
                 }
 
                 let best = fitting()
@@ -347,7 +375,10 @@ impl GameData {
                 }
 
                 let found = hits.remove(key).unwrap_or_default();
-                Some(group(key.0, key.1, &candidates, &found, thickness))
+                let verdict = shooter
+                    .zip(strongest.remove(key))
+                    .map(|(ship, munition)| verdict(ship, &munition, key.1, thickness));
+                Some(PenetrationGroup { verdict, ..group(key.0, key.1, &candidates, &found, thickness) })
             })
             .collect();
         let ordnance_rule = groups.iter().any(|group| group.armament.is_ordnance()).then_some(
@@ -428,12 +459,11 @@ fn group(
         qualifying,
         ships,
         omitted,
+        verdict: None,
     }
 }
 
 fn describe_hit(ship: &Ship, munition: &Munition, thickness: Millimeters) -> String {
-    let caliber = munition.caliber.map(|mm| format!("{} mm ", mm.value())).unwrap_or_default();
-    let ammo = munition.ammo.label();
     let penetration = munition.penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
     let overmatch = if munition.ammo == Ammo::Sap && munition.caliber.is_some_and(|mm| is_overmatch(mm, thickness)) {
         ", overmatches"
@@ -441,12 +471,39 @@ fn describe_hit(ship: &Ship, munition: &Munition, thickness: Millimeters) -> Str
         ""
     };
 
-    let weapon = match &munition.source {
+    format!("{}: {}{penetration}{overmatch}", ship.listing_label(), weapon_label(munition))
+}
+
+/// "main battery 420 mm AP" or "B7A Ryusei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)".
+fn weapon_label(munition: &Munition) -> String {
+    let caliber = munition.caliber.map(|mm| format!("{} mm ", mm.value())).unwrap_or_default();
+    let ammo = munition.ammo.label();
+    match &munition.source {
         MunitionSource::Gun(battery) => format!("{} {caliber}{ammo}", battery.label()),
         MunitionSource::Squadron { aircraft, role, kind, name } => {
             format!("{aircraft} {}, {caliber}{ammo} {} ({name})", role.label(), kind.label())
         }
-    };
+    }
+}
 
-    format!("{}: {weapon}{penetration}{overmatch}", ship.listing_label())
+/// Whether `munition`, `ship`'s strongest of its group, defeats `thickness`
+/// by `method`.
+fn verdict(ship: &Ship, munition: &Munition, method: DefeatMethod, thickness: Millimeters) -> String {
+    let weapon = format!("{} {}", ship.name, weapon_label(munition));
+    let defeats = strength(munition, method, thickness).is_some();
+    let thickness = thickness.value();
+    match (method, munition.caliber.and_then(thickest_overmatched_plate), munition.penetration) {
+        (DefeatMethod::ApOvermatch, Some(limit), _) => {
+            let result = if defeats { "overmatches" } else { "does not overmatch" };
+            format!("{weapon} overmatches plates up to {} mm, so it {result} this {thickness} mm plate.", limit.value())
+        }
+        (DefeatMethod::HePenetration | DefeatMethod::SapPenetration, _, Some(penetration)) => {
+            let result = if defeats { "penetrates" } else { "does not penetrate" };
+            format!("{weapon} has {} mm penetration, so it {result} this {thickness} mm plate.", penetration.value())
+        }
+        _ => {
+            let result = if defeats { "defeats" } else { "does not defeat" };
+            format!("{weapon} {result} this {thickness} mm plate.")
+        }
+    }
 }

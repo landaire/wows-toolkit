@@ -119,6 +119,32 @@ fn des_moines_bow_sap_search_marks_overmatch() {
     insta::assert_yaml_snapshot!(search);
 }
 
+/// A named shooter gets a verdict per group: GK's 420 mm AP overmatches Des
+/// Moines' 27 mm bow, Des Moines' own 203 mm AP does not.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn penetration_search_gives_a_shooter_verdict() {
+    let verdicts: Vec<_> = ["GK", "Des Moines"]
+        .into_iter()
+        .map(|shooter| {
+            game()
+                .penetration_search(&PenetrationSearchArgs {
+                    target_ship: Some("Des Moines".to_owned()),
+                    zone: Some("bow".to_owned()),
+                    shooter: Some(shooter.to_owned()),
+                    armament: Some(vec![Armament::MainBattery]),
+                    ..Default::default()
+                })
+                .expect("ships resolve")
+                .groups
+                .into_iter()
+                .map(|group| group.verdict)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(verdicts);
+}
+
 /// Yamato's superstructure side and roof, and each turret's barbettes, share a
 /// game name; their part tells them apart and selects each one.
 #[test]
