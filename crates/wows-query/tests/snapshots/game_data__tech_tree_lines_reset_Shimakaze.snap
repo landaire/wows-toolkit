@@ -1,0 +1,66 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: named
+---
+- tier_10_ship: Shimakaze
+  nation: Japan
+  class: destroyer
+  path:
+    - Hashidate
+    - Chikuma
+    - Umikaze
+    - Wakatake
+    - Isokaze
+    - Mutsuki
+    - Fubuki
+    - Akatsuki
+    - Kagerō
+    - Yūgumo
+    - Shimakaze
+  branches_from: Isokaze
+  ships:
+    - name: Kagerō
+      tier: 8
+      research_xp: 115000
+      purchase_credits: 9100000
+    - name: Yūgumo
+      tier: 9
+      research_xp: 154000
+      purchase_credits: 13200000
+    - name: Shimakaze
+      tier: 10
+      research_xp: 223000
+      purchase_credits: 19300000
+  total_research_xp: 492000
+  total_purchase_credits: 41600000
+  reset:
+    research_points: 10200
+    points_by_ship:
+      - name: Mutsuki
+        tier: 5
+        points: 200
+      - name: Fubuki
+        tier: 6
+        points: 500
+      - name: Akatsuki
+        tier: 7
+        points: 500
+      - name: Kagerō
+        tier: 8
+        points: 1500
+      - name: Yūgumo
+        tier: 9
+        points: 1500
+      - name: Shimakaze
+        tier: 10
+        points: 6000
+    regrind:
+      research_xp: 607920
+      purchase_credits: 52120000
+    paying_ships:
+      research_xp: 600000
+      purchase_credits: 51030000
+    credits_per_point: 5109.8
+    xp_per_point: 59.6
+    sale_credits: 26060000
+    net_credits_if_owned: 26060000

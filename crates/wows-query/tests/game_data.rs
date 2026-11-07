@@ -41,9 +41,14 @@ use wows_query::skills::CaptainSkillArgs;
 use wows_query::skills::SkillTreeArgs;
 use wows_query::stat_search::StatNamesArgs;
 use wows_query::stats::ShipStatsArgs;
+use wows_query::tech_tree::Cost;
+use wows_query::tech_tree::CostPerPoint;
 use wows_query::tech_tree::LineOrder;
+use wows_query::tech_tree::ResearchPoints;
 use wows_query::tech_tree::TechTreeLinesArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
+use wowsunpack::game_params::types::Credits;
+use wowsunpack::game_params::types::Experience;
 use wowsunpack::game_params::types::GameParamProvider;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
@@ -245,7 +250,11 @@ fn ship_overview_reports_purchase_and_research_costs() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn tech_tree_lines_cheapest_by_research_xp() {
     let lines = game()
-        .tech_tree_lines(&TechTreeLinesArgs { limit: Some(5), ..Default::default() })
+        .tech_tree_lines(&TechTreeLinesArgs {
+            sort_by: Some(LineOrder::ResearchXp),
+            limit: Some(5),
+            ..Default::default()
+        })
         .expect("default tiers are valid");
 
     insta::assert_yaml_snapshot!(lines);
@@ -275,12 +284,73 @@ fn tech_tree_lines_japan_destroyers_share_ships() {
         .tech_tree_lines(&TechTreeLinesArgs {
             nation: Some("Japan".to_owned()),
             class: Some(ShipClass::Destroyer),
+            sort_by: Some(LineOrder::ResearchXp),
             min_tier: Some(Tier(4)),
             ..Default::default()
         })
         .expect("tiers 4 to 10 are valid");
 
     insta::assert_yaml_snapshot!(lines);
+}
+
+/// The reset rank of a line, without its ships.
+#[derive(serde::Serialize)]
+struct ResetRank {
+    tier_10_ship: String,
+    class: ShipClass,
+    research_points: ResearchPoints,
+    credits_per_point: CostPerPoint<Credits>,
+    xp_per_point: CostPerPoint<Experience>,
+    regrind: Cost,
+}
+
+fn reset_ranks(sort_by: LineOrder) -> Vec<ResetRank> {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs { sort_by: Some(sort_by), limit: Some(10), ..Default::default() })
+        .expect("default tiers are valid");
+    assert_eq!(lines.sort_by, sort_by);
+
+    lines
+        .lines
+        .into_iter()
+        .map(|line| ResetRank {
+            tier_10_ship: line.tier_10_ship,
+            class: line.class,
+            research_points: line.reset.research_points,
+            credits_per_point: line.reset.credits_per_point,
+            xp_per_point: line.reset.xp_per_point,
+            regrind: line.reset.regrind,
+        })
+        .collect()
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_cheapest_to_reset_by_credits_per_point() {
+    insta::assert_yaml_snapshot!(reset_ranks(LineOrder::CreditsPerPoint));
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_cheapest_to_reset_by_xp_per_point() {
+    insta::assert_yaml_snapshot!(reset_ranks(LineOrder::XpPerPoint));
+}
+
+/// Carrier lines pay fewer Research Points than gunship lines. The Harugumo
+/// line branches from the Shimakaze line.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_reset_value_of_named_lines() {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs { limit: Some(usize::MAX), ..Default::default() })
+        .expect("default tiers are valid");
+    assert_eq!(lines.sort_by, LineOrder::CreditsPerPoint);
+
+    for end in ["Harugumo", "Shimakaze", "Essex", "Midway"] {
+        let named: Vec<_> = lines.lines.iter().filter(|line| line.tier_10_ship == end).collect();
+        assert!(!named.is_empty(), "{end} ends a line");
+        insta::assert_yaml_snapshot!(format!("tech_tree_lines_reset_{end}"), named);
+    }
 }
 
 #[test]

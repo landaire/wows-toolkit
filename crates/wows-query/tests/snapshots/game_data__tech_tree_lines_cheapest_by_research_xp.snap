@@ -39,6 +39,37 @@ lines:
         purchase_credits: 18000000
     total_research_xp: 490000
     total_purchase_credits: 40000000
+    reset:
+      research_points: 10200
+      points_by_ship:
+        - name: Podvoisky
+          tier: 5
+          points: 200
+        - name: Gnevny
+          tier: 6
+          points: 500
+        - name: Minsk
+          tier: 7
+          points: 500
+        - name: Ognevoi
+          tier: 8
+          points: 1500
+        - name: Udaloi
+          tier: 9
+          points: 1500
+        - name: Grozovoi
+          tier: 10
+          points: 6000
+      regrind:
+        research_xp: 612550
+        purchase_credits: 51013600
+      paying_ships:
+        research_xp: 603500
+        purchase_credits: 49890000
+      credits_per_point: 5001.3
+      xp_per_point: 60.1
+      sale_credits: 25506800
+      net_credits_if_owned: 25506800
   - tier_10_ship: Essex
     nation: USA
     class: aircraft_carrier
@@ -65,6 +96,31 @@ lines:
         purchase_credits: 28500000
     total_research_xp: 491000
     total_purchase_credits: 37500000
+    reset:
+      research_points: 8500
+      points_by_ship:
+        - name: Ranger
+          tier: 6
+          points: 500
+        - name: Independence
+          tier: 6
+          points: 500
+        - name: Yorktown
+          tier: 8
+          points: 1500
+        - name: Essex
+          tier: 10
+          points: 6000
+      regrind:
+        research_xp: 576020
+        purchase_credits: 46099300
+      paying_ships:
+        research_xp: 556000
+        purchase_credits: 44000000
+      credits_per_point: 5423.4
+      xp_per_point: 67.8
+      sale_credits: 23049650
+      net_credits_if_owned: 23049650
   - tier_10_ship: Shimakaze
     nation: Japan
     class: destroyer
@@ -96,6 +152,37 @@ lines:
         purchase_credits: 19300000
     total_research_xp: 492000
     total_purchase_credits: 41600000
+    reset:
+      research_points: 10200
+      points_by_ship:
+        - name: Mutsuki
+          tier: 5
+          points: 200
+        - name: Fubuki
+          tier: 6
+          points: 500
+        - name: Akatsuki
+          tier: 7
+          points: 500
+        - name: Kagerō
+          tier: 8
+          points: 1500
+        - name: Yūgumo
+          tier: 9
+          points: 1500
+        - name: Shimakaze
+          tier: 10
+          points: 6000
+      regrind:
+        research_xp: 607920
+        purchase_credits: 52120000
+      paying_ships:
+        research_xp: 600000
+        purchase_credits: 51030000
+      credits_per_point: 5109.8
+      xp_per_point: 59.6
+      sale_credits: 26060000
+      net_credits_if_owned: 26060000
   - tier_10_ship: Harugumo
     nation: Japan
     class: destroyer
@@ -127,6 +214,37 @@ lines:
         purchase_credits: 19500000
     total_research_xp: 492000
     total_purchase_credits: 41700000
+    reset:
+      research_points: 10200
+      points_by_ship:
+        - name: Minekaze
+          tier: 5
+          points: 200
+        - name: Hatsuharu
+          tier: 6
+          points: 500
+        - name: Shiratsuyu
+          tier: 7
+          points: 500
+        - name: Akizuki
+          tier: 8
+          points: 1500
+        - name: Kitakaze
+          tier: 9
+          points: 1500
+        - name: Harugumo
+          tier: 10
+          points: 6000
+      regrind:
+        research_xp: 605420
+        purchase_credits: 52220000
+      paying_ships:
+        research_xp: 597500
+        purchase_credits: 51130000
+      credits_per_point: 5119.6
+      xp_per_point: 59.4
+      sale_credits: 26110000
+      net_credits_if_owned: 26110000
   - tier_10_ship: Delny
     nation: Russia
     class: destroyer
@@ -158,4 +276,35 @@ lines:
         purchase_credits: 18800000
     total_research_xp: 495000
     total_purchase_credits: 40800000
+    reset:
+      research_points: 10200
+      points_by_ship:
+        - name: Podvoisky
+          tier: 5
+          points: 200
+        - name: Gnevny
+          tier: 6
+          points: 500
+        - name: Minsk
+          tier: 7
+          points: 500
+        - name: Kiev
+          tier: 8
+          points: 1500
+        - name: Tashkent
+          tier: 9
+          points: 1500
+        - name: Delny
+          tier: 10
+          points: 6000
+      regrind:
+        research_xp: 617550
+        purchase_credits: 51813600
+      paying_ships:
+        research_xp: 608500
+        purchase_credits: 50690000
+      credits_per_point: 5079.8
+      xp_per_point: 60.5
+      sale_credits: 25906800
+      net_credits_if_owned: 25906800
 omitted: 55

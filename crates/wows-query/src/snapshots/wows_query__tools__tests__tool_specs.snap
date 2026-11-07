@@ -59,7 +59,7 @@ expression: specs()
     required:
       - ship
 - name: tech_tree_lines
-  description: "Tech tree lines, each the research path from tier 1 to one tier 10 ship (tier 11 ships are not part of a line), with the research XP and purchase credits of its ships in a tier range (default 8 to 10) and their totals, cheapest first by sort_by: research_xp (ties broken by credits) or purchase_credits (ties broken by XP). branches_from names the highest-tier ship the line shares with another line; shared_with on a ship lists the tier 10 ships of the other lines through it. Costs leave out module research and upgrades. Filter by nation and by class of the tier 10 ship."
+  description: "Tech tree lines, each the research path from tier 1 to one tier 10 ship (tier 11 ships are not part of a line), with the research XP and purchase credits of its ships in a tier range (default 8 to 10) and their totals, and the value of a Research Bureau reset of the line. A reset rolls the line back to tier 1; each tier 5 to 10 ship of the line pays Research Points once researched again and it wins a battle or earns 300 base XP in one battle: tier 5 200, tiers 6 and 7 500, tiers 8 and 9 1,500, tier 10 6,000. A line's points depend on the tiers of the ships in its path: a line with one ship at every tier from 5 to 10 pays 10,200; most carrier lines have only tiers 6, 8 and 10 and pay 8,000, the Essex line 8,500 and submarine lines 8,700. Quote each line's research_points. Carrier lines cost less in total because they have fewer ships, so compare lines by cost per point, never by raw cost. reset gives research_points with points_by_ship, regrind (research XP and purchase credits of every ship from tier 2 to 10), paying_ships (the same for the ships that pay points), credits_per_point and xp_per_point (regrind over research_points), sale_credits (half the purchase price of the tier 2 to 10 ships, paid by the reset when the player owns them all) and net_credits_if_owned. Points are base values before season multipliers. Lines are cheapest first by sort_by: credits_per_point (default; ties broken by XP per point), xp_per_point (ties broken by credits per point), research_xp or purchase_credits (tier range totals, each broken by the other). Remaining ties go by tier 10 ship name. branches_from names the highest-tier ship the line shares with another line; shared_with on a ship lists the tier 10 ships of the other lines through it. Costs leave out module research and purchases and upgrades. Filter by nation and by class of the tier 10 ship."
   input_schema:
     type: object
     additionalProperties: false
@@ -87,14 +87,20 @@ expression: specs()
         minimum: 1
         maximum: 10
       sort_by:
-        description: "Order of the lines, cheapest first. Defaults to research_xp."
+        description: "Order of the lines, cheapest first. Defaults to credits_per_point."
         oneOf:
           - type: string
+            const: credits_per_point
+            description: "Reset purchase credits per Research Point, then reset XP per point."
+          - type: string
+            const: xp_per_point
+            description: "Reset research XP per Research Point, then reset credits per point."
+          - type: string
             const: research_xp
-            description: "Total research XP, then total purchase credits."
+            description: "Total research XP in the tier range, then total purchase credits."
           - type: string
             const: purchase_credits
-            description: "Total purchase credits, then total research XP."
+            description: "Total purchase credits in the tier range, then total research XP."
       limit:
         type: integer
         description: Most lines to list. Defaults to 20.

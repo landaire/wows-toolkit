@@ -1,0 +1,51 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: named
+---
+- tier_10_ship: Midway
+  nation: USA
+  class: aircraft_carrier
+  path:
+    - Erie
+    - Chester
+    - Sampson
+    - Wickes
+    - Clemson
+    - Langley
+    - Ranger
+    - Lexington
+    - Midway
+  branches_from: Ranger
+  ships:
+    - name: Lexington
+      tier: 8
+      research_xp: 161000
+      purchase_credits: 11500000
+    - name: Midway
+      tier: 10
+      research_xp: 355000
+      purchase_credits: 28000000
+  total_research_xp: 516000
+  total_purchase_credits: 39500000
+  reset:
+    research_points: 8000
+    points_by_ship:
+      - name: Ranger
+        tier: 6
+        points: 500
+      - name: Lexington
+        tier: 8
+        points: 1500
+      - name: Midway
+        tier: 10
+        points: 6000
+    regrind:
+      research_xp: 576020
+      purchase_credits: 46099300
+    paying_ships:
+      research_xp: 556000
+      purchase_credits: 44000000
+    credits_per_point: 5762.4
+    xp_per_point: 72
+    sale_credits: 23049650
+    net_credits_if_owned: 23049650

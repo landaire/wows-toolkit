@@ -1,0 +1,66 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: named
+---
+- tier_10_ship: Harugumo
+  nation: Japan
+  class: destroyer
+  path:
+    - Hashidate
+    - Chikuma
+    - Umikaze
+    - Wakatake
+    - Isokaze
+    - Minekaze
+    - Hatsuharu
+    - Shiratsuyu
+    - Akizuki
+    - Kitakaze
+    - Harugumo
+  branches_from: Isokaze
+  ships:
+    - name: Akizuki
+      tier: 8
+      research_xp: 115000
+      purchase_credits: 9000000
+    - name: Kitakaze
+      tier: 9
+      research_xp: 154000
+      purchase_credits: 13200000
+    - name: Harugumo
+      tier: 10
+      research_xp: 223000
+      purchase_credits: 19500000
+  total_research_xp: 492000
+  total_purchase_credits: 41700000
+  reset:
+    research_points: 10200
+    points_by_ship:
+      - name: Minekaze
+        tier: 5
+        points: 200
+      - name: Hatsuharu
+        tier: 6
+        points: 500
+      - name: Shiratsuyu
+        tier: 7
+        points: 500
+      - name: Akizuki
+        tier: 8
+        points: 1500
+      - name: Kitakaze
+        tier: 9
+        points: 1500
+      - name: Harugumo
+        tier: 10
+        points: 6000
+    regrind:
+      research_xp: 605420
+      purchase_credits: 52220000
+    paying_ships:
+      research_xp: 597500
+      purchase_credits: 51130000
+    credits_per_point: 5119.6
+    xp_per_point: 59.4
+    sale_credits: 26110000
+    net_credits_if_owned: 26110000

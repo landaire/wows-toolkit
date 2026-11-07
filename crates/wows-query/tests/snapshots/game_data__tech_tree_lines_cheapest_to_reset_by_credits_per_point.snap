@@ -1,0 +1,84 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "reset_ranks(LineOrder::CreditsPerPoint)"
+---
+- tier_10_ship: Z-52
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5001.1
+  xp_per_point: 60.6
+  regrind:
+    research_xp: 617700
+    purchase_credits: 51011300
+- tier_10_ship: Grozovoi
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5001.3
+  xp_per_point: 60.1
+  regrind:
+    research_xp: 612550
+    purchase_credits: 51013600
+- tier_10_ship: Yueyang
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5071.4
+  xp_per_point: 61.5
+  regrind:
+    research_xp: 627300
+    purchase_credits: 51728000
+- tier_10_ship: Delny
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5079.8
+  xp_per_point: 60.5
+  regrind:
+    research_xp: 617550
+    purchase_credits: 51813600
+- tier_10_ship: Shimakaze
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5109.8
+  xp_per_point: 59.6
+  regrind:
+    research_xp: 607920
+    purchase_credits: 52120000
+- tier_10_ship: Zaō
+  class: cruiser
+  research_points: 10200
+  credits_per_point: 5111.7
+  xp_per_point: 60.7
+  regrind:
+    research_xp: 619100
+    purchase_credits: 52139000
+- tier_10_ship: Harugumo
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5119.6
+  xp_per_point: 59.4
+  regrind:
+    research_xp: 605420
+    purchase_credits: 52220000
+- tier_10_ship: Gearing
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5123.5
+  xp_per_point: 61.7
+  regrind:
+    research_xp: 629520
+    purchase_credits: 52259300
+- tier_10_ship: Burrows
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5138.2
+  xp_per_point: 62.3
+  regrind:
+    research_xp: 635520
+    purchase_credits: 52409300
+- tier_10_ship: Kléber
+  class: destroyer
+  research_points: 10200
+  credits_per_point: 5143.6
+  xp_per_point: 62.3
+  regrind:
+    research_xp: 635850
+    purchase_credits: 52465000

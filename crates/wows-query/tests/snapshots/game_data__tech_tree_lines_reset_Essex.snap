@@ -1,0 +1,55 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: named
+---
+- tier_10_ship: Essex
+  nation: USA
+  class: aircraft_carrier
+  path:
+    - Erie
+    - Chester
+    - Sampson
+    - Wickes
+    - Clemson
+    - Langley
+    - Ranger
+    - Independence
+    - Yorktown
+    - Essex
+  branches_from: Ranger
+  ships:
+    - name: Yorktown
+      tier: 8
+      research_xp: 120000
+      purchase_credits: 9000000
+    - name: Essex
+      tier: 10
+      research_xp: 371000
+      purchase_credits: 28500000
+  total_research_xp: 491000
+  total_purchase_credits: 37500000
+  reset:
+    research_points: 8500
+    points_by_ship:
+      - name: Ranger
+        tier: 6
+        points: 500
+      - name: Independence
+        tier: 6
+        points: 500
+      - name: Yorktown
+        tier: 8
+        points: 1500
+      - name: Essex
+        tier: 10
+        points: 6000
+    regrind:
+      research_xp: 576020
+      purchase_credits: 46099300
+    paying_ships:
+      research_xp: 556000
+      purchase_credits: 44000000
+    credits_per_point: 5423.4
+    xp_per_point: 67.8
+    sale_credits: 23049650
+    net_credits_if_owned: 23049650
