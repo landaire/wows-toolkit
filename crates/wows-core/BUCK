@@ -4,7 +4,7 @@ workspace_library(
     name = "wows_core",
     crate = "wows_core",
     package = "wows-core",
-    version = "0.14.1",
+    version = "0.15.0",
     features = wasm_select(
         wasm = [
             "parsing",
@@ -38,7 +38,7 @@ workspace_test(
     name = "wows_core_test",
     crate = "wows_core",
     package = "wows-core",
-    version = "0.14.1",
+    version = "0.15.0",
     crate_root = "src/lib.rs",
     features = [
         "arc",

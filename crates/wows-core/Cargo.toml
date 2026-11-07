@@ -2,7 +2,7 @@
 exclude = ["BUCK"]
 name = "wows-core"
 description = "Lightweight domain core (shared types and small derived data) for the WoWS toolkit"
-version = "0.14.1"
+version = "0.15.0"
 repository = "https://github.com/landaire/wows-toolkit"
 edition.workspace = true
 rust-version.workspace = true
