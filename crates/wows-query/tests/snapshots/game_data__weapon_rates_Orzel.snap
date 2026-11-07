@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 911
+assertion_line: 908
 expression: rates(name)
 ---
 torpedoes_per_minute:
@@ -61,14 +61,70 @@ main_battery_damage:
         base:
           damage_per_minute: 27000
           damage_per_second: 450
-          broadside_damage_per_minute: 27000
-          bow_on_damage_per_minute: 27000
+          bearing: 90
+          all_barrels_ceiling: 27000
+          by_bearing:
+            - bearing: 0
+              starboard: 27000
+              port: 27000
+            - bearing: 30
+              starboard: 27000
+              port: 27000
+            - bearing: 45
+              starboard: 27000
+              port: 27000
+            - bearing: 60
+              starboard: 27000
+              port: 27000
+            - bearing: 90
+              starboard: 27000
+              port: 27000
+            - bearing: 120
+              starboard: 27000
+              port: 27000
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
             damage_per_minute: 30682
             damage_per_second: 511.4
-            broadside_damage_per_minute: 30682
-            bow_on_damage_per_minute: 30682
+            bearing: 90
+            all_barrels_ceiling: 30682
+            by_bearing:
+              - bearing: 0
+                starboard: 30682
+                port: 30682
+              - bearing: 30
+                starboard: 30682
+                port: 30682
+              - bearing: 45
+                starboard: 30682
+                port: 30682
+              - bearing: 60
+                starboard: 30682
+                port: 30682
+              - bearing: 90
+                starboard: 30682
+                port: 30682
+              - bearing: 120
+                starboard: 30682
+                port: 30682
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Main Battery Modification 3
         alternatives:
@@ -76,8 +132,8 @@ main_battery_damage:
             value:
               damage_per_minute: 27000
               damage_per_second: 450
-              broadside_damage_per_minute: 27000
-              bow_on_damage_per_minute: 27000
+              bearing: 90
+              all_barrels_ceiling: 27000
             assumed: []
 torpedo_damage:
   - ammo: 533 mm wz.AB akustyczna
@@ -164,4 +220,4 @@ torpedo_damage:
             note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 2255
 expression: stats.talents
 ---
 - talent: Resuelto
@@ -31,12 +32,17 @@ expression: stats.talents
       to: 146982 hp/min
       because:
         - Resuelto x0.975 (-0.325)
-    - stat: "Fire starts per minute, all armament, every projectile hitting"
+    - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
       from: 28.73 fires/min
       to: 28.90 fires/min
       because:
         - Resuelto x0.975 (-0.325)
-    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+    - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+      from: 22.73 fires/min
+      to: 22.90 fires/min
+      because:
+        - Resuelto x0.975 (-0.325)
+    - stat: "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE)"
       from: 6.65 fires/min
       to: 6.82 fires/min
       because:
@@ -70,12 +76,17 @@ expression: stats.talents
       to: 158581 hp/min
       because:
         - Resuelto x0.904 (-1.252)
-    - stat: "Fire starts per minute, all armament, every projectile hitting"
+    - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
       from: 28.73 fires/min
       to: 29.43 fires/min
       because:
         - Resuelto x0.904 (-1.252)
-    - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+    - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+      from: 22.73 fires/min
+      to: 23.43 fires/min
+      because:
+        - Resuelto x0.904 (-1.252)
+    - stat: "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE)"
       from: 6.65 fires/min
       to: 7.35 fires/min
       because:

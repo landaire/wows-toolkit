@@ -189,6 +189,13 @@ pub struct Builds<V> {
     pub alternatives: Vec<BuildAlternative<V>>,
 }
 
+/// Base and best-fit build of one stat, with the stat card and modifiers of
+/// the best-fit build.
+pub(crate) struct BestFit<V> {
+    pub builds: Builds<V>,
+    pub outcome: Rc<Outcome>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BuildValue<V> {
     pub value: V,
@@ -553,6 +560,18 @@ impl<'a> Planner<'a> {
 
         let best = self.build_value(fit.selection, &fit.chosen, fit.value);
         Ok(Some(Builds { base: fit.base, best, alternatives: Vec::new() }))
+    }
+
+    /// [`Planner::best`] together with the stat card and modifiers of the
+    /// best-fit build. `None` when the ship lacks the stat.
+    pub(crate) fn best_fit<V: StatAmount>(&self, plan: &StatPlan<'_, V>) -> Result<Option<BestFit<V>>, QueryError> {
+        let Some(fit) = self.fit(plan)? else {
+            return Ok(None);
+        };
+
+        let outcome = self.outcome(fit.selection, &fit.chosen.all(), None)?;
+        let best = self.build_value(fit.selection, &fit.chosen, fit.value);
+        Ok(Some(BestFit { builds: Builds { base: fit.base, best, alternatives: Vec::new() }, outcome }))
     }
 
     /// Base, best-fit build and alternatives of one stat. `None` when the

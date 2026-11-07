@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 520
+assertion_line: 908
 expression: rates(name)
 ---
 main_battery_damage:
@@ -14,14 +14,70 @@ main_battery_damage:
         base:
           damage_per_minute: 266400
           damage_per_second: 4440
-          broadside_damage_per_minute: 266400
-          bow_on_damage_per_minute: 177600
+          bearing: 90
+          all_barrels_ceiling: 266400
+          by_bearing:
+            - bearing: 0
+              starboard: 177600
+              port: 177600
+            - bearing: 30
+              starboard: 177600
+              port: 177600
+            - bearing: 45
+              starboard: 266400
+              port: 266400
+            - bearing: 60
+              starboard: 266400
+              port: 266400
+            - bearing: 90
+              starboard: 266400
+              port: 266400
+            - bearing: 120
+              starboard: 266400
+              port: 266400
+            - bearing: 135
+              starboard: 266400
+              port: 266400
+            - bearing: 150
+              starboard: 266400
+              port: 266400
+            - bearing: 180
+              starboard: 88800
+              port: 88800
         best:
           value:
             damage_per_minute: 325432
             damage_per_second: 5423.9
-            broadside_damage_per_minute: 325432
-            bow_on_damage_per_minute: 216955
+            bearing: 90
+            all_barrels_ceiling: 325432
+            by_bearing:
+              - bearing: 0
+                starboard: 216955
+                port: 216955
+              - bearing: 30
+                starboard: 216955
+                port: 216955
+              - bearing: 45
+                starboard: 325432
+                port: 325432
+              - bearing: 60
+                starboard: 325432
+                port: 325432
+              - bearing: 90
+                starboard: 325432
+                port: 325432
+              - bearing: 120
+                starboard: 325432
+                port: 325432
+              - bearing: 135
+                starboard: 325432
+                port: 325432
+              - bearing: 150
+                starboard: 325432
+                port: 325432
+              - bearing: 180
+                starboard: 108477
+                port: 108477
           assumed:
             - Super-Heavy AP Shells
             - Main Battery Modification 3
@@ -33,16 +89,16 @@ main_battery_damage:
             value:
               damage_per_minute: 302727
               damage_per_second: 5045.5
-              broadside_damage_per_minute: 302727
-              bow_on_damage_per_minute: 201818
+              bearing: 90
+              all_barrels_ceiling: 302727
             assumed:
               - Main Battery Modification 3
           - label: without Main Battery Modification 3
             value:
               damage_per_minute: 286380
               damage_per_second: 4773
-              broadside_damage_per_minute: 286380
-              bow_on_damage_per_minute: 190920
+              bearing: 90
+              all_barrels_ceiling: 286380
             assumed:
               - Super-Heavy AP Shells
             tier_fillers:
@@ -52,8 +108,8 @@ main_battery_damage:
             value:
               damage_per_minute: 361591
               damage_per_second: 6026.5
-              broadside_damage_per_minute: 361591
-              bow_on_damage_per_minute: 241061
+              bearing: 90
+              all_barrels_ceiling: 361591
             assumed:
               - Super-Heavy AP Shells
               - Main Battery Modification 3
@@ -72,14 +128,70 @@ main_battery_damage:
         base:
           damage_per_minute: 131400
           damage_per_second: 2190
-          broadside_damage_per_minute: 131400
-          bow_on_damage_per_minute: 87600
+          bearing: 90
+          all_barrels_ceiling: 131400
+          by_bearing:
+            - bearing: 0
+              starboard: 87600
+              port: 87600
+            - bearing: 30
+              starboard: 87600
+              port: 87600
+            - bearing: 45
+              starboard: 131400
+              port: 131400
+            - bearing: 60
+              starboard: 131400
+              port: 131400
+            - bearing: 90
+              starboard: 131400
+              port: 131400
+            - bearing: 120
+              starboard: 131400
+              port: 131400
+            - bearing: 135
+              starboard: 131400
+              port: 131400
+            - bearing: 150
+              starboard: 131400
+              port: 131400
+            - bearing: 180
+              starboard: 43800
+              port: 43800
         best:
           value:
             damage_per_minute: 149318
             damage_per_second: 2488.6
-            broadside_damage_per_minute: 149318
-            bow_on_damage_per_minute: 99545
+            bearing: 90
+            all_barrels_ceiling: 149318
+            by_bearing:
+              - bearing: 0
+                starboard: 99545
+                port: 99545
+              - bearing: 30
+                starboard: 99545
+                port: 99545
+              - bearing: 45
+                starboard: 149318
+                port: 149318
+              - bearing: 60
+                starboard: 149318
+                port: 149318
+              - bearing: 90
+                starboard: 149318
+                port: 149318
+              - bearing: 120
+                starboard: 149318
+                port: 149318
+              - bearing: 135
+                starboard: 149318
+                port: 149318
+              - bearing: 150
+                starboard: 149318
+                port: 149318
+              - bearing: 180
+                starboard: 49773
+                port: 49773
           assumed:
             - Main Battery Modification 3
         alternatives:
@@ -87,15 +199,15 @@ main_battery_damage:
             value:
               damage_per_minute: 131400
               damage_per_second: 2190
-              broadside_damage_per_minute: 131400
-              bow_on_damage_per_minute: 87600
+              bearing: 90
+              all_barrels_ceiling: 131400
             assumed: []
           - label: with Close Quarters Combat active
             value:
               damage_per_minute: 165909
               damage_per_second: 2765.2
-              broadside_damage_per_minute: 165909
-              bow_on_damage_per_minute: 110606
+              bearing: 90
+              all_barrels_ceiling: 165909
             assumed:
               - Main Battery Modification 3
               - Close Quarters Combat
@@ -115,14 +227,70 @@ secondary_damage:
         base:
           damage_per_minute: 78000
           damage_per_second: 1300
-          broadside_damage_per_minute: 78000
-          bow_on_damage_per_minute: 39000
+          bearing: 90
+          all_barrels_ceiling: 78000
+          by_bearing:
+            - bearing: 0
+              starboard: 39000
+              port: 39000
+            - bearing: 30
+              starboard: 39000
+              port: 39000
+            - bearing: 45
+              starboard: 39000
+              port: 39000
+            - bearing: 60
+              starboard: 78000
+              port: 78000
+            - bearing: 90
+              starboard: 78000
+              port: 78000
+            - bearing: 120
+              starboard: 78000
+              port: 78000
+            - bearing: 135
+              starboard: 78000
+              port: 78000
+            - bearing: 150
+              starboard: 39000
+              port: 39000
+            - bearing: 180
+              starboard: 39000
+              port: 39000
         best:
           value:
             damage_per_minute: 108333
             damage_per_second: 1805.6
-            broadside_damage_per_minute: 108333
-            bow_on_damage_per_minute: 54167
+            bearing: 90
+            all_barrels_ceiling: 108333
+            by_bearing:
+              - bearing: 0
+                starboard: 54167
+                port: 54167
+              - bearing: 30
+                starboard: 54167
+                port: 54167
+              - bearing: 45
+                starboard: 54167
+                port: 54167
+              - bearing: 60
+                starboard: 108333
+                port: 108333
+              - bearing: 90
+                starboard: 108333
+                port: 108333
+              - bearing: 120
+                starboard: 108333
+                port: 108333
+              - bearing: 135
+                starboard: 108333
+                port: 108333
+              - bearing: 150
+                starboard: 54167
+                port: 54167
+              - bearing: 180
+                starboard: 54167
+                port: 54167
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
@@ -135,16 +303,16 @@ secondary_damage:
             value:
               damage_per_minute: 97500
               damage_per_second: 1625
-              broadside_damage_per_minute: 97500
-              bow_on_damage_per_minute: 48750
+              bearing: 90
+              all_barrels_ceiling: 97500
             assumed:
               - Auxiliary Armaments Modification 2
           - label: without Auxiliary Armaments Modification 2
             value:
               damage_per_minute: 86667
               damage_per_second: 1444.4
-              broadside_damage_per_minute: 86667
-              bow_on_damage_per_minute: 43333
+              bearing: 90
+              all_barrels_ceiling: 86667
             assumed:
               - Manual Secondary Battery Aiming
             tier_fillers:
@@ -159,16 +327,72 @@ secondary_damage:
       unit: HP/min
       builds:
         base:
-          damage_per_minute: 252000
-          damage_per_second: 4200
-          broadside_damage_per_minute: 126000
-          bow_on_damage_per_minute: 126000
+          damage_per_minute: 126000
+          damage_per_second: 2100
+          bearing: 90
+          all_barrels_ceiling: 252000
+          by_bearing:
+            - bearing: 0
+              starboard: 84000
+              port: 84000
+            - bearing: 30
+              starboard: 126000
+              port: 126000
+            - bearing: 45
+              starboard: 126000
+              port: 126000
+            - bearing: 60
+              starboard: 126000
+              port: 126000
+            - bearing: 90
+              starboard: 126000
+              port: 126000
+            - bearing: 120
+              starboard: 126000
+              port: 126000
+            - bearing: 135
+              starboard: 126000
+              port: 126000
+            - bearing: 150
+              starboard: 126000
+              port: 126000
+            - bearing: 180
+              starboard: 84000
+              port: 84000
         best:
           value:
-            damage_per_minute: 350000
-            damage_per_second: 5833.3
-            broadside_damage_per_minute: 175000
-            bow_on_damage_per_minute: 175000
+            damage_per_minute: 175000
+            damage_per_second: 2916.7
+            bearing: 90
+            all_barrels_ceiling: 350000
+            by_bearing:
+              - bearing: 0
+                starboard: 116667
+                port: 116667
+              - bearing: 30
+                starboard: 175000
+                port: 175000
+              - bearing: 45
+                starboard: 175000
+                port: 175000
+              - bearing: 60
+                starboard: 175000
+                port: 175000
+              - bearing: 90
+                starboard: 175000
+                port: 175000
+              - bearing: 120
+                starboard: 175000
+                port: 175000
+              - bearing: 135
+                starboard: 175000
+                port: 175000
+              - bearing: 150
+                starboard: 175000
+                port: 175000
+              - bearing: 180
+                starboard: 116667
+                port: 116667
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
@@ -179,18 +403,18 @@ secondary_damage:
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
-              damage_per_minute: 315000
-              damage_per_second: 5250
-              broadside_damage_per_minute: 157500
-              bow_on_damage_per_minute: 157500
+              damage_per_minute: 157500
+              damage_per_second: 2625
+              bearing: 90
+              all_barrels_ceiling: 315000
             assumed:
               - Auxiliary Armaments Modification 2
           - label: without Auxiliary Armaments Modification 2
             value:
-              damage_per_minute: 280000
-              damage_per_second: 4666.7
-              broadside_damage_per_minute: 140000
-              bow_on_damage_per_minute: 140000
+              damage_per_minute: 140000
+              damage_per_second: 2333.3
+              bearing: 90
+              all_barrels_ceiling: 280000
             assumed:
               - Manual Secondary Battery Aiming
             tier_fillers:
@@ -205,16 +429,72 @@ secondary_damage:
       unit: HP/min
       builds:
         base:
-          damage_per_minute: 302400
-          damage_per_second: 5040
-          broadside_damage_per_minute: 151200
-          bow_on_damage_per_minute: 151200
+          damage_per_minute: 151200
+          damage_per_second: 2520
+          bearing: 90
+          all_barrels_ceiling: 302400
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 151200
+              port: 151200
+            - bearing: 45
+              starboard: 151200
+              port: 151200
+            - bearing: 60
+              starboard: 151200
+              port: 151200
+            - bearing: 90
+              starboard: 151200
+              port: 151200
+            - bearing: 120
+              starboard: 151200
+              port: 151200
+            - bearing: 135
+              starboard: 151200
+              port: 151200
+            - bearing: 150
+              starboard: 151200
+              port: 151200
+            - bearing: 180
+              starboard: 0
+              port: 0
         best:
           value:
-            damage_per_minute: 420000
-            damage_per_second: 7000
-            broadside_damage_per_minute: 210000
-            bow_on_damage_per_minute: 210000
+            damage_per_minute: 210000
+            damage_per_second: 3500
+            bearing: 90
+            all_barrels_ceiling: 420000
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 210000
+                port: 210000
+              - bearing: 45
+                starboard: 210000
+                port: 210000
+              - bearing: 60
+                starboard: 210000
+                port: 210000
+              - bearing: 90
+                starboard: 210000
+                port: 210000
+              - bearing: 120
+                starboard: 210000
+                port: 210000
+              - bearing: 135
+                starboard: 210000
+                port: 210000
+              - bearing: 150
+                starboard: 210000
+                port: 210000
+              - bearing: 180
+                starboard: 0
+                port: 0
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
@@ -225,18 +505,18 @@ secondary_damage:
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
-              damage_per_minute: 378000
-              damage_per_second: 6300
-              broadside_damage_per_minute: 189000
-              bow_on_damage_per_minute: 189000
+              damage_per_minute: 189000
+              damage_per_second: 3150
+              bearing: 90
+              all_barrels_ceiling: 378000
             assumed:
               - Auxiliary Armaments Modification 2
           - label: without Auxiliary Armaments Modification 2
             value:
-              damage_per_minute: 336000
-              damage_per_second: 5600
-              broadside_damage_per_minute: 168000
-              bow_on_damage_per_minute: 168000
+              damage_per_minute: 168000
+              damage_per_second: 2800
+              bearing: 90
+              all_barrels_ceiling: 336000
             assumed:
               - Manual Secondary Battery Aiming
             tier_fillers:
@@ -244,4 +524,4 @@ secondary_damage:
               - AA Defense and ASW Expert
               - Focus Fire Training
 rate_notes:
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

@@ -1,146 +1,133 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 690
-expression: "json!({\n    \"by_fire_starts\": by_fires, \"cruisers_by_fire_starts\": cruisers,\n    \"by_shell_fire_chance\": by_shell,\n})"
+assertion_line: 1013
+expression: "json!({\n    \"by_fire_starts_one_target\": by_fires,\n    \"by_fire_starts_every_mount_ceiling\": every_mount,\n    \"cruisers_by_fire_starts\": cruisers, \"by_shell_fire_chance\": by_shell,\n})"
 ---
-by_fire_starts:
-  - rank: 1
-    ship: "T8 Indomitable (aircraft_carrier, United_Kingdom)"
-    fires_per_minute: 112.68 fires/min
-    by_armament:
-      - "secondary battery 113 mm: 17.07"
-      - "squadron de Havilland Sea Hornet: 92.16"
-      - "squadron de Havilland Sea Hornet: 64"
-      - "air strike Handley Page Halifax GR: 3.46"
-  - rank: 2
-    ship: "T11 Patrie (battleship, France)"
-    fires_per_minute: 92.89 fires/min
-    by_armament:
-      - "main battery HE: 13.36"
-      - "secondary battery 152 mm: 12.19"
-      - "secondary battery 100 mm: 62.22"
-      - "air strike LeO H-470: 6.72"
-  - rank: 3
-    ship: "T11 Sekiryu (aircraft_carrier, Japan)"
-    fires_per_minute: 84.44 fires/min
-    by_armament:
-      - "secondary battery 100 mm: 46.67"
-      - "squadron A8M Rikufū: 32.4"
-      - "squadron Kyushu J7W3: 1.07"
-      - "air strike Kawanishi H6K: 5.38"
-  - rank: 4
-    ship: "T10 Hakuryū (aircraft_carrier, Japan)"
-    fires_per_minute: 79.73 fires/min
-    by_armament:
-      - "secondary battery 100 mm: 41.96"
-      - "squadron A7M Reppū: 32.4"
-      - "squadron A8M Rikufū: 32.4"
-      - "air strike Kawanishi H6K: 5.38"
-  - rank: 5
-    ship: "T11 Eagle (aircraft_carrier, United_Kingdom)"
-    fires_per_minute: 74.79 fires/min
-    by_armament:
-      - "secondary battery 113 mm: 18.67"
-      - "squadron Westland Wyvern: 52.09"
-      - "squadron English Electric Canberra: 1.23"
-      - "squadron Gloster Meteor: 1.85"
-      - "air strike Handley Page Halifax GR: 4.03"
-  - rank: 6
-    ship: "T10 Sibir (battleship, Russia)"
-    fires_per_minute: 74.02 fires/min
-    by_armament:
-      - "main battery HE: 8.55"
-      - "secondary battery 130 mm: 56.41"
-      - "air strike Beriyev Be-6: 10.08"
-  - rank: 7
-    ship: "T9 Navarin (battleship, Russia) [replicas: Mahtaga]"
-    fires_per_minute: 73.95 fires/min
-    by_armament:
-      - "main battery HE: 9.82"
-      - "secondary battery 130 mm: 30"
-      - "secondary battery 130 mm (2): 26.67"
-      - "air strike Beriyev Be-6: 8.64"
-  - rank: 8
-    ship: "T9 Yimeng (battleship, Pan_Asia)"
-    fires_per_minute: 73.92 fires/min
-    by_armament:
-      - "main battery HE: 9.39"
-      - "secondary battery 152 mm: 57.02"
-      - "air strike Beriyev Be-6: 8.64"
-  - rank: 9
-    ship: "T11 Ushakov (battleship, Russia)"
-    fires_per_minute: 70.94 fires/min
-    by_armament:
-      - "main battery HE: 8.55"
-      - "secondary battery 130 mm: 53.33"
-      - "air strike Beriyev Be-6: 10.08"
-  - rank: 10
-    ship: "T10 Malta (aircraft_carrier, United_Kingdom)"
-    fires_per_minute: 70.7 fires/min
-    by_armament:
-      - "secondary battery 113 mm: 18.67"
-      - "squadron Blackburn Firebrand: 48"
-      - "air strike Handley Page Halifax GR: 4.03"
-  - rank: 11
-    ship: "T10 Midway (aircraft_carrier, USA)"
-    fires_per_minute: 68.6 fires/min
-    by_armament:
-      - "secondary battery 127 mm: 33.75"
-      - "squadron AD-1 Skyraider: 27.6"
-      - "squadron F4U Corsair: 28.8"
-      - "squadron BTD Destroyer: 27.6"
-      - "squadron F8F Bearcat: 28.8"
-      - "squadron F8F Bearcat: 36.72"
-      - "air strike Consolidated PB4Y-2 Privateer: 6.05"
-  - rank: 12
-    ship: "T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]"
-    fires_per_minute: 68.34 fires/min
-    by_armament:
-      - "main battery HE: 5.66"
-      - "secondary battery 150 mm: 16.9"
-      - "secondary battery 105 mm: 37.5"
-      - "air strike Fw.200 Condor: 8.96"
-  - rank: 13
-    ship: "T5 Agincourt (battleship, United_Kingdom)"
-    fires_per_minute: 66.03 fires/min
-    by_armament:
-      - "main battery HE: 7.47"
-      - "secondary battery 152 mm: 43.33"
-      - "secondary battery 76 mm: 12.35"
-      - "air strike S.25 Sunderland: 2.88"
-  - rank: 14
-    ship: "T10 Ohio (battleship, USA)"
-    fires_per_minute: 65.38 fires/min
-    by_armament:
-      - "main battery HE: 8.73"
-      - "secondary battery 127 mm: 47.62"
-      - "air strike Consolidated PB4Y-2 Privateer: 10.08"
-  - rank: 15
-    ship: "T11 United States (aircraft_carrier, USA)"
-    fires_per_minute: 64.85 fires/min
-    by_armament:
-      - "secondary battery 127 mm: 30"
-      - "squadron BTD Destroyer: 27.6"
-      - "squadron A-2 Savage: 0.96"
-      - "squadron F8F Bearcat: 28.8"
-      - "squadron Grumman F9F: 1.46"
-      - "air strike Consolidated PB4Y-2 Privateer: 6.05"
+by_fire_starts_one_target:
+  - line: "1 T8 Indomitable (aircraft_carrier, United_Kingdom) \"104.15 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 104.15
+      secondary: 8.53
+      aircraft: 95.62
+  - line: "2 T11 Eagle (aircraft_carrier, United_Kingdom) \"65.46 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 65.46
+      secondary: 9.33
+      aircraft: 56.13
+  - line: "3 T11 Patrie (battleship, France) \"61.78 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 61.78
+      main_battery: 11.76
+      secondary: 43.3
+      aircraft: 6.72
+  - line: "4 T10 Malta (aircraft_carrier, United_Kingdom) \"61.37 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 61.37
+      secondary: 9.33
+      aircraft: 52.03
+  - line: "5 T11 Sekiryu (aircraft_carrier, Japan) \"61.11 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 61.11
+      secondary: 23.33
+      aircraft: 37.78
+  - line: "6 T10 Sibir (battleship, Russia) \"59.91 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 59.91
+      main_battery: 7.53
+      secondary: 42.31
+      aircraft: 10.08
+  - line: "7 T10 Hakuryū (aircraft_carrier, Japan) \"58.76 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 58.76
+      secondary: 20.98
+      aircraft: 37.78
+  - line: "8 T10 Louisiana (battleship, USA) \"57.74 fires/min\""
+    fires_by_armament:
+      bearing: 270
+      total: 57.74
+      main_battery: 7.4
+      secondary: 37.5
+      aircraft: 12.84
+  - line: "9 T11 Ushakov (battleship, Russia) \"57.61 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 57.61
+      main_battery: 7.53
+      secondary: 40
+      aircraft: 10.08
+  - line: "10 T10 Independencia (aircraft_carrier, Pan_America) \"54.65 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 54.65
+      aircraft: 54.65
+  - line: "11 T10 Midway (aircraft_carrier, USA) \"51.72 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 51.72
+      secondary: 16.88
+      aircraft: 34.85
+  - line: "12 T10 Audacious (aircraft_carrier, United_Kingdom) \"50.7 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 50.7
+      secondary: 10.67
+      aircraft: 40.03
+  - line: "13 T11 United States (aircraft_carrier, USA) \"49.85 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 49.85
+      secondary: 15
+      aircraft: 34.85
+  - line: "14 T8 Graf Zeppelin (aircraft_carrier, Germany) [replicas: Graf Zeppelin B] \"47.2 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 47.2
+      secondary: 17.63
+      aircraft: 29.57
+  - line: "15 T8 Colossus (aircraft_carrier, United_Kingdom) \"46.66 fires/min\""
+    fires_by_armament:
+      bearing: 90
+      total: 46.66
+      aircraft: 46.66
+by_fire_starts_every_mount_ceiling:
+  - "1 T8 Indomitable (aircraft_carrier, United_Kingdom) \"112.68 fires/min\""
+  - "2 T11 Patrie (battleship, France) \"92.89 fires/min\""
+  - "3 T11 Sekiryu (aircraft_carrier, Japan) \"84.44 fires/min\""
+  - "4 T10 Hakuryū (aircraft_carrier, Japan) \"79.73 fires/min\""
+  - "5 T11 Eagle (aircraft_carrier, United_Kingdom) \"74.79 fires/min\""
+  - "6 T10 Sibir (battleship, Russia) \"74.02 fires/min\""
+  - "7 T9 Navarin (battleship, Russia) [replicas: Mahtaga] \"73.95 fires/min\""
+  - "8 T9 Yimeng (battleship, Pan_Asia) \"73.92 fires/min\""
+  - "9 T11 Ushakov (battleship, Russia) \"70.94 fires/min\""
+  - "10 T10 Malta (aircraft_carrier, United_Kingdom) \"70.7 fires/min\""
+  - "11 T10 Midway (aircraft_carrier, USA) \"68.6 fires/min\""
+  - "12 T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff] \"68.34 fires/min\""
+  - "13 T5 Agincourt (battleship, United_Kingdom) \"66.03 fires/min\""
+  - "14 T10 Ohio (battleship, USA) \"65.38 fires/min\""
+  - "15 T11 United States (aircraft_carrier, USA) \"64.85 fires/min\""
 cruisers_by_fire_starts:
-  - "1 T10 Amiral Lartigue (cruiser, France) \"58.48 fires/min\""
-  - "2 T10 Hildebrand (cruiser, Germany) \"56.5 fires/min\""
-  - "3 T11 Annapolis (cruiser, USA) \"54.72 fires/min\""
-  - "4 T11 Kurama (cruiser, Japan) \"54.47 fires/min\""
-  - "5 T10 Prinz Adalbert (cruiser, Germany) \"53.85 fires/min\""
-  - "6 T9 Schröder (cruiser, Germany) \"53.45 fires/min\""
-  - "7 T10 Puerto Rico (cruiser, USA) [replicas: Puerto Rico B] \"52.58 fires/min\""
-  - "8 T11 Condé (cruiser, France) \"51.88 fires/min\""
-  - "9 T8 Regele Carol I (cruiser, Europe) \"51.4 fires/min\""
-  - "10 T10 Gouden Leeuw (cruiser, Netherlands) \"51.07 fires/min\""
-  - "11 T10 Prins van Oranje (cruiser, Netherlands) [replicas: Pr. van Oranje G] \"50.34 fires/min\""
-  - "12 T10 Bremen (cruiser, Germany) [replicas: Bremen G] \"50.26 fires/min\""
-  - "13 T9 Johan de Witt (cruiser, Netherlands) \"48.87 fires/min\""
-  - "14 T10 Marseille (cruiser, France) [replicas: Zhuge Liang] \"48.67 fires/min\""
-  - "15 T10 Yoshino (cruiser, Japan) [replicas: Yoshino B] \"48.24 fires/min\""
+  - "1 T11 Annapolis (cruiser, USA) \"46.38 fires/min\""
+  - "2 T10 Puerto Rico (cruiser, USA) [replicas: Puerto Rico B] \"40.08 fires/min\""
+  - "3 T11 Kurama (cruiser, Japan) \"38.92 fires/min\""
+  - "4 T10 Utrecht (cruiser, Netherlands) \"37.95 fires/min\""
+  - "5 T10 Gouden Leeuw (cruiser, Netherlands) \"37.74 fires/min\""
+  - "6 T8 Vrijheid (cruiser, Netherlands) \"37.69 fires/min\""
+  - "7 T10 Bremen (cruiser, Germany) [replicas: Bremen G] \"37.48 fires/min\""
+  - "8 T10 Amiral Lartigue (cruiser, France) \"37.14 fires/min\""
+  - "9 T10 Prins van Oranje (cruiser, Netherlands) [replicas: Pr. van Oranje G] \"37 fires/min\""
+  - "10 T11 Jacksonville (cruiser, USA) \"36.67 fires/min\""
+  - "11 T10 Hildebrand (cruiser, Germany) \"36.56 fires/min\""
+  - "12 T10 Marseille (cruiser, France) [replicas: Zhuge Liang] \"35.97 fires/min\""
+  - "13 T10 Prinz Adalbert (cruiser, Germany) \"35.59 fires/min\""
+  - "14 T9 Johan de Witt (cruiser, Netherlands) \"35.54 fires/min\""
+  - "15 T9 Schröder (cruiser, Germany) \"35.34 fires/min\""
 by_shell_fire_chance:
   - "1 T10 St. Vincent (battleship, United_Kingdom) \"64%\""
   - "1 T10 Thunderer (battleship, United_Kingdom) \"64%\""

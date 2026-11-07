@@ -23,9 +23,12 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::Param;
 
+use crate::bearing::MountCoverage;
 use crate::fires::FireArmament;
 use crate::fires::FireInputs;
-use crate::fires::total_fires;
+use crate::fires::secondary_fires_by_bearing;
+use crate::fires::total_fires_all_mounts;
+use crate::fires::total_fires_by_bearing;
 use crate::mounts::aiming_mounts;
 use crate::resistance::FireResistance;
 use crate::resistance::Flooding;
@@ -65,16 +68,30 @@ pub enum DerivedStat {
     /// consumable: charges times action time plus reload.
     ConsumableAllChargesTime,
 
-    /// Theoretical fire starts per minute of every armament together: the
-    /// main battery's best ammo type, every secondary group, the best squadron
-    /// of the stock plane modules and the best air strike aircraft.
+    /// Theoretical fire starts per minute against one target at the bearing
+    /// where the most start: the main battery's best ammo type and every
+    /// secondary group from the mounts that bear there, the best squadron of
+    /// the stock plane modules and the best air strike aircraft.
     FiresPerMinuteTotal,
 
-    /// Theoretical fire starts per minute, per main battery ammo type.
+    /// The same with every gun mount firing at once: a ceiling no single
+    /// target sees.
+    FiresPerMinuteTotalAllMounts,
+
+    /// Theoretical fire starts per minute against one target at its best
+    /// bearing, per main battery ammo type.
     FiresPerMinuteMainBattery,
 
-    /// Theoretical fire starts per minute, per secondary gun group.
+    /// Theoretical fire starts per minute against one target at its best
+    /// bearing, every secondary group together.
     FiresPerMinuteSecondary,
+
+    /// Theoretical fire starts per minute against one target at the group's
+    /// own best bearing, per secondary group.
+    FiresPerMinuteSecondaryGroup,
+
+    /// Every secondary mount firing at once: a ceiling no single target sees.
+    FiresPerMinuteSecondaryAllMounts,
 
     /// Theoretical fire starts per minute, per squadron or air strike
     /// aircraft.
@@ -119,8 +136,11 @@ impl DerivedStat {
         DerivedStat::TorpedoTubes,
         DerivedStat::ConsumableAllChargesTime,
         DerivedStat::FiresPerMinuteTotal,
+        DerivedStat::FiresPerMinuteTotalAllMounts,
         DerivedStat::FiresPerMinuteMainBattery,
         DerivedStat::FiresPerMinuteSecondary,
+        DerivedStat::FiresPerMinuteSecondaryGroup,
+        DerivedStat::FiresPerMinuteSecondaryAllMounts,
         DerivedStat::FiresPerMinuteAircraft,
         DerivedStat::AircraftFireChance,
         DerivedStat::FireChanceReduction,
@@ -146,8 +166,11 @@ impl DerivedStat {
             Self::TorpedoTubes => "torpedoes.tubes",
             Self::ConsumableAllChargesTime => "consumable.all_charges_time",
             Self::FiresPerMinuteTotal => "fires_per_minute.total",
+            Self::FiresPerMinuteTotalAllMounts => "fires_per_minute.total_all_mounts",
             Self::FiresPerMinuteMainBattery => "fires_per_minute.main_battery",
             Self::FiresPerMinuteSecondary => "fires_per_minute.secondary",
+            Self::FiresPerMinuteSecondaryGroup => "fires_per_minute.secondary_group",
+            Self::FiresPerMinuteSecondaryAllMounts => "fires_per_minute.secondary_all_mounts",
             Self::FiresPerMinuteAircraft => "fires_per_minute.aircraft",
             Self::AircraftFireChance => "aircraft.fire_chance",
             Self::FireChanceReduction => "durability.fire_chance_reduction",
@@ -172,9 +195,24 @@ impl DerivedStat {
             Self::SecondaryVerticalDispersionAtStockRange => "Secondary vertical dispersion at stock secondary range",
             Self::TorpedoTubes => "Torpedo tubes, all launchers",
             Self::ConsumableAllChargesTime => "Time to use every charge",
-            Self::FiresPerMinuteTotal => "Fire starts per minute, all armament, every projectile hitting",
-            Self::FiresPerMinuteMainBattery => "Main battery fire starts per minute, every shell hitting",
-            Self::FiresPerMinuteSecondary => "Secondary fire starts per minute, every shell hitting",
+            Self::FiresPerMinuteTotal => {
+                "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+            }
+            Self::FiresPerMinuteTotalAllMounts => {
+                "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
+            }
+            Self::FiresPerMinuteMainBattery => {
+                "Main battery fire starts per minute against one target at its best bearing, every shell hitting"
+            }
+            Self::FiresPerMinuteSecondary => {
+                "Secondary fire starts per minute against one target at its best bearing, every group, every shell hitting"
+            }
+            Self::FiresPerMinuteSecondaryGroup => {
+                "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting"
+            }
+            Self::FiresPerMinuteSecondaryAllMounts => {
+                "Secondary fire starts per minute with every mount firing at once: a ceiling no single target sees"
+            }
             Self::FiresPerMinuteAircraft => "Aircraft fire starts per minute, all ordnance hitting",
             Self::AircraftFireChance => "Fire chance of one aircraft bomb, rocket or depth charge",
             Self::FireChanceReduction => "Fire chance reduction against shells hitting the ship",
@@ -199,8 +237,11 @@ impl DerivedStat {
             | Self::SecondaryVerticalDispersionAtStockRange => Unit::Meters,
             Self::ConsumableAllChargesTime | Self::FireDuration | Self::FloodDuration => Unit::Seconds,
             Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteTotalAllMounts
             | Self::FiresPerMinuteMainBattery
             | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteSecondaryGroup
+            | Self::FiresPerMinuteSecondaryAllMounts
             | Self::FiresPerMinuteAircraft => Unit::FiresPerMinute,
             Self::AircraftFireChance
             | Self::FireChanceReduction
@@ -231,8 +272,11 @@ impl DerivedStat {
             // More charges and longer action raise it, and so does a longer reload.
             Self::ConsumableAllChargesTime => None,
             Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteTotalAllMounts
             | Self::FiresPerMinuteMainBattery
             | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteSecondaryGroup
+            | Self::FiresPerMinuteSecondaryAllMounts
             | Self::FiresPerMinuteAircraft
             | Self::AircraftFireChance => Some(Direction::Higher),
         }
@@ -255,14 +299,18 @@ impl DerivedStat {
             Self::ConsumableAllChargesTime => {
                 &[TtxStat::ConsumableCharges, TtxStat::ConsumableWorkTime, TtxStat::ConsumableReloadTime]
             }
-            Self::FiresPerMinuteTotal => &[
+            Self::FiresPerMinuteTotal | Self::FiresPerMinuteTotalAllMounts => &[
                 TtxStat::ShellBurnChance,
                 TtxStat::ArtilleryReloadTime,
                 TtxStat::SecondaryShellBurnChance,
                 TtxStat::SecondaryReloadTime,
             ],
             Self::FiresPerMinuteMainBattery => &[TtxStat::ShellBurnChance, TtxStat::ArtilleryReloadTime],
-            Self::FiresPerMinuteSecondary => &[TtxStat::SecondaryShellBurnChance, TtxStat::SecondaryReloadTime],
+            Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteSecondaryGroup
+            | Self::FiresPerMinuteSecondaryAllMounts => {
+                &[TtxStat::SecondaryShellBurnChance, TtxStat::SecondaryReloadTime]
+            }
 
             // The card lists no aircraft stat.
             Self::FiresPerMinuteAircraft | Self::AircraftFireChance => &[],
@@ -297,8 +345,11 @@ impl DerivedStat {
             | Self::TorpedoTubes
             | Self::ConsumableAllChargesTime
             | Self::FiresPerMinuteTotal
+            | Self::FiresPerMinuteTotalAllMounts
             | Self::FiresPerMinuteMainBattery
             | Self::FiresPerMinuteSecondary
+            | Self::FiresPerMinuteSecondaryGroup
+            | Self::FiresPerMinuteSecondaryAllMounts
             | Self::FiresPerMinuteAircraft
             | Self::AircraftFireChance
             | Self::FireZones => &[],
@@ -308,7 +359,44 @@ impl DerivedStat {
     /// Whether `sources` covers every input that moves it. Aircraft
     /// ordnance reads modifiers the card records under no stat.
     pub fn fully_traced(self) -> bool {
-        !matches!(self, Self::FiresPerMinuteTotal | Self::FiresPerMinuteAircraft | Self::AircraftFireChance)
+        !matches!(
+            self,
+            Self::FiresPerMinuteTotal
+                | Self::FiresPerMinuteTotalAllMounts
+                | Self::FiresPerMinuteAircraft
+                | Self::AircraftFireChance
+        )
+    }
+
+    /// Whether it counts only the gun mounts bearing on one target, and so
+    /// needs [`Derivation::coverage`].
+    pub fn reads_mount_bearings(self) -> bool {
+        !self.bearing_armaments().is_empty()
+    }
+
+    /// The gun armaments it counts against one target.
+    pub fn bearing_armaments(self) -> &'static [FireArmament] {
+        match self {
+            Self::FiresPerMinuteTotal => &[FireArmament::MainBattery, FireArmament::Secondary],
+            Self::FiresPerMinuteMainBattery => &[FireArmament::MainBattery],
+            Self::FiresPerMinuteSecondary | Self::FiresPerMinuteSecondaryGroup => &[FireArmament::Secondary],
+            _ => &[],
+        }
+    }
+
+    /// Whether it is one of the fire start stats, whose ranking lists each
+    /// armament's share.
+    pub fn is_fire_starts(self) -> bool {
+        matches!(
+            self,
+            Self::FiresPerMinuteTotal
+                | Self::FiresPerMinuteTotalAllMounts
+                | Self::FiresPerMinuteMainBattery
+                | Self::FiresPerMinuteSecondary
+                | Self::FiresPerMinuteSecondaryGroup
+                | Self::FiresPerMinuteSecondaryAllMounts
+                | Self::FiresPerMinuteAircraft
+        )
     }
 }
 
@@ -393,6 +481,10 @@ pub struct Derivation<'a> {
     pub merges_fire_zones: bool,
     pub stock_ranges: StockRanges,
     pub provider: &'a dyn GameParamProvider,
+
+    /// Which gun mounts bear at each bearing. Without it the one-target fire
+    /// stats are left out and only the all-mount ceilings remain.
+    pub coverage: Option<&'a MountCoverage>,
 }
 
 impl Derivation<'_> {
@@ -495,21 +587,69 @@ impl Derivation<'_> {
             provider: self.provider,
         }
         .sources();
-        if let Some(total) = total_fires(&fires) {
+        if let Some(total) = total_fires_all_mounts(&fires) {
             rows.push(DerivedRow {
-                stat: DerivedStat::FiresPerMinuteTotal,
+                stat: DerivedStat::FiresPerMinuteTotalAllMounts,
                 qualifier: None,
                 value: DerivedValue::FiresPerMinute(total),
             });
         }
-        for source in &fires {
-            let stat = match source.armament {
-                FireArmament::MainBattery => DerivedStat::FiresPerMinuteMainBattery,
-                FireArmament::Secondary => DerivedStat::FiresPerMinuteSecondary,
-                FireArmament::Squadron | FireArmament::AirStrike => DerivedStat::FiresPerMinuteAircraft,
-            };
+        // Aircraft fire starts do not depend on the bearing, so a ship
+        // with no gun that starts fires needs no mount facings.
+        let no_mounts = MountCoverage::default();
+        let coverage = self.coverage.or_else(|| {
+            fires
+                .iter()
+                .all(|source| matches!(source.armament, FireArmament::Squadron | FireArmament::AirStrike))
+                .then_some(&no_mounts)
+        });
+        if let Some(coverage) = coverage {
+            if let Some(total) = total_fires_by_bearing(&fires, coverage) {
+                rows.push(DerivedRow {
+                    stat: DerivedStat::FiresPerMinuteTotal,
+                    qualifier: None,
+                    value: DerivedValue::FiresPerMinute(total.at(total.best())),
+                });
+            }
+            if let Some(secondaries) = secondary_fires_by_bearing(&fires, coverage) {
+                rows.push(DerivedRow {
+                    stat: DerivedStat::FiresPerMinuteSecondary,
+                    qualifier: None,
+                    value: DerivedValue::FiresPerMinute(secondaries.at(secondaries.best())),
+                });
+            }
+            for source in &fires {
+                let stat = match source.armament {
+                    FireArmament::MainBattery => DerivedStat::FiresPerMinuteMainBattery,
+                    FireArmament::Secondary => DerivedStat::FiresPerMinuteSecondaryGroup,
+                    // Aircraft do not depend on the bearing.
+                    FireArmament::Squadron | FireArmament::AirStrike => continue,
+                };
+                let by_bearing = source.by_bearing(coverage);
+                rows.push(DerivedRow {
+                    stat,
+                    qualifier: Some(source.qualifier.clone()),
+                    value: DerivedValue::FiresPerMinute(by_bearing.at(by_bearing.best())),
+                });
+            }
+        }
+        let secondary_ceiling: Vec<FiresPerMinute> = fires
+            .iter()
+            .filter(|source| source.armament == FireArmament::Secondary)
+            .map(|source| source.fires_per_minute)
+            .collect();
+        if !secondary_ceiling.is_empty() {
             rows.push(DerivedRow {
-                stat,
+                stat: DerivedStat::FiresPerMinuteSecondaryAllMounts,
+                qualifier: None,
+                value: DerivedValue::FiresPerMinute(secondary_ceiling.into_iter().sum()),
+            });
+        }
+        for source in
+            fires.iter().filter(|source| matches!(source.armament, FireArmament::Squadron | FireArmament::AirStrike))
+        {
+            rows.push(DerivedRow {
+                stat: DerivedStat::FiresPerMinuteAircraft,
                 qualifier: Some(source.qualifier.clone()),
                 value: DerivedValue::FiresPerMinute(source.fires_per_minute),
             });

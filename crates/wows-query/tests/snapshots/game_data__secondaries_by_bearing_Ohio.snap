@@ -1,0 +1,199 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 977
+expression: "Bearings { fires_per_minute: &fires.builds, damage_per_minute }"
+---
+fires_per_minute:
+  base:
+    fires_per_minute: 15.43
+    bearing: 90
+    all_mounts_ceiling: 30.86
+    by_bearing:
+      - bearing: 0
+        starboard: 0
+        port: 0
+      - bearing: 30
+        starboard: 15.43
+        port: 15.43
+      - bearing: 45
+        starboard: 15.43
+        port: 15.43
+      - bearing: 60
+        starboard: 15.43
+        port: 15.43
+      - bearing: 90
+        starboard: 15.43
+        port: 15.43
+      - bearing: 120
+        starboard: 15.43
+        port: 15.43
+      - bearing: 135
+        starboard: 15.43
+        port: 15.43
+      - bearing: 150
+        starboard: 15.43
+        port: 15.43
+      - bearing: 180
+        starboard: 0
+        port: 0
+  best:
+    value:
+      fires_per_minute: 23.81
+      bearing: 90
+      all_mounts_ceiling: 47.62
+      by_bearing:
+        - bearing: 0
+          starboard: 0
+          port: 0
+        - bearing: 30
+          starboard: 23.81
+          port: 23.81
+        - bearing: 45
+          starboard: 23.81
+          port: 23.81
+        - bearing: 60
+          starboard: 23.81
+          port: 23.81
+        - bearing: 90
+          starboard: 23.81
+          port: 23.81
+        - bearing: 120
+          starboard: 23.81
+          port: 23.81
+        - bearing: 135
+          starboard: 23.81
+          port: 23.81
+        - bearing: 150
+          starboard: 23.81
+          port: 23.81
+        - bearing: 180
+          starboard: 0
+          port: 0
+    assumed:
+      - Manual Secondary Battery Aiming
+      - Demolition Expert
+      - Auxiliary Armaments Modification 2
+    tier_fillers:
+      - AA Defense and ASW Expert
+      - Focus Fire Training
+  alternatives:
+    - label: without Manual Secondary Battery Aiming
+      value:
+        fires_per_minute: 21.43
+        bearing: 90
+        all_mounts_ceiling: 42.86
+      assumed:
+        - Demolition Expert
+        - Auxiliary Armaments Modification 2
+    - label: without Demolition Expert
+      value:
+        fires_per_minute: 21.43
+        bearing: 90
+        all_mounts_ceiling: 42.86
+      assumed:
+        - Manual Secondary Battery Aiming
+        - Auxiliary Armaments Modification 2
+      tier_fillers:
+        - Emergency Repair Specialist
+        - AA Defense and ASW Expert
+        - Focus Fire Training
+    - label: without Auxiliary Armaments Modification 2
+      value:
+        fires_per_minute: 19.05
+        bearing: 90
+        all_mounts_ceiling: 38.1
+      assumed:
+        - Manual Secondary Battery Aiming
+        - Demolition Expert
+      tier_fillers:
+        - AA Defense and ASW Expert
+        - Focus Fire Training
+    - label: with Inertia Fuse for HE Shells
+      value:
+        fires_per_minute: 13.1
+        bearing: 90
+        all_mounts_ceiling: 26.19
+      assumed:
+        - Manual Secondary Battery Aiming
+        - Demolition Expert
+        - Auxiliary Armaments Modification 2
+        - Inertia Fuse for HE Shells
+      tier_fillers:
+        - Focus Fire Training
+      note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+damage_per_minute:
+  - ammo: 127 mm HE
+    base:
+      damage_per_minute: 308571
+      damage_per_second: 5142.9
+      bearing: 90
+      all_barrels_ceiling: 617143
+      by_bearing:
+        - bearing: 0
+          starboard: 0
+          port: 0
+        - bearing: 30
+          starboard: 308571
+          port: 308571
+        - bearing: 45
+          starboard: 308571
+          port: 308571
+        - bearing: 60
+          starboard: 308571
+          port: 308571
+        - bearing: 90
+          starboard: 308571
+          port: 308571
+        - bearing: 120
+          starboard: 308571
+          port: 308571
+        - bearing: 135
+          starboard: 308571
+          port: 308571
+        - bearing: 150
+          starboard: 308571
+          port: 308571
+        - bearing: 180
+          starboard: 0
+          port: 0
+    best:
+      value:
+        damage_per_minute: 428571
+        damage_per_second: 7142.9
+        bearing: 90
+        all_barrels_ceiling: 857143
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 428571
+            port: 428571
+          - bearing: 45
+            starboard: 428571
+            port: 428571
+          - bearing: 60
+            starboard: 428571
+            port: 428571
+          - bearing: 90
+            starboard: 428571
+            port: 428571
+          - bearing: 120
+            starboard: 428571
+            port: 428571
+          - bearing: 135
+            starboard: 428571
+            port: 428571
+          - bearing: 150
+            starboard: 428571
+            port: 428571
+          - bearing: 180
+            starboard: 0
+            port: 0
+      assumed:
+        - Manual Secondary Battery Aiming
+        - Auxiliary Armaments Modification 2
+      tier_fillers:
+        - Emergency Repair Specialist
+        - AA Defense and ASW Expert
+        - Focus Fire Training

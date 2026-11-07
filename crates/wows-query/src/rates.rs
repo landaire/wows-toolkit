@@ -6,16 +6,18 @@
 //! that releases at most `loaders` launchers of each group at once
 //! (`TorpedoesReloadManagers`); `useGroups` only changes the port stat card.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::hash_map::Entry;
+use std::rc::Rc;
 
 use serde::Serialize;
 use wows_core::units::DamagePerMinute;
 use wows_core::units::DamagePerSecond;
-use wows_core::units::Degrees;
 use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
+use wows_ship_stats::Bearing;
+use wows_ship_stats::MountCoverage;
+use wows_ship_stats::PerBearing;
+use wows_ship_stats::bearing::BearingRow;
 use wows_ship_stats::mount_salvo;
 use wows_ship_stats::mounts::selected_component;
 use wows_ship_stats::mounts::selected_mounts;
@@ -40,16 +42,13 @@ use crate::builds::StatUnit;
 use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
-use crate::firing_arcs::PerArc;
 use crate::firing_arcs::Weapon;
-use crate::firing_arcs::bearing_sets;
-use crate::firing_arcs::oriented_mounts;
 use crate::firing_arcs::round_to;
 use crate::firing_arcs::weapon_mounts;
 use crate::ships::Ship;
 use crate::special_abilities::Burst;
 
-const DAMAGE_NOTE: &str = "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them.";
+const DAMAGE_NOTE: &str = "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them.";
 
 const BURST_NOTE: &str = "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval.";
 
@@ -174,30 +173,56 @@ pub struct AmmoDamage {
     pub during_burst: Option<BuildStat<DamageRate>>,
 }
 
-/// Damage per minute and per second of one ammo, every barrel firing.
+/// Damage per minute and per second of one ammo. For guns whose mount
+/// facings are known, against one target at its best bearing; otherwise
+/// every barrel or tube firing.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct DamageRate {
     pub damage_per_minute: DamagePerMinute,
     pub damage_per_second: DamagePerSecond,
 
-    /// Barrels bearing on a broadside target only.
+    /// The target bearing the rate is for, degrees off the bow, clockwise.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub broadside_damage_per_minute: Option<DamagePerMinute>,
+    pub bearing: Option<Bearing>,
 
-    /// Barrels bearing on a target ahead only.
+    /// Every barrel firing at once, a ceiling no single target sees.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub bow_on_damage_per_minute: Option<DamagePerMinute>,
+    pub all_barrels_ceiling: Option<DamagePerMinute>,
+
+    /// The rate at standard bearings; on the base and best builds only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_bearing: Option<[BearingRow<DamagePerMinute>; 9]>,
 }
 
 impl DamageRate {
-    fn new(rate: DamagePerMinute, arcs: Option<ArcRates>) -> Self {
+    /// `total` is every barrel firing; `by_bearing` the barrels bearing at
+    /// each bearing, when the mount facings are known.
+    fn new(total: DamagePerMinute, by_bearing: Option<PerBearing<DamagePerMinute>>) -> Self {
         let whole = |rate: DamagePerMinute| DamagePerMinute::new(rate.value().round());
+        let per_second = |rate: DamagePerMinute| DamagePerSecond::new(round_to(rate.per_second().value(), 10.0));
+
+        let Some(by_bearing) = by_bearing else {
+            return Self {
+                damage_per_minute: whole(total),
+                damage_per_second: per_second(total),
+                bearing: None,
+                all_barrels_ceiling: None,
+                by_bearing: None,
+            };
+        };
+        let bearing = by_bearing.best();
+        let rate = by_bearing.at(bearing);
 
         Self {
             damage_per_minute: whole(rate),
-            damage_per_second: DamagePerSecond::new(round_to(rate.per_second().value(), 10.0)),
-            broadside_damage_per_minute: arcs.map(|arcs| whole(arcs.broadside)),
-            bow_on_damage_per_minute: arcs.map(|arcs| whole(arcs.bow_on)),
+            damage_per_second: per_second(rate),
+            bearing: Some(bearing),
+            all_barrels_ceiling: Some(whole(total)),
+            by_bearing: Some(by_bearing.table().map(|row| BearingRow {
+                bearing: row.bearing,
+                starboard: whole(row.starboard),
+                port: whole(row.port),
+            })),
         }
     }
 }
@@ -210,14 +235,6 @@ impl StatAmount for DamageRate {
 
 impl StatUnit for DamageRate {
     const UNIT: &'static str = "HP/min";
-}
-
-/// Damage per minute of the barrels that bear inside the broadside and bow
-/// arcs.
-#[derive(Debug, Clone, Copy)]
-struct ArcRates {
-    broadside: DamagePerMinute,
-    bow_on: DamagePerMinute,
 }
 
 /// How often the main battery fires.
@@ -261,31 +278,27 @@ impl Gun {
 struct Battery {
     guns: Vec<Gun>,
 
-    /// Per arc, the sets of guns that bear together. `None` when the hull's
-    /// hardpoint facings are unknown.
-    arcs: Option<PerArc<Vec<Vec<usize>>>>,
+    /// Which mounts bear at each bearing. `None` when the hull's hardpoint
+    /// facings are unknown.
+    coverage: Option<Rc<MountCoverage>>,
 }
 
 impl Battery {
-    /// Damage per minute of all guns and per arc, given each gun's damage
-    /// per minute. `None` when no gun fires the ammo.
+    /// Damage per minute of all guns and against one target per bearing,
+    /// given each gun's damage per minute. `None` when no gun fires the ammo.
     fn rate(&self, per_gun: &[DamagePerMinute]) -> Option<DamageRate> {
         let total: DamagePerMinute = per_gun.iter().copied().sum();
         if total.value() <= 0.0 {
             return None;
         }
 
-        let best = |sets: &[Vec<usize>]| -> DamagePerMinute {
-            sets.iter()
-                .map(|set| set.iter().map(|index| per_gun[*index]).sum::<DamagePerMinute>())
-                .fold(DamagePerMinute::new(0.0), |best, rate| if rate > best { rate } else { best })
-        };
-        let arcs = self.arcs.as_ref().map(|arcs| {
-            let (starboard, port) = (best(&arcs.starboard), best(&arcs.port));
-            ArcRates { broadside: if starboard > port { starboard } else { port }, bow_on: best(&arcs.bow) }
+        let by_bearing = self.coverage.as_deref().map(|coverage| {
+            self.guns.iter().zip(per_gun).fold(PerBearing::uniform(DamagePerMinute::new(0.0)), |sum, (gun, rate)| {
+                sum + PerBearing::mount(coverage, &gun.hardpoint, *rate)
+            })
         });
 
-        Some(DamageRate::new(total, arcs))
+        Some(DamageRate::new(total, by_bearing))
     }
 
     /// Barrels of the guns that may fire any of `shells`.
@@ -401,10 +414,11 @@ impl GameData {
             let extract = |outcome: &Outcome| {
                 main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, standard)
             };
-            let Some(rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? else {
+            let Some(mut rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? else {
                 continue;
             };
 
+            tables_on_base_and_best(&mut rates);
             let mut ammo = AmmoDamage::new(kind.clone(), Vec::new(), damage, barrels, rates);
             if let Some(burst) = planner.burst() {
                 let label = format!("main battery {kind} damage rate during a burst");
@@ -412,6 +426,9 @@ impl GameData {
                     main_battery_rate(outcome, &layouts.main_battery[outcome.selection], &kind, Cadence::InBurst(burst))
                 };
                 ammo.during_burst = planner.plan(&StatPlan::new(label, Better::Higher, &extract))?;
+                if let Some(during) = &mut ammo.during_burst {
+                    tables_on_base_and_best(during);
+                }
                 let burst_damage = ammo.damage.value() * (ammo.barrels.0 * burst.shots.0) as f32;
                 ammo.burst_damage = Some(Hp::from(burst_damage.round()));
             }
@@ -430,7 +447,8 @@ impl GameData {
             let label = format!("secondary {ammo} damage rate");
             let extract =
                 |outcome: &Outcome| secondary_rate(outcome, &layouts.secondaries[outcome.selection], &mount.label);
-            if let Some(rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? {
+            if let Some(mut rates) = planner.plan(&StatPlan::new(label, Better::Higher, &extract))? {
+                tables_on_base_and_best(&mut rates);
                 let barrels = BarrelCount(mount.num_barrels * mount.num_mounts);
                 secondary_damage.push(AmmoDamage::new(ammo, Vec::new(), damage, barrels, rates));
             }
@@ -488,22 +506,11 @@ impl GameData {
     }
 
     fn layouts(&self, ship: &Ship, planner: &Planner<'_>) -> Result<Layouts, QueryError> {
-        let mut facings_by_hull: HashMap<Option<&str>, Option<HashMap<String, Degrees>>> = HashMap::new();
+        let coverages = self.mount_coverages(ship, planner.selections())?;
         let mut layouts = Layouts { main_battery: Vec::new(), secondaries: Vec::new(), torpedoes: Vec::new() };
-        for selection in planner.selections() {
-            let facings = match facings_by_hull.entry(selection.hull.as_deref()) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(entry) => entry.insert(match self.hardpoint_facings(ship, selection) {
-                    Ok(facings) => Some(facings),
-                    // Without a readable armor extract, rates leave out the arcs.
-                    Err(QueryError::HullFacingsUnavailable { .. } | QueryError::ArmorUnreadable { .. }) => None,
-                    Err(error) => return Err(error),
-                }),
-            };
-            let facings = facings.as_ref();
-
-            layouts.main_battery.push(battery(ship, selection, Weapon::MainBattery, facings));
-            layouts.secondaries.push(battery(ship, selection, Weapon::Secondaries, facings));
+        for (selection, coverage) in planner.selections().zip(coverages) {
+            layouts.main_battery.push(battery(ship, selection, Weapon::MainBattery, coverage.as_ref().map(Rc::clone)));
+            layouts.secondaries.push(battery(ship, selection, Weapon::Secondaries, coverage));
             layouts.torpedoes.push(torpedo_layout(ship, selection));
         }
 
@@ -525,6 +532,14 @@ impl AmmoDamage {
     }
 }
 
+/// Keeps the per-bearing table on the base and best builds and drops it
+/// from the alternatives, which differ only in the headline.
+fn tables_on_base_and_best(stat: &mut BuildStat<DamageRate>) {
+    for alternative in &mut stat.builds.alternatives {
+        alternative.value.by_bearing = None;
+    }
+}
+
 /// "AP", "HE" or "SAP" for a GameParams ammo type.
 fn ammo_label(kind: &str) -> Option<String> {
     match AmmoType::from_game_str(kind) {
@@ -537,18 +552,12 @@ fn battery(
     ship: &Ship,
     selection: &ShipUpgradeSelection,
     weapon: Weapon,
-    facings: Option<&HashMap<String, Degrees>>,
+    coverage: Option<Rc<MountCoverage>>,
 ) -> Battery {
-    // A hardpoint missing from the hull model leaves only the arcs unknown.
-    if let Some(oriented) = facings.and_then(|facings| oriented_mounts(ship, selection, weapon, facings).ok()) {
-        let guns = oriented.iter().map(|mount| Gun::new(mount.mount, mount.barrels)).collect();
-        return Battery { guns, arcs: Some(bearing_sets(&oriented)) };
-    }
-
     let guns =
         weapon_mounts(ship, selection, weapon).into_iter().map(|(mount, barrels)| Gun::new(mount, barrels)).collect();
 
-    Battery { guns, arcs: None }
+    Battery { guns, coverage }
 }
 
 fn torpedo_layout(ship: &Ship, selection: &ShipUpgradeSelection) -> Option<TorpedoLayout> {

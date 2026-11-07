@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 178
+assertion_line: 302
 expression: stats
 ---
 interpretations:
@@ -105,25 +105,44 @@ changes:
     to: 9.0 km
     because:
       - Concealment Expert x0.9 (-1)
-  - stat: "Fire starts per minute, all armament, every projectile hitting"
+  - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
     from: 47.08 fires/min
     to: 28.02 fires/min
     because:
       - Inertia Fuse for HE Shells x0.5 (-13.5)
       - Inertia Fuse for HE Shells x0.5 (-4)
       - Inertia Fuse for HE Shells x0.5 (-2.5)
-  - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+  - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+    from: 30.42 fires/min
+    to: 19.69 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-13.5)
+      - Inertia Fuse for HE Shells x0.5 (-4)
+      - Inertia Fuse for HE Shells x0.5 (-2.5)
+  - stat: "Secondary fire starts per minute against one target at its best bearing, every group, every shell hitting"
+    from: 16.66 fires/min
+    to: 8.33 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-4)
+      - Inertia Fuse for HE Shells x0.5 (-2.5)
+  - stat: "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE)"
     from: 4.80 fires/min
     to: 2.40 fires/min
     because:
       - Inertia Fuse for HE Shells x0.5 (-13.5)
-  - stat: "Secondary fire starts per minute, every shell hitting (150 mm)"
-    from: 10.82 fires/min
-    to: 5.41 fires/min
+  - stat: "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting (150 mm)"
+    from: 5.41 fires/min
+    to: 2.70 fires/min
     because:
       - Inertia Fuse for HE Shells x0.5 (-4)
-  - stat: "Secondary fire starts per minute, every shell hitting (105 mm)"
-    from: 22.50 fires/min
-    to: 11.25 fires/min
+  - stat: "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting (105 mm)"
+    from: 11.25 fires/min
+    to: 5.62 fires/min
     because:
+      - Inertia Fuse for HE Shells x0.5 (-2.5)
+  - stat: "Secondary fire starts per minute with every mount firing at once: a ceiling no single target sees"
+    from: 33.32 fires/min
+    to: 16.66 fires/min
+    because:
+      - Inertia Fuse for HE Shells x0.5 (-4)
       - Inertia Fuse for HE Shells x0.5 (-2.5)

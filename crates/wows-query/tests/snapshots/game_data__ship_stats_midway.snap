@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 2079
 expression: stats.stats
 ---
 - "Hit Points: 67600"
@@ -43,8 +44,11 @@ expression: stats.stats
 - "Secondary horizontal dispersion at stock secondary range (127 mm): 315 m"
 - "Secondary vertical dispersion at stock secondary range (127 mm): 315 m"
 - "Time to use every charge (fighter): 2560.0 s"
-- "Fire starts per minute, all armament, every projectile hitting: 55.95 fires/min"
-- "Secondary fire starts per minute, every shell hitting (127 mm): 24.30 fires/min"
+- "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 55.95 fires/min"
+- "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 43.80 fires/min"
+- "Secondary fire starts per minute against one target at its best bearing, every group, every shell hitting: 12.15 fires/min"
+- "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting (127 mm): 12.15 fires/min"
+- "Secondary fire starts per minute with every mount firing at once: a ceiling no single target sees: 24.30 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAD110_Midway_stock): 25.60 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAF110_Midway_stock): 25.20 fires/min"
 - "Aircraft fire starts per minute, all ordnance hitting (PAAD210_Midway_top): 25.60 fires/min"

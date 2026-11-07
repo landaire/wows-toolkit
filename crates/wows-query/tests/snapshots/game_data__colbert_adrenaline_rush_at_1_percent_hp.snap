@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 603
 expression: at(1.0)
 ---
 ship:
@@ -31,12 +32,17 @@ changes:
     to: 915359 hp/min
     because:
       - "Adrenaline Rush at 1% HP: -19.8% reload (-0.673)"
-  - stat: "Fire starts per minute, all armament, every projectile hitting"
+  - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
     from: 26.48 fires/min
     to: 31.36 fires/min
     because:
       - "Adrenaline Rush at 1% HP: -19.8% reload (-0.673)"
-  - stat: "Main battery fire starts per minute, every shell hitting (HE)"
+  - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+    from: 26.48 fires/min
+    to: 31.36 fires/min
+    because:
+      - "Adrenaline Rush at 1% HP: -19.8% reload (-0.673)"
+  - stat: "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE)"
     from: 19.76 fires/min
     to: 24.64 fires/min
     because:

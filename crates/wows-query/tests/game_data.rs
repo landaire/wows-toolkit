@@ -744,19 +744,16 @@ fn find_ships_lists_variants_after_the_named_ship() {
             .map(|found| {
                 format!(
                     "{name} {include_event_variants}: T{} {} ({}, {:?}, {:?})",
-                    found.ship.tier.0,
-                    found.ship.name,
-                    found.ship.index,
-                    found.ship.category,
-                    found.name_match
+                    found.ship.tier.0, found.ship.name, found.ship.index, found.ship.category, found.name_match
                 )
             })
             .collect()
     };
-    let listed: Vec<String> = [("Essex", false), ("Essex", true), ("old Essex", false), ("Zao", true), ("[Zao]", false)]
-        .into_iter()
-        .flat_map(|(name, include)| found(name, include))
-        .collect();
+    let listed: Vec<String> =
+        [("Essex", false), ("Essex", true), ("old Essex", false), ("Zao", true), ("[Zao]", false)]
+            .into_iter()
+            .flat_map(|(name, include)| found(name, include))
+            .collect();
 
     insta::assert_yaml_snapshot!(listed);
 }
@@ -947,9 +944,47 @@ fn fire_starts_per_minute_cover_every_armament() {
     }
 }
 
-/// The 15 ships that start the most fires on their best build, each
-/// armament with its own best value, against the 15 with the highest main
-/// battery shell fire chance, and the 15 cruisers that start the most fires.
+/// Secondary fire starts and damage against one target by bearing: only the
+/// mounts whose firing sectors cover the bearing count.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn secondaries_bear_on_one_target_by_bearing() {
+    #[derive(serde::Serialize)]
+    struct SecondaryDamage<'a> {
+        ammo: &'a str,
+        base: &'a wows_query::rates::DamageRate,
+        best: &'a wows_query::builds::BuildValue<wows_query::rates::DamageRate>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct Bearings<'a> {
+        fires_per_minute: &'a wows_query::builds::Builds<wows_query::fires::FireTotal>,
+        damage_per_minute: Vec<SecondaryDamage<'a>>,
+    }
+
+    for name in ["Sibir", "Libertad", "Patrie", "Ohio", "Yamato"] {
+        let rates = rates(name);
+        let fires = fire_rates(name).secondaries.expect("the ship has secondaries that start fires");
+        let damage_per_minute = rates
+            .secondary_damage
+            .iter()
+            .map(|ammo| SecondaryDamage {
+                ammo: &ammo.ammo,
+                base: &ammo.rates.builds.base,
+                best: &ammo.rates.builds.best,
+            })
+            .collect();
+        insta::assert_yaml_snapshot!(
+            format!("secondaries_by_bearing_{name}"),
+            Bearings { fires_per_minute: &fires.builds, damage_per_minute }
+        );
+    }
+}
+
+/// The 15 ships that start the most fires against one target, each with
+/// what every armament adds at its best bearing, against the same ranking
+/// with every gun mount firing at once, the 15 with the highest main battery
+/// shell fire chance, and the 15 cruisers that start the most fires.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn fire_starts_rank_ships_by_every_armament() {
@@ -962,33 +997,22 @@ fn fire_starts_rank_ships_by_every_armament() {
         let search = game().call_tool("stat_search", arguments).expect("rank resolves");
         search["ranking"]["ships"].as_array().expect("ships is a list").clone()
     };
-    // "T10 Des Moines (cruiser, USA)" names Des Moines.
-    let name = |ship: &serde_json::Value| -> String {
-        let label = ship["ship"].as_str().expect("ship is a label");
-        let (_, rest) = label.split_once(' ').expect("tier prefix");
-        rest.rsplit_once(" (").map_or(rest, |(name, _)| name).to_owned()
+    let line = |ship: &serde_json::Value| {
+        format!("{} {} {}", ship["rank"], ship["ship"].as_str().unwrap_or_default(), ship["value"])
     };
 
     let by_fires: Vec<serde_json::Value> = rank("fires_per_minute.total", None)
         .iter()
-        .map(|ship| {
-            let split: Vec<String> = fire_rates(&name(ship))
-                .sources
-                .iter()
-                .map(|source| format!("{}: {}", source.source, source.rate.builds.best.value.fires_per_minute.value()))
-                .collect();
-            json!({ "rank": ship["rank"], "ship": ship["ship"], "fires_per_minute": ship["value"], "by_armament": split })
-        })
+        .map(|ship| json!({ "line": line(ship), "fires_by_armament": ship["fires_by_armament"] }))
         .collect();
-    let line = |ship: &serde_json::Value| {
-        format!("{} {} {}", ship["rank"], ship["ship"].as_str().unwrap_or_default(), ship["value"])
-    };
+    let every_mount: Vec<String> = rank("fires_per_minute.total_all_mounts", None).iter().map(line).collect();
     let cruisers: Vec<String> = rank("fires_per_minute.total", Some("cruiser")).iter().map(line).collect();
     let by_shell: Vec<String> = rank("artillery.shells.burn_chance", None).iter().map(line).collect();
 
-    assert!(cruisers.iter().any(|ship| ship.contains("Prins van Oranje")), "{cruisers:?}");
+    assert!(by_fires.iter().all(|ship| ship["fires_by_armament"].is_object()), "{by_fires:?}");
     insta::assert_yaml_snapshot!(json!({
-        "by_fire_starts": by_fires,
+        "by_fire_starts_one_target": by_fires,
+        "by_fire_starts_every_mount_ceiling": every_mount,
         "cruisers_by_fire_starts": cruisers,
         "by_shell_fire_chance": by_shell,
     }));

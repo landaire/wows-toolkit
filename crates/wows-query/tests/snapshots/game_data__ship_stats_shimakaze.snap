@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 2079
 expression: stats.stats
 ---
 - "Hit Points: 17900"
@@ -76,8 +77,9 @@ expression: stats.stats
 - "Torpedo tubes, all launchers: 15"
 - "Time to use every charge (smokeGenerator): 540.0 s"
 - "Time to use every charge (speedBoosters): 720.0 s"
-- "Fire starts per minute, all armament, every projectile hitting: 5.64 fires/min"
-- "Main battery fire starts per minute, every shell hitting (HE): 5.64 fires/min"
+- "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees: 5.64 fires/min"
+- "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting: 5.64 fires/min"
+- "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE): 5.64 fires/min"
 - "Fire chance reduction against shells hitting the ship: 49.95%"
 - "Fires that can burn at once: 4"
 - "Fire duration: 30.0 s"

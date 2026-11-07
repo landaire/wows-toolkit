@@ -1,13 +1,22 @@
-//! Fire starts per minute of every armament on the best-fit build.
+//! Fire starts per minute of every armament on the best-fit build, against
+//! one target at its best bearing.
+
+use std::rc::Rc;
 
 use serde::Serialize;
 use wows_core::units::FiresPerMinute;
 use wows_core::units::Percent;
 use wows_core::units::ProjectilesPerMinute;
+use wows_ship_stats::Bearing;
 use wows_ship_stats::FireArmament;
 use wows_ship_stats::FireInputs;
 use wows_ship_stats::FireSource;
-use wows_ship_stats::total_fires;
+use wows_ship_stats::MountCoverage;
+use wows_ship_stats::PerBearing;
+use wows_ship_stats::bearing::BearingRow;
+use wows_ship_stats::secondary_fires_by_bearing;
+use wows_ship_stats::total_fires_all_mounts;
+use wows_ship_stats::total_fires_by_bearing;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 
 use crate::builds::Better;
@@ -24,14 +33,79 @@ use crate::data::GameData;
 use crate::error::QueryError;
 use crate::firing_arcs::round_to;
 
-const FIRE_NOTE: &str = "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges).";
+const FIRE_NOTE: &str = "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. The headline is against one distant target at the bearing (degrees off the bow, clockwise) where the most fires start: the server gives each secondary mount its own target, and a gun fires at a target only when its mount turns to it outside its dead zones, so one target draws the mounts whose firing sectors cover its bearing, usually one side and the centerline. all_mounts_ceiling is every gun mount firing at once, which no single target sees. by_bearing gives the figure at standard bearings, starboard and its port mirror, on the base and best builds. salvo_fire_chance_pct = 1 - (1 - p)^n over the n bearing shells of one salvo. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges).";
 
 /// Fire starts per minute on the best-fit build.
 #[derive(Debug, Clone, Serialize)]
 pub struct FireRates {
-    pub total: BuildStat<FiresPerMinute>,
+    /// Every armament together.
+    pub total: BuildStat<FireTotal>,
+
+    /// Every secondary group together.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondaries: Option<BuildStat<FireTotal>>,
+
     pub sources: Vec<FireSourceBuilds>,
     pub note: &'static str,
+}
+
+/// Fires against one target at its best bearing, and with every gun mount
+/// firing at once.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct FireTotal {
+    /// Against one target at `bearing`; every mount when the mount facings
+    /// are unknown.
+    pub fires_per_minute: FiresPerMinute,
+
+    /// Degrees off the bow, clockwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearing: Option<Bearing>,
+
+    /// Every gun mount firing at once, a ceiling no single target sees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub all_mounts_ceiling: Option<FiresPerMinute>,
+
+    /// The figure at standard bearings; on the base and best builds only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_bearing: Option<[BearingRow<FiresPerMinute>; 9]>,
+}
+
+impl FireTotal {
+    /// `ceiling` is every mount firing; `by_bearing` one target per bearing,
+    /// when the mount facings are known.
+    fn new(ceiling: FiresPerMinute, by_bearing: Option<PerBearing<FiresPerMinute>>) -> Self {
+        let rounded = |fires: FiresPerMinute| FiresPerMinute::new(round(fires.value()));
+        let Some(by_bearing) = by_bearing else {
+            return Self {
+                fires_per_minute: rounded(ceiling),
+                bearing: None,
+                all_mounts_ceiling: None,
+                by_bearing: None,
+            };
+        };
+        let bearing = by_bearing.best();
+
+        Self {
+            fires_per_minute: rounded(by_bearing.at(bearing)),
+            bearing: Some(bearing),
+            all_mounts_ceiling: Some(rounded(ceiling)),
+            by_bearing: Some(by_bearing.table().map(|row| BearingRow {
+                bearing: row.bearing,
+                starboard: rounded(row.starboard),
+                port: rounded(row.port),
+            })),
+        }
+    }
+}
+
+impl StatAmount for FireTotal {
+    fn amount(self) -> f32 {
+        self.fires_per_minute.value()
+    }
+}
+
+impl StatUnit for FireTotal {
+    const UNIT: &'static str = "fires/min";
 }
 
 /// One armament's fire output.
@@ -58,20 +132,58 @@ pub struct FireSourceBuilds {
     pub rate: BuildStat<FireRate>,
 }
 
-/// Projectiles per minute, the fire chance of one and the fires they start.
+/// One armament against one target at its best bearing: projectiles per
+/// minute, the fire chance of one and the fires they start.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct FireRate {
     pub fires_per_minute: FiresPerMinute,
+
+    /// Degrees off the bow, clockwise; absent for aircraft and when the mount
+    /// facings are unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearing: Option<Bearing>,
+
     pub fire_chance_pct: Percent,
     pub projectiles_per_minute: ProjectilesPerMinute,
+
+    /// Chance one salvo of the bearing guns starts at least one fire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub salvo_fire_chance_pct: Option<Percent>,
+
+    /// Every mount firing at once, a ceiling no single target sees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub all_mounts_ceiling: Option<FiresPerMinute>,
 }
 
 impl FireRate {
-    fn from_source(source: &FireSource) -> Self {
+    fn new(source: &FireSource, coverage: Option<&MountCoverage>) -> Self {
+        let rounded = |fires: FiresPerMinute| FiresPerMinute::new(round(fires.value()));
+        let fire_chance_pct = Percent::new(round_to(source.fire_chance.value(), 100.0));
+        let projectiles =
+            |projectiles: ProjectilesPerMinute| ProjectilesPerMinute::new(round_to(projectiles.value(), 10.0));
+        let gun = !source.mounts.is_empty();
+        let Some(coverage) = coverage.filter(|_| gun) else {
+            return Self {
+                fires_per_minute: rounded(source.fires_per_minute),
+                bearing: None,
+                fire_chance_pct,
+                projectiles_per_minute: projectiles(source.projectiles_per_minute),
+                salvo_fire_chance_pct: None,
+                all_mounts_ceiling: None,
+            };
+        };
+        let by_bearing = source.by_bearing(coverage);
+        let bearing = by_bearing.best();
+
         Self {
-            fires_per_minute: FiresPerMinute::new(round(source.fires_per_minute.value())),
-            fire_chance_pct: Percent::new(round_to(source.fire_chance.value(), 100.0)),
-            projectiles_per_minute: ProjectilesPerMinute::new(round_to(source.projectiles_per_minute.value(), 10.0)),
+            fires_per_minute: rounded(by_bearing.at(bearing)),
+            bearing: Some(bearing),
+            fire_chance_pct,
+            projectiles_per_minute: projectiles(source.projectiles_at(coverage, bearing)),
+            salvo_fire_chance_pct: source
+                .salvo_fire_chance(coverage, bearing)
+                .map(|chance| Percent::new(round_to(chance.value(), 10.0))),
+            all_mounts_ceiling: Some(rounded(source.fires_per_minute)),
         }
     }
 }
@@ -89,6 +201,7 @@ impl StatUnit for FireRate {
 impl GameData {
     pub(crate) fn fire_rates(&self, planner: &Planner<'_>) -> Result<Option<FireRates>, QueryError> {
         let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+        let coverages: Vec<Option<Rc<MountCoverage>>> = self.mount_coverages(planner.ship(), planner.selections())?;
         let sources = |outcome: &Outcome| -> Vec<FireSource> {
             FireInputs {
                 ship: &planner.ship().param,
@@ -99,17 +212,48 @@ impl GameData {
             }
             .sources()
         };
+        let coverage = |outcome: &Outcome| coverages[outcome.selection].as_deref();
 
-        let total_extract =
-            |outcome: &Outcome| total_fires(&sources(outcome)).map(|total| FiresPerMinute::new(round(total.value())));
-        let total_exclude =
-            |planner: &Planner<'_>, _: &[(Item, FiresPerMinute)]| lowering_items(planner, 0, &total_extract);
+        let total_extract = |outcome: &Outcome| {
+            let sources = sources(outcome);
+            let ceiling = total_fires_all_mounts(&sources)?;
+            let by_bearing = coverage(outcome).and_then(|coverage| total_fires_by_bearing(&sources, coverage));
+            Some(FireTotal::new(ceiling, by_bearing))
+        };
+        let total_exclude = |planner: &Planner<'_>, _: &[(Item, FireTotal)]| lowering_items(planner, 0, &total_extract);
         let mut total_plan =
             StatPlan::new("fire starts per minute, all armament".to_owned(), Better::Higher, &total_extract);
         total_plan.exclude = Some(&total_exclude);
-        let Some(total) = planner.plan(&total_plan)? else {
+        let Some(mut total) = planner.plan(&total_plan)? else {
             return Ok(None);
         };
+        tables_on_base_and_best(&mut total);
+
+        let secondaries_extract = |outcome: &Outcome| {
+            let sources = sources(outcome);
+            let ceiling: Vec<FiresPerMinute> = sources
+                .iter()
+                .filter(|source| source.armament == FireArmament::Secondary)
+                .map(|source| source.fires_per_minute)
+                .collect();
+            if ceiling.is_empty() {
+                return None;
+            }
+            let by_bearing = coverage(outcome).and_then(|coverage| secondary_fires_by_bearing(&sources, coverage));
+            Some(FireTotal::new(ceiling.into_iter().sum(), by_bearing))
+        };
+        let secondaries_exclude =
+            |planner: &Planner<'_>, _: &[(Item, FireTotal)]| lowering_items(planner, 0, &secondaries_extract);
+        let mut secondaries_plan = StatPlan::new(
+            "secondary fire starts per minute, every group".to_owned(),
+            Better::Higher,
+            &secondaries_extract,
+        );
+        secondaries_plan.exclude = Some(&secondaries_exclude);
+        let mut secondaries = planner.plan(&secondaries_plan)?;
+        if let Some(secondaries) = &mut secondaries {
+            tables_on_base_and_best(secondaries);
+        }
 
         // Each source with the first module combination that carries it.
         let mut found: Vec<(FireSource, usize)> = Vec::new();
@@ -130,7 +274,7 @@ impl GameData {
                 sources(outcome)
                     .iter()
                     .find(|other| other.armament == source.armament && other.qualifier == source.qualifier)
-                    .map(FireRate::from_source)
+                    .map(|other| FireRate::new(other, coverage(outcome)))
             };
             let exclude = |planner: &Planner<'_>, _: &[(Item, FireRate)]| lowering_items(planner, *selection, &extract);
             let label = format!("{} fire starts per minute", self.fire_source_name(source));
@@ -151,7 +295,7 @@ impl GameData {
             });
         }
 
-        Ok(Some(FireRates { total, sources: builds, note: FIRE_NOTE }))
+        Ok(Some(FireRates { total, secondaries, sources: builds, note: FIRE_NOTE }))
     }
 
     fn fire_source_name(&self, source: &FireSource) -> String {
@@ -164,6 +308,14 @@ impl GameData {
                 format!("{} {name}", source.armament.label())
             }
         }
+    }
+}
+
+/// Keeps the per-bearing table on the base and best builds and drops it
+/// from the alternatives, which differ only in the headline.
+fn tables_on_base_and_best(stat: &mut BuildStat<FireTotal>) {
+    for alternative in &mut stat.builds.alternatives {
+        alternative.value.by_bearing = None;
     }
 }
 

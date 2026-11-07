@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 520
+assertion_line: 908
 expression: rates(name)
 ---
 torpedoes_per_minute:
@@ -46,14 +46,70 @@ main_battery_damage:
         base:
           damage_per_minute: 137979
           damage_per_second: 2299.7
-          broadside_damage_per_minute: 137979
-          bow_on_damage_per_minute: 45993
+          bearing: 90
+          all_barrels_ceiling: 137979
+          by_bearing:
+            - bearing: 0
+              starboard: 45993
+              port: 45993
+            - bearing: 30
+              starboard: 91986
+              port: 91986
+            - bearing: 45
+              starboard: 137979
+              port: 137979
+            - bearing: 60
+              starboard: 137979
+              port: 137979
+            - bearing: 90
+              starboard: 137979
+              port: 137979
+            - bearing: 120
+              starboard: 137979
+              port: 137979
+            - bearing: 135
+              starboard: 137979
+              port: 137979
+            - bearing: 150
+              starboard: 137979
+              port: 137979
+            - bearing: 180
+              starboard: 91986
+              port: 91986
         best:
           value:
             damage_per_minute: 177425
             damage_per_second: 2957.1
-            broadside_damage_per_minute: 177425
-            bow_on_damage_per_minute: 59142
+            bearing: 90
+            all_barrels_ceiling: 177425
+            by_bearing:
+              - bearing: 0
+                starboard: 59142
+                port: 59142
+              - bearing: 30
+                starboard: 118284
+                port: 118284
+              - bearing: 45
+                starboard: 177425
+                port: 177425
+              - bearing: 60
+                starboard: 177425
+                port: 177425
+              - bearing: 90
+                starboard: 177425
+                port: 177425
+              - bearing: 120
+                starboard: 177425
+                port: 177425
+              - bearing: 135
+                starboard: 177425
+                port: 177425
+              - bearing: 150
+                starboard: 177425
+                port: 177425
+              - bearing: 180
+                starboard: 118284
+                port: 118284
           assumed:
             - Extra-Heavy Ammunition
             - Main Battery and AA Specialist
@@ -65,8 +121,8 @@ main_battery_damage:
             value:
               damage_per_minute: 165047
               damage_per_second: 2750.8
-              broadside_damage_per_minute: 165047
-              bow_on_damage_per_minute: 55016
+              bearing: 90
+              all_barrels_ceiling: 165047
             assumed:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
@@ -77,8 +133,8 @@ main_battery_damage:
             value:
               damage_per_minute: 168554
               damage_per_second: 2809.2
-              broadside_damage_per_minute: 168554
-              bow_on_damage_per_minute: 56185
+              bearing: 90
+              all_barrels_ceiling: 168554
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery Modification 3
@@ -88,8 +144,8 @@ main_battery_damage:
             value:
               damage_per_minute: 156134
               damage_per_second: 2602.2
-              broadside_damage_per_minute: 156134
-              bow_on_damage_per_minute: 52045
+              bearing: 90
+              all_barrels_ceiling: 156134
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery and AA Specialist
@@ -99,8 +155,8 @@ main_battery_damage:
             value:
               damage_per_minute: 197139
               damage_per_second: 3285.7
-              broadside_damage_per_minute: 197139
-              bow_on_damage_per_minute: 65713
+              bearing: 90
+              all_barrels_ceiling: 197139
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery and AA Specialist
@@ -119,14 +175,70 @@ main_battery_damage:
         base:
           damage_per_minute: 134843
           damage_per_second: 2247.4
-          broadside_damage_per_minute: 134843
-          bow_on_damage_per_minute: 44948
+          bearing: 90
+          all_barrels_ceiling: 134843
+          by_bearing:
+            - bearing: 0
+              starboard: 44948
+              port: 44948
+            - bearing: 30
+              starboard: 89895
+              port: 89895
+            - bearing: 45
+              starboard: 134843
+              port: 134843
+            - bearing: 60
+              starboard: 134843
+              port: 134843
+            - bearing: 90
+              starboard: 134843
+              port: 134843
+            - bearing: 120
+              starboard: 134843
+              port: 134843
+            - bearing: 135
+              starboard: 134843
+              port: 134843
+            - bearing: 150
+              starboard: 134843
+              port: 134843
+            - bearing: 180
+              starboard: 89895
+              port: 89895
         best:
           value:
             damage_per_minute: 161296
             damage_per_second: 2688.3
-            broadside_damage_per_minute: 161296
-            bow_on_damage_per_minute: 53765
+            bearing: 90
+            all_barrels_ceiling: 161296
+            by_bearing:
+              - bearing: 0
+                starboard: 53765
+                port: 53765
+              - bearing: 30
+                starboard: 107530
+                port: 107530
+              - bearing: 45
+                starboard: 161296
+                port: 161296
+              - bearing: 60
+                starboard: 161296
+                port: 161296
+              - bearing: 90
+                starboard: 161296
+                port: 161296
+              - bearing: 120
+                starboard: 161296
+                port: 161296
+              - bearing: 135
+                starboard: 161296
+                port: 161296
+              - bearing: 150
+                starboard: 161296
+                port: 161296
+              - bearing: 180
+                starboard: 107530
+                port: 107530
           assumed:
             - Main Battery and AA Specialist
             - Main Battery Modification 3
@@ -138,16 +250,16 @@ main_battery_damage:
             value:
               damage_per_minute: 153231
               damage_per_second: 2553.8
-              broadside_damage_per_minute: 153231
-              bow_on_damage_per_minute: 51077
+              bearing: 90
+              all_barrels_ceiling: 153231
             assumed:
               - Main Battery Modification 3
           - label: without Main Battery Modification 3
             value:
               damage_per_minute: 141940
               damage_per_second: 2365.7
-              broadside_damage_per_minute: 141940
-              bow_on_damage_per_minute: 47313
+              bearing: 90
+              all_barrels_ceiling: 141940
             assumed:
               - Main Battery and AA Specialist
             tier_fillers:
@@ -157,8 +269,8 @@ main_battery_damage:
             value:
               damage_per_minute: 179217
               damage_per_second: 2987
-              broadside_damage_per_minute: 179217
-              bow_on_damage_per_minute: 59739
+              bearing: 90
+              all_barrels_ceiling: 179217
             assumed:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
@@ -288,4 +400,4 @@ torpedo_damage:
               - Extra-Heavy Ammunition
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time. Launchers outside every loader group reload all at once. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
-  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

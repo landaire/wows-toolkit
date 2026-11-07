@@ -354,6 +354,7 @@ impl GameData {
     ) -> Result<Card, QueryError> {
         let effects = self.effective_modifiers(ship, loadout)?;
         let card = effects.build.card(&ship.param, selection, self.provider()).map_err(build_failed(ship))?;
+        let coverage = self.mount_coverages(ship, std::iter::once(selection))?.pop().flatten();
         let derived = Derivation {
             ship: &ship.param,
             selection,
@@ -362,6 +363,7 @@ impl GameData {
             merges_fire_zones: effects.build.merges_fire_zones,
             stock_ranges: self.stock_ranges(ship)?,
             provider: self.provider(),
+            coverage: coverage.as_deref(),
         }
         .rows();
 

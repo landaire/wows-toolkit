@@ -3,6 +3,9 @@
 //!
 //! Every projectile is taken to hit a target that can burn, with no limit on
 //! the fires the target can carry and none of the target's fire resistance.
+//! Against one target only the gun mounts that bear on it fire
+//! ([`crate::bearing`]); the sum over every mount is a ceiling no single
+//! target sees.
 //! Guns fire at their reload. A squadron with several attacks per sortie
 //! attacks once per `attackCooldown`, the shortest time between two of its
 //! attacks, while it has attacks left; flight to the target, returns and
@@ -27,6 +30,9 @@ use wowsunpack::game_params::ttx::weapon_tables::is_small_projectile;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 
+use crate::bearing::Bearing;
+use crate::bearing::MountCoverage;
+use crate::bearing::PerBearing;
 use crate::mounts::aiming_mounts;
 
 /// What releases the projectiles.
@@ -71,7 +77,69 @@ pub struct FireSource {
     /// Chance one projectile starts a fire, with the build applied.
     pub fire_chance: Percent,
 
+    /// Every mount firing, or the aircraft attacking.
     pub fires_per_minute: FiresPerMinute,
+
+    /// Each gun mount's share of `fires_per_minute`. Empty for aircraft.
+    pub mounts: Vec<MountFires>,
+}
+
+impl FireSource {
+    /// Fires against one target at each bearing: guns count only the mounts
+    /// that bear on it; aircraft reach every bearing.
+    pub fn by_bearing(&self, coverage: &MountCoverage) -> PerBearing<FiresPerMinute> {
+        match self.armament {
+            FireArmament::Squadron | FireArmament::AirStrike => PerBearing::uniform(self.fires_per_minute),
+            FireArmament::MainBattery | FireArmament::Secondary => {
+                self.mounts.iter().fold(PerBearing::uniform(FiresPerMinute::new(0.0)), |sum, mount| {
+                    sum + PerBearing::mount(coverage, &mount.hardpoint, mount.fires)
+                })
+            }
+        }
+    }
+
+    /// Chance one salvo of the mounts bearing at `bearing` starts at least
+    /// one fire, every shell hitting independently: 1 - product of (1 - p)
+    /// over the bearing shells. `None` for aircraft.
+    pub fn salvo_fire_chance(&self, coverage: &MountCoverage, bearing: Bearing) -> Option<Percent> {
+        if self.mounts.is_empty() {
+            return None;
+        }
+
+        let no_fire: f32 = self
+            .mounts
+            .iter()
+            .filter(|mount| coverage.bears(&mount.hardpoint, bearing))
+            .map(|mount| (1.0 - mount.fire_chance.to_fraction()).powi(mount.barrels as i32))
+            .product();
+
+        Some(Percent::from_fraction(1.0 - no_fire))
+    }
+
+    /// Projectiles per minute from the mounts bearing at `bearing`; every
+    /// projectile for aircraft.
+    pub fn projectiles_at(&self, coverage: &MountCoverage, bearing: Bearing) -> ProjectilesPerMinute {
+        if self.mounts.is_empty() {
+            return self.projectiles_per_minute;
+        }
+
+        let bearing_mounts = self.mounts.iter().filter(|mount| coverage.bears(&mount.hardpoint, bearing));
+        ProjectilesPerMinute::new(bearing_mounts.map(|mount| mount.projectiles.value()).sum())
+    }
+}
+
+/// One gun mount's fires per minute.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MountFires {
+    pub hardpoint: String,
+
+    /// Barrels on the mount.
+    pub barrels: u32,
+
+    /// Chance one of its shells starts a fire.
+    pub fire_chance: Percent,
+    pub projectiles: ProjectilesPerMinute,
+    pub fires: FiresPerMinute,
 }
 
 /// The inputs fire output reads besides the card.
@@ -123,6 +191,7 @@ impl FireInputs<'_> {
         for (kind, shells) in kinds {
             let mut projectiles = 0.0;
             let mut fires = 0.0;
+            let mut per_mount = Vec::new();
             for (mount, barrels) in &mounts {
                 let Some(shell) = mount.ammo().iter().find_map(|name| shells.iter().find(|shell| shell.name == *name))
                 else {
@@ -131,6 +200,13 @@ impl FireInputs<'_> {
                 let barrels = *barrels as f32;
                 projectiles += barrels;
                 fires += barrels * burn_fraction(shell);
+                per_mount.push(MountFires {
+                    hardpoint: mount.hp_name().to_owned(),
+                    barrels: barrels as u32,
+                    fire_chance: Percent::from_fraction(burn_fraction(shell)),
+                    projectiles: ProjectilesPerMinute::from_interval(barrels, reload),
+                    fires: FiresPerMinute::new(60.0 * barrels * burn_fraction(shell) / reload.value()),
+                });
             }
             if fires <= 0.0 {
                 continue;
@@ -143,35 +219,54 @@ impl FireInputs<'_> {
                 projectiles_per_minute: ProjectilesPerMinute::from_interval(projectiles, reload),
                 fire_chance: Percent::from_fraction(fires / projectiles),
                 fires_per_minute: FiresPerMinute::new(60.0 * fires / reload.value()),
+                mounts: per_mount,
             });
         }
 
         sources
     }
 
-    /// Each secondary gun group with a fire chance.
+    /// Each secondary gun group with a fire chance, from its aiming mounts.
     fn secondaries(&self) -> Vec<FireSource> {
         let Some(battery) = self.stats.secondaries.as_ref() else {
             return Vec::new();
         };
+        let mounts = aiming_mounts(self.ship, self.selection, ComponentType::Atba);
 
         battery
             .mounts
             .iter()
-            .filter(|mount| burn_fraction(&mount.shell) > 0.0 && mount.reload_time.value() > 0.0)
-            .map(|mount| {
-                let barrels = (mount.num_barrels * mount.num_mounts) as f32;
-                let projectiles = ProjectilesPerMinute::from_interval(barrels, Seconds::new(mount.reload_time.value()));
-                let chance = Percent::from_fraction(burn_fraction(&mount.shell));
+            .filter(|group| burn_fraction(&group.shell) > 0.0 && group.reload_time.value() > 0.0)
+            .map(|group| {
+                let reload = Seconds::new(group.reload_time.value());
+                let chance = Percent::from_fraction(burn_fraction(&group.shell));
+                let in_group: Vec<(String, f32)> = mounts
+                    .iter()
+                    .filter(|(mount, _)| group.hardpoints.iter().any(|hardpoint| hardpoint == mount.hp_name()))
+                    .map(|(mount, barrels)| (mount.hp_name().to_owned(), *barrels as f32))
+                    .collect();
+                let barrels: f32 = in_group.iter().map(|(_, barrels)| barrels).sum();
+                let projectiles = ProjectilesPerMinute::from_interval(barrels, reload);
                 FireSource {
                     armament: FireArmament::Secondary,
-                    qualifier: mount.label.clone(),
+                    qualifier: group.label.clone(),
                     module_upgrade: false,
                     projectiles_per_minute: projectiles,
                     fire_chance: chance,
                     fires_per_minute: projectiles.fires(chance),
+                    mounts: in_group
+                        .into_iter()
+                        .map(|(hardpoint, barrels)| MountFires {
+                            hardpoint,
+                            barrels: barrels as u32,
+                            fire_chance: chance,
+                            projectiles: ProjectilesPerMinute::from_interval(barrels, reload),
+                            fires: ProjectilesPerMinute::from_interval(barrels, reload).fires(chance),
+                        })
+                        .collect(),
                 }
             })
+            .filter(|source| source.fires_per_minute.value() > 0.0)
             .collect()
     }
 
@@ -265,8 +360,28 @@ impl FireInputs<'_> {
             projectiles_per_minute: projectiles,
             fire_chance: chance,
             fires_per_minute: projectiles.fires(chance),
+            mounts: Vec::new(),
         })
     }
+}
+
+/// Fires against one target at `bearing`, in total and per armament.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct FireBreakdown {
+    pub bearing: Bearing,
+    pub total: FiresPerMinute,
+
+    /// The best ammo type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_battery: Option<FiresPerMinute>,
+
+    /// Every secondary group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<FiresPerMinute>,
+
+    /// The best stock squadron and the best air strike aircraft.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aircraft: Option<FiresPerMinute>,
 }
 
 /// How often an aircraft releases its ordnance.
@@ -290,33 +405,87 @@ impl Sortie {
     }
 }
 
-/// Fires every armament starts together: the main battery's best ammo type,
-/// every secondary group, the best squadron of the stock plane modules (one
-/// flies at a time) and the best air strike aircraft (the aircraft of one
-/// air strike are alternatives sharing its charges). `None` when nothing can
-/// start fires.
-pub fn total_fires(sources: &[FireSource]) -> Option<FiresPerMinute> {
-    if sources.is_empty() {
-        return None;
+/// What each armament adds to a total: the main battery's best ammo type,
+/// every secondary group, the best squadron of the stock plane modules and
+/// the best air strike aircraft.
+#[derive(Debug, Clone)]
+struct Parts<V> {
+    main_battery: Option<V>,
+    secondary: Option<V>,
+    squadron: Option<V>,
+    air_strike: Option<V>,
+}
+
+impl<V> Parts<V>
+where
+    V: std::ops::Add<Output = V>,
+{
+    /// `best` chooses between alternatives of one armament.
+    fn new(sources: &[FireSource], value: impl Fn(&FireSource) -> V, best: impl Fn(V, V) -> V) -> Self {
+        let counted = |armament: FireArmament| {
+            sources.iter().filter(move |source| source.armament == armament && !source.module_upgrade).map(&value)
+        };
+
+        Self {
+            main_battery: counted(FireArmament::MainBattery).reduce(&best),
+            secondary: counted(FireArmament::Secondary).reduce(|sum, group| sum + group),
+            squadron: counted(FireArmament::Squadron).reduce(&best),
+            air_strike: counted(FireArmament::AirStrike).reduce(&best),
+        }
     }
 
-    let counted = |armament: FireArmament| {
-        sources.iter().filter(move |source| source.armament == armament && !source.module_upgrade)
-    };
-    let best = |armament: FireArmament| -> FiresPerMinute {
-        counted(armament)
-            .map(|source| source.fires_per_minute)
-            .fold(FiresPerMinute::new(0.0), |best, rate| if rate > best { rate } else { best })
-    };
-    let every =
-        |armament: FireArmament| -> FiresPerMinute { counted(armament).map(|source| source.fires_per_minute).sum() };
+    fn sum(self) -> Option<V> {
+        [self.main_battery, self.secondary, self.squadron, self.air_strike]
+            .into_iter()
+            .flatten()
+            .reduce(|sum, part| sum + part)
+    }
+}
 
-    Some(
-        best(FireArmament::MainBattery)
-            + every(FireArmament::Secondary)
-            + best(FireArmament::Squadron)
-            + best(FireArmament::AirStrike),
-    )
+/// Fires every armament starts together, every gun mount firing: the main
+/// battery's best ammo type, every secondary group, the best squadron of the
+/// stock plane modules (one flies at a time) and the best air strike aircraft
+/// (the aircraft of one air strike are alternatives sharing its charges). A
+/// ceiling: no single target draws every mount. `None` when nothing can start
+/// fires.
+pub fn total_fires_all_mounts(sources: &[FireSource]) -> Option<FiresPerMinute> {
+    Parts::new(sources, |source| source.fires_per_minute, |left, right| if right > left { right } else { left }).sum()
+}
+
+/// The same total against one target at each bearing: only the gun mounts
+/// that bear on it fire. `None` when nothing can start fires.
+pub fn total_fires_by_bearing(sources: &[FireSource], coverage: &MountCoverage) -> Option<PerBearing<FiresPerMinute>> {
+    Parts::new(sources, |source| source.by_bearing(coverage), PerBearing::max).sum()
+}
+
+/// The secondary groups together against one target at each bearing. `None`
+/// without secondaries that start fires.
+pub fn secondary_fires_by_bearing(
+    sources: &[FireSource],
+    coverage: &MountCoverage,
+) -> Option<PerBearing<FiresPerMinute>> {
+    Parts::new(sources, |source| source.by_bearing(coverage), PerBearing::max).secondary
+}
+
+/// What each armament adds to the fires against one target at the bearing
+/// where the total is highest. `None` when nothing can start fires.
+pub fn fire_breakdown(sources: &[FireSource], coverage: &MountCoverage) -> Option<FireBreakdown> {
+    let parts = Parts::new(sources, |source| source.by_bearing(coverage), PerBearing::max);
+    let total = parts.clone().sum()?;
+    let bearing = total.best();
+    let at = |part: Option<PerBearing<FiresPerMinute>>| part.map(|part| part.at(bearing));
+    let aircraft = match (at(parts.squadron), at(parts.air_strike)) {
+        (Some(squadron), Some(strike)) => Some(squadron + strike),
+        (squadron, strike) => squadron.or(strike),
+    };
+
+    Some(FireBreakdown {
+        bearing,
+        total: total.at(bearing),
+        main_battery: at(parts.main_battery),
+        secondary: at(parts.secondary),
+        aircraft,
+    })
 }
 
 /// The card's fire chance of a shell, 0 to 1. A shell the card gives no fire

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
+assertion_line: 86
 expression: stats
 ---
 ship:
@@ -86,14 +87,70 @@ build_stats:
           base:
             damage_per_minute: 255273
             damage_per_second: 4254.5
-            broadside_damage_per_minute: 255273
-            bow_on_damage_per_minute: 127636
+            bearing: 90
+            all_barrels_ceiling: 255273
+            by_bearing:
+              - bearing: 0
+                starboard: 85091
+                port: 85091
+              - bearing: 30
+                starboard: 170182
+                port: 170182
+              - bearing: 45
+                starboard: 255273
+                port: 255273
+              - bearing: 60
+                starboard: 255273
+                port: 255273
+              - bearing: 90
+                starboard: 255273
+                port: 255273
+              - bearing: 120
+                starboard: 255273
+                port: 255273
+              - bearing: 135
+                starboard: 255273
+                port: 255273
+              - bearing: 150
+                starboard: 212727
+                port: 212727
+              - bearing: 180
+                starboard: 85091
+                port: 85091
           best:
             value:
               damage_per_minute: 311839
               damage_per_second: 5197.3
-              broadside_damage_per_minute: 311839
-              bow_on_damage_per_minute: 155919
+              bearing: 90
+              all_barrels_ceiling: 311839
+              by_bearing:
+                - bearing: 0
+                  starboard: 103946
+                  port: 103946
+                - bearing: 30
+                  starboard: 207893
+                  port: 207893
+                - bearing: 45
+                  starboard: 311839
+                  port: 311839
+                - bearing: 60
+                  starboard: 311839
+                  port: 311839
+                - bearing: 90
+                  starboard: 311839
+                  port: 311839
+                - bearing: 120
+                  starboard: 311839
+                  port: 311839
+                - bearing: 135
+                  starboard: 311839
+                  port: 311839
+                - bearing: 150
+                  starboard: 259866
+                  port: 259866
+                - bearing: 180
+                  starboard: 103946
+                  port: 103946
             assumed:
               - Super-Heavy AP Shells
               - Main Battery Modification 3
@@ -105,16 +162,16 @@ build_stats:
               value:
                 damage_per_minute: 290083
                 damage_per_second: 4834.7
-                broadside_damage_per_minute: 290083
-                bow_on_damage_per_minute: 145041
+                bearing: 90
+                all_barrels_ceiling: 290083
               assumed:
                 - Main Battery Modification 3
             - label: without Main Battery Modification 3
               value:
                 damage_per_minute: 274418
                 damage_per_second: 4573.6
-                broadside_damage_per_minute: 274418
-                bow_on_damage_per_minute: 137209
+                bearing: 90
+                all_barrels_ceiling: 274418
               assumed:
                 - Super-Heavy AP Shells
               tier_fillers:
@@ -124,8 +181,8 @@ build_stats:
               value:
                 damage_per_minute: 346488
                 damage_per_second: 5774.8
-                broadside_damage_per_minute: 346488
-                bow_on_damage_per_minute: 173244
+                bearing: 90
+                all_barrels_ceiling: 346488
               assumed:
                 - Super-Heavy AP Shells
                 - Main Battery Modification 3
@@ -144,14 +201,70 @@ build_stats:
           base:
             damage_per_minute: 133091
             damage_per_second: 2218.2
-            broadside_damage_per_minute: 133091
-            bow_on_damage_per_minute: 66545
+            bearing: 90
+            all_barrels_ceiling: 133091
+            by_bearing:
+              - bearing: 0
+                starboard: 44364
+                port: 44364
+              - bearing: 30
+                starboard: 88727
+                port: 88727
+              - bearing: 45
+                starboard: 133091
+                port: 133091
+              - bearing: 60
+                starboard: 133091
+                port: 133091
+              - bearing: 90
+                starboard: 133091
+                port: 133091
+              - bearing: 120
+                starboard: 133091
+                port: 133091
+              - bearing: 135
+                starboard: 133091
+                port: 133091
+              - bearing: 150
+                starboard: 110909
+                port: 110909
+              - bearing: 180
+                starboard: 44364
+                port: 44364
           best:
             value:
               damage_per_minute: 151240
               damage_per_second: 2520.7
-              broadside_damage_per_minute: 151240
-              bow_on_damage_per_minute: 75620
+              bearing: 90
+              all_barrels_ceiling: 151240
+              by_bearing:
+                - bearing: 0
+                  starboard: 50413
+                  port: 50413
+                - bearing: 30
+                  starboard: 100826
+                  port: 100826
+                - bearing: 45
+                  starboard: 151240
+                  port: 151240
+                - bearing: 60
+                  starboard: 151240
+                  port: 151240
+                - bearing: 90
+                  starboard: 151240
+                  port: 151240
+                - bearing: 120
+                  starboard: 151240
+                  port: 151240
+                - bearing: 135
+                  starboard: 151240
+                  port: 151240
+                - bearing: 150
+                  starboard: 126033
+                  port: 126033
+                - bearing: 180
+                  starboard: 50413
+                  port: 50413
             assumed:
               - Main Battery Modification 3
           alternatives:
@@ -159,15 +272,15 @@ build_stats:
               value:
                 damage_per_minute: 133091
                 damage_per_second: 2218.2
-                broadside_damage_per_minute: 133091
-                bow_on_damage_per_minute: 66545
+                bearing: 90
+                all_barrels_ceiling: 133091
               assumed: []
             - label: with Close Quarters Combat active
               value:
                 damage_per_minute: 168044
                 damage_per_second: 2800.7
-                broadside_damage_per_minute: 168044
-                bow_on_damage_per_minute: 84022
+                bearing: 90
+                all_barrels_ceiling: 168044
               assumed:
                 - Main Battery Modification 3
                 - Close Quarters Combat
@@ -185,16 +298,72 @@ build_stats:
         unit: HP/min
         builds:
           base:
-            damage_per_minute: 682500
-            damage_per_second: 11375
-            broadside_damage_per_minute: 341250
-            bow_on_damage_per_minute: 341250
+            damage_per_minute: 341250
+            damage_per_second: 5687.5
+            bearing: 90
+            all_barrels_ceiling: 682500
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 341250
+                port: 341250
+              - bearing: 45
+                starboard: 341250
+                port: 341250
+              - bearing: 60
+                starboard: 341250
+                port: 341250
+              - bearing: 90
+                starboard: 341250
+                port: 341250
+              - bearing: 120
+                starboard: 341250
+                port: 341250
+              - bearing: 135
+                starboard: 341250
+                port: 341250
+              - bearing: 150
+                starboard: 341250
+                port: 341250
+              - bearing: 180
+                starboard: 136500
+                port: 136500
           best:
             value:
-              damage_per_minute: 947917
-              damage_per_second: 15798.6
-              broadside_damage_per_minute: 473958
-              bow_on_damage_per_minute: 473958
+              damage_per_minute: 473958
+              damage_per_second: 7899.3
+              bearing: 90
+              all_barrels_ceiling: 947917
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 473958
+                  port: 473958
+                - bearing: 45
+                  starboard: 473958
+                  port: 473958
+                - bearing: 60
+                  starboard: 473958
+                  port: 473958
+                - bearing: 90
+                  starboard: 473958
+                  port: 473958
+                - bearing: 120
+                  starboard: 473958
+                  port: 473958
+                - bearing: 135
+                  starboard: 473958
+                  port: 473958
+                - bearing: 150
+                  starboard: 473958
+                  port: 473958
+                - bearing: 180
+                  starboard: 189583
+                  port: 189583
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
@@ -205,18 +374,18 @@ build_stats:
           alternatives:
             - label: without Manual Secondary Battery Aiming
               value:
-                damage_per_minute: 853125
-                damage_per_second: 14218.7
-                broadside_damage_per_minute: 426562
-                bow_on_damage_per_minute: 426562
+                damage_per_minute: 426562
+                damage_per_second: 7109.4
+                bearing: 90
+                all_barrels_ceiling: 853125
               assumed:
                 - Auxiliary Armaments Modification 2
             - label: without Auxiliary Armaments Modification 2
               value:
-                damage_per_minute: 758333
-                damage_per_second: 12638.9
-                broadside_damage_per_minute: 379167
-                bow_on_damage_per_minute: 379167
+                damage_per_minute: 379167
+                damage_per_second: 6319.4
+                bearing: 90
+                all_barrels_ceiling: 758333
               assumed:
                 - Manual Secondary Battery Aiming
               tier_fillers:
@@ -231,16 +400,72 @@ build_stats:
         unit: HP/min
         builds:
           base:
-            damage_per_minute: 280800
-            damage_per_second: 4680
-            broadside_damage_per_minute: 140400
-            bow_on_damage_per_minute: 140400
+            damage_per_minute: 140400
+            damage_per_second: 2340
+            bearing: 90
+            all_barrels_ceiling: 280800
+            by_bearing:
+              - bearing: 0
+                starboard: 70200
+                port: 70200
+              - bearing: 30
+                starboard: 140400
+                port: 140400
+              - bearing: 45
+                starboard: 140400
+                port: 140400
+              - bearing: 60
+                starboard: 140400
+                port: 140400
+              - bearing: 90
+                starboard: 140400
+                port: 140400
+              - bearing: 120
+                starboard: 140400
+                port: 140400
+              - bearing: 135
+                starboard: 140400
+                port: 140400
+              - bearing: 150
+                starboard: 140400
+                port: 140400
+              - bearing: 180
+                starboard: 140400
+                port: 140400
           best:
             value:
-              damage_per_minute: 390000
-              damage_per_second: 6500
-              broadside_damage_per_minute: 195000
-              bow_on_damage_per_minute: 195000
+              damage_per_minute: 195000
+              damage_per_second: 3250
+              bearing: 90
+              all_barrels_ceiling: 390000
+              by_bearing:
+                - bearing: 0
+                  starboard: 97500
+                  port: 97500
+                - bearing: 30
+                  starboard: 195000
+                  port: 195000
+                - bearing: 45
+                  starboard: 195000
+                  port: 195000
+                - bearing: 60
+                  starboard: 195000
+                  port: 195000
+                - bearing: 90
+                  starboard: 195000
+                  port: 195000
+                - bearing: 120
+                  starboard: 195000
+                  port: 195000
+                - bearing: 135
+                  starboard: 195000
+                  port: 195000
+                - bearing: 150
+                  starboard: 195000
+                  port: 195000
+                - bearing: 180
+                  starboard: 195000
+                  port: 195000
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
@@ -251,18 +476,18 @@ build_stats:
           alternatives:
             - label: without Manual Secondary Battery Aiming
               value:
-                damage_per_minute: 351000
-                damage_per_second: 5850
-                broadside_damage_per_minute: 175500
-                bow_on_damage_per_minute: 175500
+                damage_per_minute: 175500
+                damage_per_second: 2925
+                bearing: 90
+                all_barrels_ceiling: 351000
               assumed:
                 - Auxiliary Armaments Modification 2
             - label: without Auxiliary Armaments Modification 2
               value:
-                damage_per_minute: 312000
-                damage_per_second: 5200
-                broadside_damage_per_minute: 156000
-                bow_on_damage_per_minute: 156000
+                damage_per_minute: 156000
+                damage_per_second: 2600
+                bearing: 90
+                all_barrels_ceiling: 312000
               assumed:
                 - Manual Secondary Battery Aiming
               tier_fillers:
@@ -270,15 +495,77 @@ build_stats:
                 - AA Defense and ASW Expert
                 - Focus Fire Training
   rate_notes:
-    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute = barrels x damage x 60 / reload. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. broadside and bow_on count only the barrels that bear at the bearing inside that arc where the most damage bears, as ship_firing_arcs reports; broadside is 30-150 or 210-330 off the bow, bow_on 331-29. An ammo with modules is carried only with those modules; its base uses them."
+    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
   fires_per_minute:
     total:
       stat: "fire starts per minute, all armament"
       unit: fires/min
       builds:
-        base: 52.13
+        base:
+          fires_per_minute: 34.82
+          bearing: 90
+          all_mounts_ceiling: 52.13
+          by_bearing:
+            - bearing: 0
+              starboard: 14.05
+              port: 14.05
+            - bearing: 30
+              starboard: 32.34
+              port: 32.34
+            - bearing: 45
+              starboard: 34.82
+              port: 34.82
+            - bearing: 60
+              starboard: 34.82
+              port: 34.82
+            - bearing: 90
+              starboard: 34.82
+              port: 34.82
+            - bearing: 120
+              starboard: 34.82
+              port: 34.82
+            - bearing: 135
+              starboard: 34.82
+              port: 34.82
+            - bearing: 150
+              starboard: 33.58
+              port: 33.58
+            - bearing: 180
+              starboard: 21.28
+              port: 21.28
         best:
-          value: 69.38
+          value:
+            fires_per_minute: 43.55
+            bearing: 90
+            all_mounts_ceiling: 69.38
+            by_bearing:
+              - bearing: 0
+                starboard: 15.13
+                port: 15.13
+              - bearing: 30
+                starboard: 41
+                port: 41
+              - bearing: 45
+                starboard: 43.55
+                port: 43.55
+              - bearing: 60
+                starboard: 43.55
+                port: 43.55
+              - bearing: 90
+                starboard: 43.55
+                port: 43.55
+              - bearing: 120
+                starboard: 43.55
+                port: 43.55
+              - bearing: 135
+                starboard: 43.55
+                port: 43.55
+              - bearing: 150
+                starboard: 42.28
+                port: 42.28
+              - bearing: 180
+                starboard: 25.96
+                port: 25.96
           assumed:
             - Manual Secondary Battery Aiming
             - Demolition Expert
@@ -288,12 +575,18 @@ build_stats:
             - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
-            value: 64.22
+            value:
+              fires_per_minute: 40.97
+              bearing: 90
+              all_mounts_ceiling: 64.22
             assumed:
               - Demolition Expert
               - Auxiliary Armaments Modification 2
           - label: without Demolition Expert
-            value: 65.6
+            value:
+              fires_per_minute: 41.55
+              bearing: 90
+              all_mounts_ceiling: 65.6
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
@@ -302,7 +595,10 @@ build_stats:
               - AA Defense and ASW Expert
               - Focus Fire Training
           - label: without Auxiliary Armaments Modification 2
-            value: 59.05
+            value:
+              fires_per_minute: 38.38
+              bearing: 90
+              all_mounts_ceiling: 59.05
             assumed:
               - Manual Secondary Battery Aiming
               - Demolition Expert
@@ -310,7 +606,10 @@ build_stats:
               - AA Defense and ASW Expert
               - Focus Fire Training
           - label: with Inertia Fuse for HE Shells
-            value: 41.62
+            value:
+              fires_per_minute: 27.81
+              bearing: 90
+              all_mounts_ceiling: 41.62
             assumed:
               - Manual Secondary Battery Aiming
               - Demolition Expert
@@ -320,7 +619,10 @@ build_stats:
               - Focus Fire Training
             note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
           - label: with Close Quarters Combat active
-            value: 70.23
+            value:
+              fires_per_minute: 44.4
+              bearing: 90
+              all_mounts_ceiling: 70.23
             assumed:
               - Manual Secondary Battery Aiming
               - Demolition Expert
@@ -330,6 +632,127 @@ build_stats:
               - AA Defense and ASW Expert
               - Focus Fire Training
             note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+    secondaries:
+      stat: "secondary fire starts per minute, every group"
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 17.32
+          bearing: 90
+          all_mounts_ceiling: 34.64
+          by_bearing:
+            - bearing: 0
+              starboard: 1.5
+              port: 1.5
+            - bearing: 30
+              starboard: 17.32
+              port: 17.32
+            - bearing: 45
+              starboard: 17.32
+              port: 17.32
+            - bearing: 60
+              starboard: 17.32
+              port: 17.32
+            - bearing: 90
+              starboard: 17.32
+              port: 17.32
+            - bearing: 120
+              starboard: 17.32
+              port: 17.32
+            - bearing: 135
+              starboard: 17.32
+              port: 17.32
+            - bearing: 150
+              starboard: 17.32
+              port: 17.32
+            - bearing: 180
+              starboard: 8.73
+              port: 8.73
+        best:
+          value:
+            fires_per_minute: 25.83
+            bearing: 90
+            all_mounts_ceiling: 51.67
+            by_bearing:
+              - bearing: 0
+                starboard: 2.5
+                port: 2.5
+              - bearing: 30
+                starboard: 25.83
+                port: 25.83
+              - bearing: 45
+                starboard: 25.83
+                port: 25.83
+              - bearing: 60
+                starboard: 25.83
+                port: 25.83
+              - bearing: 90
+                starboard: 25.83
+                port: 25.83
+              - bearing: 120
+                starboard: 25.83
+                port: 25.83
+              - bearing: 135
+                starboard: 25.83
+                port: 25.83
+              - bearing: 150
+                starboard: 25.83
+                port: 25.83
+              - bearing: 180
+                starboard: 13.33
+                port: 13.33
+          assumed:
+            - Manual Secondary Battery Aiming
+            - Demolition Expert
+            - Auxiliary Armaments Modification 2
+          tier_fillers:
+            - AA Defense and ASW Expert
+            - Focus Fire Training
+        alternatives:
+          - label: without Manual Secondary Battery Aiming
+            value:
+              fires_per_minute: 23.25
+              bearing: 90
+              all_mounts_ceiling: 46.5
+            assumed:
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+          - label: without Demolition Expert
+            value:
+              fires_per_minute: 24.05
+              bearing: 90
+              all_mounts_ceiling: 48.11
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Auxiliary Armaments Modification 2
+            tier_fillers:
+              - Emergency Repair Specialist
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          - label: without Auxiliary Armaments Modification 2
+            value:
+              fires_per_minute: 20.67
+              bearing: 90
+              all_mounts_ceiling: 41.33
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Demolition Expert
+            tier_fillers:
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+          - label: with Inertia Fuse for HE Shells
+            value:
+              fires_per_minute: 13.81
+              bearing: 90
+              all_mounts_ceiling: 27.61
+            assumed:
+              - Manual Secondary Battery Aiming
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+              - Inertia Fuse for HE Shells
+            tier_fillers:
+              - Focus Fire Training
+            note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
     sources:
       - armament: main_battery
         source: main battery HE
@@ -339,13 +762,19 @@ build_stats:
           builds:
             base:
               fires_per_minute: 7.42
+              bearing: 90
               fire_chance_pct: 34
               projectiles_per_minute: 21.8
+              salvo_fire_chance_pct: 99.3
+              all_mounts_ceiling: 7.42
             best:
               value:
                 fires_per_minute: 8.68
+                bearing: 90
                 fire_chance_pct: 35
                 projectiles_per_minute: 24.8
+                salvo_fire_chance_pct: 99.4
+                all_mounts_ceiling: 8.68
               assumed:
                 - Demolition Expert
                 - Main Battery Modification 3
@@ -353,22 +782,31 @@ build_stats:
               - label: without Demolition Expert
                 value:
                   fires_per_minute: 8.43
+                  bearing: 90
                   fire_chance_pct: 34
                   projectiles_per_minute: 24.8
+                  salvo_fire_chance_pct: 99.3
+                  all_mounts_ceiling: 8.43
                 assumed:
                   - Main Battery Modification 3
               - label: without Main Battery Modification 3
                 value:
                   fires_per_minute: 7.64
+                  bearing: 90
                   fire_chance_pct: 35
                   projectiles_per_minute: 21.8
+                  salvo_fire_chance_pct: 99.4
+                  all_mounts_ceiling: 7.64
                 assumed:
                   - Demolition Expert
               - label: with Inertia Fuse for HE Shells
                 value:
                   fires_per_minute: 4.46
+                  bearing: 90
                   fire_chance_pct: 18
                   projectiles_per_minute: 24.8
+                  salvo_fire_chance_pct: 90.8
+                  all_mounts_ceiling: 4.46
                 assumed:
                   - Demolition Expert
                   - Main Battery Modification 3
@@ -377,8 +815,11 @@ build_stats:
               - label: with Close Quarters Combat active
                 value:
                   fires_per_minute: 9.64
+                  bearing: 90
                   fire_chance_pct: 35
                   projectiles_per_minute: 27.5
+                  salvo_fire_chance_pct: 99.4
+                  all_mounts_ceiling: 9.64
                 assumed:
                   - Demolition Expert
                   - Main Battery Modification 3
@@ -394,14 +835,20 @@ build_stats:
           unit: fires/min
           builds:
             base:
-              fires_per_minute: 28.64
+              fires_per_minute: 14.32
+              bearing: 90
               fire_chance_pct: 21
-              projectiles_per_minute: 136.4
+              projectiles_per_minute: 68.2
+              salvo_fire_chance_pct: 90.5
+              all_mounts_ceiling: 28.64
             best:
               value:
-                fires_per_minute: 41.67
+                fires_per_minute: 20.83
+                bearing: 90
                 fire_chance_pct: 22
-                projectiles_per_minute: 189.4
+                projectiles_per_minute: 94.7
+                salvo_fire_chance_pct: 91.7
+                all_mounts_ceiling: 41.67
               assumed:
                 - Manual Secondary Battery Aiming
                 - Demolition Expert
@@ -412,17 +859,23 @@ build_stats:
             alternatives:
               - label: without Manual Secondary Battery Aiming
                 value:
-                  fires_per_minute: 37.5
+                  fires_per_minute: 18.75
+                  bearing: 90
                   fire_chance_pct: 22
-                  projectiles_per_minute: 170.5
+                  projectiles_per_minute: 85.2
+                  salvo_fire_chance_pct: 91.7
+                  all_mounts_ceiling: 37.5
                 assumed:
                   - Demolition Expert
                   - Auxiliary Armaments Modification 2
               - label: without Demolition Expert
                 value:
-                  fires_per_minute: 39.77
+                  fires_per_minute: 19.89
+                  bearing: 90
                   fire_chance_pct: 21
-                  projectiles_per_minute: 189.4
+                  projectiles_per_minute: 94.7
+                  salvo_fire_chance_pct: 90.5
+                  all_mounts_ceiling: 39.77
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Auxiliary Armaments Modification 2
@@ -432,9 +885,12 @@ build_stats:
                   - Focus Fire Training
               - label: without Auxiliary Armaments Modification 2
                 value:
-                  fires_per_minute: 33.33
+                  fires_per_minute: 16.67
+                  bearing: 90
                   fire_chance_pct: 22
-                  projectiles_per_minute: 151.5
+                  projectiles_per_minute: 75.8
+                  salvo_fire_chance_pct: 91.7
+                  all_mounts_ceiling: 33.33
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Demolition Expert
@@ -443,9 +899,12 @@ build_stats:
                   - Focus Fire Training
               - label: with Inertia Fuse for HE Shells
                 value:
-                  fires_per_minute: 21.78
+                  fires_per_minute: 10.89
+                  bearing: 90
                   fire_chance_pct: 11.5
-                  projectiles_per_minute: 189.4
+                  projectiles_per_minute: 94.7
+                  salvo_fire_chance_pct: 70.5
+                  all_mounts_ceiling: 21.78
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Demolition Expert
@@ -461,14 +920,20 @@ build_stats:
           unit: fires/min
           builds:
             base:
-              fires_per_minute: 6
+              fires_per_minute: 3
+              bearing: 90
               fire_chance_pct: 5
-              projectiles_per_minute: 120
+              projectiles_per_minute: 60
+              salvo_fire_chance_pct: 18.5
+              all_mounts_ceiling: 6
             best:
               value:
-                fires_per_minute: 10
+                fires_per_minute: 5
+                bearing: 90
                 fire_chance_pct: 6
-                projectiles_per_minute: 166.7
+                projectiles_per_minute: 83.3
+                salvo_fire_chance_pct: 21.9
+                all_mounts_ceiling: 10
               assumed:
                 - Demolition Expert
                 - Manual Secondary Battery Aiming
@@ -479,9 +944,12 @@ build_stats:
             alternatives:
               - label: without Demolition Expert
                 value:
-                  fires_per_minute: 8.33
+                  fires_per_minute: 4.17
+                  bearing: 90
                   fire_chance_pct: 5
-                  projectiles_per_minute: 166.7
+                  projectiles_per_minute: 83.3
+                  salvo_fire_chance_pct: 18.5
+                  all_mounts_ceiling: 8.33
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Auxiliary Armaments Modification 2
@@ -491,17 +959,23 @@ build_stats:
                   - Focus Fire Training
               - label: without Manual Secondary Battery Aiming
                 value:
-                  fires_per_minute: 9
+                  fires_per_minute: 4.5
+                  bearing: 90
                   fire_chance_pct: 6
-                  projectiles_per_minute: 150
+                  projectiles_per_minute: 75
+                  salvo_fire_chance_pct: 21.9
+                  all_mounts_ceiling: 9
                 assumed:
                   - Demolition Expert
                   - Auxiliary Armaments Modification 2
               - label: without Auxiliary Armaments Modification 2
                 value:
-                  fires_per_minute: 8
+                  fires_per_minute: 4
+                  bearing: 90
                   fire_chance_pct: 6
-                  projectiles_per_minute: 133.3
+                  projectiles_per_minute: 66.7
+                  salvo_fire_chance_pct: 21.9
+                  all_mounts_ceiling: 8
                 assumed:
                   - Demolition Expert
                   - Manual Secondary Battery Aiming
@@ -510,9 +984,12 @@ build_stats:
                   - Focus Fire Training
               - label: with Inertia Fuse for HE Shells
                 value:
-                  fires_per_minute: 5.83
+                  fires_per_minute: 2.92
+                  bearing: 90
                   fire_chance_pct: 3.5
-                  projectiles_per_minute: 166.7
+                  projectiles_per_minute: 83.3
+                  salvo_fire_chance_pct: 13.3
+                  all_mounts_ceiling: 5.83
                 assumed:
                   - Demolition Expert
                   - Manual Secondary Battery Aiming
@@ -538,7 +1015,7 @@ build_stats:
                 fire_chance_pct: 28
                 projectiles_per_minute: 36
               assumed: []
-    note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."
+    note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. The headline is against one distant target at the bearing (degrees off the bow, clockwise) where the most fires start: the server gives each secondary mount its own target, and a gun fires at a target only when its mount turns to it outside its dead zones, so one target draws the mounts whose firing sectors cover its bearing, usually one side and the centerline. all_mounts_ceiling is every gun mount firing at once, which no single target sees. by_bearing gives the figure at standard bearings, starboard and its port mirror, on the base and best builds. salvo_fire_chance_pct = 1 - (1 - p)^n over the n bearing shells of one salvo. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."
 changes:
   - stat: Firing Range
     from: 8.3 km
@@ -595,19 +1072,37 @@ changes:
     to: 279 m
     because:
       - "Combat Instructions: Modified Secondary Munitions x1.2 (+1.66) via Firing Range"
-  - stat: "Fire starts per minute, all armament, every projectile hitting"
+  - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
     from: 45.21 fires/min
     to: 52.13 fires/min
     because:
       - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
       - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"
-  - stat: "Secondary fire starts per minute, every shell hitting (234 mm)"
-    from: 22.91 fires/min
-    to: 28.64 fires/min
+  - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+    from: 31.35 fires/min
+    to: 34.82 fires/min
     because:
       - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
-  - stat: "Secondary fire starts per minute, every shell hitting (127 mm)"
-    from: 4.80 fires/min
-    to: 6.00 fires/min
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"
+  - stat: "Secondary fire starts per minute against one target at its best bearing, every group, every shell hitting"
+    from: 13.85 fires/min
+    to: 17.32 fires/min
     because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"
+  - stat: "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting (234 mm)"
+    from: 11.45 fires/min
+    to: 14.32 fires/min
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
+  - stat: "Secondary fire starts per minute of one gun group against one target at its best bearing, every shell hitting (127 mm)"
+    from: 2.40 fires/min
+    to: 3.00 fires/min
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"
+  - stat: "Secondary fire starts per minute with every mount firing at once: a ceiling no single target sees"
+    from: 27.71 fires/min
+    to: 34.64 fires/min
+    because:
+      - "Combat Instructions: Modified Secondary Munitions x0.8 (-2.2)"
       - "Combat Instructions: Modified Secondary Munitions x0.8 (-1)"

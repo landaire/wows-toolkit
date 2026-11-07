@@ -1,15 +1,212 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 646
+assertion_line: 943
 expression: fire_rates(name)
 ---
 total:
   stat: "fire starts per minute, all armament"
   unit: fires/min
   builds:
-    base: 29.87
+    base:
+      fires_per_minute: 24.11
+      bearing: 90
+      all_mounts_ceiling: 29.87
+      by_bearing:
+        - bearing: 0
+          starboard: 12.54
+          port: 12.54
+        - bearing: 30
+          starboard: 22.67
+          port: 22.67
+        - bearing: 45
+          starboard: 24.11
+          port: 24.11
+        - bearing: 60
+          starboard: 24.11
+          port: 24.11
+        - bearing: 90
+          starboard: 24.11
+          port: 24.11
+        - bearing: 120
+          starboard: 24.11
+          port: 24.11
+        - bearing: 135
+          starboard: 24.11
+          port: 24.11
+        - bearing: 150
+          starboard: 16.85
+          port: 16.85
+        - bearing: 180
+          starboard: 12.54
+          port: 12.54
     best:
-      value: 36.53
+      value:
+        fires_per_minute: 27.34
+        bearing: 90
+        all_mounts_ceiling: 34.54
+        by_bearing:
+          - bearing: 0
+            starboard: 13.43
+            port: 13.43
+          - bearing: 30
+            starboard: 25.54
+            port: 25.54
+          - bearing: 45
+            starboard: 27.34
+            port: 27.34
+          - bearing: 60
+            starboard: 27.34
+            port: 27.34
+          - bearing: 90
+            starboard: 27.34
+            port: 27.34
+          - bearing: 120
+            starboard: 27.34
+            port: 27.34
+          - bearing: 135
+            starboard: 27.34
+            port: 27.34
+          - bearing: 150
+            starboard: 18.83
+            port: 18.83
+          - bearing: 180
+            starboard: 13.43
+            port: 13.43
+      assumed:
+        - Demolition Expert
+        - Manual Secondary Battery Aiming
+        - Main Battery Modification 3
+      tier_fillers:
+        - AA Defense and ASW Expert
+        - Focus Fire Training
+    alternatives:
+      - label: without Demolition Expert
+        value:
+          fires_per_minute: 26.33
+          bearing: 90
+          all_mounts_ceiling: 32.73
+        assumed:
+          - Manual Secondary Battery Aiming
+          - Main Battery Modification 3
+        tier_fillers:
+          - Emergency Repair Specialist
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+      - label: without Manual Secondary Battery Aiming
+        value:
+          fires_per_minute: 26.62
+          bearing: 90
+          all_mounts_ceiling: 33.1
+        assumed:
+          - Demolition Expert
+          - Main Battery Modification 3
+      - label: without Main Battery Modification 3
+        value:
+          fires_per_minute: 25.73
+          bearing: 90
+          all_mounts_ceiling: 32.93
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+        tier_fillers:
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+      - label: with Inertia Fuse for HE Shells
+        value:
+          fires_per_minute: 17.54
+          bearing: 90
+          all_mounts_ceiling: 21.53
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+          - Main Battery Modification 3
+          - Inertia Fuse for HE Shells
+        tier_fillers:
+          - Focus Fire Training
+        note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+      - label: with Close Quarters Combat active
+        value:
+          fires_per_minute: 28.83
+          bearing: 90
+          all_mounts_ceiling: 36.03
+        assumed:
+          - Demolition Expert
+          - Manual Secondary Battery Aiming
+          - Main Battery Modification 3
+          - Close Quarters Combat
+        tier_fillers:
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+        note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
+secondaries:
+  stat: "secondary fire starts per minute, every group"
+  unit: fires/min
+  builds:
+    base:
+      fires_per_minute: 5.76
+      bearing: 90
+      all_mounts_ceiling: 11.51
+      by_bearing:
+        - bearing: 0
+          starboard: 0
+          port: 0
+        - bearing: 30
+          starboard: 4.32
+          port: 4.32
+        - bearing: 45
+          starboard: 5.76
+          port: 5.76
+        - bearing: 60
+          starboard: 5.76
+          port: 5.76
+        - bearing: 90
+          starboard: 5.76
+          port: 5.76
+        - bearing: 120
+          starboard: 5.76
+          port: 5.76
+        - bearing: 135
+          starboard: 5.76
+          port: 5.76
+        - bearing: 150
+          starboard: 4.32
+          port: 4.32
+        - bearing: 180
+          starboard: 0
+          port: 0
+    best:
+      value:
+        fires_per_minute: 9
+        bearing: 90
+        all_mounts_ceiling: 17.99
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 6.75
+            port: 6.75
+          - bearing: 45
+            starboard: 9
+            port: 9
+          - bearing: 60
+            starboard: 9
+            port: 9
+          - bearing: 90
+            starboard: 9
+            port: 9
+          - bearing: 120
+            starboard: 9
+            port: 9
+          - bearing: 135
+            starboard: 9
+            port: 9
+          - bearing: 150
+            starboard: 6.75
+            port: 6.75
+          - bearing: 180
+            starboard: 0
+            port: 0
       assumed:
         - Demolition Expert
         - Manual Secondary Battery Aiming
@@ -19,7 +216,10 @@ total:
         - Focus Fire Training
     alternatives:
       - label: without Demolition Expert
-        value: 34.34
+        value:
+          fires_per_minute: 8
+          bearing: 90
+          all_mounts_ceiling: 15.99
         assumed:
           - Manual Secondary Battery Aiming
           - Auxiliary Armaments Modification 2
@@ -28,12 +228,18 @@ total:
           - AA Defense and ASW Expert
           - Focus Fire Training
       - label: without Manual Secondary Battery Aiming
-        value: 34.73
+        value:
+          fires_per_minute: 8.1
+          bearing: 90
+          all_mounts_ceiling: 16.19
         assumed:
           - Demolition Expert
           - Auxiliary Armaments Modification 2
       - label: without Auxiliary Armaments Modification 2
-        value: 32.93
+        value:
+          fires_per_minute: 7.2
+          bearing: 90
+          all_mounts_ceiling: 14.39
         assumed:
           - Demolition Expert
           - Manual Secondary Battery Aiming
@@ -41,7 +247,10 @@ total:
           - AA Defense and ASW Expert
           - Focus Fire Training
       - label: with Inertia Fuse for HE Shells
-        value: 22.72
+        value:
+          fires_per_minute: 5
+          bearing: 90
+          all_mounts_ceiling: 10
         assumed:
           - Demolition Expert
           - Manual Secondary Battery Aiming
@@ -50,17 +259,6 @@ total:
         tier_fillers:
           - Focus Fire Training
         note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
-      - label: with Close Quarters Combat active
-        value: 37.84
-        assumed:
-          - Demolition Expert
-          - Manual Secondary Battery Aiming
-          - Auxiliary Armaments Modification 2
-          - Close Quarters Combat
-        tier_fillers:
-          - AA Defense and ASW Expert
-          - Focus Fire Training
-        note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
 sources:
   - armament: main_battery
     source: main battery HE
@@ -70,13 +268,19 @@ sources:
       builds:
         base:
           fires_per_minute: 11.63
+          bearing: 90
           fire_chance_pct: 63
           projectiles_per_minute: 18.5
+          salvo_fire_chance_pct: 100
+          all_mounts_ceiling: 11.63
         best:
           value:
             fires_per_minute: 13.43
+            bearing: 90
             fire_chance_pct: 64
             projectiles_per_minute: 21
+            salvo_fire_chance_pct: 100
+            all_mounts_ceiling: 13.43
           assumed:
             - Demolition Expert
             - Main Battery Modification 3
@@ -84,22 +288,31 @@ sources:
           - label: without Demolition Expert
             value:
               fires_per_minute: 13.22
+              bearing: 90
               fire_chance_pct: 63
               projectiles_per_minute: 21
+              salvo_fire_chance_pct: 100
+              all_mounts_ceiling: 13.22
             assumed:
               - Main Battery Modification 3
           - label: without Main Battery Modification 3
             value:
               fires_per_minute: 11.82
+              bearing: 90
               fire_chance_pct: 64
               projectiles_per_minute: 18.5
+              salvo_fire_chance_pct: 100
+              all_mounts_ceiling: 11.82
             assumed:
               - Demolition Expert
           - label: with Inertia Fuse for HE Shells
             value:
               fires_per_minute: 6.82
+              bearing: 90
               fire_chance_pct: 32.5
               projectiles_per_minute: 21
+              salvo_fire_chance_pct: 95.7
+              all_mounts_ceiling: 6.82
             assumed:
               - Demolition Expert
               - Main Battery Modification 3
@@ -108,8 +321,11 @@ sources:
           - label: with Close Quarters Combat active
             value:
               fires_per_minute: 14.92
+              bearing: 90
               fire_chance_pct: 64
               projectiles_per_minute: 23.3
+              salvo_fire_chance_pct: 100
+              all_mounts_ceiling: 14.92
             assumed:
               - Demolition Expert
               - Main Battery Modification 3
@@ -125,14 +341,20 @@ sources:
       unit: fires/min
       builds:
         base:
-          fires_per_minute: 11.51
+          fires_per_minute: 5.76
+          bearing: 90
           fire_chance_pct: 8
-          projectiles_per_minute: 143.9
+          projectiles_per_minute: 72
+          salvo_fire_chance_pct: 48.7
+          all_mounts_ceiling: 11.51
         best:
           value:
-            fires_per_minute: 17.99
+            fires_per_minute: 9
+            bearing: 90
             fire_chance_pct: 9
-            projectiles_per_minute: 199.9
+            projectiles_per_minute: 100
+            salvo_fire_chance_pct: 53
+            all_mounts_ceiling: 17.99
           assumed:
             - Demolition Expert
             - Manual Secondary Battery Aiming
@@ -143,9 +365,12 @@ sources:
         alternatives:
           - label: without Demolition Expert
             value:
-              fires_per_minute: 15.99
+              fires_per_minute: 8
+              bearing: 90
               fire_chance_pct: 8
-              projectiles_per_minute: 199.9
+              projectiles_per_minute: 100
+              salvo_fire_chance_pct: 48.7
+              all_mounts_ceiling: 15.99
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
@@ -155,17 +380,23 @@ sources:
               - Focus Fire Training
           - label: without Manual Secondary Battery Aiming
             value:
-              fires_per_minute: 16.19
+              fires_per_minute: 8.1
+              bearing: 90
               fire_chance_pct: 9
-              projectiles_per_minute: 179.9
+              projectiles_per_minute: 90
+              salvo_fire_chance_pct: 53
+              all_mounts_ceiling: 16.19
             assumed:
               - Demolition Expert
               - Auxiliary Armaments Modification 2
           - label: without Auxiliary Armaments Modification 2
             value:
-              fires_per_minute: 14.39
+              fires_per_minute: 7.2
+              bearing: 90
               fire_chance_pct: 9
-              projectiles_per_minute: 159.9
+              projectiles_per_minute: 80
+              salvo_fire_chance_pct: 53
+              all_mounts_ceiling: 14.39
             assumed:
               - Demolition Expert
               - Manual Secondary Battery Aiming
@@ -174,9 +405,12 @@ sources:
               - Focus Fire Training
           - label: with Inertia Fuse for HE Shells
             value:
-              fires_per_minute: 10
+              fires_per_minute: 5
+              bearing: 90
               fire_chance_pct: 5
-              projectiles_per_minute: 199.9
+              projectiles_per_minute: 100
+              salvo_fire_chance_pct: 33.7
+              all_mounts_ceiling: 10
             assumed:
               - Demolition Expert
               - Manual Secondary Battery Aiming
@@ -202,4 +436,4 @@ sources:
             fire_chance_pct: 28
             projectiles_per_minute: 24
           assumed: []
-note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."
+note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. The headline is against one distant target at the bearing (degrees off the bow, clockwise) where the most fires start: the server gives each secondary mount its own target, and a gun fires at a target only when its mount turns to it outside its dead zones, so one target draws the mounts whose firing sectors cover its bearing, usually one side and the centerline. all_mounts_ceiling is every gun mount firing at once, which no single target sees. by_bearing gives the figure at standard bearings, starboard and its port mirror, on the base and best builds. salvo_fire_chance_pct = 1 - (1 - p)^n over the n bearing shells of one salvo. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."

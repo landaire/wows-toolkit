@@ -7,17 +7,23 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::FiresPerMinute;
 use wows_ship_stats::Derivation;
 use wows_ship_stats::DerivedRow;
 use wows_ship_stats::DerivedStat;
 use wows_ship_stats::Direction;
+use wows_ship_stats::FireBreakdown;
+use wows_ship_stats::FireInputs;
+use wows_ship_stats::MountCoverage;
 use wows_ship_stats::StockRanges;
 use wows_ship_stats::Triggers;
 use wows_ship_stats::Unit;
+use wows_ship_stats::fire_breakdown;
 use wows_ship_stats::resistance::merges_fire_zones;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::skill_grid_data::skill_grid;
@@ -39,6 +45,7 @@ use crate::armor::ThicknessSpan;
 use crate::armor::plates;
 use crate::armor::zone_spans;
 use crate::builds;
+use crate::builds::BestFit;
 use crate::builds::Better;
 use crate::builds::BuildValue;
 use crate::builds::Builds;
@@ -46,6 +53,7 @@ use crate::builds::Extract;
 use crate::builds::Planner;
 use crate::builds::StatAmount;
 use crate::builds::StatPlan;
+use crate::builds::round;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::fuzzy;
@@ -365,6 +373,11 @@ pub struct RankedShip {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meets: Option<ConditionMatch>,
 
+    /// For the fire start stats: fires against one target at the bearing
+    /// where the best-fit build starts the most, in total and per armament.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fires_by_armament: Option<FireBreakdown>,
+
     /// The row the value comes from when the stat has several, e.g. "main
     /// battery 483 mm HE".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -530,7 +543,7 @@ impl SearchStat {
 
         if key.starts_with("artillery.shells.") || key == "fires_per_minute.main_battery" {
             Some("per ammo type")
-        } else if key.starts_with("secondary.") || key == "fires_per_minute.secondary" {
+        } else if key.starts_with("secondary.") || key == "fires_per_minute.secondary_group" {
             Some("per secondary mount")
         } else if key.starts_with("aircraft.") || key == "fires_per_minute.aircraft" {
             Some("per aircraft, by GameParams name")
@@ -788,6 +801,10 @@ struct ShipSearch<'a> {
 
     /// Computed on first use.
     stock_ranges: OnceCell<StockRanges>,
+
+    /// Which gun mounts bear at each bearing, per module combination read,
+    /// when a condition counts only bearing mounts.
+    coverages: RefCell<Vec<(ShipUpgradeSelection, Option<Rc<MountCoverage>>)>>,
 }
 
 impl GameData {
@@ -929,10 +946,7 @@ impl GameData {
         };
 
         hits.sort_by(|(left_ship, left), (right_ship, right)| {
-            left.requires
-                .len()
-                .cmp(&right.requires.len())
-                .then_with(|| listing_order(left_ship, right_ship))
+            left.requires.len().cmp(&right.requires.len()).then_with(|| listing_order(left_ship, right_ship))
         });
 
         ConditionSearch { hits, searched_without_skills, unmatched_qualifiers }
@@ -953,7 +967,9 @@ impl GameData {
         let mut lacking_stat = 0;
         for (ship, meets) in candidates {
             match self.rank_builds(ship, rank, &row_names) {
-                Ok(Some(builds)) => entries.push(RankEntry { ship, builds, meets }),
+                Ok(Some(RankedBuilds { builds, fires_by_armament })) => {
+                    entries.push(RankEntry { ship, builds, fires_by_armament, meets })
+                }
                 Ok(None) => lacking_stat += 1,
                 Err(error) => undetermined.push(UndeterminedShip {
                     ship: ship.listing_label(),
@@ -995,7 +1011,7 @@ impl GameData {
         let ships: Vec<RankedShip> = entries
             .into_iter()
             .zip(placements)
-            .map(|(RankEntry { ship, builds, meets }, (position, tied))| RankedShip {
+            .map(|(RankEntry { ship, builds, fires_by_armament, meets }, (position, tied))| RankedShip {
                 rank: position,
                 ship: ship.listing_label(),
                 value: format_value(builds.best.value.value, unit),
@@ -1004,6 +1020,7 @@ impl GameData {
                 tier_fillers: builds.best.tier_fillers,
                 tied,
                 meets,
+                fires_by_armament,
                 row: builds.best.value.row.and_then(|row| row_names.label(self, rank.stat, row)),
             })
             .collect();
@@ -1014,12 +1031,9 @@ impl GameData {
 
     /// Base and best-fit build value of the rank stat, `None` when the ship
     /// lacks it.
-    fn rank_builds(
-        &self,
-        ship: &Ship,
-        rank: &Rank,
-        row_names: &RowNames,
-    ) -> Result<Option<Builds<Amount>>, QueryError> {
+    fn rank_builds(&self, ship: &Ship, rank: &Rank, row_names: &RowNames) -> Result<Option<RankedBuilds>, QueryError> {
+        let plain =
+            |builds: Option<Builds<Amount>>| builds.map(|builds| RankedBuilds { builds, fires_by_armament: None });
         match rank.stat {
             SearchStat::Card(stat) => {
                 let planner = Planner::new(self, ship);
@@ -1031,12 +1045,18 @@ impl GameData {
                     extreme(rank.order, values)
                 };
 
-                planned_builds(&planner, rank, &extract)
+                planned_builds(&planner, rank, &extract).map(plain)
             }
             SearchStat::Derived(stat) => {
                 let stock_ranges = self.stock_ranges(ship)?;
                 let planner = Planner::new(self, ship);
                 let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+                let coverages = if stat.reads_mount_bearings() || stat.is_fire_starts() {
+                    self.mount_coverages(ship, planner.selections())?
+                } else {
+                    Vec::new()
+                };
+                let coverage = |selection: usize| coverages.get(selection).and_then(|coverage| coverage.as_deref());
                 let extract = |outcome: &builds::Outcome| {
                     let rows = Derivation {
                         ship: &ship.param,
@@ -1046,6 +1066,7 @@ impl GameData {
                         merges_fire_zones: outcome.merges_fire_zones,
                         stock_ranges,
                         provider: self.provider(),
+                        coverage: if stat.reads_mount_bearings() { coverage(outcome.selection) } else { None },
                     }
                     .rows();
                     let caliber = (rank.stat.shell_battery() == Some(Battery::Main))
@@ -1058,15 +1079,48 @@ impl GameData {
                     extreme(rank.order, values)
                 };
 
-                planned_builds(&planner, rank, &extract)
+                let fire_sources = |outcome: &builds::Outcome| {
+                    FireInputs {
+                        ship: &ship.param,
+                        selection: selections[outcome.selection],
+                        stats: &outcome.stats,
+                        modifiers: &outcome.bundle,
+                        provider: self.provider(),
+                    }
+                    .sources()
+                };
+
+                let Some(plan) = rank_plan(&planner, rank, &extract)? else {
+                    // Gun fire starts against one target need the mount facings.
+                    if stat.reads_mount_bearings() && coverages.iter().all(Option::is_none) {
+                        let armaments = stat.bearing_armaments();
+                        let sources = fire_sources(&*planner.bare(0)?);
+                        if sources.iter().any(|source| armaments.contains(&source.armament)) {
+                            return Err(QueryError::HullFacingsUnavailable { ship: ship.name.clone() });
+                        }
+                    }
+                    return Ok(None);
+                };
+                if !stat.is_fire_starts() {
+                    return planner.best(&plan).map(plain);
+                }
+
+                let Some(BestFit { builds, outcome: best }) = planner.best_fit(&plan)? else {
+                    return Ok(None);
+                };
+                let sources = fire_sources(&best);
+                let fires_by_armament =
+                    coverage(best.selection).and_then(|coverage| fire_breakdown(&sources, coverage)).map(rounded);
+
+                Ok(Some(RankedBuilds { builds, fires_by_armament }))
             }
             SearchStat::Armor { zone, bound } => {
                 let value = armor_value(&zone_spans(&plates(ship)), zone, bound);
-                Ok(value.map(|value| {
+                Ok(plain(value.map(|value| {
                     let amount = Amount { value, row: None };
                     let best = BuildValue { value: amount, assumed: Vec::new(), tier_fillers: Vec::new() };
                     Builds { base: amount, best, alternatives: Vec::new() }
-                }))
+                })))
             }
             SearchStat::Ricochet { ammo, bound } => {
                 let planner = Planner::new(self, ship);
@@ -1078,7 +1132,7 @@ impl GameData {
                     extreme(rank.order, values)
                 };
 
-                planned_builds(&planner, rank, &extract)
+                planned_builds(&planner, rank, &extract).map(plain)
             }
         }
     }
@@ -1097,6 +1151,7 @@ impl<'a> ShipSearch<'a> {
             failures: RefCell::default(),
             rows_seen: RefCell::new(vec![false; conditions.len()]),
             stock_ranges: OnceCell::new(),
+            coverages: RefCell::default(),
         }
     }
 
@@ -1501,6 +1556,7 @@ impl<'a> ShipSearch<'a> {
         let effects = self.game.effective_modifiers(self.ship, &loadout)?;
         let stats =
             effects.build.stats(&self.ship.param, &selection, self.game.provider()).map_err(build_failed(self.ship))?;
+        let coverage = self.coverage(&selection)?;
         let derived = Derivation {
             ship: &self.ship.param,
             selection: &selection,
@@ -1509,6 +1565,7 @@ impl<'a> ShipSearch<'a> {
             merges_fire_zones: effects.build.merges_fire_zones,
             stock_ranges: self.stock_ranges()?,
             provider: self.game.provider(),
+            coverage: coverage.as_deref(),
         }
         .rows();
 
@@ -1531,6 +1588,26 @@ impl<'a> ShipSearch<'a> {
         let ranges = self.game.stock_ranges(self.ship)?;
 
         Ok(*self.stock_ranges.get_or_init(|| ranges))
+    }
+
+    /// Mount coverage of `selection`, read only when a condition counts the
+    /// mounts bearing on one target.
+    fn coverage(&self, selection: &ShipUpgradeSelection) -> Result<Option<Rc<MountCoverage>>, QueryError> {
+        let needed = self
+            .conditions
+            .iter()
+            .any(|condition| matches!(condition.stat, SearchStat::Derived(stat) if stat.reads_mount_bearings()));
+        if !needed {
+            return Ok(None);
+        }
+        if let Some((_, coverage)) = self.coverages.borrow().iter().find(|(known, _)| known == selection) {
+            return Ok(coverage.as_ref().map(Rc::clone));
+        }
+
+        let coverage = self.game.mount_coverages(self.ship, std::iter::once(selection))?.pop().flatten();
+        self.coverages.borrow_mut().push((selection.clone(), coverage.as_ref().map(Rc::clone)));
+
+        Ok(coverage)
     }
 
     fn explain(&self, items: &[Item<'_>]) -> Result<ShipStatsProvenance, QueryError> {
@@ -1668,7 +1745,15 @@ impl Rank {
 struct RankEntry<'a> {
     ship: &'a Ship,
     builds: Builds<Amount>,
+    fires_by_armament: Option<FireBreakdown>,
     meets: Option<ConditionMatch>,
+}
+
+/// The rank stat's builds on one ship, with each armament's share for the
+/// fire start stats.
+struct RankedBuilds {
+    builds: Builds<Amount>,
+    fires_by_armament: Option<FireBreakdown>,
 }
 
 /// A stat value in its search `Unit`, for the build planner, with the row it
@@ -2078,6 +2163,19 @@ fn planned_builds(
     rank: &Rank,
     extract: Extract<'_, Amount>,
 ) -> Result<Option<Builds<Amount>>, QueryError> {
+    match rank_plan(planner, rank, extract)? {
+        Some(plan) => planner.best(&plan),
+        None => Ok(None),
+    }
+}
+
+/// The plan that ranks a ship by `rank`, starting from the first module
+/// combination that has the stat. `None` when none has it.
+fn rank_plan<'f>(
+    planner: &Planner<'_>,
+    rank: &Rank,
+    extract: Extract<'f, Amount>,
+) -> Result<Option<StatPlan<'f, Amount>>, QueryError> {
     let mut base_selection = None;
     for selection in 0..planner.selections().count() {
         if extract(&*planner.bare(selection)?).is_some() {
@@ -2090,9 +2188,21 @@ fn planned_builds(
     };
 
     let plan = StatPlan::new(rank.stat.name(), rank.order.better(), extract).on_selection(base_selection);
-    let plan = if rank.stat.is_consumable() { plan.for_consumable() } else { plan };
 
-    planner.best(&plan)
+    Ok(Some(if rank.stat.is_consumable() { plan.for_consumable() } else { plan }))
+}
+
+/// `breakdown` with its rates rounded for display.
+fn rounded(breakdown: FireBreakdown) -> FireBreakdown {
+    let round_fires = |fires: FiresPerMinute| FiresPerMinute::new(round(fires.value()));
+
+    FireBreakdown {
+        bearing: breakdown.bearing,
+        total: round_fires(breakdown.total),
+        main_battery: breakdown.main_battery.map(round_fires),
+        secondary: breakdown.secondary.map(round_fires),
+        aircraft: breakdown.aircraft.map(round_fires),
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,8 @@
 //! limits count.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::rc::Rc;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,6 +19,9 @@ use wows_core::units::Meters;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
+use wows_ship_stats::Bearing;
+use wows_ship_stats::MountCoverage;
+use wows_ship_stats::bearing::mount_bears;
 use wows_ship_stats::mounts::aiming_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -91,33 +96,6 @@ pub struct FiringArcsArgs {
     pub range_km: Option<Km>,
 }
 
-/// A target bearing off the bow in whole degrees, clockwise, 0 to 359.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Bearing(u16);
-
-impl Bearing {
-    pub fn new(degrees: u16) -> Self {
-        Self(degrees % 360)
-    }
-
-    pub fn degrees(self) -> u16 {
-        self.0
-    }
-
-    fn all() -> impl Iterator<Item = Bearing> {
-        (0..360).map(Bearing)
-    }
-}
-
-impl Serialize for Bearing {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u16(self.0)
-    }
-}
-
 /// Bearings from `from` clockwise to `to`, both included. Serializes as
 /// "from-to", or as one number when both ends are equal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,7 +112,7 @@ impl Serialize for BearingRange {
         if self.from == self.to {
             self.from.serialize(serializer)
         } else {
-            serializer.serialize_str(&format!("{}-{}", self.from.0, self.to.0))
+            serializer.serialize_str(&format!("{}-{}", self.from.degrees(), self.to.degrees()))
         }
     }
 }
@@ -175,7 +153,7 @@ impl Arc {
             Self::Starboard => 90,
             Self::Port => 270,
         };
-        let difference = (bearing.0 + 360 - centre) % 360;
+        let difference = (bearing.degrees() + 360 - centre) % 360;
 
         difference.min(360 - difference)
     }
@@ -380,12 +358,9 @@ pub(crate) struct OrientedMount<'a> {
 }
 
 impl OrientedMount<'_> {
-    /// Whether the mount fires at a distant target on `bearing`. Mount yaw
-    /// limits are measured in the hardpoint frame, clockwise from above.
+    /// Whether the mount fires at a distant target on `bearing`.
     fn bears(&self, bearing: Bearing) -> bool {
-        let local = Degrees::new(f32::from(bearing.0) - self.facing.value());
-
-        self.mount.can_fire_at(local).unwrap_or(false)
+        mount_bears(self.mount, self.facing, bearing)
     }
 }
 
@@ -587,6 +562,37 @@ impl GameData {
         Ok(model.hardpoints.iter().map(|hardpoint| (hardpoint.name.clone(), hardpoint.yaw())).collect())
     }
 
+    /// Which gun mounts bear at each bearing, for each module combination in
+    /// `selections`. Every entry is `None` when one of them lacks facings, so
+    /// one-target figures are never compared with all-mount figures across
+    /// combinations.
+    pub(crate) fn mount_coverages<'s>(
+        &self,
+        ship: &Ship,
+        selections: impl Iterator<Item = &'s ShipUpgradeSelection>,
+    ) -> Result<Vec<Option<Rc<MountCoverage>>>, QueryError> {
+        let mut by_hull: HashMap<Option<String>, Option<HashMap<String, Degrees>>> = HashMap::new();
+        let mut coverages = Vec::new();
+        for selection in selections {
+            let facings = match by_hull.entry(selection.hull.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => entry.insert(match self.hardpoint_facings(ship, selection) {
+                    Ok(facings) => Some(facings),
+                    // Without a readable armor extract the bearing figures are left out.
+                    Err(QueryError::HullFacingsUnavailable { .. } | QueryError::ArmorUnreadable { .. }) => None,
+                    Err(error) => return Err(error),
+                }),
+            };
+            let coverage = facings.as_ref().and_then(|facings| MountCoverage::new(&ship.param, selection, facings));
+            coverages.push(coverage.map(Rc::new));
+        }
+        if coverages.iter().any(Option::is_none) {
+            coverages.fill(None);
+        }
+
+        Ok(coverages)
+    }
+
     fn reload_and_fire_changes(
         &self,
         ship: &Ship,
@@ -778,7 +784,7 @@ pub(crate) fn weapon_mounts<'a>(
 }
 
 /// The aiming mounts of one weapon, each with the facing of its hardpoint.
-pub(crate) fn oriented_mounts<'a>(
+fn oriented_mounts<'a>(
     ship: &'a Ship,
     selection: &ShipUpgradeSelection,
     weapon: Weapon,
@@ -797,29 +803,14 @@ pub(crate) fn oriented_mounts<'a>(
         .collect()
 }
 
-/// Per arc, each distinct set of mounts that bear together at one bearing
-/// inside it, as indices into `mounts`.
-pub(crate) fn bearing_sets(mounts: &[OrientedMount<'_>]) -> PerArc<Vec<Vec<usize>>> {
-    PerArc::from_fn(|arc| {
-        let mut sets: Vec<Vec<usize>> = Vec::new();
-        for bearing in arc.bearings() {
-            let set: Vec<usize> = (0..mounts.len()).filter(|index| mounts[*index].bears(bearing)).collect();
-            if !set.is_empty() && !sets.contains(&set) {
-                sets.push(set);
-            }
-        }
-
-        sets
-    })
-}
-
 fn battery_arcs(weapon: Weapon, mounts: &[OrientedMount<'_>], ordnance: &Ordnance) -> BatteryArcs {
     let total: u32 = mounts.iter().map(|mount| mount.barrels).sum();
     let on_target: Vec<u32> = Bearing::all()
         .map(|bearing| mounts.iter().filter(|mount| mount.bears(bearing)).map(|mount| mount.barrels).sum())
         .collect();
 
-    let all: Vec<Bearing> = Bearing::all().filter(|bearing| on_target[usize::from(bearing.0)] == total).collect();
+    let all: Vec<Bearing> =
+        Bearing::all().filter(|bearing| on_target[usize::from(bearing.degrees())] == total).collect();
     let all_barrels_bear = if all.is_empty() { AllBarrels::Never } else { AllBarrels::At(ranges(&all)) };
 
     let ammo = ordnance
@@ -912,7 +903,7 @@ fn arc(from: u16, to: u16) -> Vec<Bearing> {
 }
 
 fn coverage(on_target: &[u32], arc: &[Bearing]) -> ArcCoverage {
-    let at = |bearing: &Bearing| on_target[usize::from(bearing.0)];
+    let at = |bearing: &Bearing| on_target[usize::from(bearing.degrees())];
     let barrels = arc.iter().map(at).max().unwrap_or(0);
     let fewest_barrels = arc.iter().map(at).min().unwrap_or(0);
     let peak: Vec<Bearing> = arc.iter().copied().filter(|bearing| barrels > 0 && at(bearing) == barrels).collect();
@@ -926,14 +917,14 @@ fn ranges(bearings: &[Bearing]) -> Vec<BearingRange> {
     let mut out: Vec<BearingRange> = Vec::new();
     for bearing in bearings {
         match out.last_mut() {
-            Some(range) if Bearing::new(range.to.0 + 1) == *bearing => range.to = *bearing,
+            Some(range) if Bearing::new(range.to.degrees() + 1) == *bearing => range.to = *bearing,
             _ => out.push(BearingRange { from: *bearing, to: *bearing }),
         }
     }
 
     if out.len() > 1
         && let (Some(first), Some(last)) = (out.first().copied(), out.last().copied())
-        && Bearing::new(last.to.0 + 1) == first.from
+        && Bearing::new(last.to.degrees() + 1) == first.from
     {
         out.pop();
         out[0].from = last.from;
@@ -973,7 +964,7 @@ mod tests {
                 .find(|(mount, _)| mount.hp_name() == hardpoint)
                 .expect("secondary mount");
             let oriented = OrientedMount { mount, facing: facings[hardpoint], barrels };
-            (oriented.bears(Bearing(90)), oriented.bears(Bearing(270)))
+            (oriented.bears(Bearing::new(90)), oriented.bears(Bearing::new(270)))
         };
 
         assert_eq!(side("HP_AGS_1"), (false, true));
@@ -986,21 +977,21 @@ mod tests {
         let starboard = Arc::Starboard.bearings();
 
         assert_eq!(bow.len(), 59);
-        assert_eq!((bow.first(), bow.last()), (Some(&Bearing(331)), Some(&Bearing(29))));
-        assert_eq!((starboard.first(), starboard.last()), (Some(&Bearing(30)), Some(&Bearing(150))));
-        assert_eq!(Arc::Bow.off_centre(Bearing(331)), 29);
-        assert_eq!(Arc::Port.off_centre(Bearing(300)), 30);
+        assert_eq!((bow.first(), bow.last()), (Some(&Bearing::new(331)), Some(&Bearing::new(29))));
+        assert_eq!((starboard.first(), starboard.last()), (Some(&Bearing::new(30)), Some(&Bearing::new(150))));
+        assert_eq!(Arc::Bow.off_centre(Bearing::new(331)), 29);
+        assert_eq!(Arc::Port.off_centre(Bearing::new(300)), 30);
     }
 
     #[test]
     fn ranges_join_a_run_through_zero() {
-        let joined = ranges(&[Bearing(0), Bearing(1), Bearing(2), Bearing(10), Bearing(358), Bearing(359)]);
+        let joined = ranges(&[0, 1, 2, 10, 358, 359].map(Bearing::new));
 
         assert_eq!(
             joined,
             vec![
-                BearingRange { from: Bearing(358), to: Bearing(2) },
-                BearingRange { from: Bearing(10), to: Bearing(10) }
+                BearingRange { from: Bearing::new(358), to: Bearing::new(2) },
+                BearingRange { from: Bearing::new(10), to: Bearing::new(10) }
             ]
         );
     }
@@ -1014,7 +1005,7 @@ mod tests {
             expected_fires: 0.3,
             no_fire: 0.9_f32.powi(3),
         };
-        let salvo = arc_salvo(Some(Bearing(90)), [mount, mount].into_iter());
+        let salvo = arc_salvo(Some(Bearing::new(90)), [mount, mount].into_iter());
 
         assert_eq!(salvo.barrels, 6);
         assert_eq!(
