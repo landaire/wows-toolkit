@@ -42,7 +42,76 @@ use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::VehicleRelation;
 
-const REPLAY_INDEX_REVISION: i64 = 1;
+/// Indexer revision stamped on every replay row a build of the toolkit writes.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct IndexRevision(i64);
+
+const REPLAY_INDEX_REVISION: IndexRevision = IndexRevision(2);
+
+/// Client builds a reparse rule applies to, compared with the replay's
+/// `version_build`.
+enum ReparseBuilds {
+    All,
+    /// This build and every later one.
+    From(u32),
+}
+
+impl ReparseBuilds {
+    fn contains(&self, build: Option<u32>) -> bool {
+        match *self {
+            Self::All => true,
+            Self::From(first) => build.is_some_and(|build| build >= first),
+        }
+    }
+}
+
+/// Rows of `builds` written by an indexer older than `fixed_in` are parsed again.
+struct ReparseRule {
+    builds: ReparseBuilds,
+    fixed_in: IndexRevision,
+}
+
+/// When a parser fix changes what replays of some builds index to, raise
+/// [`REPLAY_INDEX_REVISION`] and add a rule naming those builds and the new
+/// revision. Rows outside every rule stay current at the revision they have.
+const REPARSE_RULES: &[ReparseRule] = &[
+    // Rows written before revisions were recorded.
+    ReparseRule { builds: ReparseBuilds::All, fixed_in: IndexRevision(1) },
+    // 15.10 changed the ship config's modernization layout. The bound is one past
+    // the newest known 15.9 build (13357625), so every 15.10 build is covered.
+    ReparseRule { builds: ReparseBuilds::From(13_357_626), fixed_in: IndexRevision(2) },
+];
+
+fn needs_reparse(written_by: IndexRevision, build: Option<u32>) -> bool {
+    REPARSE_RULES.iter().any(|rule| written_by < rule.fixed_in && rule.builds.contains(build))
+}
+
+/// A replay row with what decides whether it must be parsed again.
+struct RecordRevision {
+    path: String,
+    written_by: IndexRevision,
+    build: Option<u32>,
+}
+
+async fn record_revisions(pool: &SqlitePool, source: SourceId) -> Result<Vec<RecordRevision>, IndexError> {
+    let rows = sqlx::query(
+        "SELECT r.replay_path, r.index_revision, m.version_build FROM replay_record r \
+         LEFT JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
+    )
+    .bind(source.0)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let build: Option<i64> = row.try_get("version_build")?;
+            Ok(RecordRevision {
+                path: row.try_get("replay_path")?,
+                written_by: IndexRevision(row.try_get("index_revision")?),
+                build: build.and_then(|build| u32::try_from(build).ok()),
+            })
+        })
+        .collect()
+}
 
 /// The column list every query mapped by [`row_to_match_hit`] selects, so the
 /// two callers cannot drift apart.
@@ -674,7 +743,7 @@ pub async fn upsert_record_with_mode<'e>(
         .bind(r.self_pr)
         .bind(r.results_available)
         .bind(r.indexed_at.as_second())
-        .bind(REPLAY_INDEX_REVISION)
+        .bind(REPLAY_INDEX_REVISION.0)
         .execute(executor)
         .await?;
     Ok(())
@@ -690,26 +759,25 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
 
 /// Absolute replay paths current enough for the startup pass to skip.
 ///
-/// An indexer revision change leaves existing rows readable but causes replay
-/// files still on disk to be parsed and upserted once.
+/// A row that [`REPARSE_RULES`] marks stale stays readable, but its replay file,
+/// if still on disk, is parsed and upserted once.
 pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Result<HashSet<String>, IndexError> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1 AND index_revision = ?2")
-            .bind(source.0)
-            .bind(REPLAY_INDEX_REVISION)
-            .fetch_all(pool)
-            .await?;
-    Ok(rows.into_iter().map(|(p,)| p).collect())
+    Ok(record_revisions(pool, source)
+        .await?
+        .into_iter()
+        .filter(|record| !needs_reparse(record.written_by, record.build))
+        .map(|record| record.path)
+        .collect())
 }
 
 async fn stale_paths_under(pool: &SqlitePool, source: SourceId, root: &Path) -> Result<Vec<String>, IndexError> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT replay_path FROM replay_record WHERE source_id = ?1 AND index_revision != ?2")
-            .bind(source.0)
-            .bind(REPLAY_INDEX_REVISION)
-            .fetch_all(pool)
-            .await?;
-    Ok(rows.into_iter().map(|(path,)| path).filter(|path| Path::new(path).parent() == Some(root)).collect())
+    Ok(record_revisions(pool, source)
+        .await?
+        .into_iter()
+        .filter(|record| needs_reparse(record.written_by, record.build))
+        .map(|record| record.path)
+        .filter(|path| Path::new(path).parent() == Some(root))
+        .collect())
 }
 
 /// Whether a live replay directly in `root` needs the current parser to refresh it.
@@ -725,7 +793,7 @@ pub async fn mark_replay_records_current(pool: &SqlitePool, source: SourceId, ro
     let mut tx = pool.begin().await?;
     for path in stale {
         sqlx::query("UPDATE replay_record SET index_revision = ?1 WHERE source_id = ?2 AND replay_path = ?3")
-            .bind(REPLAY_INDEX_REVISION)
+            .bind(REPLAY_INDEX_REVISION.0)
             .bind(source.0)
             .bind(path)
             .execute(&mut *tx)

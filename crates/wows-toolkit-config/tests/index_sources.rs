@@ -246,6 +246,35 @@ async fn an_old_index_revision_is_reparsed_once_within_the_scanned_directory() {
     assert!(!current.contains("D:/old/replays/b.wowsreplay"), "a directory that was not scanned stays stale");
 }
 
+#[tokio::test]
+async fn a_reparse_rule_refreshes_only_the_builds_it_names() {
+    const BUILD_15_9: u32 = 13_357_625;
+    const BUILD_15_10: u32 = 13_533_378;
+
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let root = Path::new("C:/wows/replays");
+    let source = query::ensure_default_source(&pool, root, now).await.unwrap();
+    let older = sample_record(100, source, "C:/wows/replays/15_9.wowsreplay");
+    let newer = sample_record(200, source, "C:/wows/replays/15_10.wowsreplay");
+    query::upsert_match(&pool, &ObjectiveMatch { version_build: Some(BUILD_15_9), ..sample_match(100) }).await.unwrap();
+    query::upsert_match(&pool, &ObjectiveMatch { version_build: Some(BUILD_15_10), ..sample_match(200) })
+        .await
+        .unwrap();
+    query::upsert_record(&pool, &older).await.unwrap();
+    query::upsert_record(&pool, &newer).await.unwrap();
+    // Both rows as the 1.0.3 indexer left them.
+    sqlx::query("UPDATE replay_record SET index_revision = 1").execute(&pool).await.unwrap();
+
+    let current = query::record_paths_in_source(&pool, source).await.unwrap();
+    assert!(current.contains("C:/wows/replays/15_9.wowsreplay"), "a 15.9 row needs no reparse");
+    assert!(!current.contains("C:/wows/replays/15_10.wowsreplay"), "a 15.10 row from the old indexer is reparsed");
+
+    query::upsert_record(&pool, &newer).await.unwrap();
+    assert!(query::record_paths_in_source(&pool, source).await.unwrap().contains("C:/wows/replays/15_10.wowsreplay"));
+    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
+}
+
 async fn store_stale_ship(pool: &SqlitePool) {
     query::upsert_match(pool, &sample_match(100)).await.unwrap();
     let mut stale = sample_vehicle(100);
