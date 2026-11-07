@@ -319,6 +319,10 @@ pub struct RibbonCount {
 pub struct ActivityFeedEntry {
     pub clock: GameClock,
     pub kind: ActivityFeedKind,
+    /// How far the row has eased into place, from 0 (just arrived) to 1
+    /// (settled). See [`crate::activity_feed::reveal`].
+    pub reveal: f32,
+    pub shade: RowShade,
 }
 
 /// The payload of an activity feed entry.
@@ -327,6 +331,21 @@ pub struct ActivityFeedEntry {
 pub enum ActivityFeedKind {
     Kill(KillFeedEntry),
     Chat(ChatEntry),
+}
+
+/// Background band of an activity feed row. Taken from the entry's place in
+/// the whole feed so a row keeps its band as newer rows push it along.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum RowShade {
+    Plain,
+    Banded,
+}
+
+impl RowShade {
+    pub fn from_feed_index(index: usize) -> Self {
+        if index.is_multiple_of(2) { Self::Plain } else { Self::Banded }
+    }
 }
 
 /// A single weapon-group damage entry for the stats panel breakdown.

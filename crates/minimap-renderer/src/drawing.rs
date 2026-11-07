@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use ab_glyph::Font;
@@ -23,10 +24,17 @@ use tiny_skia::Transform;
 use std::sync::Arc;
 
 use crate::STATS_PANEL_WIDTH;
+use crate::activity_feed as feed;
+use crate::activity_feed::FeedIcon;
+use crate::activity_feed::FlowItem;
+use crate::activity_feed::FlowLayout;
+use crate::activity_feed::PlacedContent;
+use crate::activity_feed::RowExtent;
 use crate::assets::GameFonts;
 
 use crate::SHIP_ICON_OUTLINE_THICKNESS;
 
+use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::AnnotationShape;
 use crate::draw_command::ChatEntry;
@@ -34,6 +42,7 @@ use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RenderTarget;
+use crate::draw_command::RowShade;
 use crate::draw_command::ShipVisibility;
 use wows_replays::types::ElapsedClock;
 use wt_translations::DefaultTextResolver;
@@ -1084,6 +1093,193 @@ fn truncate_to_fit(text: &str, max_width: u32, scale: PxScale, font: &impl Font)
         truncated = candidate;
     }
     format!("{}{}", truncated, ellipsis)
+}
+
+/// Text style of a run in the activity feed.
+#[derive(Clone, Copy)]
+struct FeedStyle<'f> {
+    font: &'f FontArc,
+    scale: PxScale,
+    color: [u8; 3],
+}
+
+struct FeedRowLayout<'e, 'f> {
+    header: FlowLayout<'e, FeedStyle<'f>, FeedIcon<'e>>,
+    message: Option<FlowLayout<'e, FeedStyle<'f>, FeedIcon<'e>>>,
+}
+
+impl FeedRowLayout<'_, '_> {
+    fn height(&self) -> f32 {
+        feed::row_height(self.header.lines, self.message.as_ref().map(|message| message.lines))
+    }
+}
+
+/// Icons and fonts the activity feed draws with.
+struct FeedAssets<'a> {
+    fonts: &'a GameFonts,
+    ship_icons: &'a HashMap<String, ShipIcon>,
+    death_cause_icons: &'a HashMap<String, RgbaImage>,
+}
+
+impl<'a> FeedAssets<'a> {
+    fn icon(&self, icon: &FeedIcon<'_>) -> Option<&'a RgbaImage> {
+        match icon {
+            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => self.ship_icons.get(*species),
+            FeedIcon::DeathCause(kill) => self.death_cause_icons.get(death_cause_icon_key(kill.cause.as_ref())),
+        }
+    }
+
+    fn layout_row<'e>(&self, entry: &'e ActivityFeedEntry, inner_w: f32) -> FeedRowLayout<'e, 'a> {
+        let fonts = self.fonts;
+        let measure = |style: FeedStyle<'_>, text: &str| text_size(style.scale, style.font, text).0 as f32;
+
+        let header_items = feed::header_items(
+            &entry.kind,
+            feed::ICON_SIZE,
+            |text, color| {
+                let (font, scale) = fonts.font_and_scale(text, feed::NAME_FONT_SIZE);
+                FeedStyle { font, scale, color }
+            },
+            |icon| self.icon(icon).is_some(),
+        );
+        let header = feed::flow(&header_items, inner_w, feed::ITEM_GAP, measure);
+
+        let message = match &entry.kind {
+            ActivityFeedKind::Chat(chat) => {
+                let font = match chat.font_hint {
+                    FontHint::Primary => &fonts.primary,
+                    FontHint::Fallback(idx) => fonts.fallbacks.get(idx).unwrap_or(&fonts.primary),
+                };
+                let style = FeedStyle { font, scale: fonts.scale(feed::MESSAGE_FONT_SIZE), color: chat.message_color };
+                let items: [FlowItem<'e, FeedStyle<'a>, FeedIcon<'e>>; 1] =
+                    [FlowItem::Text { text: Cow::Borrowed(&chat.message), style }];
+                Some(feed::flow(&items, inner_w, feed::ITEM_GAP, measure))
+            }
+            ActivityFeedKind::Kill(_) => None,
+        };
+
+        FeedRowLayout { header, message }
+    }
+
+    fn draw_row(&self, pm: &mut Pixmap, layout: &FeedRowLayout<'_, '_>, shade: RowShade, top: f32, width: f32) {
+        if shade == RowShade::Banded {
+            draw_filled_rect(
+                pm,
+                feed::BAND_INSET,
+                top,
+                width - 2.0 * feed::BAND_INSET,
+                layout.height(),
+                feed::BANDED_ROW_RGB,
+                feed::BANDED_ROW_ALPHA,
+            );
+        }
+
+        let lines_top = top + feed::ROW_PADDING;
+        for piece in &layout.header.pieces {
+            let x = feed::SIDE_PADDING + piece.x;
+            let line_top = lines_top + piece.line as f32 * feed::NAME_LINE_HEIGHT;
+            match &piece.content {
+                PlacedContent::Text { text, style } => {
+                    let (_, text_h) = text_size(style.scale, style.font, text);
+                    let text_y = line_top + (feed::NAME_LINE_HEIGHT - text_h as f32) / 2.0;
+                    draw_text_shadow(pm, style.color, x as i32, text_y as i32, style.scale, style.font, text);
+                }
+                PlacedContent::Icon { icon } => {
+                    let Some(image) = self.icon(icon) else { continue };
+                    let icon_y = line_top + (feed::NAME_LINE_HEIGHT - feed::ICON_SIZE) / 2.0;
+                    let size = feed::ICON_SIZE as i32;
+                    match *icon {
+                        // Friendly ships face left, enemies right.
+                        FeedIcon::KillShip { color, friendly, .. } => {
+                            draw_kill_feed_icon(pm, image, x as i32, icon_y as i32, size, color, !friendly);
+                        }
+                        FeedIcon::ChatShip { color, .. } => {
+                            draw_kill_feed_icon(pm, image, x as i32, icon_y as i32, size, color, false);
+                        }
+                        FeedIcon::DeathCause(_) => {
+                            let half = feed::ICON_SIZE / 2.0;
+                            draw_icon(pm, image, x + half, icon_y + half, 1.0);
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(message) = &layout.message else { return };
+        let message_top = lines_top + layout.header.lines.max(1) as f32 * feed::NAME_LINE_HEIGHT;
+        for piece in &message.pieces {
+            let PlacedContent::Text { text, style } = &piece.content else { continue };
+            let y = message_top + piece.line as f32 * feed::MESSAGE_LINE_HEIGHT;
+            draw_text_shadow(
+                pm,
+                style.color,
+                (feed::SIDE_PADDING + piece.x) as i32,
+                y as i32,
+                style.scale,
+                style.font,
+                text,
+            );
+        }
+    }
+}
+
+/// Draw the stats panel's merged kill and chat feed.
+fn draw_activity_feed(
+    pm: &mut Pixmap,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    entries: &[ActivityFeedEntry],
+    assets: &FeedAssets<'_>,
+) {
+    draw_filled_rect(pm, x as f32, y as f32, width as f32, height as f32, [24, 28, 36], 0.8);
+    draw_line(pm, x as f32 + 4.0, y as f32, (x + width - 4) as f32, y as f32, [55, 60, 72], 0.6, 1.0);
+
+    // Rows are drawn on a copy of the panel so ones sliding past its edges
+    // are cut off there.
+    let inset = feed::AREA_INSET;
+    let area_h = height as f32 - 2.0 * inset;
+    if width <= 0 || area_h <= 0.0 {
+        return;
+    }
+    let Some(panel_rect) = tiny_skia::IntRect::from_xywh(x, y, width as u32, height as u32) else { return };
+    let Some(mut panel) = pm.clone_rect(panel_rect) else { return };
+
+    let inner_w = width as f32 - 2.0 * feed::SIDE_PADDING;
+    let mut layouts: Vec<FeedRowLayout<'_, '_>> = Vec::new();
+    let rows = feed::stack_rows(entries.len(), area_h, |index| {
+        let entry = &entries[index];
+        let layout = assets.layout_row(entry, inner_w);
+        let height = layout.height();
+        layouts.push(layout);
+        RowExtent { height, reveal: entry.reveal }
+    });
+
+    for row in rows {
+        let entry = &entries[row.index];
+        // `stack_rows` asked for rows once each, newest first.
+        let layout = &layouts[entries.len() - 1 - row.index];
+        let top = inset + row.top;
+        if row.opacity >= 1.0 {
+            assets.draw_row(&mut panel, layout, entry.shade, top, width as f32);
+            continue;
+        }
+
+        // A fading row is drawn on its own layer, then blended in. The layer
+        // keeps the row's offset within a pixel so it lands where an opaque
+        // row would.
+        let layer_top = top.floor();
+        let layer_h = (top - layer_top + layout.height()).ceil() as u32 + 1;
+        let Some(mut layer) = Pixmap::new(width as u32, layer_h) else { continue };
+        assets.draw_row(&mut layer, layout, entry.shade, top - layer_top, width as f32);
+        let paint =
+            PixmapPaint { opacity: row.opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        panel.draw_pixmap(0, layer_top as i32, layer.as_ref(), &paint, Transform::identity(), None);
+    }
+
+    let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::Source, quality: FilterQuality::Nearest };
+    pm.draw_pixmap(panel_rect.x(), panel_rect.y(), panel.as_ref(), &paint, Transform::identity(), None);
 }
 
 /// Draw the chat overlay on the left side of the minimap.
@@ -3142,239 +3338,12 @@ impl RenderTarget for ImageTarget {
                 }
             }
             DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {
-                let padding = 8;
-                let inner_x = *x + padding;
-                let inner_w = *width - padding * 2;
-                let name_scale = self.fonts.scale(14.0);
-                let msg_scale = self.fonts.scale(13.0);
-                let kill_row_h = 20i32;
-                let chat_header_h = 18i32;
-                let chat_line_h = 17i32;
-                let icon_size = 16i32;
-                let gap = 2i32;
-                let font = &self.fonts.primary;
-
-                // Fixed-size box background
-                draw_filled_rect(
-                    &mut self.canvas,
-                    *x as f32,
-                    *y as f32,
-                    *width as f32,
-                    *height as f32,
-                    [24, 28, 36],
-                    0.8,
-                );
-                // Top border
-                draw_line(
-                    &mut self.canvas,
-                    *x as f32 + 4.0,
-                    *y as f32,
-                    (*x + *width - 4) as f32,
-                    *y as f32,
-                    [55, 60, 72],
-                    0.6,
-                    1.0,
-                );
-
-                // Pre-compute entry heights
-                let mut entry_heights: Vec<i32> = Vec::new();
-                for entry in entries.iter() {
-                    let h = match &entry.kind {
-                        ActivityFeedKind::Kill(_) => kill_row_h,
-                        ActivityFeedKind::Chat(chat) => {
-                            let msg_font = match chat.font_hint {
-                                FontHint::Primary => &self.fonts.primary,
-                                FontHint::Fallback(i) => self.fonts.fallbacks.get(i).unwrap_or(&self.fonts.primary),
-                            };
-                            let msg_lines = word_wrap(&chat.message, inner_w as u32, msg_scale, msg_font);
-                            chat_header_h + msg_lines.len().max(1) as i32 * chat_line_h + 2
-                        }
-                    };
-                    entry_heights.push(h);
-                }
-
-                // Show most recent entries that fit
-                let total_h = *height;
-                let mut consumed = 0i32;
-                let mut start_idx = entries.len();
-                for i in (0..entries.len()).rev() {
-                    let needed = consumed + entry_heights[i];
-                    if needed > total_h - 4 {
-                        break;
-                    }
-                    consumed = needed;
-                    start_idx = i;
-                }
-
-                let mut ey = *y + 4;
-                for entry in entries.iter().skip(start_idx) {
-                    if ey >= *y + *height {
-                        break;
-                    }
-                    match &entry.kind {
-                        ActivityFeedKind::Kill(kill) => {
-                            let (_, text_h) = text_size(name_scale, font, "Ag");
-                            let icon_y = ey + (text_h as i32 - icon_size) / 2;
-                            let mut cx = inner_x;
-
-                            // Kill prefix
-                            let prefix = " | ";
-                            draw_text_shadow(&mut self.canvas, [140, 140, 140], cx, ey, name_scale, font, prefix);
-                            let (pw, _) = text_size(name_scale, font, prefix);
-                            cx += pw as i32;
-
-                            // Killer name
-                            if let Some(killer_name) = &kill.killer_name {
-                                let (kf, ks) = self.fonts.font_and_scale(killer_name, 14.0);
-                                draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, ks, kf, killer_name);
-                                let (kw, _) = text_size(ks, kf, killer_name);
-                                cx += kw as i32 + gap;
-                            }
-
-                            // Killer ship icon (friendly=left, enemy=right)
-                            if let Some(ref species) = kill.killer_species
-                                && let Some(icon) = self.ship_icons.get(species)
-                            {
-                                draw_kill_feed_icon(
-                                    &mut self.canvas,
-                                    icon,
-                                    cx,
-                                    icon_y,
-                                    icon_size,
-                                    kill.killer_color,
-                                    !kill.killer_is_friendly,
-                                );
-                                cx += icon_size + gap;
-                            }
-
-                            // Death cause icon
-                            let cause_key = death_cause_icon_key(kill.cause.as_ref());
-                            if let Some(cause_icon) = self.death_cause_icons.get(cause_key) {
-                                let cause_center_y = icon_y + icon_size / 2;
-                                draw_icon(
-                                    &mut self.canvas,
-                                    cause_icon,
-                                    (cx + icon_size / 2) as f32,
-                                    cause_center_y as f32,
-                                    1.0,
-                                );
-                                cx += icon_size + gap;
-                            }
-
-                            // Victim name
-                            let (vf, vs) = self.fonts.font_and_scale(&kill.victim_name, 14.0);
-                            draw_text_shadow(&mut self.canvas, kill.victim_color, cx, ey, vs, vf, &kill.victim_name);
-                            let (vw, _) = text_size(vs, vf, &kill.victim_name);
-                            cx += vw as i32 + gap;
-
-                            // Victim ship icon (friendly=left, enemy=right)
-                            if let Some(ref species) = kill.victim_species
-                                && let Some(icon) = self.ship_icons.get(species)
-                            {
-                                draw_kill_feed_icon(
-                                    &mut self.canvas,
-                                    icon,
-                                    cx,
-                                    icon_y,
-                                    icon_size,
-                                    kill.victim_color,
-                                    !kill.victim_is_friendly,
-                                );
-                            }
-
-                            ey += kill_row_h;
-                        }
-                        ActivityFeedKind::Chat(chat) => {
-                            let mut cx = inner_x;
-
-                            // Clan tag + Player name (use same font for both)
-                            let (chat_name_font, chat_name_scale) = self.fonts.font_and_scale(&chat.player_name, 14.0);
-                            if !chat.clan_tag.is_empty() {
-                                let clan_color = chat.clan_color.unwrap_or(chat.team_color);
-                                let clan_text = format!("[{}] ", chat.clan_tag);
-                                draw_text_shadow(
-                                    &mut self.canvas,
-                                    clan_color,
-                                    cx,
-                                    ey,
-                                    chat_name_scale,
-                                    chat_name_font,
-                                    &clan_text,
-                                );
-                                let (cw, _) = text_size(chat_name_scale, chat_name_font, &clan_text);
-                                cx += cw as i32;
-                            }
-
-                            // Player name
-                            draw_text_shadow(
-                                &mut self.canvas,
-                                chat.team_color,
-                                cx,
-                                ey,
-                                chat_name_scale,
-                                chat_name_font,
-                                &chat.player_name,
-                            );
-                            let (nw, text_h) = text_size(chat_name_scale, chat_name_font, &chat.player_name);
-                            cx += nw as i32 + gap;
-
-                            // Ship icon
-                            let icon_y = ey + (text_h as i32 - icon_size) / 2;
-                            if let Some(ref species) = chat.ship_species
-                                && let Some(icon) = self.ship_icons.get(species.as_str())
-                            {
-                                draw_kill_feed_icon(
-                                    &mut self.canvas,
-                                    icon,
-                                    cx,
-                                    icon_y,
-                                    icon_size,
-                                    chat.team_color,
-                                    false,
-                                );
-                                cx += icon_size + gap;
-                            }
-
-                            // Ship name
-                            if let Some(ref ship_name) = chat.ship_name {
-                                draw_text_shadow(
-                                    &mut self.canvas,
-                                    chat.team_color,
-                                    cx,
-                                    ey,
-                                    name_scale,
-                                    font,
-                                    ship_name,
-                                );
-                            }
-
-                            ey += chat_header_h;
-
-                            // Message lines (word-wrapped)
-                            let msg_font = match chat.font_hint {
-                                FontHint::Primary => &self.fonts.primary,
-                                FontHint::Fallback(idx) => self.fonts.fallbacks.get(idx).unwrap_or(&self.fonts.primary),
-                            };
-                            let msg_lines = word_wrap(&chat.message, inner_w as u32, msg_scale, msg_font);
-                            for line in &msg_lines {
-                                draw_text_shadow(
-                                    &mut self.canvas,
-                                    chat.message_color,
-                                    inner_x,
-                                    ey,
-                                    msg_scale,
-                                    msg_font,
-                                    line,
-                                );
-                                ey += chat_line_h;
-                            }
-                            if msg_lines.is_empty() {
-                                ey += chat_line_h;
-                            }
-                            ey += 2; // small gap after chat
-                        }
-                    }
-                }
+                let assets = FeedAssets {
+                    fonts: &self.fonts,
+                    ship_icons: &self.ship_icons,
+                    death_cause_icons: &self.death_cause_icons,
+                };
+                draw_activity_feed(&mut self.canvas, *x, *y, *width, *height, entries, &assets);
             }
             DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
                 draw_team_roster(

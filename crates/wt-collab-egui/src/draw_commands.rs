@@ -3,7 +3,9 @@
 //! The desktop's `replay_renderer/shapes.rs` was the authoritative source; this module
 //! is a direct port. All consumers (desktop + web) call into here.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use egui::Color32;
 use egui::CornerRadius;
@@ -15,8 +17,17 @@ use egui::TextureHandle;
 use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::activity_feed as feed;
+use wows_minimap_renderer::activity_feed::FeedIcon;
+use wows_minimap_renderer::activity_feed::FlowItem;
+use wows_minimap_renderer::activity_feed::FlowLayout;
+use wows_minimap_renderer::activity_feed::PlacedContent;
+use wows_minimap_renderer::activity_feed::RowExtent;
+use wows_minimap_renderer::draw_command::ActivityFeedEntry;
+use wows_minimap_renderer::draw_command::ActivityFeedKind;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::RowShade;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
 
@@ -186,6 +197,228 @@ fn death_cause_icon_key(cause: &wows_minimap_renderer::draw_command::KillFeedEnt
         Some(DeathCause::DepthCharge | DeathCause::AerialDepthCharge) => "depthbomb",
         Some(DeathCause::Missile) => "missile",
         _ => "main_caliber",
+    }
+}
+
+/// Stroke width of the activity feed's top border, before window scale.
+const FEED_BORDER_WIDTH: f32 = 0.5;
+
+/// The rect a command's shapes must be clipped to, for commands whose content
+/// can slide past their own edges. Callers paint those shapes through a
+/// painter clipped to it.
+pub fn command_clip_rect(cmd: &DrawCommand, transform: &MapTransform) -> Option<Rect> {
+    let DrawCommand::StatsActivityFeed { x, y, width, height, .. } = cmd else { return None };
+
+    // The top border is stroked on the panel's top edge; leave room for the
+    // half of it above the edge and its one-point anti-aliasing feather.
+    let mut rect = hud_rect(transform, *x, *y, *width, *height);
+    rect.min.y -= FEED_BORDER_WIDTH * transform.window_scale / 2.0 + 1.0;
+
+    Some(rect)
+}
+
+/// A rect given in HUD canvas pixels, on screen.
+fn hud_rect(transform: &MapTransform, x: i32, y: i32, width: i32, height: i32) -> Rect {
+    let ws = transform.window_scale;
+
+    Rect::from_min_size(transform.hud_pos(x as f32, y as f32), Vec2::new(width as f32 * ws, height as f32 * ws))
+}
+
+#[derive(Clone, Copy)]
+enum FeedFont {
+    Name,
+    Message,
+}
+
+/// Text style of a run in the activity feed.
+#[derive(Clone, Copy)]
+struct FeedStyle {
+    font: FeedFont,
+    color: [u8; 3],
+}
+
+struct FeedRowLayout<'e> {
+    header: FlowLayout<'e, FeedStyle, FeedIcon<'e>>,
+    message: Option<FlowLayout<'e, FeedStyle, FeedIcon<'e>>>,
+}
+
+/// Lays out and paints activity feed rows at one window scale.
+struct FeedPainter<'a, 't> {
+    textures: &'a DrawCommandTextures<'t>,
+    ctx: &'a egui::Context,
+    ws: f32,
+    inner_w: f32,
+    name_font: egui::FontId,
+    message_font: egui::FontId,
+}
+
+impl<'t> FeedPainter<'_, 't> {
+    fn galley(&self, style: FeedStyle, text: &str, opacity: f32) -> Arc<egui::Galley> {
+        let font = match style.font {
+            FeedFont::Name => self.name_font.clone(),
+            FeedFont::Message => self.message_font.clone(),
+        };
+        let color = color_from_rgb(style.color).gamma_multiply(opacity);
+
+        self.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, color))
+    }
+
+    fn icon_texture(&self, icon: &FeedIcon<'_>) -> Option<&'t TextureHandle> {
+        match icon {
+            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => {
+                self.textures.ship_icons.get(*species)
+            }
+            FeedIcon::DeathCause(kill) => {
+                self.textures.death_cause_icons.and_then(|icons| icons.get(death_cause_icon_key(kill)))
+            }
+        }
+    }
+
+    fn row_height(&self, layout: &FeedRowLayout<'_>) -> f32 {
+        feed::row_height(layout.header.lines, layout.message.as_ref().map(|message| message.lines)) * self.ws
+    }
+
+    fn layout_row<'e>(&self, entry: &'e ActivityFeedEntry) -> FeedRowLayout<'e> {
+        let measure = |style: FeedStyle, text: &str| self.galley(style, text, 1.0).size().x;
+        let gap = feed::ITEM_GAP * self.ws;
+
+        let header_items = feed::header_items(
+            &entry.kind,
+            feed::ICON_SIZE * self.ws,
+            |_, color| FeedStyle { font: FeedFont::Name, color },
+            |icon| self.icon_texture(icon).is_some(),
+        );
+        let header = feed::flow(&header_items, self.inner_w, gap, measure);
+
+        let message = match &entry.kind {
+            ActivityFeedKind::Chat(chat) => {
+                let style = FeedStyle { font: FeedFont::Message, color: chat.message_color };
+                let items: [FlowItem<'e, FeedStyle, FeedIcon<'e>>; 1] =
+                    [FlowItem::Text { text: Cow::Borrowed(&chat.message), style }];
+                Some(feed::flow(&items, self.inner_w, gap, measure))
+            }
+            ActivityFeedKind::Kill(_) => None,
+        };
+
+        FeedRowLayout { header, message }
+    }
+
+    fn draw_row(
+        &self,
+        shapes: &mut Vec<Shape>,
+        layout: &FeedRowLayout<'_>,
+        shade: RowShade,
+        panel: Rect,
+        top: f32,
+        opacity: f32,
+    ) {
+        let ws = self.ws;
+        if shade == RowShade::Banded {
+            let band = Rect::from_min_size(
+                Pos2::new(panel.min.x + feed::BAND_INSET * ws, top),
+                Vec2::new(panel.width() - 2.0 * feed::BAND_INSET * ws, self.row_height(layout)),
+            );
+            let fill = color_from_rgba(feed::BANDED_ROW_RGB, feed::BANDED_ROW_ALPHA * opacity);
+            shapes.push(Shape::rect_filled(band, CornerRadius::ZERO, fill));
+        }
+
+        let left = panel.min.x + feed::SIDE_PADDING * ws;
+        let line_h = feed::NAME_LINE_HEIGHT * ws;
+        let icon_size = feed::ICON_SIZE * ws;
+        let lines_top = top + feed::ROW_PADDING * ws;
+        for piece in &layout.header.pieces {
+            let x = left + piece.x;
+            let line_top = lines_top + piece.line as f32 * line_h;
+            let line_center = line_top + line_h / 2.0;
+            match &piece.content {
+                PlacedContent::Text { text, style } => {
+                    let galley = self.galley(*style, text, opacity);
+                    let text_y = line_center - galley.size().y / 2.0;
+                    shapes.push(Shape::galley(Pos2::new(x, text_y), galley, Color32::TRANSPARENT));
+                }
+                PlacedContent::Icon { icon } => {
+                    let Some(texture) = self.icon_texture(icon) else { continue };
+                    let center = Pos2::new(x + icon_size / 2.0, line_center);
+                    match *icon {
+                        // Friendly ships face left, enemies right.
+                        FeedIcon::KillShip { color, friendly, .. } => {
+                            let angle = if friendly { std::f32::consts::PI } else { 0.0 };
+                            let tint = color_from_rgb(color).gamma_multiply(opacity);
+                            shapes.push(make_rotated_icon_mesh(texture.id(), center, icon_size, angle, tint));
+                        }
+                        FeedIcon::ChatShip { color, .. } => {
+                            let tint = color_from_rgb(color).gamma_multiply(opacity);
+                            shapes.push(make_rotated_icon_mesh(texture.id(), center, icon_size, 0.0, tint));
+                        }
+                        FeedIcon::DeathCause(_) => {
+                            let mut mesh = egui::Mesh::with_texture(texture.id());
+                            mesh.add_rect_with_uv(
+                                Rect::from_center_size(center, Vec2::splat(icon_size)),
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                Color32::WHITE.gamma_multiply(opacity),
+                            );
+                            shapes.push(Shape::Mesh(mesh.into()));
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(message) = &layout.message else { return };
+        let message_top = lines_top + layout.header.lines.max(1) as f32 * line_h;
+        for piece in &message.pieces {
+            let PlacedContent::Text { text, style } = &piece.content else { continue };
+            let y = message_top + piece.line as f32 * feed::MESSAGE_LINE_HEIGHT * ws;
+            let galley = self.galley(*style, text, opacity);
+            shapes.push(Shape::galley(Pos2::new(left + piece.x, y), galley, Color32::TRANSPARENT));
+        }
+    }
+}
+
+/// Shapes of the stats panel's merged kill and chat feed. Rows may extend
+/// past the panel while animating; see [`command_clip_rect`].
+fn activity_feed_shapes(
+    shapes: &mut Vec<Shape>,
+    panel: Rect,
+    ws: f32,
+    entries: &[ActivityFeedEntry],
+    textures: &DrawCommandTextures,
+    ctx: &egui::Context,
+) {
+    shapes.push(Shape::rect_filled(panel, CornerRadius::same(2), Color32::from_rgba_unmultiplied(24, 28, 36, 200)));
+    shapes.push(Shape::LineSegment {
+        points: [Pos2::new(panel.min.x + 4.0 * ws, panel.min.y), Pos2::new(panel.max.x - 4.0 * ws, panel.min.y)],
+        stroke: Stroke::new(FEED_BORDER_WIDTH * ws, Color32::from_rgba_unmultiplied(55, 60, 72, 150)),
+    });
+
+    let inset = feed::AREA_INSET * ws;
+    let area_h = panel.height() - 2.0 * inset;
+    if area_h <= 0.0 {
+        return;
+    }
+
+    let painter = FeedPainter {
+        textures,
+        ctx,
+        ws,
+        inner_w: panel.width() - 2.0 * feed::SIDE_PADDING * ws,
+        name_font: game_font(feed::NAME_FONT_SIZE * ws),
+        message_font: game_font(feed::MESSAGE_FONT_SIZE * ws),
+    };
+    let mut layouts: Vec<FeedRowLayout<'_>> = Vec::new();
+    let rows = feed::stack_rows(entries.len(), area_h, |index| {
+        let entry = &entries[index];
+        let layout = painter.layout_row(entry);
+        let height = painter.row_height(&layout);
+        layouts.push(layout);
+        RowExtent { height, reveal: entry.reveal }
+    });
+
+    for row in rows {
+        let entry = &entries[row.index];
+        // `stack_rows` asked for rows once each, newest first.
+        let layout = &layouts[entries.len() - 1 - row.index];
+        painter.draw_row(shapes, layout, entry.shade, panel, panel.min.y + inset + row.top, row.opacity);
     }
 }
 
@@ -1803,232 +2036,8 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {
-            let padding = 8.0 * ws;
-            let origin = transform.hud_pos(*x as f32, *y as f32);
-            let inner_x = origin.x + padding;
-            let inner_w = *width as f32 * ws - padding * 2.0;
-            let total_h = *height as f32 * ws;
-            let name_font = game_font(14.0 * ws);
-            let msg_font = game_font(13.0 * ws);
-            let icon_size = 16.0 * ws;
-            let gap = 2.0 * ws;
-
-            // Fixed-size box background
-            let box_rect = Rect::from_min_size(origin, Vec2::new(*width as f32 * ws, total_h));
-            shapes.push(Shape::rect_filled(
-                box_rect,
-                CornerRadius::same(2),
-                Color32::from_rgba_unmultiplied(24, 28, 36, 200),
-            ));
-            // Top border
-            shapes.push(Shape::LineSegment {
-                points: [
-                    Pos2::new(origin.x + 4.0 * ws, origin.y),
-                    Pos2::new(origin.x + (*width as f32 - 4.0) * ws, origin.y),
-                ],
-                stroke: Stroke::new(ws * 0.5, Color32::from_rgba_unmultiplied(55, 60, 72, 150)),
-            });
-
-            // All feed content goes into a clipped group
-            let mut feed_shapes: Vec<Shape> = Vec::new();
-
-            // Pre-compute entry heights to show most recent that fit
-            struct EntryLayout {
-                height: f32,
-            }
-            let kill_row_h = 20.0 * ws;
-            let chat_header_h = 18.0 * ws;
-            let chat_msg_h = 17.0 * ws;
-
-            let mut layouts: Vec<EntryLayout> = Vec::new();
-            for entry in entries.iter() {
-                let h = match &entry.kind {
-                    wows_minimap_renderer::draw_command::ActivityFeedKind::Kill(_) => kill_row_h,
-                    wows_minimap_renderer::draw_command::ActivityFeedKind::Chat(chat) => {
-                        let msg_galley = ctx.fonts_mut(|f| {
-                            let job = egui::text::LayoutJob::simple(
-                                chat.message.clone(),
-                                msg_font.clone(),
-                                Color32::WHITE,
-                                inner_w,
-                            );
-                            f.layout_job(job)
-                        });
-                        let lines = msg_galley.rows.len().max(1) as f32;
-                        chat_header_h + lines * chat_msg_h + 2.0 * ws
-                    }
-                };
-                layouts.push(EntryLayout { height: h });
-            }
-
-            // Show most recent entries that fit
-            let mut consumed = 0.0f32;
-            let mut start_idx = entries.len();
-            for i in (0..entries.len()).rev() {
-                let needed = consumed + layouts[i].height;
-                if needed > total_h - 4.0 * ws {
-                    break;
-                }
-                consumed = needed;
-                start_idx = i;
-            }
-
-            let mut ey = origin.y + 4.0 * ws;
-            for entry in entries.iter().skip(start_idx) {
-                if ey >= origin.y + total_h {
-                    break;
-                }
-                match &entry.kind {
-                    wows_minimap_renderer::draw_command::ActivityFeedKind::Kill(kill) => {
-                        let killer_color = color_from_rgb(kill.killer_color);
-                        let victim_color = color_from_rgb(kill.victim_color);
-
-                        let mut cx = inner_x;
-
-                        // Kill prefix
-                        let prefix_galley = ctx.fonts_mut(|f| {
-                            f.layout_no_wrap(" | ".into(), name_font.clone(), Color32::from_rgb(140, 140, 140))
-                        });
-                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), prefix_galley.clone(), Color32::TRANSPARENT));
-                        cx += prefix_galley.size().x;
-
-                        // Killer name. A kill with no responsible ship lays out an empty
-                        // name so the row keeps its height.
-                        let killer_name = kill.killer_name.clone().unwrap_or_default();
-                        let killer_galley =
-                            ctx.fonts_mut(|f| f.layout_no_wrap(killer_name, name_font.clone(), killer_color));
-                        let row_center_y = ey + killer_galley.size().y / 2.0;
-                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), killer_galley.clone(), Color32::TRANSPARENT));
-                        cx += killer_galley.size().x + gap;
-
-                        // Killer ship icon (friendly=points left (PI), enemy=points right (0))
-                        if let Some(ref species) = kill.killer_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str())
-                        {
-                            let tint =
-                                Color32::from_rgb(kill.killer_color[0], kill.killer_color[1], kill.killer_color[2]);
-                            let angle = if kill.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
-                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                tex.id(),
-                                Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                icon_size,
-                                angle,
-                                tint,
-                            ));
-                            cx += icon_size + gap;
-                        }
-
-                        // Death cause icon
-                        let cause_key = death_cause_icon_key(kill);
-                        if let Some(icons) = textures.death_cause_icons.as_ref()
-                            && let Some(tex) = icons.get(cause_key)
-                        {
-                            let half = icon_size / 2.0;
-                            let mut mesh = egui::Mesh::with_texture(tex.id());
-                            mesh.add_rect_with_uv(
-                                Rect::from_min_max(
-                                    Pos2::new(cx, row_center_y - half),
-                                    Pos2::new(cx + icon_size, row_center_y + half),
-                                ),
-                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                Color32::WHITE,
-                            );
-                            feed_shapes.push(Shape::Mesh(mesh.into()));
-                            cx += icon_size + gap;
-                        }
-
-                        // Victim name
-                        let victim_galley = ctx
-                            .fonts_mut(|f| f.layout_no_wrap(kill.victim_name.clone(), name_font.clone(), victim_color));
-                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), victim_galley.clone(), Color32::TRANSPARENT));
-                        cx += victim_galley.size().x + gap;
-
-                        // Victim ship icon (friendly=points left (PI), enemy=points right (0))
-                        if let Some(ref species) = kill.victim_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str())
-                        {
-                            let tint =
-                                Color32::from_rgb(kill.victim_color[0], kill.victim_color[1], kill.victim_color[2]);
-                            let angle = if kill.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
-                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                tex.id(),
-                                Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                icon_size,
-                                angle,
-                                tint,
-                            ));
-                        }
-
-                        ey += kill_row_h;
-                    }
-                    wows_minimap_renderer::draw_command::ActivityFeedKind::Chat(chat) => {
-                        let team_c = color_from_rgb(chat.team_color);
-                        let msg_c = color_from_rgb(chat.message_color);
-
-                        let mut cx = inner_x;
-
-                        // Clan tag
-                        if !chat.clan_tag.is_empty() {
-                            let clan_c = chat.clan_color.map_or(team_c, color_from_rgb);
-                            let clan_galley = ctx.fonts_mut(|f| {
-                                f.layout_no_wrap(format!("[{}] ", chat.clan_tag), name_font.clone(), clan_c)
-                            });
-                            feed_shapes.push(Shape::galley(
-                                Pos2::new(cx, ey),
-                                clan_galley.clone(),
-                                Color32::TRANSPARENT,
-                            ));
-                            cx += clan_galley.size().x;
-                        }
-
-                        // Player name
-                        let name_galley =
-                            ctx.fonts_mut(|f| f.layout_no_wrap(chat.player_name.clone(), name_font.clone(), team_c));
-                        let row_center_y = ey + name_galley.size().y / 2.0;
-                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), name_galley.clone(), Color32::TRANSPARENT));
-                        cx += name_galley.size().x + gap;
-
-                        // Ship icon
-                        if let Some(ref species) = chat.ship_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str())
-                        {
-                            let tint = Color32::from_rgb(chat.team_color[0], chat.team_color[1], chat.team_color[2]);
-                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                tex.id(),
-                                Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                icon_size,
-                                0.0,
-                                tint,
-                            ));
-                            cx += icon_size + gap;
-                        }
-
-                        // Ship name
-                        if let Some(ref ship_name) = chat.ship_name {
-                            let sn_galley =
-                                ctx.fonts_mut(|f| f.layout_no_wrap(ship_name.clone(), name_font.clone(), team_c));
-                            feed_shapes.push(Shape::galley(Pos2::new(cx, ey), sn_galley, Color32::TRANSPARENT));
-                        }
-                        ey += chat_header_h;
-
-                        // Message body
-                        let msg_galley = ctx.fonts_mut(|f| {
-                            let job =
-                                egui::text::LayoutJob::simple(chat.message.clone(), msg_font.clone(), msg_c, inner_w);
-                            f.layout_job(job)
-                        });
-                        feed_shapes.push(Shape::galley(
-                            Pos2::new(inner_x, ey),
-                            msg_galley.clone(),
-                            Color32::TRANSPARENT,
-                        ));
-                        ey += msg_galley.rows.len().max(1) as f32 * chat_msg_h + 2.0 * ws;
-                    }
-                }
-            }
-
-            // Add feed content to output shapes
-            shapes.extend(feed_shapes);
+            let panel = hud_rect(transform, *x, *y, *width, *height);
+            activity_feed_shapes(&mut shapes, panel, ws, entries, textures, ctx);
         }
 
         DrawCommand::TeamRoster { side, x, y, width, height, rows } => {

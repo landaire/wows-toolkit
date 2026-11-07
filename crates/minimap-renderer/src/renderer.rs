@@ -42,6 +42,8 @@ use wows_replays::types::PlaneId;
 use wows_replays::types::Relation;
 use wows_replays::types::WorldPos;
 
+use crate::activity_feed;
+use crate::activity_feed::PlaybackRate;
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
@@ -55,6 +57,7 @@ use crate::draw_command::FontHint;
 use crate::draw_command::HitPoints;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RibbonCount;
+use crate::draw_command::RowShade;
 use crate::draw_command::STATS_RIBBON_CELL_W;
 use crate::draw_command::STATS_RIBBON_ROW_H;
 use crate::draw_command::ShipConfigCircleKind;
@@ -424,6 +427,9 @@ pub struct MinimapRenderer<'a> {
 
     /// Real per-salvo flight times learned from impacts, for tracer pacing.
     salvo_flight_times: Option<Arc<SalvoFlightTimes>>,
+
+    /// Paces the activity feed's reflow animation in displayed time.
+    playback_rate: PlaybackRate,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -464,6 +470,8 @@ impl<'a> MinimapRenderer<'a> {
             render_clock: None,
             position_timeline: None,
             salvo_flight_times: None,
+            // Until told otherwise, frames are shown as fast as the game ran.
+            playback_rate: PlaybackRate::REAL_TIME,
         }
     }
 
@@ -472,6 +480,11 @@ impl<'a> MinimapRenderer<'a> {
     /// leaves it unset and renders at the packet clock.
     pub fn set_render_clock(&mut self, clock: GameClock) {
         self.render_clock = Some(clock);
+    }
+
+    /// How much game time each second of displayed output covers.
+    pub fn set_playback_rate(&mut self, rate: PlaybackRate) {
+        self.playback_rate = rate;
     }
 
     /// Install the shared position timeline used to smooth motion between packets.
@@ -2318,7 +2331,12 @@ impl<'a> MinimapRenderer<'a> {
                         continue;
                     }
                     let kind = ActivityFeedKind::Kill(self.kill_feed_entry(kill));
-                    activity_entries.push(ActivityFeedEntry { clock: kill.clock, kind });
+                    activity_entries.push(ActivityFeedEntry {
+                        clock: kill.clock,
+                        kind,
+                        reveal: activity_feed::reveal(clock - kill.clock, self.playback_rate),
+                        shade: RowShade::Plain,
+                    });
                 }
             }
             // Add chat messages
@@ -2364,6 +2382,8 @@ impl<'a> MinimapRenderer<'a> {
                         .unwrap_or(FontHint::Primary);
                     activity_entries.push(ActivityFeedEntry {
                         clock: msg.clock,
+                        reveal: activity_feed::reveal(clock - msg.clock, self.playback_rate),
+                        shade: RowShade::Plain,
                         kind: ActivityFeedKind::Chat(ChatEntry {
                             clan_tag,
                             clan_color,
@@ -2381,6 +2401,9 @@ impl<'a> MinimapRenderer<'a> {
             }
             // Sort merged entries by game clock
             activity_entries.sort_by_key(|a| a.clock);
+            for (index, entry) in activity_entries.iter_mut().enumerate() {
+                entry.shade = RowShade::from_feed_index(index);
+            }
 
             let inner_w = panel_w - 16;
             let per_row = (inner_w / STATS_RIBBON_CELL_W).max(1);

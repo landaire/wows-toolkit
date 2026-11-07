@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
+use wows_minimap_renderer::activity_feed::PlaybackRate;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -402,6 +403,7 @@ pub(super) fn playback_thread(
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
+    apply_playback_speed(&mut live_renderer, speed);
     live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
     live_renderer.set_vehicle_facts(vehicle_facts.clone());
     live_renderer.set_damage_events(damage_events.clone());
@@ -773,6 +775,7 @@ pub(super) fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
+            apply_playback_speed(&mut live_renderer, speed);
             live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
             live_renderer.set_vehicle_facts(vehicle_facts.clone());
             live_renderer.set_damage_events(damage_events.clone());
@@ -970,6 +973,7 @@ pub(super) fn playback_thread(
                 }
                 PlaybackCommand::SetSpeed(s) => {
                     speed = s;
+                    apply_playback_speed(&mut live_renderer, speed);
                 }
                 PlaybackCommand::Stop => {
                     return;
@@ -1058,6 +1062,14 @@ pub(super) fn playback_thread(
         // Pace the playback loop at ~30 fps (one render per iteration); idle
         // slower when paused.
         std::thread::sleep(std::time::Duration::from_millis(if playing { 33 } else { 16 }));
+    }
+}
+
+/// Paces the renderer's animations for `speed`, the playback multiplier.
+fn apply_playback_speed(renderer: &mut MinimapRenderer<'_>, speed: f32) {
+    // Playback speeds are all positive.
+    if let Some(rate) = PlaybackRate::new(speed) {
+        renderer.set_playback_rate(rate);
     }
 }
 

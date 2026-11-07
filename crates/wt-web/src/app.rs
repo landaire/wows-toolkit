@@ -704,6 +704,7 @@ impl WebApp {
         if is_replay && let Some(commands) = self.get_active_frame_commands() {
             use wt_collab_egui::draw_commands::DrawCommandLabelOptions;
             use wt_collab_egui::draw_commands::DrawCommandTextures;
+            use wt_collab_egui::draw_commands::command_clip_rect;
             use wt_collab_egui::draw_commands::draw_command_to_shapes;
             use wt_translations::DefaultTextResolver;
 
@@ -736,6 +737,8 @@ impl WebApp {
                     None,
                 );
                 let target_painter = if is_hud { &painter } else { &map_painter };
+                let clipped = command_clip_rect(cmd, &transform).map(|rect| target_painter.with_clip_rect(rect));
+                let target_painter = clipped.as_ref().unwrap_or(target_painter);
                 for shape in cmd_shapes {
                     target_painter.add(shape);
                 }

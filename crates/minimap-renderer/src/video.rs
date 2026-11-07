@@ -14,6 +14,7 @@ use tracing::info;
 use wows_battle_world::view::BattleView;
 use wows_replays::types::GameClock;
 
+use crate::activity_feed::PlaybackRate;
 use crate::codec::VideoCodec;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
@@ -231,6 +232,10 @@ impl VideoEncoder {
         let total_frames = self.total_frames();
         let frame_duration = self.window_duration() / total_frames as f32;
         let target_frame = ((new_clock.seconds() - self.start_clock.seconds()) / frame_duration) as i64;
+        // A zero-length window returned above, so the rate is positive.
+        if let Some(rate) = PlaybackRate::new(frame_duration * FPS as f32) {
+            renderer.set_playback_rate(rate);
+        }
 
         let mut writer = BufWriter::new(stdout().lock());
 

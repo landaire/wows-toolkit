@@ -3,6 +3,7 @@
 /// Team advantage, which is game logic rather than drawing: it lives in
 /// `wows-core` so the timeline can read it without depending on a renderer.
 pub use wows_core::advantage;
+pub mod activity_feed;
 #[cfg(feature = "rendering")]
 pub mod assets;
 pub mod codec;

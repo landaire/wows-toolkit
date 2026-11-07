@@ -21,6 +21,7 @@ use crate::draw_commands::ConsumableHoverRegion;
 use crate::draw_commands::DrawCommandLabelOptions;
 use crate::draw_commands::DrawCommandTextures;
 use crate::draw_commands::PlayerBuildHoverRegion;
+use crate::draw_commands::command_clip_rect;
 use crate::draw_commands::draw_command_to_shapes;
 use crate::rendering::draw_grid;
 use crate::rendering::draw_map_background;
@@ -251,8 +252,10 @@ impl MinimapView<'_> {
                     Some(&mut consumable_hover_regions),
                     Some(&mut player_build_regions),
                 );
+                let clipped = command_clip_rect(cmd, &stats_transform).map(|rect| painter.with_clip_rect(rect));
+                let target = clipped.as_ref().unwrap_or(painter);
                 for shape in shapes {
-                    painter.add(shape);
+                    target.add(shape);
                 }
             }
         }
