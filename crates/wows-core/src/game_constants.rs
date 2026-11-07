@@ -112,7 +112,8 @@ impl BattleConstants {
                 (23, Cow::Borrowed(CameraMode::IdleGame.name())),
             ]),
             death_reasons: HashMap::from([
-                (0, Cow::Borrowed(DeathCause::None.name())),
+                // The game's name for no cause; `DeathCause::from_name` reads it as `None`.
+                (0, Cow::Borrowed("NONE")),
                 (1, Cow::Borrowed(DeathCause::Artillery.name())),
                 (2, Cow::Borrowed(DeathCause::Secondaries.name())),
                 (3, Cow::Borrowed(DeathCause::Torpedo.name())),

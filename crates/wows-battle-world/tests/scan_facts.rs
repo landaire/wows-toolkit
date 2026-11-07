@@ -21,11 +21,11 @@ fn r3(v: f32) -> f32 {
 #[derive(Serialize)]
 struct FactEntry {
     entity_id: u32,
-    vehicle_id: u64,
-    max_health: f32,
-    ship_params_id: u64,
+    vehicle_id: Option<u64>,
+    max_health: Option<f32>,
+    ship_params_id: Option<u64>,
     ability_count: usize,
-    crew_params_id: u64,
+    crew_params_id: Option<u64>,
 }
 
 /// Stable scalar for a single damage event.
@@ -53,11 +53,11 @@ fn facts_and_damage_golden() {
         .iter()
         .map(|(entity_id, f)| FactEntry {
             entity_id: entity_id.raw(),
-            vehicle_id: f.vehicle_id.raw(),
-            max_health: r3(f.max_health),
-            ship_params_id: f.ship_config.ship_params_id().raw(),
+            vehicle_id: f.vehicle_id.map(|id| id.raw()),
+            max_health: f.max_health.map(r3),
+            ship_params_id: f.ship_config.ship_params_id().map(|id| id.raw()),
             ability_count: f.ship_config.abilities().len(),
-            crew_params_id: f.crew.params_id().raw(),
+            crew_params_id: f.crew.params_id().map(|id| id.raw()),
         })
         .collect();
     facts.sort_by_key(|e| e.entity_id);

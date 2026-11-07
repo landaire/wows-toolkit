@@ -378,7 +378,7 @@ mod tests {
     /// division one or not.
     fn met(account: i64, meetings: &[(i64, bool)]) -> (AccountId, tracked::TrackedPlayer) {
         let now = Timestamp::now();
-        let mut player = tracked::TrackedPlayer::default();
+        let mut player = tracked::TrackedPlayer::new(AccountId(account));
         for (ix, (hours_ago, in_division)) in meetings.iter().enumerate() {
             let arena = wows_replays::types::ArenaId::from(ix as i64);
             let at = now - hours_ago.hours();

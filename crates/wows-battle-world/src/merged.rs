@@ -129,16 +129,16 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
             timeline_parts.push(positions.timeline);
             for (entity_id, src) in facts.into_facts() {
                 let dst = combined_facts.entry(entity_id).or_default();
-                if dst.vehicle_id.raw() == 0 && src.vehicle_id.raw() != 0 {
+                if dst.vehicle_id.is_none() {
                     dst.vehicle_id = src.vehicle_id;
                 }
-                if dst.max_health == 0.0 && src.max_health > 0.0 {
+                if dst.max_health.is_none() {
                     dst.max_health = src.max_health;
                 }
                 if dst.ship_config.abilities().is_empty() && !src.ship_config.abilities().is_empty() {
                     dst.ship_config = src.ship_config;
                 }
-                if dst.crew.params_id().raw() == 0 && src.crew.params_id().raw() != 0 {
+                if dst.crew.params_id().is_none() && src.crew.params_id().is_some() {
                     dst.crew = src.crew;
                 }
             }

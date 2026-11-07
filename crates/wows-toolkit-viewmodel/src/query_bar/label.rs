@@ -409,7 +409,6 @@ pub fn game_mode_label(mode: GameMode) -> String {
 /// or anything else.
 fn game_mode_key(mode: GameMode) -> &'static str {
     match mode {
-        GameMode::Invalid => "ui.search.value.game_mode_invalid",
         GameMode::Test => "ui.search.value.game_mode_test",
         GameMode::Standart => "ui.search.value.game_mode_standard",
         GameMode::Singlebase => "ui.search.value.game_mode_singlebase",

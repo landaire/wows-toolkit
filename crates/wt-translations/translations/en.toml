@@ -1153,7 +1153,6 @@ rating_super_unicum = "Super Unicum"
 # PVE stays an acronym and Anti-Standard keeps its hyphen; both read better
 # that way than a mechanical space would. Each value is independent, so a
 # confirmed name can replace one without touching any other line or any code.
-game_mode_invalid = "Invalid"
 game_mode_test = "Test"
 game_mode_standard = "Standard"
 game_mode_singlebase = "Singlebase"

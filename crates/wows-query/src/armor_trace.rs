@@ -212,7 +212,10 @@ pub struct TracedWeapon {
     /// GameParams name of the projectile.
     pub param: String,
     pub ammo: Ammo,
-    pub caliber_mm: Millimeters,
+
+    /// Absent for HE and SAP bombs, whose `bulletDiametr` is a placeholder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caliber_mm: Option<Millimeters>,
 
     /// HE or SAP penetration used against the first plate.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -373,15 +376,16 @@ pub(crate) enum WeaponModel {
 }
 
 /// When SAP ricochets off its first plate: struck at or past `always_at`,
-/// unless its caliber overmatches the plate.
+/// unless its caliber overmatches the plate. Without a caliber it never
+/// overmatches.
 pub(crate) struct FirstPlateRicochet {
     always_at: Degrees,
-    caliber: Millimeters,
+    caliber: Option<Millimeters>,
 }
 
 impl FirstPlateRicochet {
     fn overmatches(&self, plate: &RayPlate) -> bool {
-        is_overmatch(self.caliber, plate.thickness)
+        self.caliber.is_some_and(|caliber| is_overmatch(caliber, plate.thickness))
     }
 
     fn ricochets(&self, plate: &RayPlate) -> bool {
@@ -627,7 +631,9 @@ impl GameData {
             "Impact velocity and fall angle come from the toolkit's trajectory solution at {range} (client drag model, no target movement)."
         )];
 
-        let Some(params) = ShellParams::from_shell_info(&projectile.to_shell_info(shell.param.clone())) else {
+        let Some(params) =
+            projectile.to_shell_info(shell.param.clone()).and_then(|info| ShellParams::from_shell_info(&info))
+        else {
             return Err(QueryError::ProjectileIncomplete { projectile: shell.name.clone() });
         };
         let Some(impact) = solve_for_range(&params, range.to_meters()) else {
@@ -648,7 +654,7 @@ impl GameData {
                 if ifhe && ammo == Ammo::He {
                     assumptions.push("Inertia Fuse for HE Shells is applied to the HE penetration.".to_owned());
                 }
-                let ricochet = first_plate_ricochet(ammo, &projectile, shell.caliber_mm);
+                let ricochet = first_plate_ricochet(ammo, &projectile, Some(shell.caliber_mm));
                 (WeaponModel::FirstPlate { penetration, ricochet }, Some(penetration))
             }
         };
@@ -662,7 +668,7 @@ impl GameData {
                 projectile: shell.name.clone(),
                 param: shell.param.clone(),
                 ammo,
-                caliber_mm: shell.caliber_mm,
+                caliber_mm: Some(shell.caliber_mm),
                 penetration_mm: penetration,
             },
             arrival: Arrival {
@@ -704,16 +710,21 @@ impl GameData {
             .game_param_by_name(&squadron.aircraft_param)
             .and_then(|param| param.aircraft().and_then(|aircraft| aircraft.angle_of_dive()))
             .map(Degrees::abs)
-            .filter(|dive| dive.value() > 0.0)
             .ok_or_else(|| not_traceable("the aircraft has no dive angle"))?;
         let speed = projectile
             .bullet_speed()
             .map(MetersPerSecond::new)
             .ok_or_else(|| not_traceable("the bomb has no bulletSpeed"))?;
-        let caliber = projectile
-            .bullet_diametr()
-            .map(|meters| round_mm(Meters::new(meters).to_mm()))
-            .ok_or_else(|| not_traceable("the bomb has no caliber"))?;
+        // HE and SAP bombs carry a placeholder bulletDiametr; only AP bombs state a caliber.
+        let caliber = match ammo {
+            Ammo::Ap => Some(
+                projectile
+                    .bullet_diametr()
+                    .map(|meters| round_mm(Meters::new(meters).to_mm()))
+                    .ok_or_else(|| not_traceable("the bomb has no caliber"))?,
+            ),
+            Ammo::He | Ammo::Sap => None,
+        };
 
         let mut assumptions = vec![format!(
             "Bomb impact speed is assumed to be its bulletSpeed ({} m/s) and its fall angle the aircraft's angleOfDive ({} deg). The client does not define bomb impact kinematics; the server does.",
@@ -726,8 +737,10 @@ impl GameData {
 
         let (model, penetration, raw_penetration) = match ammo {
             Ammo::Ap => {
-                let params = ShellParams::from_shell_info(&projectile.to_shell_info(ordnance.param.clone()))
-                    .ok_or_else(|| not_traceable("the bomb lacks a normalization angle or fuse threshold"))?;
+                let params = projectile
+                    .to_shell_info(ordnance.param.clone())
+                    .and_then(|info| ShellParams::from_shell_info(&info))
+                    .ok_or_else(|| not_traceable("the bomb lacks ballistic data"))?;
                 let raw = round_mm(params.raw_penetration(speed));
                 assumptions.push(
                     "AP bombs are simulated with the gun shell formulas; the game may treat bombs differently on the server."
@@ -1064,7 +1077,11 @@ pub(crate) fn ap_outcome<'a>(sim: &ShellSimResult, zones: &[&'a str]) -> (RayOut
 }
 
 /// How SAP ricochets off its first plate; HE does not ricochet.
-fn first_plate_ricochet(ammo: Ammo, projectile: &Projectile, caliber: Millimeters) -> Option<FirstPlateRicochet> {
+fn first_plate_ricochet(
+    ammo: Ammo,
+    projectile: &Projectile,
+    caliber: Option<Millimeters>,
+) -> Option<FirstPlateRicochet> {
     match ammo {
         Ammo::Sap => projectile
             .bullet_always_ricochet_at()
@@ -1339,7 +1356,8 @@ mod tests {
     #[cfg_attr(not(has_build_13533378), ignore)]
     fn grid_rays_match_single_casts_of_the_armor_viewer() {
         let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");

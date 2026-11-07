@@ -539,15 +539,14 @@ mod tests {
         {
             let mut guard = tracker.write();
             let mut again =
-                TrackedPlayer { db_id: AccountId(501), last_name: "EnemyRenamed".to_owned(), ..Default::default() };
+                TrackedPlayer { last_name: "EnemyRenamed".to_owned(), ..TrackedPlayer::new(AccountId(501)) };
             again.arena_ids.insert(ArenaId::new(900));
             again.timestamps.insert(at(1_700_900_000));
             guard.tracked_players.insert(AccountId(501), again);
             guard.pending.identity_changed(AccountId(501));
             guard.pending.encounter_changed(AccountId(501), ArenaId::new(900), at(1_700_900_000));
 
-            let mut met =
-                TrackedPlayer { db_id: AccountId(902), last_name: "MetJustNow".to_owned(), ..Default::default() };
+            let mut met = TrackedPlayer { last_name: "MetJustNow".to_owned(), ..TrackedPlayer::new(AccountId(902)) };
             met.arena_ids.insert(ArenaId::new(900));
             met.timestamps.insert(at(1_700_900_000));
             guard.tracked_players.insert(AccountId(902), met);
@@ -616,8 +615,7 @@ mod tests {
                 .expect("the blob stores");
 
             // The save task got there first.
-            let mut met =
-                TrackedPlayer { db_id: AccountId(902), last_name: "MetJustNow".to_owned(), ..Default::default() };
+            let mut met = TrackedPlayer { last_name: "MetJustNow".to_owned(), ..TrackedPlayer::new(AccountId(902)) };
             met.arena_ids.insert(ArenaId::new(900));
             met.timestamps.insert(at(1_700_900_000));
             let players = [(AccountId(902), met)].into_iter().collect();

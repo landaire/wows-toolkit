@@ -82,12 +82,9 @@ pub struct HullComponentStats {
     /// Raw `visibilityCoefFireByPlane` field, added to air detection while burning.
     /// FactoryVisibility createVisibilityTTX@322: visibilityByPlane.fire.
     pub visibility_coef_fire_by_plane: Option<Km>,
-    /// Raw `visibilityCoefGK` field (gun-fire detection range, km; near-zero
-    /// sentinel `1e-6` when unset in GameParams). Copied by PreprocessedHull.
-    pub visibility_coef_gk: Option<Km>,
-    /// Raw `visibilityCoefGKInSmoke` field, the in-smoke detection range used when
-    /// it exceeds MINIMAL_VALID_VALUE (0.01). FactoryVisibility createVisibilityTTX@137:
-    /// visibilityByShip.smoke.
+    /// Raw `visibilityCoefGKInSmoke` field, the in-smoke detection range. `None`
+    /// when absent or at or below the client's MINIMAL_VALID_VALUE gate (0.01).
+    /// FactoryVisibility createVisibilityTTX@137: visibilityByShip.smoke.
     pub visibility_coef_gk_in_smoke: Option<Km>,
     /// `visibilityFactorsBySubmarine['PERISCOPE']` (submarine periscope-depth detection
     /// range, km). PreprocessedHull.py:13; FactoryVisibility createVisibilityTTX@359

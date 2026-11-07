@@ -36,8 +36,8 @@ pub struct BuildTrackerPayload {
     game_type: String,
 }
 
-fn indicies_to_index(ids: &[GameParamId], metadata_provider: &GameMetadataProvider) -> Vec<String> {
-    ids.iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect()
+fn indicies_to_index(ids: &[Option<GameParamId>], metadata_provider: &GameMetadataProvider) -> Vec<String> {
+    ids.iter().flatten().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect()
 }
 
 impl BuildTrackerPayload {

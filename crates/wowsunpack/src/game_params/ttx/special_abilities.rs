@@ -3,6 +3,7 @@
 //! battery's alternative fire mode (`SwitchableModeArtilleryModule` in an
 //! artillery component).
 
+use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::types::CrewSkillModifier;
@@ -16,12 +17,12 @@ use crate::game_params::types::Meters;
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CombatInstructions {
     /// `rageModeName`, which names the title key
-    /// `IDS_DOCK_RAGE_MODE_TITLE_<NAME>`.
-    pub name: String,
+    /// `IDS_DOCK_RAGE_MODE_TITLE_<NAME>`. `None` when the section names none.
+    pub name: Option<String>,
     pub activation: Activation,
 
-    /// `boostDuration`.
-    pub duration: Seconds,
+    /// `boostDuration`. `None` when the section lists none.
+    pub duration: Option<Seconds>,
 
     /// `boostPreparation`: delay between a full meter and the ability being
     /// ready. `None` when zero.
@@ -69,10 +70,10 @@ pub struct ProgressDecay {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ProgressTrigger {
-    /// `progressName`; `"default"` when the event alone names the trigger.
+    /// `progressName`; `None` when the activator type alone names the trigger.
     /// The client labels it `IDS_RAGE_MODE_TRIGGER_<progressName or
     /// activator type>`.
-    pub progress_name: String,
+    pub progress_name: Option<String>,
 
     /// Progress added each time the event happens `required_count` times.
     pub gain: ProgressPercent,
@@ -148,15 +149,16 @@ pub struct AlternativeFireMode {
 pub struct BurstShots(pub u32);
 
 /// A shell the alternative fire mode loads.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct AlternativeAmmo {
     /// Projectile param name.
     pub name: String,
 
-    /// Shells per battle; `None` when unlimited (`-1`).
-    pub limit: Option<u32>,
+    /// `secondaryAmmoPool` shells per battle; `None` when the pool does not
+    /// list the shell.
+    pub limit: Option<AmmoCount>,
 }
 
 impl AlternativeFireMode {

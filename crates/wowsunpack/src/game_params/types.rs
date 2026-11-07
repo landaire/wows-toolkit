@@ -1093,15 +1093,12 @@ impl MountPoint {
     }
 
     /// Get the minimum barrel elevation (degrees) at a given yaw angle (degrees)
-    /// by checking pitch dead zones. Returns 0.0 if no dead zone applies.
-    pub fn min_pitch_at_yaw(&self, yaw_deg: f32) -> f32 {
-        for dz in &self.pitch_dead_zones {
+    /// by checking pitch dead zones. `None` if no dead zone applies.
+    pub fn min_pitch_at_yaw(&self, yaw_deg: f32) -> Option<f32> {
+        self.pitch_dead_zones.iter().find_map(|dz| {
             let [yaw_min, yaw_max, pitch_min, _pitch_max] = *dz;
-            if yaw_deg >= yaw_min && yaw_deg <= yaw_max {
-                return pitch_min;
-            }
-        }
-        0.0
+            (yaw_deg >= yaw_min && yaw_deg <= yaw_max).then_some(pitch_min)
+        })
     }
 }
 
@@ -1196,9 +1193,11 @@ impl Exterior {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct HullUpgradeConfig {
     /// Sea detection range in km.
-    pub detection_km: Km,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub detection_km: Option<Km>,
     /// Air detection range in km.
-    pub air_detection_km: Km,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub air_detection_km: Option<Km>,
     /// Component type key to component name (e.g. "artillery" -> "AB1_Artillery").
     #[cfg_attr(feature = "serde", serde(default))]
     pub component_names: HashMap<super::keys::ComponentType, String>,
@@ -1478,8 +1477,8 @@ pub struct ShipConfigData {
     /// Secondary (ATBA) ammo GameParam name per gun, ordered by hardpoint number
     /// (HP_GGS_<n>). Index == wire gunID under the assumption that the client's
     /// gun list follows hardpoint numeric order. Used for per-gun dot pacing;
-    /// empty string marks a mount with no resolvable ammo so indices stay aligned.
-    pub secondary_guns: Vec<String>,
+    /// `None` marks a mount with no resolvable ammo so indices stay aligned.
+    pub secondary_guns: Vec<Option<String>>,
 }
 
 /// Resolved ship range values in real-world units.
@@ -1507,18 +1506,20 @@ pub struct ShipRanges {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct HitLocation {
-    max_hp: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    max_hp: Option<f32>,
     hl_type: String,
-    regenerated_hp_part: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    regenerated_hp_part: Option<f32>,
     /// Default armor plating thickness for this zone, in mm.
     #[cfg_attr(feature = "serde", serde(default))]
-    thickness: f32,
+    thickness: Option<f32>,
     #[cfg_attr(feature = "serde", serde(default))]
     splash_boxes: Vec<String>,
 }
 
 impl HitLocation {
-    pub fn max_hp(&self) -> f32 {
+    pub fn max_hp(&self) -> Option<f32> {
         self.max_hp
     }
 
@@ -1526,12 +1527,12 @@ impl HitLocation {
         &self.hl_type
     }
 
-    pub fn regenerated_hp_part(&self) -> f32 {
+    pub fn regenerated_hp_part(&self) -> Option<f32> {
         self.regenerated_hp_part
     }
 
     /// Default armor plating thickness for this zone, in mm.
-    pub fn thickness(&self) -> f32 {
+    pub fn thickness(&self) -> Option<f32> {
         self.thickness
     }
 
@@ -1816,8 +1817,8 @@ impl Vehicle {
                 .and_then(|name| config.hull_upgrades.get(name))
                 .or_else(|| config.hull_upgrades.values().next());
             if let Some(hc) = hull_config {
-                ranges.detection_km = Some(hc.detection_km);
-                ranges.air_detection_km = Some(hc.air_detection_km);
+                ranges.detection_km = hc.detection_km;
+                ranges.air_detection_km = hc.air_detection_km;
                 ranges.main_battery_m = config.main_battery_m;
                 ranges.secondary_battery_m = config.secondary_battery_m;
                 // Torpedo range: look up all ammo params and take the max range
@@ -1873,16 +1874,71 @@ impl Vehicle {
     }
 }
 
+/// Client `ConsumableGroup` (`ConsumableConstants.py`): which group-scoped
+/// consumable coefficients apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ConsumableGroup {
+    Ship,
+    Squadron,
+}
+
+impl ConsumableGroup {
+    /// Parse the GameParams `group` string. `None` for any other value.
+    pub fn from_game_str(group: &str) -> Option<Self> {
+        match group {
+            "ship" => Some(Self::Ship),
+            "squadron" => Some(Self::Squadron),
+            _ => None,
+        }
+    }
+}
+
+/// Client `ConsumableLifeCycleType` (`ConsumableConstants.py`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ConsumableLifecycle {
+    /// A fixed number of charges, each active for `workTime`.
+    CountBased,
+    /// A capacity pool drained while active (`maxCapacity`).
+    TimeBased,
+}
+
+impl ConsumableLifecycle {
+    /// Parse the GameParams `lifeCycleType` value (`0` or `1`). `None` for any
+    /// other value.
+    pub fn from_game_params(value: f32) -> Option<Self> {
+        if value == 0.0 {
+            Some(Self::CountBased)
+        } else if value == 1.0 {
+            Some(Self::TimeBased)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct AbilityCategory {
     special_sound_id: Option<String>,
     consumable_type: String,
-    group: String,
-    icon_id: String,
-    num_consumables: isize,
-    preparation_time: f32,
+    /// `None` when the category names no client `ConsumableGroup`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    group: Option<ConsumableGroup>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    icon_id: Option<String>,
+    num_consumables: crate::game_types::ChargeCount,
+    lifecycle: ConsumableLifecycle,
+    /// `preparationTime`, seconds. `None` when the category does not list it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    preparation_time: Option<f32>,
+    /// `maxCapacity` of a TIME_BASED pool. `None` when absent or negative.
+    #[cfg_attr(feature = "serde", serde(default))]
+    max_capacity: Option<f32>,
     reload_time: f32,
     work_time: f32,
     /// Detection radius for ships (radar, hydro, sublocator). BigWorld units.
@@ -1938,10 +1994,8 @@ impl AbilityCategory {
         &self.consumable_type
     }
 
-    /// The consumable group string, `"ship"` or `"squadron"` (client
-    /// `ConsumableGroup`). Empty when absent.
-    pub fn group(&self) -> &str {
-        &self.group
+    pub fn group(&self) -> Option<ConsumableGroup> {
+        self.group
     }
 
     pub fn consumable_type(
@@ -1951,8 +2005,8 @@ impl AbilityCategory {
         crate::game_types::Consumable::from_consumable_type(&self.consumable_type, version)
     }
 
-    pub fn icon_id(&self) -> &str {
-        &self.icon_id
+    pub fn icon_id(&self) -> Option<&str> {
+        self.icon_id.as_deref()
     }
 
     pub fn work_time(&self) -> f32 {
@@ -1963,15 +2017,21 @@ impl AbilityCategory {
         self.reload_time
     }
 
-    pub fn preparation_time(&self) -> f32 {
+    pub fn preparation_time(&self) -> Option<f32> {
         self.preparation_time
     }
 
-    /// Raw `numConsumables` from GameParams. A value of `-1` means unlimited.
-    /// Callers that want a typed result should wrap this via
-    /// `wows_replay_insights::build::ChargeCount::from_game_params`.
-    pub fn num_consumables(&self) -> isize {
+    /// `numConsumables`: the base charge pool before build modifiers.
+    pub fn num_consumables(&self) -> crate::game_types::ChargeCount {
         self.num_consumables
+    }
+
+    pub fn lifecycle(&self) -> ConsumableLifecycle {
+        self.lifecycle
+    }
+
+    pub fn max_capacity(&self) -> Option<f32> {
+        self.max_capacity
     }
 
     /// Detection radius in meters.
@@ -2032,8 +2092,6 @@ impl AbilityCategory {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Ability {
     can_buy: bool,
-    cost_credits: isize,
-    cost_gold: isize,
     is_free: bool,
     categories: HashMap<String, AbilityCategory>,
 }
@@ -2080,10 +2138,6 @@ impl CrewPersonalityShips {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewPersonality {
     can_reset_skills_for_free: bool,
-    cost_credits: usize,
-    cost_elite_xp: usize,
-    cost_gold: usize,
-    cost_xp: usize,
     has_custom_background: Option<bool>,
     has_overlay: Option<bool>,
     has_rank: Option<bool>,
@@ -2095,7 +2149,7 @@ pub struct CrewPersonality {
     peculiarity: Option<String>,
     /// TODO: flags?
     permissions: Option<u32>,
-    person_name: String,
+    person_name: Option<String>,
     ships: CrewPersonalityShips,
     subnation: Option<String>,
     tags: Vec<String>,
@@ -2114,10 +2168,11 @@ impl CrewPersonality {
         self.is_person.unwrap_or(false)
     }
 
-    /// The person-name token (e.g. "Halsey"). The localized display name is
-    /// looked up as `IDS_<NAME>` with the token uppercased.
-    pub fn name(&self) -> &str {
-        &self.person_name
+    /// The person-name token (e.g. "Halsey"), `None` for crews without one.
+    /// The localized display name is looked up as `IDS_<NAME>` with the token
+    /// uppercased.
+    pub fn name(&self) -> Option<&str> {
+        self.person_name.as_deref()
     }
 
     pub fn ships(&self) -> &CrewPersonalityShips {
@@ -2211,6 +2266,8 @@ impl CrewSkillModifier {
             Species::Destroyer => self.destroyer,
             Species::Submarine => self.submarine,
             Species::Auxiliary => self.auxiliary,
+            // Event classes (e.g. Airship) carry no per-class value; 1.0 leaves
+            // multiplicative coefficients unchanged.
             _ => 1.0,
         }
     }
@@ -2291,9 +2348,9 @@ impl Interpolator {
         last_y
     }
 
-    /// The last control point's x (the saturation input); 0.0 if empty.
-    pub fn max_x(&self) -> f32 {
-        self.0.last().map(|&(x, _)| x).unwrap_or(0.0)
+    /// The last control point's x (the saturation input); `None` if empty.
+    pub fn max_x(&self) -> Option<f32> {
+        self.0.last().map(|&(x, _)| x)
     }
 }
 
@@ -2307,7 +2364,8 @@ pub struct CrewSkillLogicTrigger {
     /// (added across patches); model absence as None rather than a fake default.
     consumable_type: Option<String>,
     cooling_delay: Option<f32>,
-    cooling_interpolator: Interpolator,
+    /// `None` when the trigger has no `coolingInterpolator` points.
+    cooling_interpolator: Option<Interpolator>,
     count_to_modifier: Vec<(u32, Vec<CrewSkillModifier>)>,
     damage_value: Option<f32>,
     divider_type: Option<String>,
@@ -2316,7 +2374,8 @@ pub struct CrewSkillLogicTrigger {
     energy_coeff: Option<f32>,
     flood_count: Option<usize>,
     health_factor: Option<f32>,
-    heat_interpolator: Interpolator,
+    /// `None` when the trigger has no `heatInterpolator` points.
+    heat_interpolator: Option<Interpolator>,
     modifiers: Option<Vec<CrewSkillModifier>>,
     trigger_desc_ids: Option<String>,
     trigger_type: Option<String>,
@@ -2339,12 +2398,12 @@ impl CrewSkillLogicTrigger {
         &self.count_to_modifier
     }
 
-    pub fn heat_interpolator(&self) -> &Interpolator {
-        &self.heat_interpolator
+    pub fn heat_interpolator(&self) -> Option<&Interpolator> {
+        self.heat_interpolator.as_ref()
     }
 
-    pub fn cooling_interpolator(&self) -> &Interpolator {
-        &self.cooling_interpolator
+    pub fn cooling_interpolator(&self) -> Option<&Interpolator> {
+        self.cooling_interpolator.as_ref()
     }
 
     /// The consumable this trigger watches (`activationOnConsumable`), resolved to a type.
@@ -2484,7 +2543,8 @@ pub struct CrewSkill {
     is_epic: bool,
     modifiers: Option<Vec<CrewSkillModifier>>,
     skill_type: CrewSkillType,
-    tier: CrewSkillTiers,
+    /// `None` when a pre-rework skill has no scalar `tier`.
+    tier: Option<CrewSkillTiers>,
     ui_treat_as_trigger: bool,
 }
 
@@ -2738,8 +2798,8 @@ impl CrewSkill {
         self.skill_type
     }
 
-    pub fn tier(&self) -> &CrewSkillTiers {
-        &self.tier
+    pub fn tier(&self) -> Option<&CrewSkillTiers> {
+        self.tier.as_ref()
     }
 
     pub fn ui_treat_as_trigger(&self) -> bool {
@@ -3109,8 +3169,9 @@ impl CrewTalent {
 pub struct Achievement {
     is_group: bool,
     one_per_battle: bool,
-    ui_type: String,
-    ui_name: String,
+    ui_type: Option<String>,
+    /// Key for the achievement's translations and icon.
+    ui_name: Option<String>,
 }
 
 impl Achievement {
@@ -3122,12 +3183,12 @@ impl Achievement {
         self.one_per_battle
     }
 
-    pub fn ui_type(&self) -> &str {
-        &self.ui_type
+    pub fn ui_type(&self) -> Option<&str> {
+        self.ui_type.as_deref()
     }
 
-    pub fn ui_name(&self) -> &str {
-        &self.ui_name
+    pub fn ui_name(&self) -> Option<&str> {
+        self.ui_name.as_deref()
     }
 }
 
@@ -3151,8 +3212,10 @@ pub enum PlaneCategory {
 pub struct Aircraft {
     #[cfg_attr(feature = "serde", serde(default))]
     category: PlaneCategory,
+    /// `ammoType` of the `bombName` projectile. `None` for planes without
+    /// ordnance.
     #[cfg_attr(feature = "serde", serde(default))]
-    ammo_type: String,
+    ammo_type: Option<String>,
     /// Raw `planeSubtype` entries, e.g. "airsupport", "turboprop", "jet".
     #[cfg_attr(feature = "serde", serde(default))]
     subtypes: Vec<String>,
@@ -3196,8 +3259,8 @@ impl Aircraft {
         &self.category
     }
 
-    pub fn ammo_type(&self) -> &str {
-        &self.ammo_type
+    pub fn ammo_type(&self) -> Option<&str> {
+        self.ammo_type.as_deref()
     }
 
     pub fn subtypes(&self) -> &[String] {
@@ -3259,14 +3322,14 @@ impl Aircraft {
     /// The raw `category` from `planeSubtype` isn't always sufficient:
     /// - Airship/Auxiliary species are event airships that always use controllable-style icons,
     ///   even though their `planeSubtype` is empty (which defaults to `Controllable`).
-    /// - Controllable CV planes always have an ammo type; if ammo is empty and the plane isn't
-    ///   an airship, it's actually a consumable (catapult fighter/spotter).
+    /// - Controllable CV planes always have an ammo type; one without it that isn't an
+    ///   airship is actually a consumable (catapult fighter/spotter).
     pub fn effective_category(&self, species: Option<&Species>) -> PlaneCategory {
         let is_airship = matches!(species, Some(Species::Airship | Species::Auxiliary));
         if is_airship {
             return PlaneCategory::Controllable;
         }
-        if matches!(self.category, PlaneCategory::Controllable) && self.ammo_type.is_empty() {
+        if matches!(self.category, PlaneCategory::Controllable) && self.ammo_type.is_none() {
             return PlaneCategory::Consumable;
         }
         self.category.clone()
@@ -3335,7 +3398,8 @@ impl std::fmt::Display for AmmoType {
 ///
 /// A flattened, easy-to-use representation of a `Projectile`'s ballistic
 /// properties. All units are game-standard (mm for caliber/penetration,
-/// m/s for velocity, kg for mass, degrees for angles).
+/// m/s for velocity, kg for mass, degrees for angles). Built only from a
+/// projectile that lists its ammo type, caliber, damage and flight inputs.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ShellInfo {
@@ -3348,13 +3412,17 @@ pub struct ShellInfo {
     pub muzzle_velocity: f32,
     pub mass_kg: f32,
     pub krupp: f32,
-    pub ricochet_angle: f32,
-    pub always_ricochet_angle: f32,
-    pub fuse_time: f32,
+    /// Strike angle in degrees past which a ricochet becomes possible.
+    pub ricochet_angle: Option<f32>,
+    /// Strike angle in degrees past which a ricochet is certain.
+    pub always_ricochet_angle: Option<f32>,
+    /// Fuse delay in seconds.
+    pub fuse_time: Option<f32>,
     /// Fuse arming threshold in mm. `None` when the projectile carries no fuse
     /// data; there is no safe numeric default (0.0 would arm on any plate).
     pub fuse_threshold: Option<f32>,
-    pub burn_prob: f32,
+    /// Raw `burnProb`, the base the client's fire chance formula adds bonuses to.
+    pub burn_prob: Option<f32>,
     pub air_drag: f32,
     /// Cap normalization angle in degrees. `None` when the projectile defines no
     /// normalization; there is no safe numeric default (0.0 changes penetration).
@@ -3369,8 +3437,10 @@ pub struct ShellInfo {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Projectile {
+    /// `ammoType`, e.g. "HE", "AP", "CS" or "torpedo". `None` when the
+    /// projectile lists none.
     #[cfg_attr(feature = "serde", serde(default))]
-    ammo_type: String,
+    ammo_type: Option<String>,
     /// Maximum range in BigWorld units. Present for torpedo ammo.
     #[cfg_attr(feature = "serde", serde(default))]
     max_dist: Option<BigWorldDistance>,
@@ -3413,7 +3483,9 @@ pub struct Projectile {
     /// Alpha strike damage.
     #[cfg_attr(feature = "serde", serde(default))]
     alpha_damage: Option<f32>,
-    /// Fire chance (-0.5 means N/A).
+    /// Fire chance base (`burnProb`). GameParams writes -0.5 on shells that
+    /// cannot start fires; the value stays raw because the client's fire chance
+    /// formula adds bonuses to it before clamping.
     #[cfg_attr(feature = "serde", serde(default))]
     burn_prob: Option<f32>,
     /// Flood chance (`uwCritical`). Read by `PreprocessedAmmo.floodChance`
@@ -3465,8 +3537,8 @@ pub struct Projectile {
 }
 
 impl Projectile {
-    pub fn ammo_type(&self) -> &str {
-        &self.ammo_type
+    pub fn ammo_type(&self) -> Option<&str> {
+        self.ammo_type.as_deref()
     }
 
     pub fn max_dist(&self) -> Option<BigWorldDistance> {
@@ -3588,28 +3660,28 @@ impl Projectile {
     /// Convert this projectile to a [`ShellInfo`] with the given name.
     ///
     /// This is the canonical way to build a `ShellInfo` from game data,
-    /// avoiding duplication across consumers.
-    pub fn to_shell_info(&self, name: String) -> ShellInfo {
-        let caliber_mm = Millimeters::new(self.bullet_diametr.unwrap_or(0.0) * 1000.0);
-        ShellInfo {
+    /// avoiding duplication across consumers. `None` when the projectile lacks
+    /// its ammo type, caliber, damage, mass, speed, Krupp or air drag.
+    pub fn to_shell_info(&self, name: String) -> Option<ShellInfo> {
+        Some(ShellInfo {
             name,
-            ammo_type: AmmoType::from_game_str(&self.ammo_type),
-            caliber: caliber_mm,
+            ammo_type: AmmoType::from_game_str(self.ammo_type.as_deref()?),
+            caliber: Millimeters::new(self.bullet_diametr? * 1000.0),
             he_pen_mm: self.alpha_piercing_he,
             sap_pen_mm: self.alpha_piercing_cs,
-            alpha_damage: self.alpha_damage.unwrap_or(0.0),
-            muzzle_velocity: self.bullet_speed.unwrap_or(0.0),
-            mass_kg: self.bullet_mass.unwrap_or(0.0),
-            krupp: self.bullet_krupp.unwrap_or(0.0),
-            ricochet_angle: self.bullet_ricochet_at.unwrap_or(45.0),
-            always_ricochet_angle: self.bullet_always_ricochet_at.unwrap_or(60.0),
-            fuse_time: self.bullet_detonator.unwrap_or(0.033),
+            alpha_damage: self.alpha_damage?,
+            muzzle_velocity: self.bullet_speed?,
+            mass_kg: self.bullet_mass?,
+            krupp: self.bullet_krupp?,
+            ricochet_angle: self.bullet_ricochet_at,
+            always_ricochet_angle: self.bullet_always_ricochet_at,
+            fuse_time: self.bullet_detonator,
             fuse_threshold: self.bullet_detonator_threshold,
-            burn_prob: self.burn_prob.unwrap_or(-0.5),
-            air_drag: self.bullet_air_drag.unwrap_or(0.0),
+            burn_prob: self.burn_prob,
+            air_drag: self.bullet_air_drag?,
             normalization: self.bullet_cap_normalize_max_angle,
             cap: self.bullet_cap.unwrap_or(true),
-        }
+        })
     }
 }
 
@@ -3618,11 +3690,11 @@ impl Projectile {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct BuffDrop {
     #[cfg_attr(feature = "serde", serde(default))]
-    marker_name_active: String,
+    marker_name_active: Option<String>,
     #[cfg_attr(feature = "serde", serde(default))]
-    marker_name_inactive: String,
+    marker_name_inactive: Option<String>,
     #[cfg_attr(feature = "serde", serde(default))]
-    sorting: i64,
+    sorting: Option<i64>,
 
     /// How many times the buff stacks (`maxBuffLevel`); absent when the
     /// param does not say.
@@ -3637,15 +3709,15 @@ pub struct BuffDrop {
 }
 
 impl BuffDrop {
-    pub fn marker_name_active(&self) -> &str {
-        &self.marker_name_active
+    pub fn marker_name_active(&self) -> Option<&str> {
+        self.marker_name_active.as_deref()
     }
 
-    pub fn marker_name_inactive(&self) -> &str {
-        &self.marker_name_inactive
+    pub fn marker_name_inactive(&self) -> Option<&str> {
+        self.marker_name_inactive.as_deref()
     }
 
-    pub fn sorting(&self) -> i64 {
+    pub fn sorting(&self) -> Option<i64> {
         self.sorting
     }
 
@@ -3655,16 +3727,6 @@ impl BuffDrop {
 
     pub fn buffs(&self) -> &[String] {
         &self.buffs
-    }
-
-    /// Returns the game asset path for the active icon.
-    pub fn active_icon_path(&self) -> String {
-        format!("gui/powerups/drops/icon_marker_{}.png", self.marker_name_active)
-    }
-
-    /// Returns the game asset path for the inactive icon.
-    pub fn inactive_icon_path(&self) -> String {
-        format!("gui/powerups/drops/icon_marker_{}.png", self.marker_name_inactive)
     }
 }
 
@@ -3859,24 +3921,24 @@ impl Unit {
 }
 
 /// Number of modernization (upgrade) slots a ship has: max applicable `slot` + 1.
-/// Returns 0 when `ship` is not a vehicle or no slotted modernization applies.
-pub fn modernization_slot_count(params: &[crate::Rc<Param>], ship: &Param) -> usize {
-    let Some(vehicle) = ship.vehicle() else { return 0 };
-    let Some(species) = ship.species().and_then(|r| r.known()) else { return 0 };
+/// `None` when `ship` is not a vehicle or its species is unknown; `Some(0)` when
+/// no slotted modernization applies.
+pub fn modernization_slot_count(params: &[crate::Rc<Param>], ship: &Param) -> Option<usize> {
+    let vehicle = ship.vehicle()?;
+    let species = ship.species().and_then(|r| r.known())?;
     let species_name = species.name();
     let ship_name = ship.name();
     let level = vehicle.level();
     let group = vehicle.group();
     let nation = ship.nation();
-    let mut max_slot: i32 = -1;
-    for p in params {
-        let Some(m) = p.modernization() else { continue };
-        let Some(slot) = m.slot() else { continue };
-        if m.applies_to(ship_name, level, species_name, nation, group) {
-            max_slot = max_slot.max(slot as i32);
-        }
-    }
-    (max_slot + 1) as usize
+    let max_slot = params
+        .iter()
+        .filter_map(|p| p.modernization())
+        .filter(|m| m.applies_to(ship_name, level, species_name, nation, group))
+        .filter_map(|m| m.slot())
+        .max();
+
+    Some(max_slot.map_or(0, |slot| usize::from(slot) + 1))
 }
 
 #[cfg(test)]
@@ -3950,7 +4012,8 @@ mod modernization_tests {
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Building {
     level: u32,
-    health: f32,
+    /// `None` when the param has no `hull.health`.
+    health: Option<f32>,
 }
 
 impl Building {
@@ -3958,7 +4021,7 @@ impl Building {
         self.level
     }
 
-    pub fn health(&self) -> f32 {
+    pub fn health(&self) -> Option<f32> {
         self.health
     }
 }
@@ -4153,7 +4216,7 @@ pub fn secondary_gun_ammo_param<P: GameParamProvider + ?Sized>(
 ) -> Option<GameParamId> {
     let ship_param = provider.game_param_by_id(ship)?;
     let guns = &ship_param.vehicle()?.config_data()?.secondary_guns;
-    let name = guns.get(gun.index()).filter(|n| !n.is_empty());
+    let name = guns.get(gun.index()).and_then(Option::as_deref);
     match name.and_then(|n| provider.game_param_by_name(n)) {
         Some(p) => Some(p.id()),
         None => secondary_ammo_param(provider, ship),
@@ -4189,7 +4252,7 @@ mod tests {
             .bullet_mass(47.6)
             .bullet_krupp(1150.0)
             .build();
-        assert_eq!(p.ammo_type(), "HE");
+        assert_eq!(p.ammo_type(), Some("HE"));
         assert_eq!(p.alpha_damage(), Some(2200.0));
         assert_eq!(p.alpha_piercing_he(), Some(30.0));
         assert_eq!(p.burn_prob(), Some(0.12));
@@ -4214,7 +4277,7 @@ mod tests {
             .bullet_mass(59.0)
             .bullet_krupp(2692.0)
             .build();
-        assert_eq!(p.ammo_type(), "AP");
+        assert_eq!(p.ammo_type(), Some("AP"));
         assert_eq!(p.alpha_damage(), Some(3200.0));
         assert_eq!(p.burn_prob(), Some(-0.5));
         assert_eq!(p.uw_critical(), Some(0.0));
@@ -4443,11 +4506,9 @@ mod crew_skill_description_tests {
         CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .modifiers(modifiers)
             .trigger_desc_ids(String::new())
             .trigger_type(trigger_type.to_owned())
@@ -4506,11 +4567,9 @@ mod crew_skill_description_tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type("hydrophone".to_owned())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(15.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .trigger_desc_ids(String::new())
             .trigger_type("activationOnConsumable".to_owned())
             .build();
@@ -4597,11 +4656,11 @@ mod interpolator_tests {
         assert!((lerp.eval(27.5) - 0.75).abs() < 1e-6, "midpoint of [10,0.5]-[45,1.0]");
         assert_eq!(lerp.eval(45.0), 1.0, "last point");
         assert_eq!(lerp.eval(100.0), 1.0, "above last x clamps to last y");
-        assert_eq!(lerp.max_x(), 45.0);
+        assert_eq!(lerp.max_x(), Some(45.0));
 
         let empty = Interpolator::from_points(Vec::new());
         assert_eq!(empty.eval(5.0), 0.0, "empty -> 0.0");
-        assert_eq!(empty.max_x(), 0.0, "empty -> 0.0");
+        assert_eq!(empty.max_x(), None, "empty has no saturation input");
     }
 }
 

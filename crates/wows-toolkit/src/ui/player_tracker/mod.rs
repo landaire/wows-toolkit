@@ -379,7 +379,8 @@ impl PlayerTracker {
                 is_division_mate = state_of(self_player).is_division_mate(player_state);
             }
 
-            let tracked_player = tracked_players.entry(player_state.db_id()).or_default();
+            let tracked_player =
+                tracked_players.entry(player_state.db_id()).or_insert_with(|| TrackedPlayer::new(player_state.db_id()));
 
             // Division encounters are recorded like any other and marked, so the
             // tables can hide this battle without losing the ones where the same
@@ -423,7 +424,6 @@ impl PlayerTracker {
                 tracked_player.clan = player_state.clan().to_string();
             }
 
-            tracked_player.db_id = player_state.db_id();
             tracked_player.clan_id = player_state.clan_id();
             tracked_player.timestamps.insert(timestamp);
             tracked_player.arena_ids.insert(arena_id);
@@ -906,7 +906,7 @@ mod tests {
         let player = tracker.tracked_players.get(&AccountId(501)).expect("the saved player is tracked");
         assert_eq!(player.last_name, "Enemy");
         assert_eq!(player.clan, "RAIN");
-        assert_eq!(player.clan_id, 7);
+        assert_eq!(player.clan_id, Some(7));
         assert_eq!(player.timestamps.iter().collect::<Vec<_>>(), vec![timestamp]);
         assert_eq!(player.arena_ids.len(), 1);
         assert_eq!(player.notes, "", "a player saved before notes existed loads without any");

@@ -59,7 +59,7 @@ pub fn handle_chat_message<G: ResourceLoader>(
         .find(|p| {
             let state = p.initial_state();
             if by_account {
-                state.player_id() == sender_id
+                state.player_id() == Some(sender_id)
             } else {
                 state.avatar_id().is_some_and(|avatar| PlayerId::from(avatar.raw()) == sender_id)
             }

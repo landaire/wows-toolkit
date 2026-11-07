@@ -11,6 +11,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownTalentEffect;
 use wowsunpack::game_params::types::Species;
 
+use crate::buffs::BuffDuration;
 use crate::buffs::buff_heal_rate;
 use crate::commanders::Talent;
 use crate::consumables::ConsumableStats;
@@ -61,9 +62,10 @@ pub struct HealingSourcesOutput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OwnHeal {
-    /// The squadrons that drop it, for carrier plane consumables.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub squadrons: Vec<String>,
+    /// The squadrons that drop it, for carrier plane consumables. Absent when
+    /// the ship uses it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub squadrons: Option<Vec<String>>,
 
     #[serde(flatten)]
     pub consumable: ConsumableStats,
@@ -81,11 +83,18 @@ pub struct AllyHeal {
 pub struct AllyHealCarriers {
     pub ships: Vec<String>,
 
-    /// The ship uses it, or its squadrons drop it.
-    pub delivered_by: &'static str,
+    pub delivered_by: DeliveredBy,
 
     #[serde(flatten)]
     pub consumable: ConsumableStats,
+}
+
+/// Whether the ship uses a consumable, or its squadrons drop it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveredBy {
+    Ship,
+    Squadron,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,10 +107,31 @@ pub struct CommanderHeals {
 struct Mounted {
     ability: String,
     variant: String,
+    carrier: Carrier,
+}
 
-    /// English names of the squadrons that carry it; empty when the ship
-    /// carries it.
-    squadrons: Vec<String>,
+/// What carries a mounted consumable.
+enum Carrier {
+    Ship,
+
+    /// English names of the squadrons that carry it.
+    Squadrons(Vec<String>),
+}
+
+impl Carrier {
+    fn squadrons(self) -> Option<Vec<String>> {
+        match self {
+            Self::Ship => None,
+            Self::Squadrons(names) => Some(names),
+        }
+    }
+
+    fn delivered_by(&self) -> DeliveredBy {
+        match self {
+            Self::Ship => DeliveredBy::Ship,
+            Self::Squadrons(_) => DeliveredBy::Squadron,
+        }
+    }
 }
 
 impl GameData {
@@ -131,7 +161,7 @@ impl GameData {
                     continue;
                 }
                 own_consumables.push(OwnHeal {
-                    squadrons: mounted.squadrons,
+                    squadrons: mounted.carrier.squadrons(),
                     consumable: self.healing_consumable(ship, name, category)?,
                 });
             }
@@ -177,7 +207,7 @@ impl GameData {
                 }
 
                 let consumable = self.healing_consumable(ship, name.clone(), category)?;
-                let delivered_by = if mounted.squadrons.is_empty() { "ship" } else { "squadron" };
+                let delivered_by = mounted.carrier.delivered_by();
                 let heal = match heals.iter_mut().find(|heal| heal.consumable == name) {
                     Some(heal) => heal,
                     None => {
@@ -208,16 +238,28 @@ impl GameData {
     /// choice once.
     fn mounted_consumables(&self, ship: &Ship) -> Vec<Mounted> {
         let mut mounted: Vec<Mounted> = Vec::new();
-        let mut add = |ability: &str, variant: &str, squadron: Option<String>| match mounted
-            .iter_mut()
-            .find(|other| other.ability == ability && other.variant == variant)
-        {
-            Some(other) => other.squadrons.extend(squadron.filter(|name| !other.squadrons.contains(name))),
-            None => mounted.push(Mounted {
-                ability: ability.to_owned(),
-                variant: variant.to_owned(),
-                squadrons: squadron.into_iter().collect(),
-            }),
+        let mut add = |ability: &str, variant: &str, squadron: Option<String>| {
+            let found = mounted.iter_mut().find(|other| other.ability == ability && other.variant == variant);
+            match (found, squadron) {
+                (Some(other), Some(squadron)) => match &mut other.carrier {
+                    Carrier::Squadrons(names) => {
+                        if !names.contains(&squadron) {
+                            names.push(squadron);
+                        }
+                    }
+                    // A squadron that drops a consumable the ship also uses
+                    // reports it as dropped.
+                    Carrier::Ship => other.carrier = Carrier::Squadrons(vec![squadron]),
+                },
+                (Some(_), None) => {
+                    // Already listed.
+                }
+                (None, squadron) => mounted.push(Mounted {
+                    ability: ability.to_owned(),
+                    variant: variant.to_owned(),
+                    carrier: squadron.map_or(Carrier::Ship, |name| Carrier::Squadrons(vec![name])),
+                }),
+            }
         };
 
         for slot in ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default() {
@@ -290,7 +332,8 @@ impl GameData {
     ) -> Result<ConsumableStats, QueryError> {
         let effects = self.effective_modifiers(ship, &self.stock_loadout())?;
         let mut stats = consumable_stats(name, category, effects.build.modifiers.bundle());
-        stats.buff = self.consumable_buff(category, ship.class.species(), stats.action_time_s.map(|time| time.value()));
+        stats.buff =
+            self.consumable_buff(category, ship.class.species(), BuffDuration::of_consumable(stats.action_time_s));
 
         Ok(stats)
     }

@@ -2167,7 +2167,8 @@ mod tests {
                 unclassifiable_upgrade_param(),
             ])));
 
-            let upgrades: &[GameParamId] = if self.unclassifiable_modifier { &[upgrade_id()] } else { &[] };
+            let upgrades: &[Option<GameParamId>] =
+                if self.unclassifiable_modifier { &[Some(upgrade_id())] } else { &[] };
             let build: &'static ResolvedBuild = Box::leak(Box::new(
                 ResolvedBuild::from_ids(
                     ship_id(),

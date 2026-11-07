@@ -293,7 +293,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968040
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3655251408)
   - id: 968043
     health: 102200
@@ -303,7 +303,7 @@ vehicles:
     visibility_flags: 1
     team_id: 0
     owner: 968042
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3761190608)
   - id: 968045
     health: 0
@@ -313,7 +313,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968044
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4178491344)
   - id: 968047
     health: 0
@@ -323,7 +323,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968046
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3750638896)
   - id: 968049
     health: 57816.473
@@ -333,7 +333,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968048
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4276041424)
   - id: 968051
     health: 81468.54
@@ -343,7 +343,7 @@ vehicles:
     visibility_flags: 65
     team_id: 0
     owner: 968050
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4277090288)
   - id: 968053
     health: 0
@@ -353,7 +353,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968052
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3655284688)
   - id: 968055
     health: 329
@@ -363,7 +363,7 @@ vehicles:
     visibility_flags: 1
     team_id: 0
     owner: 968054
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3655218960)
   - id: 968057
     health: 0
@@ -373,7 +373,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968056
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4074682064)
   - id: 968059
     health: 44632.258
@@ -383,7 +383,7 @@ vehicles:
     visibility_flags: 1
     team_id: 1
     owner: 968058
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4074714832)
   - id: 968061
     health: 0
@@ -393,7 +393,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968060
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3530471216)
   - id: 968063
     health: 0
@@ -403,7 +403,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968062
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4074649392)
   - id: 968065
     health: 0
@@ -413,7 +413,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968064
-    selected_weapon: Known(Pinger)
+    selected_weapon: Some(Known(Pinger))
     ship_params_id: GameParamId(3759585072)
   - id: 968067
     health: 1589.246
@@ -423,7 +423,7 @@ vehicles:
     visibility_flags: 257
     team_id: 0
     owner: 968066
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3750672176)
   - id: 968069
     health: 0
@@ -433,7 +433,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968068
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3540924112)
   - id: 968071
     health: 32270.018
@@ -443,7 +443,7 @@ vehicles:
     visibility_flags: 1
     team_id: 1
     owner: 968070
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4179572720)
   - id: 968073
     health: 0
@@ -453,7 +453,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968072
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4276041424)
   - id: 968075
     health: 6697.574
@@ -463,7 +463,7 @@ vehicles:
     visibility_flags: 33
     team_id: 1
     owner: 968074
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3549869904)
   - id: 968077
     health: 58000
@@ -473,7 +473,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968076
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4178491184)
   - id: 968079
     health: 79996.375
@@ -483,7 +483,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968078
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3760142320)
   - id: 968081
     health: 22546.25
@@ -493,7 +493,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968080
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4074649296)
   - id: 968083
     health: 0
@@ -503,7 +503,7 @@ vehicles:
     visibility_flags: 0
     team_id: 0
     owner: 968082
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4179572528)
   - id: 968085
     health: 51072.42
@@ -513,7 +513,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968084
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(3666818896)
   - id: 968087
     health: 22500
@@ -523,7 +523,7 @@ vehicles:
     visibility_flags: 0
     team_id: 1
     owner: 968086
-    selected_weapon: Known(Artillery)
+    selected_weapon: Some(Known(Artillery))
     ship_params_id: GameParamId(4282267344)
 entity_kinds:
   - id: 321824

@@ -140,77 +140,61 @@ main_battery_damage:
               port: 123120
         best:
           value:
-            damage_per_minute: 293809
-            damage_per_second: 4896.8
+            damage_per_minute: 279818
+            damage_per_second: 4663.6
             bearing: 90
-            all_barrels_ceiling: 293809
+            all_barrels_ceiling: 279818
             by_bearing:
               - bearing: 0
-                starboard: 97936
-                port: 97936
+                starboard: 93273
+                port: 93273
               - bearing: 30
-                starboard: 97936
-                port: 97936
+                starboard: 93273
+                port: 93273
               - bearing: 45
-                starboard: 293809
-                port: 293809
+                starboard: 279818
+                port: 279818
               - bearing: 60
-                starboard: 293809
-                port: 293809
+                starboard: 279818
+                port: 279818
               - bearing: 90
-                starboard: 293809
-                port: 293809
+                starboard: 279818
+                port: 279818
               - bearing: 120
-                starboard: 293809
-                port: 293809
+                starboard: 279818
+                port: 279818
               - bearing: 135
-                starboard: 293809
-                port: 293809
+                starboard: 279818
+                port: 279818
               - bearing: 150
-                starboard: 244841
-                port: 244841
+                starboard: 233182
+                port: 233182
               - bearing: 180
-                starboard: 146905
-                port: 146905
+                starboard: 139909
+                port: 139909
           assumed:
-            - Heavy AP Shells
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         alternatives:
-          - label: without Heavy AP Shells
-            value:
-              damage_per_minute: 279818
-              damage_per_second: 4663.6
-              bearing: 90
-              all_barrels_ceiling: 279818
-            assumed:
-              - Main Battery Modification 3
           - label: without Main Battery Modification 3
             value:
-              damage_per_minute: 258552
-              damage_per_second: 4309.2
+              damage_per_minute: 246240
+              damage_per_second: 4104
               bearing: 90
-              all_barrels_ceiling: 258552
-            assumed:
-              - Heavy AP Shells
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
+              all_barrels_ceiling: 246240
+            assumed: []
           - label: with Top Grade Gunner active
             value:
-              damage_per_minute: 319358
-              damage_per_second: 5322.6
+              damage_per_minute: 304150
+              damage_per_second: 5069.2
               bearing: 90
-              all_barrels_ceiling: 319358
+              all_barrels_ceiling: 304150
             assumed:
-              - Heavy AP Shells
               - Main Battery Modification 3
               - Top Grade Gunner
             tier_fillers:
               - Consumable Specialist
               - Focus Fire Training
+              - Heavy AP Shells
             note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
   - ammo: HE
     damage: 2850

@@ -172,7 +172,7 @@ pub fn draw_ship_labels(
 /// Map a `DeathCause` to the icon key used in the `death_cause_icons` HashMap.
 fn death_cause_icon_key(cause: &wows_minimap_renderer::draw_command::KillFeedEntry) -> &'static str {
     use wows_replays::analyzer::decoder::DeathCause;
-    match cause.cause.known() {
+    match cause.cause.as_ref().and_then(|cause| cause.known()) {
         Some(DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell) => "main_caliber",
         Some(DeathCause::Secondaries) => "atba",
         Some(DeathCause::Torpedo | DeathCause::AerialTorpedo) => "torpedo",
@@ -872,8 +872,9 @@ pub fn draw_command_to_shapes(
 
                 let cause_key = death_cause_icon_key(entry);
 
-                let killer_galley =
-                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.killer_name.clone(), name_font.clone(), killer_color));
+                // A kill with no responsible ship draws no killer name.
+                let killer_name = entry.killer_name.clone().unwrap_or_default();
+                let killer_galley = ctx.fonts_mut(|f| f.layout_no_wrap(killer_name, name_font.clone(), killer_color));
                 let victim_galley =
                     ctx.fonts_mut(|f| f.layout_no_wrap(entry.victim_name.clone(), name_font.clone(), victim_color));
                 let killer_name_w = killer_galley.size().x;
@@ -927,7 +928,10 @@ pub fn draw_command_to_shapes(
                 // If we don't have death cause icons, fall back to simple text-only layout
                 if !has_cause_icon && !has_killer_icon && !has_victim_icon {
                     // Simple text kill feed: "killer ⚔ victim"
-                    let text = format!("{} \u{2694} {}", entry.killer_name, entry.victim_name);
+                    let text = match &entry.killer_name {
+                        Some(killer_name) => format!("{killer_name} \u{2694} {}", entry.victim_name),
+                        None => format!("\u{2694} {}", entry.victim_name),
+                    };
                     let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, name_font.clone(), Color32::WHITE));
                     let text_w = galley.size().x;
                     let x = map_right_edge - right_margin - text_w;
@@ -1452,11 +1456,7 @@ pub fn draw_command_to_shapes(
             width,
             height,
             ship_param_id: _,
-            hp_fraction,
-            hp_current,
-            hp_max,
-            hp_healable,
-            hp_healable_per_charge,
+            hp,
             heal_availability,
             player_name,
             clan_tag,
@@ -1559,52 +1559,54 @@ pub fn draw_command_to_shapes(
                 });
                 shapes.push(Shape::Mesh(base_mesh.into()));
 
-                let regions = wows_minimap_renderer::panel_math::silhouette_regions(
-                    *hp_current,
-                    *hp_healable,
-                    *hp_healable_per_charge,
-                    *hp_max,
-                );
-
-                // Colored region: current HP, clipped from the left by regions.colored
-                let hp_color = hp_bar_color_egui(*hp_fraction);
-                let colored_w = fit_w * regions.colored;
-                if colored_w > 0.0 {
-                    let clip_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(colored_w, fit_h));
-                    let mut hp_mesh = egui::Mesh::with_texture(sil_tex.id());
-                    hp_mesh.add_rect_with_uv(
-                        clip_rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(regions.colored, 1.0)),
-                        hp_color,
+                if let Some(hp) = hp {
+                    let regions = wows_minimap_renderer::panel_math::silhouette_regions(
+                        hp.current,
+                        hp.healable,
+                        hp.healable_per_charge,
+                        hp.max,
                     );
-                    shapes.push(Shape::Mesh(hp_mesh.into()));
-                }
 
-                // Healable region: bright = HP the next heal charge restores,
-                // dim = the regenerable pool beyond that charge. Gray when a heal
-                // is ready, white while healing, hidden when unavailable.
-                if let Some([r, g, b]) = heal_availability.healable_rgb() {
-                    let bright = Color32::from_rgb(r, g, b);
-                    let [dr, dg, db] = wows_minimap_renderer::panel_math::darken([r, g, b], 0.5);
-                    let dim = Color32::from_rgb(dr, dg, db);
-                    let mut draw_region = |start: f32, w_frac: f32, color: Color32| {
-                        let region_w = fit_w * w_frac;
-                        if region_w > 0.0 {
-                            let clip_rect = Rect::from_min_size(
-                                Pos2::new(sil_x + fit_w * start, sil_y),
-                                Vec2::new(region_w, fit_h),
-                            );
-                            let mut region_mesh = egui::Mesh::with_texture(sil_tex.id());
-                            region_mesh.add_rect_with_uv(
-                                clip_rect,
-                                Rect::from_min_max(egui::pos2(start, 0.0), egui::pos2(start + w_frac, 1.0)),
-                                color,
-                            );
-                            shapes.push(Shape::Mesh(region_mesh.into()));
-                        }
-                    };
-                    draw_region(regions.colored, regions.healable_bright, bright);
-                    draw_region(regions.colored + regions.healable_bright, regions.healable_dim, dim);
+                    // Colored region: current HP, clipped from the left by regions.colored
+                    let hp_color = hp_bar_color_egui(hp.fraction());
+                    let colored_w = fit_w * regions.colored;
+                    if colored_w > 0.0 {
+                        let clip_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(colored_w, fit_h));
+                        let mut hp_mesh = egui::Mesh::with_texture(sil_tex.id());
+                        hp_mesh.add_rect_with_uv(
+                            clip_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(regions.colored, 1.0)),
+                            hp_color,
+                        );
+                        shapes.push(Shape::Mesh(hp_mesh.into()));
+                    }
+
+                    // Healable region: bright = HP the next heal charge restores,
+                    // dim = the regenerable pool beyond that charge. Gray when a heal
+                    // is ready, white while healing, hidden when unavailable.
+                    if let Some([r, g, b]) = heal_availability.healable_rgb() {
+                        let bright = Color32::from_rgb(r, g, b);
+                        let [dr, dg, db] = wows_minimap_renderer::panel_math::darken([r, g, b], 0.5);
+                        let dim = Color32::from_rgb(dr, dg, db);
+                        let mut draw_region = |start: f32, w_frac: f32, color: Color32| {
+                            let region_w = fit_w * w_frac;
+                            if region_w > 0.0 {
+                                let clip_rect = Rect::from_min_size(
+                                    Pos2::new(sil_x + fit_w * start, sil_y),
+                                    Vec2::new(region_w, fit_h),
+                                );
+                                let mut region_mesh = egui::Mesh::with_texture(sil_tex.id());
+                                region_mesh.add_rect_with_uv(
+                                    clip_rect,
+                                    Rect::from_min_max(egui::pos2(start, 0.0), egui::pos2(start + w_frac, 1.0)),
+                                    color,
+                                );
+                                shapes.push(Shape::Mesh(region_mesh.into()));
+                            }
+                        };
+                        draw_region(regions.colored, regions.healable_bright, bright);
+                        draw_region(regions.colored + regions.healable_bright, regions.healable_dim, dim);
+                    }
                 }
             } else {
                 // Fallback: simple HP bar when no silhouette texture
@@ -1616,26 +1618,31 @@ pub fn draw_command_to_shapes(
                         CornerRadius::same(2),
                         Color32::from_rgb(40, 40, 40),
                     ));
-                    let hp_color = hp_bar_color_egui(*hp_fraction);
-                    let fill_w = inner_w * hp_fraction;
-                    if fill_w > 0.0 {
-                        shapes.push(Shape::rect_filled(
-                            Rect::from_min_size(Pos2::new(inner_x, bar_y), Vec2::new(fill_w, bar_h)),
-                            CornerRadius::same(2),
-                            hp_color,
-                        ));
+                    if let Some(hp) = hp {
+                        let hp_fraction = hp.fraction();
+                        let hp_color = hp_bar_color_egui(hp_fraction);
+                        let fill_w = inner_w * hp_fraction;
+                        if fill_w > 0.0 {
+                            shapes.push(Shape::rect_filled(
+                                Rect::from_min_size(Pos2::new(inner_x, bar_y), Vec2::new(fill_w, bar_h)),
+                                CornerRadius::same(2),
+                                hp_color,
+                            ));
+                        }
                     }
                 }
             }
 
             // HP text: "12,345 / 42,750"
-            let hp_text =
-                format!("{} / {}", format_number_egui(*hp_current as i64), format_number_egui(*hp_max as i64));
-            let hp_font = game_font(16.0 * ws);
-            let hp_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_text, hp_font, Color32::from_rgb(220, 220, 220)));
-            let hp_x = inner_x + (inner_w - hp_galley.size().x) / 2.0;
-            let hp_y = sil_top + sil_area_h;
-            shapes.push(Shape::galley(Pos2::new(hp_x, hp_y), hp_galley, Color32::TRANSPARENT));
+            if let Some(hp) = hp {
+                let hp_text =
+                    format!("{} / {}", format_number_egui(hp.current as i64), format_number_egui(hp.max as i64));
+                let hp_font = game_font(16.0 * ws);
+                let hp_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_text, hp_font, Color32::from_rgb(220, 220, 220)));
+                let hp_x = inner_x + (inner_w - hp_galley.size().x) / 2.0;
+                let hp_y = sil_top + sil_area_h;
+                shapes.push(Shape::galley(Pos2::new(hp_x, hp_y), hp_galley, Color32::TRANSPARENT));
+            }
         }
 
         DrawCommand::StatsDamage {
@@ -1885,9 +1892,11 @@ pub fn draw_command_to_shapes(
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), prefix_galley.clone(), Color32::TRANSPARENT));
                         cx += prefix_galley.size().x;
 
-                        // Killer name
-                        let killer_galley = ctx
-                            .fonts_mut(|f| f.layout_no_wrap(kill.killer_name.clone(), name_font.clone(), killer_color));
+                        // Killer name. A kill with no responsible ship lays out an empty
+                        // name so the row keeps its height.
+                        let killer_name = kill.killer_name.clone().unwrap_or_default();
+                        let killer_galley =
+                            ctx.fonts_mut(|f| f.layout_no_wrap(killer_name, name_font.clone(), killer_color));
                         let row_center_y = ey + killer_galley.size().y / 2.0;
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), killer_galley.clone(), Color32::TRANSPARENT));
                         cx += killer_galley.size().x + gap;
@@ -2052,12 +2061,12 @@ pub fn draw_command_to_shapes(
                 CornerRadius::ZERO,
                 Color32::from_rgba_unmultiplied(track_rgb[0], track_rgb[1], track_rgb[2], 242),
             ));
-            if let Some(frac) = team_hp_fraction(rows.iter().map(|r| (r.hp_current, r.hp_max))) {
+            if let Some(frac) = team_hp_fraction(rows.iter().filter_map(|r| r.hp).map(|hp| (hp.current, hp.max))) {
                 let fill_rect = Rect::from_min_size(origin, Vec2::new(panel_size.x * frac, bar_h));
                 shapes.push(Shape::rect_filled(fill_rect, CornerRadius::ZERO, accent));
             }
-            let total_cur: f32 = rows.iter().map(|r| r.hp_current.max(0.0)).sum();
-            let total_max: f32 = rows.iter().map(|r| r.hp_max).sum();
+            let total_cur: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.current.max(0.0)).sum();
+            let total_max: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.max).sum();
             let hp_bar_text =
                 format!("{} / {}", format_number_egui(total_cur as i64), format_number_egui(total_max as i64));
             let bar_font = game_font(10.0 * ws);
@@ -2271,8 +2280,10 @@ pub fn draw_command_to_shapes(
                     CornerRadius::same(1),
                     Color32::from_rgba_unmultiplied(40, 40, 40, 220),
                 ));
-                if row.hp_max > 0.0 && !row.is_dead {
-                    let fill_ratio = (row.hp_current / row.hp_max).clamp(0.0, 1.0);
+                if let Some(hp) = row.hp
+                    && !row.is_dead
+                {
+                    let fill_ratio = hp.fraction();
                     let fill_w = hp_bar_w * fill_ratio;
                     let fill_color = hp_bar_color_egui(fill_ratio);
                     shapes.push(Shape::rect_filled(
@@ -2281,14 +2292,14 @@ pub fn draw_command_to_shapes(
                         fill_color,
                     ));
                     if let Some([r, g, b]) = row.heal_availability.healable_rgb()
-                        && row.hp_healable > 0.0
+                        && hp.healable > 0.0
                     {
                         // Bright = HP the next heal charge restores; dim = the
                         // regenerable pool beyond that charge.
                         let bright = Color32::from_rgba_unmultiplied(r, g, b, 217);
                         let [dr, dg, db] = wows_minimap_renderer::panel_math::darken([r, g, b], 0.5);
                         let dim = Color32::from_rgba_unmultiplied(dr, dg, db, 217);
-                        let bright_w = (hp_bar_w * (row.hp_healable_per_charge.min(row.hp_healable) / row.hp_max))
+                        let bright_w = (hp_bar_w * (hp.healable_per_charge.min(hp.healable) / hp.max))
                             .clamp(0.0, hp_bar_w - fill_w);
                         if bright_w > 0.0 {
                             shapes.push(Shape::rect_filled(
@@ -2300,7 +2311,7 @@ pub fn draw_command_to_shapes(
                                 bright,
                             ));
                         }
-                        let dim_total = (hp_bar_w * (row.hp_healable / row.hp_max)).min(hp_bar_w - fill_w);
+                        let dim_total = (hp_bar_w * (hp.healable / hp.max)).min(hp_bar_w - fill_w);
                         let dim_w = (dim_total - bright_w).max(0.0);
                         if dim_w > 0.0 {
                             shapes.push(Shape::rect_filled(
@@ -2315,45 +2326,51 @@ pub fn draw_command_to_shapes(
                     }
                 }
 
-                let hp_text = format!(
-                    "{} / {}",
-                    format_number_egui(row.hp_current.max(0.0) as i64),
-                    format_number_egui(row.hp_max as i64),
-                );
-                let hp_color =
-                    if row.is_dead { Color32::from_rgba_unmultiplied(200, 200, 200, 200) } else { Color32::WHITE };
-                let hp_galley = ctx.fonts_mut(|f| {
-                    let mut job = egui::text::LayoutJob::default();
-                    job.append(
-                        &hp_text,
-                        0.0,
-                        egui::TextFormat { font_id: hp_font.clone(), color: hp_color, ..Default::default() },
+                if let Some(hp) = row.hp {
+                    let hp_text = format!(
+                        "{} / {}",
+                        format_number_egui(hp.current.max(0.0) as i64),
+                        format_number_egui(hp.max as i64),
                     );
-                    f.layout_job(job)
-                });
-                let hp_galley_size = hp_galley.size();
-                let hp_text_y = hp_bar_y + (hp_bar_h - hp_galley_size.y) * 0.5;
-                let hp_text_x = inner_x + hp_bar_w - hp_galley_size.x - 6.0 * ws;
-                // 4-direction outline against the green/yellow/red fill so the
-                // numeric overlay stays readable at any HP fraction.
-                let outline_color = Color32::from_rgba_unmultiplied(0, 0, 0, 220);
-                for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                    let outline_galley = ctx.fonts_mut(|f| {
+                    let hp_color =
+                        if row.is_dead { Color32::from_rgba_unmultiplied(200, 200, 200, 200) } else { Color32::WHITE };
+                    let hp_galley = ctx.fonts_mut(|f| {
                         let mut job = egui::text::LayoutJob::default();
                         job.append(
                             &hp_text,
                             0.0,
-                            egui::TextFormat { font_id: hp_font.clone(), color: outline_color, ..Default::default() },
+                            egui::TextFormat { font_id: hp_font.clone(), color: hp_color, ..Default::default() },
                         );
                         f.layout_job(job)
                     });
-                    shapes.push(Shape::galley(
-                        Pos2::new(hp_text_x + dx * ws, hp_text_y + dy * ws),
-                        outline_galley,
-                        Color32::TRANSPARENT,
-                    ));
+                    let hp_galley_size = hp_galley.size();
+                    let hp_text_y = hp_bar_y + (hp_bar_h - hp_galley_size.y) * 0.5;
+                    let hp_text_x = inner_x + hp_bar_w - hp_galley_size.x - 6.0 * ws;
+                    // 4-direction outline against the green/yellow/red fill so the
+                    // numeric overlay stays readable at any HP fraction.
+                    let outline_color = Color32::from_rgba_unmultiplied(0, 0, 0, 220);
+                    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                        let outline_galley = ctx.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                &hp_text,
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: hp_font.clone(),
+                                    color: outline_color,
+                                    ..Default::default()
+                                },
+                            );
+                            f.layout_job(job)
+                        });
+                        shapes.push(Shape::galley(
+                            Pos2::new(hp_text_x + dx * ws, hp_text_y + dy * ws),
+                            outline_galley,
+                            Color32::TRANSPARENT,
+                        ));
+                    }
+                    shapes.push(Shape::galley(Pos2::new(hp_text_x, hp_text_y), hp_galley, Color32::TRANSPARENT));
                 }
-                shapes.push(Shape::galley(Pos2::new(hp_text_x, hp_text_y), hp_galley, Color32::TRANSPARENT));
 
                 // Consumable strip shares the HP-bar row, sitting flush to the
                 // panel's right edge. `icon_size` and `icon_gap` are the same

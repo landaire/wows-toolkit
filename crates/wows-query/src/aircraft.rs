@@ -36,6 +36,7 @@ use crate::error::QueryError;
 use crate::firing_arcs::round_to;
 use crate::names::Interpretations;
 use crate::shells::Ammo;
+use crate::shells::ricochet_angles;
 use crate::shells::shell_ammo;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
@@ -273,7 +274,8 @@ pub struct ApOrdnance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normalization_deg: Option<Degrees>,
 
-    /// Impact angle from the plate normal where ricochets start.
+    /// Impact angle from the plate normal where ricochets start, no later than
+    /// `ricochet_always_from_deg`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ricochet_from_deg: Option<Degrees>,
 
@@ -580,6 +582,8 @@ fn ordnance(param: &Param, name: String, aircraft: &Aircraft) -> Option<Ordnance
 }
 
 fn ap_inputs(projectile: &Projectile, aircraft: &Aircraft) -> ApOrdnance {
+    let ricochet = ricochet_angles(Ammo::Ap, projectile);
+
     ApOrdnance {
         caliber_mm: projectile
             .bullet_diametr()
@@ -588,8 +592,8 @@ fn ap_inputs(projectile: &Projectile, aircraft: &Aircraft) -> ApOrdnance {
         speed_mps: projectile.bullet_speed().map(MetersPerSecond::new),
         krupp: projectile.bullet_krupp(),
         normalization_deg: projectile.bullet_cap_normalize_max_angle().map(Degrees::new),
-        ricochet_from_deg: projectile.bullet_ricochet_at().map(Degrees::new),
-        ricochet_always_from_deg: projectile.bullet_always_ricochet_at().map(Degrees::new),
+        ricochet_from_deg: ricochet.map(|angles| angles.from_deg),
+        ricochet_always_from_deg: ricochet.map(|angles| angles.always_from_deg),
         fuse_time_s: projectile.bullet_detonator().map(Seconds::new),
         fuse_threshold_mm: projectile.bullet_detonator_threshold().map(Millimeters::new),
         dive_angle_deg: aircraft.angle_of_dive(),

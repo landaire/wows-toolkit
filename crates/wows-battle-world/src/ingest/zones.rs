@@ -51,25 +51,30 @@ fn extract_weather_position(value: &ArgValue<'_>) -> Option<WorldPos> {
     }
 }
 
+/// A zone's `name`, sent as raw bytes or a string. `None` when absent or not UTF-8.
+pub(super) fn decode_zone_name(v: Option<&ArgValue<'_>>) -> Option<String> {
+    match v? {
+        ArgValue::Array(arr) => {
+            let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
+            String::from_utf8(bytes).ok()
+        }
+        ArgValue::String(s) => Some(String::from_utf8_lossy(s).into_owned()),
+        _ => None,
+    }
+}
+
 fn parse_weather_zone(value: &ArgValue<'_>) -> Option<LocalWeatherZone> {
     let dict = as_dict(value)?;
 
-    let name = match dict.get("name") {
-        Some(ArgValue::Array(arr)) => {
-            let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
-            String::from_utf8(bytes).unwrap_or_default()
-        }
-        Some(ArgValue::String(s)) => String::from_utf8_lossy(s).into_owned(),
-        _ => String::new(),
-    };
+    let name = decode_zone_name(dict.get("name"));
 
     let position = match dict.get("position") {
         Some(v) => extract_weather_position(v)?,
         _ => return None,
     };
 
-    let radius = dict.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0);
-    let params_id = dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from).unwrap_or_default();
+    let radius = dict.get("radius").and_then(|v| v.float_32_ref().copied());
+    let params_id = dict.get("paramsId").and_then(|v| v.as_i64()).map(GameParamId::from);
 
     Some(LocalWeatherZone { name, position, radius, params_id, entity_id: None })
 }
@@ -136,7 +141,7 @@ pub fn seed_battle_logic_state(packet_props: &std::collections::HashMap<&str, Ar
         for zone in new_zones {
             // Collect names of already-known weather zones to avoid duplicates.
             let existing_names: Vec<String> = collect_weather_zone_names(world);
-            if !existing_names.iter().any(|n| n == &zone.name) {
+            if !zone.name.as_ref().is_some_and(|name| existing_names.contains(name)) {
                 let ecs_entity = world.spawn(()).id();
                 if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
                     e.insert(crate::components::WeatherZone);
@@ -150,7 +155,7 @@ pub fn seed_battle_logic_state(packet_props: &std::collections::HashMap<&str, Ar
 
 fn collect_weather_zone_names(world: &mut World) -> Vec<String> {
     let mut q = world.query::<&WeatherZoneData>();
-    q.iter(world).map(|d| d.0.name.clone()).collect()
+    q.iter(world).filter_map(|d| d.0.name.clone()).collect()
 }
 
 /// Dispatch a PropertyUpdate packet into ECS zone state.
@@ -308,67 +313,18 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
     match action {
         UpdateAction::SetRange { start, stop: _, values } => {
             let start = *start;
-            let needed = start + values.len();
-            let current_len = world.resource::<WeatherZoneOrder>().0.len();
-            for _ in current_len..needed {
-                let ecs_entity = world.spawn(()).id();
-                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
-                    e.insert(crate::components::WeatherZone);
-                    e.insert(WeatherZoneData(LocalWeatherZone {
-                        name: String::new(),
-                        position: WorldPos::default(),
-                        radius: 0.0,
-                        params_id: GameParamId::default(),
-                        entity_id: None,
-                    }));
-                }
-                world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
-            }
+            grow_weather_zone_order(start + values.len(), world);
             for (i, value) in values.iter().enumerate() {
-                if let Some(mut zone) = parse_weather_zone(value) {
-                    let ecs_entity = world.resource::<WeatherZoneOrder>().0[start + i];
-                    if let Ok(er) = world.get_entity(ecs_entity)
-                        && let Some(existing) = er.get::<WeatherZoneData>()
-                    {
-                        zone.entity_id = existing.0.entity_id;
-                    }
-                    if let Ok(mut er) = world.get_entity_mut(ecs_entity)
-                        && let Some(mut data) = er.get_mut::<WeatherZoneData>()
-                    {
-                        data.0 = zone;
-                    }
+                if let Some(zone) = parse_weather_zone(value) {
+                    store_weather_zone(start + i, zone, world);
                 }
             }
         }
         UpdateAction::SetElement { index, value } => {
             let index = *index;
-            let current_len = world.resource::<WeatherZoneOrder>().0.len();
-            for _ in current_len..=index {
-                let ecs_entity = world.spawn(()).id();
-                if let Ok(mut e) = world.get_entity_mut(ecs_entity) {
-                    e.insert(crate::components::WeatherZone);
-                    e.insert(WeatherZoneData(LocalWeatherZone {
-                        name: String::new(),
-                        position: WorldPos::default(),
-                        radius: 0.0,
-                        params_id: GameParamId::default(),
-                        entity_id: None,
-                    }));
-                }
-                world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
-            }
-            if let Some(mut zone) = parse_weather_zone(value) {
-                let ecs_entity = world.resource::<WeatherZoneOrder>().0[index];
-                if let Ok(er) = world.get_entity(ecs_entity)
-                    && let Some(existing) = er.get::<WeatherZoneData>()
-                {
-                    zone.entity_id = existing.0.entity_id;
-                }
-                if let Ok(mut er) = world.get_entity_mut(ecs_entity)
-                    && let Some(mut data) = er.get_mut::<WeatherZoneData>()
-                {
-                    data.0 = zone;
-                }
+            grow_weather_zone_order(index + 1, world);
+            if let Some(zone) = parse_weather_zone(value) {
+                store_weather_zone(index, zone, world);
             }
         }
         UpdateAction::RemoveRange { start, stop } => {
@@ -389,6 +345,30 @@ fn apply_weather_zone_array_update(action: &UpdateAction<'_>, world: &mut World)
     }
 }
 
+/// Extend the weather array to `len` slots. A new slot carries no
+/// `WeatherZoneData` until a parsed zone lands in it.
+fn grow_weather_zone_order(len: usize, world: &mut World) {
+    let current_len = world.resource::<WeatherZoneOrder>().0.len();
+    for _ in current_len..len {
+        let ecs_entity = world.spawn(crate::components::WeatherZone).id();
+        world.resource_mut::<WeatherZoneOrder>().0.push(ecs_entity);
+    }
+}
+
+/// Write `zone` into array slot `index`, keeping the entity id an earlier
+/// InteractiveZone create linked to the slot.
+fn store_weather_zone(index: usize, mut zone: LocalWeatherZone, world: &mut World) {
+    let ecs_entity = world.resource::<WeatherZoneOrder>().0[index];
+    let Ok(mut er) = world.get_entity_mut(ecs_entity) else {
+        return;
+    };
+
+    if let Some(existing) = er.get::<WeatherZoneData>() {
+        zone.entity_id = existing.0.entity_id;
+    }
+    er.insert(WeatherZoneData(zone));
+}
+
 fn apply_weather_zone_field_update(idx: usize, key: &str, value: &ArgValue<'_>, world: &mut World) {
     let Some(ecs_entity) = world.resource::<WeatherZoneOrder>().0.get(idx).copied() else { return };
     let Ok(mut er) = world.get_entity_mut(ecs_entity) else { return };
@@ -401,22 +381,15 @@ fn apply_weather_zone_field_update(idx: usize, key: &str, value: &ArgValue<'_>, 
         }
         "radius" => {
             if let Some(r) = value.float_32_ref().copied() {
-                data.0.radius = r;
+                data.0.radius = Some(r);
             }
         }
         "name" => {
-            data.0.name = match value {
-                ArgValue::Array(arr) => {
-                    let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
-                    String::from_utf8(bytes).unwrap_or_default()
-                }
-                ArgValue::String(s) => String::from_utf8_lossy(s).into_owned(),
-                _ => String::new(),
-            };
+            data.0.name = decode_zone_name(Some(value));
         }
         "paramsId" => {
             if let Some(id) = value.as_i64() {
-                data.0.params_id = GameParamId::from(id);
+                data.0.params_id = Some(GameParamId::from(id));
             }
         }
         _ => {}

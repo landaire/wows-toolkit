@@ -383,7 +383,9 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         // the packet clocks every other log in this report is keyed by.
         let mut death_clock_by_victim: HashMap<EntityId, GameClock> = HashMap::new();
         for kill in &self.world().resource::<KillLog>().0 {
-            frags_by_killer.entry(kill.killer).or_default().push(DeathInfo::from(kill));
+            if let Some(killer) = kill.killer {
+                frags_by_killer.entry(killer).or_default().push(DeathInfo::from(kill));
+            }
             death_by_victim.entry(kill.victim).or_insert_with(|| DeathInfo::from(kill));
             death_clock_by_victim.entry(kill.victim).or_insert(kill.clock);
         }
@@ -608,20 +610,17 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             .unwrap_or_else(|| self.meta().scenario.clone())
     }
 
-    /// `ReplayMeta.gameMode` is a `u32` on the wire, but `GameMode::Invalid` is
-    /// `-1`, a value no `u32` can carry -- it is unreachable from a replay.
-    /// `GameMode::from_id` is `i32`-keyed (Task 1's table; `Invalid` genuinely
-    /// needs the sign), so this widens back out to `u32` only at the report
+    /// `ReplayMeta.gameMode` is a `u32` on the wire and `GameMode::from_id` is
+    /// `i32`-keyed, so this widens back out to `u32` only at the report
     /// boundary: a value that does not fit in `i32` becomes `Unknown` carrying
-    /// its own true `u32` value, not a placeholder standing in for it.
-    /// Converted with `try_from` rather than `as i32`, which would wrap a
-    /// value above `i32::MAX` into the negative range and could land on
-    /// `Invalid` by accident.
+    /// its own true `u32` value, not a placeholder standing in for it. A `u32`
+    /// is never the game's -1 "no mode", so `from_id` always names a mode or an
+    /// unknown id here.
     fn report_game_mode_id(&self) -> Recognized<GameMode, u32> {
         let raw = self.meta().gameMode;
-        match i32::try_from(raw) {
-            Ok(id) => GameMode::from_id(id).map_unknown(|_| raw),
-            Err(_) => Recognized::Unknown(raw),
+        match i32::try_from(raw).ok().and_then(GameMode::from_id) {
+            Some(mode) => mode.map_unknown(|_| raw),
+            None => Recognized::Unknown(raw),
         }
     }
 
@@ -748,21 +747,11 @@ mod tests {
     #[test]
     fn deaths_are_reported_by_victim_at_the_first_kill_clock() {
         let victim = EntityId::from(9u32);
-        let killer = EntityId::from(3u32);
+        let killer = Some(EntityId::from(3u32));
         let report = report_from_synthetic_world(|world| {
             let log = &mut world.resource_mut::<KillLog>().0;
-            log.push(KillRecord {
-                clock: GameClock(120.0),
-                killer,
-                victim,
-                cause: Recognized::Unknown("0".to_string()),
-            });
-            log.push(KillRecord {
-                clock: GameClock(300.0),
-                killer,
-                victim,
-                cause: Recognized::Unknown("0".to_string()),
-            });
+            log.push(KillRecord { clock: GameClock(120.0), killer, victim, cause: None });
+            log.push(KillRecord { clock: GameClock(300.0), killer, victim, cause: None });
         });
 
         assert_eq!(report.deaths_by_victim().get(&victim), Some(&GameClock(120.0)));

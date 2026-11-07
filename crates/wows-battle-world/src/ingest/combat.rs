@@ -146,9 +146,9 @@ pub fn handle_damage_stat(entries: &[DamageStatEntry], world: &mut World) {
 
 /// Record a ship kill and the dead ship's last known positions.
 pub fn handle_ship_destroyed(
-    killer: EntityId,
+    killer: Option<EntityId>,
     victim: EntityId,
-    cause: Recognized<DeathCause>,
+    cause: Option<Recognized<DeathCause>>,
     clock: GameClock,
     world: &mut World,
 ) {

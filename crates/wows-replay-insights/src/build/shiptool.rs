@@ -59,14 +59,7 @@ mod tests {
             .index(index.to_owned())
             .name(index.to_owned())
             .nation("USSR".to_owned())
-            .data(ParamData::Achievement(
-                Achievement::builder()
-                    .is_group(false)
-                    .one_per_battle(false)
-                    .ui_type(String::new())
-                    .ui_name(String::new())
-                    .build(),
-            ))
+            .data(ParamData::Achievement(Achievement::builder().is_group(false).one_per_battle(false).build()))
             .build()
     }
 
@@ -83,10 +76,10 @@ mod tests {
         let build = ResolvedBuild::from_ids(
             GameParamId::from(1u32),
             &[],
-            &[GameParamId::from(2u32), GameParamId::from(3u32)],
+            &[Some(GameParamId::from(2u32)), Some(GameParamId::from(3u32))],
             Some(GameParamId::from(4u32)),
             &[3, 12, 17],
-            &[GameParamId::from(5u32), GameParamId::from(6u32)],
+            &[Some(GameParamId::from(5u32)), Some(GameParamId::from(6u32))],
             &[],
             Species::Cruiser,
             wowsunpack::data::Version::base(15, 7, 0),

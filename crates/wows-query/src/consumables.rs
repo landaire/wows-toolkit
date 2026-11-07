@@ -14,6 +14,7 @@ use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::AbilityCategory;
 use wowsunpack::game_params::types::GameParamProvider;
 
+use crate::buffs::BuffDuration;
 use crate::buffs::ConsumableBuff;
 use crate::builds::Better;
 use crate::builds::BuildStat;
@@ -124,7 +125,7 @@ pub struct ConsumableStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_time_s: Option<Seconds>,
 
-    /// Activation delay. Absent when zero.
+    /// Activation delay. Absent when zero or not listed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preparation_s: Option<Seconds>,
 
@@ -218,8 +219,11 @@ impl GameData {
                     continue;
                 }
                 let mut stats = consumable_stats(name, category, bundle);
-                stats.buff =
-                    self.consumable_buff(category, ship.class.species(), stats.action_time_s.map(|time| time.value()));
+                stats.buff = self.consumable_buff(
+                    category,
+                    ship.class.species(),
+                    BuffDuration::of_consumable(stats.action_time_s),
+                );
                 if let Some(planner) = &planner {
                     stats.builds = Some(consumable_builds(planner, &stats.name, category)?);
                 }
@@ -376,7 +380,9 @@ pub(crate) fn consumable_stats(name: String, category: &AbilityCategory, bundle:
         charges: charges(stats.charges),
         reload_s: Seconds::new(round(stats.reload_time.value())),
         action_time_s: stats.work_time.map(|time| Seconds::new(round(time.value()))),
-        preparation_s: Some(stats.preparation_time.value())
+        preparation_s: stats
+            .preparation_time
+            .map(|time| time.value())
             .filter(|time| *time > 0.0)
             .map(|time| Seconds::new(round(time))),
         // BigWorld unit conversion leaves 9999.9 for a 10 km radar.

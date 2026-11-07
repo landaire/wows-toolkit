@@ -382,11 +382,11 @@ impl GameData {
             let projectile = entry.projectile()?;
             let kind = match shell_ammo(projectile) {
                 Some(ammo) => ammo.label().to_owned(),
-                None => projectile.ammo_type().to_ascii_lowercase().replace('_', " "),
+                None => projectile.ammo_type()?.to_ascii_lowercase().replace('_', " "),
             };
             Some(kind)
         });
-        let kind = kind.filter(|kind| !kind.is_empty()).unwrap_or_else(|| "projectile".to_owned());
+        let kind = kind.unwrap_or_else(|| "projectile".to_owned());
 
         match self.projectile_caliber(param) {
             Some(caliber) => format!("{caliber} {kind}"),

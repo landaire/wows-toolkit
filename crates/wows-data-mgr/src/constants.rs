@@ -6,18 +6,21 @@
 use rootcause::prelude::*;
 
 /// One entry in the repo's root `manifest.json`: the friendly version a build
-/// maps to. `version` is `major.minor`; `patch` is the third component.
+/// maps to. `version` is `major.minor`; `patch` is the third component, written
+/// as a float (`0.0`).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConstantsVersion {
     pub version: String,
-    #[serde(default)]
-    pub patch: f64,
+    pub patch: Option<f64>,
 }
 
 impl ConstantsVersion {
     /// Reconstruct the full friendly version, e.g. version "15.4" + patch 0.0 -> "15.4.0".
-    pub fn friendly_version(&self) -> String {
-        format!("{}.{}", self.version, self.patch as i64)
+    /// `None` when the entry has no patch.
+    pub fn friendly_version(&self) -> Option<String> {
+        let patch = self.patch?;
+
+        Some(format!("{}.{}", self.version, patch as i64))
     }
 }
 
@@ -145,7 +148,7 @@ pub fn resolve_manifest_build(
         return Some(target_build);
     }
     let want = target_version?;
-    manifest.iter().filter(|(_, v)| v.friendly_version() == want).map(|(b, _)| *b).max()
+    manifest.iter().filter(|(_, v)| v.friendly_version().as_deref() == Some(want)).map(|(b, _)| *b).max()
 }
 
 /// Fetch versioned constants for a specific build from GitHub.
@@ -500,13 +503,18 @@ mod manifest_tests {
     use super::*;
     fn m() -> BTreeMap<u32, ConstantsVersion> {
         let mut m = BTreeMap::new();
-        m.insert(11965230, ConstantsVersion { version: "15.1".into(), patch: 0.0 });
-        m.insert(12506899, ConstantsVersion { version: "15.4".into(), patch: 0.0 });
+        m.insert(11965230, ConstantsVersion { version: "15.1".into(), patch: Some(0.0) });
+        m.insert(12506899, ConstantsVersion { version: "15.4".into(), patch: Some(0.0) });
+        m.insert(12600000, ConstantsVersion { version: "15.4".into(), patch: None });
         m
     }
     #[test]
     fn friendly_version_reconstructs() {
-        assert_eq!(ConstantsVersion { version: "15.4".into(), patch: 0.0 }.friendly_version(), "15.4.0");
+        assert_eq!(
+            ConstantsVersion { version: "15.4".into(), patch: Some(0.0) }.friendly_version().as_deref(),
+            Some("15.4.0")
+        );
+        assert_eq!(ConstantsVersion { version: "15.4".into(), patch: None }.friendly_version(), None);
     }
     #[test]
     fn exact_build_wins() {

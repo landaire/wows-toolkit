@@ -1353,7 +1353,9 @@ impl GameData {
     /// Flight time of `shell` to `range`, on the in-game clock.
     fn flight_time(&self, shell: &Shell, range: Km) -> Result<Option<f32>, QueryError> {
         let projectile = self.projectile(&shell.param)?;
-        let Some(params) = ShellParams::from_shell_info(&projectile.to_shell_info(shell.param.clone())) else {
+        let Some(params) =
+            projectile.to_shell_info(shell.param.clone()).and_then(|info| ShellParams::from_shell_info(&info))
+        else {
             return Ok(None);
         };
 
@@ -1550,7 +1552,11 @@ fn main_battery_salvo(planner: &Planner<'_>, outcome: &Outcome, kind: AmmoKind) 
 
     let selection: &ShipUpgradeSelection = planner.selection(outcome.selection);
     let mounts = aiming_mounts(&planner.ship().param, selection, ComponentType::Artillery);
-    let salvo: f32 = mounts.iter().map(|(mount, barrels)| mount_salvo(mount.ammo(), *barrels, &shells).value()).sum();
+    let salvo: f32 = mounts
+        .iter()
+        .filter_map(|(mount, barrels)| mount_salvo(mount.ammo(), *barrels, &shells))
+        .map(|salvo| salvo.value())
+        .sum();
 
     (salvo > 0.0).then(|| salvo.round())
 }

@@ -70,7 +70,7 @@ mod tests {
     use wows_replays::types::ArenaId;
 
     fn player(stamps: &[(Timestamp, bool)]) -> TrackedPlayer {
-        let mut player = TrackedPlayer::default();
+        let mut player = TrackedPlayer::new(wows_replays::types::AccountId(1));
         for (ix, (timestamp, in_division)) in stamps.iter().enumerate() {
             let arena = ArenaId::from(ix as i64);
             player.timestamps.insert(*timestamp);

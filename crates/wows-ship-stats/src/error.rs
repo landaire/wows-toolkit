@@ -8,6 +8,9 @@ pub enum BuildError {
     #[error("{ship} has no known ship class")]
     UnknownSpecies { ship: String },
 
+    #[error("{ship} has no port stat components")]
+    NoStatCard { ship: String },
+
     #[error("failed to apply modifiers to {ship}")]
     Modifiers {
         ship: String,

@@ -541,11 +541,11 @@ fn icon_label_row(
     idx: usize,
     key: &str,
     label: String,
-    tooltip_text: String,
+    tooltip_text: Option<String>,
     size: f32,
     icons: &IconCache,
 ) -> AnyElement {
-    let tooltip: SharedString = tooltip_text.into();
+    let tooltip: Option<SharedString> = tooltip_text.map(SharedString::from);
     let mut row = h_flex().w_full().gap(px(8.)).items_center();
     if let Some(image) = icons.get_keyed(key) {
         let (w, h) = fit_within_box(&image, size);
@@ -553,7 +553,9 @@ fn icon_label_row(
     }
     row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(detail_text(label)));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .when_some(tooltip, |row, tooltip| {
+            row.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        })
         .into_any_element()
 }
 
@@ -861,7 +863,7 @@ fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, i
         idx,
         &key,
         label,
-        achievement.description.clone(),
+        Some(achievement.description.clone()),
         LARGE_ICON_SIZE,
         icons,
     )
@@ -1345,7 +1347,7 @@ mod tests {
         RibbonResult {
             name: name.to_string(),
             display_name: name.to_string(),
-            description: String::new(),
+            description: None,
             icon_key: name.to_string(),
             is_subribbon: false,
             count: 1,

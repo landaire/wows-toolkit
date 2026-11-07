@@ -122,7 +122,11 @@ fn ttx_across_historical_builds() {
 
             let result = catch_unwind(AssertUnwindSafe(|| ship_stats_stock(ship, &provider)));
             let stats = match result {
-                Ok(s) => s,
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    eprintln!("  {label} {name}: no TTX components");
+                    continue;
+                }
                 Err(_) => {
                     failures.push(format!("{build} {label} {name}: ship_stats_stock PANICKED"));
                     eprintln!("  {label} {name}: PANIC");
@@ -132,10 +136,8 @@ fn ttx_across_historical_builds() {
 
             // Section-population matrix: which cards the era's data supported.
             let mark = |b: bool| if b { "yes" } else { "None" };
-            let has_ttx = ship.vehicle().and_then(|v| v.ttx_components()).is_some();
             eprintln!(
-                "  {label:<2} {name:<28} ttx={:<4} dur={} mob={} arty={} torp={} sec={} vis={} bat={}",
-                mark(has_ttx),
+                "  {label:<2} {name:<28} dur={} mob={} arty={} torp={} sec={} vis={} bat={}",
                 mark(stats.durability.is_some()),
                 mark(stats.mobility.is_some()),
                 mark(stats.artillery.is_some()),

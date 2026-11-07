@@ -87,8 +87,14 @@ pub fn handle_vehicle_property(
 }
 
 /// Handle a GunSync packet: update main battery turret yaws on the vehicle's `Aim`.
-pub fn handle_gun_sync(entity_id: EntityId, weapon_type: u32, gun_id: u32, yaw: f32, world: &mut World) {
-    if WeaponType::from_raw(weapon_type) != Recognized::Known(WeaponType::Artillery) {
+pub fn handle_gun_sync(
+    entity_id: EntityId,
+    weapon_type: Option<Recognized<WeaponType, u32>>,
+    gun_id: u32,
+    yaw: f32,
+    world: &mut World,
+) {
+    if weapon_type != Some(Recognized::Known(WeaponType::Artillery)) {
         return;
     }
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
@@ -116,11 +122,14 @@ pub fn handle_gun_sync(entity_id: EntityId, weapon_type: u32, gun_id: u32, yaw: 
 /// The game sends this only for SELECTABLE_AMMO_WEAPONS (artillery, torpedo, air support).
 pub fn handle_set_ammo_for_weapon(
     entity_id: EntityId,
-    weapon_type: u32,
+    weapon_type: Option<Recognized<WeaponType, u32>>,
     ammo_param_id: GameParamId,
     world: &mut World,
 ) {
-    let key = WeaponType::from_raw(weapon_type);
+    // Ammo for `NONE` selects nothing.
+    let Some(key) = weapon_type else {
+        return;
+    };
     let Some(ecs_entity) = world.resource::<EntityIndex>().get(entity_id) else {
         return;
     };

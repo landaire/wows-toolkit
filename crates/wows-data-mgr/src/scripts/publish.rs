@@ -35,7 +35,7 @@ pub enum PublishOutcome {
 /// version recorded is the one `builds.toml` in `output_base` lists; a build
 /// it does not list is skipped.
 pub fn publish(output_base: &Path, builds: &[u32]) -> Result<Vec<(u32, PublishOutcome)>, ScriptsError> {
-    let dumped = BuildsIndex::load(&output_base.join("builds.toml"));
+    let dumped = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let mut index = published_index()?;
 
     let mut outcomes = Vec::new();

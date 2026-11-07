@@ -2831,7 +2831,7 @@ payload:
         username: ARMO7
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: 511233664
         entity_id: 968057
         human_properties:
@@ -6325,7 +6325,7 @@ payload:
         username: GrayGhos_CV6Enterprise
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: 598048869
         entity_id: 968077
         human_properties:

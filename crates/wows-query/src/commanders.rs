@@ -17,6 +17,7 @@
 //! (`UniqueSkills._isBattleGroupAllowed`).
 
 use std::borrow::Cow;
+use std::num::NonZeroUsize;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -289,8 +290,11 @@ impl Commander {
                 continue;
             }
 
-            // Crews without a localized name are templates, not commanders.
-            let key = TranslationKey::new(format!("IDS_{}", crew.personality().name().to_uppercase()));
+            // Crews without a person name or localized name are templates, not commanders.
+            let Some(person_name) = crew.personality().name() else {
+                continue;
+            };
+            let key = TranslationKey::new(format!("IDS_{}", person_name.to_uppercase()));
             let Some(name) = provider.localized_name_from_id(&key) else {
                 continue;
             };
@@ -610,33 +614,36 @@ impl GameData {
         };
         let levels = activation_levels(talent);
 
-        let activations = if levels == 0 {
-            vec![TalentActivation {
+        let activations = match levels {
+            None => vec![TalentActivation {
                 activation: None,
                 condition: None,
                 effects: self.talent_lines(talent, 1, &classes),
-            }]
-        } else {
-            let mut activations: Vec<TalentActivation> = Vec::new();
-            for activation in 1..=levels as u32 {
-                let effects = self.talent_lines(talent, activation, &classes);
-                // An activation that changes nothing further is left out.
-                if activations.last().is_some_and(|previous| previous.effects == effects) {
-                    continue;
+            }],
+            Some(levels) => {
+                let mut activations: Vec<TalentActivation> = Vec::new();
+                for activation in 1..=levels.get() as u32 {
+                    let effects = self.talent_lines(talent, activation, &classes);
+                    // An activation that changes nothing further is left out.
+                    if activations.last().is_some_and(|previous| previous.effects == effects) {
+                        continue;
+                    }
+                    activations.push(TalentActivation {
+                        activation: Some(activation),
+                        condition: self.activation_condition(key, talent, activation),
+                        effects,
+                    });
                 }
-                activations.push(TalentActivation {
-                    activation: Some(activation),
-                    condition: self.activation_condition(key, talent, activation),
-                    effects,
-                });
+                activations
             }
-            activations
         };
 
         // The total after every activation a battle allows, when the battle
         // allows more activations than the talent has levels.
         let after_all_activations = match limit {
-            ActivationLimit::PerBattle(count) if count > 1 && count as usize > levels => {
+            ActivationLimit::PerBattle(count)
+                if count > 1 && levels.is_none_or(|levels| count as usize > levels.get()) =>
+            {
                 self.talent_total_lines(talent, count, &classes)
             }
             _ => Vec::new(),
@@ -645,9 +652,10 @@ impl GameData {
         TalentVariant {
             battle_types: battle_types(talent.battle_group()),
             condition: self.talent_condition(key, talent),
+            // A talent without level blocks has zero levels.
             progression: self
                 .translate(&format!("IDS_TALENT_{key}_PROGRESSION_DESC"))
-                .map(|text| text.replace("%(_levelsCount)i", &levels.to_string())),
+                .map(|text| text.replace("%(_levelsCount)i", &levels.map_or(0, NonZeroUsize::get).to_string())),
             activations_per_battle: limit,
             activations,
             after_all_activations,
@@ -770,15 +778,19 @@ impl GameData {
         };
 
         match effect.effect_type().known() {
-            Some(KnownTalentEffect::Regen) => regen_line(
-                value("regenerationHPSpeed").unwrap_or(0.0),
-                value("regenerationHPSpeedUnits").unwrap_or(0.0),
-                effect.scale_regen_with_ship_tier(),
-                &work_time,
-                value("workTime").filter(|_| !effect.use_ship_tier_as_work_time()),
-            )
-            .into_iter()
-            .collect(),
+            Some(KnownTalentEffect::Regen) => {
+                RegenRate::from_params(value("regenerationHPSpeed"), value("regenerationHPSpeedUnits"))
+                    .map(|rate| {
+                        regen_line(
+                            rate,
+                            effect.scale_regen_with_ship_tier(),
+                            &work_time,
+                            value("workTime").filter(|_| !effect.use_ship_tier_as_work_time()),
+                        )
+                    })
+                    .into_iter()
+                    .collect()
+            }
             Some(KnownTalentEffect::CrashCrew) => {
                 let label = self
                     .translate("IDS_PARAMS_MODIFIER_CRASHCREW_TALENT")
@@ -831,10 +843,12 @@ impl GameData {
         for talent in commander.random_battle_talents().filter(|talent| talent.allowed_classes().contains(&species)) {
             let key = talent.translation_key(&commander.index);
             let name = self.talent_name(&key);
-            let levels = activation_levels(talent) as u32;
-            let mut counts: Vec<u32> = (1..=levels.max(1)).collect();
+            // A talent without level blocks acts the same on every
+            // activation, so one activation shows it.
+            let levels = activation_levels(talent).map_or(1, |levels| levels.get() as u32);
+            let mut counts: Vec<u32> = (1..=levels).collect();
             if let Some(limit) = talent.max_activations()
-                && limit > levels.max(1)
+                && limit > levels
             {
                 counts.push(limit);
             }
@@ -945,20 +959,21 @@ pub(crate) fn talent_modifiers(
 }
 
 /// Activations whose effects differ: one per level block, at most the
-/// activations a battle allows; 0 when every activation does the same.
-pub(crate) fn activation_levels(talent: &CrewTalent) -> usize {
+/// activations a battle allows; `None` when every activation does the same.
+pub(crate) fn activation_levels(talent: &CrewTalent) -> Option<NonZeroUsize> {
     let levels = talent
         .effects()
         .iter()
         .map(|effect| effect.levels().len())
         .chain(talent.activators().iter().map(|activator| activator.levels().len()))
-        .max()
-        .unwrap_or(0);
+        .max()?;
 
-    match talent.max_activations() {
+    let levels = match talent.max_activations() {
         Some(count) => levels.min(count as usize),
         None => levels,
-    }
+    };
+
+    NonZeroUsize::new(levels)
 }
 
 fn is_modifier_effect(effect: &TalentEffect) -> bool {
@@ -988,36 +1003,52 @@ fn uniform_modifier(name: &str, value: f32, excluded_consumables: Vec<String>) -
         .build()
 }
 
-/// A heal over time: `fraction` of max HP and `units` HP per second.
-pub(crate) fn regen_line(
-    fraction: f32,
-    units: f32,
-    per_tier: bool,
-    work_time: &str,
-    seconds: Option<f32>,
-) -> Option<String> {
+/// The rate of a heal over time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum RegenRate {
+    /// Fraction of max HP per second.
+    FractionPerSecond(f32),
+    HpPerSecond(f32),
+}
+
+impl RegenRate {
+    /// The rate of a regeneration talent from its `regenerationHPSpeed` and
+    /// `regenerationHPSpeedUnits` values. Talent params write 0 for the one
+    /// they do not use; the fraction wins when both are set.
+    fn from_params(fraction: Option<f32>, units: Option<f32>) -> Option<Self> {
+        if let Some(fraction) = fraction.filter(|fraction| *fraction > 0.0) {
+            return Some(Self::FractionPerSecond(fraction));
+        }
+
+        units.filter(|units| *units > 0.0).map(Self::HpPerSecond)
+    }
+}
+
+/// A heal over time at `rate` for `work_time`, with the total over `seconds`
+/// when the heal lasts a known time.
+pub(crate) fn regen_line(rate: RegenRate, per_tier: bool, work_time: &str, seconds: Option<f32>) -> String {
     let tier = if per_tier { " times the ship's tier" } else { "" };
-    if fraction > 0.0 {
-        let percent = fraction * 100.0;
-        let total = seconds.map(|seconds| format!(", {}% of max HP in total", format_amount(percent * seconds)));
+    match rate {
+        RegenRate::FractionPerSecond(fraction) => {
+            let percent = fraction * 100.0;
+            let total = seconds.map(|seconds| format!(", {}% of max HP in total", format_amount(percent * seconds)));
 
-        return Some(format!(
-            "HP regeneration: restores {}% of max HP per second{tier} for {work_time}{}",
-            format_amount(percent),
-            total.unwrap_or_default()
-        ));
+            format!(
+                "HP regeneration: restores {}% of max HP per second{tier} for {work_time}{}",
+                format_amount(percent),
+                total.unwrap_or_default()
+            )
+        }
+        RegenRate::HpPerSecond(units) => {
+            let total = seconds.map(|seconds| format!(", {} HP{tier} in total", format_amount(units * seconds)));
+
+            format!(
+                "HP regeneration: restores {} HP per second{tier} for {work_time}{}",
+                format_amount(units),
+                total.unwrap_or_default()
+            )
+        }
     }
-    if units > 0.0 {
-        let total = seconds.map(|seconds| format!(", {} HP{tier} in total", format_amount(units * seconds)));
-
-        return Some(format!(
-            "HP regeneration: restores {} HP per second{tier} for {work_time}{}",
-            format_amount(units),
-            total.unwrap_or_default()
-        ));
-    }
-
-    None
 }
 
 /// Up to three decimals without trailing zeros.

@@ -150,12 +150,7 @@ pub fn alpha_damage_coeff(
 /// `HEDamageCoeffIfOnFire` branch (line 370/388) is never taken here.
 ///
 /// `caliber_fits_heavy_cruiser` is `caliber >= HEAVY_CRUISER_SHELL_DIAMETER`
-/// (ModifiersApply.py:26). That threshold constant is `0.0` in every deob source
-/// (me658a8e4.py:15 is a zeroed placeholder; the real value lives in a compiled C++
-/// module), so the heavy-cruiser AP sub-multiplier cannot be reproduced from static
-/// data. It is gated behind `GMHeavyCruiserCaliberDamageCoeff`, a coefficient whose
-/// stock identity is 1.0, so the stock result is unaffected; the caller passes the
-/// faithful threshold once it is recovered.
+/// (ModifiersApply.py:26); see `factories::HEAVY_CRUISER_SHELL_DIAMETER_M`.
 ///
 /// Returns `(coeff, applied)` where `applied` is the ordered list of modifiers used.
 pub fn artillery_damage_coeff(

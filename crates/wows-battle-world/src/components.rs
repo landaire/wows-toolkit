@@ -163,7 +163,7 @@ pub struct Division {
 /// Captain (crew) resolved at EntityCreate time; never updated on later property changes.
 ///
 /// Mirrors the BattleController: captain is frozen from the create-time crew params id.
-/// None when the params_id is 0 (common for the self player before crewModifiersCompactParams arrives).
+/// None when no crew params id has arrived (common for the self player before crewModifiersCompactParams arrives).
 #[derive(Component, Debug, Clone)]
 pub struct Captain(pub Option<Rc<Param>>);
 
@@ -177,7 +177,7 @@ pub struct BuildingState {
     pub is_hidden: bool,
     pub is_suppressed: bool,
     pub team_id: TeamId,
-    pub params_id: GameParamId,
+    pub params_id: Option<GameParamId>,
 }
 
 impl From<&BuildingEntity> for BuildingState {
@@ -196,14 +196,15 @@ impl From<&BuildingEntity> for BuildingState {
 /// State for a smoke screen entity (drops the redundant id field).
 #[derive(Component, Debug, Clone)]
 pub struct SmokeScreenState {
-    pub radius: BigWorldDistance,
+    /// `None` when the smoke's create packet names no radius.
+    pub radius: Option<BigWorldDistance>,
     pub position: WorldPos,
     pub points: Vec<WorldPos>,
 }
 
 impl From<&SmokeScreenEntity> for SmokeScreenState {
     fn from(s: &SmokeScreenEntity) -> Self {
-        Self { radius: s.radius, position: s.position, points: s.points.clone() }
+        Self { radius: Some(s.radius), position: s.position, points: s.points.clone() }
     }
 }
 

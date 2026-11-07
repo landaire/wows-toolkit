@@ -55,8 +55,9 @@ pub struct CapturePointState {
     pub index: usize,
     /// World position of the zone center (from InteractiveZone entity)
     pub position: Option<WorldPos>,
-    /// Zone radius in world units (from InteractiveZone entity)
-    pub radius: f32,
+    /// Zone radius in world units (from InteractiveZone entity). `None` until
+    /// a `radius` names it.
+    pub radius: Option<f32>,
     /// Control point sub-type (domination, base, epicenter, etc.)
     pub control_point_type: Option<Recognized<ControlPointType>>,
     pub team_id: i64,
@@ -149,8 +150,8 @@ pub struct BuffZoneState {
     pub entity_id: EntityId,
     /// World position of the zone center
     pub position: WorldPos,
-    /// Zone radius in world units
-    pub radius: f32,
+    /// Zone radius in world units. `None` when the zone names none.
+    pub radius: Option<f32>,
     pub team_id: i64,
     /// Whether this zone is currently active and visible
     pub is_active: bool,
@@ -249,7 +250,7 @@ impl ConsumableInventory {
 }
 
 /// A building/structure entity in the game.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BuildingEntity {
     pub id: EntityId,
     pub position: WorldPos,
@@ -257,11 +258,11 @@ pub struct BuildingEntity {
     pub is_hidden: bool,
     pub is_suppressed: bool,
     pub team_id: i8,
-    pub params_id: GameParamId,
+    pub params_id: Option<GameParamId>,
 }
 
 /// A smoke screen entity in the game.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SmokeScreenEntity {
     pub id: EntityId,
     pub radius: BigWorldDistance,
@@ -319,9 +320,11 @@ pub struct ActiveWard {
 #[derive(Debug, Clone, Serialize)]
 pub struct KillRecord {
     pub clock: GameClock,
-    pub killer: EntityId,
+    /// `None` when no ship is responsible, such as a sea mine.
+    pub killer: Option<EntityId>,
     pub victim: EntityId,
-    pub cause: Recognized<DeathCause>,
+    /// `None` when the game names no cause.
+    pub cause: Option<Recognized<DeathCause>>,
 }
 
 /// A dead ship's last known position.
@@ -343,14 +346,18 @@ pub struct DeadShip {
 /// but position changes arrive via 0x2a packets on the InteractiveZone entity.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LocalWeatherZone {
-    /// Human-readable weather type name (e.g. "Filth")
-    pub name: String,
+    /// Human-readable weather type name (e.g. "Filth"). `None` when the zone
+    /// names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// 2D world position (x, z) — y is always 0. Updated by 0x2a packets.
     pub position: WorldPos,
-    /// Zone radius in world units
-    pub radius: f32,
-    /// GameParam ID for weather parameters
-    pub params_id: GameParamId,
+    /// Zone radius in world units. `None` until a `radius` names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    /// GameParam ID for weather parameters. `None` until a `paramsId` names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_id: Option<GameParamId>,
     /// InteractiveZone entity ID, used to match 0x2a position updates
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_id: Option<EntityId>,

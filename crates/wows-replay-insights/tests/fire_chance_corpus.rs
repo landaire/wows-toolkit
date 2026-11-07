@@ -685,7 +685,7 @@ fn reconcile_hits(
         reconciliation.main_battery_on_ship += 1;
         let off_roster = !roster.contains(&hit.victim_entity_id) || hit.victim_entity_id == input.self_entity;
         let after_death = deaths.get(&hit.victim_entity_id).is_some_and(|died_at| hit.clock >= *died_at);
-        match param.projectile().map(|projectile| projectile.ammo_type()) {
+        match param.projectile().and_then(|projectile| projectile.ammo_type()) {
             Some("HE") => {
                 reconciliation.main_battery_he_on_ship += 1;
                 reconciliation.main_battery_he_off_roster += u32::from(off_roster);

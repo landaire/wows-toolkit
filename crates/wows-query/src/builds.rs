@@ -167,6 +167,7 @@ impl StatAmount for Charges {
             // Precision is not a concern for charge counts.
             #[allow(clippy::cast_precision_loss)]
             Self::Limited(count) => count as f32,
+            // Ranks unlimited charges above every count.
             Self::Unlimited => f32::INFINITY,
         }
     }

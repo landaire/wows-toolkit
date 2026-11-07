@@ -11,6 +11,7 @@
 
 use serde::Serialize;
 use wows_core::units::Km;
+use wows_core::units::Seconds;
 use wowsunpack::game_params::modifier_settings_data::describe_modifiers;
 use wowsunpack::game_params::modifier_settings_data::modifier_setting;
 use wowsunpack::game_params::types::AbilityCategory;
@@ -19,6 +20,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
 use crate::builds::round;
+use crate::commanders::RegenRate;
 use crate::commanders::regen_line;
 use crate::data::GameData;
 use crate::text::clean;
@@ -45,6 +47,25 @@ pub struct ConsumableBuff {
     pub on_self: Vec<String>,
 }
 
+/// How long a buff lasts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BuffDuration {
+    For(Seconds),
+
+    /// The buff of a TIME_BASED consumable, which has no fixed action time.
+    WhileActive,
+
+    RestOfBattle,
+}
+
+impl BuffDuration {
+    /// The buff duration of a consumable with action time `action_time`.
+    /// Only TIME_BASED consumables have none.
+    pub(crate) fn of_consumable(action_time: Option<Seconds>) -> Self {
+        action_time.map_or(Self::WhileActive, Self::For)
+    }
+}
+
 impl GameData {
     /// The modifiers of level `level` (1-based) of the `Modifier` param
     /// `name` for `species`; `None` when the param is missing, is not a
@@ -60,16 +81,15 @@ impl GameData {
     }
 
     /// The buff a consumable applies, `None` for consumables without one.
-    /// `seconds` is how long the buff lasts.
     pub(crate) fn consumable_buff(
         &self,
         category: &AbilityCategory,
         species: Species,
-        seconds: Option<f32>,
+        duration: BuffDuration,
     ) -> Option<ConsumableBuff> {
         let lines = |name: Option<&str>| {
             name.and_then(|name| self.buff_modifiers(name, 1, species))
-                .map(|modifiers| self.buff_lines(&modifiers, species, seconds))
+                .map(|modifiers| self.buff_lines(&modifiers, species, duration))
                 .unwrap_or_default()
         };
         let on_allies = category.target_team() == Some("ally");
@@ -96,20 +116,22 @@ impl GameData {
     }
 
     /// A buff's effects for `species`: heals first, then the other modifiers
-    /// as the client describes them. `seconds` is how long the buff lasts,
-    /// `None` for the rest of the battle.
+    /// as the client describes them.
     pub(crate) fn buff_lines(
         &self,
         modifiers: &[CrewSkillModifier],
         species: Species,
-        seconds: Option<f32>,
+        duration: BuffDuration,
     ) -> Vec<String> {
-        let duration =
-            seconds.map_or_else(|| "the rest of the battle".to_owned(), |seconds| format!("{} s", round(seconds)));
+        let (duration_text, seconds) = match duration {
+            BuffDuration::For(seconds) => (format!("{} s", round(seconds.value())), Some(seconds.value())),
+            BuffDuration::WhileActive => ("as long as the consumable is active".to_owned(), None),
+            BuffDuration::RestOfBattle => ("the rest of the battle".to_owned(), None),
+        };
         let mut lines: Vec<String> = HEAL_MODIFIERS
             .iter()
             .filter_map(|name| heal_rate(modifiers, name, species))
-            .filter_map(|percent| regen_line(percent / 100.0, 0.0, false, &duration, seconds))
+            .map(|percent| regen_line(RegenRate::FractionPerSecond(percent / 100.0), false, &duration_text, seconds))
             .collect();
         for modifier in modifiers.iter().filter(|modifier| !HEAL_MODIFIERS.contains(&modifier.name())) {
             let value = modifier.get_for_species(&species);

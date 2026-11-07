@@ -695,7 +695,10 @@ impl GameData {
                 let (label, caliber) = match weapon {
                     Weapon::Torpedoes => (projectile_name.clone(), None),
                     Weapon::MainBattery | Weapon::Secondaries => {
-                        let label = match AmmoType::from_game_str(projectile.ammo_type()) {
+                        let Some(ammo_type) = projectile.ammo_type() else {
+                            continue;
+                        };
+                        let label = match AmmoType::from_game_str(ammo_type) {
                             AmmoType::AP => "AP",
                             AmmoType::HE => "HE",
                             AmmoType::SAP => "SAP",
@@ -951,7 +954,8 @@ mod tests {
     #[cfg_attr(not(has_build_13533378), ignore)]
     fn louisiana_wing_secondaries_bear_on_their_own_side() {
         let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");

@@ -273,8 +273,9 @@ pub struct ChatEntry {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct KillFeedEntry {
-    /// Killer's player name
-    pub killer_name: String,
+    /// Killer's player name. `None` when no ship is responsible, such as a
+    /// sea mine.
+    pub killer_name: Option<String>,
     /// Killer's ship species (e.g. "Destroyer") for icon lookup
     pub killer_species: Option<String>,
     /// Killer's localized ship name (e.g. "Shimakaze")
@@ -293,8 +294,8 @@ pub struct KillFeedEntry {
     pub victim_color: [u8; 3],
     /// True if victim is self or ally
     pub victim_is_friendly: bool,
-    /// How the victim died
-    pub cause: Recognized<DeathCause>,
+    /// How the victim died. `None` when the game names no cause.
+    pub cause: Option<Recognized<DeathCause>>,
 }
 
 /// A single ribbon type with its accumulated count.
@@ -608,13 +609,8 @@ pub enum DrawCommand {
         height: i32,
         /// Ship GameParamId — renderers resolve to localized name
         ship_param_id: Option<GameParamId>,
-        hp_fraction: f32,
-        hp_current: f32,
-        hp_max: f32,
-        hp_healable: f32,
-        /// HP the active/next heal charge will restore (the brighter part of
-        /// the healable region). The remainder of `hp_healable` is drawn dimmer.
-        hp_healable_per_charge: f32,
+        /// `None` until the ship's max health is known.
+        hp: Option<HitPoints>,
         /// Repair Party (heal) availability for this ship (drives healable region).
         heal_availability: ConsumableAvailability,
         /// Player name to display above the silhouette.
@@ -754,15 +750,8 @@ pub struct RosterRow {
     /// follows the in-game class hierarchy (CV/BB/CA/DD/SS) rather than the
     /// alphabetical fall-back of `class_icon_key`.
     pub species: Option<wowsunpack::game_params::types::Species>,
-    pub hp_current: f32,
-    pub hp_max: f32,
-    /// Portion of missing HP that the ship can still restore via Repair Party
-    /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
-    /// in the HP bar between current HP and permanent damage.
-    pub hp_healable: f32,
-    /// HP the active/next heal charge will restore (the brighter part of
-    /// the healable region). The remainder of `hp_healable` is drawn dimmer.
-    pub hp_healable_per_charge: f32,
+    /// `None` until the ship's max health is known.
+    pub hp: Option<HitPoints>,
     /// Repair Party (heal) availability for this ship (drives healable HP-bar segment).
     pub heal_availability: ConsumableAvailability,
     pub is_dead: bool,
@@ -783,6 +772,29 @@ pub struct RosterRow {
     /// indicator over this duration.
     pub seconds_since_damage: Option<f32>,
     pub consumables: Vec<RosterConsumable>,
+}
+
+/// A ship's hit points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct HitPoints {
+    pub current: f32,
+    /// Always positive.
+    pub max: f32,
+    /// Portion of missing HP that the ship can still restore via Repair Party
+    /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
+    /// between current HP and permanent damage.
+    pub healable: f32,
+    /// HP the active/next heal charge will restore (the brighter part of
+    /// the healable region). The remainder of `healable` is drawn dimmer.
+    pub healable_per_charge: f32,
+}
+
+impl HitPoints {
+    /// Current HP as a fraction of max, clamped to `0..=1`.
+    pub fn fraction(&self) -> f32 {
+        (self.current / self.max).clamp(0.0, 1.0)
+    }
 }
 
 #[derive(Debug, Clone)]

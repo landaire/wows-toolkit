@@ -107,11 +107,11 @@ fn group_into_rows(skills: Vec<SkillGridSkill>) -> Vec<SkillGridRow> {
     rows
 }
 
-/// A skill's point cost for a species, or `None` for a species with no captain
-/// grid (e.g. event ships) rather than panicking. Avoids
-/// `CrewSkillTiers::get_for_species`, which panics on such species.
+/// A skill's point cost for a species, or `None` for a skill without a tier or
+/// a species with no captain grid (e.g. event ships) rather than panicking.
+/// Avoids `CrewSkillTiers::get_for_species`, which panics on such species.
 fn point_cost_for_species(skill: &CrewSkill, species: Species) -> Option<SkillPointCost> {
-    let tiers = skill.tier();
+    let tiers = skill.tier()?;
     match species {
         Species::AirCarrier => Some(tiers.aircraft_carrier()),
         Species::Battleship => Some(tiers.battleship()),

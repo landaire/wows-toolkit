@@ -108,19 +108,20 @@ pub fn extract_cap_layout_from_controller(
         return None;
     }
 
-    // Only include points that actually have a position (they should all have
-    // one after EntityCreate, but be defensive).
+    // Only include points that actually have a position and radius (they should
+    // all have both after EntityCreate, but be defensive).
     let points: Vec<CapPointLayout> = capture_points
         .iter()
         .filter_map(|cp| {
             let pos = cp.position?;
+            let radius = cp.radius?;
             let cp_type =
                 cp.control_point_type.as_ref().and_then(|r| r.known().copied()).unwrap_or(ControlPointType::Control);
 
             Some(CapPointLayout {
                 index: cp.index,
                 position: WorldPos2D { x: pos.x, z: pos.z },
-                radius: BigWorldDistance::from(cp.radius),
+                radius: BigWorldDistance::from(radius),
                 cp_type,
                 team_id: cp.team_id,
                 initially_enabled: cp.is_enabled,

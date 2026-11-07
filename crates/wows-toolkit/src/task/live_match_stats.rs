@@ -304,7 +304,7 @@ mod tests {
         );
         let request = MatchStatsRequest {
             arena_id: ArenaId::new(1),
-            players: vec![PlayerRef { account_id: AccountId(1), region: Region::Eu, ship_id: GameParamId::default() }],
+            players: vec![PlayerRef { account_id: AccountId(1), region: Region::Eu, ship_id: GameParamId::from(1u32) }],
         };
 
         fetch(StatsLookup { started_at: replaced, request }, &tracker, &mut client);

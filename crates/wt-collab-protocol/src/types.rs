@@ -3,6 +3,8 @@
 //! These types are serializable with rkyv for wire transport and also used
 //! directly in the annotation/paint UI layer.
 
+use wowsunpack::game_types::GameParamId;
+
 /// A single annotation placed on the minimap.
 ///
 /// Coordinates are in minimap pixel space (0..760 native, but annotations
@@ -27,12 +29,11 @@ pub enum Annotation {
 /// stays independent of game-data structures.
 #[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AnnotationShipConfig {
-    /// `GameParamId` as raw `u64`.  0 = unassigned.
-    pub param_id: u64,
+    pub param_id: GameParamId,
     /// Localized display name (e.g. "Moskva").
     pub ship_name: String,
-    /// Selected hull upgrade name (e.g. "PRUH510_Moskva_1"). Empty = default hull.
-    pub hull_name: String,
+    /// Selected hull upgrade name (e.g. "PRUH510_Moskva_1"). `None` selects the default hull.
+    pub hull_name: Option<String>,
     /// Visibility distance coefficient (product of skills/mods). 1.0 = stock.
     pub vis_coeff: f32,
     /// Main battery max distance coefficient. 1.0 = stock.
@@ -41,6 +42,22 @@ pub struct AnnotationShipConfig {
     pub gs_coeff: f32,
     /// Which range circles to display.
     pub range_filter: AnnotationRangeFilter,
+}
+
+impl AnnotationShipConfig {
+    /// Ship `param_id` on its default hull, with stock coefficients and no
+    /// range circles shown.
+    pub fn new(param_id: GameParamId, ship_name: String) -> Self {
+        Self {
+            param_id,
+            ship_name,
+            hull_name: None,
+            vis_coeff: 1.0,
+            gm_coeff: 1.0,
+            gs_coeff: 1.0,
+            range_filter: AnnotationRangeFilter::default(),
+        }
+    }
 }
 
 /// Range circle visibility flags for an annotation ship.
@@ -52,20 +69,6 @@ pub struct AnnotationRangeFilter {
     pub torpedo: bool,
     pub radar: bool,
     pub hydro: bool,
-}
-
-impl Default for AnnotationShipConfig {
-    fn default() -> Self {
-        Self {
-            param_id: 0,
-            ship_name: String::new(),
-            hull_name: String::new(),
-            vis_coeff: 1.0,
-            gm_coeff: 1.0,
-            gs_coeff: 1.0,
-            range_filter: AnnotationRangeFilter::default(),
-        }
-    }
 }
 
 /// Active drawing/placement tool state.

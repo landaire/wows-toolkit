@@ -43,8 +43,8 @@ pub enum TimelineEventKind {
         ship_name: String,
         player_name: String,
         team: TeamId,
-        killer_ship: String,
-        killer_player: String,
+        /// `None` when no known player's ship is responsible, such as a sea mine.
+        killer: Option<DeathKiller>,
     },
     CapContested {
         cap_label: String,
@@ -75,6 +75,13 @@ pub enum TimelineEventKind {
         player_name: String,
         team: TeamId,
     },
+}
+
+/// The player whose ship destroyed another.
+#[derive(Debug)]
+pub struct DeathKiller {
+    pub ship_name: String,
+    pub player_name: String,
 }
 
 #[derive(Debug)]
@@ -127,13 +134,12 @@ pub fn format_timeline_event(event: &TimelineEvent) -> String {
                 max_hp
             )
         }
-        TimelineEventKind::Death { ship_name, player_name, killer_ship, killer_player, .. } => {
-            if killer_ship.is_empty() {
-                format!("{} ({}) destroyed", ship_name, player_name)
-            } else {
-                format!("{} ({}) destroyed by {} ({})", ship_name, player_name, killer_ship, killer_player)
+        TimelineEventKind::Death { ship_name, player_name, killer, .. } => match killer {
+            Some(killer) => {
+                format!("{} ({}) destroyed by {} ({})", ship_name, player_name, killer.ship_name, killer.player_name)
             }
-        }
+            None => format!("{} ({}) destroyed", ship_name, player_name),
+        },
         TimelineEventKind::CapContested { cap_label, .. } => format!("{} contested", cap_label),
         TimelineEventKind::CapFlipped { cap_label, .. } => format!("{} captured", cap_label),
         TimelineEventKind::CapBeingCaptured { cap_label, .. } => format!("{} being captured", cap_label),
@@ -242,8 +248,11 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                 let players = view.player_entities();
                 if !players.is_empty() {
                     for (entity_id, player) in players {
-                        let ship_name =
-                            self.game_metadata.localized_name_from_param(player.vehicle()).unwrap_or_default();
+                        // Without a translation, name the ship by its GameParam name.
+                        let ship_name = self
+                            .game_metadata
+                            .localized_name_from_param(player.vehicle())
+                            .unwrap_or_else(|| player.vehicle().name().to_string());
                         self.ship_names.insert(*entity_id, ship_name);
                         self.player_names.insert(*entity_id, player.initial_state().username().to_string());
 
@@ -262,11 +271,9 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
 
             for (entity_id, props) in view.vehicle_props_all() {
                 let current_health = props.health();
-                let max_health = props.max_health();
-
-                if max_health <= 0.0 {
+                let Some(max_health) = props.max_health() else {
                     continue;
-                }
+                };
 
                 if let Some((window_start, health_at_start)) = self.health_windows.get_mut(&entity_id) {
                     if clock - *window_start >= 3.0 {
@@ -305,16 +312,19 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                     };
                     let victim_ship = self.ship_names.get(&kill.victim).cloned().unwrap_or_default();
                     let victim_player = self.player_names.get(&kill.victim).cloned().unwrap_or_default();
-                    let killer_ship = self.ship_names.get(&kill.killer).cloned().unwrap_or_default();
-                    let killer_player = self.player_names.get(&kill.killer).cloned().unwrap_or_default();
+                    let killer = kill.killer.and_then(|killer| {
+                        Some(DeathKiller {
+                            ship_name: self.ship_names.get(&killer)?.clone(),
+                            player_name: self.player_names.get(&killer)?.clone(),
+                        })
+                    });
                     self.events.push(TimelineEvent {
                         clock: ElapsedClock(kill.clock.seconds()),
                         kind: TimelineEventKind::Death {
                             ship_name: victim_ship,
                             player_name: victim_player,
                             team,
-                            killer_ship,
-                            killer_player,
+                            killer,
                         },
                     });
                 }
@@ -471,7 +481,9 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                     teams[team].ships_total += 1;
                     if let Some(props) = all_vehicle_props.get(entity_id) {
                         teams[team].ships_known += 1;
-                        teams[team].max_hp += props.max_health();
+                        if let Some(max_health) = props.max_health() {
+                            teams[team].max_hp += max_health;
+                        }
                         if props.is_alive() {
                             teams[team].ships_alive += 1;
                             teams[team].total_hp += props.health();
@@ -563,10 +575,9 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
     fn observe(&mut self, packet: &Packet<'_, '_>, _prev_clock: GameClock, view: &BattleView<'_>) {
         for (entity_id, props) in view.vehicle_props_all() {
             let current_hp = props.health();
-            let max_hp = props.max_health();
-            if max_hp <= 0.0 {
+            let Some(max_hp) = props.max_health() else {
                 continue;
-            }
+            };
             let prev_hp = self.last_health.get(&entity_id).copied();
             if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
                 self.last_health.insert(entity_id, current_hp);
@@ -882,11 +893,12 @@ pub fn row_text(kind: &TimelineEventKind) -> (String, String) {
             format!("{} -{}% HP", ship_name, (percent_lost * 100.0) as u32),
             format!("{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP", ship_name, player_name, old_hp, max_hp, new_hp, max_hp),
         ),
-        TimelineEventKind::Death { ship_name, player_name, killer_ship, killer_player, .. } => {
-            let hover = if killer_ship.is_empty() {
-                format!("{} ({})", ship_name, player_name)
-            } else {
-                format!("{} ({})\nKilled by {} ({})", ship_name, player_name, killer_ship, killer_player)
+        TimelineEventKind::Death { ship_name, player_name, killer, .. } => {
+            let hover = match killer {
+                Some(killer) => {
+                    format!("{} ({})\nKilled by {} ({})", ship_name, player_name, killer.ship_name, killer.player_name)
+                }
+                None => format!("{} ({})", ship_name, player_name),
             };
             (format!("{} destroyed", ship_name), hover)
         }
@@ -916,8 +928,7 @@ mod merge_tests {
                 ship_name: ship.to_owned(),
                 player_name: "p".to_owned(),
                 team: TeamId::new(team),
-                killer_ship: String::new(),
-                killer_player: String::new(),
+                killer: None,
             },
         }
     }

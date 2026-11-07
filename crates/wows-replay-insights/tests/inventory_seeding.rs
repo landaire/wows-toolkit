@@ -73,17 +73,13 @@ fn recording_player_inventory_is_non_empty() {
         .shipId;
     let recording_facts = facts
         .values()
-        .find(|f| f.vehicle_id == recording_ship_id)
+        .find(|f| f.vehicle_id == Some(recording_ship_id))
         .expect("recording player's facts should be in cache");
 
+    assert!(recording_facts.max_health.is_some(), "recording player's max_health should be populated");
     assert!(
-        recording_facts.max_health > 0.0,
-        "recording player's max_health should be populated, got {}",
-        recording_facts.max_health
-    );
-    assert!(
-        recording_facts.vehicle_id.raw() != 0,
-        "recording player's vehicle_id should be non-zero (ship_config not captured?)"
+        recording_facts.vehicle_id.is_some(),
+        "recording player's vehicle_id should be set (ship_config not captured?)"
     );
     assert!(
         !recording_facts.ship_config.abilities().is_empty(),

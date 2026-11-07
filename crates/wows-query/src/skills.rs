@@ -395,7 +395,7 @@ mod tests {
     #[cfg_attr(not(has_build_13533378), ignore)]
     fn skill_and_upgrade_effects_show_plausible_percents() {
         let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = BuildsIndex::load(&root.join("builds.toml"));
+        let index = BuildsIndex::load(&root.join("builds.toml")).expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");

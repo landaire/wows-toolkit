@@ -36,7 +36,7 @@ fn ttx_consumables_non_empty() {
     };
     let ship_name = "PASC210_Worcester";
     let ship = provider.game_param_by_name(ship_name).unwrap_or_else(|| panic!("ship {ship_name} not in params"));
-    let stats = ship_stats_stock(&ship, &provider);
+    let stats = ship_stats_stock(&ship, &provider).expect("Worcester has a TTX card");
     assert!(!stats.consumables.is_empty(), "Worcester must have at least one consumable");
     let has_crash_crew = stats.consumables.iter().any(|c| c.label == "crashCrew");
     assert!(
@@ -142,7 +142,7 @@ fn ttx_cross_class_against_port_values() {
         "PASC020_Des_Moines_1948",
     ] {
         let ship = provider.game_param_by_name(ship_name).unwrap_or_else(|| panic!("ship {ship_name} not in params"));
-        let stats = ship_stats_stock(&ship, &provider);
+        let stats = ship_stats_stock(&ship, &provider).unwrap_or_else(|| panic!("{ship_name} has no TTX card"));
         let checks = ship_checks(ship_name, &stats);
 
         if ship_name == "PGSB108_Bismarck" {

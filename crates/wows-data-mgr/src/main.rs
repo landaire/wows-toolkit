@@ -531,7 +531,7 @@ fn local_builds_for_dump(game_dir: Option<&Path>, data_dir: &Path) -> Result<Vec
             .attach_with(|| format!("No valid game builds found at {}", dir.display()))?);
     }
 
-    let mut builds = registry::load_registry(&data_dir.join("versions.toml")).available_builds();
+    let mut builds = registry::load_registry(&data_dir.join("versions.toml"))?.available_builds();
     // `game_dir_for_build` falls back to this directory for a build with no
     // registry entry, so a build downloaded before a lost registry write is
     // dumpable by number. `--latest` has to see the same set or it would not
@@ -570,7 +570,7 @@ fn execute_dump_renderer_plan(
     let game_dir = match plan.source {
         DumpDataSource::Supplied(path) => path,
         DumpDataSource::Registry => {
-            let registry = registry::load_registry(&data_dir.join("versions.toml"));
+            let registry = registry::load_registry(&data_dir.join("versions.toml"))?;
             registry
                 .game_dir_for_build(plan.target, data_dir)
                 .ok_or_else(|| rootcause::report!("Build {} not available locally", plan.target))?
@@ -611,7 +611,7 @@ fn detect_source_version(game_dir: &Path, target: u32) -> Result<String, Report>
 
 fn remove_existing_dump(output: &Path, target: u32, version: &str) -> Result<(), Report> {
     let builds_path = output.join("builds.toml");
-    let mut index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+    let mut index = wows_data_mgr::builds::BuildsIndex::load(&builds_path)?;
     if let Some(old_entry) = index.find_by_build(target).cloned() {
         let old_dir = output.join(&old_entry.dir);
         if old_dir.exists() {
@@ -1110,8 +1110,10 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
                 version: VersionSource::Detected(dumped_version),
                 overwrite: ExistingPinPolicy::Keep,
             };
-            let reg = registry::load_registry(&data_dir.join("versions.toml"));
-            match refresh_manifest_entry(&refresh, &manifest, &reg) {
+            let outcome = registry::load_registry(&data_dir.join("versions.toml"))
+                .map_err(Report::from)
+                .and_then(|reg| refresh_manifest_entry(&refresh, &manifest, &reg));
+            match outcome {
                 Ok(outcome) => println!("{}", outcome.report()),
                 Err(e) => eprintln!(
                     "Warning: left game_versions.toml unchanged, could not verify the Steam pins for build {}: {e}",
@@ -1122,7 +1124,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         return Ok(Some(target));
     }
 
-    let mut reg = registry::load_registry(&data_dir.join("versions.toml"));
+    let mut reg = registry::load_registry(&data_dir.join("versions.toml"))?;
 
     match args.command.clone() {
         Commands::Download { latest, build, version, force, username } => {
@@ -1174,8 +1176,11 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             builds.sort();
 
             for build_str in builds {
+                let Ok(build) = build_str.parse::<u32>() else {
+                    eprintln!("Skipping manifest key {build_str:?}: not a build number");
+                    continue;
+                };
                 let entry = &manifest.versions[build_str];
-                let build: u32 = build_str.parse().unwrap_or(0);
                 // Content represents game data; client is required when content is absent.
                 let display_manifest = entry.content.as_ref().unwrap_or(&entry.client);
                 let status = if let Some(local) = reg.get(build) {
@@ -1235,7 +1240,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
         }
 
         Commands::Remove { build, version, output } => {
-            let index = wows_data_mgr::builds::BuildsIndex::load(&output.join("builds.toml"));
+            let index = wows_data_mgr::builds::BuildsIndex::load(&output.join("builds.toml"))?;
 
             if let Some(target_build) = build {
                 println!("Removing build {target_build}...");

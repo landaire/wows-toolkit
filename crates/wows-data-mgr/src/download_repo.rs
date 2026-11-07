@@ -141,7 +141,7 @@ pub async fn check_for_updates(
         return Ok(UpdateCheck { tip, updates: Vec::new() });
     }
 
-    let local = BuildsIndex::load(&output_base.join("builds.toml"));
+    let local = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let remote = fetch_builds_index(client, base_url).await?;
 
     let mut updates = Vec::new();
@@ -192,7 +192,7 @@ pub async fn validate_cache(
     on_progress: impl Fn(u64, u64),
 ) -> Result<CacheValidation, Report> {
     let tip = fetch_repo_tip(client).await?;
-    let local = BuildsIndex::load(&output_base.join("builds.toml"));
+    let local = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let remote = fetch_builds_index(client, base_url).await?;
     let cas_root = cas::cas_root(output_base);
 
@@ -814,7 +814,7 @@ async fn download_object(
 /// Add or update the build's entry in the local `builds.toml`.
 fn register_build(output_base: &Path, entry: &BuildEntry) -> Result<(), Report> {
     let builds_path = output_base.join("builds.toml");
-    let mut index = BuildsIndex::load(&builds_path);
+    let mut index = BuildsIndex::load(&builds_path)?;
     index.upsert(entry.clone());
     index.save(&builds_path)
 }
@@ -907,7 +907,7 @@ mod tests {
         assert!(!gp.is_empty());
         assert!(!build_dir.join("vfs").exists());
         // The build is registered locally.
-        let index = BuildsIndex::load(&base.join("builds.toml"));
+        let index = BuildsIndex::load(&base.join("builds.toml")).unwrap();
         assert!(index.find_by_build(296659).is_some());
 
         // A second download is a cheap no-op that still reports the same build.
@@ -968,7 +968,7 @@ mod tests {
     }
 
     fn entry(version: &str, build: u32, dir: &str) -> BuildEntry {
-        BuildEntry { version: version.into(), build, dir: dir.into(), dumped_at: String::new() }
+        BuildEntry { version: version.into(), build, dir: dir.into(), dumped_at: "2025-12-01T09:00:00Z".into() }
     }
 
     // Two requested builds resolving to the same entry via nearest-version
@@ -1119,7 +1119,7 @@ mod tests {
     #[test]
     fn a_corrupt_object_failure_names_the_build_and_the_files_it_breaks() {
         let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
-        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        let mut metadata = BuildMetadata::new("15.4.0".into(), 12506899);
         for i in 0..9 {
             metadata.files.insert(format!("res/spaces/s{i}/space.settings"), "a24a46f62dc08fd95fc7".into());
         }
@@ -1178,7 +1178,7 @@ mod tests {
     #[test]
     fn a_corrupt_object_failure_writes_every_file_to_the_log() {
         let entry = entry("15.4.0", 12506899, "15.4.0_12506899");
-        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        let mut metadata = BuildMetadata::new("15.4.0".into(), 12506899);
         let files: Vec<String> = (0..9).map(|i| format!("res/spaces/s{i}/space.settings")).collect();
         for file in &files {
             metadata.files.insert(file.clone(), "a24a46f62dc08fd95fc7".into());

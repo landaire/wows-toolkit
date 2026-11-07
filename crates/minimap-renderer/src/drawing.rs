@@ -790,10 +790,10 @@ fn draw_pre_battle_countdown(
 /// Keys correspond to the base name portion of `icon_frag_{key}.png` files
 /// in `gui/battle_hud/icon_frag/`.
 fn death_cause_icon_key(
-    cause: &wows_replays::analyzer::decoder::Recognized<wows_replays::analyzer::decoder::DeathCause>,
+    cause: Option<&wows_replays::analyzer::decoder::Recognized<wows_replays::analyzer::decoder::DeathCause>>,
 ) -> &'static str {
     use wows_replays::analyzer::decoder::DeathCause;
-    match cause.known() {
+    match cause.and_then(|cause| cause.known()) {
         Some(DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell) => "main_caliber",
         Some(DeathCause::Secondaries) => "atba",
         Some(DeathCause::Torpedo | DeathCause::AerialTorpedo) => "torpedo",
@@ -842,12 +842,13 @@ fn draw_kill_feed(
         let icon_y = y + (text_h - icon_size) / 2;
 
         // Get death cause icon key
-        let cause_key = death_cause_icon_key(&entry.cause);
+        let cause_key = death_cause_icon_key(entry.cause.as_ref());
         let has_cause_icon = death_cause_icons.contains_key(cause_key);
         let cause_w = if has_cause_icon { cause_icon_size } else { 0 } as u32;
 
         // Pick appropriate fonts for each text segment
-        let (killer_name_font, killer_name_scale) = fonts.font_and_scale(&entry.killer_name, 12.0);
+        let killer_name = entry.killer_name.as_deref().unwrap_or("");
+        let (killer_name_font, killer_name_scale) = fonts.font_and_scale(killer_name, 12.0);
         let (victim_name_font, victim_name_scale) = fonts.font_and_scale(&entry.victim_name, 12.0);
         let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
         let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
@@ -855,7 +856,7 @@ fn draw_kill_feed(
         let (victim_ship_font, victim_ship_scale) = fonts.font_and_scale(victim_ship, 12.0);
 
         // Measure all text segments
-        let (killer_name_w, _) = text_size(killer_name_scale, killer_name_font, &entry.killer_name);
+        let (killer_name_w, _) = text_size(killer_name_scale, killer_name_font, killer_name);
         let (killer_ship_w, _) =
             if !killer_ship.is_empty() { text_size(killer_ship_scale, killer_ship_font, killer_ship) } else { (0, 0) };
         let (victim_name_w, _) = text_size(victim_name_scale, victim_name_font, &entry.victim_name);
@@ -898,7 +899,7 @@ fn draw_kill_feed(
         let mut x = width - total_w - right_margin;
 
         // Killer name (team-colored)
-        draw_text_shadow(pm, entry.killer_color, x, y, killer_name_scale, killer_name_font, &entry.killer_name);
+        draw_text_shadow(pm, entry.killer_color, x, y, killer_name_scale, killer_name_font, killer_name);
         x += killer_name_w as i32;
 
         // Killer ship icon (friendly=left, enemy=right)
@@ -1574,11 +1575,11 @@ fn draw_team_roster(
     // Team HP bar replaces the old 1px accent line.
     let bar_h: f32 = 14.0;
     draw_filled_rect(pm, panel_x, panel_y, panel_w, bar_h, darken(accent, 0.4), 0.95);
-    if let Some(frac) = team_hp_fraction(rows.iter().map(|r| (r.hp_current, r.hp_max))) {
+    if let Some(frac) = team_hp_fraction(rows.iter().filter_map(|r| r.hp).map(|hp| (hp.current, hp.max))) {
         draw_filled_rect(pm, panel_x, panel_y, panel_w * frac, bar_h, accent, 1.0);
     }
-    let total_cur: f32 = rows.iter().map(|r| r.hp_current.max(0.0)).sum();
-    let total_max: f32 = rows.iter().map(|r| r.hp_max).sum();
+    let total_cur: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.current.max(0.0)).sum();
+    let total_max: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.max).sum();
     let hp_bar_text = format!("{} / {}", format_number(total_cur as i64), format_number(total_max as i64));
     let bar_text_scale = fonts.scale(10.0);
     let (btw_u, bth_u) = text_size(bar_text_scale, &fonts.primary, &hp_bar_text);
@@ -1732,22 +1733,24 @@ fn draw_team_roster(
         let hp_bar_y = row_top + name_scale.y + ship_scale.y + 6.0;
         let hp_bar_h: f32 = 18.0;
         draw_filled_rect(pm, inner_x, hp_bar_y, hp_bar_w, hp_bar_h, [40, 40, 40], 0.86);
-        if row.hp_max > 0.0 && !row.is_dead {
-            let fill_ratio = (row.hp_current / row.hp_max).clamp(0.0, 1.0);
+        if let Some(hp) = row.hp
+            && !row.is_dead
+        {
+            let fill_ratio = hp.fraction();
             let fill_w = hp_bar_w * fill_ratio;
             let fill_color = hp_bar_color_lerp(fill_ratio);
             draw_filled_rect(pm, inner_x, hp_bar_y, fill_w, hp_bar_h, fill_color, 1.0);
             if let Some(color) = row.heal_availability.healable_rgb()
-                && row.hp_healable > 0.0
+                && hp.healable > 0.0
             {
                 // Bright = HP the next heal charge restores; dim = the regenerable
                 // pool beyond that charge.
-                let bright_w = (hp_bar_w * (row.hp_healable_per_charge.min(row.hp_healable) / row.hp_max))
-                    .clamp(0.0, hp_bar_w - fill_w);
+                let bright_w =
+                    (hp_bar_w * (hp.healable_per_charge.min(hp.healable) / hp.max)).clamp(0.0, hp_bar_w - fill_w);
                 if bright_w > 0.0 {
                     draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, bright_w, hp_bar_h, color, 0.85);
                 }
-                let dim_total = (hp_bar_w * (row.hp_healable / row.hp_max)).min(hp_bar_w - fill_w);
+                let dim_total = (hp_bar_w * (hp.healable / hp.max)).min(hp_bar_w - fill_w);
                 let dim_w = (dim_total - bright_w).max(0.0);
                 if dim_w > 0.0 {
                     draw_filled_rect(
@@ -1763,29 +1766,30 @@ fn draw_team_roster(
             }
         }
 
-        let hp_text =
-            format!("{} / {}", format_number(row.hp_current.max(0.0) as i64), format_number(row.hp_max as i64),);
-        let hp_text_color = if row.is_dead { [220, 220, 220] } else { [255, 255, 255] };
-        let (hp_text_w_u, hp_text_h_u) = text_size(hp_scale, &fonts.primary, &hp_text);
-        let hp_text_w = hp_text_w_u as f32;
-        let hp_text_h = hp_text_h_u as f32;
-        let hp_text_y = hp_bar_y + (hp_bar_h - hp_text_h) * 0.5;
-        let hp_text_x = inner_x + hp_bar_w - hp_text_w - 4.0;
-        // Strong drop shadow rather than a backing pill. A pill at this size
-        // covered most of the HP fill (the bar is only ~18px tall and the
-        // text is ~12 of those), so the colored portion got drowned out.
-        // Doubling up the shadow keeps the white legible against any fill.
-        draw_text(
-            pm,
-            [0, 0, 0],
-            (hp_text_x + 1.0) as i32,
-            (hp_text_y + 1.0) as i32,
-            hp_scale,
-            &fonts.primary,
-            &hp_text,
-        );
-        draw_text(pm, [0, 0, 0], (hp_text_x + 1.0) as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
-        draw_text(pm, hp_text_color, hp_text_x as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+        if let Some(hp) = row.hp {
+            let hp_text = format!("{} / {}", format_number(hp.current.max(0.0) as i64), format_number(hp.max as i64));
+            let hp_text_color = if row.is_dead { [220, 220, 220] } else { [255, 255, 255] };
+            let (hp_text_w_u, hp_text_h_u) = text_size(hp_scale, &fonts.primary, &hp_text);
+            let hp_text_w = hp_text_w_u as f32;
+            let hp_text_h = hp_text_h_u as f32;
+            let hp_text_y = hp_bar_y + (hp_bar_h - hp_text_h) * 0.5;
+            let hp_text_x = inner_x + hp_bar_w - hp_text_w - 4.0;
+            // Strong drop shadow rather than a backing pill. A pill at this size
+            // covered most of the HP fill (the bar is only ~18px tall and the
+            // text is ~12 of those), so the colored portion got drowned out.
+            // Doubling up the shadow keeps the white legible against any fill.
+            draw_text(
+                pm,
+                [0, 0, 0],
+                (hp_text_x + 1.0) as i32,
+                (hp_text_y + 1.0) as i32,
+                hp_scale,
+                &fonts.primary,
+                &hp_text,
+            );
+            draw_text(pm, [0, 0, 0], (hp_text_x + 1.0) as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+            draw_text(pm, hp_text_color, hp_text_x as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+        }
 
         // Consumable strip: 6 fixed slots aligned to the right of the row.
         let strip_y = hp_bar_y + (hp_bar_h - icon_size) * 0.5;
@@ -2788,11 +2792,7 @@ impl RenderTarget for ImageTarget {
                 width,
                 height,
                 ship_param_id: _,
-                hp_fraction,
-                hp_current,
-                hp_max,
-                hp_healable,
-                hp_healable_per_charge,
+                hp,
                 heal_availability,
                 player_name,
                 clan_tag,
@@ -2873,67 +2873,72 @@ impl RenderTarget for ImageTarget {
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
                     draw_icon_at(&mut self.canvas, &resized_base, sil_x, sil_cy);
 
-                    let regions = crate::panel_math::silhouette_regions(
-                        *hp_current,
-                        *hp_healable,
-                        *hp_healable_per_charge,
-                        *hp_max,
-                    );
-
-                    // Colored region: current HP portion
-                    let hp_color = hp_bar_color_lerp(*hp_fraction);
-                    let hp_sil = tint_silhouette(sil_img, hp_color);
-                    let resized_hp =
-                        image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
-                    let colored_px = (draw_w as f32 * regions.colored) as u32;
-                    if colored_px > 0 {
-                        let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, colored_px, draw_h).to_image();
-                        draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
-                    }
-
-                    // Healable region: bright = HP the next heal charge restores,
-                    // dim = the regenerable pool beyond that charge. Gray when a
-                    // heal is ready, white while healing, hidden when unavailable.
-                    if let Some(color) = heal_availability.healable_rgb() {
-                        let mut draw_region = |fraction_start: f32, fraction_w: f32, tint: [u8; 3]| {
-                            let region_x = (draw_w as f32 * fraction_start) as u32;
-                            let region_w = (draw_w as f32 * fraction_w) as u32;
-                            if region_w > 0 {
-                                let region_sil = tint_silhouette(sil_img, tint);
-                                let resized_region = image::imageops::resize(
-                                    &region_sil,
-                                    draw_w,
-                                    draw_h,
-                                    image::imageops::FilterType::Triangle,
-                                );
-                                let cropped = image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h)
-                                    .to_image();
-                                draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
-                            }
-                        };
-                        draw_region(regions.colored, regions.healable_bright, color);
-                        draw_region(
-                            regions.colored + regions.healable_bright,
-                            regions.healable_dim,
-                            crate::panel_math::darken(color, 0.5),
+                    if let Some(hp) = hp {
+                        let regions = crate::panel_math::silhouette_regions(
+                            hp.current,
+                            hp.healable,
+                            hp.healable_per_charge,
+                            hp.max,
                         );
+
+                        // Colored region: current HP portion
+                        let hp_color = hp_bar_color_lerp(hp.fraction());
+                        let hp_sil = tint_silhouette(sil_img, hp_color);
+                        let resized_hp =
+                            image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                        let colored_px = (draw_w as f32 * regions.colored) as u32;
+                        if colored_px > 0 {
+                            let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, colored_px, draw_h).to_image();
+                            draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
+                        }
+
+                        // Healable region: bright = HP the next heal charge restores,
+                        // dim = the regenerable pool beyond that charge. Gray when a
+                        // heal is ready, white while healing, hidden when unavailable.
+                        if let Some(color) = heal_availability.healable_rgb() {
+                            let mut draw_region = |fraction_start: f32, fraction_w: f32, tint: [u8; 3]| {
+                                let region_x = (draw_w as f32 * fraction_start) as u32;
+                                let region_w = (draw_w as f32 * fraction_w) as u32;
+                                if region_w > 0 {
+                                    let region_sil = tint_silhouette(sil_img, tint);
+                                    let resized_region = image::imageops::resize(
+                                        &region_sil,
+                                        draw_w,
+                                        draw_h,
+                                        image::imageops::FilterType::Triangle,
+                                    );
+                                    let cropped =
+                                        image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h)
+                                            .to_image();
+                                    draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
+                                }
+                            };
+                            draw_region(regions.colored, regions.healable_bright, color);
+                            draw_region(
+                                regions.colored + regions.healable_bright,
+                                regions.healable_dim,
+                                crate::panel_math::darken(color, 0.5),
+                            );
+                        }
                     }
                 }
 
                 // HP text: "12,345 / 42,750"
-                let hp_text = format!("{} / {}", format_number(*hp_current as i64), format_number(*hp_max as i64));
-                let hp_scale = self.fonts.scale(14.0);
-                let (tw, _) = text_size(hp_scale, &self.fonts.primary, &hp_text);
-                let hp_text_x = inner_x + (inner_w - tw as i32) / 2;
-                draw_text_shadow(
-                    &mut self.canvas,
-                    [220, 220, 220],
-                    hp_text_x,
-                    *y + *height - 14,
-                    hp_scale,
-                    &self.fonts.primary,
-                    &hp_text,
-                );
+                if let Some(hp) = hp {
+                    let hp_text = format!("{} / {}", format_number(hp.current as i64), format_number(hp.max as i64));
+                    let hp_scale = self.fonts.scale(14.0);
+                    let (tw, _) = text_size(hp_scale, &self.fonts.primary, &hp_text);
+                    let hp_text_x = inner_x + (inner_w - tw as i32) / 2;
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [220, 220, 220],
+                        hp_text_x,
+                        *y + *height - 14,
+                        hp_scale,
+                        &self.fonts.primary,
+                        &hp_text,
+                    );
+                }
             }
             DrawCommand::StatsDamage {
                 x,
@@ -3219,10 +3224,12 @@ impl RenderTarget for ImageTarget {
                             cx += pw as i32;
 
                             // Killer name
-                            let (kf, ks) = self.fonts.font_and_scale(&kill.killer_name, 14.0);
-                            draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, ks, kf, &kill.killer_name);
-                            let (kw, _) = text_size(ks, kf, &kill.killer_name);
-                            cx += kw as i32 + gap;
+                            if let Some(killer_name) = &kill.killer_name {
+                                let (kf, ks) = self.fonts.font_and_scale(killer_name, 14.0);
+                                draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, ks, kf, killer_name);
+                                let (kw, _) = text_size(ks, kf, killer_name);
+                                cx += kw as i32 + gap;
+                            }
 
                             // Killer ship icon (friendly=left, enemy=right)
                             if let Some(ref species) = kill.killer_species
@@ -3241,7 +3248,7 @@ impl RenderTarget for ImageTarget {
                             }
 
                             // Death cause icon
-                            let cause_key = death_cause_icon_key(&kill.cause);
+                            let cause_key = death_cause_icon_key(kill.cause.as_ref());
                             if let Some(cause_icon) = self.death_cause_icons.get(cause_key) {
                                 let cause_center_y = icon_y + icon_size / 2;
                                 draw_icon(
@@ -3539,10 +3546,12 @@ mod region_tests {
             ship_param_id: None,
             class_icon_key: None,
             species: None,
-            hp_current: 15400.0,
-            hp_max: 15400.0,
-            hp_healable: 0.0,
-            hp_healable_per_charge: 0.0,
+            hp: Some(crate::draw_command::HitPoints {
+                current: 15400.0,
+                max: 15400.0,
+                healable: 0.0,
+                healable_per_charge: 0.0,
+            }),
             heal_availability: ConsumableAvailability::Ready,
             is_dead: false,
             is_self: false,

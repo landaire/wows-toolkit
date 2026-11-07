@@ -475,6 +475,7 @@ fn arrow_head(points: &[[f32; 2]], width: f32) -> Option<[[f32; 2]; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wowsunpack::game_types::GameParamId;
 
     const NEAR: f32 = 1e-4;
 
@@ -733,11 +734,10 @@ mod tests {
             species: "Cruiser".to_string(),
             friendly: true,
             config: Some(crate::types::AnnotationShipConfig {
-                ship_name: "Moskva".to_string(),
                 vis_coeff: vis,
                 gm_coeff: gm,
                 range_filter: filter,
-                ..Default::default()
+                ..crate::types::AnnotationShipConfig::new(GameParamId::from(1u32), "Moskva".to_string())
             }),
         }
     }
@@ -810,7 +810,7 @@ mod tests {
             yaw: 0.0,
             species: "Cruiser".to_string(),
             friendly: true,
-            config: Some(crate::types::AnnotationShipConfig { ship_name: "Moskva".to_string(), ..Default::default() }),
+            config: Some(crate::types::AnnotationShipConfig::new(GameParamId::from(1u32), "Moskva".to_string())),
         };
         let drawn = annotation_commands(&named);
         let [DrawCommand::Ship { ship_name, .. }] = &drawn[..] else { panic!("a ship") };

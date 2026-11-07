@@ -2187,11 +2187,16 @@ impl UiReport {
                                                 bytes: icon.data.clone().into(),
                                             })
                                             .fit_to_exact_size(size.into());
-                                            ui.add(image).on_hover_text(&ribbon.description);
+                                            let response = ui.add(image);
+                                            if let Some(description) = &ribbon.description {
+                                                response.on_hover_text(description);
+                                            }
                                         }
 
-                                        ui.label(format!("{} ({}x)", ribbon.display_name, ribbon.count))
-                                            .on_hover_text(&ribbon.description);
+                                        let response = ui.label(format!("{} ({}x)", ribbon.display_name, ribbon.count));
+                                        if let Some(description) = &ribbon.description {
+                                            response.on_hover_text(description);
+                                        }
                                     });
                                 }
                             }

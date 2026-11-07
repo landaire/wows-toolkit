@@ -14,7 +14,8 @@ use wows_query::stats::ShipStatsArgs;
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
     let cache = std::env::temp_dir().join("wows-query-test-cache");
-    let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+    let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+        .expect("dump root has a readable builds.toml");
     let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
     GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads")
 });

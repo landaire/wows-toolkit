@@ -331,8 +331,8 @@ pub struct OwnShipPacket {
 /// upstream client->cell `setWeaponLock` call, not here.
 #[derive(Debug, Serialize, Clone)]
 pub struct SetWeaponLockPacket {
-    /// Which weapon system this lock applies to.
-    pub weapon_type: Recognized<WeaponType, u32>,
+    /// Which weapon system this lock applies to; `None` for `NONE`.
+    pub weapon_type: Option<Recognized<WeaponType, u32>>,
     /// The lock mode (none / absolute point / relative point / target).
     pub lock_type: Recognized<WeaponLockType, u32>,
     /// Entity ID of the lock target. Meaningful only when `lock_type` is

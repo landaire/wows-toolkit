@@ -288,7 +288,7 @@ fn assert_translations_are_rebuilt(
         }
         for ribbon in &mut scribbled.ribbons {
             ribbon.display_name = SCRIBBLE.to_string();
-            ribbon.description = SCRIBBLE.to_string();
+            ribbon.description = Some(SCRIBBLE.to_string());
         }
 
         scribbled.refresh_translations(player, provider, version);

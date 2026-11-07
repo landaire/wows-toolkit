@@ -837,25 +837,29 @@ impl AnalysisPaneViewer<'_> {
                             format!("  {}", zone.zone_name)
                         };
                         ui.label(egui::RichText::new(label).strong().small());
-                        if zone.thickness.value() > 0.0 {
+                        if let Some(thickness) = zone.thickness {
                             ui.label(
-                                egui::RichText::new(format!("{:.0}mm", zone.thickness.value()))
+                                egui::RichText::new(format!("{:.0}mm", thickness.value()))
                                     .small()
                                     .color(ui.sem().text_dim),
                             );
                         }
-                        if zone.max_hp > 0.0 {
-                            ui.label(
-                                egui::RichText::new(format!("{:.0} HP", zone.max_hp)).small().color(ui.sem().text_dim),
-                            );
+                        if let Some(max_hp) = zone.max_hp {
+                            ui.label(egui::RichText::new(format!("{max_hp:.0} HP")).small().color(ui.sem().text_dim));
                         }
                     });
+
+                    // Penetration needs the zone plating thickness.
+                    let Some(thickness) = zone.thickness else {
+                        ui.add_space(2.0);
+                        continue;
+                    };
 
                     // Per-shell penetration results
                     for (ship_name, shell) in &shells_with_names {
                         let pen_mm = crate::armor_viewer::splash::shell_pen_mm(shell, self.ifhe_enabled);
                         let penetrates =
-                            crate::armor_viewer::splash::shell_penetrates(shell, zone.thickness, self.ifhe_enabled);
+                            crate::armor_viewer::splash::shell_penetrates(shell, thickness, self.ifhe_enabled);
                         let ammo_label = match shell.ammo_type {
                             AmmoType::HE => "HE",
                             AmmoType::SAP => "SAP",

@@ -146,7 +146,9 @@ fn dumped_builds(cache_dir: &str) -> Vec<u32> {
     let Some(base) = crate::task::replays::game_data_dump_base_with_override(cache_dir) else {
         return Vec::new();
     };
-    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let Some(index) = crate::task::replays::load_builds_index(&base) else {
+        return Vec::new();
+    };
     let mut builds: Vec<u32> = index.builds.iter().map(|entry| entry.build).collect();
     builds.sort_unstable();
     builds.dedup();
@@ -368,13 +370,15 @@ fn build_encounters(tracker: &mut PlayerTracker, count: usize, pool: u64, mut on
         let timestamp = Timestamp::from_second(1_600_000_000 + battle as i64 * 900).expect("a timestamp in range");
         for _ in 0..ROSTER {
             let account = AccountId((next() % pool) as i64);
-            let tracked = tracker.tracked_players.entry(account).or_default();
+            let tracked = tracker
+                .tracked_players
+                .entry(account)
+                .or_insert_with(|| crate::ui::player_tracker::TrackedPlayer::new(account));
             if tracked.timestamps.is_empty() {
                 tracked.last_name = format!("Player_{}", account.0);
                 tracked.clan = "RAIN".to_string();
             }
-            tracked.db_id = account;
-            tracked.clan_id = 12345;
+            tracked.clan_id = Some(12345);
             tracked.timestamps.insert(timestamp);
             tracked.arena_ids.insert(arena_id);
         }

@@ -21,6 +21,7 @@ use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
+use crate::game_params::ttx::effects::EffectCoeff;
 use crate::game_params::ttx::effects::HEALTH_SCALED_RELOAD_STEP;
 use crate::game_params::ttx::labels::TtxStat;
 use crate::game_params::ttx::model::AmmoCount;
@@ -149,7 +150,7 @@ pub fn durability<R: Recorder>(
 pub fn mobility<R: Recorder>(
     hull: &HullComponentStats,
     hull_name: &str,
-    engine: &EngineComponentStats,
+    engine: Option<&EngineComponentStats>,
     engine_name: Option<&str>,
     modifiers: &ModifierBundle,
     sources: &ModifierSources,
@@ -157,8 +158,11 @@ pub fn mobility<R: Recorder>(
 ) -> Mobility {
     let speed = match (hull.max_speed, hull.speed_coef) {
         (Some(max_speed), Some(hull_speed_coef)) => {
-            let engine_speed_coef = engine.speed_coef.unwrap_or(0.0);
-            let coef = (hull_speed_coef + engine_speed_coef).clamp(0.0, 1.0);
+            let coef = match engine.and_then(|e| e.speed_coef) {
+                Some(engine_speed_coef) => (hull_speed_coef + engine_speed_coef).clamp(0.0, 1.0),
+                // No engine coefficient adds nothing to the hull's (additive identity).
+                None => hull_speed_coef.clamp(0.0, 1.0),
+            };
             let value = max_speed.value() * coef * modifiers.coef("speedCoef");
             if R::ON {
                 rec.record(
@@ -262,6 +266,8 @@ const DEFAULT_LOWEST_ARMOR_THICKNESS: f32 = 6.0;
 /// indices). When no plate is classified, both extremes are
 /// `DEFAULT_LOWEST_ARMOR_THICKNESS`.
 fn armor_list_min_max(armor: &ArmorMap) -> (f32, f32) {
+    // The client seeds both extremes with this value, so the port card shows it
+    // when no plate classifies.
     let mut min = DEFAULT_LOWEST_ARMOR_THICKNESS;
     let mut max = DEFAULT_LOWEST_ARMOR_THICKNESS;
     let mut found = false;
@@ -353,7 +359,7 @@ pub fn torpedo_stats<R: Recorder>(
     rec: &mut R,
 ) -> TorpedoStats {
     let torp_src = || InputId::Module { slot: ModuleSlot::Torpedoes, name: torp_name.to_string() };
-    // qualifier for per-ammo rows matches torpedo_qualifier in model.rs: the ammo name.
+    // Per-ammo rows are qualified by the ammo name, as `ShipStats::rows` does.
     let qualifier = name.as_str();
 
     // damage: getTorpedoDamage (ModifiersApply.py:477-488). Surface torpedoes take
@@ -379,7 +385,7 @@ pub fn torpedo_stats<R: Recorder>(
     // only applies when ammoType == AMMO_TYPES.TORPEDO (line 495); deep-water/alt
     // torpedoes skip it (multiplier stays 1.0, unrecorded).
     let speed = projectile.speed().map(|s| {
-        let is_torpedo = projectile.ammo_type() == AMMO_TYPE_TORPEDO;
+        let is_torpedo = projectile.ammo_type() == Some(AMMO_TYPE_TORPEDO);
         let normal = if is_torpedo { modifiers.coef("normalTorpedoSpeedMultiplier") } else { 1.0 };
         let value = s * modifiers.coef("torpedoSpeedMultiplier") * normal + modifiers.bonus("torpedoSpeedBonus");
         if R::ON {
@@ -430,12 +436,6 @@ pub fn torpedo_stats<R: Recorder>(
         let (dist_of_max, _) = first_by(pairs, |coeff, kept| coeff > kept)?;
         Some(dist_of_max > dist_of_min)
     });
-    if R::ON
-        && let Some(flag) = is_damage_increasing
-    {
-        let v = if flag { 1.0 } else { 0.0 };
-        rec.record(TtxStat::TorpedoIsDamageIncreasing, Some(qualifier), v, torp_src(), v, |_b| {});
-    }
 
     // The arming run plus the distance of the largest coefficient.
     let distance_of_max_damage = falloff.and_then(|pairs| {
@@ -449,12 +449,6 @@ pub fn torpedo_stats<R: Recorder>(
     });
 
     let disabled_underwater: Option<bool> = None;
-    if R::ON
-        && let Some(flag) = disabled_underwater
-    {
-        let v = if flag { 1.0 } else { 0.0 };
-        rec.record(TtxStat::TorpedoDisabledUnderwater, Some(qualifier), v, torp_src(), v, |_b| {});
-    }
 
     TorpedoStats {
         name,
@@ -508,13 +502,12 @@ fn warn_unresolved_ammo(name: &str) {
 }
 
 /// `None` when `launchers` is empty (no torpedo armament).
-// Threads the modifier bundle, per-source provenance, reload coef + its source, recorder, and module name alongside the base inputs.
+// Threads the modifier bundle, per-source provenance, reload coef, recorder, and module name alongside the base inputs.
 #[allow(clippy::too_many_arguments)]
 pub fn torpedoes<R: Recorder>(
     launchers: &[TorpedoLauncherStats],
     modifiers: &ModifierBundle,
-    reload_coeff: f32,
-    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
+    reload_coeff: Option<&EffectCoeff>,
     provider: &dyn GameParamProvider,
     torp_name: &str,
     sources: &ModifierSources,
@@ -569,7 +562,11 @@ pub fn torpedoes<R: Recorder>(
         });
 
         if let Some(delay) = launcher.shot_delay {
-            let reload = delay.value() * shot_delay_coef * reload_coeff;
+            let reload = match reload_coeff {
+                Some(coeff) => delay.value() * shot_delay_coef * coeff.value,
+                None => delay.value() * shot_delay_coef,
+            };
+            // initAmmoReloadParams skips zero reloads when taking the minimum.
             if reload != 0.0 {
                 reload_candidates.push((reload, delay.value()));
             }
@@ -603,11 +600,8 @@ pub fn torpedoes<R: Recorder>(
             // shot_delay as base; steps reproduce the final value exactly.
             rec.record(TtxStat::TorpedoReloadTime, None, min_base, torp_src(), min_reload, |b| {
                 b.coef(sources, "GTShotDelay");
-                // Attribute to the real source (Adrenaline skill) when available;
-                // fall back to the torpedo module when source is absent.
-                if reload_coeff != 1.0 {
-                    let src = reload_coeff_source.clone().unwrap_or_else(torp_src);
-                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
+                if let Some(coeff) = reload_coeff {
+                    b.module(coeff.source.clone(), HEALTH_SCALED_RELOAD_STEP, coeff.value);
                 }
             });
         }
@@ -617,11 +611,11 @@ pub fn torpedoes<R: Recorder>(
     Some(Torpedoes { reload_time, launchers: result_launchers, torpedoes })
 }
 
-/// Caliber threshold constants (`me658a8e4.py:13,15`) are zeroed placeholders in
-/// every deob source; the real values live in a compiled C++ module. Stock results
-/// are unaffected (the gated coeffs read identity 1.0/0.0 from an empty bundle).
-/// Passed as `0.0` here, matching the weapon_tables test convention.
-const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.0;
+/// `HEAVY_CRUISER_SHELL_DIAMETER` (meters), the AP `caliber_fits_heavy_cruiser` gate
+/// (ModifiersApply.py:26). The straight `.py` decompile zeroes this compiled-module
+/// float (me658a8e4.py:15); the real value recovered from stage4 bytecode is 0.19
+/// (docs/FIRE_CHANCE.md section 2.1).
+const HEAVY_CRUISER_SHELL_DIAMETER_M: f32 = 0.19;
 /// `SMALL_PROJECTILE_MAX_DIAMETER` (meters), the `isSmallProjectile` caliber gate
 /// (Modifiers/__init__.py:10, `bulletDiametr <= SMALL_PROJECTILE_MAX_DIAMETER`).
 /// The straight `.py` decompile zeroes this compiled-module float; the real value
@@ -639,7 +633,6 @@ struct ShellStatKeys {
     penetration: TtxStat,
     burn_chance: TtxStat,
     flood_chance: TtxStat,
-    max_ammo: TtxStat,
 }
 
 impl ShellStatKeys {
@@ -652,7 +645,6 @@ impl ShellStatKeys {
                 penetration: TtxStat::SecondaryShellPenetration,
                 burn_chance: TtxStat::SecondaryShellBurnChance,
                 flood_chance: TtxStat::SecondaryShellFloodChance,
-                max_ammo: TtxStat::SecondaryShellMaxAmmo,
             }
         } else {
             ShellStatKeys {
@@ -662,7 +654,6 @@ impl ShellStatKeys {
                 penetration: TtxStat::ShellPenetration,
                 burn_chance: TtxStat::ShellBurnChance,
                 flood_chance: TtxStat::ShellFloodChance,
-                max_ammo: TtxStat::ShellMaxAmmo,
             }
         }
     }
@@ -698,7 +689,8 @@ pub fn shell_stats<R: Recorder>(
     rec: &mut R,
 ) -> ShellStats {
     let ammo_kind = projectile.ammo_type();
-    let mut weapon = ammo_to_stat_weapon_table(ammo_kind);
+    // ammoToStatWeaponTable.get(ammo, default): a projectile without ammoType takes the default.
+    let mut weapon = ammo_kind.map_or(StatWeaponType::Other, ammo_to_stat_weapon_table);
     if is_atba {
         // FactoryArtillery.py:159-161: map the main stat type to its ATBA equivalent.
         weapon = weapon.to_atba();
@@ -845,15 +837,12 @@ pub fn shell_stats<R: Recorder>(
     };
 
     // Main battery pools are unlimited (INFINITE_AMMO_POOL_SIZE = -1, PreprocessedAmmo.py:6).
-    // Record as -1.0 so replay is exact; the model stores AmmoCount::Infinite.
+    // Provenance records numeric rows only, so this row has no attribution.
     let max_ammo = Some(AmmoCount::Infinite);
-    if R::ON {
-        rec.record(stat.max_ammo, Some(qualifier), -1.0, arty_src(), -1.0, |_b| {});
-    }
 
     ShellStats {
         name,
-        ammo_kind: Some(ammo_kind.to_string()),
+        ammo_kind: ammo_kind.map(str::to_owned),
         damage,
         caliber,
         speed,
@@ -874,10 +863,16 @@ pub fn shell_stats<R: Recorder>(
 pub(crate) fn artillery_range_km(
     arty: &ArtilleryComponentStats,
     fc_max_dist_coef: f32,
-    spotter_dist_coef: f32,
+    spotter_range: Option<f32>,
     modifiers: &ModifierBundle,
 ) -> Option<f32> {
-    arty.max_dist.map(|d| (d.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist") * spotter_dist_coef)
+    let max_dist = arty.max_dist?;
+    let range = (max_dist.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist");
+
+    Some(match spotter_range {
+        Some(coeff) => range * coeff,
+        None => range,
+    })
 }
 
 /// Main-battery armament section (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
@@ -909,10 +904,8 @@ pub fn artillery<R: Recorder>(
     modifiers: &ModifierBundle,
     sources: &ModifierSources,
     fc_max_dist_coef: f32,
-    spotter_dist_coef: f32,
-    spotter_dist_coef_source: Option<crate::game_params::ttx::provenance::InputId>,
-    reload_coeff: f32,
-    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
+    spotter_range: Option<&EffectCoeff>,
+    reload_coeff: Option<&EffectCoeff>,
     level: u32,
     provider: &dyn GameParamProvider,
     rec: &mut R,
@@ -933,22 +926,22 @@ pub fn artillery<R: Recorder>(
     let first = &arty.guns[0];
 
     let reload_time = first.shot_delay.map(|d| {
-        let value = d.value() * shot_delay_coef * reload_coeff;
+        let value = match reload_coeff {
+            Some(coeff) => d.value() * shot_delay_coef * coeff.value,
+            None => d.value() * shot_delay_coef,
+        };
         if R::ON {
             rec.record(TtxStat::ArtilleryReloadTime, None, d.value(), arty_src(), value, |b| {
                 b.coef(sources, "GMShotDelay");
-                // Attribute to the real source (Adrenaline skill) when available;
-                // fall back to the artillery module when source is absent.
-                if reload_coeff != 1.0 {
-                    let src = reload_coeff_source.clone().unwrap_or_else(arty_src);
-                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
+                if let Some(coeff) = reload_coeff {
+                    b.module(coeff.source.clone(), HEALTH_SCALED_RELOAD_STEP, coeff.value);
                 }
             });
         }
         Seconds::from(value)
     });
 
-    let range_km = artillery_range_km(arty, fc_max_dist_coef, spotter_dist_coef, modifiers);
+    let range_km = artillery_range_km(arty, fc_max_dist_coef, spotter_range.map(|coeff| coeff.value), modifiers);
     let range = range_km.map(|rng| {
         if R::ON
             && let Some(base_km) = arty.max_dist.map(|d| d.value() / KM_TO_M)
@@ -959,11 +952,8 @@ pub fn artillery<R: Recorder>(
             rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
                 b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
                 b.coef(sources, "GMMaxDist");
-                // Attribute to the real source (consumable) when available; fall back
-                // to the artillery module when source is absent.
-                if spotter_dist_coef != 1.0 {
-                    let src = spotter_dist_coef_source.clone().unwrap_or_else(arty_src);
-                    b.module(src, "spotterDistCoeff", spotter_dist_coef);
+                if let Some(coeff) = spotter_range {
+                    b.module(coeff.source.clone(), "spotterDistCoeff", coeff.value);
                 }
             });
         }
@@ -1086,7 +1076,8 @@ pub fn artillery<R: Recorder>(
                 sources,
                 level,
                 false,
-                projectile.ammo_type(),
+                // rows() qualifies a shell without an ammo kind by its name.
+                projectile.ammo_type().unwrap_or(ammo_name),
                 rec,
             ));
         } else {
@@ -1152,8 +1143,7 @@ pub fn secondaries<R: Recorder>(
     hull_name: &str,
     modifiers: &ModifierBundle,
     sources: &ModifierSources,
-    reload_coeff: f32,
-    reload_coeff_source: Option<crate::game_params::ttx::provenance::InputId>,
+    reload_coeff: Option<&EffectCoeff>,
     level: u32,
     provider: &dyn GameParamProvider,
     rec: &mut R,
@@ -1208,15 +1198,15 @@ pub fn secondaries<R: Recorder>(
             continue;
         };
 
-        let reload_value = shot_delay.value() * shot_delay_coef * reload_coeff;
+        let reload_value = match reload_coeff {
+            Some(coeff) => shot_delay.value() * shot_delay_coef * coeff.value,
+            None => shot_delay.value() * shot_delay_coef,
+        };
         if R::ON {
             rec.record(TtxStat::SecondaryReloadTime, Some(q), shot_delay.value(), hull_src(), reload_value, |b| {
                 b.coef(sources, "GSShotDelay");
-                // Attribute to the real source (Adrenaline skill) when available;
-                // fall back to the hull module when source is absent.
-                if reload_coeff != 1.0 {
-                    let src = reload_coeff_source.clone().unwrap_or_else(hull_src);
-                    b.module(src, HEALTH_SCALED_RELOAD_STEP, reload_coeff);
+                if let Some(coeff) = reload_coeff {
+                    b.module(coeff.source.clone(), HEALTH_SCALED_RELOAD_STEP, coeff.value);
                 }
             });
         }
@@ -1324,11 +1314,6 @@ pub fn secondaries<R: Recorder>(
     Some(SecondaryBattery { range: Km::from(range_km), mounts })
 }
 
-/// `MINIMAL_VALID_VALUE` smoke-detection gate (createVisibilityTTX@140): the in-smoke
-/// range is shown only when `visibilityCoefGKInSmoke` exceeds it. The compiled module
-/// that defines the constant carries 0.01; below it the field is a zeroed placeholder.
-const MINIMAL_VALID_VALUE: f32 = 0.01;
-
 /// Detectability section (`ma6320f36/ttx/FactoryVisibility.pyc` createVisibilityTTX,
 /// offsets from the bytecode disassembly).
 ///
@@ -1345,8 +1330,8 @@ const MINIMAL_VALID_VALUE: f32 = 0.01;
 ///
 /// `sea_detection` (@65-94) = `hull.visibilityFactor * coeff`.
 /// `sea_detection_on_fire` (@97-128) = `sea + hull.visibilityCoefFire`.
-/// `detection_in_smoke` (@131-167) = `hull.visibilityCoefGKInSmoke`, only when it
-/// exceeds `MINIMAL_VALID_VALUE`. `air_detection` (@278-307) =
+/// `detection_in_smoke` (@131-167) = `hull.visibilityCoefGKInSmoke`, already gated on
+/// `MINIMAL_VALID_VALUE` at parse. `air_detection` (@278-307) =
 /// `hull.visibilityFactorByPlane * coeff`;
 /// `air_detection_on_fire` (@310-341) = `air + hull.visibilityCoefFireByPlane`.
 /// `main_gun_range_detection` (@188-224) = `max(sea, mgMaxDist)` when the main-battery
@@ -1406,7 +1391,7 @@ pub fn visibility<R: Recorder>(
         _ => None,
     };
 
-    let detection_in_smoke = hull.visibility_coef_gk_in_smoke.filter(|&v| v.value() > MINIMAL_VALID_VALUE).map(|v| {
+    let detection_in_smoke = hull.visibility_coef_gk_in_smoke.map(|v| {
         if R::ON {
             rec.record(TtxStat::DetectionInSmoke, None, v.value(), hull_src(), v.value(), |_b| {});
         }
@@ -1554,7 +1539,6 @@ mod tests {
             visibility_factor_by_plane: Some(Km::from(3.41)),
             visibility_coef_fire: Some(Km::from(2.0)),
             visibility_coef_fire_by_plane: Some(Km::from(2.0)),
-            visibility_coef_gk: Some(Km::from(1e-6)),
             visibility_coef_gk_in_smoke: Some(Km::from(2.83)),
             visibility_factor_by_periscope: None,
             flood_prob: Some(0.0),
@@ -1678,7 +1662,7 @@ mod tests {
         let mobility = mobility(
             &gearing_hull(),
             "H",
-            &gearing_engine(),
+            Some(&gearing_engine()),
             Some("E"),
             &ModifierBundle::empty(Species::Destroyer),
             &ModifierSources::default(),
@@ -1701,7 +1685,7 @@ mod tests {
         let mobility = mobility(
             &gearing_hull(),
             "H",
-            &gearing_engine(),
+            Some(&gearing_engine()),
             Some("E"),
             &bundle,
             &ModifierSources::default(),
@@ -1738,7 +1722,7 @@ mod tests {
         let mobility = mobility(
             &empty_hull,
             "H",
-            &EngineComponentStats::default(),
+            None,
             Some("E"),
             &ModifierBundle::empty(Species::Destroyer),
             &ModifierSources::default(),
@@ -2041,7 +2025,6 @@ mod tests {
         let torps = torpedoes(
             &launchers,
             &ModifierBundle::empty(Species::Destroyer),
-            1.0,
             None,
             &provider,
             "",
@@ -2117,7 +2100,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "", &ModifierSources::default(), &mut Off)
+        let torps = torpedoes(&launchers, &bundle, None, &provider, "", &ModifierSources::default(), &mut Off)
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         let rs = launcher.rotation_speed.expect("rotation_speed").value();
@@ -2134,7 +2117,7 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Destroyer, VERSION).expect("test modifiers are all known");
         let launchers = [gearing_launcher()];
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
-        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "", &ModifierSources::default(), &mut Off)
+        let torps = torpedoes(&launchers, &bundle, None, &provider, "", &ModifierSources::default(), &mut Off)
             .expect("torpedoes computed");
         let launcher = &torps.launchers[0];
         assert_eq!(launcher.rotation_speed, Some(DegreesPerSecond::from(TORP_ROT_AFTER_COEFF)));
@@ -2149,7 +2132,6 @@ mod tests {
             torpedoes(
                 &[],
                 &ModifierBundle::empty(Species::Destroyer),
-                1.0,
                 None,
                 &provider,
                 "",
@@ -2208,7 +2190,7 @@ mod tests {
         let provider = StubProvider::new("PAPT027_Mk_16_mod_1", gearing_torpedo());
         let launchers = [gearing_launcher()];
         let mut rec = On::default();
-        let torps = torpedoes(&launchers, &bundle, 1.0, None, &provider, "PAUT902_D10_NEW_STOCK", &sources, &mut rec)
+        let torps = torpedoes(&launchers, &bundle, None, &provider, "PAUT902_D10_NEW_STOCK", &sources, &mut rec)
             .expect("torpedoes computed");
         let prov = rec.into_provenance();
 
@@ -2373,9 +2355,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2412,9 +2392,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2465,9 +2443,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2490,9 +2466,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2513,9 +2487,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2548,9 +2520,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2584,9 +2554,7 @@ mod tests {
             &bundle,
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2613,9 +2581,7 @@ mod tests {
             &bundle,
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2641,9 +2607,7 @@ mod tests {
                 &ModifierBundle::empty(Species::Cruiser),
                 &ModifierSources::default(),
                 1.0,
-                1.0,
                 None,
-                1.0,
                 None,
                 10,
                 &provider,
@@ -2666,9 +2630,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -2838,7 +2800,6 @@ mod tests {
             "HULL",
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
-            1.0,
             None,
             8,
             &provider,
@@ -2873,7 +2834,6 @@ mod tests {
             "HULL",
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
-            1.0,
             None,
             8,
             &provider,
@@ -2916,7 +2876,6 @@ mod tests {
             "HULL",
             &bundle,
             &ModifierSources::default(),
-            1.0,
             None,
             8,
             &provider,
@@ -2939,7 +2898,6 @@ mod tests {
             "HULL",
             &bundle,
             &ModifierSources::default(),
-            1.0,
             None,
             8,
             &provider,
@@ -2961,7 +2919,6 @@ mod tests {
                 "HULL",
                 &ModifierBundle::empty(Species::Battleship),
                 &ModifierSources::default(),
-                1.0,
                 None,
                 8,
                 &provider,
@@ -2987,7 +2944,6 @@ mod tests {
             "HULL_B",
             &ModifierBundle::empty(Species::Battleship),
             &ModifierSources::default(),
-            1.0,
             None,
             8,
             &provider,
@@ -3195,37 +3151,6 @@ mod tests {
     }
 
     #[test]
-    fn near_zero_smoke_coef_yields_no_smoke_detection() {
-        // visibilityCoefGKInSmoke == MINIMAL_VALID_VALUE (0.01) is not > the gate -> None.
-        let hull = HullComponentStats { visibility_coef_gk_in_smoke: Some(Km::from(0.01)), ..gearing_hull() };
-        let vis = visibility(
-            &hull,
-            "H",
-            &ModifierBundle::empty(Species::Destroyer),
-            &ModifierSources::default(),
-            false,
-            None,
-            None,
-            &mut Off,
-        );
-        assert!(vis.detection_in_smoke.is_none());
-
-        // Below the gate -> None.
-        let hull_zero = HullComponentStats { visibility_coef_gk_in_smoke: Some(Km::from(0.0)), ..gearing_hull() };
-        let vis_zero = visibility(
-            &hull_zero,
-            "H",
-            &ModifierBundle::empty(Species::Destroyer),
-            &ModifierSources::default(),
-            false,
-            None,
-            None,
-            &mut Off,
-        );
-        assert!(vis_zero.detection_in_smoke.is_none());
-    }
-
-    #[test]
     fn submarine_periscope_detection_applies_coeff() {
         // Periscope-depth detection only when the field is present:
         // visibilityByPeriscope 5.0 * visibilityForSubmarineCoeff 1.0 (stock) = 5.0.
@@ -3353,9 +3278,7 @@ mod tests {
             &bundle,
             &sources,
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -3402,9 +3325,7 @@ mod tests {
             &ModifierBundle::empty(Species::Cruiser),
             &ModifierSources::default(),
             fc_coef,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -3455,9 +3376,7 @@ mod tests {
             &bundle,
             &sources,
             1.0,
-            1.0,
             None,
-            1.0,
             None,
             10,
             &provider,
@@ -3531,7 +3450,7 @@ mod tests {
 
         let provider = bismarck_secondary_provider();
         let mut rec = On::default();
-        let sec = secondaries(&bismarck_secondaries(), "HULL_B", &bundle, &sources, 1.0, None, 8, &provider, &mut rec)
+        let sec = secondaries(&bismarck_secondaries(), "HULL_B", &bundle, &sources, None, 8, &provider, &mut rec)
             .expect("secondaries computed");
 
         let prov = rec.into_provenance();
@@ -3570,18 +3489,9 @@ mod tests {
 
         let provider = bismarck_secondary_provider();
         let mut rec = On::default();
-        let sec = secondaries(
-            &bismarck_secondaries_with_curve(),
-            "HULL_B",
-            &bundle,
-            &sources,
-            1.0,
-            None,
-            8,
-            &provider,
-            &mut rec,
-        )
-        .expect("secondaries computed");
+        let sec =
+            secondaries(&bismarck_secondaries_with_curve(), "HULL_B", &bundle, &sources, None, 8, &provider, &mut rec)
+                .expect("secondaries computed");
 
         let prov = rec.into_provenance();
 

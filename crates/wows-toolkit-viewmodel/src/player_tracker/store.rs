@@ -314,11 +314,10 @@ mod tests {
 
     fn tracked_player(account: i64) -> TrackedPlayer {
         TrackedPlayer {
-            db_id: AccountId(account),
             last_name: format!("Player{account}"),
             clan: "RAIN".to_owned(),
-            clan_id: 7,
-            ..TrackedPlayer::default()
+            clan_id: Some(7),
+            ..TrackedPlayer::new(AccountId(account))
         }
     }
 

@@ -49,7 +49,8 @@ pub fn translate_achievement_description(ui_name: &str, resource_loader: &dyn Re
 /// Result of looking up a ribbon's display name.
 pub struct RibbonTranslation {
     pub display_name: String,
-    pub description: String,
+    /// `None` when the ribbon has no description translation.
+    pub description: Option<String>,
     pub is_subribbon: bool,
     /// Lowercase ribbon key for icon lookups.
     pub icon_key: String,
@@ -69,12 +70,10 @@ pub fn translate_ribbon(key: &str, resource_loader: &dyn ResourceLoader) -> Opti
                 .map(|name| (name, true))
         })?;
 
-    let description = resource_loader
-        .localized_name_from_id(&TranslationKey::new(format!("IDS_RIBBON_DESCRIPTION_{key}")))
-        .or_else(|| {
-            resource_loader.localized_name_from_id(&TranslationKey::new(format!("IDS_RIBBON_DESCRIPTION_SUB{key}")))
-        })
-        .unwrap_or_default();
+    let description =
+        resource_loader.localized_name_from_id(&TranslationKey::new(format!("IDS_RIBBON_DESCRIPTION_{key}"))).or_else(
+            || resource_loader.localized_name_from_id(&TranslationKey::new(format!("IDS_RIBBON_DESCRIPTION_SUB{key}"))),
+        );
 
     Some(RibbonTranslation { display_name, description, is_subribbon, icon_key: key.to_lowercase() })
 }

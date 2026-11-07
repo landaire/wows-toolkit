@@ -183,7 +183,9 @@ pub struct Interaction {
 pub struct Death {
     pub clock: Option<GameClock>,
     pub killer: Option<EntityId>,
-    pub cause: Recognized<DeathCause>,
+    /// Absent when the game names no cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<Recognized<DeathCause>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -194,7 +196,9 @@ pub struct Kill {
     /// a sea mine.
     pub killer: Option<EntityId>,
     pub victim: EntityId,
-    pub cause: Recognized<DeathCause>,
+    /// Absent when the game names no cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<Recognized<DeathCause>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -232,8 +236,8 @@ pub fn analyze(
             let state = player.initial_state();
             let death = player.vehicle_entity().and_then(|vehicle| vehicle.death_info()).map(|death| Death {
                 clock: report.deaths_by_victim().get(&state.entity_id()).copied(),
-                killer: Some(death.killer()).filter(|killer| killer.raw() != 0),
-                cause: death.cause().clone(),
+                killer: death.killer(),
+                cause: death.cause().cloned(),
             });
 
             PlayerSummary {

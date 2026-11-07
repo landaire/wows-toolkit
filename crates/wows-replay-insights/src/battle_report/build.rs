@@ -75,8 +75,9 @@ impl TranslatedBuild {
                     <GameMetadataProvider as GameParamProvider>::params(metadata_provider),
                     ship,
                 );
-                let mut slots: Vec<Option<TranslatedModule>> = vec![None; slot_count];
-                for id in config.modernization() {
+                // Without a known slot count, upgrades are listed in config order.
+                let mut slots: Vec<Option<TranslatedModule>> = vec![None; slot_count.unwrap_or(0)];
+                for id in config.modernization().iter().flatten() {
                     let Some(param) =
                         <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)
                     else {
@@ -104,6 +105,7 @@ impl TranslatedBuild {
             signals: config
                 .exteriors()
                 .iter()
+                .flatten()
                 .filter_map(|id| <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id))
                 .filter(|param| {
                     matches!(
@@ -129,7 +131,7 @@ impl TranslatedBuild {
             loadout: config
                 .units()
                 .iter()
-                .filter(|id| id.raw() != 0)
+                .flatten()
                 .filter_map(|id| {
                     use wowsunpack::game_params::describe::DescribeContext;
                     let param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
@@ -148,6 +150,7 @@ impl TranslatedBuild {
             abilities: config
                 .abilities()
                 .iter()
+                .flatten()
                 .filter_map(|id| {
                     use wowsunpack::game_params::describe::DescribeContext;
                     let param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?;
@@ -196,7 +199,8 @@ pub struct AchievementResult {
 pub struct RibbonResult {
     pub name: String,
     pub display_name: String,
-    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub icon_key: String,
     pub is_subribbon: bool,
     pub count: u64,

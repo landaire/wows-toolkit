@@ -30,10 +30,13 @@ use super::controller::VehicleProps;
 /// of which perspective spotted the entity first. Lets renderers display max
 /// HP and consumable inventories for every player from the first frame of a
 /// merged session, even before the primary perspective has spotted them.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VehicleFacts {
-    pub vehicle_id: GameParamId,
-    pub max_health: f32,
+    /// `None` until a shipConfig blob or roster entry names the ship.
+    pub vehicle_id: Option<GameParamId>,
+    /// `None` until a create packet, property update, or roster entry names a
+    /// positive max health.
+    pub max_health: Option<f32>,
     pub ship_config: ShipConfig,
     pub crew: CrewModifiersCompactParams,
 }
@@ -89,17 +92,17 @@ impl<'c> VehicleFactsAccumulator<'c> {
                 let parsed = VehicleProps::from_create_props(&single, self.version, self.constants);
 
                 let entry = self.facts.entry(ep.entity_id).or_default();
-                if entry.max_health == 0.0 && parsed.max_health() > 0.0 {
+                if entry.max_health.is_none() {
                     entry.max_health = parsed.max_health();
                 }
                 if entry.ship_config.abilities().is_empty() && !parsed.ship_config().abilities().is_empty() {
                     entry.ship_config = parsed.ship_config().clone();
-                    if entry.vehicle_id.raw() == 0 && parsed.ship_config().ship_params_id().raw() != 0 {
+                    if entry.vehicle_id.is_none() {
                         entry.vehicle_id = parsed.ship_config().ship_params_id();
                     }
                 }
                 let parsed_crew = parsed.crew_modifiers_compact_params();
-                if parsed_crew.params_id().raw() != 0 || parsed_crew.has_learned_skills() {
+                if parsed_crew.params_id().is_some() || parsed_crew.has_learned_skills() {
                     entry.crew.merge_from(parsed_crew);
                 }
             }
@@ -109,13 +112,13 @@ impl<'c> VehicleFactsAccumulator<'c> {
             for player in player_states.iter().chain(bot_states.iter()) {
                 let entity_id = player.entity_id();
                 let entry = self.facts.entry(entity_id).or_default();
-                if entry.max_health == 0.0 && player.max_health() > 0 {
-                    entry.max_health = player.max_health() as f32;
-                }
-                if let Some(spid) = player.ship_params_id()
-                    && spid.raw() != 0
+                if entry.max_health.is_none()
+                    && let Some(max_health) = player.max_health().filter(|health| *health > 0)
                 {
-                    entry.vehicle_id = spid;
+                    entry.max_health = Some(max_health as f32);
+                }
+                if let Some(spid) = player.ship_params_id() {
+                    entry.vehicle_id = Some(spid);
                     entry.ship_config.set_ship_params_id(spid);
                     if let Some(blob) = player.ship_config_dump()
                         && let Ok(mut ship_config) = parse_ship_config(&blob, &self.version)
@@ -126,9 +129,7 @@ impl<'c> VehicleFactsAccumulator<'c> {
                         }
                     }
                 }
-                if let Some(crew_id) = player.crew_params_id()
-                    && crew_id.raw() != 0
-                {
+                if let Some(crew_id) = player.crew_params_id() {
                     entry.crew.set_params_id(crew_id);
                 }
             }
@@ -138,17 +139,6 @@ impl<'c> VehicleFactsAccumulator<'c> {
     /// Consume the accumulator and return the collected facts.
     pub fn into_facts(self) -> HashMap<EntityId, VehicleFacts> {
         self.facts
-    }
-}
-
-impl Default for VehicleFacts {
-    fn default() -> Self {
-        VehicleFacts {
-            vehicle_id: GameParamId::default(),
-            max_health: 0.0,
-            ship_config: ShipConfig::default(),
-            crew: CrewModifiersCompactParams::default(),
-        }
     }
 }
 
@@ -194,22 +184,22 @@ pub fn gather_replay_facts(
         let replay_facts = acc.into_facts();
         for (entity_id, src) in replay_facts {
             let dst = combined.entry(entity_id).or_default();
-            if src.vehicle_id.raw() != 0 {
-                dst.vehicle_id = src.vehicle_id;
-                dst.ship_config.set_ship_params_id(src.vehicle_id);
+            if let Some(vehicle_id) = src.vehicle_id {
+                dst.vehicle_id = Some(vehicle_id);
+                dst.ship_config.set_ship_params_id(vehicle_id);
             }
-            if dst.max_health == 0.0 && src.max_health > 0.0 {
+            if dst.max_health.is_none() {
                 dst.max_health = src.max_health;
             }
             if dst.ship_config.abilities().is_empty() && !src.ship_config.abilities().is_empty() {
                 dst.ship_config = src.ship_config;
             }
-            if src.crew.params_id().raw() != 0 || src.crew.has_learned_skills() {
+            if src.crew.params_id().is_some() || src.crew.has_learned_skills() {
                 dst.crew.merge_from(&src.crew);
             }
         }
         let with_ship_config = combined.values().filter(|f| !f.ship_config.abilities().is_empty()).count();
-        let with_max_health = combined.values().filter(|f| f.max_health > 0.0).count();
+        let with_max_health = combined.values().filter(|f| f.max_health.is_some()).count();
         tracing::info!(
             replay_idx,
             player = %replay.meta.playerName,
@@ -242,16 +232,16 @@ pub fn fold_props_into(
 
     let entry = out.entry(entity_id).or_default();
 
-    if entry.vehicle_id.raw() == 0 && parsed_vehicle_id.raw() != 0 {
+    if entry.vehicle_id.is_none() {
         entry.vehicle_id = parsed_vehicle_id;
     }
-    if entry.max_health == 0.0 && parsed_max_health > 0.0 {
+    if entry.max_health.is_none() {
         entry.max_health = parsed_max_health;
     }
     if entry.ship_config.abilities().is_empty() && !parsed_ship_config.abilities().is_empty() {
         entry.ship_config = parsed_ship_config;
     }
-    if parsed_crew.params_id().raw() != 0 || parsed_crew.has_learned_skills() {
+    if parsed_crew.params_id().is_some() || parsed_crew.has_learned_skills() {
         entry.crew.merge_from(&parsed_crew);
     }
 }
@@ -283,7 +273,7 @@ mod tests {
         fold_props_into(&mut facts, entity_id, &props, version, &constants);
 
         let crew = &facts[&entity_id].crew;
-        assert_eq!(crew.params_id(), GameParamId::from(456u32));
+        assert_eq!(crew.params_id(), Some(GameParamId::from(456u32)));
         assert_eq!(crew.learned_skills().battleship(), &[2, 9]);
     }
 }

@@ -29,6 +29,7 @@ use crate::game_params::ttx::components::LauncherDirectionGroup;
 use crate::game_params::ttx::components::LoaderCount;
 use crate::game_params::ttx::components::TorpedoLoaderGroup;
 use crate::game_params::ttx::components::TorpedoLoading;
+use crate::game_params::ttx::model::AmmoCount;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::special_abilities::Activation;
@@ -40,6 +41,7 @@ use crate::game_params::ttx::special_abilities::ProgressDecay;
 use crate::game_params::ttx::special_abilities::ProgressEvent;
 use crate::game_params::ttx::special_abilities::ProgressPercent;
 use crate::game_params::ttx::special_abilities::ProgressTrigger;
+use crate::game_types::ChargeCount;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
 use crate::game_types::Vec3;
@@ -242,6 +244,8 @@ fn build_skill_modifiers(modifiers: &pickled::Dict) -> Vec<CrewSkillModifier> {
                 // Skip dicts that aren't per-species modifier dicts.
                 modifier_data.get(&HashableValue::String("AirCarrier".to_owned().into()))?;
 
+                // Builds that predate a class (e.g. Submarine) omit its key, and no
+                // ship of that class exists there to read the value.
                 let read_species = |key: &str| -> f32 {
                     modifier_data
                         .get(&HashableValue::String(key.to_owned().into()))
@@ -331,23 +335,14 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     })
                     .unwrap_or_default();
 
-                let heat_interpolator = logic_trigger_data
-                    .get(&pk("heatInterpolator"))
-                    .and_then(|v| v.list_ref())
-                    .map(|list| {
-                        let points = list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
-                        Interpolator::from_points(points)
-                    })
-                    .unwrap_or_default();
-
-                let cooling_interpolator = logic_trigger_data
-                    .get(&pk("coolingInterpolator"))
-                    .and_then(|v| v.list_ref())
-                    .map(|list| {
-                        let points = list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
-                        Interpolator::from_points(points)
-                    })
-                    .unwrap_or_default();
+                let read_interpolator = |key: &str| {
+                    let list = logic_trigger_data.get(&pk(key))?.list_ref()?;
+                    let points: Vec<(f32, f32)> =
+                        list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
+                    (!points.is_empty()).then(|| Interpolator::from_points(points))
+                };
+                let heat_interpolator = read_interpolator("heatInterpolator");
+                let cooling_interpolator = read_interpolator("coolingInterpolator");
 
                 CrewSkillLogicTrigger::builder()
                     .maybe_burn_count(game_param_to_type!(logic_trigger_data, "burnCount", Option<usize>))
@@ -361,7 +356,7 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     // so absence stays None instead of becoming a fake default.
                     .maybe_consumable_type(game_param_to_type!(logic_trigger_data, "consumableType", Option<String>))
                     .maybe_cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", Option<f32>))
-                    .cooling_interpolator(cooling_interpolator)
+                    .maybe_cooling_interpolator(cooling_interpolator)
                     .count_to_modifier(count_to_modifier)
                     .maybe_damage_value(damage_value)
                     .maybe_divider_type(game_param_to_type!(logic_trigger_data, "dividerType", Option<String>))
@@ -370,7 +365,7 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     .maybe_energy_coeff(game_param_to_type!(logic_trigger_data, "energyCoeff", Option<f32>))
                     .maybe_flood_count(game_param_to_type!(logic_trigger_data, "floodCount", Option<usize>))
                     .maybe_health_factor(game_param_to_type!(logic_trigger_data, "healthFactor", Option<f32>))
-                    .heat_interpolator(heat_interpolator)
+                    .maybe_heat_interpolator(heat_interpolator)
                     .maybe_modifiers(trigger_modifiers)
                     .maybe_trigger_desc_ids(game_param_to_type!(logic_trigger_data, "triggerDescIds", Option<String>))
                     .maybe_trigger_type(game_param_to_type!(logic_trigger_data, "triggerType", Option<String>))
@@ -399,44 +394,54 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
             let tier = match skill_data.get(&pk("tier")).and_then(|v| v.dict_or_object_dict()) {
                 Some(tier_data) => {
                     let tier_data = tier_data.inner();
-                    CrewSkillTiers::builder()
-                        .aircraft_carrier(
-                            SkillPointCost::new(game_param_to_type!(tier_data, "AirCarrier", usize) as u8),
+                    let cost = |species: &str| {
+                        u8::try_from(game_param_to_type!(tier_data, species, i64)).ok().map(SkillPointCost::new)
+                    };
+                    (|| {
+                        Some(
+                            CrewSkillTiers::builder()
+                                .aircraft_carrier(cost("AirCarrier")?)
+                                .auxiliary(cost("Auxiliary")?)
+                                .battleship(cost("Battleship")?)
+                                .cruiser(cost("Cruiser")?)
+                                .destroyer(cost("Destroyer")?)
+                                .submarine(cost("Submarine")?)
+                                .build(),
                         )
-                        .auxiliary(SkillPointCost::new(game_param_to_type!(tier_data, "Auxiliary", usize) as u8))
-                        .battleship(SkillPointCost::new(game_param_to_type!(tier_data, "Battleship", usize) as u8))
-                        .cruiser(SkillPointCost::new(game_param_to_type!(tier_data, "Cruiser", usize) as u8))
-                        .destroyer(SkillPointCost::new(game_param_to_type!(tier_data, "Destroyer", usize) as u8))
-                        .submarine(SkillPointCost::new(game_param_to_type!(tier_data, "Submarine", usize) as u8))
-                        .build()
+                    })()
                 }
-                None => {
-                    let t =
-                        skill_data.get(&pk("tier")).and_then(|v| v.i64_ref()).map(|&v| v as usize).unwrap_or_default();
-                    let cost = SkillPointCost::new(t as u8);
-                    CrewSkillTiers::builder()
-                        .aircraft_carrier(cost)
-                        .auxiliary(cost)
-                        .battleship(cost)
-                        .cruiser(cost)
-                        .destroyer(cost)
-                        .submarine(cost)
-                        .build()
-                }
+                None => skill_data
+                    .get(&pk("tier"))
+                    .and_then(|v| v.i64_ref())
+                    .and_then(|&v| u8::try_from(v).ok())
+                    .map(SkillPointCost::new)
+                    .map(|cost| {
+                        CrewSkillTiers::builder()
+                            .aircraft_carrier(cost)
+                            .auxiliary(cost)
+                            .battleship(cost)
+                            .cruiser(cost)
+                            .destroyer(cost)
+                            .submarine(cost)
+                            .build()
+                    }),
             };
+
+            // skillType is the identity learned-skill lists refer to; a skill
+            // without one cannot be matched, so it is not modeled.
+            let skill_type = skill_data.get(&pk("skillType")).and_then(|v| v.i64_ref())?;
+            let skill_type = CrewSkillType::new(u32::try_from(*skill_type).ok()?);
 
             Some(
                 CrewSkill::builder()
                     .internal_name(CrewSkillName::from(skill_name.to_owned()))
                     .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", Option<bool>).unwrap_or_default())
                     .is_epic(game_param_to_type!(skill_data, "isEpic", Option<bool>).unwrap_or_default())
-                    .skill_type(CrewSkillType::new(
-                        game_param_to_type!(skill_data, "skillType", Option<usize>).unwrap_or_default() as u32,
-                    ))
+                    .skill_type(skill_type)
                     .ui_treat_as_trigger(
                         game_param_to_type!(skill_data, "uiTreatAsTrigger", Option<bool>).unwrap_or_default(),
                     )
-                    .tier(tier)
+                    .maybe_tier(tier)
                     .maybe_modifiers(modifiers)
                     .maybe_logic_trigger(logic_trigger)
                     .build(),
@@ -466,10 +471,6 @@ fn build_crew_personality(personality: &pickled::Dict) -> CrewPersonality {
         .can_reset_skills_for_free(
             game_param_to_type!(personality, "canResetSkillsForFree", Option<bool>).unwrap_or_default(),
         )
-        .cost_credits(game_param_to_type!(personality, "costCR", Option<usize>).unwrap_or_default())
-        .cost_elite_xp(game_param_to_type!(personality, "costELXP", Option<usize>).unwrap_or_default())
-        .cost_gold(game_param_to_type!(personality, "costGold", Option<usize>).unwrap_or_default())
-        .cost_xp(game_param_to_type!(personality, "costXP", Option<usize>).unwrap_or_default())
         .maybe_has_custom_background(personality.get(&pk("hasCustomBackground")).and_then(|v| v.bool_ref().copied()))
         .maybe_has_overlay(personality.get(&pk("hasOverlay")).and_then(|v| v.bool_ref().copied()))
         .maybe_has_rank(personality.get(&pk("hasRank")).and_then(|v| v.bool_ref().copied()))
@@ -482,7 +483,10 @@ fn build_crew_personality(personality: &pickled::Dict) -> CrewPersonality {
             personality.get(&pk("peculiarity")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()),
         )
         .maybe_permissions(personality.get(&pk("permissions")).and_then(|v| v.i64_ref()).map(|&v| v as u32))
-        .person_name(game_param_to_type!(personality, "personName", Option<String>).unwrap_or_default())
+        // An empty personName names no person.
+        .maybe_person_name(
+            game_param_to_type!(personality, "personName", Option<String>).filter(|name| !name.is_empty()),
+        )
         .maybe_subnation(personality.get(&pk("subnation")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()))
         .tags(
             personality
@@ -683,9 +687,7 @@ fn talent_effect_values(block: &pickled::Dict) -> Vec<CrewSkillModifier> {
 }
 
 fn build_buff_drop(param_data: &pickled::Dict) -> BuffDrop {
-    let string = |key: &str| {
-        param_data.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()).unwrap_or_default()
-    };
+    let string = |key: &str| param_data.get(&pk(key)).and_then(|v| v.string_ref()).map(|s| s.inner().to_string());
     let buffs = param_data
         .get(&pk("payload"))
         .and_then(|v| v.dict_or_object_dict())
@@ -702,9 +704,9 @@ fn build_buff_drop(param_data: &pickled::Dict) -> BuffDrop {
         .unwrap_or_default();
 
     BuffDrop::builder()
-        .marker_name_active(string("markerNameActive"))
-        .marker_name_inactive(string("markerNameInactive"))
-        .sorting(param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0))
+        .maybe_marker_name_active(string("markerNameActive"))
+        .maybe_marker_name_inactive(string("markerNameInactive"))
+        .maybe_sorting(param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied())
         .maybe_max_buff_level(
             param_data.get(&pk("maxBuffLevel")).and_then(|v| v.i64_ref()).and_then(|level| u32::try_from(*level).ok()),
         )
@@ -767,7 +769,9 @@ fn build_modifier_param(param_data: &pickled::Dict, defaults: Option<&pickled::D
     ModifierParam::builder().classes(classes).levels(levels).build()
 }
 
-fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
+/// `None` when the category lacks `consumableType` or `numConsumables`, or
+/// carries a `numConsumables` or `lifeCycleType` the client does not define.
+fn build_ability_category(category_data: &pickled::Dict) -> Option<AbilityCategory> {
     let reload_time =
         if let Some(reload_time) = category_data.get(&HashableValue::String("reloadTime".to_owned().into())) {
             if let Some(reload_time) = reload_time.i64_ref() {
@@ -859,27 +863,46 @@ fn build_ability_category(category_data: &pickled::Dict) -> AbilityCategory {
         })
         .filter(|team| !team.is_empty());
 
-    AbilityCategory::builder()
-        .maybe_buff(logic_string("buff"))
-        .maybe_buff_on_self(logic_string("buffOnSelf"))
-        .maybe_target_team(target_team)
-        .effect_fields(effect_fields)
-        .modifiers(ability_modifiers)
-        .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
-        .consumable_type(game_param_to_type!(category_data, "consumableType", Option<String>).unwrap_or_default())
-        .group(game_param_to_type!(category_data, "group", Option<String>).unwrap_or_default())
-        .icon_id(game_param_to_type!(category_data, "iconIDs", Option<String>).unwrap_or_default())
-        .num_consumables(game_param_to_type!(category_data, "numConsumables", Option<isize>).unwrap_or_default())
-        .preparation_time(game_param_to_type!(category_data, "preparationTime", Option<f32>).unwrap_or_default())
-        .reload_time(reload_time)
-        .work_time(work_time)
-        .maybe_dist_ship(dist_ship)
-        .maybe_dist_torpedo(dist_torpedo)
-        .maybe_hydrophone_wave_radius(hydrophone_wave_radius)
-        .maybe_patrol_radius(patrol_radius)
-        .maybe_regeneration_hp_speed(read_f32("regenerationHPSpeed"))
-        .maybe_regeneration_hp_speed_units(read_f32("regenerationHPSpeedUnits"))
-        .build()
+    let consumable_type = game_param_to_type!(category_data, "consumableType", Option<String>)?;
+    let num_consumables =
+        ChargeCount::from_game_params(game_param_to_type!(category_data, "numConsumables", Option<i64>)?)?;
+    // The client's ConsumableLifeCycleType default is COUNT_BASED when the
+    // category omits lifeCycleType.
+    let lifecycle = match read_f32("lifeCycleType") {
+        Some(value) => ConsumableLifecycle::from_game_params(value)?,
+        None => ConsumableLifecycle::CountBased,
+    };
+    let group = game_param_to_type!(category_data, "group", Option<String>)
+        .and_then(|group| ConsumableGroup::from_game_str(&group));
+    let icon_id = game_param_to_type!(category_data, "iconIDs", Option<String>).filter(|icon| !icon.is_empty());
+    // GameParams writes a negative maxCapacity on categories without a capacity pool.
+    let max_capacity = read_f32("maxCapacity").filter(|capacity| *capacity >= 0.0);
+
+    Some(
+        AbilityCategory::builder()
+            .maybe_buff(logic_string("buff"))
+            .maybe_buff_on_self(logic_string("buffOnSelf"))
+            .maybe_target_team(target_team)
+            .effect_fields(effect_fields)
+            .modifiers(ability_modifiers)
+            .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
+            .consumable_type(consumable_type)
+            .maybe_group(group)
+            .maybe_icon_id(icon_id)
+            .num_consumables(num_consumables)
+            .lifecycle(lifecycle)
+            .maybe_preparation_time(read_float(category_data, "preparationTime"))
+            .maybe_max_capacity(max_capacity)
+            .reload_time(reload_time)
+            .work_time(work_time)
+            .maybe_dist_ship(dist_ship)
+            .maybe_dist_torpedo(dist_torpedo)
+            .maybe_hydrophone_wave_radius(hydrophone_wave_radius)
+            .maybe_patrol_radius(patrol_radius)
+            .maybe_regeneration_hp_speed(read_f32("regenerationHPSpeed"))
+            .maybe_regeneration_hp_speed_units(read_f32("regenerationHPSpeedUnits"))
+            .build(),
+    )
 }
 
 fn build_ability(ability_data: &pickled::Dict) -> Ability {
@@ -891,17 +914,19 @@ fn build_ability(ability_data: &pickled::Dict) -> Ability {
             // and was dropping every Ability variant on the floor.
             let dict = value.dict_or_object_dict()?;
             let inner = dict.inner();
-            if inner.contains_key(&test_key) {
-                Some((key.string_ref().unwrap().inner().to_owned(), build_ability_category(&inner)))
-            } else {
-                None
+            if !inner.contains_key(&test_key) {
+                return None;
             }
+            let name = key.string_ref().unwrap().inner().to_owned();
+            let Some(category) = build_ability_category(&inner) else {
+                tracing::warn!(category = %name, "ability category lacks a valid consumableType, numConsumables or lifeCycleType");
+                return None;
+            };
+            Some((name, category))
         }));
 
     Ability::builder()
         .can_buy(game_param_to_type!(ability_data, "canBuy", bool))
-        .cost_credits(game_param_to_type!(ability_data, "costCR", isize))
-        .cost_gold(game_param_to_type!(ability_data, "costGold", isize))
         .is_free(game_param_to_type!(ability_data, "freeOfCharge", bool))
         .categories(categories)
         .build()
@@ -1001,18 +1026,18 @@ fn read_torpedo_loading(component: &pickled::Dict) -> Option<TorpedoLoading> {
 }
 
 /// Combat Instructions of a `specials` component (its `RageMode` section),
-/// `None` when it has none. Absent scalar fields take the client's GameParams
-/// class defaults (`RageMode`: zero times, `isAutoUsage` false).
+/// `None` when it has none.
 fn read_combat_instructions(specials: &pickled::Dict) -> Option<CombatInstructions> {
     let section = specials.get(&pk(keys::RAGE_MODE))?.dict_or_object_dict()?;
     let section = section.inner();
-    let seconds = |key: &str| Seconds::from(read_float(&section, key).unwrap_or(0.0));
 
+    // The `RageMode` class default for an absent isAutoUsage is false.
     let activation = match section.get(&pk("isAutoUsage")).and_then(|value| value.bool_ref().copied()) {
         Some(true) => Activation::Automatic,
         Some(false) | None => Activation::Manual,
     };
-    let preparation = Some(seconds("boostPreparation")).filter(|time| time.value() > 0.0);
+    // A zero boostPreparation readies the ability as the meter fills.
+    let preparation = read_float(&section, "boostPreparation").filter(|time| *time > 0.0).map(Seconds::from);
     let decay = match (
         read_float(&section, "decrementDelay"),
         read_float(&section, "decrementCount"),
@@ -1046,9 +1071,9 @@ fn read_combat_instructions(specials: &pickled::Dict) -> Option<CombatInstructio
         .collect();
 
     Some(CombatInstructions {
-        name: read_string(&section, "rageModeName").unwrap_or_default(),
+        name: read_string(&section, "rageModeName").filter(|name| !name.is_empty()),
         activation,
-        duration: seconds("boostDuration"),
+        duration: read_float(&section, "boostDuration").map(Seconds::from),
         preparation,
         decay,
         modifiers,
@@ -1085,7 +1110,7 @@ fn read_progress_trigger(trigger: &pickled::Dict) -> Option<ProgressTrigger> {
             .filter_map(|value| value.i64_ref().copied())
             .collect()
     };
-    let kind = read_string(&activator, "type").unwrap_or_default();
+    let kind = read_string(&activator, "type")?;
     let event = match kind.as_str() {
         "RibbonActivator" => ProgressEvent::Ribbon { ribbons: ids("ribbons"), sub_ribbons: ids("subRibbons") },
         "PotentialDamageActivator" => {
@@ -1108,10 +1133,13 @@ fn read_progress_trigger(trigger: &pickled::Dict) -> Option<ProgressTrigger> {
     };
 
     Some(ProgressTrigger {
-        progress_name: read_string(&action, "progressName").unwrap_or_else(|| "default".to_owned()),
+        // GameParams writes progressName "default" when the activator type names the trigger.
+        progress_name: read_string(&action, "progressName").filter(|name| !name.is_empty() && name != "default"),
         gain: ProgressPercent(read_float(&action, "progress")?),
         event,
+        // An activator without requiredCount advances on every event.
         required_count: read_float(&activator, "requiredCount").map_or(1, |count| count as u32),
+        // GameParams writes a negative maxActivations, like an absent one, for no limit.
         max_activations: read_float(&activator, "maxActivations")
             .filter(|count| *count >= 0.0)
             .map(|count| count as u32),
@@ -1135,14 +1163,20 @@ fn read_alternative_fire(artillery: &pickled::Dict) -> Option<AlternativeFireMod
                 .collect()
         })
         .unwrap_or_default();
+    // An entry whose pool count the client does not define is dropped.
     let ammo = section
         .get(&pk("secondaryAmmoList"))
         .map(read_string_sequence)
         .unwrap_or_default()
         .into_iter()
-        .map(|name| {
-            let limit = pool.get(&name).and_then(|count| u32::try_from(*count).ok());
-            AlternativeAmmo { name, limit }
+        .filter_map(|name| {
+            // GameParams writes -1 for an unlimited pool.
+            let limit = match pool.get(&name).copied() {
+                None => None,
+                Some(-1) => Some(AmmoCount::Infinite),
+                Some(count) => Some(AmmoCount::Finite(u32::try_from(count).ok()?)),
+            };
+            Some(AlternativeAmmo { name, limit })
         })
         .collect();
     let modifiers = section
@@ -1379,6 +1413,16 @@ fn read_visibility_by_periscope(hull_data: &pickled::Dict) -> Option<f32> {
     read_float(&dict, keys::VISIBILITY_PERISCOPE)
 }
 
+/// Read `visibilityCoefGKInSmoke`, the in-smoke detection range.
+/// `None` when absent or at or below `MINIMAL_VALID_VALUE`.
+fn read_visibility_in_smoke(hull_data: &pickled::Dict) -> Option<f32> {
+    // GameParams writes a near-zero placeholder for hulls without an in-smoke
+    // range; the client shows it only above this gate (createVisibilityTTX@140).
+    const MINIMAL_VALID_VALUE: f32 = 0.01;
+
+    read_float(hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE).filter(|range| *range > MINIMAL_VALID_VALUE)
+}
+
 fn read_ignore_height(v: Option<&Value>) -> bool {
     v.map(|v| if let Some(b) = v.bool_ref() { *b } else { v.i64_ref().map(|i| *i != 0).unwrap_or(false) })
         .unwrap_or(false)
@@ -1604,15 +1648,11 @@ fn extract_mounts(ship_data: &pickled::Dict, component_name: &str) -> Vec<MountP
         .collect()
 }
 
-/// Parse the trailing decimal digits of a hardpoint name as a sort key.
-/// Mounts without a trailing number sort last (u32::MAX).
-fn hardpoint_number(key: &str) -> u32 {
-    let digits: String = key.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>();
-    if digits.is_empty() {
-        return u32::MAX;
-    }
-    let reversed: String = digits.chars().rev().collect();
-    reversed.parse().unwrap_or(u32::MAX)
+/// Parse the trailing decimal digits of a hardpoint name.
+fn hardpoint_number(key: &str) -> Option<u32> {
+    // ASCII digits are one byte each, so the count is a valid byte offset.
+    let digit_count = key.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    key[key.len() - digit_count..].parse().ok()
 }
 
 /// `ShipAbilities` or `PlaneAbilities`: per slot in slot order, the
@@ -2011,7 +2051,10 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     upgrade_name.clone(),
                     crate::game_params::ttx::components::AirSupportStats {
                         planes,
-                        charges: read_float(&support_data, keys::CHARGES_NUM).map(|charges| charges as u32),
+                        // A negative or fractional chargesNum is not a charge count.
+                        charges: read_float(&support_data, keys::CHARGES_NUM)
+                            .filter(|charges| *charges >= 0.0 && charges.fract() == 0.0)
+                            .map(|charges| charges as u32),
                         reload_time: read_float(&support_data, keys::RELOAD_TIME)
                             .map(crate::game_params::ttx::model::Seconds::from),
                         max_dist: read_float(&support_data, keys::MAX_DIST).map(Meters::from),
@@ -2112,8 +2155,10 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             && let Some(hull_data) = ship_data.get(&pk(hull_comp)).and_then(|v| v.dict_or_object_dict())
         {
             let hull_data = hull_data.inner();
-            config.detection_km = Km::from(read_float(&hull_data, keys::VISIBILITY_FACTOR).unwrap_or(0.0));
-            config.air_detection_km = Km::from(read_float(&hull_data, keys::VISIBILITY_FACTOR_BY_PLANE).unwrap_or(0.0));
+            // A zero visibilityFactor states no detection range.
+            let detection = |key: &str| read_float(&hull_data, key).filter(|km| *km > 0.0).map(Km::from);
+            config.detection_km = detection(keys::VISIBILITY_FACTOR);
+            config.air_detection_km = detection(keys::VISIBILITY_FACTOR_BY_PLANE);
             config.hull_model_path = read_string(&hull_data, keys::MODEL);
             config.draft = read_float(&hull_data, keys::DRAFT).map(Meters::from);
             config.dock_y_offset = read_float(&hull_data, keys::DOCK_Y_OFFSET);
@@ -2134,9 +2179,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     visibility_coef_fire: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE).map(Km::from),
                     visibility_coef_fire_by_plane: read_float(&hull_data, keys::VISIBILITY_COEF_FIRE_BY_PLANE)
                         .map(Km::from),
-                    visibility_coef_gk: read_float(&hull_data, keys::VISIBILITY_COEF_GK).map(Km::from),
-                    visibility_coef_gk_in_smoke: read_float(&hull_data, keys::VISIBILITY_COEF_GK_IN_SMOKE)
-                        .map(Km::from),
+                    visibility_coef_gk_in_smoke: read_visibility_in_smoke(&hull_data).map(Km::from),
                     visibility_factor_by_periscope: read_visibility_by_periscope(&hull_data).map(Km::from),
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
@@ -2169,7 +2212,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
         }
 
         // Store if we got meaningful data (detection or mounts).
-        if config.detection_km.value() > 0.0 || !config.mounts_by_type.is_empty() {
+        if config.detection_km.is_some() || !config.mounts_by_type.is_empty() {
             hull_upgrades.insert(upgrade_name, config);
         }
     }
@@ -2181,8 +2224,8 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
     let mut secondary_battery_ammo = HashSet::new();
     let mut max_main_battery_m: Option<Meters> = None;
     let mut max_secondary_battery_m: Option<Meters> = None;
-    // (hardpoint_key, ammo_name); populated from the first atba-bearing hull only
-    let mut secondary_guns_raw: Vec<(String, String)> = Vec::new();
+    // (hardpoint_key, first ammo name); populated from the first atba-bearing hull only
+    let mut secondary_guns_raw: Vec<(String, Option<String>)> = Vec::new();
 
     for (_upgrade_name_val, upgrade_value) in upgrade_data.inner().iter() {
         let Some(upgrade_dict) = upgrade_value.dict_or_object_dict() else {
@@ -2250,29 +2293,34 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     continue;
                 };
                 let mount_inner = mount_dict.inner();
-                let Some(ammo_val) = mount_inner.get(&pk(keys::AMMO_LIST)) else {
-                    continue;
-                };
+                let ammo_val = mount_inner.get(&pk(keys::AMMO_LIST));
+
                 let mut insert_ammo = |item: &Value| {
                     if let Some(name) = item.string_ref() {
                         secondary_battery_ammo.insert(name.inner().clone());
                     }
                 };
                 match ammo_val {
-                    Value::Tuple(t) => t.inner().iter().for_each(&mut insert_ammo),
-                    Value::List(l) => l.inner().iter().for_each(&mut insert_ammo),
+                    Some(Value::Tuple(t)) => t.inner().iter().for_each(&mut insert_ammo),
+                    Some(Value::List(l)) => l.inner().iter().for_each(&mut insert_ammo),
                     _ => {}
                 }
-                if capture_per_gun {
+
+                // Every HP_ mount takes a slot so wire gun indices stay aligned.
+                if capture_per_gun
+                    && let Some(key_str) = mount_key.string_ref().map(|s| s.inner().clone())
+                    && key_str.starts_with(keys::HP_PREFIX)
+                {
                     let first_ammo = match ammo_val {
-                        Value::Tuple(t) => t.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone())),
-                        Value::List(l) => l.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone())),
+                        Some(Value::Tuple(t)) => {
+                            t.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
+                        }
+                        Some(Value::List(l)) => {
+                            l.inner().iter().find_map(|i| i.string_ref().map(|s| s.inner().clone()))
+                        }
                         _ => None,
                     };
-                    if let (Some(name), Some(key_str)) = (first_ammo, mount_key.string_ref().map(|s| s.inner().clone()))
-                    {
-                        secondary_guns_raw.push((key_str, name));
-                    }
+                    secondary_guns_raw.push((key_str, first_ammo));
                 }
             }
         }
@@ -2325,8 +2373,12 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
         .and_then(|(_, config)| config.component_names.get(&keys::ComponentType::Hull).cloned());
     let hull_comp_key = first_hull_comp_name.as_deref().unwrap_or(keys::A_HULL);
 
-    secondary_guns_raw.sort_by_key(|(k, _)| hardpoint_number(k));
-    let secondary_guns: Vec<String> = secondary_guns_raw.into_iter().map(|(_, name)| name).collect();
+    // Mounts without a trailing number sort last.
+    secondary_guns_raw.sort_by_key(|(k, _)| {
+        let number = hardpoint_number(k);
+        (number.is_none(), number)
+    });
+    let secondary_guns: Vec<Option<String>> = secondary_guns_raw.into_iter().map(|(_, name)| name).collect();
 
     let config_data = if hull_upgrades.is_empty()
         && torpedo_ammo.is_empty()
@@ -2373,9 +2425,9 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                 let group_dict = group_shared.inner();
                 // Only consider entries with hlType — that marks them as hit location zones.
                 let hl_type = read_string(&group_dict, keys::HL_TYPE)?;
-                let max_hp = read_float(&group_dict, keys::MAX_HP).unwrap_or(0.0);
-                let regenerated_hp_part = read_float(&group_dict, keys::REGENERATED_HP_PART).unwrap_or(0.0);
-                let thickness = read_float(&group_dict, keys::THICKNESS).unwrap_or(0.0);
+                let max_hp = read_float(&group_dict, keys::MAX_HP);
+                let regenerated_hp_part = read_float(&group_dict, keys::REGENERATED_HP_PART);
+                let thickness = read_float(&group_dict, keys::THICKNESS);
                 let splash_boxes: Vec<String> = group_dict
                     .get(&pk(keys::SPLASH_BOXES))
                     .map(|v| {
@@ -2394,10 +2446,10 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                 Some((
                     name,
                     HitLocation::builder()
-                        .max_hp(max_hp)
+                        .maybe_max_hp(max_hp)
                         .hl_type(hl_type)
-                        .regenerated_hp_part(regenerated_hp_part)
-                        .thickness(thickness)
+                        .maybe_regenerated_hp_part(regenerated_hp_part)
+                        .maybe_thickness(thickness)
                         .splash_boxes(splash_boxes)
                         .build(),
                 ))
@@ -2562,15 +2614,15 @@ impl GameMetadataProvider {
             ParamType::Achievement => {
                 let is_group = game_param_to_type!(param_data, "group", Option<bool>).unwrap_or_default();
                 let one_per_battle = game_param_to_type!(param_data, "onePerBattle", Option<bool>).unwrap_or_default();
-                let ui_type = game_param_to_type!(param_data, "uiType", Option<String>).unwrap_or_default();
-                let ui_name = game_param_to_type!(param_data, "uiName", Option<String>).unwrap_or_default();
+                let ui_type = game_param_to_type!(param_data, "uiType", Option<String>);
+                let ui_name = game_param_to_type!(param_data, "uiName", Option<String>);
 
                 Some(ParamData::Achievement(
                     Achievement::builder()
                         .is_group(is_group)
                         .one_per_battle(one_per_battle)
-                        .ui_type(ui_type)
-                        .ui_name(ui_name)
+                        .maybe_ui_type(ui_type)
+                        .maybe_ui_name(ui_name)
                         .build(),
                 ))
             }
@@ -2697,7 +2749,7 @@ impl GameMetadataProvider {
                                     .map(|s| s.inner().to_string())
                             })
                     })
-                    .unwrap_or_default();
+                    .filter(|ammo_type| !ammo_type.is_empty());
                 let read_opt_f32 = |key: &str| -> Option<f32> {
                     param_data
                         .get(&pk(key))
@@ -2727,14 +2779,17 @@ impl GameMetadataProvider {
                 Some(ParamData::Aircraft(
                     Aircraft::builder()
                         .category(category)
-                        .ammo_type(ammo_type)
+                        .maybe_ammo_type(ammo_type)
                         .subtypes(subtypes)
                         .maybe_squadron_size(read_count("numPlanesInSquadron"))
                         .maybe_attack_flight_size(read_count("attackerSize"))
                         .maybe_attack_count(read_count("attackCount"))
                         .maybe_projectiles_per_attack(read_count("projectilesPerAttack"))
                         .maybe_ordnance(ordnance)
-                        .maybe_angle_of_dive(read_opt_f32("angleOfDive").map(Degrees::from))
+                        // GameParams writes angleOfDive 0 for planes that do not dive.
+                        .maybe_angle_of_dive(
+                            read_opt_f32("angleOfDive").filter(|angle| *angle != 0.0).map(Degrees::from),
+                        )
                         .maybe_speed_with_ordnance(
                             read_opt_f32("speedMoveWithBomb").map(crate::game_params::ttx::model::Knots::from),
                         )
@@ -2751,7 +2806,7 @@ impl GameMetadataProvider {
                     .get(&pk("ammoType"))
                     .and_then(|v| v.string_ref())
                     .map(|s| s.inner().to_string())
-                    .unwrap_or_default();
+                    .filter(|ammo_type| !ammo_type.is_empty());
                 let max_dist = param_data
                     .get(&pk(keys::MAX_DIST))
                     .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
@@ -2807,7 +2862,7 @@ impl GameMetadataProvider {
                 });
                 Some(ParamData::Projectile(
                     Projectile::builder()
-                        .ammo_type(ammo_type)
+                        .maybe_ammo_type(ammo_type)
                         .maybe_max_dist(max_dist)
                         .maybe_bullet_diametr(bullet_diametr)
                         .maybe_bullet_mass(bullet_mass)
@@ -2848,16 +2903,13 @@ impl GameMetadataProvider {
             ParamType::Building => {
                 let level = game_param_to_type!(param_data, "level", u32);
                 let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_or_object_dict());
-                let health = hull
-                    .as_ref()
-                    .and_then(|h| {
-                        let inner = h.inner();
-                        inner
-                            .get(&pk("health"))
-                            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
-                    })
-                    .unwrap_or(0.0);
-                Some(ParamData::Building(super::types::Building::builder().level(level).health(health).build()))
+                let health = hull.as_ref().and_then(|h| {
+                    let inner = h.inner();
+                    inner
+                        .get(&pk("health"))
+                        .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
+                });
+                Some(ParamData::Building(super::types::Building::builder().level(level).maybe_health(health).build()))
             }
             _ => {
                 // Some params (e.g. Drops) have typeinfo.type = "Other"
@@ -3000,12 +3052,13 @@ impl GameMetadataProvider {
     ///
     /// Resolves the param, extracts the projectile data, and converts it to
     /// the flattened `ShellInfo` representation. Returns `None` if the param
-    /// doesn't exist or isn't a projectile.
+    /// doesn't exist, isn't a projectile, or lacks the fields `ShellInfo`
+    /// requires.
     pub fn resolve_shell_from_param_id(&self, params_id: GameParamId) -> Option<ShellInfo> {
         let param = GameParamProvider::game_param_by_id(self, params_id)?;
         let projectile = param.projectile()?;
         let name = param.name().to_string();
-        Some(projectile.to_shell_info(name))
+        projectile.to_shell_info(name)
     }
 }
 
@@ -3238,7 +3291,7 @@ mod camera_tests {
         .into_iter()
         .collect();
 
-        let cat = build_ability_category(&category_data);
+        let cat = build_ability_category(&category_data).expect("category has consumableType and numConsumables");
         let fields = cat.effect_fields();
 
         assert_eq!(fields.get("workTime"), Some(&28.0_f32));
@@ -3254,6 +3307,43 @@ mod camera_tests {
         assert_eq!(fields.get("shootShift"), Some(&3.0_f32));
         // non-numeric string fields are skipped.
         assert!(!fields.contains_key("consumableType"));
+    }
+
+    #[test]
+    fn build_ability_category_converts_game_params_markers() {
+        let category = |extra: Vec<(HashableValue, Value)>| -> pickled::Dict {
+            let mut data = vec![
+                (pk("reloadTime"), fv(60.0)),
+                (pk("workTime"), fv(10.0)),
+                (pk("consumableType"), sv("smokeGenerator")),
+            ];
+            data.extend(extra);
+            data.into_iter().collect()
+        };
+
+        let unlimited = build_ability_category(&category(vec![
+            (pk("numConsumables"), Value::I64(-1)),
+            (pk("group"), sv("squadron")),
+            (pk("iconIDs"), sv("")),
+            (pk("lifeCycleType"), Value::I64(1)),
+            (pk("maxCapacity"), Value::I64(-1)),
+        ]))
+        .expect("valid category");
+        assert_eq!(unlimited.num_consumables(), ChargeCount::Unlimited);
+        assert_eq!(unlimited.group(), Some(ConsumableGroup::Squadron));
+        assert_eq!(unlimited.icon_id(), None);
+        assert_eq!(unlimited.lifecycle(), ConsumableLifecycle::TimeBased);
+        assert_eq!(unlimited.max_capacity(), None);
+        assert_eq!(unlimited.preparation_time(), None);
+
+        let finite =
+            build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(2))])).expect("valid category");
+        assert_eq!(finite.num_consumables(), ChargeCount::Finite(2));
+        assert_eq!(finite.group(), None);
+        assert_eq!(finite.lifecycle(), ConsumableLifecycle::CountBased);
+
+        assert!(build_ability_category(&category(vec![(pk("numConsumables"), Value::I64(-2))])).is_none());
+        assert!(build_ability_category(&category(Vec::new())).is_none());
     }
 
     /// Build a ship dict mirroring Gearing's (`PASD013_Gearing_1945`) real shape:
@@ -3320,7 +3410,6 @@ mod camera_tests {
         assert_eq!(hull.visibility_factor_by_plane, Some(Km::from(3.41)));
         assert_eq!(hull.visibility_coef_fire, Some(Km::from(2.0)));
         assert_eq!(hull.visibility_coef_fire_by_plane, Some(Km::from(2.0)));
-        assert_eq!(hull.visibility_coef_gk, Some(Km::from(1e-6)));
         assert_eq!(hull.visibility_coef_gk_in_smoke, Some(Km::from(2.83)));
         // visibilityFactorsBySubmarine['PERISCOPE'] (PreprocessedHull.py:13).
         assert_eq!(hull.visibility_factor_by_periscope, Some(Km::from(3.41)));
@@ -3340,6 +3429,16 @@ mod camera_tests {
 
         let engine = ttx.engine("PAUE903_D10_ENG_STOCK").expect("engine stats present");
         assert_eq!(engine.speed_coef, Some(0.0));
+    }
+
+    #[test]
+    fn in_smoke_visibility_at_or_below_gate_is_absent() {
+        let hull =
+            |range: f64| -> pickled::Dict { vec![(pk("visibilityCoefGKInSmoke"), fv(range))].into_iter().collect() };
+        assert_eq!(read_visibility_in_smoke(&hull(2.83)), Some(2.83));
+        assert_eq!(read_visibility_in_smoke(&hull(0.01)), None);
+        assert_eq!(read_visibility_in_smoke(&hull(0.0)), None);
+        assert_eq!(read_visibility_in_smoke(&pickled::Dict::new()), None);
     }
 
     /// Build a minimal ship dict with just an `A_Hull` component carrying
@@ -3988,9 +4087,9 @@ mod crew_skill_logic_trigger_tests {
 
         let skills = build_skill_with_trigger(entries);
         let trigger = skills[0].logic_trigger().expect("trigger present");
-        let heat = trigger.heat_interpolator();
+        let heat = trigger.heat_interpolator().expect("heat interpolator present");
         assert_eq!(heat.points(), &[(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)]);
-        let cool = trigger.cooling_interpolator();
+        let cool = trigger.cooling_interpolator().expect("cooling interpolator present");
         assert_eq!(cool.points(), &[(0.0, 1.0), (10.0, 0.0)]);
     }
 
@@ -4002,8 +4101,8 @@ mod crew_skill_logic_trigger_tests {
         let trigger = skills[0].logic_trigger().expect("trigger present");
         assert!(trigger.count_to_modifier().is_empty());
         assert_eq!(trigger.damage_value(), None);
-        assert!(trigger.heat_interpolator().is_empty());
-        assert!(trigger.cooling_interpolator().is_empty());
+        assert_eq!(trigger.heat_interpolator(), None);
+        assert_eq!(trigger.cooling_interpolator(), None);
     }
 }
 

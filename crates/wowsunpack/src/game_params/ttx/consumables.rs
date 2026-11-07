@@ -23,8 +23,11 @@ use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::provenance::Op;
 use crate::game_params::types::AbilityCategory;
+use crate::game_params::types::ConsumableGroup;
+use crate::game_params::types::ConsumableLifecycle;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
+use crate::game_types::ChargeCount;
 use crate::recognized::Recognized;
 
 /// One modifier a consumable computation applied, in application order. Owned
@@ -54,14 +57,6 @@ pub struct ConsumableApplied {
     pub call_fighters_time_from_heaven: Vec<AppliedConsumableModifier>,
     pub plane_regeneration_rate: Vec<AppliedConsumableModifier>,
 }
-
-/// Consumable group strings, `ConsumableConstants.py` `ConsumableGroup`.
-const GROUP_SHIP: &str = "ship";
-const GROUP_SQUADRON: &str = "squadron";
-
-/// `lifeCycleType` enum values, `ConsumableConstants.py` `ConsumableLifeCycleType`.
-const LIFECYCLE_COUNT_BASED: f32 = 0.0;
-const LIFECYCLE_TIME_BASED: f32 = 1.0;
 
 /// `ConsumableNames.REGEN_CREW`, the Repair Party consumable type string.
 const TYPE_REGEN_CREW: &str = "regenCrew";
@@ -173,10 +168,11 @@ pub struct EffectiveConsumable {
     /// by `max_capacity`/`min_work_time` instead.
     pub work_time: Option<Seconds>,
     /// Activation delay, `preparationTime * getConsumableReloadTime`
-    /// (ConsumableUtils.py:116).
-    pub preparation_time: Seconds,
+    /// (ConsumableUtils.py:116). `None` when the category lists no
+    /// `preparationTime`.
+    pub preparation_time: Option<Seconds>,
     /// Resource pool. COUNT_BASED uses `numConsumables` plus the additional-count
-    /// bonuses (ConsumableUtils.py:122-128); `-1` means an unlimited pool, modeled as
+    /// bonuses (ConsumableUtils.py:122-128); an unlimited pool is
     /// [`AmmoCount::Infinite`] and never made finite by modifiers.
     pub charges: AmmoCount,
     /// TIME_BASED capacity pool, `maxCapacity * getConsumableCapacity`
@@ -262,22 +258,23 @@ fn gated_type_coef(
 fn consumable_reload_coeff(
     bundle: &ModifierBundle,
     type_name: &str,
-    group: &str,
+    group: Option<ConsumableGroup>,
     out: &mut Vec<AppliedConsumableModifier>,
 ) -> f32 {
     // ModifiersApply.py:191
     let mut coeff = bundle.coef("allConsumableReloadTime");
     out.push(AppliedConsumableModifier { name: "allConsumableReloadTime".into(), op: Op::Mul });
     match group {
-        GROUP_SHIP => {
+        Some(ConsumableGroup::Ship) => {
             coeff *= bundle.coef("ConsumableReloadTime"); // :197
             out.push(AppliedConsumableModifier { name: "ConsumableReloadTime".into(), op: Op::Mul });
         }
-        GROUP_SQUADRON => {
+        Some(ConsumableGroup::Squadron) => {
             coeff *= bundle.coef("planeConsumableReloadTime"); // :206
             out.push(AppliedConsumableModifier { name: "planeConsumableReloadTime".into(), op: Op::Mul });
         }
-        _ => {}
+        // No group-scoped coefficient applies without a client ConsumableGroup.
+        None => {}
     }
     // :200-201 / :209-210
     gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_RELOAD_COEFFICIENTS, "ReloadCoeff", out)
@@ -291,20 +288,21 @@ fn consumable_reload_coeff(
 fn consumable_work_time_coeff(
     bundle: &ModifierBundle,
     type_name: &str,
-    group: &str,
+    group: Option<ConsumableGroup>,
     out: &mut Vec<AppliedConsumableModifier>,
 ) -> f32 {
     let mut coeff = 1.0;
     match group {
-        GROUP_SHIP => {
+        Some(ConsumableGroup::Ship) => {
             coeff *= bundle.coef("ConsumablesWorkTime"); // :222
             out.push(AppliedConsumableModifier { name: "ConsumablesWorkTime".into(), op: Op::Mul });
         }
-        GROUP_SQUADRON => {
+        Some(ConsumableGroup::Squadron) => {
             coeff *= bundle.coef("planeConsumablesWorkTime"); // :231
             out.push(AppliedConsumableModifier { name: "planeConsumablesWorkTime".into(), op: Op::Mul });
         }
-        _ => {}
+        // No group-scoped coefficient applies without a client ConsumableGroup.
+        None => {}
     }
     // :225-226 / :234-235
     gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_WORK_TIME_COEFFICIENTS, "WorkTimeCoeff", out)
@@ -318,21 +316,22 @@ fn consumable_work_time_coeff(
 fn consumable_capacity_coeff(
     bundle: &ModifierBundle,
     type_name: &str,
-    group: &str,
+    group: Option<ConsumableGroup>,
     out: &mut Vec<AppliedConsumableModifier>,
 ) -> f32 {
     let mut coeff = bundle.coef("consumableCapacityCoeff"); // :243
     out.push(AppliedConsumableModifier { name: "consumableCapacityCoeff".into(), op: Op::Mul });
     match group {
-        GROUP_SHIP => {
+        Some(ConsumableGroup::Ship) => {
             coeff *= bundle.coef("shipConsumableCapacityCoeff"); // :246
             out.push(AppliedConsumableModifier { name: "shipConsumableCapacityCoeff".into(), op: Op::Mul });
         }
-        GROUP_SQUADRON => {
+        Some(ConsumableGroup::Squadron) => {
             coeff *= bundle.coef("squadronConsumableCapacityCoeff"); // :255
             out.push(AppliedConsumableModifier { name: "squadronConsumableCapacityCoeff".into(), op: Op::Mul });
         }
-        _ => {}
+        // No group-scoped coefficient applies without a client ConsumableGroup.
+        None => {}
     }
     // :249-250 / :258-259
     gated_type_coef(bundle, coeff, type_name, CONSUMABLES_WITH_CAPACITY_COEFFICIENTS, "CapacityCoeff", out)
@@ -361,19 +360,20 @@ fn additional_consumables_count(
 /// (SQUADRON).
 fn additional_consumables_for_group(
     bundle: &ModifierBundle,
-    group: &str,
+    group: Option<ConsumableGroup>,
     out: &mut Vec<AppliedConsumableModifier>,
 ) -> f32 {
     match group {
-        GROUP_SHIP => {
+        Some(ConsumableGroup::Ship) => {
             out.push(AppliedConsumableModifier { name: "additionalConsumables".into(), op: Op::Add });
             bundle.apply(0.0, "additionalConsumables") // :285
         }
-        GROUP_SQUADRON => {
+        Some(ConsumableGroup::Squadron) => {
             out.push(AppliedConsumableModifier { name: "planeAdditionalConsumables".into(), op: Op::Add });
             bundle.apply(0.0, "planeAdditionalConsumables") // :288
         }
-        _ => 0.0,
+        // Additive identity: no group-wide bonus without a client ConsumableGroup.
+        None => 0.0,
     }
 }
 
@@ -410,43 +410,42 @@ pub fn effective_consumable(
     let reload_coeff = consumable_reload_coeff(modifiers, type_name, group, &mut applied.reload_time);
     applied.preparation_time = applied.reload_time.clone();
     let reload_time = Seconds::from(category.reload_time() * reload_coeff);
-    let preparation_time = Seconds::from(category.preparation_time() * reload_coeff);
+    let preparation_time = category.preparation_time().map(|time| Seconds::from(time * reload_coeff));
 
-    let lifecycle = field(fields, "lifeCycleType").unwrap_or(LIFECYCLE_COUNT_BASED);
+    let lifecycle = category.lifecycle();
 
     // workTime is multiplied only for COUNT_BASED consumables (ConsumableUtils.py:120);
     // TIME_BASED consumables have no port workTime stat (capacity/minWorkTime govern).
-    let work_time = if lifecycle == LIFECYCLE_COUNT_BASED {
-        let wt = consumable_work_time_coeff(modifiers, type_name, group, &mut applied.work_time);
-        Some(Seconds::from(category.work_time() * wt))
-    } else {
-        None
+    let work_time = match lifecycle {
+        ConsumableLifecycle::CountBased => {
+            let wt = consumable_work_time_coeff(modifiers, type_name, group, &mut applied.work_time);
+            Some(Seconds::from(category.work_time() * wt))
+        }
+        ConsumableLifecycle::TimeBased => None,
     };
 
     // charges: COUNT_BASED applies numConsumables + additional counts
-    // (ConsumableUtils.py:122-128). A base of -1 is an unlimited pool and stays
-    // Infinite regardless of modifiers.
-    let base_count = category.num_consumables();
-    let charges = if base_count < 0 {
-        AmmoCount::Infinite
-    } else if lifecycle == LIFECYCLE_COUNT_BASED {
-        let added = additional_consumables_count(modifiers, type_name, &mut applied.charges)
-            + additional_consumables_for_group(modifiers, group, &mut applied.charges);
-        // ConsumableUtils.py:128 `max(0, numConsumables + added)`
-        let total = (base_count as f32 + added).max(0.0);
-        AmmoCount::Finite(total.round() as u32)
-    } else {
-        AmmoCount::Finite(base_count as u32)
+    // (ConsumableUtils.py:122-128). An unlimited pool stays Infinite regardless of
+    // modifiers.
+    let charges = match (category.num_consumables(), lifecycle) {
+        (ChargeCount::Unlimited, _) => AmmoCount::Infinite,
+        (ChargeCount::Finite(base_count), ConsumableLifecycle::CountBased) => {
+            let added = additional_consumables_count(modifiers, type_name, &mut applied.charges)
+                + additional_consumables_for_group(modifiers, group, &mut applied.charges);
+            // ConsumableUtils.py:128 `max(0, numConsumables + added)`
+            let total = (base_count as f32 + added).max(0.0);
+            AmmoCount::Finite(total.round() as u32)
+        }
+        (ChargeCount::Finite(base_count), ConsumableLifecycle::TimeBased) => AmmoCount::Finite(base_count),
     };
 
     // maxCapacity for TIME_BASED consumables (ConsumableUtils.py:166-167). Absent for
     // COUNT_BASED.
-    let max_capacity = if lifecycle == LIFECYCLE_TIME_BASED {
-        field(fields, "maxCapacity")
-            .filter(|&c| c >= 0.0)
-            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group, &mut applied.max_capacity))
-    } else {
-        None
+    let max_capacity = match lifecycle {
+        ConsumableLifecycle::TimeBased => category
+            .max_capacity()
+            .map(|c| c * consumable_capacity_coeff(modifiers, type_name, group, &mut applied.max_capacity)),
+        ConsumableLifecycle::CountBased => None,
     };
 
     // regenerationHPSpeed: REGEN_CREW only, `*= regenerationHPSpeed` modifier
@@ -573,10 +572,10 @@ mod tests {
     const CRASH_CREW_WORK_TIME_S: f32 = 15.0;
     const SONAR_RELOAD_S: f32 = 90.0;
     const SONAR_WORK_TIME_S: f32 = 100.0;
-    const SONAR_BASE_CHARGES: isize = 3;
+    const SONAR_BASE_CHARGES: u32 = 3;
     const SMOKE_RELOAD_S: f32 = 240.0;
     const SMOKE_WORK_TIME_S: f32 = 20.0;
-    const SMOKE_BASE_CHARGES: isize = 2;
+    const SMOKE_BASE_CHARGES: u32 = 2;
     const SMOKE_BASE_RADIUS_BW: f32 = 15.0;
     const SMOKE_RADIUS_KM: f32 = 0.45;
     const SMOKE_LIFETIME_S: f32 = 77.0;
@@ -609,14 +608,13 @@ mod tests {
     /// numConsumables -1, workTime 15, COUNT_BASED.
     fn crash_crew() -> AbilityCategory {
         let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         fields.insert("reloadTime".to_string(), CRASH_CREW_RELOAD_S);
         fields.insert("workTime".to_string(), CRASH_CREW_WORK_TIME_S);
         AbilityCategory::builder()
             .consumable_type("crashCrew".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(-1)
+            .group(ConsumableGroup::Ship)
+            .num_consumables(ChargeCount::Unlimited)
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(CRASH_CREW_RELOAD_S)
             .work_time(CRASH_CREW_WORK_TIME_S)
@@ -627,17 +625,15 @@ mod tests {
     /// A finite-charge ship consumable (`sonar`, COUNT_BASED) for charge tests:
     /// numConsumables 3, reloadTime 90, workTime 100.
     fn finite_sonar() -> AbilityCategory {
-        let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         AbilityCategory::builder()
             .consumable_type("sonar".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(SONAR_BASE_CHARGES)
+            .group(ConsumableGroup::Ship)
+            .num_consumables(ChargeCount::Finite(SONAR_BASE_CHARGES))
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(SONAR_RELOAD_S)
             .work_time(SONAR_WORK_TIME_S)
-            .effect_fields(fields)
+            .effect_fields(BTreeMap::new())
             .build()
     }
 
@@ -646,14 +642,13 @@ mod tests {
     /// `radius` 15.0, `lifeTime` 77.0.
     fn smoke_generator() -> AbilityCategory {
         let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         fields.insert("radius".to_string(), SMOKE_BASE_RADIUS_BW);
         fields.insert("lifeTime".to_string(), SMOKE_LIFETIME_S);
         AbilityCategory::builder()
             .consumable_type("smokeGenerator".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(SMOKE_BASE_CHARGES)
+            .group(ConsumableGroup::Ship)
+            .num_consumables(ChargeCount::Finite(SMOKE_BASE_CHARGES))
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(SMOKE_RELOAD_S)
             .work_time(SMOKE_WORK_TIME_S)
@@ -665,15 +660,14 @@ mod tests {
     /// 116.667, `timeDelayAttack` 5.0, `timeFromHeaven` 3.0.
     fn call_fighters() -> AbilityCategory {
         let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         fields.insert("radius".to_string(), CF_RADIUS_BW);
         fields.insert("timeDelayAttack".to_string(), CF_TIME_DELAY_S);
         fields.insert("timeFromHeaven".to_string(), CF_TIME_FROM_HEAVEN_S);
         AbilityCategory::builder()
             .consumable_type("callFighters".to_string())
-            .group("squadron".to_string())
-            .icon_id(String::new())
-            .num_consumables(-1)
+            .group(ConsumableGroup::Squadron)
+            .num_consumables(ChargeCount::Unlimited)
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(60.0)
             .work_time(60.0)
@@ -684,13 +678,12 @@ mod tests {
     /// A Fighter (`fighter`, COUNT_BASED) with the real `fightersNum` 1.
     fn fighter() -> AbilityCategory {
         let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         fields.insert("fightersNum".to_string(), FIGHTER_BASE_COUNT);
         AbilityCategory::builder()
             .consumable_type("fighter".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(3)
+            .group(ConsumableGroup::Ship)
+            .num_consumables(ChargeCount::Finite(3))
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(90.0)
             .work_time(60.0)
@@ -702,13 +695,12 @@ mod tests {
     /// `regenerationRate` 0.1.
     fn regenerate_health() -> AbilityCategory {
         let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), LIFECYCLE_COUNT_BASED);
         fields.insert("regenerationRate".to_string(), REGEN_RATE_BASE);
         AbilityCategory::builder()
             .consumable_type("regenerateHealth".to_string())
-            .group("squadron".to_string())
-            .icon_id(String::new())
-            .num_consumables(-1)
+            .group(ConsumableGroup::Squadron)
+            .num_consumables(ChargeCount::Unlimited)
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(60.0)
             .work_time(60.0)
@@ -735,7 +727,7 @@ mod tests {
         let cat = crash_crew();
         let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Battleship));
         assert_eq!(eff.reload_time, Seconds::from(CRASH_CREW_RELOAD_S));
-        assert_eq!(eff.preparation_time, Seconds::from(0.0));
+        assert_eq!(eff.preparation_time, Some(Seconds::from(0.0)));
         assert_eq!(eff.work_time, Some(Seconds::from(CRASH_CREW_WORK_TIME_S)));
         assert_eq!(eff.charges, AmmoCount::Infinite);
         assert_eq!(eff.max_capacity, None);
@@ -800,7 +792,7 @@ mod tests {
     fn finite_charges_base_unchanged() {
         let cat = finite_sonar();
         let (eff, _applied) = effective_consumable(&cat, &ModifierBundle::empty(Species::Cruiser));
-        assert_eq!(eff.charges, AmmoCount::Finite(SONAR_BASE_CHARGES as u32));
+        assert_eq!(eff.charges, AmmoCount::Finite(SONAR_BASE_CHARGES));
     }
 
     /// The per-type `sonarWorkTimeCoeff` gate fires for `sonar`: SONAR_WORK_TIME_S * SONAR_WORK_COEFF

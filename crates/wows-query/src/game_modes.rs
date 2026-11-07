@@ -18,6 +18,7 @@ use wowsunpack::game_params::types::CrewSkillModifier;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
+use crate::buffs::BuffDuration;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::names::Interpretations;
@@ -194,8 +195,9 @@ impl GameData {
             let stacks = (1..=max_stacks)
                 .map(|stack| BuffStack {
                     stacks: stack,
-                    effects: self
-                        .per_class_lines(classes, |species| self.buff_lines(&modifiers(stack, species), species, None)),
+                    effects: self.per_class_lines(classes, |species| {
+                        self.buff_lines(&modifiers(stack, species), species, BuffDuration::RestOfBattle)
+                    }),
                 })
                 .collect();
 
@@ -210,10 +212,16 @@ impl GameData {
     }
 
     /// The name the client gives a drop in quick commands
-    /// (`QCmdTarget_DropZone`), without its exclamation mark.
-    fn drop_name(&self, marker: &str, param: &str) -> String {
-        self.provider()
-            .localized_name_from_id(&TranslationKey::new(format!("IDS_CMD_QUICK_DROP_{}", marker.to_uppercase())))
+    /// (`QCmdTarget_DropZone`), without its exclamation mark. Falls back to
+    /// the param name when the drop has no marker or no translation.
+    fn drop_name(&self, marker: Option<&str>, param: &str) -> String {
+        marker
+            .and_then(|marker| {
+                self.provider().localized_name_from_id(&TranslationKey::new(format!(
+                    "IDS_CMD_QUICK_DROP_{}",
+                    marker.to_uppercase()
+                )))
+            })
             .map(|name| clean(&name).trim_end_matches('!').to_owned())
             .unwrap_or_else(|| param.to_owned())
     }

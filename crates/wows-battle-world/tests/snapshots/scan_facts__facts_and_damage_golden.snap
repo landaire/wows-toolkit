@@ -4,83 +4,83 @@ expression: "Snapshot { facts, damage }"
 ---
 facts:
   - entity_id: 321811
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321812
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321813
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321814
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321815
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321816
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321817
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321818
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321821
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321822
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321823
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 321824
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 968039
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 968041
     vehicle_id: 3655251408
     max_health: 38750
@@ -172,11 +172,11 @@ facts:
     ability_count: 6
     crew_params_id: 4277315280
   - entity_id: 968070
-    vehicle_id: 0
-    max_health: 0
-    ship_params_id: 0
+    vehicle_id: ~
+    max_health: ~
+    ship_params_id: ~
     ability_count: 0
-    crew_params_id: 0
+    crew_params_id: ~
   - entity_id: 968071
     vehicle_id: 4179572720
     max_health: 107950

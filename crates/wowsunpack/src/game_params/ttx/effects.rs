@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use crate::data::Version;
+use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::ShipStats;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::modifiers::ModifierError;
@@ -35,11 +36,12 @@ const TRIGGER_ATBA_HEAT: &str = "atbaHeat";
 /// The deob clamps the stacking count to `PACKED_STATE_LIMITS` (1023).
 const STACK_LIMIT: u32 = 1023;
 
-/// Stack count carried by an activation; any non-`Stacks` activation (including the
-/// `Stacks(0)` default) yields 0.
+/// Stack count carried by an activation, clamped to `STACK_LIMIT`; `MaxStacks` yields
+/// the limit and any other non-`Stacks` activation yields 0.
 fn stacks(activation: EffectActivation) -> u32 {
     match activation {
-        EffectActivation::Stacks(n) => n,
+        EffectActivation::Stacks(n) => n.min(STACK_LIMIT),
+        EffectActivation::MaxStacks => STACK_LIMIT,
         _ => 0,
     }
 }
@@ -200,8 +202,8 @@ pub struct SituationFacts {
     /// `floor(potential_damage / max_health)`.
     pub potential_damage: f32,
     /// The ship's maximum health pool (used as the denominator for `potential_damage`
-    /// stacking). Must be `> 0.0` for stacking to be non-zero.
-    pub max_health: f32,
+    /// stacking). `None` when unknown; stacking is then zero.
+    pub max_health: Option<Hp>,
     /// Seconds the manual-secondaries target has been continuously held. Drives `Heat`
     /// (ATBA manual-secondaries accuracy) effects.
     pub secondary_fire_seconds: f32,
@@ -247,7 +249,7 @@ impl Default for SituationFacts {
             hp_fraction: 1.0,
             burn_flood_count: 0,
             potential_damage: 0.0,
-            max_health: 0.0,
+            max_health: None,
             secondary_fire_seconds: 0.0,
             active_consumables: Vec::new(),
             detected: false,
@@ -286,8 +288,9 @@ impl HealthFraction {
     }
 }
 
-/// How an effect is activated. `Off` / `On` / `Health` / `Stacks` / `Heat`; `Stacks(n)` drives
-/// the stacking triggers (Furious burn+flood count, potential-damage health-multiplier);
+/// How an effect is activated. `Off` / `On` / `Health` / `Stacks` / `MaxStacks` / `Heat`;
+/// `Stacks(n)` drives the stacking triggers (Furious burn+flood count, potential-damage
+/// health-multiplier) and `MaxStacks` applies the most stacks the client allows;
 /// `Heat(seconds)` drives manual-secondaries heat triggers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EffectActivation {
@@ -295,6 +298,7 @@ pub enum EffectActivation {
     On,
     Health(HealthFraction),
     Stacks(u32),
+    MaxStacks,
     Heat(f32),
 }
 
@@ -325,7 +329,7 @@ pub enum EffectKind {
     HealthScaledReload,
     /// A consumable that, while active, applies its `modifiers` block and (for the spotter)
     /// an `artillery_dist_coeff` range multiplier.
-    Consumable { artillery_dist_coeff: f32 },
+    Consumable { artillery_dist_coeff: Option<f32> },
     /// Furious (`activationOnBurnFlood`): at `Stacks(n)`, contribute every per-count block
     /// with `count <= n` (accumulative). Capped at the highest count present.
     StackingPerCount { blocks: Vec<(u32, Vec<CrewSkillModifier>)> },
@@ -403,30 +407,35 @@ impl EffectsState {
 /// Provenance step name of a `ReloadCoeffs` multiplier applied to a reload time.
 pub const HEALTH_SCALED_RELOAD_STEP: &str = "reloadCoeff";
 
-/// Per-armament reload multipliers from dynamic effects (Adrenaline Rush), evaluated at
-/// the state's health fraction. `1.0` = no change. Kept separate from the bundle because
-/// `lastChanceReloadCoefficient` is additive in `MODIFIER_SETTINGS` (the raw per-HP
-/// coefficient sums across sources), whereas the evaluated value is a multiplier.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ReloadCoeffs {
-    pub main: f32,
-    pub secondary: f32,
-    pub torpedo: f32,
+/// A multiplier applied by active effects and the input that last applied it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectCoeff {
+    pub value: f32,
+    pub source: InputId,
 }
 
-impl Default for ReloadCoeffs {
-    fn default() -> Self {
-        ReloadCoeffs { main: 1.0, secondary: 1.0, torpedo: 1.0 }
+impl EffectCoeff {
+    /// Folds `factor` from `source` into the running coefficient `current`.
+    fn stack(current: Option<Self>, factor: f32, source: InputId) -> Self {
+        let value = match current {
+            Some(current) => current.value * factor,
+            None => factor,
+        };
+
+        Self { value, source }
     }
 }
 
-/// The `InputId` source for each per-armament reload channel populated by dynamic
-/// effects (Adrenaline Rush). `None` when the channel was not modified.
-#[derive(Clone, Debug, Default)]
-pub struct ReloadCoeffSources {
-    pub main: Option<InputId>,
-    pub secondary: Option<InputId>,
-    pub torpedo: Option<InputId>,
+/// Per-armament reload multipliers from dynamic effects (Adrenaline Rush), evaluated at
+/// the state's health fraction. `None` when no effect touches the channel. Kept separate
+/// from the bundle because `lastChanceReloadCoefficient` is additive in
+/// `MODIFIER_SETTINGS` (the raw per-HP coefficient sums across sources), whereas the
+/// evaluated value is a multiplier.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReloadCoeffs {
+    pub main: Option<EffectCoeff>,
+    pub secondary: Option<EffectCoeff>,
+    pub torpedo: Option<EffectCoeff>,
 }
 
 /// The resolved modifiers for a state: the aggregated static bundle, the consumable
@@ -435,10 +444,8 @@ pub struct ReloadCoeffSources {
 pub struct EffectiveModifiers {
     bundle: ModifierBundle,
     sources: ModifierSources,
-    artillery_dist_coeff: f32,
-    artillery_dist_coeff_source: Option<InputId>,
+    spotter_range: Option<EffectCoeff>,
     reload_coeffs: ReloadCoeffs,
-    reload_coeff_sources: ReloadCoeffSources,
     version: Version,
 }
 
@@ -449,17 +456,12 @@ impl EffectiveModifiers {
     pub fn sources(&self) -> &ModifierSources {
         &self.sources
     }
-    pub fn artillery_dist_coeff(&self) -> f32 {
-        self.artillery_dist_coeff
+    /// The active consumable artillery range multiplier, if any.
+    pub fn spotter_range(&self) -> Option<&EffectCoeff> {
+        self.spotter_range.as_ref()
     }
-    pub fn artillery_dist_coeff_source(&self) -> Option<&InputId> {
-        self.artillery_dist_coeff_source.as_ref()
-    }
-    pub fn reload_coeffs(&self) -> ReloadCoeffs {
-        self.reload_coeffs
-    }
-    pub fn reload_coeff_sources(&self) -> &ReloadCoeffSources {
-        &self.reload_coeff_sources
+    pub fn reload_coeffs(&self) -> &ReloadCoeffs {
+        &self.reload_coeffs
     }
     pub fn version(&self) -> Version {
         self.version
@@ -572,10 +574,13 @@ impl Loadout<'_> {
                         }
                     }
                     Some(TRIGGER_ATBA_HEAT) => {
-                        if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty()) {
+                        // Without heat points the ramp has no shape to evaluate.
+                        if let Some(tmods) = trigger.modifiers().filter(|m| !m.is_empty())
+                            && let Some(heat_interpolator) = trigger.heat_interpolator()
+                        {
                             effects.push(Effect {
                                 id: EffectId::Skill(name),
-                                kind: EffectKind::Heat { heat_interpolator: trigger.heat_interpolator().clone() },
+                                kind: EffectKind::Heat { heat_interpolator: heat_interpolator.clone() },
                                 modifiers: tmods.clone(),
                             });
                         }
@@ -601,9 +606,11 @@ impl Loadout<'_> {
 
         walk_ability_slots(self.ship, provider, version, |recognized, cat| {
             let Some(consumable) = recognized.into_known() else { return };
-            let artillery_dist_coeff = cat.effect_fields().get("artilleryDistCoeff").copied().unwrap_or(1.0);
+            // An identity coefficient does not move range.
+            let artillery_dist_coeff =
+                cat.effect_fields().get("artilleryDistCoeff").copied().filter(|coeff| *coeff != 1.0);
             let cat_modifiers = cat.modifiers();
-            if artillery_dist_coeff != 1.0 || !cat_modifiers.is_empty() {
+            if artillery_dist_coeff.is_some() || !cat_modifiers.is_empty() {
                 effects.push(Effect {
                     id: EffectId::Consumable(consumable),
                     kind: EffectKind::Consumable { artillery_dist_coeff },
@@ -655,7 +662,13 @@ impl Effects {
                 }
                 EffectKind::StackingPerCount { .. } => EffectActivation::Stacks(facts.burn_flood_count),
                 EffectKind::StackingRepeated => {
-                    let n = if facts.max_health > 0.0 { (facts.potential_damage / facts.max_health) as u32 } else { 0 };
+                    let n = match facts.max_health {
+                        Some(max_health) if max_health.value() > 0.0 => {
+                            (facts.potential_damage / max_health.value()) as u32
+                        }
+                        // No pool to divide by.
+                        _ => 0,
+                    };
                     EffectActivation::Stacks(n)
                 }
                 EffectKind::Heat { .. } => EffectActivation::Heat(facts.secondary_fire_seconds),
@@ -685,10 +698,8 @@ impl Effects {
         const EPSILON: f32 = 1e-6;
         let mut contributed: Vec<CrewSkillModifier> = Vec::new();
         let mut sources = ModifierSources::default();
-        let mut dist: f32 = 1.0;
-        let mut dist_source: Option<InputId> = None;
+        let mut spotter_range: Option<EffectCoeff> = None;
         let mut reload_coeffs = ReloadCoeffs::default();
-        let mut reload_coeff_sources = ReloadCoeffSources::default();
 
         for effect in &self.0 {
             let activation = state.get(effect.id()).unwrap_or_else(|| effect.default_activation());
@@ -718,17 +729,12 @@ impl Effects {
                         let c = m.get_for_species(&species).clamp(0.0, 1.0);
                         let mul = (1.0 - lost * c).max(EPSILON);
                         for channel in health_scaled_reload_channels(m.name()) {
-                            let (coeff, source) = match channel {
-                                ReloadChannel::Main => (&mut reload_coeffs.main, &mut reload_coeff_sources.main),
-                                ReloadChannel::Secondary => {
-                                    (&mut reload_coeffs.secondary, &mut reload_coeff_sources.secondary)
-                                }
-                                ReloadChannel::Torpedo => {
-                                    (&mut reload_coeffs.torpedo, &mut reload_coeff_sources.torpedo)
-                                }
+                            let coeff = match channel {
+                                ReloadChannel::Main => &mut reload_coeffs.main,
+                                ReloadChannel::Secondary => &mut reload_coeffs.secondary,
+                                ReloadChannel::Torpedo => &mut reload_coeffs.torpedo,
                             };
-                            *coeff *= mul;
-                            *source = Some(input_id_for(effect.id()));
+                            *coeff = Some(EffectCoeff::stack(coeff.take(), mul, input_id_for(effect.id())));
                         }
                     }
                 }
@@ -737,10 +743,10 @@ impl Effects {
                         record_source(&mut sources, m, input_id_for(effect.id()), species, version);
                         contributed.push(m.clone());
                     }
-                    if *artillery_dist_coeff != 1.0 {
-                        dist_source = Some(input_id_for(effect.id()));
+                    if let Some(factor) = *artillery_dist_coeff {
+                        spotter_range =
+                            Some(EffectCoeff::stack(spotter_range.take(), factor, input_id_for(effect.id())));
                     }
-                    dist *= artillery_dist_coeff;
                 }
                 (EffectKind::StackingPerCount { blocks }, activation) => {
                     let n = stacks(activation);
@@ -754,7 +760,7 @@ impl Effects {
                     }
                 }
                 (EffectKind::StackingRepeated, activation) => {
-                    let n = stacks(activation).min(STACK_LIMIT);
+                    let n = stacks(activation);
                     for _ in 0..n {
                         for m in &effect.modifiers {
                             record_source(&mut sources, m, input_id_for(effect.id()), species, version);
@@ -792,37 +798,28 @@ impl Effects {
         }
 
         let bundle = ModifierBundle::from_modifiers(&contributed, species, version)?;
-        Ok(EffectiveModifiers {
-            bundle,
-            sources,
-            artillery_dist_coeff: dist,
-            artillery_dist_coeff_source: dist_source,
-            reload_coeffs,
-            reload_coeff_sources,
-            version,
-        })
+        Ok(EffectiveModifiers { bundle, sources, spotter_range, reload_coeffs, version })
     }
 }
 
 impl EffectiveModifiers {
     /// The ship's stat card under these effective modifiers, threading the spotter range
-    /// coefficient and per-armament reload multipliers into the factories.
+    /// coefficient and per-armament reload multipliers into the factories. `None` when
+    /// `ship` is not a vehicle or carries no TTX components.
     pub fn stats(
         &self,
         ship: &Param,
         selection: &ShipUpgradeSelection,
         level: u32,
         provider: &dyn GameParamProvider,
-    ) -> ShipStats {
+    ) -> Option<ShipStats> {
         crate::game_params::ttx::orchestration::ship_stats_with(
             ship,
             selection,
             &self.bundle,
             &self.sources,
-            self.reload_coeffs,
-            self.artillery_dist_coeff,
-            self.artillery_dist_coeff_source.clone(),
-            self.reload_coeff_sources.clone(),
+            &self.reload_coeffs,
+            self.spotter_range.as_ref(),
             level,
             self.version,
             provider,
@@ -831,29 +828,29 @@ impl EffectiveModifiers {
     }
 
     /// The ship's stat card plus per-stat provenance under these effective modifiers.
+    /// `None` when `ship` is not a vehicle or carries no TTX components.
     pub fn stats_explained(
         &self,
         ship: &Param,
         selection: &ShipUpgradeSelection,
         level: u32,
         provider: &dyn GameParamProvider,
-    ) -> (ShipStats, crate::game_params::ttx::provenance::ShipStatsProvenance) {
+    ) -> Option<(ShipStats, crate::game_params::ttx::provenance::ShipStatsProvenance)> {
         let mut rec = crate::game_params::ttx::provenance::On::default();
         let stats = crate::game_params::ttx::orchestration::ship_stats_with(
             ship,
             selection,
             &self.bundle,
             &self.sources,
-            self.reload_coeffs,
-            self.artillery_dist_coeff,
-            self.artillery_dist_coeff_source.clone(),
-            self.reload_coeff_sources.clone(),
+            &self.reload_coeffs,
+            self.spotter_range.as_ref(),
             level,
             self.version,
             provider,
             &mut rec,
-        );
-        (stats, rec.into_provenance())
+        )?;
+
+        Some((stats, rec.into_provenance()))
     }
 }
 
@@ -940,11 +937,9 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .modifiers(trigger_mods)
             .trigger_desc_ids(String::new())
             .trigger_type(trigger_type.to_owned())
@@ -997,11 +992,9 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(blocks)
             .duration(0.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .maybe_modifiers(None)
             .trigger_desc_ids(String::new())
             .trigger_type(TRIGGER_ACTIVATION_ON_BURN_FLOOD.to_owned())
@@ -1057,7 +1050,7 @@ mod tests {
             EffectActivation::Off
         );
         assert_eq!(
-            mk(EffectKind::Consumable { artillery_dist_coeff: 1.2 }).default_activation(),
+            mk(EffectKind::Consumable { artillery_dist_coeff: Some(1.2) }).default_activation(),
             EffectActivation::Off
         );
         assert_eq!(
@@ -1172,9 +1165,9 @@ mod tests {
         fields.insert("artilleryDistCoeff".to_string(), 1.2f32);
         let cat = AbilityCategory::builder()
             .consumable_type("scout".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(2)
+            .group(crate::game_params::types::ConsumableGroup::Ship)
+            .num_consumables(crate::game_types::ChargeCount::Finite(2))
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(240.0)
             .work_time(20.0)
@@ -1182,8 +1175,6 @@ mod tests {
             .build();
         let ability = Ability::builder()
             .can_buy(false)
-            .cost_credits(0)
-            .cost_gold(0)
             .is_free(true)
             .categories(HashMap::from([(variant.to_string(), cat)]))
             .build();
@@ -1241,7 +1232,7 @@ mod tests {
             loadout.effects(&ScoutProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpottingAircraft));
-        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.2 });
+        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: Some(1.2) });
     }
 
     #[test]
@@ -1252,9 +1243,9 @@ mod tests {
         fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
         let cat = AbilityCategory::builder()
             .consumable_type("speedBoosters".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(3)
+            .group(crate::game_params::types::ConsumableGroup::Ship)
+            .num_consumables(crate::game_types::ChargeCount::Finite(3))
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(180.0)
             .work_time(120.0)
@@ -1263,8 +1254,6 @@ mod tests {
             .build();
         let ability = Ability::builder()
             .can_buy(false)
-            .cost_credits(0)
-            .cost_gold(0)
             .is_free(true)
             .categories(HashMap::from([(variant.to_string(), cat)]))
             .build();
@@ -1322,7 +1311,7 @@ mod tests {
             loadout.effects(&SpeedBoostProvider(ability_param_rc), test_version()).iter().cloned().collect();
         assert_eq!(effects.len(), 1, "non-empty modifiers should emit a consumable effect even with coeff==1.0");
         assert_eq!(effects[0].id(), &EffectId::Consumable(Consumable::SpeedBoost));
-        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: 1.0 });
+        assert_eq!(effects[0].kind(), &EffectKind::Consumable { artillery_dist_coeff: None });
     }
 
     #[test]
@@ -1331,9 +1320,9 @@ mod tests {
         fields.insert("artilleryDistCoeff".to_string(), 1.0f32);
         let cat = AbilityCategory::builder()
             .consumable_type("crashCrew".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(-1)
+            .group(crate::game_params::types::ConsumableGroup::Ship)
+            .num_consumables(crate::game_types::ChargeCount::Unlimited)
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(120.0)
             .work_time(15.0)
@@ -1341,8 +1330,6 @@ mod tests {
             .build();
         let ability = Ability::builder()
             .can_buy(false)
-            .cost_credits(0)
-            .cost_gold(0)
             .is_free(true)
             .categories(HashMap::from([("CrashCrew".to_string(), cat)]))
             .build();
@@ -1418,7 +1405,6 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(15.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(0.0)
             .energy_coeff(0.0)
@@ -1513,7 +1499,8 @@ mod tests {
 
         let state_full = EffectsState::default();
         let result = effects.resolve(&state_full, Species::Cruiser, test_version()).unwrap();
-        assert!((result.reload_coeffs().main - 1.0).abs() < 1e-6, "at full HP reload_coeffs.main == 1.0");
+        let main = result.reload_coeffs().main.as_ref().expect("main channel set").value;
+        assert!((main - 1.0).abs() < 1e-6, "at full HP reload_coeffs.main == 1.0");
     }
 
     #[test]
@@ -1530,7 +1517,8 @@ mod tests {
             .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.5)));
         let result = effects.resolve(&state_half, Species::Cruiser, test_version()).unwrap();
         let expected = 1.0 - 0.5 * raw;
-        assert!((result.reload_coeffs().main - expected).abs() < 1e-6, "at 50% HP reload_coeffs.main == {expected}");
+        let main = result.reload_coeffs().main.as_ref().expect("main channel set").value;
+        assert!((main - expected).abs() < 1e-6, "at 50% HP reload_coeffs.main == {expected}");
     }
 
     #[test]
@@ -1544,9 +1532,11 @@ mod tests {
 
         let state = EffectsState::default()
             .set(EffectId::Skill("ArmamentReloadAaDamage".into()), EffectActivation::Health(HealthFraction::new(0.01)));
-        let coeffs = effects.resolve(&state, Species::Cruiser, test_version()).unwrap().reload_coeffs();
+        let resolved = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
+        let coeffs = resolved.reload_coeffs();
         let expected = 1.0 - 0.99 * 0.2;
-        for coeff in [coeffs.main, coeffs.secondary, coeffs.torpedo] {
+        for coeff in [&coeffs.main, &coeffs.secondary, &coeffs.torpedo] {
+            let coeff = coeff.as_ref().expect("channel set").value;
             assert!((coeff - expected).abs() < 1e-6, "at 1% HP each reload coefficient is {expected}, got {coeff}");
         }
     }
@@ -1555,19 +1545,21 @@ mod tests {
     fn resolve_consumable_on_applies_dist_coeff() {
         let effect = Effect::for_test(
             EffectId::Consumable(Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            EffectKind::Consumable { artillery_dist_coeff: Some(1.2) },
             vec![],
         );
         let effects = Effects(vec![effect]);
 
         let state_off = EffectsState::default();
         let result_off = effects.resolve(&state_off, Species::Cruiser, test_version()).unwrap();
-        assert!((result_off.artillery_dist_coeff() - 1.0).abs() < 1e-6, "off -> dist 1.0");
+        assert_eq!(result_off.spotter_range(), None, "off -> no range coefficient");
 
         let state_on =
             EffectsState::default().set(EffectId::Consumable(Consumable::SpottingAircraft), EffectActivation::On);
         let result_on = effects.resolve(&state_on, Species::Cruiser, test_version()).unwrap();
-        assert!((result_on.artillery_dist_coeff() - 1.2).abs() < 1e-6, "on -> dist 1.2");
+        let range_on = result_on.spotter_range().expect("on -> range coefficient");
+        assert!((range_on.value - 1.2).abs() < 1e-6, "on -> dist 1.2");
+        assert_eq!(range_on.source, InputId::Consumable(Recognized::Known(Consumable::SpottingAircraft)));
     }
 
     #[test]
@@ -1855,11 +1847,9 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type(String::new())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(15.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .modifiers(vec![uniform_modifier("shootShift", 1.2)])
             .trigger_desc_ids(String::new())
             .trigger_type("activationOnDetectTrigger".to_owned())
@@ -1875,11 +1865,9 @@ mod tests {
         let trigger = CrewSkillLogicTrigger::builder()
             .consumable_type("hydrophone".to_owned())
             .cooling_delay(0.0)
-            .cooling_interpolator(Interpolator::default())
             .count_to_modifier(Vec::new())
             .duration(30.0)
             .energy_coeff(0.0)
-            .heat_interpolator(Interpolator::default())
             .modifiers(vec![uniform_modifier("firstSectorTimeCoeff", 1.25)])
             .trigger_desc_ids(String::new())
             .trigger_type("activationOnConsumable".to_owned())
@@ -1927,7 +1915,8 @@ mod tests {
         let state = effects.situation_state(&SituationFacts::default());
         let r = effects.resolve(&state, Species::Cruiser, test_version()).unwrap();
         assert!((r.bundle().coef("GMShotDelay") - 0.9).abs() < 1e-6, "only the always-on modifier");
-        assert!((r.reload_coeffs().main - 1.0).abs() < 1e-6, "adrenaline identity at full HP");
+        let main = r.reload_coeffs().main.as_ref().expect("adrenaline sets the main channel").value;
+        assert!((main - 1.0).abs() < 1e-6, "adrenaline identity at full HP");
     }
 
     #[test]
@@ -1949,7 +1938,7 @@ mod tests {
         );
         let scout = Effect::for_test(
             EffectId::Consumable(Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            EffectKind::Consumable { artillery_dist_coeff: Some(1.2) },
             Vec::new(),
         );
         let effects = Effects::for_test(vec![furious, outnum, scout]);
@@ -1975,7 +1964,7 @@ mod tests {
             vec![uniform_modifier("regenCrewReloadCoeff", 0.992)],
         );
         let effects = Effects::for_test(vec![pot]);
-        let facts = SituationFacts { potential_damage: 2.0e6, max_health: 1.0e5, ..Default::default() };
+        let facts = SituationFacts { potential_damage: 2.0e6, max_health: Some(Hp::from(1.0e5)), ..Default::default() };
         let state = effects.situation_state(&facts);
         assert_eq!(state.get(&EffectId::Skill(CrewSkillName::from("Pot"))), Some(EffectActivation::Stacks(20)));
     }
@@ -1999,7 +1988,7 @@ mod tests {
         );
         let consumable = Effect::for_test(
             EffectId::Consumable(Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            EffectKind::Consumable { artillery_dist_coeff: Some(1.2) },
             vec![uniform_modifier("GMIdealRadius", 0.95)],
         );
 
@@ -2016,8 +2005,10 @@ mod tests {
             (result.bundle().coef("GMIdealRadius") - (0.85 * 0.95)).abs() < 1e-5,
             "binary + consumable GMIdealRadius"
         );
-        assert!((result.reload_coeffs().main - 0.9).abs() < 1e-6, "adrenaline at 50% HP");
-        assert!((result.artillery_dist_coeff() - 1.2).abs() < 1e-6, "consumable dist coeff");
+        let main = result.reload_coeffs().main.as_ref().expect("adrenaline sets the main channel").value;
+        assert!((main - 0.9).abs() < 1e-6, "adrenaline at 50% HP");
+        let range = result.spotter_range().expect("consumable sets the range coefficient").value;
+        assert!((range - 1.2).abs() < 1e-6, "consumable dist coeff");
     }
 
     #[test]

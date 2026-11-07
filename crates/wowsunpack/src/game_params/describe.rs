@@ -553,13 +553,7 @@ mod tests {
         use crate::game_params::types::Ability;
         let loader = EchoLoader;
         let v = version(11791718);
-        let ability = Ability::builder()
-            .can_buy(false)
-            .cost_credits(0)
-            .cost_gold(0)
-            .is_free(true)
-            .categories(Default::default())
-            .build();
+        let ability = Ability::builder().can_buy(false).is_free(true).categories(Default::default()).build();
         let c = DescribeContext {
             resource_loader: &loader,
             version: &v,
@@ -607,9 +601,9 @@ mod tests {
         fields.insert("totally_not_a_field".to_string(), 1.0_f32);
         let cat = AbilityCategory::builder()
             .consumable_type("foo".to_string())
-            .group("default".to_string())
             .icon_id("icon".to_string())
-            .num_consumables(2)
+            .num_consumables(crate::game_types::ChargeCount::Finite(2))
+            .lifecycle(crate::game_params::types::ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(5.0)
             .work_time(10.0)

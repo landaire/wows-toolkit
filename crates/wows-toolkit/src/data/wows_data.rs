@@ -248,11 +248,11 @@ impl BuildDataCache {
         let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir) else {
             return false;
         };
-        let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
-        if index.resolve_build(build, Some(&request.friendly_version())).is_some() {
+        let index = crate::task::replays::load_builds_index(&dump_base);
+        if index.as_ref().is_some_and(|index| index.resolve_build(build, Some(&request.friendly_version())).is_some()) {
             return true;
         }
-        if index.builds.is_empty()
+        if index.as_ref().is_none_or(|index| index.builds.is_empty())
             && let Ok(entries) = std::fs::read_dir(&dump_base)
         {
             for entry in entries.flatten() {
@@ -402,7 +402,7 @@ impl BuildDataCache {
     /// are read. Returns `None` when there is no dump index or extracted VFS.
     fn newest_dump_gui_vfs(&self) -> Option<(VfsPath, Option<Version>)> {
         let base = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir)?;
-        let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+        let index = crate::task::replays::load_builds_index(&base)?;
         let entry = index.builds.iter().max_by_key(|e| e.build)?;
         let build_dir = base.join(&entry.dir);
         let vfs = wows_data_mgr::cas_vfs::BuildCas::open(&build_dir)?.vfs();
@@ -566,7 +566,7 @@ impl BuildDataCache {
 
         // Fall back to auto-dumped game data via BuildsIndex
         if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir) {
-            let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
+            let index = crate::task::replays::load_builds_index(&dump_base);
 
             // Friendly version for the cross-region fallback. Build numbers are
             // per-server (the China client ships a different one for the same
@@ -580,7 +580,9 @@ impl BuildDataCache {
                 })
             });
 
-            if let Some((entry, exact)) = index.resolve_build(build, version_hint.as_deref()) {
+            if let Some((entry, exact)) =
+                index.as_ref().and_then(|index| index.resolve_build(build, version_hint.as_deref()))
+            {
                 if !exact {
                     warn!("No exact data for build {}; using {} (build {})", build, entry.version, entry.build);
                 }
@@ -602,7 +604,7 @@ impl BuildDataCache {
                         warn!("Could not load data for build {} from dump: {}", build, e);
                     }
                 }
-            } else if index.builds.is_empty() {
+            } else if index.as_ref().is_none_or(|index| index.builds.is_empty()) {
                 // Legacy fallback: scan directories for old-format dumps without builds.toml
                 if let Ok(entries) = std::fs::read_dir(&dump_base) {
                     for entry in entries.flatten() {

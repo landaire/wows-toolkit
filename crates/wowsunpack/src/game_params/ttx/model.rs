@@ -371,8 +371,8 @@ impl ShipStats {
                 item(&mut rows, TtxStat::LauncherRotationTime, &q, launcher.rotation_time.map(StatValue::Seconds));
                 item(&mut rows, TtxStat::LauncherNumBarrels, &q, launcher.num_barrels.map(StatValue::Count));
             }
-            for (idx, torp) in t.torpedoes.iter().enumerate() {
-                let q = torpedo_qualifier(torp, idx);
+            for torp in &t.torpedoes {
+                let q = torp.name.clone();
                 item(&mut rows, TtxStat::TorpedoDamage, &q, torp.damage.map(StatValue::Hp));
                 item(&mut rows, TtxStat::TorpedoSpeed, &q, torp.speed.map(StatValue::Knots));
                 item(&mut rows, TtxStat::TorpedoRange, &q, torp.range.map(StatValue::Km));
@@ -417,18 +417,9 @@ enum ArtilleryKind {
 }
 
 /// The ammo-kind qualifier for a shell row: the resolved `ammo_kind` string,
-/// falling back to the projectile `name`, then the index.
-fn shell_qualifier(shell: &ShellStats, idx: usize) -> String {
-    shell
-        .ammo_kind
-        .clone()
-        .or_else(|| (!shell.name.is_empty()).then(|| shell.name.clone()))
-        .unwrap_or_else(|| idx.to_string())
-}
-
-/// The qualifier for a torpedo row: the projectile `name`, else the index.
-pub fn torpedo_qualifier(torp: &TorpedoStats, idx: usize) -> String {
-    if torp.name.is_empty() { idx.to_string() } else { torp.name.clone() }
+/// falling back to the projectile `name`.
+pub fn shell_qualifier(shell: &ShellStats) -> String {
+    shell.ammo_kind.clone().unwrap_or_else(|| shell.name.clone())
 }
 
 /// Emit the per-shell rows for one shell under `qualifier`, mapping each
@@ -481,8 +472,8 @@ fn push_artillery_rows(
         scalar(rows, s.gun_rotation_time, gun.rotation_time.map(StatValue::Seconds));
     }
 
-    for (idx, shell) in a.shells.iter().enumerate() {
-        let q = shell_qualifier(shell, idx);
+    for shell in &a.shells {
+        let q = shell_qualifier(shell);
         push_shell_rows(rows, &s, shell, &q, item);
     }
 }
@@ -524,7 +515,7 @@ fn push_consumable_rows(
         let q = c.label.as_str();
         let s = &c.stats;
         item(rows, TtxStat::ConsumableReloadTime, q, Some(StatValue::Seconds(s.reload_time)));
-        item(rows, TtxStat::ConsumablePreparationTime, q, Some(StatValue::Seconds(s.preparation_time)));
+        item(rows, TtxStat::ConsumablePreparationTime, q, s.preparation_time.map(StatValue::Seconds));
         item(rows, TtxStat::ConsumableCharges, q, Some(StatValue::Ammo(s.charges)));
         item(rows, TtxStat::ConsumableWorkTime, q, s.work_time.map(StatValue::Seconds));
         item(rows, TtxStat::ConsumableMaxCapacity, q, s.max_capacity.map(StatValue::Float));
@@ -667,7 +658,7 @@ pub struct MainGun {
 }
 
 /// Per-shell stats (`ArtilleryAmmoTTX`, createAmmoTTX, FactoryArtillery.py:147-190).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ShellStats {
     /// Projectile GameParams name (`ammoParams.name`, FactoryArtillery.py:152).
@@ -779,7 +770,7 @@ pub struct Launcher {
 }
 
 /// Per-ammo torpedo stats (`TorpedoTTX`, FactoryTorpedoes.py:82-122).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TorpedoStats {
     /// Projectile GameParams name (`ammoParams.name`, FactoryTorpedoes.py:89).
@@ -834,6 +825,22 @@ pub struct Visibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A shell with only its identity set.
+    fn bare_shell(name: &str, ammo_kind: &str) -> ShellStats {
+        ShellStats {
+            name: name.to_owned(),
+            ammo_kind: Some(ammo_kind.to_owned()),
+            damage: None,
+            caliber: None,
+            speed: None,
+            penetration: None,
+            burn_chance: None,
+            flood_chance: None,
+            max_ammo: None,
+            disabled_underwater: None,
+        }
+    }
 
     #[test]
     fn ship_stats_default_is_empty() {
@@ -923,18 +930,8 @@ mod tests {
             artillery: Some(Artillery {
                 reload_time: Some(Seconds::from(30.0)),
                 shells: vec![
-                    ShellStats {
-                        name: "PHEShell".to_string(),
-                        ammo_kind: Some("HE".to_string()),
-                        damage: Some(Hp::from(5000.0)),
-                        ..Default::default()
-                    },
-                    ShellStats {
-                        name: "PAPShell".to_string(),
-                        ammo_kind: Some("AP".to_string()),
-                        damage: Some(Hp::from(11900.0)),
-                        ..Default::default()
-                    },
+                    ShellStats { damage: Some(Hp::from(5000.0)), ..bare_shell("PHEShell", "HE") },
+                    ShellStats { damage: Some(Hp::from(11900.0)), ..bare_shell("PAPShell", "AP") },
                 ],
                 ..Default::default()
             }),
@@ -992,7 +989,6 @@ mod tests {
         use crate::game_params::ttx::labels::TtxStat as T;
 
         let shell = || ShellStats {
-            ammo_kind: Some("HE".to_string()),
             damage: Some(Hp::from(1.0)),
             caliber: Some(Millimeters::from(1.0)),
             speed: Some(MetersPerSecond::from(1.0)),
@@ -1001,7 +997,7 @@ mod tests {
             flood_chance: Some(Percent::from(1.0)),
             max_ammo: Some(AmmoCount::Finite(1)),
             disabled_underwater: Some(true),
-            ..Default::default()
+            ..bare_shell("S", "HE")
         };
         let gun = || {
             Some(MainGun {
@@ -1033,7 +1029,7 @@ mod tests {
             label: "test".to_string(),
             stats: EffectiveConsumable {
                 reload_time: Seconds::from(1.0),
-                preparation_time: Seconds::from(1.0),
+                preparation_time: Some(Seconds::from(1.0)),
                 charges: AmmoCount::Finite(1),
                 work_time: Some(Seconds::from(1.0)),
                 max_capacity: Some(1.0),
@@ -1117,11 +1113,7 @@ mod tests {
         let stats = ShipStats {
             battery: Some(Battery { capacity: Some(240.0), regeneration: Some(1.2) }),
             artillery: Some(Artillery {
-                shells: vec![ShellStats {
-                    ammo_kind: Some("HE".to_string()),
-                    speed: Some(MetersPerSecond::from(820.0)),
-                    ..Default::default()
-                }],
+                shells: vec![ShellStats { speed: Some(MetersPerSecond::from(820.0)), ..bare_shell("S", "HE") }],
                 ..Default::default()
             }),
             ..Default::default()
@@ -1155,7 +1147,7 @@ mod tests {
             label: "Damage Control Party".to_string(),
             stats: EffectiveConsumable {
                 reload_time: Seconds::from(120.0),
-                preparation_time: Seconds::from(0.0),
+                preparation_time: Some(Seconds::from(0.0)),
                 charges: AmmoCount::Infinite,
                 work_time: Some(Seconds::from(15.0)),
                 max_capacity: None,

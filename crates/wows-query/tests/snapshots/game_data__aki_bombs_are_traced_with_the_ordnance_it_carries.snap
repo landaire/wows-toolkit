@@ -13,7 +13,6 @@ traces:
       projectile: Type 99 No. 80 Mk. 11
       param: PJPB750_AKI_STOCK
       ammo: HE
-      caliber_mm: 40
       penetration_mm: 61
     arrival:
       velocity_mps: 300

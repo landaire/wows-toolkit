@@ -147,7 +147,7 @@ pub struct Shell {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub muzzle_velocity_mps: Option<MetersPerSecond>,
 
-    /// Base chance to start a fire.
+    /// Base chance to start a fire. Absent when the shell cannot start fires.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fire_chance_pct: Option<Percent>,
 
@@ -483,9 +483,9 @@ fn shell_from_param(param: &Param, name: String, battery: Battery, ifhe: Option<
     })
 }
 
-/// `None` for ammo other than AP, HE and SAP.
+/// `None` for ammo other than AP, HE and SAP, or a projectile with no ammo type.
 pub(crate) fn shell_ammo(projectile: &Projectile) -> Option<Ammo> {
-    match AmmoType::from_game_str(projectile.ammo_type()) {
+    match AmmoType::from_game_str(projectile.ammo_type()?) {
         AmmoType::AP => Some(Ammo::Ap),
         AmmoType::HE => Some(Ammo::He),
         AmmoType::SAP => Some(Ammo::Sap),
@@ -494,15 +494,15 @@ pub(crate) fn shell_ammo(projectile: &Projectile) -> Option<Ammo> {
 }
 
 /// `None` for HE, which does not ricochet whatever angles its projectile lists.
-/// GameParams states no random band with a start angle past the always angle
-/// (91 deg); every hit from the always angle on ricochets, so ricochets start
-/// there.
 pub(crate) fn ricochet_angles(ammo: Ammo, projectile: &Projectile) -> Option<RicochetAngles> {
     if ammo == Ammo::He {
         return None;
     }
 
     let always = projectile.bullet_always_ricochet_at()?;
+    // GameParams writes bulletRicochetAt = 91 deg, past the always angle, for no
+    // random band; every hit from the always angle on ricochets, so ricochets
+    // start there.
     let start = projectile.bullet_ricochet_at()?.min(always);
 
     Some(RicochetAngles { from_deg: Degrees::new(start), always_from_deg: Degrees::new(always) })
@@ -549,7 +549,8 @@ mod tests {
     fn test_game() -> GameData {
         let root =
             std::path::PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
 

@@ -1011,13 +1011,7 @@ pub fn enumerable_values(kind: ValueKind) -> Option<Vec<String>> {
                 .collect(),
         ),
         ValueKind::Bool => Some(vec!["true".into(), "false".into()]),
-        // `GameMode::Invalid` cannot appear in an indexed row (its id does
-        // not fit `game_mode_id`'s wire type), so offering it here would
-        // suggest a value that can never match. The parser still reads the
-        // token if someone types it: only the offered list narrows.
-        ValueKind::GameMode => {
-            Some(GameMode::ALL.iter().filter(|m| m.is_offerable()).map(|m| m.as_token().to_string()).collect())
-        }
+        ValueKind::GameMode => Some(GameMode::ALL.iter().map(|m| m.as_token().to_string()).collect()),
         _ => None,
     }
 }
@@ -2244,23 +2238,6 @@ mod tests {
         match &e {
             Expr::Leaf(MatchTerm::Field(MatchField::GameMode, _, Value::GameMode(m))) => {
                 assert_eq!(*m, GameMode::ArmsRace);
-            }
-            other => panic!("got {other:?}"),
-        }
-        assert_eq!(parse_query(&print_query(&e)).expect("reparse"), e);
-    }
-
-    /// The dropdown excludes `Invalid` (its id cannot fit `game_mode_id`'s
-    /// wire type), but existing query text naming it must not turn into a
-    /// parse error just because the offered list narrowed. The parser stays
-    /// total over `GameMode::ALL`; only `enumerable_values` (the dropdown's
-    /// and the error hint's source) narrows.
-    #[test]
-    fn game_mode_invalid_still_parses_though_the_dropdown_excludes_it() {
-        let e = parse_query("game-mode:invalid").expect("parse");
-        match &e {
-            Expr::Leaf(MatchTerm::Field(MatchField::GameMode, _, Value::GameMode(m))) => {
-                assert_eq!(*m, GameMode::Invalid);
             }
             other => panic!("got {other:?}"),
         }

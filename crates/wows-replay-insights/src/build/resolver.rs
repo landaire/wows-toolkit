@@ -12,7 +12,6 @@ use wowsunpack::game_types::GameParamId;
 
 use wows_replays::analyzer::battle_controller::Player;
 
-use super::consumables::ChargeCount;
 use super::consumables::ConsumableSlot;
 use super::modifiers::ModifierSet;
 
@@ -53,7 +52,7 @@ impl ResolvedBuild {
         let skills = entity.commander_skills_raw(species);
 
         Self::from_ids(
-            config.ship_params_id(),
+            config.ship_params_id()?,
             config.units(),
             config.modernization(),
             captain_id,
@@ -70,15 +69,16 @@ impl ResolvedBuild {
         self.captain.as_ref().map(|c| c.index()).unwrap_or("PCW001")
     }
 
+    /// Slot lists keep one entry per slot; `None` is an empty slot.
     #[allow(clippy::too_many_arguments)]
     pub fn from_ids<P: GameParamProvider>(
         ship_id: GameParamId,
-        modules: &[GameParamId],
-        upgrades: &[GameParamId],
+        modules: &[Option<GameParamId>],
+        upgrades: &[Option<GameParamId>],
         captain_id: Option<GameParamId>,
         skill_types: &[u8],
-        signals: &[GameParamId],
-        abilities: &[GameParamId],
+        signals: &[Option<GameParamId>],
+        abilities: &[Option<GameParamId>],
         species: Species,
         version: Version,
         gp: &P,
@@ -138,13 +138,13 @@ impl ResolvedBuild {
     }
 }
 
-fn resolve_ids<P: GameParamProvider>(ids: &[GameParamId], gp: &P) -> Vec<Rc<Param>> {
-    ids.iter().filter_map(|id| gp.game_param_by_id(*id)).collect()
+fn resolve_ids<P: GameParamProvider>(ids: &[Option<GameParamId>], gp: &P) -> Vec<Rc<Param>> {
+    ids.iter().flatten().filter_map(|id| gp.game_param_by_id(*id)).collect()
 }
 
 fn resolve_slots<P: GameParamProvider>(
     ship: &Param,
-    chosen_abilities: &[GameParamId],
+    chosen_abilities: &[Option<GameParamId>],
     gp: &P,
     version: Version,
     modifiers: &ModifierSet,
@@ -156,7 +156,10 @@ fn resolve_slots<P: GameParamProvider>(
 
     let mut out = Vec::with_capacity(chosen_abilities.len());
     for (slot_index, ability_id) in chosen_abilities.iter().enumerate() {
-        let Some(ability_param) = gp.game_param_by_id(*ability_id) else {
+        let Some(ability_id) = *ability_id else {
+            continue;
+        };
+        let Some(ability_param) = gp.game_param_by_id(ability_id) else {
             tracing::trace!(
                 ?ability_id,
                 ship = ship.index(),
@@ -201,7 +204,7 @@ fn resolve_slots<P: GameParamProvider>(
         };
 
         let consumable_type_raw = category.consumable_type_raw();
-        let base_charges = ChargeCount::from_game_params(category.num_consumables());
+        let base_charges = category.num_consumables();
         let bonus_for_slot =
             if base_charges.is_unlimited() { 0 } else { modifiers.consumable_charge_bonus(consumable_type_raw) };
         let total_charges = base_charges.saturating_add(bonus_for_slot);
@@ -288,11 +291,6 @@ mod tests {
     fn personality() -> CrewPersonality {
         CrewPersonality::builder()
             .can_reset_skills_for_free(false)
-            .cost_credits(0)
-            .cost_elite_xp(0)
-            .cost_gold(0)
-            .cost_xp(0)
-            .person_name(String::new())
             .ships(
                 CrewPersonalityShips::builder()
                     .groups(Vec::new())
@@ -311,14 +309,7 @@ mod tests {
             .index("SHIP01".to_owned())
             .name("SHIP01".to_owned())
             .nation("USA".to_owned())
-            .data(ParamData::Achievement(
-                Achievement::builder()
-                    .is_group(false)
-                    .one_per_battle(false)
-                    .ui_type(String::new())
-                    .ui_name(String::new())
-                    .build(),
-            ))
+            .data(ParamData::Achievement(Achievement::builder().is_group(false).one_per_battle(false).build()))
             .build()
     }
 
@@ -386,7 +377,7 @@ mod tests {
         for (i, name) in upgrade_names.iter().enumerate() {
             let id = GameParamId::from(100u32 + i as u32);
             params.push(upgrade_param(id, name));
-            upgrade_ids.push(id);
+            upgrade_ids.push(Some(id));
         }
 
         let captain_id = GameParamId::from(999u32);

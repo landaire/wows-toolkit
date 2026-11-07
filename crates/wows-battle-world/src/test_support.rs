@@ -67,7 +67,7 @@ pub(crate) fn fixture_param() -> Rc<Param> {
 const SELF_PLAYER_JSON: &str = r#"{
     "username": "self",
     "clan": "",
-    "clan_id": 0,
+    "clan_id": null,
     "clan_color": 0,
     "db_id": 1,
     "realm": null,

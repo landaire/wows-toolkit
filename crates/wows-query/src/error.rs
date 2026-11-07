@@ -22,6 +22,12 @@ pub enum LoadError {
     #[error("{root} lists no game data builds in builds.toml")]
     NoBuilds { root: PathBuf },
 
+    #[error("failed to load the game data builds index")]
+    BuildsIndex {
+        #[source]
+        source: wows_data_mgr::error::BuildsIndexError,
+    },
+
     #[error("game data dump {dir} has no {file}")]
     MissingFile { dir: PathBuf, file: &'static str },
 
@@ -263,7 +269,7 @@ pub enum QueryError {
     #[error("{ship}'s armor model has no citadel plates")]
     NoCitadel { ship: String },
 
-    #[error("projectile {projectile} lacks the normalization angle or fuse threshold the ballistic solution needs")]
+    #[error("projectile {projectile} lacks data the ballistic solution needs")]
     ProjectileIncomplete { projectile: String },
 }
 

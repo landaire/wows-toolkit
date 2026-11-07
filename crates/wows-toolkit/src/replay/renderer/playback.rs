@@ -1144,11 +1144,14 @@ fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
             continue;
         };
         let config = props.ship_config();
+        let Some(ship_params_id) = config.ship_params_id() else {
+            continue;
+        };
         let crew = props.crew_modifiers_compact_params();
-        let captain_id = if crew.params_id().raw() != 0 { Some(crew.params_id()) } else { None };
+        let captain_id = crew.params_id();
         let skills = crew.learned_skills().for_species(&species);
         let Some(build) = wows_replay_insights::build::ResolvedBuild::from_ids(
-            config.ship_params_id(),
+            ship_params_id,
             config.units(),
             config.modernization(),
             captain_id,

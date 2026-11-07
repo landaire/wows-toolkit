@@ -624,7 +624,7 @@ mod tests {
             last_name: last_name.to_string(),
             db_id: AccountId(id),
             names: aliases.iter().map(|name| name.to_string()).collect(),
-            clan_id: 0,
+            clan_id: None,
             clan: clan.to_string(),
             timestamps: timestamps.iter().copied().collect(),
             arena_ids,

@@ -111,17 +111,20 @@ pub fn build_inventory_from_facts<P: GameParamProvider>(
     gp: &P,
     version: Version,
 ) -> Vec<ConsumableInventory> {
-    let Some(ship) = gp.game_param_by_id(facts.vehicle_id) else {
+    let Some(ship) = facts.vehicle_id.and_then(|id| gp.game_param_by_id(id)) else {
         return Vec::new();
     };
     let Some(species) = ship.species().and_then(|s| s.known()).copied() else {
         return Vec::new();
     };
     let cfg = &facts.ship_config;
-    let captain_id = if facts.crew.params_id().raw() != 0 { Some(facts.crew.params_id()) } else { None };
+    let Some(ship_params_id) = cfg.ship_params_id() else {
+        return Vec::new();
+    };
+    let captain_id = facts.crew.params_id();
     let skill_types = facts.crew.learned_skills().for_species(&species);
     let Some(build) = ResolvedBuild::from_ids(
-        cfg.ship_params_id(),
+        ship_params_id,
         cfg.units(),
         cfg.modernization(),
         captain_id,
@@ -140,5 +143,5 @@ pub fn build_inventory_from_facts<P: GameParamProvider>(
 /// Helper kept for callers that want species-specific facts lookups (e.g.
 /// the renderer needs species to interpret captain skills).
 pub fn facts_species<P: GameParamProvider>(facts: &VehicleFacts, gp: &P) -> Option<Species> {
-    gp.game_param_by_id(facts.vehicle_id)?.species()?.known().copied()
+    gp.game_param_by_id(facts.vehicle_id?)?.species()?.known().copied()
 }

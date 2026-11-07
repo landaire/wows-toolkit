@@ -6,6 +6,8 @@ use rootcause::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::error::RegistryError;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LocalRegistry {
     /// Path to a WoWs installation that always provides the latest builds.
@@ -119,15 +121,15 @@ impl LocalRegistry {
     }
 }
 
-pub fn load_registry(path: &Path) -> LocalRegistry {
-    if !path.exists() {
-        return LocalRegistry::default();
-    }
+/// Load the registry. A missing file is an empty registry: nothing has been registered.
+pub fn load_registry(path: &Path) -> Result<LocalRegistry, RegistryError> {
     let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return LocalRegistry::default(),
+        Ok(content) => content,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(LocalRegistry::default()),
+        Err(source) => return Err(RegistryError::Read { path: path.to_path_buf(), source }),
     };
-    toml::from_str(&content).unwrap_or_default()
+
+    toml::from_str(&content).map_err(|source| RegistryError::Parse { path: path.to_path_buf(), source })
 }
 
 pub fn save_registry(registry: &LocalRegistry, path: &Path) -> Result<(), Report> {

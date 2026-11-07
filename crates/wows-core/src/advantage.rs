@@ -256,12 +256,16 @@ pub fn calculate_advantage(
     bd.team0_pps = pps0;
     bd.team1_pps = pps1;
 
-    let seconds_left = time_left.unwrap_or(0).max(0) as f64;
+    // BattleLogic `timeLeft` is unknown until the server first sends it; no
+    // time-based projection applies before then.
+    let seconds_left = time_left.map(|time| time.max(0) as f64);
     let win = scoring.team_win_score as f64;
+    let in_time = |seconds: f64| seconds_left.is_some_and(|left| seconds < left);
 
     // Project final scores (capped at win score)
-    let proj0 = (team0.score as f64 + pps0 * seconds_left).min(win);
-    let proj1 = (team1.score as f64 + pps1 * seconds_left).min(win);
+    let project = |score: i64, pps: f64| (score as f64 + seconds_left.map_or(0.0, |left| pps * left)).min(win);
+    let proj0 = project(team0.score, pps0);
+    let proj1 = project(team1.score, pps1);
 
     // Time-to-win for each team (None = can't reach win score from cap income)
     let ttw = |score: i64, pps: f64| -> Option<f64> {
@@ -292,7 +296,7 @@ pub fn calculate_advantage(
 
     // Sub-factor: time-to-win (up to 3 pts)
     match (ttw0, ttw1) {
-        (Some(t0), Some(t1)) if t0 < seconds_left && t1 < seconds_left => {
+        (Some(t0), Some(t1)) if in_time(t0) && in_time(t1) => {
             // Both can reach win score — advantage to whoever gets there first
             let time_diff = (t1 - t0).abs();
             let ttw_pts = if time_diff > 30.0 {
@@ -310,10 +314,10 @@ pub fn calculate_advantage(
                 score_pts.1 += ttw_pts;
             }
         }
-        (Some(t0), _) if t0 < seconds_left => {
+        (Some(t0), _) if in_time(t0) => {
             score_pts.0 += 3.0; // Only team0 can win by score
         }
-        (_, Some(t1)) if t1 < seconds_left => {
+        (_, Some(t1)) if in_time(t1) => {
             score_pts.1 += 3.0; // Only team1 can win by score
         }
         _ => {}
@@ -369,8 +373,9 @@ pub fn calculate_advantage(
         let mut threat1: f32 = 0.0;
 
         // Time factor: strategic threats matter more with more time remaining.
-        // Full weight at 5+ minutes, scales down linearly.
-        let time_weight = (seconds_left / 300.0).clamp(0.2, 1.0) as f32;
+        // Full weight at 5+ minutes, scales down linearly. An unknown time
+        // gets the least weight.
+        let time_weight = seconds_left.map_or(0.2, |left| (left / 300.0).clamp(0.2, 1.0)) as f32;
 
         // DD/SS survival bonus (up to 2.5 pts)
         // These ships can contest caps and are very hard to eliminate.

@@ -422,7 +422,7 @@ mod tests {
         let cas_root = cas::cas_root(base.path());
         let hash = cas::store(&cas_root, b"pickled params").unwrap();
         let build_dir = base.path().join("1.2.3_100");
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.files.insert("content/GameParams.data".into(), hash);
 
         // No vfs/ tree exists: every downloaded build looks exactly like this.
@@ -441,7 +441,7 @@ mod tests {
         std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
         std::fs::write(build_dir.join("vfs/content/GameParams.data"), b"legacy params").unwrap();
         // No file hashes: the tree is the only copy of the data.
-        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+        let meta = BuildMetadata::new("0.6.0".into(), 50);
 
         let vfs = resolve_vfs(&build_dir, &cas_root, &meta);
 
@@ -500,7 +500,7 @@ mod tests {
     /// Write a CAS-format build dir under a dump base and return its dump_dir.
     fn cas_build(base: &Path, files: &[(&str, &[u8])], derived: &[(&str, &[u8])]) -> PathBuf {
         let cas_root = base.join("common");
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         for (rel, bytes) in files {
             meta.files.insert((*rel).to_string(), cas::store(&cas_root, bytes).unwrap());
         }
@@ -550,7 +550,7 @@ mod tests {
         let dump_dir = base.path().join("0.6.0_50");
         std::fs::create_dir_all(dump_dir.join("vfs/content")).unwrap();
         std::fs::write(dump_dir.join("vfs/content/x.dat"), b"legacy").unwrap();
-        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+        let meta = BuildMetadata::new("0.6.0".into(), 50);
         meta.save(&dump_dir.join("metadata.toml")).unwrap();
 
         let cas = BuildCas::open(&dump_dir).unwrap();

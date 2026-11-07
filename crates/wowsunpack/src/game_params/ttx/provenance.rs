@@ -171,8 +171,9 @@ impl StatAttribution {
     }
 }
 
-/// Provenance for a whole card: one `StatAttribution` per `StatRow`, in
-/// `ShipStats::rows()` order.
+/// Provenance for a whole card: one `StatAttribution` per numeric `StatRow`
+/// (`StatValue::as_f32` is `Some`), in `ShipStats::rows()` order. Unlimited
+/// pools and flags have no base or steps, so they are not recorded.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ShipStatsProvenance {
     pub attributions: Vec<StatAttribution>,

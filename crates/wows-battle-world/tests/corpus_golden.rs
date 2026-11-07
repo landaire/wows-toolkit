@@ -29,6 +29,11 @@ fn r3o(v: Option<f32>) -> Option<f32> {
     v.map(r3)
 }
 
+/// A death cause as the digests print it; `None` when the game named no cause.
+fn cause_text<T: std::fmt::Debug>(cause: Option<&T>) -> String {
+    cause.map_or_else(|| "None".to_owned(), |cause| format!("{cause:?}"))
+}
+
 #[derive(Serialize)]
 struct PosEntry {
     id: u32,
@@ -55,14 +60,14 @@ struct MinimapEntry {
 struct VehicleEntry {
     id: u32,
     health: f32,
-    max_health: f32,
+    max_health: Option<f32>,
     is_alive: bool,
     is_invisible: bool,
     visibility_flags: Option<u32>,
     team_id: i8,
     owner: u32,
     selected_weapon: String,
-    ship_params_id: String,
+    ship_params_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -74,7 +79,7 @@ struct EntityKindEntry {
 #[derive(Serialize)]
 struct KillEntry {
     clock: f32,
-    killer: u32,
+    killer: Option<u32>,
     victim: u32,
     cause: String,
 }
@@ -94,7 +99,7 @@ struct ChatEntry {
 struct CapturePointEntry {
     index: usize,
     position: Option<(f32, f32, f32)>,
-    radius: f32,
+    radius: Option<f32>,
     control_point_type: String,
     team_id: i64,
     invader_team: i64,
@@ -162,7 +167,7 @@ struct PlayerEntry {
     name: String,
     entity_id: u32,
     team_id: i64,
-    player_id: i64,
+    player_id: Option<i64>,
     relation: String,
     is_bot: bool,
     vehicle_id: String,
@@ -266,7 +271,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
                 name: st.username().to_string(),
                 entity_id: st.entity_id().raw(),
                 team_id: st.team_id(),
-                player_id: st.player_id().raw(),
+                player_id: st.player_id().map(|id| id.raw()),
                 relation: format!("{:?}", p.relation()),
                 is_bot: p.is_bot(),
                 vehicle_id: format!("{:?}", p.vehicle().id()),
@@ -281,8 +286,13 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
         .iter()
         .map(|(killer, deaths)| {
             let st = killer.initial_state();
-            let mut victims: Vec<String> =
-                deaths.iter().map(|d| format!("{}@{:?}", d.killer().raw(), d.cause())).collect();
+            let mut victims: Vec<String> = deaths
+                .iter()
+                .map(|d| {
+                    let killer = d.killer().expect("frags are keyed by their killer");
+                    format!("{}@{}", killer.raw(), cause_text(d.cause()))
+                })
+                .collect();
             victims.sort();
             FragEntry { killer_account_id: st.db_id().raw(), killer_name: st.username().to_string(), victims }
         })
@@ -358,7 +368,7 @@ fn capture_point_entries(
         .map(|c| CapturePointEntry {
             index: c.index,
             position: c.position.map(|p| (r3(p.x), r3(p.y), r3(p.z))),
-            radius: r3(c.radius),
+            radius: c.radius.map(r3),
             control_point_type: format!("{:?}", c.control_point_type),
             team_id: c.team_id,
             invader_team: c.invader_team,
@@ -417,14 +427,14 @@ fn digest_snapshot(filename: &str) -> Digest {
         .map(|(id, vp)| VehicleEntry {
             id: id.raw(),
             health: r3(vp.health()),
-            max_health: r3(vp.max_health()),
+            max_health: vp.max_health().map(r3),
             is_alive: vp.is_alive(),
             is_invisible: vp.is_invisible(),
             visibility_flags: vp.visibility_flags().map(|f| f.raw()),
             team_id: vp.team_id(),
             owner: vp.owner(),
             selected_weapon: format!("{:?}", vp.selected_weapon()),
-            ship_params_id: format!("{:?}", vp.ship_config().ship_params_id()),
+            ship_params_id: vp.ship_config().ship_params_id().map(|id| format!("{id:?}")),
         })
         .collect();
     vehicles.sort_by_key(|e| e.id);
@@ -441,9 +451,9 @@ fn digest_snapshot(filename: &str) -> Digest {
         .iter()
         .map(|k| KillEntry {
             clock: r3(k.clock.0),
-            killer: k.killer.raw(),
+            killer: k.killer.map(|killer| killer.raw()),
             victim: k.victim.raw(),
-            cause: format!("{:?}", k.cause),
+            cause: cause_text(k.cause.as_ref()),
         })
         .collect();
 

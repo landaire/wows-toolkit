@@ -680,10 +680,9 @@ impl PlayerTrackerView {
         // egui tab's own list, which keys its rows on the stored name.
         let facet = self.players.iter().find(|facet| facet.account_id == account);
         let entry = self.tracked.entry(account).or_insert_with(|| TrackedPlayer {
-            db_id: account,
             last_name: facet.map(|facet| facet.latest_name.clone()).unwrap_or_default(),
             clan: facet.map(|facet| facet.clan.clone()).unwrap_or_default(),
-            ..TrackedPlayer::default()
+            ..TrackedPlayer::new(account)
         });
         if entry.notes == note {
             return;
@@ -3138,7 +3137,7 @@ mod tests {
         let stats = wows_toolkit_viewmodel::match_stats::PlayerStatsOut {
             account_id: wows_replays::types::AccountId(1),
             region: "eu".to_owned(),
-            ship_id: wows_replays::types::GameParamId::default(),
+            ship_id: wows_replays::types::GameParamId::from(1u32),
             status: PlayerStatsStatus::Ok,
             battles: Some(12_345),
             overall_win_rate: Some(52.4),
@@ -3205,7 +3204,7 @@ mod tests {
             TrackedPlayer {
                 last_name: "Harvey635".to_string(),
                 names: ["Harvey635".to_string(), "Harvey42".to_string()].into_iter().collect(),
-                ..TrackedPlayer::default()
+                ..TrackedPlayer::new(account)
             },
         )]
         .into_iter()
@@ -3296,9 +3295,10 @@ mod tests {
             clan: "WTK".to_string(),
             match_count: 3,
         }];
-        let tracked = [(account, TrackedPlayer { notes: "camps the spawn".to_string(), ..TrackedPlayer::default() })]
-            .into_iter()
-            .collect();
+        let tracked =
+            [(account, TrackedPlayer { notes: "camps the spawn".to_string(), ..TrackedPlayer::new(account) })]
+                .into_iter()
+                .collect();
 
         window
             .update(cx, |tracker, _window, cx| tracker.seed_players_and_notes(players, tracked, cx))
@@ -3567,7 +3567,7 @@ mod clan_table_tests {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
-        let mut player = TrackedPlayer { clan: "WTK".to_string(), ..TrackedPlayer::default() };
+        let mut player = TrackedPlayer { clan: "WTK".to_string(), ..TrackedPlayer::new(AccountId(7)) };
         for (arena, minute) in [(1i64, 10i64), (2, 20)] {
             player.arena_ids.insert(ArenaId::from(arena));
             player.timestamps.insert(at(minute));
@@ -3611,8 +3611,11 @@ mod clan_table_tests {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(1400.), px(700.)), PlayerTrackerView::new);
 
-        let mut player =
-            TrackedPlayer { clan: "WTK".to_string(), last_name: "Harvey635".to_string(), ..TrackedPlayer::default() };
+        let mut player = TrackedPlayer {
+            clan: "WTK".to_string(),
+            last_name: "Harvey635".to_string(),
+            ..TrackedPlayer::new(AccountId(7))
+        };
         player.arena_ids.insert(ArenaId::from(1i64));
         player.timestamps.insert(at(10));
         let tracked = HashMap::from([(AccountId(7), player)]);
@@ -3659,8 +3662,11 @@ mod clan_table_tests {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
-        let mut player =
-            TrackedPlayer { clan: "WTK".to_string(), last_name: "Harvey635".to_string(), ..TrackedPlayer::default() };
+        let mut player = TrackedPlayer {
+            clan: "WTK".to_string(),
+            last_name: "Harvey635".to_string(),
+            ..TrackedPlayer::new(AccountId(7))
+        };
         player.arena_ids.insert(ArenaId::from(1i64));
         player.timestamps.insert(at(10));
         let tracked = HashMap::from([(AccountId(7), player)]);

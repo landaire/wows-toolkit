@@ -205,7 +205,7 @@ fn sample_ribbons() -> Vec<RibbonResult> {
         RibbonResult {
             name: "RIBBON_MAIN_CALIBER".to_string(),
             display_name: "Main Caliber Hit".to_string(),
-            description: "Main battery hit.".to_string(),
+            description: Some("Main battery hit.".to_string()),
             icon_key: "main_caliber".to_string(),
             is_subribbon: false,
             count: 24,
@@ -213,7 +213,7 @@ fn sample_ribbons() -> Vec<RibbonResult> {
         RibbonResult {
             name: "RIBBON_BULGE".to_string(),
             display_name: "Torpedo Protection Hit".to_string(),
-            description: "Hit a torpedo protection bulge.".to_string(),
+            description: Some("Hit a torpedo protection bulge.".to_string()),
             icon_key: "bulge".to_string(),
             is_subribbon: false,
             count: 3,
@@ -221,7 +221,7 @@ fn sample_ribbons() -> Vec<RibbonResult> {
         RibbonResult {
             name: "RIBBON_DESTROYED".to_string(),
             display_name: "Destroyed".to_string(),
-            description: "Destroyed an enemy ship.".to_string(),
+            description: Some("Destroyed an enemy ship.".to_string()),
             icon_key: "destroyed".to_string(),
             is_subribbon: false,
             count: 3,

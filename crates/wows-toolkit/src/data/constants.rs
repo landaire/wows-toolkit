@@ -109,7 +109,7 @@ pub fn install_constants(
         .map_err(|source| ImportError::Write { path: storage_path.clone(), source })?;
 
     let dump_path = dump_base.and_then(|base| {
-        let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+        let index = crate::task::replays::load_builds_index(base)?;
         index.find_by_build(parsed.build).map(|entry| base.join(&entry.dir).join("constants.json"))
     });
 

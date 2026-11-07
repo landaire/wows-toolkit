@@ -308,12 +308,15 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
                     ..
                 } => {
                     for player in players.iter().chain(bots.iter()) {
-                        println!(
-                            "{} {} ({:x?})",
-                            player.username(),
-                            player.player_id(),
-                            (player.player_id().raw() as u32).to_le_bytes(),
-                        );
+                        match player.player_id() {
+                            Some(player_id) => println!(
+                                "{} {} ({:x?})",
+                                player.username(),
+                                player_id,
+                                (player_id.raw() as u32).to_le_bytes(),
+                            ),
+                            None => println!("{} (no player id)", player.username()),
+                        }
                     }
                 }
                 _ => {
@@ -486,7 +489,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> rootcause::Re
         let builds_path = path.join("builds.toml");
         if builds_path.exists() {
             let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
-            let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+            let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path)?;
             if let Some((entry, _exact)) = index.resolve_build(replay_build, Some(&version_str)) {
                 eprintln!("No exact data for build {}; using {} (build {})", replay_build, entry.version, entry.build);
                 return Ok(path.join(&entry.dir));

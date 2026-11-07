@@ -144,7 +144,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
         }
         let ammo_param = metadata.game_param_by_name(ammo_name)?;
         let projectile = ammo_param.projectile()?;
-        shells.push(projectile.to_shell_info(ammo_name.clone()));
+        shells.extend(projectile.to_shell_info(ammo_name.clone()));
     }
 
     // Sort shells: AP first, then HE, then SAP
@@ -180,11 +180,11 @@ mod tests {
             muzzle_velocity: 0.0,
             mass_kg: 0.0,
             krupp: 0.0,
-            ricochet_angle: 0.0,
-            always_ricochet_angle: 0.0,
-            fuse_time: 0.0,
+            ricochet_angle: None,
+            always_ricochet_angle: None,
+            fuse_time: None,
             fuse_threshold: None,
-            burn_prob: 0.0,
+            burn_prob: None,
             air_drag: 0.0,
             normalization: None,
             cap: true,

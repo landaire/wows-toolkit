@@ -92,10 +92,8 @@ impl Build<'_> {
             };
             let activation = match effect.kind() {
                 EffectKind::Binary { .. } if met => Some(EffectActivation::On),
-                EffectKind::StackingPerCount { .. } if met => Some(EffectActivation::Stacks(u32::MAX)),
-                EffectKind::Heat { heat_interpolator } if met => {
-                    Some(EffectActivation::Heat(heat_interpolator.max_x()))
-                }
+                EffectKind::StackingPerCount { .. } if met => Some(EffectActivation::MaxStacks),
+                EffectKind::Heat { heat_interpolator } if met => heat_interpolator.max_x().map(EffectActivation::Heat),
                 EffectKind::HealthScaledReload | EffectKind::InnateAdrenaline { .. } => {
                     self.health.map(EffectActivation::Health)
                 }
@@ -135,7 +133,7 @@ impl BuildEffects {
         selection: &ShipUpgradeSelection,
         provider: &dyn GameParamProvider,
     ) -> Result<ShipStats, BuildError> {
-        Ok(self.modifiers.stats(ship, selection, level(ship)?, provider))
+        self.modifiers.stats(ship, selection, level(ship)?, provider).ok_or_else(|| no_stat_card(ship))
     }
 
     /// The same card with the inputs behind each stat.
@@ -145,7 +143,10 @@ impl BuildEffects {
         selection: &ShipUpgradeSelection,
         provider: &dyn GameParamProvider,
     ) -> Result<BuildCard, BuildError> {
-        let (stats, provenance) = self.modifiers.stats_explained(ship, selection, level(ship)?, provider);
+        let (stats, provenance) = self
+            .modifiers
+            .stats_explained(ship, selection, level(ship)?, provider)
+            .ok_or_else(|| no_stat_card(ship))?;
 
         Ok(BuildCard { stats, provenance })
     }
@@ -153,4 +154,8 @@ impl BuildEffects {
 
 fn level(ship: &Param) -> Result<u32, BuildError> {
     ship.vehicle().map(|vehicle| vehicle.level()).ok_or_else(|| BuildError::NotAShip { param: ship.name().to_owned() })
+}
+
+fn no_stat_card(ship: &Param) -> BuildError {
+    BuildError::NoStatCard { ship: ship.name().to_owned() }
 }

@@ -765,12 +765,17 @@ fn copy_constants_into_dump(dump_base: &Path, version: &str, build: u32) {
 /// A cache written before `builds.toml` existed is read by its directory name,
 /// which ends in the build number.
 fn dump_for_build(dump_base: &Path, build: u32, version: Option<&str>) -> Option<PathBuf> {
-    let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
-    if let Some((entry, exact)) = index.resolve_build(build, version) {
-        if !exact {
-            tracing::warn!(build, served_by = entry.build, version = %entry.version, "no exact dump for this build");
+    match wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml")) {
+        Ok(index) => {
+            if let Some((entry, exact)) = index.resolve_build(build, version) {
+                if !exact {
+                    tracing::warn!(build, served_by = entry.build, version = %entry.version, "no exact dump for this build");
+                }
+                return Some(dump_base.join(&entry.dir));
+            }
         }
-        return Some(dump_base.join(&entry.dir));
+        // The directory-name lookup below still finds a dump by its build number.
+        Err(err) => tracing::warn!(build, error = ?err, "the game data builds index does not load"),
     }
 
     let suffix = format!("_{build}");
@@ -796,7 +801,14 @@ pub fn prune_stale_caches(wows_dir: &Path, dump_base: Option<&Path>) {
     let mut keep: std::collections::HashSet<u32> =
         wowsunpack::game_data::list_available_builds(wows_dir).unwrap_or_default().into_iter().collect();
     if let Some(base) = dump_base {
-        let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+        let index = match wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml")) {
+            Ok(index) => index,
+            Err(err) => {
+                // Without the index the keep set is incomplete, and pruning would delete live caches.
+                tracing::warn!(error = ?err, "not pruning caches: the game data builds index does not load");
+                return;
+            }
+        };
         keep.extend(index.builds.iter().map(|entry| entry.build));
         // A dump written before the index existed is named for its build.
         if let Ok(entries) = std::fs::read_dir(base) {

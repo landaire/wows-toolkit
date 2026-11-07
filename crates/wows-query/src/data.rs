@@ -226,7 +226,8 @@ fn standard_skills(provider: &GameMetadataProvider) -> Vec<CrewSkill> {
 
 /// The directory of the newest build listed in a dump root's `builds.toml`.
 pub fn latest_dump_dir(root: &Path) -> Result<PathBuf, Report<LoadError>> {
-    let index = BuildsIndex::load(&root.join("builds.toml"));
+    let index =
+        BuildsIndex::load(&root.join("builds.toml")).map_err(|source| report!(LoadError::BuildsIndex { source }))?;
     let Some(entry) = index.builds.iter().max_by_key(|entry| entry.build) else {
         return Err(report!(LoadError::NoBuilds { root: root.to_path_buf() }));
     };
@@ -442,7 +443,7 @@ mod tests {
     #[cfg_attr(not(has_build_13533378), ignore)]
     fn alias_tables_resolve_to_their_targets() {
         let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = BuildsIndex::load(&root.join("builds.toml"));
+        let index = BuildsIndex::load(&root.join("builds.toml")).expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");

@@ -10,6 +10,7 @@ use egui::Color32;
 use egui::FontId;
 use egui::Pos2;
 use egui::Vec2;
+use wows_replays::types::GameParamId;
 use wt_collab_protocol::protocol::EntityId;
 use wt_collab_protocol::protocol::ShipConfigFilter;
 use wt_collab_protocol::types as wire;
@@ -76,12 +77,11 @@ pub enum Annotation {
 /// Ship assignment and configuration for Ship annotations (local egui mirror).
 #[derive(Clone, Debug)]
 pub struct AnnotationShipConfig {
-    /// `GameParamId` as raw `u64`.  0 = unassigned.
-    pub param_id: u64,
+    pub param_id: GameParamId,
     /// Localized display name (e.g. "Moskva").
     pub ship_name: String,
-    /// Selected hull upgrade name. Empty = default hull.
-    pub hull_name: String,
+    /// Selected hull upgrade name. `None` selects the default hull.
+    pub hull_name: Option<String>,
     /// Visibility distance coefficient (1.0 = stock).
     pub vis_coeff: f32,
     /// Main battery range coefficient (1.0 = stock).
@@ -90,20 +90,6 @@ pub struct AnnotationShipConfig {
     pub gs_coeff: f32,
     /// Which range circles to display.
     pub range_filter: AnnotationRangeFilter,
-}
-
-impl Default for AnnotationShipConfig {
-    fn default() -> Self {
-        Self {
-            param_id: 0,
-            ship_name: String::new(),
-            hull_name: String::new(),
-            vis_coeff: 1.0,
-            gm_coeff: 1.0,
-            gs_coeff: 1.0,
-            range_filter: AnnotationRangeFilter::default(),
-        }
-    }
 }
 
 /// Range circle visibility flags.

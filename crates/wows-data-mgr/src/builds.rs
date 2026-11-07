@@ -10,6 +10,8 @@ use std::path::Path;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::error::BuildsIndexError;
+
 // -- Master builds index (builds.toml) --
 
 /// Top-level index of all dumped builds.
@@ -29,9 +31,15 @@ pub struct BuildEntry {
 }
 
 impl BuildsIndex {
-    /// Load from disk. Returns an empty index if the file doesn't exist.
-    pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
+    /// Load from disk. A missing file is an empty index: nothing has been dumped there.
+    pub fn load(path: &Path) -> Result<Self, BuildsIndexError> {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(source) => return Err(BuildsIndexError::Read { path: path.to_path_buf(), source }),
+        };
+
+        toml::from_str(&contents).map_err(|source| BuildsIndexError::Parse { path: path.to_path_buf(), source })
     }
 
     /// Save to disk. Uses write-to-temp-then-rename for atomicity.
@@ -106,7 +114,7 @@ impl BuildsIndex {
 // -- Per-build metadata (metadata.toml) --
 
 /// Enhanced per-build metadata with file hashes for CAS management.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BuildMetadata {
     pub version: String,
     pub build: u32,
@@ -133,6 +141,11 @@ pub struct BuildMetadata {
 }
 
 impl BuildMetadata {
+    /// Metadata for a build with no files recorded yet.
+    pub fn new(version: String, build: u32) -> Self {
+        Self { version, build, materialized: false, files: BTreeMap::new(), derived: BTreeMap::new() }
+    }
+
     /// Load from disk. Returns None if the file doesn't exist or can't be parsed.
     pub fn load(path: &Path) -> Option<Self> {
         let contents = std::fs::read_to_string(path).ok()?;
@@ -295,9 +308,29 @@ mod tests {
         });
 
         index.save(&path).unwrap();
-        let loaded = BuildsIndex::load(&path);
+        let loaded = BuildsIndex::load(&path).unwrap();
         assert_eq!(loaded.builds.len(), 2);
         assert_eq!(loaded.builds[0].build, 11965230);
+    }
+
+    #[test]
+    fn missing_builds_index_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let loaded = BuildsIndex::load(&dir.path().join("builds.toml")).unwrap();
+
+        assert!(loaded.builds.is_empty());
+    }
+
+    #[test]
+    fn malformed_builds_index_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("builds.toml");
+        std::fs::write(&path, "[[builds]]\nbuild = \"not a number\"\n").unwrap();
+
+        let err = BuildsIndex::load(&path).unwrap_err();
+
+        assert!(matches!(err, BuildsIndexError::Parse { path: ref p, .. } if p == &path), "{err:?}");
     }
 
     #[test]
@@ -307,7 +340,7 @@ mod tests {
             version: "15.2.0".into(),
             build: 12100000,
             dir: "15.2.0_12100000".into(),
-            dumped_at: String::new(),
+            dumped_at: "2025-07-01T14:00:00Z".into(),
         });
 
         let (entry, exact) = index.resolve_build(12100000, None).unwrap();
@@ -322,7 +355,7 @@ mod tests {
             version: "15.2.0".into(),
             build: 12100000,
             dir: "15.2.0_12100000".into(),
-            dumped_at: String::new(),
+            dumped_at: "2025-07-01T14:00:00Z".into(),
         });
 
         // Different build but same version (e.g. CN server)
@@ -342,13 +375,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("metadata.toml");
 
-        let mut meta = BuildMetadata {
-            version: "15.2.0".into(),
-            build: 12100000,
-            materialized: false,
-            files: BTreeMap::new(),
-            derived: BTreeMap::new(),
-        };
+        let mut meta = BuildMetadata::new("15.2.0".into(), 12100000);
         meta.files.insert("gui/test.png".into(), "abcdef1234567890abcd".into());
 
         meta.save(&path).unwrap();
@@ -471,9 +498,9 @@ mod tests {
             version: "15.4.0".into(),
             build: 12506899,
             dir: "15.4.0_12506899".into(),
-            dumped_at: String::new(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         };
-        let mut metadata = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        let mut metadata = BuildMetadata::new("15.4.0".into(), 12506899);
         metadata.files.insert("res/a.xml".into(), "a24a46f62dc08fd95fc7".into());
         metadata.files.insert("res/b.xml".into(), "a24a46f62dc08fd95fc7".into());
         metadata.files.insert("res/other.xml".into(), "11111111111111111111".into());
@@ -522,7 +549,7 @@ mod tests {
         loaded.save(&path).unwrap();
         assert!(!BuildMetadata::load(&path).unwrap().materialized);
 
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.materialized = true;
         meta.files.insert("content/x.dat".into(), "0123456789abcdef0123".into());
         meta.save(&path).unwrap();

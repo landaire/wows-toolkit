@@ -31,7 +31,8 @@ fn replay() -> Vec<u8> {
 /// The 15.4.0 build of the dump root named by `WOWS_GAME_DATA`.
 fn build() -> BuildSource {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-    let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+    let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+        .expect("dump root has a readable builds.toml");
     let entry = index.find_by_build(12506899).expect("dump root lists build 12506899");
 
     BuildSource {

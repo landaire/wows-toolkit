@@ -19,7 +19,7 @@ use crate::units::Meters;
 
 /// Per-replay-session entity identifier for game objects (ships, buildings, smoke screens).
 /// The wire format is u32 but some packet types use i32 or i64.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -110,7 +110,7 @@ impl From<u32> for GunBits {
 /// methods like `receiveShotKills`, `receiveArtilleryShots`, etc.).
 /// This type distinguishes avatar entity IDs from vehicle/ship entity IDs to
 /// prevent silent mismatches.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -237,7 +237,7 @@ impl From<i64> for ArenaId {
 }
 
 /// A persistent player account identifier (db_id, avatar_id).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -277,7 +277,7 @@ impl From<i64> for AccountId {
 /// `tempArenaInfo`'s `vehicles[]`. Distinct from the account database id
 /// (`accountDBID`) and from the avatar entity id. It does not resolve against
 /// Vortex, so it must never be sent where a WG account id is expected.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -308,7 +308,7 @@ impl From<u32> for PlayerId {
 }
 
 /// A game parameter type identifier from GameParams (ships, equipment, etc.).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -1698,7 +1698,6 @@ impl Ribbon {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum DeathCause {
-    None,
     Artillery,
     Secondaries,
     Torpedo,
@@ -1737,13 +1736,10 @@ pub enum DeathCause {
 }
 
 impl DeathCause {
-    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.death_reason(id).map(|name| Self::from_name(name, version))
-    }
-
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
-            "NONE" => Recognized::Known(DeathCause::None),
+    /// `None` for `NONE`, the game's name for no cause.
+    pub fn from_name(name: &str, _version: Version) -> Option<Recognized<Self>> {
+        let cause = match name {
+            "NONE" => return None,
             "ARTILLERY" => Recognized::Known(DeathCause::Artillery),
             "ATBA" => Recognized::Known(DeathCause::Secondaries),
             "TORPEDO" => Recognized::Known(DeathCause::Torpedo),
@@ -1780,12 +1776,13 @@ impl DeathCause {
             "EVENT_6" => Recognized::Known(DeathCause::Event6),
             "MISSILE" => Recognized::Known(DeathCause::Missile),
             other => Recognized::Unknown(other.to_string()),
-        }
+        };
+
+        Some(cause)
     }
 
     pub const fn name(&self) -> &'static str {
         match self {
-            DeathCause::None => "NONE",
             DeathCause::Artillery => "ARTILLERY",
             DeathCause::Secondaries => "ATBA",
             DeathCause::Torpedo => "TORPEDO",
@@ -1880,9 +1877,9 @@ pub enum ConsumableUsageParams {
 
 /// Total available charges for a consumable slot.
 ///
-/// `AbilityCategory::num_consumables` uses `-1` to mean "unlimited" (base
-/// Damage Control, for instance). [`from_game_params`] converts at the
-/// boundary so the sentinel never leaks past this type.
+/// GameParams writes `numConsumables = -1` for an unlimited pool (base Damage
+/// Control, for instance). [`from_game_params`] converts at the parse
+/// boundary.
 ///
 /// [`from_game_params`]: ChargeCount::from_game_params
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1894,8 +1891,13 @@ pub enum ChargeCount {
 }
 
 impl ChargeCount {
-    pub fn from_game_params(num_consumables: isize) -> Self {
-        if num_consumables < 0 { ChargeCount::Unlimited } else { ChargeCount::Finite(num_consumables as u32) }
+    /// `None` for a negative count other than the `-1` unlimited marker, or one
+    /// past `u32`.
+    pub fn from_game_params(num_consumables: i64) -> Option<Self> {
+        match num_consumables {
+            -1 => Some(ChargeCount::Unlimited),
+            count => u32::try_from(count).ok().map(ChargeCount::Finite),
+        }
     }
 
     pub fn saturating_sub(self, used: u32) -> Self {
@@ -2444,9 +2446,7 @@ impl fmt::Display for BuoyancyState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
-#[derive(Default)]
 pub enum WeaponType {
-    #[default]
     Artillery,
     Secondaries,
     Torpedoes,
@@ -2479,36 +2479,46 @@ impl WeaponType {
     /// (`scripts/WeaponType.pyc`, e.g. in the `onSetWeaponLock` packet) to a
     /// variant. That enum is wider than the selectable weapons modeled here;
     /// non-selectable types (air defense, depth charges, lasers, waves, air
-    /// support, missiles, squadron) and the -1 `NONE` sentinel are preserved as
-    /// `Unknown(raw)`.
-    pub fn from_raw(raw: u32) -> crate::recognized::Recognized<Self, u32> {
-        use crate::recognized::Recognized;
+    /// support, missiles, squadron) are preserved as `Unknown(raw)`.
+    ///
+    /// `None` for -1 `NONE`, which arrives as `u32::MAX`.
+    pub fn from_raw(raw: u32) -> Option<Recognized<Self, u32>> {
         let known = match raw as i32 {
+            -1 => return None,
             0 => Self::Artillery,
             1 => Self::Secondaries,
             2 => Self::Torpedoes,
             3 => Self::Planes,
             6 => Self::Pinger,
-            _ => return Recognized::Unknown(raw),
+            _ => return Some(Recognized::Unknown(raw)),
         };
-        Recognized::Known(known)
+
+        Some(Recognized::Known(known))
     }
 }
 
 impl WeaponType {
+    /// `None` for `NONE`; an id missing from `SHIP_WEAPON_TYPES` is `Unknown(id)`.
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.weapon_type(id).map(|name| Self::from_name(name, version))
+        match constants.weapon_type(id) {
+            Some(name) => Self::from_name(name, version),
+            None => Some(Recognized::Unknown(id.to_string())),
+        }
     }
 
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
+    /// `None` for `NONE`, the game's name for no weapon.
+    pub fn from_name(name: &str, _version: Version) -> Option<Recognized<Self>> {
+        let weapon = match name {
+            "NONE" => return None,
             "ARTILLERY" => Recognized::Known(WeaponType::Artillery),
             "ATBA" => Recognized::Known(WeaponType::Secondaries),
             "TORPEDO" => Recognized::Known(WeaponType::Torpedoes),
             "AIRPLANES" => Recognized::Known(WeaponType::Planes),
             "PINGER" => Recognized::Known(WeaponType::Pinger),
             other => Recognized::Unknown(other.to_string()),
-        }
+        };
+
+        Some(weapon)
     }
 }
 
@@ -2667,13 +2677,13 @@ impl fmt::Display for BattleType {
 }
 
 /// Game mode, mapped from the `GAME_MODE` class in `shared_constants.py`.
-/// The ids are the game's own and have gaps at 3 through 6; `Invalid` is a
-/// real value the game uses, not an error case.
+/// The ids are the game's own and have gaps at 3 through 6. The game's
+/// `INVALID` (-1, no mode) has no variant; [`GameMode::from_id`] reads it as
+/// `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum GameMode {
-    Invalid,
     Test,
     Standart,
     Singlebase,
@@ -2705,8 +2715,7 @@ pub enum GameMode {
 }
 
 impl GameMode {
-    pub const ALL: [GameMode; 29] = [
-        GameMode::Invalid,
+    pub const ALL: [GameMode; 28] = [
         GameMode::Test,
         GameMode::Standart,
         GameMode::Singlebase,
@@ -2739,7 +2748,6 @@ impl GameMode {
 
     pub const fn id(self) -> i32 {
         match self {
-            GameMode::Invalid => -1,
             GameMode::Test => 0,
             GameMode::Standart => 1,
             GameMode::Singlebase => 2,
@@ -2771,21 +2779,10 @@ impl GameMode {
         }
     }
 
-    /// Whether this mode's id fits `ReplayMeta.gameMode`'s wire type, `u32`.
-    /// `Invalid` is the one variant with a negative id (-1, the game's own
-    /// sentinel for "no mode"), which a `u32` field can never carry; the
-    /// indexer (`replay_index.rs`) can therefore never write it into
-    /// `indexed_match.game_mode_id`. A filter or dropdown built from
-    /// `game_mode_id`'s value space must exclude exactly the modes this
-    /// returns `false` for, or it offers a choice the column can never
-    /// satisfy.
-    pub const fn is_offerable(self) -> bool {
-        self.id() >= 0
-    }
-
-    pub fn from_id(id: i32) -> Recognized<GameMode, i32> {
-        match id {
-            -1 => Recognized::Known(GameMode::Invalid),
+    /// `None` for -1, the game's id for no mode.
+    pub fn from_id(id: i32) -> Option<Recognized<GameMode, i32>> {
+        let mode = match id {
+            -1 => return None,
             0 => Recognized::Known(GameMode::Test),
             1 => Recognized::Known(GameMode::Standart),
             2 => Recognized::Known(GameMode::Singlebase),
@@ -2815,13 +2812,14 @@ impl GameMode {
             30 => Recognized::Known(GameMode::Respawns),
             31 => Recognized::Known(GameMode::RespawnsSectors),
             other => Recognized::Unknown(other),
-        }
+        };
+
+        Some(mode)
     }
 
     /// Lowercase kebab-case token used in the query grammar.
     pub const fn as_token(self) -> &'static str {
         match self {
-            GameMode::Invalid => "invalid",
             GameMode::Test => "test",
             GameMode::Standart => "standard",
             GameMode::Singlebase => "singlebase",
@@ -3819,7 +3817,7 @@ mod tests {
     fn every_documented_game_mode_id_round_trips() {
         for mode in GameMode::ALL {
             let back = GameMode::from_id(mode.id());
-            assert_eq!(back.known().copied(), Some(mode), "{mode:?} did not round trip");
+            assert_eq!(back.and_then(|back| back.known().copied()), Some(mode), "{mode:?} did not round trip");
         }
     }
 
@@ -3827,13 +3825,16 @@ mod tests {
     fn the_id_table_matches_the_games_own_values() {
         // Spot-checked against GAME_MODE in the deobfuscated shared_constants.
         // The gaps at 3..=6 are the game's, not an omission here.
-        assert_eq!(GameMode::Invalid.id(), -1);
+        assert_eq!(GameMode::from_id(-1), None, "-1 is the game's id for no mode");
         assert_eq!(GameMode::Standart.id(), 1);
         assert_eq!(GameMode::Domination.id(), 7);
         assert_eq!(GameMode::ArmsRace.id(), 15);
         assert_eq!(GameMode::RespawnsSectors.id(), 31);
         for gap in 3..=6 {
-            assert!(GameMode::from_id(gap).known().is_none(), "{gap} is a gap in the game's table");
+            assert!(
+                GameMode::from_id(gap).is_some_and(|mode| mode.known().is_none()),
+                "{gap} is a gap in the game's table"
+            );
         }
     }
 
@@ -3842,7 +3843,7 @@ mod tests {
         // A future build can add a mode. It must survive as its raw id, not
         // collapse onto a neighbouring variant.
         match GameMode::from_id(9_001) {
-            Recognized::Unknown(raw) => assert_eq!(raw, 9_001),
+            Some(Recognized::Unknown(raw)) => assert_eq!(raw, 9_001),
             other => panic!("got {other:?}"),
         }
     }
@@ -3864,25 +3865,19 @@ mod tests {
     fn all_carries_exactly_the_games_id_table() {
         // Transcribed from GAME_MODE in the deobfuscated shared_constants. The
         // gaps at 3..=6 are the game's. A changed or swapped id fails here.
-        let expected: [i32; 29] = [
-            -1, 0, 1, 2, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31,
-        ];
+        let expected: [i32; 28] =
+            [0, 1, 2, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31];
         let actual: Vec<i32> = GameMode::ALL.iter().map(|m| m.id()).collect();
         assert_eq!(actual, expected.to_vec());
     }
 
     #[test]
-    fn is_offerable_excludes_exactly_the_modes_whose_id_does_not_fit_the_wire_type() {
-        // `ReplayMeta.gameMode` is `u32` on the wire, so an id a `u32` cannot
-        // hold can never appear in an indexed row, which is what makes the
-        // predicate exactly `u32::try_from(id()).is_ok()` rather than a
-        // hand-picked exclusion list.
+    fn every_mode_id_fits_the_wire_type() {
+        // `ReplayMeta.gameMode` is `u32` on the wire, so a mode whose id a `u32`
+        // cannot hold could never appear in an indexed row.
         for mode in GameMode::ALL {
-            assert_eq!(mode.is_offerable(), u32::try_from(mode.id()).is_ok(), "{mode:?}");
+            assert!(u32::try_from(mode.id()).is_ok(), "{mode:?}");
         }
-        let excluded: Vec<GameMode> = GameMode::ALL.into_iter().filter(|m| !m.is_offerable()).collect();
-        assert_eq!(excluded, vec![GameMode::Invalid], "the offerable set must narrow by exactly Invalid, no more");
     }
 
     #[test]

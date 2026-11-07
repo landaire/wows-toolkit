@@ -627,7 +627,7 @@ const HISTORY_DEPTH: usize = 50;
 #[derive(Clone, Debug)]
 pub struct PlacedShip {
     /// The param the ranges are read from.
-    param_id: u64,
+    param_id: wowsunpack::game_types::GameParamId,
     name: String,
     species: wowsunpack::game_params::types::Species,
     /// Whether it is on the reader's side, which is what colours the marker.
@@ -1947,8 +1947,7 @@ impl TacticsBoard {
         let Some(param) = loaded.provider().game_param_by_index(&ship.param_index) else { return };
 
         let friendly = self.placing.as_ref().map(|placed| placed.friendly).unwrap_or(true);
-        self.placing =
-            Some(PlacedShip { param_id: param.id().raw(), name: ship.display_name.clone(), species, friendly });
+        self.placing = Some(PlacedShip { param_id: param.id(), name: ship.display_name.clone(), species, friendly });
         self.drawing.set_tool(wt_collab_client::drawing::Tool::Ship {
             species: format!("{species:?}"),
             friendly,
@@ -1984,13 +1983,11 @@ impl TacticsBoard {
         if let wt_collab_client::types::Annotation::Ship { config, .. } = &mut annotation
             && let Some(placed) = self.placing.clone()
         {
+            // Stock hull and no modifiers until the reader says otherwise,
+            // which is where the egui chooser leaves it.
             *config = Some(wt_collab_client::types::AnnotationShipConfig {
-                param_id: placed.param_id,
-                ship_name: placed.name,
                 range_filter: self.range_filter.clone(),
-                // Stock hull and no modifiers until the reader says otherwise,
-                // which is where the egui chooser leaves it.
-                ..Default::default()
+                ..wt_collab_client::types::AnnotationShipConfig::new(placed.param_id, placed.name)
             });
         }
         self.collab.add_annotation(annotation);
@@ -2613,11 +2610,11 @@ fn ship_ranges(
     let mut circles = Vec::new();
     for annotation in annotations {
         let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else { continue };
-        let Some(param) = GameParamProvider::game_param_by_id(provider.as_ref(), config.param_id.into()) else {
+        let Some(param) = GameParamProvider::game_param_by_id(provider.as_ref(), config.param_id) else {
             continue;
         };
         let Some(vehicle) = param.vehicle() else { continue };
-        let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
+        let hull = config.hull_name.as_deref();
         let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
         circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
     }

@@ -556,7 +556,7 @@ mod tests {
         let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
             "username": name,
             "clan": "",
-            "clan_id": 0,
+            "clan_id": null,
             "clan_color": 0,
             "db_id": db_id,
             "realm": "na",

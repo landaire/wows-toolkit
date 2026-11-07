@@ -536,9 +536,7 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// A deterministic placeholder for a value of `kind`, used only to replace a
 /// value whose kind no longer matches its field. Empty text, zero for a
 /// number or an ID, local midnight today for a timestamp, and the first declared variant
-/// for an enum -- except `GameMode`, whose placeholder is the first *offerable*
-/// variant (`GameMode::Invalid` cannot be offered; see `GameMode::is_offerable`),
-/// so the placeholder stays a value the dropdown can also produce. This is an
+/// for an enum, so the placeholder stays a value the dropdown can also produce. This is an
 /// arbitrary in-kind value, never a sentinel for "absent" -- `Outcome`'s
 /// placeholder is `Win`, a value a user can also choose on purpose, so
 /// nothing may treat it as meaning "unchosen".
@@ -573,9 +571,7 @@ fn placeholder_value(kind: ValueKind) -> Value {
         // reads as 1970, a day no replay was ever played on, and every widening
         // of it from there reaches back over the whole index.
         ValueKind::Timestamp => Value::Timestamp(query_text::start_of_today()),
-        ValueKind::GameMode => Value::GameMode(
-            GameMode::ALL.into_iter().find(|m| m.is_offerable()).expect("at least one mode is offerable"),
-        ),
+        ValueKind::GameMode => Value::GameMode(GameMode::ALL[0]),
         ValueKind::Rating => Value::Rating(PersonalRatingCategory::ALL[0]),
     }
 }
@@ -1969,10 +1965,8 @@ mod tests {
 
     /// A retarget that mints a placeholder must mint one the dropdown could
     /// also have produced: a value the user could reach some other way, not a
-    /// value that exists only inside this function. `GameMode`'s placeholder
-    /// (`is_offerable`'s first hit, not `ALL[0]`) is what motivates this test;
-    /// checked across every enum kind so a future kind cannot reintroduce the
-    /// same gap.
+    /// value that exists only inside this function. Checked across every enum
+    /// kind so a future kind cannot introduce that gap.
     #[test]
     fn the_placeholder_for_every_enum_kind_is_something_the_dropdown_offers() {
         use crate::query_bar::suggest::enum_values;

@@ -711,7 +711,7 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     let builds_path = path.join("builds.toml");
     if builds_path.exists() {
         let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
-        let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+        let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path)?;
         if let Some((entry, _exact)) = index.resolve_build(replay_build, Some(&version_str)) {
             let resolved = path.join(&entry.dir);
             warn!("No exact data for build {}; using {} (build {})", replay_build, entry.version, entry.build);

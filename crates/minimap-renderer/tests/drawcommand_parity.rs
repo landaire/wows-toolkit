@@ -256,8 +256,15 @@ fn normalize(cmd: &DrawCommand) -> String {
             format!("PreBattleCountdown s={seconds}")
         }
         DrawCommand::KillFeed { entries } => {
-            let names: Vec<_> = entries.iter().map(|e| (&e.killer_name, &e.victim_name, &e.cause)).collect();
-            format!("KillFeed {names:?}")
+            let names: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let killer = e.killer_name.as_deref().map_or_else(|| "None".to_owned(), |name| format!("{name:?}"));
+                    let cause = e.cause.as_ref().map_or_else(|| "None".to_owned(), |cause| format!("{cause:?}"));
+                    format!("({killer}, {:?}, {cause})", e.victim_name)
+                })
+                .collect();
+            format!("KillFeed [{}]", names.join(", "))
         }
         DrawCommand::ChatOverlay { entries } => {
             let msgs: Vec<_> = entries.iter().map(|e| (&e.player_name, &e.message)).collect();
@@ -275,20 +282,19 @@ fn normalize(cmd: &DrawCommand) -> String {
             width,
             height,
             ship_param_id,
-            hp_fraction,
-            hp_current,
-            hp_max,
+            hp,
             player_name,
             clan_tag,
             clan_color,
             ship_name,
             ..
         } => {
+            let hp = hp.map_or_else(
+                || "hp=None".to_owned(),
+                |hp| format!("hpf={:.3} hpc={:.0} hpm={:.0}", round2(hp.fraction()), hp.current, hp.max),
+            );
             format!(
-                "StatsSilhouette x={x} y={y} w={width} h={height} sid={ship_param_id:?} hpf={:.3} hpc={:.0} hpm={:.0} pn={player_name:?} ct={clan_tag:?} cc={clan_color:?} sn={ship_name:?}",
-                round2(*hp_fraction),
-                hp_current,
-                hp_max
+                "StatsSilhouette x={x} y={y} w={width} h={height} sid={ship_param_id:?} {hp} pn={player_name:?} ct={clan_tag:?} cc={clan_color:?} sn={ship_name:?}"
             )
         }
         DrawCommand::StatsDamage {

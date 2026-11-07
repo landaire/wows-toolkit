@@ -98,15 +98,12 @@ fn handle_vehicle_create<G: ResourceLoader>(
     version: Version,
 ) {
     let props = VehicleProps::from_create_props(&packet.props, version, constants);
-    let captain_id = props.crew_modifiers_compact_params().params_id();
-    let captain = if captain_id.raw() != 0 {
+    let captain = props.crew_modifiers_compact_params().params_id().and_then(|captain_id| {
         resources.game_param_by_id(captain_id).or_else(|| {
             warn!("failed to get captain param for id={}", captain_id);
             None
         })
-    } else {
-        None
-    };
+    });
     // Snapshot player link before borrowing the entity mutably.
     let player_rc = world.resource::<PlayerIndex>().0.get(&packet.entity_id).cloned();
     let entity = spawn_or_get(world, packet.entity_id);
@@ -159,7 +156,7 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
     let mut is_hidden = false;
     let mut is_suppressed = false;
     let mut team_id: i8 = 0;
-    let mut params_id: u32 = 0;
+    let mut params_id: Option<GameParamId> = None;
 
     if let Some(v) = packet.props.get("isAlive") {
         is_alive = v.uint_8_ref().map(|v| *v != 0).unwrap_or(true);
@@ -176,8 +173,8 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
         team_id = v.int_8_ref().copied().unwrap_or(0);
     }
     if let Some(v) = packet.props.get("paramsId") {
-        // 0 maps to GameParamId::default() (no param); correct when key absent (mirrors old controller).
-        params_id = v.uint_32_ref().copied().unwrap_or(0);
+        // Buildings without a param carry 0.
+        params_id = v.uint_32_ref().copied().filter(|id| *id != 0).map(GameParamId::from);
     }
 
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
@@ -187,7 +184,7 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
         is_hidden,
         is_suppressed,
         team_id: TeamId::from(team_id as i64),
-        params_id: GameParamId::from(params_id),
+        params_id,
     };
 
     let entity = spawn_or_get(world, packet.entity_id);
@@ -198,8 +195,7 @@ fn handle_building_create(_clock: GameClock, packet: &EntityCreatePacket<'_>, wo
 }
 
 fn handle_smoke_create(packet: &EntityCreatePacket<'_>, world: &mut World) {
-    let radius =
-        BigWorldDistance::from(packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0));
+    let radius = packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).map(BigWorldDistance::from);
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
     let state = SmokeScreenState { radius, position, points: vec![position] };
 
@@ -259,7 +255,7 @@ fn handle_interactive_zone_create(
     use wows_replays::analyzer::decoder::Recognized;
 
     let position = WorldPos::new(packet.position.x, packet.position.y, packet.position.z);
-    let radius = packet.props.get("radius").and_then(|v| v.float_32_ref().copied()).unwrap_or(0.0);
+    let zone_radius = packet.props.get("radius").and_then(|v| v.float_32_ref().copied());
     // -1 is the game's own "no owning team" encoding for zones (mirrors old controller and game protocol).
     let team_id = packet.props.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
 
@@ -271,7 +267,7 @@ fn handle_interactive_zone_create(
     let is_weather = zone_type.as_ref().and_then(|r| r.known().copied()) == Some(InteractiveZoneType::WeatherZone);
 
     if is_weather {
-        let name = decode_name(packet.props.get("name"));
+        let name = super::zones::decode_zone_name(packet.props.get("name"));
 
         // Try to match against a WeatherZoneData already seeded from BattleLogic state.
         // If found (by name, no entity_id yet), update it in-place instead of creating a duplicate.
@@ -279,7 +275,7 @@ fn handle_interactive_zone_create(
             let mut q = world.query::<(bevy_ecs::entity::Entity, &WeatherZoneData)>();
             let mut found = None;
             for (ecs_entity, data) in q.iter(world) {
-                if data.0.name == name && data.0.entity_id.is_none() {
+                if name.is_some() && data.0.name == name && data.0.entity_id.is_none() {
                     found = Some(ecs_entity);
                     break;
                 }
@@ -295,14 +291,16 @@ fn handle_interactive_zone_create(
             {
                 data.0.entity_id = Some(packet.entity_id);
                 data.0.position = position;
-                data.0.radius = radius;
+                if zone_radius.is_some() {
+                    data.0.radius = zone_radius;
+                }
             }
         } else {
             let wz = wows_replays::analyzer::battle_controller::state::LocalWeatherZone {
                 name,
                 position,
-                radius,
-                params_id: GameParamId::default(),
+                radius: zone_radius,
+                params_id: None,
                 entity_id: Some(packet.entity_id),
             };
             let entity = spawn_or_get(world, packet.entity_id);
@@ -353,7 +351,7 @@ fn handle_interactive_zone_create(
         let cp_state = CapturePointState {
             index: idx,
             position: Some(position),
-            radius,
+            radius: zone_radius,
             control_point_type: cp_type,
             team_id,
             invader_team,
@@ -405,7 +403,7 @@ fn handle_interactive_zone_create(
         let bz_state = BuffZoneState {
             entity_id: packet.entity_id,
             position,
-            radius,
+            radius: zone_radius,
             team_id,
             is_active: is_enabled,
             visual_state,
@@ -450,14 +448,14 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
 
         // Build Player if not already in the index.
         if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
-            let meta = metadata.iter().find(|m| m.id() == player.player_id()).or_else(|| {
+            let meta = metadata.iter().find(|m| Some(m.id()) == player.player_id()).or_else(|| {
                 let name = player.username();
                 if name.is_empty() { None } else { metadata.iter().find(|m| m.name() == name) }
             });
 
             match meta {
                 None => {
-                    warn!("could not map arena player to metadata player (player_id={})", player.player_id());
+                    warn!("could not map arena player to metadata player (player_id={:?})", player.player_id());
                 }
                 Some(meta) => {
                     if let Some(battle_player) = Player::from_arena_player(player, meta.as_ref(), resources) {
@@ -508,15 +506,12 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
         // instead of 0 until the first EntityProperty(health) arrives.
         props.seed_initial_health();
 
-        let captain_id = props.crew_modifiers_compact_params().params_id();
-        let captain = if captain_id.raw() != 0 {
+        let captain = props.crew_modifiers_compact_params().params_id().and_then(|captain_id| {
             resources.game_param_by_id(captain_id).or_else(|| {
                 warn!("failed to get captain param for id={}", captain_id);
                 None
             })
-        } else {
-            None
-        };
+        });
 
         // Snapshot player_rc before entity_mut borrow.
         let player_rc = world.resource::<PlayerIndex>().0.get(&entity_id).cloned();
@@ -693,24 +688,13 @@ fn as_dict<'a, 'b>(v: &'a ArgValue<'b>) -> Option<&'a std::collections::HashMap<
     }
 }
 
-fn decode_name(v: Option<&ArgValue<'_>>) -> String {
-    match v {
-        Some(ArgValue::Array(arr)) => {
-            let bytes: Vec<u8> = arr.iter().filter_map(|v| v.as_i64().map(|i| i as u8)).collect();
-            String::from_utf8(bytes).unwrap_or_default()
-        }
-        Some(ArgValue::String(s)) => String::from_utf8_lossy(s).into_owned(),
-        _ => String::new(),
-    }
-}
-
 fn arena_state_to_args<'a>(
     player: &PlayerStateData,
     ship_config: Option<&'a [u8]>,
 ) -> std::collections::HashMap<&'static str, ArgValue<'a>> {
     let mut args = std::collections::HashMap::new();
-    if player.max_health() > 0 {
-        args.insert("maxHealth", ArgValue::Float32(player.max_health() as f32));
+    if let Some(max_health) = player.max_health().filter(|health| *health > 0) {
+        args.insert("maxHealth", ArgValue::Float32(max_health as f32));
     }
     if let Some(blob) = ship_config {
         args.insert("shipConfig", ArgValue::Blob(blob));
@@ -738,7 +722,7 @@ fn parse_legacy_control_point(
         }
         _ => None,
     };
-    let radius = dict.get("radius").and_then(|v| v.as_f32()).unwrap_or(0.0);
+    let radius = dict.get("radius").and_then(|v| v.as_f32());
     let team_id = dict.get("teamId").and_then(|v| v.as_i64()).unwrap_or(-1);
     let invader_team = dict.get("invaderTeam").and_then(|v| v.as_i64()).unwrap_or(-1);
     let has_invaders = dict.get("hasInvaders").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
@@ -987,7 +971,7 @@ mod presence_tests {
         let json = r#"{
             "username": "bot9",
             "clan": "",
-            "clan_id": 0,
+            "clan_id": null,
             "clan_color": 0,
             "db_id": 0,
             "realm": null,

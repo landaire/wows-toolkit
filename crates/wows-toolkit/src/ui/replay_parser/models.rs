@@ -146,7 +146,7 @@ pub struct Achievement {
 pub struct Ribbon {
     pub name: String,
     pub display_name: String,
-    pub description: String,
+    pub description: Option<String>,
     pub icon_key: String,
     pub is_subribbon: bool,
     pub count: u64,

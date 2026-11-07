@@ -7,6 +7,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use serde::Deserialize;
+use serde::Deserializer;
+use wows_replays::types::GameParamId;
 use wt_collab_protocol::types::Annotation;
 use wt_collab_protocol::types::AnnotationRangeFilter;
 use wt_collab_protocol::types::AnnotationShipConfig;
@@ -14,10 +17,11 @@ use wt_collab_protocol::types::AnnotationShipConfig;
 /// A ship assigned to a placed marker, as the preset stores it.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct PresetShipConfig {
-    pub param_id: u64,
+    pub param_id: GameParamId,
     pub ship_name: String,
-    #[serde(default)]
-    pub hull_name: String,
+    /// `None` selects the default hull.
+    #[serde(default, deserialize_with = "hull_name_from_stored", skip_serializing_if = "Option::is_none")]
+    pub hull_name: Option<String>,
     #[serde(default = "one")]
     pub vis_coeff: f32,
     #[serde(default = "one")]
@@ -48,6 +52,14 @@ pub struct PresetRangeFilter {
 /// A coefficient a preset written before the field existed is read with.
 fn one() -> f32 {
     1.0
+}
+
+/// A preset may name the default hull with an empty string.
+fn hull_name_from_stored<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.filter(|name| !name.is_empty()))
 }
 
 /// One drawn thing on the board.
@@ -334,9 +346,9 @@ mod tests {
             species: "Cruiser".to_owned(),
             friendly: true,
             config: Some(AnnotationShipConfig {
-                param_id: 4242,
+                param_id: GameParamId::from(4242u32),
                 ship_name: "Moskva".to_owned(),
-                hull_name: "PRUH510_Moskva_1".to_owned(),
+                hull_name: Some("PRUH510_Moskva_1".to_owned()),
                 vis_coeff: 0.9,
                 gm_coeff: 1.1,
                 gs_coeff: 1.0,
@@ -354,7 +366,8 @@ mod tests {
         assert_eq!(species, "Cruiser");
         assert!(friendly);
         let config = config.expect("the ship kept its configuration");
-        assert_eq!(config.param_id, 4242);
+        assert_eq!(config.param_id, GameParamId::from(4242u32));
+        assert_eq!(config.hull_name.as_deref(), Some("PRUH510_Moskva_1"));
         assert_eq!(config.vis_coeff, 0.9);
         assert!(config.range_filter.detection && config.range_filter.radar);
         assert!(!config.range_filter.torpedo);
@@ -369,6 +382,14 @@ mod tests {
         assert_eq!(config.vis_coeff, 1.0);
         assert_eq!(config.gm_coeff, 1.0);
         assert_eq!(config.gs_coeff, 1.0);
-        assert_eq!(config.hull_name, "");
+        assert_eq!(config.hull_name, None);
+    }
+
+    /// A preset naming the default hull with an empty string reads as no hull.
+    #[test]
+    fn an_empty_hull_name_reads_as_the_default_hull() {
+        let json = r#"{"param_id":1,"ship_name":"Moskva","hull_name":""}"#;
+        let config: PresetShipConfig = serde_json::from_str(json).expect("it parses");
+        assert_eq!(config.hull_name, None);
     }
 }

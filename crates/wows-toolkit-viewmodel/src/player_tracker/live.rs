@@ -756,7 +756,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "username": username,
             "clan": clan,
-            "clan_id": if clan.is_empty() { 0 } else { 7 },
+            "clan_id": if clan.is_empty() { None } else { Some(7) },
             "clan_color": clan_color,
             "db_id": db_id,
             "realm": "na",

@@ -2108,6 +2108,7 @@ fn shown(value: f32) -> f32 {
 }
 
 fn format_value(value: f32, unit: Unit) -> String {
+    // Only unlimited charges are infinite; see `card_values`.
     if value.is_infinite() {
         return "unlimited".to_owned();
     }
@@ -2134,6 +2135,7 @@ fn card_values<'r>(
         .filter(move |row| row.stat == stat && qualifier_matches(game, row.qualifier.as_deref(), qualifier))
         .filter_map(|row| {
             let value = match row.value {
+                // Infinity sorts unlimited charges above every count.
                 StatValue::Ammo(AmmoCount::Infinite) => f32::INFINITY,
                 value => value.as_f32()?,
             };
@@ -2308,7 +2310,8 @@ mod tests {
         let root =
             std::path::PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
         let cache = std::env::temp_dir().join("wows-query-test-cache");
-        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
 
         GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads")

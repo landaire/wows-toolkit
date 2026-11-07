@@ -235,7 +235,6 @@ pub const VISIBILITY_FACTOR_BY_PLANE: &str = "visibilityFactorByPlane";
 // Visibility detection-range coefficients read by FactoryVisibility.createVisibilityTTX.
 pub const VISIBILITY_COEF_FIRE: &str = "visibilityCoefFire";
 pub const VISIBILITY_COEF_FIRE_BY_PLANE: &str = "visibilityCoefFireByPlane";
-pub const VISIBILITY_COEF_GK: &str = "visibilityCoefGK";
 pub const VISIBILITY_COEF_GK_IN_SMOKE: &str = "visibilityCoefGKInSmoke";
 // Submarine per-depth visibility dict; PreprocessedHull.py:13 reads ['PERISCOPE'].
 pub const VISIBILITY_FACTORS_BY_SUBMARINE: &str = "visibilityFactorsBySubmarine";

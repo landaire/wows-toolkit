@@ -347,7 +347,7 @@ pub fn dump_renderer_data(
 
     // Update master builds index
     let builds_path = output_base.join("builds.toml");
-    let mut index = BuildsIndex::load(&builds_path);
+    let mut index = BuildsIndex::load(&builds_path)?;
     index.upsert(BuildEntry {
         version: version_str.to_string(),
         build,
@@ -385,7 +385,7 @@ pub fn dump_renderer_data(
 /// The build must already exist in `builds.toml`. Returns the number of maps
 /// extracted; errors if no maps were found.
 pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui: bool) -> Result<usize, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let entry = index
         .find_by_build(build)
         .ok_or_else(|| report!("build {build} is not in builds.toml; dump it normally first"))?
@@ -440,7 +440,7 @@ pub fn extract_build_armor(
     output_base: &Path,
     workers: NonZeroUsize,
 ) -> Result<armor::ExtractSummary, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let entry = index
         .find_by_build(build)
         .ok_or_else(|| report!("build {build} is not in builds.toml; dump it normally first"))?
@@ -468,7 +468,7 @@ pub fn extract_build_armor(
 /// any it held. Reads only `bin/<build>/res/scripts.zip`. The build must
 /// already exist in `builds.toml`.
 pub fn extract_build_scripts(game_dir: &Path, build: u32, output_base: &Path) -> Result<std::path::PathBuf, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     if index.find_by_build(build).is_none() {
         bail!("build {build} is not in builds.toml; dump it normally first");
     }
@@ -516,7 +516,7 @@ pub fn create_progress_bar(game_dir: &Path) -> Option<ProgressBar> {
 /// Remove a dumped build, cleaning up orphaned CAS objects.
 pub fn remove_build(output_base: &Path, target_build: u32) -> Result<(), Report> {
     let builds_path = output_base.join("builds.toml");
-    let mut index = BuildsIndex::load(&builds_path);
+    let mut index = BuildsIndex::load(&builds_path)?;
     let entry = index
         .find_by_build(target_build)
         .ok_or_else(|| report!("Build {target_build} not found in builds.toml"))?
@@ -602,7 +602,7 @@ pub fn sync_from_local(
     if source_base == output_base {
         bail!("source and destination are the same directory");
     }
-    let source_index = BuildsIndex::load(&source_base.join("builds.toml"));
+    let source_index = BuildsIndex::load(&source_base.join("builds.toml"))?;
     if source_index.builds.is_empty() {
         bail!("no builds.toml entries found in source {}", source_base.display());
     }
@@ -719,7 +719,7 @@ fn copy_build_from_local(
 /// Add or update the build's entry in the destination `builds.toml`.
 fn register_build(output_base: &Path, entry: &BuildEntry) -> Result<(), Report> {
     let builds_path = output_base.join("builds.toml");
-    let mut index = BuildsIndex::load(&builds_path);
+    let mut index = BuildsIndex::load(&builds_path)?;
     index.upsert(entry.clone());
     index.save(&builds_path)
 }
@@ -966,7 +966,7 @@ impl RefreshSummary {
 /// `only_build` is given). The caller decides whether to garbage-collect
 /// afterwards; consult [`RefreshSummary::safe_to_gc`] first.
 pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<RefreshSummary, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let cas_root = cas::cas_root(output_base);
 
     let targets: Vec<&BuildEntry> = match only_build {
@@ -991,11 +991,8 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<Re
     for entry in &targets {
         let build_dir = output_base.join(&entry.dir);
         let meta_path = build_dir.join("metadata.toml");
-        let mut metadata = BuildMetadata::load(&meta_path).unwrap_or(BuildMetadata {
-            version: entry.version.clone(),
-            build: entry.build,
-            ..Default::default()
-        });
+        let mut metadata =
+            BuildMetadata::load(&meta_path).unwrap_or_else(|| BuildMetadata::new(entry.version.clone(), entry.build));
 
         #[cfg(feature = "constants")]
         let constants_added = if build_dir.join("constants.json").exists() {
@@ -1175,7 +1172,7 @@ pub fn relink_builds(
     only_build: Option<u32>,
     sync: TreeSync,
 ) -> Result<BTreeMap<String, Vec<String>>, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let cas_root = cas::cas_root(output_base);
 
     let targets: Vec<&BuildEntry> = match only_build {
@@ -1217,7 +1214,7 @@ pub fn prune_materialized_trees(
     output_base: &Path,
     only_build: Option<u32>,
 ) -> Result<BTreeMap<String, usize>, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let targets: Vec<&BuildEntry> = match only_build {
         Some(build) => index.builds.iter().filter(|entry| entry.build == build).collect(),
         None => index.builds.iter().collect(),
@@ -1255,7 +1252,7 @@ pub fn prune_materialized_trees(
 /// persisting the entries recovered. Returns a report per build that had
 /// anything to report at all.
 pub fn reindex_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTreeMap<String, ReindexReport>, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let cas_root = cas::cas_root(output_base);
 
     let targets: Vec<&BuildEntry> = match only_build {
@@ -1289,7 +1286,7 @@ pub fn reindex_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTr
 /// tree or the derived artifacts). Aborts without deleting anything if any
 /// build's metadata cannot be read, so in-use objects are never removed.
 pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let cas_root = cas::cas_root(output_base);
 
     let mut live = std::collections::HashSet::new();
@@ -1499,7 +1496,7 @@ fn verify_builds_audited(
     check_hashes: bool,
     audit: impl FnMut(&str) -> ObjectAudit,
 ) -> Result<Vec<BuildVerification>, Report> {
-    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let index = BuildsIndex::load(&output_base.join("builds.toml"))?;
     let cas_root = cas::cas_root(output_base);
 
     let loaded: Vec<(&BuildEntry, Option<BuildMetadata>)> = index
@@ -2054,7 +2051,7 @@ mod maintenance_tests {
 
     fn write_build_metadata(build_dir: &Path, version: &str, build: u32, files: &[(&str, &str)]) {
         std::fs::create_dir_all(build_dir).unwrap();
-        let mut meta = BuildMetadata { version: version.to_string(), build, ..Default::default() };
+        let mut meta = BuildMetadata::new(version.to_string(), build);
         for (rel, hash) in files {
             meta.files.insert((*rel).to_string(), (*hash).to_string());
         }
@@ -2063,12 +2060,12 @@ mod maintenance_tests {
 
     fn register(base: &Path, version: &str, build: u32) {
         let path = base.join("builds.toml");
-        let mut index = BuildsIndex::load(&path);
+        let mut index = BuildsIndex::load(&path).unwrap();
         index.upsert(BuildEntry {
             version: version.to_string(),
             build,
             dir: format!("{version}_{build}"),
-            dumped_at: String::new(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&path).unwrap();
     }
@@ -2173,10 +2170,10 @@ mod maintenance_tests {
     /// per referencing build.
     #[test]
     fn an_object_is_hashed_once_even_when_several_builds_reference_it() {
-        let mut first = BuildMetadata { version: "15.3.0".into(), build: 12400000, ..Default::default() };
+        let mut first = BuildMetadata::new("15.3.0".into(), 12400000);
         first.files.insert("res/a.xml".into(), "shared".into());
         first.files.insert("res/only_in_first.xml".into(), "unique".into());
-        let mut second = BuildMetadata { version: "15.4.0".into(), build: 12506899, ..Default::default() };
+        let mut second = BuildMetadata::new("15.4.0".into(), 12506899);
         second.files.insert("res/b.xml".into(), "shared".into());
         second.derived.insert("GameParams.rkyv".into(), "shared".into());
 
@@ -2423,15 +2420,15 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"hi").unwrap();
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(&build_dir).unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.files.insert("content/x.dat".into(), hash);
         meta.save(&build_dir.join("metadata.toml")).unwrap();
-        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml")).unwrap();
         index.upsert(BuildEntry {
             version: "1.2.3".into(),
             build: 100,
             dir: "1.2.3_100".into(),
-            dumped_at: "now".into(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&base.path().join("builds.toml")).unwrap();
 
@@ -2450,18 +2447,18 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"rkyv").unwrap();
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(&build_dir).unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         // A build with links is a materialized build.
         meta.materialized = true;
         meta.files.insert("content/x.dat".into(), hash.clone());
         meta.derived.insert("game_params.rkyv".into(), hash.clone());
         meta.save(&build_dir.join("metadata.toml")).unwrap();
-        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml")).unwrap();
         index.upsert(BuildEntry {
             version: "1.2.3".into(),
             build: 100,
             dir: "1.2.3_100".into(),
-            dumped_at: "now".into(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&base.path().join("builds.toml")).unwrap();
         if cas::link_file(&cas_root, &hash, &build_dir.join("game_params.rkyv")).is_err() {
@@ -2490,15 +2487,15 @@ mod maintenance_tests {
         let tree_file = build_dir.join("vfs/content/GameParams.data");
         std::fs::create_dir_all(tree_file.parent().unwrap()).unwrap();
         std::fs::write(&tree_file, b"legacy params").unwrap();
-        let mut meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+        let mut meta = BuildMetadata::new("0.6.0".into(), 50);
         meta.materialized = true;
         meta.save(&build_dir.join("metadata.toml")).unwrap();
-        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml")).unwrap();
         index.upsert(BuildEntry {
             version: "0.6.0".into(),
             build: 50,
             dir: "0.6.0_50".into(),
-            dumped_at: "now".into(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&base.path().join("builds.toml")).unwrap();
 
@@ -2520,7 +2517,7 @@ mod maintenance_tests {
         std::fs::create_dir_all(mo.parent().unwrap()).unwrap();
         std::fs::write(&mo, b"catalog bytes").unwrap();
 
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
         meta.materialized = true;
         refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
 
@@ -2537,7 +2534,7 @@ mod maintenance_tests {
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(build_dir.join("translations/ru/LC_MESSAGES")).unwrap();
         std::fs::write(build_dir.join("translations/ru/LC_MESSAGES/global.mo"), b"catalog").unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
 
         refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
 
@@ -2557,7 +2554,7 @@ mod maintenance_tests {
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(build_dir.join("translations/ru/LC_MESSAGES")).unwrap();
         std::fs::write(build_dir.join("translations/ru/LC_MESSAGES/global.mo"), b"catalog").unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.materialized = true;
 
         refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
@@ -2587,7 +2584,7 @@ mod maintenance_tests {
         // Pruning leaves the directory skeleton behind but removes every link.
         std::fs::create_dir_all(build_dir.join("translations/ru/LC_MESSAGES")).unwrap();
 
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
         meta.derived.insert("translations/ru/LC_MESSAGES/global.mo".into(), mo_hash.clone());
         meta.derived.insert("game_params.rkyv".into(), rkyv_hash.clone());
 
@@ -2608,7 +2605,7 @@ mod maintenance_tests {
         let build_dir = base.join("1.0.0_100");
         std::fs::create_dir_all(&build_dir).unwrap();
 
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
         meta.derived.insert("game_params.rkyv".into(), "0123456789abcdef0123".into());
 
         let missing = refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
@@ -2625,7 +2622,7 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"icon bytes").unwrap();
         let build_dir = base.join("1.0.0_100");
         cas::link_file(&cas_root, &hash, &build_dir.join("vfs/gui/stray.png")).unwrap();
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
 
         let report = reindex_build(&build_dir, &cas_root, &mut meta).unwrap();
 
@@ -2645,7 +2642,7 @@ mod maintenance_tests {
         let build_dir = base.join("1.0.0_100");
         let link = build_dir.join("vfs/gui/icon.png");
         cas::link_file(&cas_root, "0123456789abcdef0123", &link).unwrap();
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
         meta.files.insert("gui/icon.png".into(), current.clone());
 
         let repointed = relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
@@ -2661,7 +2658,7 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"hi").unwrap();
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.materialized = true;
         meta.files.insert("content/x.dat".into(), hash.clone());
 
@@ -2708,7 +2705,7 @@ mod maintenance_tests {
         let cas_root = cas::cas_root(base.path());
         let hash = cas::store(&cas_root, b"hi").unwrap();
         let build_dir = base.path().join("1.2.3_100");
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.materialized = true;
         meta.files.insert("content/x.dat".into(), hash.clone());
         let unrecorded = build_dir.join("vfs/content/gone.dat");
@@ -2741,7 +2738,7 @@ mod maintenance_tests {
             eprintln!("skipping: cannot create symlinks on this platform/account");
             return;
         }
-        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+        let meta = BuildMetadata::new("0.6.0".into(), 50);
 
         let repointed = relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
 
@@ -2788,7 +2785,7 @@ mod maintenance_tests {
         let cas_root = cas::cas_root(base);
         let build_dir = base.join("1.0.0_100");
         cas::link_file(&cas_root, "0123456789abcdef0123", &build_dir.join("vfs/gui/stray.png")).unwrap();
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
 
         let report = reindex_build(&build_dir, &cas_root, &mut meta).unwrap();
 
@@ -2827,16 +2824,16 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"hi").unwrap();
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(&build_dir).unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         // No tree, and the metadata does not claim one.
         meta.files.insert("content/x.dat".into(), hash);
         meta.save(&build_dir.join("metadata.toml")).unwrap();
-        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml")).unwrap();
         index.upsert(BuildEntry {
             version: "1.2.3".into(),
             build: 100,
             dir: "1.2.3_100".into(),
-            dumped_at: "now".into(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&base.path().join("builds.toml")).unwrap();
 
@@ -2855,16 +2852,16 @@ mod maintenance_tests {
         let hash = cas::store(&cas_root, b"hi").unwrap();
         let build_dir = base.path().join("1.2.3_100");
         std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         meta.materialized = true;
         meta.files.insert("content/x.dat".into(), hash.clone());
         meta.save(&build_dir.join("metadata.toml")).unwrap();
-        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml")).unwrap();
         index.upsert(BuildEntry {
             version: "1.2.3".into(),
             build: 100,
             dir: "1.2.3_100".into(),
-            dumped_at: "now".into(),
+            dumped_at: "2025-12-01T09:00:00Z".into(),
         });
         index.save(&base.path().join("builds.toml")).unwrap();
         if cas::link_file(&cas_root, &hash, &build_dir.join("vfs/content/x.dat")).is_err() {
@@ -2885,7 +2882,7 @@ mod maintenance_tests {
         let build_dir = base.join("1.0.0_100");
         std::fs::create_dir_all(&build_dir).unwrap();
         std::fs::write(build_dir.join("constants.json"), b"{}").unwrap();
-        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.0.0".into(), 100);
         for (rel, hash) in derived {
             meta.derived.insert((*rel).to_string(), (*hash).to_string());
         }

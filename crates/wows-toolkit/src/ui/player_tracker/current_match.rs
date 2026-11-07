@@ -1202,7 +1202,8 @@ mod tests {
             })
             .collect();
         friendly[0].tracked = Some(AccountId(1));
-        let encountered = TrackedPlayer { arena_ids: (1..=7).map(ArenaId::new).collect(), ..Default::default() };
+        let encountered =
+            TrackedPlayer { arena_ids: (1..=7).map(ArenaId::new).collect(), ..TrackedPlayer::new(AccountId(1)) };
         let tracked = HashMap::from([(AccountId(1), encountered)]);
         let twitch = TwitchState::default();
         let now = Timestamp::now();

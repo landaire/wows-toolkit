@@ -445,13 +445,14 @@ pub struct VehicleState {
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct CrewModifiersCompactParams {
-    params_id: GameParamId,
+    /// `None` until a `paramsId` names the commander.
+    params_id: Option<GameParamId>,
     is_in_adaptation: Option<bool>,
     learned_skills: Skills,
 }
 
 impl CrewModifiersCompactParams {
-    pub fn params_id(&self) -> GameParamId {
+    pub fn params_id(&self) -> Option<GameParamId> {
         self.params_id
     }
 
@@ -464,7 +465,7 @@ impl CrewModifiersCompactParams {
     }
 
     pub fn set_params_id(&mut self, params_id: GameParamId) {
-        self.params_id = params_id;
+        self.params_id = Some(params_id);
     }
 
     pub fn has_learned_skills(&self) -> bool {
@@ -472,7 +473,7 @@ impl CrewModifiersCompactParams {
     }
 
     pub fn merge_from(&mut self, source: &Self) {
-        if self.params_id.raw() == 0 && source.params_id.raw() != 0 {
+        if self.params_id.is_none() && source.params_id.is_some() {
             self.params_id = source.params_id;
         }
         if !source.learned_skills.is_empty() {
@@ -612,7 +613,10 @@ impl UpdateFromReplayArgs for CrewModifiersCompactParams {
         const LEARNED_SKILLS_KEY: &str = "learnedSkills";
 
         if args.contains_key(PARAMS_ID_KEY) {
-            self.params_id = GameParamId::from(arg_value_to_type!(args, PARAMS_ID_KEY, u32));
+            // The game writes 0 before a commander is assigned (e.g. the
+            // recording player before the server sends the crew).
+            let raw = arg_value_to_type!(args, PARAMS_ID_KEY, u32);
+            self.params_id = (raw != 0).then(|| GameParamId::from(raw));
         }
         if args.contains_key(IS_IN_ADAPTATION_KEY) {
             self.is_in_adaptation = Some(arg_value_to_type!(args, IS_IN_ADAPTATION_KEY, bool));
@@ -679,7 +683,8 @@ pub struct VehicleProps {
     crew_modifiers_compact_params: CrewModifiersCompactParams,
     laser_target_local_pos: u16,
     anti_air_auras: Vec<AAAura>,
-    selected_weapon: Recognized<WeaponType>,
+    /// `None` before the `selectedWeapon` property arrives and for `NONE`.
+    selected_weapon: Option<Recognized<WeaponType>>,
     regeneration_health: f32,
     is_on_forsage: bool,
     is_in_rage_mode: bool,
@@ -688,7 +693,10 @@ pub struct VehicleProps {
     /// TODO
     air_defense_target_ids: Vec<()>,
     buoyancy: f32,
-    max_health: f32,
+    /// `None` until a positive `maxHealth`, or on clients that never send one,
+    /// a positive `health`, names it.
+    max_health: Option<f32>,
+    /// Whether the cell sent `maxHealth`, which stops `health` from raising it.
     max_health_explicit: bool,
     rudders_angle: f32,
     draught: f32,
@@ -747,7 +755,7 @@ impl Default for VehicleProps {
             crew_modifiers_compact_params: CrewModifiersCompactParams::default(),
             laser_target_local_pos: 0,
             anti_air_auras: Vec::new(),
-            selected_weapon: Recognized::Known(WeaponType::Artillery),
+            selected_weapon: None,
             regeneration_health: 0.0,
             is_on_forsage: false,
             is_in_rage_mode: false,
@@ -755,7 +763,7 @@ impl Default for VehicleProps {
             torpedo_local_pos: 0,
             air_defense_target_ids: Vec::new(),
             buoyancy: 0.0,
-            max_health: 0.0,
+            max_health: None,
             max_health_explicit: false,
             rudders_angle: 0.0,
             draught: 0.0,
@@ -844,8 +852,8 @@ impl VehicleProps {
         self.anti_air_auras.as_ref()
     }
 
-    pub fn selected_weapon(&self) -> &Recognized<WeaponType> {
-        &self.selected_weapon
+    pub fn selected_weapon(&self) -> Option<&Recognized<WeaponType>> {
+        self.selected_weapon.as_ref()
     }
 
     pub fn regeneration_health(&self) -> f32 {
@@ -876,7 +884,7 @@ impl VehicleProps {
         self.buoyancy
     }
 
-    pub fn max_health(&self) -> f32 {
+    pub fn max_health(&self) -> Option<f32> {
         self.max_health
     }
 
@@ -1053,8 +1061,10 @@ impl VehicleProps {
 
     /// Seed health from max_health when arena state omits a live health value.
     pub fn seed_initial_health(&mut self) {
-        if self.health == 0.0 && self.max_health > 0.0 {
-            self.health = self.max_health;
+        if self.health == 0.0
+            && let Some(max_health) = self.max_health
+        {
+            self.health = max_health;
         }
     }
 }
@@ -1099,9 +1109,7 @@ impl VehicleProps {
             // TODO: AntiAirAuras
             "selectedWeapon" => {
                 let id = *value.uint_32_ref().unwrap_or_else(|| panic!("selectedWeapon is not a u32"));
-                if let Some(wt) = WeaponType::from_id(id as i32, constants.ships(), version) {
-                    self.selected_weapon = wt;
-                }
+                self.selected_weapon = WeaponType::from_id(id as i32, constants.ships(), version);
             }
             "isOnForsage" => apply_prop_value!(self.is_on_forsage, value, bool),
             "isInRageMode" => apply_prop_value!(self.is_in_rage_mode, value, bool),
@@ -1110,7 +1118,10 @@ impl VehicleProps {
             // TODO: airDefenseTargetIds
             "buoyancy" => apply_prop_value!(self.buoyancy, value, f32),
             "maxHealth" => {
-                apply_prop_value!(self.max_health, value, f32);
+                if let Some(max_health) = value.as_f32() {
+                    // Every consumer divides by this; a non-positive value names no maximum.
+                    self.max_health = Some(max_health).filter(|max| *max > 0.0);
+                }
                 self.max_health_explicit = true;
             }
             "draught" => apply_prop_value!(self.draught, value, f32),
@@ -1160,8 +1171,11 @@ impl VehicleProps {
                 // health as the max so the HP-bar fraction stays valid. Gated on
                 // never having seen an explicit maxHealth so a legitimate mid-match
                 // decrease is not overridden.
-                if !self.max_health_explicit && self.health > self.max_health {
-                    self.max_health = self.health;
+                if !self.max_health_explicit
+                    && self.health > 0.0
+                    && self.max_health.is_none_or(|max_health| self.health > max_health)
+                {
+                    self.max_health = Some(self.health);
                 }
             }
             "engineDir" => apply_prop_value!(self.engine_dir, value, i8),
@@ -1214,8 +1228,10 @@ pub struct DeathInfo {
     /// Time lived in the game. This may not be accurate if a game rejoin occurs
     /// as there's no known way to detect this event.
     time_lived: Duration,
-    killer: EntityId,
-    cause: Recognized<DeathCause>,
+    /// `None` when no ship is responsible, such as a sea mine.
+    killer: Option<EntityId>,
+    /// `None` when the game names no cause.
+    cause: Option<Recognized<DeathCause>>,
 }
 
 impl DeathInfo {
@@ -1223,12 +1239,12 @@ impl DeathInfo {
         self.time_lived
     }
 
-    pub fn killer(&self) -> EntityId {
+    pub fn killer(&self) -> Option<EntityId> {
         self.killer
     }
 
-    pub fn cause(&self) -> &Recognized<DeathCause> {
-        &self.cause
+    pub fn cause(&self) -> Option<&Recognized<DeathCause>> {
+        self.cause.as_ref()
     }
 }
 
@@ -1279,7 +1295,7 @@ impl VehicleEntity {
         &self.props
     }
 
-    pub fn commander_id(&self) -> GameParamId {
+    pub fn commander_id(&self) -> Option<GameParamId> {
         self.props.crew_modifiers_compact_params.params_id
     }
 
@@ -1303,7 +1319,7 @@ impl VehicleEntity {
                 if skill.is_none() {
                     tracing::warn!(
                         skill_type,
-                        captain_id = %self.commander_id(),
+                        captain_id = ?self.commander_id(),
                         "captain definition is missing learned skill type"
                     );
                 }
@@ -1458,7 +1474,7 @@ mod tests {
         roster_crew.set_params_id(GameParamId::from(456u32));
         roster_crew.merge_from(vehicle_props.crew_modifiers_compact_params());
 
-        assert_eq!(roster_crew.params_id(), GameParamId::from(456u32));
+        assert_eq!(roster_crew.params_id(), Some(GameParamId::from(456u32)));
         assert_eq!(roster_crew.learned_skills().battleship(), &[2, 9]);
         assert_eq!(roster_crew.is_in_adaptation(), Some(true));
     }

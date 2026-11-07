@@ -609,14 +609,7 @@ mod tests {
             .index("SHIP01".to_owned())
             .name("SHIP01".to_owned())
             .nation("USA".to_owned())
-            .data(ParamData::Achievement(
-                Achievement::builder()
-                    .is_group(false)
-                    .one_per_battle(false)
-                    .ui_type(String::new())
-                    .ui_name(String::new())
-                    .build(),
-            ))
+            .data(ParamData::Achievement(Achievement::builder().is_group(false).one_per_battle(false).build()))
             .build()
     }
 
@@ -644,11 +637,6 @@ mod tests {
     fn personality() -> CrewPersonality {
         CrewPersonality::builder()
             .can_reset_skills_for_free(false)
-            .cost_credits(0)
-            .cost_elite_xp(0)
-            .cost_gold(0)
-            .cost_xp(0)
-            .person_name(String::new())
             .ships(
                 CrewPersonalityShips::builder()
                     .groups(Vec::new())
@@ -738,7 +726,7 @@ mod tests {
             for (index, (name, uc_type)) in self.modules.iter().enumerate() {
                 let id = GameParamId::from(100u32 + index as u32);
                 params.push(module_param(id, name, uc_type));
-                module_ids.push(id);
+                module_ids.push(Some(id));
             }
             let gp = GameParams::from(params);
             ResolvedBuild::from_ids(

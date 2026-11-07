@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use jiff::Timestamp;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
@@ -148,12 +149,14 @@ impl DivisionEncounters {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     pub last_name: String,
     pub db_id: AccountId,
     pub names: HashSet<String>,
-    pub clan_id: i64,
+    /// `None` for a player outside any clan.
+    #[serde(default, deserialize_with = "clan_id_from_stored")]
+    pub clan_id: Option<i64>,
     pub clan: String,
     /// When this player was met. Whole seconds in practice, which is all a
     /// replay header carries and all the `tracked_player_timestamp` key holds:
@@ -170,6 +173,21 @@ pub struct TrackedPlayer {
 }
 
 impl TrackedPlayer {
+    /// A player with account `db_id` and no encounters yet.
+    pub fn new(db_id: AccountId) -> Self {
+        Self {
+            last_name: String::new(),
+            db_id,
+            names: HashSet::new(),
+            clan_id: None,
+            clan: String::new(),
+            timestamps: EncounterSet::default(),
+            arena_ids: EncounterSet::default(),
+            notes: String::new(),
+            division_encounters: DivisionEncounters::default(),
+        }
+    }
+
     /// The battles this player was met in that the division-mate toggle leaves
     /// visible, keyed by arena. Drives the all-time counts.
     pub fn visible_arena_ids(&self, show_division_mates: bool) -> impl Iterator<Item = ArenaId> + '_ {
@@ -419,6 +437,14 @@ pub enum BlobError {
     Decode(#[source] serde_json::Error),
 }
 
+/// Stored trackers write clan id 0 for a player outside any clan.
+fn clan_id_from_stored<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<i64>::deserialize(deserializer)?.filter(|id| *id != 0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,10 +496,9 @@ mod tests {
 
     fn player(id: i64, name: &str, notes: &str) -> (AccountId, TrackedPlayer) {
         let player = TrackedPlayer {
-            db_id: AccountId(id),
             last_name: name.to_string(),
             notes: notes.to_string(),
-            ..TrackedPlayer::default()
+            ..TrackedPlayer::new(AccountId(id))
         };
         (AccountId(id), player)
     }
@@ -609,7 +634,7 @@ mod tests {
 
         let (_, mut live) = player(1, "NewName", "");
         live.clan = "RAIN".to_owned();
-        live.clan_id = 7;
+        live.clan_id = Some(7);
         live.arena_ids.insert(ArenaId::new(11));
         live.timestamps.insert(seen(200));
 

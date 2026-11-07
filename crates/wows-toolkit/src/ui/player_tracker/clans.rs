@@ -820,7 +820,7 @@ mod tests {
     use super::*;
 
     fn player(clan: &str, encounters: &[(i64, i64)]) -> TrackedPlayer {
-        let mut p = TrackedPlayer::default();
+        let mut p = TrackedPlayer::new(AccountId(1));
         clan.clone_into(&mut p.clan);
         for (arena, second) in encounters {
             p.arena_ids.insert(ArenaId::new(*arena));

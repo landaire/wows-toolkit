@@ -306,8 +306,8 @@ impl PlayerTracker {
                 .block_on(query::matches_with_player(pool, facet.account_id, &MatchFilter::default()))
                 .unwrap_or_default();
 
-            let entry = self.tracked_players.entry(facet.account_id).or_default();
-            entry.db_id = facet.account_id;
+            let entry =
+                self.tracked_players.entry(facet.account_id).or_insert_with(|| TrackedPlayer::new(facet.account_id));
             entry.last_name = facet.latest_name;
             entry.clan = facet.clan;
             for hit in hits {
@@ -743,8 +743,7 @@ mod tests {
         let timestamp = Timestamp::from_second(1_700_000_100).unwrap();
         let mut tracker = PlayerTracker::default();
         for id in [AccountId(9), AccountId(501)] {
-            let player = tracker.tracked_players.entry(id).or_default();
-            player.db_id = id;
+            let player = tracker.tracked_players.entry(id).or_insert_with(|| TrackedPlayer::new(id));
             player.arena_ids.insert(arena);
             player.timestamps.insert(timestamp);
         }

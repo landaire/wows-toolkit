@@ -113,9 +113,9 @@ pub struct SplashZoneHit {
     /// Raw splash box name from the `.splash` file.
     pub box_name: String,
     /// Default zone plating thickness from HitLocation.
-    pub thickness: Millimeters,
+    pub thickness: Option<Millimeters>,
     /// Zone max HP.
-    pub max_hp: f32,
+    pub max_hp: Option<f32>,
     /// Whether this is the box that directly contains the impact point.
     pub is_direct_hit: bool,
 }
@@ -263,8 +263,8 @@ pub fn compute_splash(
                         splash_data.box_to_zone.get(&sbox.name).and_then(|zn| hls.get(zn))
                     })
                 })
-                .map(|hl| (Millimeters::new(hl.thickness()), hl.max_hp()))
-                .unwrap_or((Millimeters::new(0.0), 0.0));
+                .map(|hl| (hl.thickness().map(Millimeters::new), hl.max_hp()))
+                .unwrap_or((None, None));
 
             let is_direct_hit = direct_hit_box.as_ref() == Some(&sbox.name);
 

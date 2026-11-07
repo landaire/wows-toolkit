@@ -218,7 +218,7 @@ fn resolve_icon_source(vfs: &VfsPath, version: Option<&Version>, dump_dir: Optio
 /// old builds that ship none. Returns None when there's no usable dump.
 fn newest_dump_source(dump_dir: Option<&std::path::Path>) -> Option<(VfsPath, Option<Version>)> {
     let base = dump_dir.and_then(|d| d.parent())?;
-    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let index = crate::task::replays::load_builds_index(base)?;
     let entry = index.builds.iter().max_by_key(|e| e.build)?;
     let build_dir = base.join(&entry.dir);
     let vfs = wows_data_mgr::cas_vfs::BuildCas::open(&build_dir)?.vfs();
@@ -239,7 +239,9 @@ fn dump_sources_newest_first(dump_dir: Option<&std::path::Path>) -> Vec<VfsPath>
     let Some(base) = dump_dir.and_then(|d| d.parent()) else {
         return Vec::new();
     };
-    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let Some(index) = crate::task::replays::load_builds_index(base) else {
+        return Vec::new();
+    };
     let mut entries: Vec<_> = index.builds.iter().collect();
     entries.sort_by_key(|e| std::cmp::Reverse(e.build));
     entries

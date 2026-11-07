@@ -376,6 +376,14 @@ pub use wows_toolkit_config::game_data_dump_base;
 /// directory. Shared with the GPUI port so both resolve the same cache.
 pub use wows_toolkit_config::game_data_dump_base_with_override;
 
+/// The `builds.toml` index under `dump_base`. An index that does not load is
+/// logged and read as no index, which every caller already falls back from.
+pub fn load_builds_index(dump_base: &std::path::Path) -> Option<wows_data_mgr::builds::BuildsIndex> {
+    wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"))
+        .inspect_err(|err| warn!(error = ?err, "the game data builds index does not load"))
+        .ok()
+}
+
 /// Load game data from a previously dumped directory.
 /// Used as a fallback when the live game install no longer has the build.
 /// Cache a re-parsed provider's params into the build's override directory, so

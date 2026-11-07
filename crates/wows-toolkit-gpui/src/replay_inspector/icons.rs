@@ -436,7 +436,7 @@ mod tests {
         row.ribbons.push(RibbonResult {
             name: "main_caliber".to_string(),
             display_name: "Main Caliber Hit".to_string(),
-            description: String::new(),
+            description: None,
             icon_key: "main_caliber".to_string(),
             is_subribbon: true,
             count: 1,

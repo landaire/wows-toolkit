@@ -33,6 +33,7 @@ use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
+use wows_replays::analyzer::battle_controller::state::KillRecord;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -51,6 +52,7 @@ use crate::draw_command::ConsumableAvailability;
 use crate::draw_command::DamageBreakdownEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
+use crate::draw_command::HitPoints;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RibbonCount;
 use crate::draw_command::STATS_RIBBON_CELL_W;
@@ -698,7 +700,7 @@ impl<'a> MinimapRenderer<'a> {
                 continue;
             }
             self.resolved_entities.insert(entity_id);
-            for &ability_id in abilities {
+            for ability_id in abilities.iter().flatten().copied() {
                 let Some(param) = GameParamProvider::game_param_by_id(self.game_params, ability_id) else {
                     continue;
                 };
@@ -795,7 +797,7 @@ impl<'a> MinimapRenderer<'a> {
             let param = GameParamProvider::game_param_by_id(self.game_params, plane.params_id);
             let aircraft = param.as_ref().and_then(|p| p.aircraft());
             let species = param.as_ref().and_then(|p| p.species()).and_then(|sp| sp.known().cloned());
-            let ammo_type = aircraft.map(|a| a.ammo_type()).unwrap_or("");
+            let ammo_type = aircraft.and_then(|a| a.ammo_type());
             let category =
                 aircraft.map(|a| a.effective_category(species.as_ref())).unwrap_or(PlaneCategory::Consumable);
             let is_consumable = matches!(category, PlaneCategory::Consumable);
@@ -819,14 +821,14 @@ impl<'a> MinimapRenderer<'a> {
         const COLOR_SONAR: [u8; 3] = [100, 220, 255]; // cyan
 
         let props = controller.vehicle_props(*entity_id)?;
-        let weapon = props.selected_weapon().known()?;
+        let weapon = props.selected_weapon()?.known()?;
         let selected_ammo = controller.selected_ammo();
         match weapon {
             WeaponType::Artillery => {
                 let ammo_param_id = selected_ammo.get(entity_id)?;
                 let param = GameParamProvider::game_param_by_id(self.game_params, *ammo_param_id)?;
                 let projectile = param.projectile()?;
-                Some(ammo_type_color(&AmmoType::from_game_str(projectile.ammo_type())))
+                Some(ammo_type_color(&AmmoType::from_game_str(projectile.ammo_type()?)))
             }
             WeaponType::Torpedoes => Some(COLOR_TORP),
             WeaponType::Planes => Some(COLOR_PLANES),
@@ -958,8 +960,11 @@ impl<'a> MinimapRenderer<'a> {
             }
 
             if let Some(props) = controller.vehicle_props(*entity_id) {
+                let max_health = props.max_health();
                 teams[team].ships_known += 1;
-                teams[team].max_hp += props.max_health();
+                if let Some(max_health) = max_health {
+                    teams[team].max_hp += max_health;
+                }
                 if props.is_alive() {
                     teams[team].ships_alive += 1;
                     teams[team].total_hp += props.health();
@@ -975,7 +980,9 @@ impl<'a> MinimapRenderer<'a> {
                     if let Some(cc) = class_count {
                         cc.alive += 1;
                         cc.hp += props.health();
-                        cc.max_hp += props.max_health();
+                        if let Some(max_health) = max_health {
+                            cc.max_hp += max_health;
+                        }
                     }
                 }
             }
@@ -1000,6 +1007,31 @@ impl<'a> MinimapRenderer<'a> {
             swap_breakdown(&mut result.breakdown);
         }
         result
+    }
+
+    /// Kill feed line for `kill`, with both ships resolved to their display data.
+    fn kill_feed_entry(&self, kill: &KillRecord) -> KillFeedEntry {
+        let killer_name =
+            kill.killer.map(|killer| self.player_names.get(&killer).cloned().unwrap_or_else(|| format!("#{killer}")));
+        let victim_name = self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
+        let killer_relation =
+            kill.killer.and_then(|killer| self.player_relations.get(&killer).copied()).unwrap_or(Relation::new(2));
+        let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
+        let killer_is_division_mate = kill.killer.is_some_and(|killer| self.division_mates.contains(&killer));
+
+        KillFeedEntry {
+            killer_name,
+            killer_species: kill.killer.and_then(|killer| self.player_species.get(&killer).cloned()),
+            killer_ship_name: kill.killer.and_then(|killer| self.ship_display_names.get(&killer).cloned()),
+            killer_color: ship_color_rgb(killer_relation, killer_is_division_mate),
+            killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
+            victim_name,
+            victim_species: self.player_species.get(&kill.victim).cloned(),
+            victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
+            victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
+            victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
+            cause: kill.cause.clone(),
+        }
     }
 
     /// Produce draw commands for the current frame from controller state.
@@ -1082,12 +1114,12 @@ impl<'a> MinimapRenderer<'a> {
                 let friendly_team = if swap { 1i64 } else { 0i64 };
 
                 // Aggregate: (team_id, marker_name) -> (count, sorting)
-                let mut buff_counts: HashMap<(i64, String), (u32, i64)> = HashMap::new();
+                let mut buff_counts: HashMap<(i64, String), (u32, Option<i64>)> = HashMap::new();
                 for buff in captured {
                     let drop_info =
                         GameParamProvider::game_param_by_id(self.game_params, buff.params_id).and_then(|p| {
                             let d = p.drop_data()?;
-                            Some((d.marker_name_active().to_string(), d.sorting()))
+                            Some((d.marker_name_active()?.to_string(), d.sorting()))
                         });
                     if let Some((marker_name, sorting)) = drop_info {
                         let entry = buff_counts.entry((buff.team_id, marker_name)).or_insert((0, sorting));
@@ -1095,7 +1127,7 @@ impl<'a> MinimapRenderer<'a> {
                     }
                 }
 
-                // Split into friendly and enemy, sorted by sorting
+                // Split into friendly and enemy, sorted by sorting; drops without one come first.
                 let mut friendly_buffs: Vec<(String, u32)> = Vec::new();
                 let mut enemy_buffs: Vec<(String, u32)> = Vec::new();
                 let mut friendly_sorted: Vec<_> =
@@ -1124,11 +1156,11 @@ impl<'a> MinimapRenderer<'a> {
                 if !cp.is_enabled {
                     continue;
                 }
-                let Some(pos) = cp.position else {
+                let (Some(pos), Some(radius)) = (cp.position, cp.radius) else {
                     continue;
                 };
                 let px = map_info.world_to_minimap(pos, MINIMAP_SIZE);
-                let px_radius = (cp.radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
+                let px_radius = (radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
                 let color = cap_point_color(cp.team_id, self.self_team_id);
                 let is_base = cp
                     .control_point_type
@@ -1178,16 +1210,19 @@ impl<'a> MinimapRenderer<'a> {
                 if !bz.is_active {
                     continue;
                 }
+                let Some(radius) = bz.radius else {
+                    continue;
+                };
                 let px = map_info.world_to_minimap(bz.position, MINIMAP_SIZE);
-                let px_radius = (bz.radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
+                let px_radius = (radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
                 let color = cap_point_color(bz.team_id, self.self_team_id);
                 let marker_name = bz.drop_params_id.and_then(|id| {
                     let param = GameParamProvider::game_param_by_id(self.game_params, id)?;
                     let drop = param.drop_data()?;
                     if bz.team_id >= 0 {
-                        Some(drop.marker_name_active().to_string())
+                        drop.marker_name_active().map(str::to_owned)
                     } else {
-                        Some(drop.marker_name_inactive().to_string())
+                        drop.marker_name_inactive().map(str::to_owned)
                     }
                 });
                 commands.push(DrawCommand::BuffZone {
@@ -1274,7 +1309,7 @@ impl<'a> MinimapRenderer<'a> {
                     None => TRACER_LEN,
                 };
                 let tip_color = if self.options.show_armament {
-                    projectile.map(|p| ammo_type_color(&AmmoType::from_game_str(p.ammo_type())))
+                    projectile.and_then(|p| p.ammo_type()).map(|ammo| ammo_type_color(&AmmoType::from_game_str(ammo)))
                 } else {
                     None
                 };
@@ -1284,8 +1319,10 @@ impl<'a> MinimapRenderer<'a> {
                 // owner or its ammo set cannot be resolved (unknown ship, or builds whose
                 // data predates secondary_battery_ammo) this stays false and the salvo
                 // renders as main battery, matching pre-classification behavior.
-                let is_secondary =
-                    controller.vehicle_props(owner).map(|v| v.ship_config().ship_params_id()).is_some_and(|ship_id| {
+                let is_secondary = controller
+                    .vehicle_props(owner)
+                    .and_then(|v| v.ship_config().ship_params_id())
+                    .is_some_and(|ship_id| {
                         wowsunpack::game_params::types::is_secondary_ammo(
                             self.game_params,
                             ship_id,
@@ -1353,7 +1390,10 @@ impl<'a> MinimapRenderer<'a> {
         // 4. Smoke screens
         if self.options.show_smoke {
             for smoke in controller.smoke_screens().values() {
-                let px_radius = (smoke.radius.value() / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
+                let Some(radius) = smoke.radius else {
+                    continue;
+                };
+                let px_radius = (radius.value() / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
                 for point in &smoke.points {
                     let px = map_info.world_to_minimap(*point, MINIMAP_SIZE);
                     commands.push(DrawCommand::Smoke {
@@ -1369,8 +1409,11 @@ impl<'a> MinimapRenderer<'a> {
         // 5. Weather zones
         if self.options.show_weather {
             for zone in controller.local_weather_zones() {
+                let Some(radius) = zone.radius else {
+                    continue;
+                };
                 let px = map_info.world_to_minimap(zone.position, MINIMAP_SIZE);
-                let px_radius = (zone.radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
+                let px_radius = (radius / map_info.space_size as f32 * MINIMAP_SIZE as f32) as i32;
                 commands.push(DrawCommand::WeatherZone { pos: px, radius: px_radius.max(5) });
             }
         }
@@ -1413,7 +1456,9 @@ impl<'a> MinimapRenderer<'a> {
                 };
 
                 // Look up building species from GameParams
-                let icon_type = GameParamProvider::game_param_by_id(self.game_params, building.params_id)
+                let icon_type = building
+                    .params_id
+                    .and_then(|params_id| GameParamProvider::game_param_by_id(self.game_params, params_id))
                     .and_then(|p| p.species().cloned())
                     .and_then(|s| s.known().cloned())
                     .and_then(|s| species_to_building_icon_type(&s));
@@ -1444,14 +1489,11 @@ impl<'a> MinimapRenderer<'a> {
         for entity_id in &all_ship_ids {
             if !self.player_species.contains_key(entity_id)
                 && let Some(props) = controller.vehicle_props(*entity_id)
+                && let Some(ship_id) = props.ship_config().ship_params_id()
+                && let Some(param) = GameParamProvider::game_param_by_id(self.game_params, ship_id)
+                && let Some(species) = param.species().and_then(|s| s.known())
             {
-                let ship_id = props.ship_config().ship_params_id();
-                if ship_id.raw() != 0
-                    && let Some(param) = GameParamProvider::game_param_by_id(self.game_params, ship_id)
-                    && let Some(species) = param.species().and_then(|s| s.known())
-                {
-                    self.player_species.insert(*entity_id, species.name().to_string());
-                }
+                self.player_species.insert(*entity_id, species.name().to_string());
             }
         }
 
@@ -1500,10 +1542,9 @@ impl<'a> MinimapRenderer<'a> {
             let vis_flags = controller.vehicle_props(*entity_id).and_then(|p| p.visibility_flags());
 
             // Get health fraction from entity
-            let health_fraction = controller.vehicle_props(*entity_id).and_then(|p| {
-                let max = p.max_health();
-                if max > 0.0 { Some((p.health() / max).clamp(0.0, 1.0)) } else { None }
-            });
+            let health_fraction = controller
+                .vehicle_props(*entity_id)
+                .and_then(|p| p.max_health().map(|max| (p.health() / max).clamp(0.0, 1.0)));
 
             // Compute yaw: prefer minimap heading (more accurate for icon rotation)
             let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value());
@@ -1739,7 +1780,7 @@ impl<'a> MinimapRenderer<'a> {
 
                 // Check if this entity has an HP bar rendered
                 let has_hp_bar = self.options.show_hp_bars
-                    && controller.vehicle_props(*entity_id).map(|p| p.max_health() > 0.0).unwrap_or(false);
+                    && controller.vehicle_props(*entity_id).is_some_and(|p| p.max_health().is_some());
 
                 let mut icon_keys = Vec::new();
                 for active in consumables {
@@ -1844,7 +1885,7 @@ impl<'a> MinimapRenderer<'a> {
                         ship_param_id,
                         cfg.units(),
                         cfg.modernization(),
-                        Some(crew.params_id()),
+                        crew.params_id(),
                         crew.learned_skills().for_species(&species),
                         cfg.exteriors(),
                         cfg.abilities(),
@@ -1994,25 +2035,7 @@ impl<'a> MinimapRenderer<'a> {
                     continue;
                 }
                 if clock >= kill.clock && clock <= kill.clock + KILL_FEED_DURATION {
-                    let killer_name =
-                        self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
-                    let victim_name =
-                        self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
-                    let killer_relation = self.player_relations.get(&kill.killer).copied().unwrap_or(Relation::new(2));
-                    let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
-                    recent_kills.push(KillFeedEntry {
-                        killer_name,
-                        killer_species: self.player_species.get(&kill.killer).cloned(),
-                        killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
-                        killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
-                        killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
-                        victim_name,
-                        victim_species: self.player_species.get(&kill.victim).cloned(),
-                        victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
-                        victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
-                        victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
-                        cause: kill.cause.clone(),
-                    });
+                    recent_kills.push(self.kill_feed_entry(kill));
                     if recent_kills.len() >= 5 {
                         break;
                     }
@@ -2154,19 +2177,11 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
 
             // Ship silhouette + HP
-            let (
-                hp_fraction,
-                hp_current,
-                hp_max,
-                hp_healable,
-                hp_healable_per_charge,
-                ship_param_id,
-                self_heal_availability,
-            ) = self
+            let (self_hp, ship_param_id, self_heal_availability) = self
                 .self_entity_id
                 .and_then(|eid| {
                     let props = controller.vehicle_props(eid)?;
-                    let max = props.max_health();
+                    let max = props.max_health()?;
                     let cur = props.health();
                     let healable = props.regeneration_health().max(0.0).min((max - cur).max(0.0));
                     let inventories = controller.consumable_inventories();
@@ -2176,24 +2191,14 @@ impl<'a> MinimapRenderer<'a> {
                         .map(|b| healable.min(b))
                         .unwrap_or(healable);
                     let param_id = self.ship_param_ids.get(&eid).copied();
-                    let is_dead = max > 0.0 && cur <= 0.0;
+                    let is_dead = cur <= 0.0;
                     let heal_availability =
                         consumable_availability(&active, &inventories, eid, clock, is_dead, is_heal_consumable);
-                    if max > 0.0 {
-                        Some((
-                            (cur / max).clamp(0.0, 1.0),
-                            cur,
-                            max,
-                            healable,
-                            healable_per_charge,
-                            param_id,
-                            heal_availability,
-                        ))
-                    } else {
-                        None
-                    }
+                    let hp = HitPoints { current: cur, max, healable, healable_per_charge };
+                    Some((Some(hp), param_id, heal_availability))
                 })
-                .unwrap_or((1.0, 0.0, 0.0, 0.0, 0.0, None, ConsumableAvailability::Unavailable));
+                // Nothing is known about a ship whose max health has not arrived.
+                .unwrap_or((None, None, ConsumableAvailability::Unavailable));
 
             let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
                 .self_entity_id
@@ -2213,11 +2218,7 @@ impl<'a> MinimapRenderer<'a> {
                 width: panel_w,
                 height: 110,
                 ship_param_id,
-                hp_fraction,
-                hp_current,
-                hp_max,
-                hp_healable,
-                hp_healable_per_charge,
+                hp: self_hp,
                 heal_availability: self_heal_availability,
                 player_name: self_player_name,
                 clan_tag: self_clan_tag,
@@ -2316,28 +2317,8 @@ impl<'a> MinimapRenderer<'a> {
                     if !self.player_names.contains_key(&kill.victim) {
                         continue;
                     }
-                    let killer_name =
-                        self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
-                    let victim_name =
-                        self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
-                    let killer_relation = self.player_relations.get(&kill.killer).copied().unwrap_or(Relation::new(2));
-                    let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
-                    activity_entries.push(ActivityFeedEntry {
-                        clock: kill.clock,
-                        kind: ActivityFeedKind::Kill(KillFeedEntry {
-                            killer_name,
-                            killer_species: self.player_species.get(&kill.killer).cloned(),
-                            killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
-                            killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
-                            killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
-                            victim_name,
-                            victim_species: self.player_species.get(&kill.victim).cloned(),
-                            victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
-                            victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
-                            victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
-                            cause: kill.cause.clone(),
-                        }),
-                    });
+                    let kind = ActivityFeedKind::Kill(self.kill_feed_entry(kill));
+                    activity_entries.push(ActivityFeedEntry { clock: kill.clock, kind });
                 }
             }
             // Add chat messages
@@ -2450,33 +2431,36 @@ impl<'a> MinimapRenderer<'a> {
             let is_self = relation.is_self();
 
             let vehicle_props = controller.vehicle_props(entity_id);
-            let cached = self.vehicle_facts.get(&entity_id);
+            let cached_max_health = self.vehicle_facts.get(&entity_id).and_then(|facts| facts.max_health);
             // Prefer live entity HP. Fall back to the scanned EntityCreate
             // value when the live entity isn't tracked yet (merged sessions
             // before primary spotting) or hasn't received its first maxHealth
             // broadcast (some ships only get it on first damage).
-            let (hp_current, hp_max, hp_healable) = if let Some(props) = vehicle_props.as_ref() {
-                let live_max = props.max_health();
-                let live_cur = props.health();
-                let healable = props.regeneration_health().max(0.0).min((live_max - live_cur).max(0.0));
-                if live_max > 0.0 {
-                    (live_cur, live_max, healable)
-                } else if let Some(f) = cached {
-                    (f.max_health, f.max_health, 0.0)
-                } else {
-                    (0.0, 0.0, 0.0)
-                }
-            } else if let Some(f) = cached {
-                (f.max_health, f.max_health, 0.0)
-            } else {
-                (0.0, 0.0, 0.0)
-            };
-            let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
+            let hp = vehicle_props
+                .as_ref()
+                .and_then(|props| {
+                    let max = props.max_health()?;
+                    let current = props.health();
+                    let healable = props.regeneration_health().max(0.0).min((max - current).max(0.0));
+                    Some(HitPoints { current, max, healable, healable_per_charge: healable })
+                })
+                .or_else(|| {
+                    cached_max_health.map(|max| HitPoints {
+                        current: max,
+                        max,
+                        healable: 0.0,
+                        healable_per_charge: 0.0,
+                    })
+                })
+                .map(|hp| HitPoints {
+                    healable_per_charge: heal_bright_amount(&active, &inventories, entity_id, clock, hp.max)
+                        .map(|bright| hp.healable.min(bright))
+                        .unwrap_or(hp.healable),
+                    ..hp
+                });
+            let is_dead = dead.contains_key(&entity_id) || hp.is_some_and(|hp| hp.current <= 0.0);
             let heal_availability =
                 consumable_availability(&active, &inventories, entity_id, clock, is_dead, is_heal_consumable);
-            let hp_healable_per_charge = heal_bright_amount(&active, &inventories, entity_id, clock, hp_max)
-                .map(|b| hp_healable.min(b))
-                .unwrap_or(hp_healable);
             // Same source as the yellow ship-icon outline: visibilityFlags on
             // the live VehicleEntity.
             let is_spotted =
@@ -2486,7 +2470,8 @@ impl<'a> MinimapRenderer<'a> {
             // Kills at the current clock: filter the global kill list by
             // killer and clock. Damage at the current clock: sum the merged
             // damage events for this entity that have already happened.
-            let kills = controller.kills().iter().filter(|k| k.killer == entity_id && k.clock <= clock).count() as u32;
+            let kills =
+                controller.kills().iter().filter(|k| k.killer == Some(entity_id) && k.clock <= clock).count() as u32;
             let (damage_dealt, last_damage_clock): (f32, Option<f32>) = self
                 .damage_events
                 .get(&entity_id)
@@ -2592,10 +2577,7 @@ impl<'a> MinimapRenderer<'a> {
                 ship_param_id,
                 class_icon_key,
                 species,
-                hp_current,
-                hp_max,
-                hp_healable,
-                hp_healable_per_charge,
+                hp,
                 heal_availability,
                 is_dead,
                 is_self,
@@ -2881,40 +2863,34 @@ fn torpedo_position(torp: &TorpedoData, elapsed: f32) -> WorldPos {
 }
 
 /// Build the icon base name from species, consumable flag, and ammo type.
-fn species_to_icon_base(species: Species, is_consumable: bool, ammo_type: &str) -> String {
+fn species_to_icon_base(species: Species, is_consumable: bool, ammo_type: Option<&str>) -> String {
     use convert_case::Case;
     use convert_case::Casing;
 
-    let snake = ammo_type.to_case(Case::Snake);
-    let ammo = match snake.as_str() {
-        "sea_mine" => "mine",
-        "depthcharge" => "depth_charge",
-        other => other,
-    };
+    let ammo = ammo_type.map(|ammo_type| match ammo_type.to_case(Case::Snake).as_str() {
+        "sea_mine" => "mine".to_owned(),
+        "depthcharge" => "depth_charge".to_owned(),
+        other => other.to_owned(),
+    });
     if is_consumable {
-        match species {
-            Species::Dive if !ammo.is_empty() => format!("bomber_{ammo}"),
-            Species::Dive => "bomber".to_string(),
-            _ => {
-                let species_name = species.name();
-                species_name.to_case(Case::Snake)
-            }
+        match (species, ammo) {
+            (Species::Dive, Some(ammo)) => format!("bomber_{ammo}"),
+            (Species::Dive, None) => "bomber".to_string(),
+            (species, _) => species.name().to_case(Case::Snake),
         }
     } else {
-        match species {
-            Species::Fighter if !ammo.is_empty() => format!("fighter_{ammo}"),
-            Species::Fighter => "fighter".to_string(),
-            Species::Dive if !ammo.is_empty() => format!("bomber_{ammo}"),
-            Species::Dive => "bomber".to_string(),
-            Species::Bomber => match ammo {
-                "torpedo_deepwater" => "torpedo_deepwater".to_string(),
-                _ => "torpedo_regular".to_string(),
-            },
-            Species::Skip if !ammo.is_empty() => format!("skip_{ammo}"),
-            Species::Skip => "skip".to_string(),
-            Species::Airship | Species::Auxiliary => "auxiliary".to_string(),
-            _ if !ammo.is_empty() => format!("fighter_{ammo}"),
-            _ => "fighter".to_string(),
+        match (species, ammo.as_deref()) {
+            (Species::Fighter, Some(ammo)) => format!("fighter_{ammo}"),
+            (Species::Fighter, None) => "fighter".to_string(),
+            (Species::Dive, Some(ammo)) => format!("bomber_{ammo}"),
+            (Species::Dive, None) => "bomber".to_string(),
+            (Species::Bomber, Some("torpedo_deepwater")) => "torpedo_deepwater".to_string(),
+            (Species::Bomber, _) => "torpedo_regular".to_string(),
+            (Species::Skip, Some(ammo)) => format!("skip_{ammo}"),
+            (Species::Skip, None) => "skip".to_string(),
+            (Species::Airship | Species::Auxiliary, _) => "auxiliary".to_string(),
+            (_, Some(ammo)) => format!("fighter_{ammo}"),
+            (_, None) => "fighter".to_string(),
         }
     }
 }

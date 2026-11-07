@@ -180,7 +180,7 @@ mod tests {
             clan: clan.to_string(),
             arena_ids: encounters.iter().map(|(arena, _)| ArenaId::from(*arena)).collect(),
             timestamps: encounters.iter().map(|(_, minute)| at(*minute)).collect(),
-            ..TrackedPlayer::default()
+            ..TrackedPlayer::new(AccountId(1))
         }
     }
 

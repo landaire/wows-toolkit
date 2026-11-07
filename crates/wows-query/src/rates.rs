@@ -975,7 +975,10 @@ impl GameData {
         }
 
         let preparation_extract = |outcome: &Outcome| {
-            Some(Seconds::new(round(effective(outcome).preparation_time.value()))).filter(|time| time.value() > 0.0)
+            effective(outcome)
+                .preparation_time
+                .map(|time| Seconds::new(round(time.value())))
+                .filter(|time| time.value() > 0.0)
         };
         let preparation = planner.plan(&consumable_plan(name, "preparation", Better::Lower, &preparation_extract))?;
 
@@ -1039,7 +1042,7 @@ impl GameData {
             .and_then(|vehicle| vehicle.ttx_components())
             .zip(ShipUpgradeSelection::stock(&ship.param).hull)
             .and_then(|(components, hull)| {
-                components.combat_instructions(&hull).map(|instructions| instructions.duration)
+                components.combat_instructions(&hull).and_then(|instructions| instructions.duration)
             });
         let note = match duration {
             Some(duration) => format!(
@@ -1169,10 +1172,15 @@ fn main_battery_rate(outcome: &Outcome, battery: &Battery, kind: &str, cadence: 
         .filter(|shell| shell.ammo_kind.as_deref().and_then(ammo_label).as_deref() == Some(kind))
         .collect();
 
+    // A gun without a rated shell of this ammo adds nothing; per_gun stays
+    // aligned with battery.guns.
     let per_gun: Vec<DamagePerMinute> = battery
         .guns
         .iter()
-        .map(|gun| DamagePerMinute::from_reload(mount_salvo(&gun.ammo, gun.barrels.0, &shells).value(), reload))
+        .map(|gun| {
+            let salvo = mount_salvo(&gun.ammo, gun.barrels.0, &shells).map_or(0.0, |salvo| salvo.value());
+            DamagePerMinute::from_reload(salvo, reload)
+        })
         .collect();
 
     battery.rate(&per_gun)
@@ -1208,7 +1216,8 @@ mod tests {
     #[cfg_attr(not(has_build_13533378), ignore)]
     fn ships_with_loader_limited_torpedo_reload() {
         let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
-        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
         let cache = std::env::temp_dir().join("wows-query-test-cache");
         let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");

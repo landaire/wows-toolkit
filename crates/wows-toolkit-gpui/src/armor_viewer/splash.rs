@@ -235,8 +235,8 @@ pub fn compute_splash(
         hit_zones.push(SplashZoneHit {
             zone_name,
             box_name: shape.name.clone(),
-            thickness: location.map(|found| Millimeters::new(found.thickness())),
-            max_hp: location.map(|found| found.max_hp()),
+            thickness: location.and_then(|found| found.thickness()).map(Millimeters::new),
+            max_hp: location.and_then(|found| found.max_hp()),
             is_direct_hit: direct_hit_box.as_ref() == Some(&shape.name),
         });
     }

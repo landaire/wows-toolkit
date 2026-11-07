@@ -14,7 +14,7 @@ use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::constants::DispersionEllipse;
 use crate::game_params::ttx::consumables::ConsumableCard;
 use crate::game_params::ttx::consumables::effective_consumable;
-use crate::game_params::ttx::effects::ReloadCoeffSources;
+use crate::game_params::ttx::effects::EffectCoeff;
 use crate::game_params::ttx::effects::ReloadCoeffs;
 use crate::game_params::ttx::effects::walk_ability_slots;
 use crate::game_params::ttx::factories;
@@ -83,7 +83,7 @@ pub fn artillery_dispersion(
         .as_deref()
         .and_then(|name| components.fire_control_max_dist_coef(name))
         .unwrap_or(NO_FIRE_CONTROL_COEF);
-    let range_km = factories::artillery_range_km(arty, fc_coef, 1.0, modifiers)?;
+    let range_km = factories::artillery_range_km(arty, fc_coef, None, modifiers)?;
     Some(ArtilleryDispersion {
         curve,
         max_range: Km::from(range_km),
@@ -137,23 +137,22 @@ const SMALL_SHELL_MAX_DIAMETER_M: f32 = 0.149;
 ///   feed from the computed artillery/secondary range so the secondary-detection floor
 ///   uses the same numbers the cards show.
 ///
-/// Sections are `None` when their components are absent.
+/// Sections are `None` when their components are absent. `None` when `ship` is not a
+/// vehicle or carries no TTX components.
 pub fn ship_stats(
     ship: &Param,
     selection: &ShipUpgradeSelection,
     modifiers: &ModifierBundle,
     level: u32,
     provider: &dyn GameParamProvider,
-) -> ShipStats {
+) -> Option<ShipStats> {
     ship_stats_with(
         ship,
         selection,
         modifiers,
         &ModifierSources::default(),
-        ReloadCoeffs::default(),
-        1.0,
+        &ReloadCoeffs::default(),
         None,
-        ReloadCoeffSources::default(),
         level,
         // No game version at this boundary; from_consumable_type ignores version today
         // (Known/Unknown classification only; re-audit here if that changes).
@@ -173,30 +172,30 @@ pub fn ship_stats_explained(
     sources: &ModifierSources,
     level: u32,
     provider: &dyn GameParamProvider,
-) -> (ShipStats, ShipStatsProvenance) {
+) -> Option<(ShipStats, ShipStatsProvenance)> {
     let mut rec = On::default();
     let stats = ship_stats_with(
         ship,
         selection,
         modifiers,
         sources,
-        ReloadCoeffs::default(),
-        1.0,
+        &ReloadCoeffs::default(),
         None,
-        ReloadCoeffSources::default(),
         level,
         // No game version at this boundary; from_consumable_type ignores version today
         // (Known/Unknown classification only; re-audit here if that changes).
         Version::base(15, 0, 0),
         provider,
         &mut rec,
-    );
-    (stats, rec.into_provenance())
+    )?;
+
+    Some((stats, rec.into_provenance()))
 }
 
 /// Compute a ship's stat card with per-armament reload multipliers and a spotter
 /// artillery range coefficient layered on top of `modifiers`. The public [`ship_stats`]
-/// delegates here with identity values so existing callers see no behavior change.
+/// delegates here with no effect coefficients. `None` when `ship` is not a vehicle or
+/// carries no TTX components.
 // Threads recorder, modifier bundle, per-source provenance, reload coefficients, and spotter coef alongside the base inputs.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ship_stats_with<R: Recorder>(
@@ -204,33 +203,26 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     selection: &ShipUpgradeSelection,
     modifiers: &ModifierBundle,
     sources: &ModifierSources,
-    reload_coeffs: ReloadCoeffs,
-    spotter_dist_coef: f32,
-    spotter_dist_coef_source: Option<InputId>,
-    reload_coeff_sources: ReloadCoeffSources,
+    reload_coeffs: &ReloadCoeffs,
+    spotter_range: Option<&EffectCoeff>,
     level: u32,
     version: Version,
     provider: &dyn GameParamProvider,
     rec: &mut R,
-) -> ShipStats {
-    let Some(vehicle) = ship.vehicle() else {
-        return ShipStats::default();
-    };
-    let Some(components) = vehicle.ttx_components() else {
-        return ShipStats::default();
-    };
+) -> Option<ShipStats> {
+    let vehicle = ship.vehicle()?;
+    let components = vehicle.ttx_components()?;
 
-    let hull = selection.hull.as_deref().and_then(|name| components.hull(name));
-    let hull_name = selection.hull.as_deref().unwrap_or("");
+    let hull = selection.hull.as_deref().and_then(|name| components.hull(name).map(|stats| (name, stats)));
 
-    let durability = hull.map(|h| factories::durability(h, hull_name, modifiers, sources, level, rec));
+    let durability = hull.map(|(hull_name, h)| factories::durability(h, hull_name, modifiers, sources, level, rec));
 
-    let mobility = hull.map(|h| {
-        let engine = selection.engine.as_deref().and_then(|name| components.engine(name)).cloned().unwrap_or_default();
-        factories::mobility(h, hull_name, &engine, selection.engine.as_deref(), modifiers, sources, rec)
+    let mobility = hull.map(|(hull_name, h)| {
+        let engine = selection.engine.as_deref().and_then(|name| components.engine(name));
+        factories::mobility(h, hull_name, engine, selection.engine.as_deref(), modifiers, sources, rec)
     });
 
-    let battery = hull.and_then(|h| factories::battery(h, hull_name, modifiers, sources, rec));
+    let battery = hull.and_then(|(hull_name, h)| factories::battery(h, hull_name, modifiers, sources, rec));
 
     // Fire-control coefficient feeds main-battery range (default 1.0 when no FC).
     let fc_coef = selection
@@ -239,8 +231,8 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         .and_then(|name| components.fire_control_max_dist_coef(name))
         .unwrap_or(NO_FIRE_CONTROL_COEF);
 
-    let arty_name = selection.artillery.as_deref().unwrap_or("");
-    let artillery = selection.artillery.as_deref().and_then(|name| components.artillery(name)).and_then(|arty| {
+    let artillery = selection.artillery.as_deref().and_then(|arty_name| {
+        let arty = components.artillery(arty_name)?;
         factories::artillery(
             arty,
             arty_name,
@@ -248,47 +240,37 @@ pub(crate) fn ship_stats_with<R: Recorder>(
             modifiers,
             sources,
             fc_coef,
-            spotter_dist_coef,
-            spotter_dist_coef_source.clone(),
-            reload_coeffs.main,
-            reload_coeff_sources.main.clone(),
+            spotter_range,
+            reload_coeffs.main.as_ref(),
             level,
             provider,
             rec,
         )
     });
 
-    let secondaries = selection.hull.as_deref().and_then(|name| components.secondaries(name)).and_then(|atba| {
+    let secondaries = selection.hull.as_deref().and_then(|hull_name| {
+        let atba = components.secondaries(hull_name)?;
         factories::secondaries(
             atba,
             hull_name,
             modifiers,
             sources,
-            reload_coeffs.secondary,
-            reload_coeff_sources.secondary.clone(),
+            reload_coeffs.secondary.as_ref(),
             level,
             provider,
             rec,
         )
     });
 
-    let torp_name = selection.torpedoes.as_deref().unwrap_or("");
-    let torpedoes = selection.torpedoes.as_deref().and_then(|name| components.torpedoes(name)).and_then(|launchers| {
-        factories::torpedoes(
-            launchers,
-            modifiers,
-            reload_coeffs.torpedo,
-            reload_coeff_sources.torpedo.clone(),
-            provider,
-            torp_name,
-            sources,
-            rec,
-        )
+    let torpedoes = selection.torpedoes.as_deref().and_then(|torp_name| {
+        let launchers = components.torpedoes(torp_name)?;
+        factories::torpedoes(launchers, modifiers, reload_coeffs.torpedo.as_ref(), provider, torp_name, sources, rec)
     });
 
     // Armor: hull plate map plus the selected hull's main-battery mount armor maps.
-    let armor = vehicle.armor().and_then(|hull_armor| {
-        let arti_armor = artillery_armor_maps(vehicle, selection.hull.as_deref());
+    let armor = selection.hull.as_deref().and_then(|hull_name| {
+        let hull_armor = vehicle.armor()?;
+        let arti_armor = artillery_armor_maps(vehicle, hull_name);
         factories::armor(hull_armor, hull_name, arti_armor.iter().copied(), rec)
     });
 
@@ -306,7 +288,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     let mg_max_dist_km = artillery.as_ref().and_then(|a| a.range.map(|r| r.value()));
     let atba_max_dist_km = secondaries.as_ref().map(|b| b.range.value());
 
-    let visibility = hull.map(|h| {
+    let visibility = hull.map(|(hull_name, h)| {
         factories::visibility(
             h,
             hull_name,
@@ -321,7 +303,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
 
     let consumables = build_consumable_cards(ship, modifiers, sources, version, provider, rec);
 
-    ShipStats {
+    Some(ShipStats {
         durability,
         mobility,
         armor,
@@ -333,7 +315,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         fire_control: None,
         visibility,
         consumables,
-    }
+    })
 }
 
 /// Enumerate every distinct consumable the ship can mount, compute stats, assign
@@ -426,29 +408,28 @@ fn record_consumable_stats<R: Recorder>(
         },
     );
 
-    // preparation_time: always present
-    rec.record(
-        TtxStat::ConsumablePreparationTime,
-        Some(label),
-        base_stats.preparation_time.value(),
-        base_source.clone(),
-        stats.preparation_time.value(),
-        |b| {
-            for m in &applied.preparation_time {
-                match m.op {
-                    Op::Mul => b.coef(sources, &m.name),
-                    Op::Add => b.bonus(sources, &m.name, 1.0),
+    if let (Some(base), Some(effective)) = (base_stats.preparation_time, stats.preparation_time) {
+        rec.record(
+            TtxStat::ConsumablePreparationTime,
+            Some(label),
+            base.value(),
+            base_source.clone(),
+            effective.value(),
+            |b| {
+                for m in &applied.preparation_time {
+                    match m.op {
+                        Op::Mul => b.coef(sources, &m.name),
+                        Op::Add => b.bonus(sources, &m.name, 1.0),
+                    }
                 }
-            }
-        },
-    );
+            },
+        );
+    }
 
-    // charges: always present. Infinite uses -1.0 (the game sentinel) as the recorded
-    // value so replay is exact: replay(-1.0) = -1.0 = value, with no steps.
+    // charges: always present. Provenance records numeric rows only, so an
+    // unlimited pool has no attribution.
     match (base_stats.charges, stats.charges) {
-        (AmmoCount::Infinite, AmmoCount::Infinite) => {
-            rec.record(TtxStat::ConsumableCharges, Some(label), -1.0, base_source.clone(), -1.0, |_| {});
-        }
+        (AmmoCount::Infinite, AmmoCount::Infinite) => {}
         (AmmoCount::Finite(base_n), AmmoCount::Finite(final_n)) => {
             rec.record(
                 TtxStat::ConsumableCharges,
@@ -669,12 +650,13 @@ fn record_consumable_stats<R: Recorder>(
 ///
 /// `level` and `species` come from the ship itself; an empty bundle reads identity
 /// (1.0/0.0) for every coefficient, giving the unmodernised port card for free.
-pub fn ship_stats_stock(ship: &Param, provider: &dyn GameParamProvider) -> ShipStats {
+/// `None` when `ship` is not a vehicle, its species is unknown, or it carries no
+/// TTX components.
+pub fn ship_stats_stock(ship: &Param, provider: &dyn GameParamProvider) -> Option<ShipStats> {
+    let level = ship.vehicle()?.level();
+    let species = ship.species().and_then(|s| s.known().copied())?;
     let selection = ShipUpgradeSelection::stock(ship);
-    let level = ship.vehicle().map(|v| v.level()).unwrap_or(0);
-    let Some(species) = ship.species().and_then(|s| s.known().copied()) else {
-        return ShipStats::default();
-    };
+
     ship_stats(ship, &selection, &ModifierBundle::empty(species), level, provider)
 }
 
@@ -682,13 +664,7 @@ pub fn ship_stats_stock(ship: &Param, provider: &dyn GameParamProvider) -> ShipS
 /// `artillery_armor` input the [`factories::armor`] factory takes
 /// (`getArmorDictByComponent`, all `HP_AGM_*` mounts). Empty when the hull has no
 /// artillery mounts (the factory's no-artillery branch).
-fn artillery_armor_maps<'a>(
-    vehicle: &'a crate::game_params::types::Vehicle,
-    hull_name: Option<&str>,
-) -> Vec<&'a ArmorMap> {
-    let Some(hull_name) = hull_name else {
-        return Vec::new();
-    };
+fn artillery_armor_maps<'a>(vehicle: &'a crate::game_params::types::Vehicle, hull_name: &str) -> Vec<&'a ArmorMap> {
     let Some(config) = vehicle.hull_upgrade(hull_name) else {
         return Vec::new();
     };
@@ -705,7 +681,7 @@ mod tests {
 
     const SONAR_RELOAD_S: f32 = 90.0;
     const SONAR_WORK_TIME_S: f32 = 100.0;
-    const SONAR_BASE_CHARGES: isize = 3;
+    const SONAR_BASE_CHARGES: u32 = 3;
     const SUPERINTENDENT_BONUS: f32 = 1.0;
     const SONAR_CHARGES_WITH_SUPER: f32 = 4.0;
     const CONSUMABLE_RELOAD_COEFF: f32 = 0.9;
@@ -749,7 +725,6 @@ mod tests {
             visibility_factor_by_plane: Some(Km::from(3.41)),
             visibility_coef_fire: Some(Km::from(2.0)),
             visibility_coef_fire_by_plane: Some(Km::from(2.0)),
-            visibility_coef_gk: Some(Km::from(1e-6)),
             visibility_coef_gk_in_smoke: Some(Km::from(2.83)),
             visibility_factor_by_periscope: None,
             flood_prob: Some(0.0),
@@ -953,7 +928,7 @@ mod tests {
         let profile = artillery_dispersion(&ship, &sel, &bundle).expect("profile");
 
         let provider = gearing_provider();
-        let card = ship_stats(&ship, &sel, &bundle, 10, &provider).artillery.expect("arty");
+        let card = ship_stats(&ship, &sel, &bundle, 10, &provider).expect("vehicle card").artillery.expect("arty");
         assert!((profile.max_range.value() - card.range.expect("range").value()).abs() < 1e-3);
 
         let e = profile.at_max_range();
@@ -1011,7 +986,7 @@ mod tests {
     fn gearing_stock_ship_stats_sections() {
         let ship = gearing_ship();
         let provider = gearing_provider();
-        let stats = ship_stats_stock(&ship, &provider);
+        let stats = ship_stats_stock(&ship, &provider).expect("vehicle card");
 
         // Durability: health 19400 (validated against the factory's gearing case).
         let durability = stats.durability.expect("durability");
@@ -1064,7 +1039,7 @@ mod tests {
         );
         let ship = ship_with("PASD013_Gearing_1945", 10, Species::Destroyer, components);
         let provider = gearing_provider();
-        let stats = ship_stats_stock(&ship, &provider);
+        let stats = ship_stats_stock(&ship, &provider).expect("vehicle card");
         let range = stats.artillery.expect("artillery").range.expect("range").value();
         // GEARING_BASE_RANGE_KM * FC_COEF * 1.0 (GMMaxDist) = 13.356.
         assert!((range - GEARING_BASE_RANGE_KM * FC_COEF).abs() < 1e-2, "got {range}");
@@ -1102,14 +1077,14 @@ mod tests {
             ModifierBundle::from_modifiers(&[modifier], Species::Cruiser, crate::data::Version::base(15, 0, 0))
                 .expect("test modifiers are all known");
         let sel = ShipUpgradeSelection::stock(&ship);
-        let stats = ship_stats(&ship, &sel, &bundle, 10, &provider);
+        let stats = ship_stats(&ship, &sel, &bundle, 10, &provider).expect("vehicle card");
         let sea = stats.visibility.expect("visibility").sea_detection.expect("sea").value();
         // GEARING_SEA_DETECTION_KM * BIG_GUN_VISIBILITY_COEFF = 7.6965.
         assert!((sea - GEARING_SEA_DETECTION_KM * BIG_GUN_VISIBILITY_COEFF).abs() < 1e-3, "got {sea}");
     }
 
     #[test]
-    fn non_vehicle_yields_empty_stats() {
+    fn non_vehicle_yields_no_stats() {
         let proj = Param::builder()
             .id(GameParamId::from(1u32))
             .index("S0001".to_string())
@@ -1125,14 +1100,13 @@ mod tests {
             10,
             &provider,
         );
-        assert!(stats.durability.is_none());
-        assert!(stats.artillery.is_none());
+        assert!(stats.is_none());
     }
 
     #[test]
-    fn stock_stats_default_when_species_unknown() {
+    fn stock_stats_none_when_species_unknown() {
         // A vehicle whose species is Unknown has no modifier context; ship_stats_stock
-        // returns the default stat card rather than guessing a species.
+        // returns no card rather than guessing a species.
         let mut components = ShipTtxComponents::default();
         components.hulls.insert("PAUH911_Gearing_1945".to_string(), gearing_hull());
         components.stock_selection =
@@ -1160,13 +1134,7 @@ mod tests {
             .data(ParamData::Vehicle(vehicle))
             .build();
         let provider = StubProvider::new(&[]);
-        let stats = ship_stats_stock(&ship, &provider);
-        // Default card: even though a hull is present, the unknown species short-circuits
-        // before any factory runs, so every section is None.
-        assert!(stats.durability.is_none());
-        assert!(stats.mobility.is_none());
-        assert!(stats.artillery.is_none());
-        assert!(stats.visibility.is_none());
+        assert!(ship_stats_stock(&ship, &provider).is_none());
     }
 
     use crate::game_params::ttx::components::SecondaryComponentStats;
@@ -1277,15 +1245,17 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
 
         let battery = stats.secondaries.as_ref().expect("secondaries");
         assert_eq!(battery.mounts.len(), 2);
 
         use std::collections::HashSet;
-        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let row_keys: HashSet<_> =
+            stats.rows().into_iter().filter(|r| r.value.as_f32().is_some()).map(|r| (r.stat, r.qualifier)).collect();
         let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
-        assert_eq!(row_keys, prov_keys, "every secondary stat row must have exactly one attribution");
+        assert_eq!(row_keys, prov_keys, "every numeric secondary stat row must have exactly one attribution");
 
         for a in &prov.attributions {
             let replayed = ShipStatsProvenance::replay(a);
@@ -1313,18 +1283,19 @@ mod tests {
     /// (group-wide) adds charges.
     fn finite_sonar_category() -> crate::game_params::types::AbilityCategory {
         use crate::game_params::types::AbilityCategory;
+        use crate::game_params::types::ConsumableGroup;
+        use crate::game_params::types::ConsumableLifecycle;
+        use crate::game_types::ChargeCount;
         use std::collections::BTreeMap;
-        let mut fields = BTreeMap::new();
-        fields.insert("lifeCycleType".to_string(), 0.0_f32); // COUNT_BASED
         AbilityCategory::builder()
             .consumable_type("sonar".to_string())
-            .group("ship".to_string())
-            .icon_id(String::new())
-            .num_consumables(SONAR_BASE_CHARGES)
+            .group(ConsumableGroup::Ship)
+            .num_consumables(ChargeCount::Finite(SONAR_BASE_CHARGES))
+            .lifecycle(ConsumableLifecycle::CountBased)
             .preparation_time(0.0)
             .reload_time(SONAR_RELOAD_S)
             .work_time(SONAR_WORK_TIME_S)
-            .effect_fields(fields)
+            .effect_fields(BTreeMap::new())
             .build()
     }
 
@@ -1359,13 +1330,7 @@ mod tests {
                 .collect();
             let mut categories = StdHashMap::new();
             categories.insert(variant_name.to_string(), category);
-            let ability = Ability::builder()
-                .can_buy(false)
-                .cost_credits(0)
-                .cost_gold(0)
-                .is_free(true)
-                .categories(categories)
-                .build();
+            let ability = Ability::builder().can_buy(false).is_free(true).categories(categories).build();
             let idx = params.len() + 1;
             params.push(Rc::new(
                 Param::builder()
@@ -1467,12 +1432,13 @@ mod tests {
         let sel = ShipUpgradeSelection::stock(&ship);
         let level = 10u32;
 
-        let base = ship_stats(&ship, &sel, &ModifierBundle::empty(Species::Destroyer), level, &provider);
+        let base = ship_stats(&ship, &sel, &ModifierBundle::empty(Species::Destroyer), level, &provider)
+            .expect("vehicle card");
 
         let em = crate::game_params::ttx::effects::Effects::for_test(vec![])
             .resolve(&crate::game_params::ttx::effects::EffectsState::default(), Species::Destroyer, test_version())
             .unwrap();
-        let under_em = em.stats(&ship, &sel, level, &provider);
+        let under_em = em.stats(&ship, &sel, level, &provider).expect("vehicle card");
 
         let base_reload = base.artillery.as_ref().and_then(|a| a.reload_time).map(|s| s.value());
         let em_reload = under_em.artillery.as_ref().and_then(|a| a.reload_time).map(|s| s.value());
@@ -1510,6 +1476,7 @@ mod tests {
         let em_full = effects.resolve(&state_full, Species::Destroyer, test_version()).unwrap();
         let reload_full = em_full
             .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
             .artillery
             .and_then(|a| a.reload_time)
             .map(|s| s.value())
@@ -1520,6 +1487,7 @@ mod tests {
         let em_half = effects.resolve(&state_half, Species::Destroyer, test_version()).unwrap();
         let reload_half = em_half
             .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
             .artillery
             .and_then(|a| a.reload_time)
             .map(|s| s.value())
@@ -1548,23 +1516,34 @@ mod tests {
         let dist_coeff = 1.2f32;
         let scout_effect = Effect::for_test(
             EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
+            EffectKind::Consumable { artillery_dist_coeff: Some(dist_coeff) },
             vec![uniform_modifier("GMIdealRadius", 0.9)],
         );
         let effects = Effects::for_test(vec![scout_effect]);
 
         let state_off = EffectsState::default();
         let em_off = effects.resolve(&state_off, Species::Destroyer, test_version()).unwrap();
-        let range_off =
-            em_off.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
+        let range_off = em_off
+            .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
+            .artillery
+            .and_then(|a| a.range)
+            .map(|r| r.value())
+            .unwrap();
 
         let state_on = EffectsState::default()
             .set(EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft), EffectActivation::On);
         let em_on = effects.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
-        let range_on =
-            em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.range).map(|r| r.value()).unwrap();
+        let range_on = em_on
+            .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
+            .artillery
+            .and_then(|a| a.range)
+            .map(|r| r.value())
+            .unwrap();
 
         let base_range = ship_stats(&ship, &sel, &ModifierBundle::empty(Species::Destroyer), level, &provider)
+            .expect("vehicle card")
             .artillery
             .and_then(|a| a.range)
             .map(|r| r.value())
@@ -1573,15 +1552,21 @@ mod tests {
         // Build a reference On state without the GMIdealRadius modifier to isolate its effect.
         let scout_no_radius_mod = Effect::for_test(
             EffectId::Consumable(crate::game_types::Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: dist_coeff },
+            EffectKind::Consumable { artillery_dist_coeff: Some(dist_coeff) },
             vec![],
         );
         let effects_no_radius = Effects::for_test(vec![scout_no_radius_mod]);
         let em_on_no_radius = effects_no_radius.resolve(&state_on, Species::Destroyer, test_version()).unwrap();
-        let dispersion_on =
-            em_on.stats(&ship, &sel, level, &provider).artillery.and_then(|a| a.dispersion).map(|d| d.value()).unwrap();
+        let dispersion_on = em_on
+            .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
+            .artillery
+            .and_then(|a| a.dispersion)
+            .map(|d| d.value())
+            .unwrap();
         let dispersion_on_no_radius = em_on_no_radius
             .stats(&ship, &sel, level, &provider)
+            .expect("vehicle card")
             .artillery
             .and_then(|a| a.dispersion)
             .map(|d| d.value())
@@ -1612,12 +1597,14 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
 
         use std::collections::HashSet;
-        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let row_keys: HashSet<_> =
+            stats.rows().into_iter().filter(|r| r.value.as_f32().is_some()).map(|r| (r.stat, r.qualifier)).collect();
         let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
-        assert_eq!(row_keys, prov_keys, "every stat row must have exactly one attribution");
+        assert_eq!(row_keys, prov_keys, "every numeric stat row must have exactly one attribution");
     }
 
     #[test]
@@ -1633,7 +1620,8 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
         for a in &prov.attributions {
             let replayed = ShipStatsProvenance::replay(a);
             assert!(
@@ -1663,14 +1651,16 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
 
         // Fixture must have at least one consumable card.
         assert!(!stats.consumables.is_empty(), "fixture must have at least one consumable card");
 
-        let row_keys: HashSet<_> = stats.rows().into_iter().map(|r| (r.stat, r.qualifier)).collect();
+        let row_keys: HashSet<_> =
+            stats.rows().into_iter().filter(|r| r.value.as_f32().is_some()).map(|r| (r.stat, r.qualifier)).collect();
         let prov_keys: HashSet<_> = prov.attributions.iter().map(|a| (a.stat, a.qualifier.clone())).collect();
-        assert_eq!(row_keys, prov_keys, "consumable stats: row keys must equal provenance keys");
+        assert_eq!(row_keys, prov_keys, "numeric consumable rows: row keys must equal provenance keys");
 
         for a in &prov.attributions {
             let replayed = ShipStatsProvenance::replay(a);
@@ -1705,7 +1695,7 @@ mod tests {
         let mut sources = ModifierSources::default();
         sources.record("additionalConsumables", InputId::Skill { name: "Superintendent".into() }, 1.0);
 
-        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider).expect("vehicle card");
 
         // Sonar has finite charges; the card must be present.
         let card = stats.consumables.iter().find(|c| c.label == "sonar").expect("sonar card");
@@ -1769,7 +1759,7 @@ mod tests {
             CONSUMABLE_RELOAD_COEFF,
         );
 
-        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+        let (stats, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider).expect("vehicle card");
 
         let card = stats.consumables.iter().find(|c| c.label == "sonar").expect("sonar card");
         let label = card.label.clone();
@@ -1825,7 +1815,8 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
         let keys: HashSet<StatKey> =
             prov.attributions.iter().map(|a| StatKey { stat: a.stat, qualifier: a.qualifier.clone() }).collect();
         for a in &prov.attributions {
@@ -1856,7 +1847,7 @@ mod tests {
 
         let scout_effect = Effect::for_test(
             EffectId::Consumable(Consumable::SpottingAircraft),
-            EffectKind::Consumable { artillery_dist_coeff: 1.2 },
+            EffectKind::Consumable { artillery_dist_coeff: Some(1.2) },
             vec![],
         );
         let effects = Effects::for_test(vec![scout_effect]);
@@ -1871,14 +1862,13 @@ mod tests {
             em.bundle(),
             em.sources(),
             em.reload_coeffs(),
-            em.artillery_dist_coeff(),
-            em.artillery_dist_coeff_source().cloned(),
-            em.reload_coeff_sources().clone(),
+            em.spotter_range(),
             10,
             em.version(),
             &provider,
             &mut rec,
-        );
+        )
+        .expect("vehicle card");
         let prov = rec.into_provenance();
 
         let range_attr = prov
@@ -1888,7 +1878,7 @@ mod tests {
             .expect("ArtilleryRange must be recorded");
 
         let spotter_step = range_attr.steps.iter().find(|s| s.modifier_name == "spotterDistCoeff");
-        assert!(spotter_step.is_some(), "spotterDistCoeff step must be recorded when coeff != 1.0");
+        assert!(spotter_step.is_some(), "spotterDistCoeff step must be recorded when the spotter is active");
         assert_eq!(
             spotter_step.unwrap().input,
             InputId::Consumable(Recognized::Known(Consumable::SpottingAircraft)),
@@ -1912,7 +1902,8 @@ mod tests {
             &ModifierSources::default(),
             10,
             &provider,
-        );
+        )
+        .expect("vehicle card");
         let stock_by_key: HashMap<StatKey, f32> = stock_prov
             .attributions
             .iter()
@@ -1935,7 +1926,7 @@ mod tests {
         sources.record("GMShotDelay", InputId::Upgrade { name: "MainBatteryMod3".into() }, 0.9);
         sources.record("additionalConsumables", InputId::Skill { name: "Superintendent".into() }, 1.0);
         sources.record("ConsumableReloadTime", InputId::Upgrade { name: "ConsumablesMod3".into() }, 0.9);
-        let (_built, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider);
+        let (_built, prov) = ship_stats_explained(&ship, &sel, &bundle, &sources, 10, &provider).expect("vehicle card");
 
         for a in &prov.attributions {
             let key = StatKey { stat: a.stat, qualifier: a.qualifier.clone() };
@@ -1990,14 +1981,13 @@ mod tests {
             em.bundle(),
             em.sources(),
             em.reload_coeffs(),
-            em.artillery_dist_coeff(),
-            em.artillery_dist_coeff_source().cloned(),
-            em.reload_coeff_sources().clone(),
+            em.spotter_range(),
             10,
             em.version(),
             &provider,
             &mut rec,
-        );
+        )
+        .expect("vehicle card");
         let prov = rec.into_provenance();
 
         let reload_attr = prov
@@ -2007,7 +1997,7 @@ mod tests {
             .expect("ArtilleryReloadTime must be recorded");
 
         let reload_step = reload_attr.steps.iter().find(|s| s.modifier_name == HEALTH_SCALED_RELOAD_STEP);
-        assert!(reload_step.is_some(), "reloadCoeff step must be recorded when coeff != 1.0");
+        assert!(reload_step.is_some(), "reloadCoeff step must be recorded when adrenaline is active");
         assert_eq!(
             reload_step.unwrap().input,
             InputId::Skill { name: skill_name },

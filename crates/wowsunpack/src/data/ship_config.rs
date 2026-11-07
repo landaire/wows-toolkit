@@ -36,19 +36,23 @@ impl ExteriorKillTagState {
     }
 }
 /// A player's ship loadout as encoded in replay data.
+///
+/// Slot lists keep one entry per slot so positions stay meaningful; `None` is
+/// an empty slot.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ShipConfig {
-    ship_params_id: GameParamId,
-    abilities: Vec<GameParamId>,
-    modernization: Vec<GameParamId>,
-    units: Vec<GameParamId>,
+    /// `None` until a blob or roster entry supplies the ship.
+    ship_params_id: Option<GameParamId>,
+    abilities: Vec<Option<GameParamId>>,
+    modernization: Vec<Option<GameParamId>>,
+    units: Vec<Option<GameParamId>>,
     /// Exterior slot items (signals, camos, flags). Despite the field name, this covers
     /// all ExteriorSlots items, not just signal flags.
-    exteriors: Vec<GameParamId>,
+    exteriors: Vec<Option<GameParamId>>,
     exterior_kill_tags: Option<Vec<ExteriorKillTagState>>,
-    ensigns: Vec<GameParamId>,
-    ecoboosts: Vec<GameParamId>,
+    ensigns: Vec<Option<GameParamId>>,
+    ecoboosts: Vec<Option<GameParamId>>,
     /// `None` when the (older, truncated) blob ended before these trailing fields.
     naval_flag: Option<u32>,
     last_boarded_crew: Option<u32>,
@@ -59,43 +63,44 @@ impl ShipConfig {
     /// the <=0.11.x `SHIP_CONFIG` FIXED_DICT shape, whose `cd` blob uses an older
     /// layout we don't decode; the ship id comes from the dict's `shipId` field.
     pub fn stock(ship_params_id: GameParamId) -> Self {
-        Self { ship_params_id, ..Default::default() }
+        Self { ship_params_id: Some(ship_params_id), ..Default::default() }
     }
 
-    pub fn ship_params_id(&self) -> GameParamId {
+    pub fn ship_params_id(&self) -> Option<GameParamId> {
         self.ship_params_id
     }
 
     pub fn set_ship_params_id(&mut self, ship_params_id: GameParamId) {
-        self.ship_params_id = ship_params_id;
+        self.ship_params_id = Some(ship_params_id);
     }
 
-    pub fn exteriors(&self) -> &[GameParamId] {
+    pub fn exteriors(&self) -> &[Option<GameParamId>] {
         self.exteriors.as_ref()
     }
 
-    pub fn units(&self) -> &[GameParamId] {
+    pub fn units(&self) -> &[Option<GameParamId>] {
         self.units.as_ref()
     }
 
-    pub fn modernization(&self) -> &[GameParamId] {
+    pub fn modernization(&self) -> &[Option<GameParamId>] {
         self.modernization.as_ref()
     }
 
-    /// The hull is the first unit slot. `None` if no units were recorded.
+    /// The hull is the first unit slot. `None` if no units were recorded or the
+    /// slot is empty.
     pub fn hull(&self) -> Option<GameParamId> {
-        self.units.first().copied()
+        self.units.first().copied().flatten()
     }
 
-    pub fn abilities(&self) -> &[GameParamId] {
+    pub fn abilities(&self) -> &[Option<GameParamId>] {
         self.abilities.as_ref()
     }
 
-    pub fn ensigns(&self) -> &[GameParamId] {
+    pub fn ensigns(&self) -> &[Option<GameParamId>] {
         self.ensigns.as_ref()
     }
 
-    pub fn ecoboosts(&self) -> &[GameParamId] {
+    pub fn ecoboosts(&self) -> &[Option<GameParamId>] {
         self.ecoboosts.as_ref()
     }
 
@@ -144,7 +149,7 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     let ship_params_id = le_u32.parse_next(i)?;
     let _element_count = le_u32.parse_next(i)?;
 
-    // Unit type slots (14 fixed slots from UNIT_TYPE_NAMES, some may be 0)
+    // Unit type slots (14 fixed slots from UNIT_TYPE_NAMES, empty slots are 0)
     let unit_count = le_u32.parse_next(i)?;
     let units: Vec<u32> = repeat(unit_count as usize, le_u32).parse_next(i)?;
 
@@ -208,9 +213,11 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     let _is_owned = take_u32(i);
     let last_boarded_crew = take_u32(i);
 
-    let to_ids = |v: Vec<u32>| v.into_iter().map(GameParamId::from).collect();
+    // The blob writes 0 for an empty slot.
+    let slot_id = |raw: u32| (raw != 0).then(|| GameParamId::from(raw));
+    let to_ids = |v: Vec<u32>| v.into_iter().map(slot_id).collect();
     Ok(ShipConfig {
-        ship_params_id: GameParamId::from(ship_params_id),
+        ship_params_id: slot_id(ship_params_id),
         abilities: to_ids(abilities),
         modernization: to_ids(modernization),
         units: to_ids(units),
@@ -369,7 +376,7 @@ mod tests {
     fn parse_minimal_config() {
         let blob = ShipConfigBlobBuilder::new(4_293_001_168).units([100]).with_v13_2_field().build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
-        assert_eq!(config.ship_params_id().raw(), 4_293_001_168);
+        assert_eq!(config.ship_params_id().map(|id| id.raw()), Some(4_293_001_168));
         assert_eq!(config.hull().map(|h| h.raw()), Some(100));
         assert_eq!(config.units().len(), 1);
         assert!(config.modernization().is_empty());
@@ -394,7 +401,7 @@ mod tests {
             .with_v13_2_field()
             .build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
-        assert_eq!(config.ship_params_id().raw(), 1000);
+        assert_eq!(config.ship_params_id().map(|id| id.raw()), Some(1000));
         assert_eq!(config.hull().map(|h| h.raw()), Some(10));
         assert_eq!(config.units().len(), 3);
         assert_eq!(config.modernization().len(), 2);
@@ -418,7 +425,7 @@ mod tests {
             .last_boarded_crew(8888)
             .build();
         let config = parse_ship_config(&blob, &version_12_3()).unwrap();
-        assert_eq!(config.ship_params_id().raw(), 2000);
+        assert_eq!(config.ship_params_id().map(|id| id.raw()), Some(2000));
         assert_eq!(config.hull().map(|h| h.raw()), Some(50));
         assert_eq!(config.units().len(), 2);
         assert_eq!(config.modernization().len(), 1);
@@ -442,6 +449,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_zero_slot_as_empty() {
+        let blob = ShipConfigBlobBuilder::new(42).units([0, 7]).abilities([401, 0]).with_v13_2_field().build();
+        let config = parse_ship_config(&blob, &version_15_1()).unwrap();
+        assert_eq!(config.units(), [None, Some(GameParamId::from(7u32))]);
+        assert_eq!(config.hull(), None);
+        assert_eq!(config.abilities(), [Some(GameParamId::from(401u32)), None]);
+    }
+
+    #[test]
     fn parse_config_with_many_modules() {
         // Realistic slot counts: 14 units, 6 modernizations, 8 exteriors
         let blob = ShipConfigBlobBuilder::new(5000)
@@ -457,7 +473,7 @@ mod tests {
             .with_v13_2_field()
             .build();
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
-        assert_eq!(config.ship_params_id().raw(), 5000);
+        assert_eq!(config.ship_params_id().map(|id| id.raw()), Some(5000));
         assert_eq!(config.hull().map(|h| h.raw()), Some(100)); // first unit
         assert_eq!(config.units().len(), 14);
         assert_eq!(config.modernization().len(), 6);
@@ -469,10 +485,10 @@ mod tests {
         assert_eq!(config.last_boarded_crew(), Some(7777));
 
         // Verify specific GameParamId values
-        assert_eq!(config.units()[5].raw(), 105);
-        assert_eq!(config.modernization()[3].raw(), 203);
-        assert_eq!(config.exteriors()[7].raw(), 307);
-        assert_eq!(config.abilities()[2].raw(), 402);
+        assert_eq!(config.units()[5].map(|id| id.raw()), Some(105));
+        assert_eq!(config.modernization()[3].map(|id| id.raw()), Some(203));
+        assert_eq!(config.exteriors()[7].map(|id| id.raw()), Some(307));
+        assert_eq!(config.abilities()[2].map(|id| id.raw()), Some(402));
     }
 
     #[test]
@@ -504,7 +520,7 @@ mod tests {
     #[test]
     fn default_ship_config() {
         let config = ShipConfig::default();
-        assert_eq!(config.ship_params_id().raw(), 0);
+        assert_eq!(config.ship_params_id(), None);
         assert_eq!(config.hull(), None);
         assert!(config.units().is_empty());
         assert_eq!(config.exterior_kill_tags(), None);
@@ -541,7 +557,7 @@ mod tests {
                 ExteriorKillTagState { exterior_id: GameParamId::from(301u32), enabled: true },
             ]
         );
-        assert_eq!(config.abilities(), [GameParamId::from(400u32)].as_slice());
+        assert_eq!(config.abilities(), [Some(GameParamId::from(400u32))].as_slice());
     }
 
     #[test]
@@ -559,9 +575,9 @@ mod tests {
 
         let config = parse_ship_config(&blob, &Version::base(15, 8, 0)).unwrap();
         assert_eq!(config.exterior_kill_tags(), None);
-        assert_eq!(config.abilities(), [GameParamId::from(400u32), GameParamId::from(401u32)].as_slice());
-        assert_eq!(config.ensigns(), [GameParamId::from(500u32)].as_slice());
-        assert_eq!(config.ecoboosts(), [GameParamId::from(600u32)].as_slice());
+        assert_eq!(config.abilities(), [Some(GameParamId::from(400u32)), Some(GameParamId::from(401u32))].as_slice());
+        assert_eq!(config.ensigns(), [Some(GameParamId::from(500u32))].as_slice());
+        assert_eq!(config.ecoboosts(), [Some(GameParamId::from(600u32))].as_slice());
         assert_eq!(config.naval_flag(), Some(7));
         assert_eq!(config.last_boarded_crew(), Some(9999));
     }
@@ -592,7 +608,7 @@ mod tests {
         blob[COLOR_SCHEME_COUNT_OFFSET..COLOR_SCHEME_COUNT_OFFSET + 4].copy_from_slice(&u32::MAX.to_le_bytes());
 
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
-        assert_eq!(config.ship_params_id().raw(), 1000);
+        assert_eq!(config.ship_params_id().map(|id| id.raw()), Some(1000));
         assert!(config.abilities().is_empty());
         assert_eq!(config.naval_flag(), None);
         assert_eq!(config.last_boarded_crew(), None);
@@ -602,6 +618,6 @@ mod tests {
     fn roster_ship_id_overrides_config_header_id() {
         let mut config = ShipConfig::stock(GameParamId::from(4_076_779_344u32));
         config.set_ship_params_id(GameParamId::from(438_335u32));
-        assert_eq!(config.ship_params_id(), GameParamId::from(438_335u32));
+        assert_eq!(config.ship_params_id(), Some(GameParamId::from(438_335u32)));
     }
 }

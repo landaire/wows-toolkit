@@ -108,11 +108,11 @@ pub fn module_options(
         let baseline_for_slot = baseline_name(baseline, slot);
         let options = names
             .into_iter()
-            .map(|name| {
+            .filter_map(|name| {
                 let selection = with_slot(baseline, slot, &name);
-                let stats = ship_stats(ship, &selection, modifiers, level, provider);
+                let stats = ship_stats(ship, &selection, modifiers, level, provider)?;
                 let is_baseline = baseline_for_slot.as_deref() == Some(name.as_str());
-                ModuleOption { upgrade_name: name, is_baseline, stats }
+                Some(ModuleOption { upgrade_name: name, is_baseline, stats })
             })
             .collect();
         slots.push(SlotOptions { slot, baseline: baseline_for_slot, options });

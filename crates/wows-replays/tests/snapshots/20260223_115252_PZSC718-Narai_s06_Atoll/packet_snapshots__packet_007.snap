@@ -10,7 +10,7 @@ payload:
     bot_states:
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -3113448432
         entity_id: 433445
         human_properties: ~
@@ -315,7 +315,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_1
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -204049776
         entity_id: 433446
         human_properties: ~
@@ -628,7 +628,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_2
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -1251500459
         entity_id: 433447
         human_properties: ~
@@ -941,7 +941,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_5
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -252247031
         entity_id: 433448
         human_properties: ~
@@ -1246,7 +1246,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_7
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -509544973
         entity_id: 433449
         human_properties: ~
@@ -1551,7 +1551,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_8
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -1368453493
         entity_id: 433450
         human_properties: ~
@@ -1856,7 +1856,7 @@ payload:
         username: IDS_OP_02_02_BOT_01_9
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -2308959489
         entity_id: 433451
         human_properties: ~
@@ -2165,7 +2165,7 @@ payload:
         username: IDS_OP_02_02_BOT_CRR_1
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: -2835062099
         entity_id: 433452
         human_properties: ~
@@ -3835,7 +3835,7 @@ payload:
         username: cainhook
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: 1049306158
         entity_id: 433440
         human_properties:

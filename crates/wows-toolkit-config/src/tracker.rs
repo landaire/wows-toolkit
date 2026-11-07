@@ -22,7 +22,8 @@ use wows_core::game_types::ArenaId;
 pub struct TrackedPlayerRow {
     pub account_id: AccountId,
     pub last_name: String,
-    pub clan_id: i64,
+    /// `None` for a player outside any clan.
+    pub clan_id: Option<i64>,
     pub clan: String,
     pub notes: String,
 }
@@ -159,7 +160,8 @@ pub async fn load_tracker(pool: &SqlitePool) -> Result<TrackerRows, sqlx::Error>
         rows.players.push(TrackedPlayerRow {
             account_id: AccountId(row.try_get::<i64, _>("account_id")?),
             last_name: row.try_get("last_name")?,
-            clan_id: row.try_get("clan_id")?,
+            // The column is NOT NULL and stores 0 for a player outside any clan.
+            clan_id: Some(row.try_get::<i64, _>("clan_id")?).filter(|id| *id != 0),
             clan: row.try_get("clan")?,
             notes: row.try_get("notes")?,
         });
@@ -392,7 +394,7 @@ async fn upsert_players(
     qb.push_values(players, |mut row, player| {
         row.push_bind(player.row.account_id.raw())
             .push_bind(player.row.last_name.as_str())
-            .push_bind(player.row.clan_id)
+            .push_bind(player.row.clan_id.unwrap_or(0))
             .push_bind(player.row.clan.as_str())
             .push_bind(player.row.notes.as_str());
     });
@@ -480,7 +482,7 @@ mod tests {
             row: TrackedPlayerRow {
                 account_id: AccountId(account),
                 last_name: format!("Player{account}"),
-                clan_id: 7,
+                clan_id: Some(7),
                 clan: "RAIN".to_owned(),
                 notes: notes.to_owned(),
             },
@@ -595,7 +597,7 @@ mod tests {
         let mut carried = player_with(1, "", PlayerFields::None);
         carried.row.last_name = "Renamed".to_owned();
         carried.row.clan = "NEW".to_owned();
-        carried.row.clan_id = 99;
+        carried.row.clan_id = Some(99);
         carried.names = Vec::new();
         apply_tracker_write(
             &pool,
@@ -608,7 +610,7 @@ mod tests {
         assert_eq!(rows.players[0].notes, "camps", "the note is untouched");
         assert_eq!(rows.players[0].last_name, "Player1", "and so is the identity");
         assert_eq!(rows.players[0].clan, "RAIN");
-        assert_eq!(rows.players[0].clan_id, 7);
+        assert_eq!(rows.players[0].clan_id, Some(7));
         assert_eq!(rows.names.len(), 1, "and the aliases");
         assert_eq!(rows.arenas, vec![arena(1, 10, false)], "the encounter it carried still landed");
     }
@@ -637,7 +639,7 @@ mod tests {
         let mut identity = player_with(1, "stale note", PlayerFields::Identity);
         identity.row.last_name = "Renamed".to_owned();
         identity.row.clan = "NEW".to_owned();
-        identity.row.clan_id = 99;
+        identity.row.clan_id = Some(99);
         identity.names = vec!["Player1".to_owned()];
         apply_tracker_write(&pool, &TrackerWrite { players: vec![identity], ..TrackerWrite::default() })
             .await
@@ -647,7 +649,7 @@ mod tests {
         assert_eq!(rows.players[0].notes, "reworded", "an identity write does not carry a note");
         assert_eq!(rows.players[0].last_name, "Renamed");
         assert_eq!(rows.players[0].clan, "NEW", "the clan and its id move together");
-        assert_eq!(rows.players[0].clan_id, 99);
+        assert_eq!(rows.players[0].clan_id, Some(99));
         assert_eq!(rows.names, vec![(AccountId(1), "Player1".to_owned())], "the displaced name became the alias");
     }
 

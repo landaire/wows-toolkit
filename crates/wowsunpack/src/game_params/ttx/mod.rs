@@ -34,6 +34,7 @@ pub use attribution_render::ContributorLine;
 pub use attribution_render::render_attributions;
 pub use effects::Effect;
 pub use effects::EffectActivation;
+pub use effects::EffectCoeff;
 pub use effects::EffectId;
 pub use effects::EffectKind;
 pub use effects::EffectiveModifiers;

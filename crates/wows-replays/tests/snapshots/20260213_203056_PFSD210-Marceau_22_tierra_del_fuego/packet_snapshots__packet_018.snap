@@ -3224,7 +3224,7 @@ payload:
         username: Wolster_1
       - clan: ""
         clan_color: 0
-        clan_id: 0
+        clan_id: ~
         db_id: 501983621
         entity_id: 1214205
         human_properties:

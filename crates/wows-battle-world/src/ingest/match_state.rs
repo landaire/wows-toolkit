@@ -116,7 +116,7 @@ pub fn handle_game_room_state_changed(
 
         let player = {
             let index = world.resource::<PlayerIndex>();
-            index.0.values().find(|p| p.initial_state().player_id() == PlayerId::from(player_id)).cloned()
+            index.0.values().find(|p| p.initial_state().player_id() == Some(PlayerId::from(player_id))).cloned()
         };
         let Some(player) = player else {
             continue;

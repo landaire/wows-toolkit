@@ -1845,7 +1845,7 @@ impl TacticsBoardViewer {
                                             if let Some(ref metadata) = wdata.game_metadata
                                                 && let Some(param) = metadata.game_param_by_index(&entry.param_index)
                                             {
-                                                let param_id = param.id().raw();
+                                                let param_id = param.id();
                                                 let ship_name = entry.display_name.clone();
                                                 let species_str = param
                                                     .species()
@@ -1862,7 +1862,7 @@ impl TacticsBoardViewer {
                                                     *config = Some(super::AnnotationShipConfig {
                                                         param_id,
                                                         ship_name,
-                                                        hull_name: String::new(),
+                                                        hull_name: None,
                                                         vis_coeff: 1.0,
                                                         gm_coeff: 1.0,
                                                         gs_coeff: 1.0,
@@ -1893,7 +1893,7 @@ impl TacticsBoardViewer {
                                     {
                                         let wdata = wows_data.read();
                                         if let Some(ref metadata) = wdata.game_metadata {
-                                            if let Some(param) = metadata.game_param_by_id(cfg.param_id.into()) {
+                                            if let Some(param) = metadata.game_param_by_id(cfg.param_id) {
                                                 if let Some(vehicle) = param.vehicle() {
                                                     if let Some(hulls) = vehicle.hull_upgrades() {
                                                         hulls.keys().cloned().collect()
@@ -1919,15 +1919,14 @@ impl TacticsBoardViewer {
                                     if let Some(Annotation::Ship { config: Some(cfg), .. }) =
                                         ann.annotations.get_mut(sel_idx)
                                     {
-                                        let current_hull =
-                                            if cfg.hull_name.is_empty() { "Default" } else { &cfg.hull_name };
+                                        let current_hull = cfg.hull_name.as_deref().unwrap_or("Default");
                                         let old_hull = cfg.hull_name.clone();
                                         egui::ComboBox::from_id_salt("ann_hull_select")
                                             .selected_text(current_hull)
                                             .width(140.0)
                                             .show_ui(ui, |ui| {
                                                 for hull in &hull_names {
-                                                    ui.selectable_value(&mut cfg.hull_name, hull.clone(), hull);
+                                                    ui.selectable_value(&mut cfg.hull_name, Some(hull.clone()), hull);
                                                 }
                                             });
                                         if cfg.hull_name != old_hull {
@@ -2358,10 +2357,6 @@ fn render_annotation_range_circles(
     use wt_collab_egui::rendering::minimap_vec2_to_screen;
     use wt_collab_egui::rendering::range_circle_style;
 
-    if cfg.param_id == 0 {
-        return;
-    }
-
     // Check if any range is enabled
     let rf = &cfg.range_filter;
     if !(rf.detection || rf.main_battery || rf.secondary_battery || rf.torpedo || rf.radar || rf.hydro) {
@@ -2374,7 +2369,7 @@ fn render_annotation_range_circles(
         Some(m) => m,
         None => return,
     };
-    let param = match metadata.game_param_by_id(cfg.param_id.into()) {
+    let param = match metadata.game_param_by_id(cfg.param_id) {
         Some(p) => p,
         None => return,
     };
@@ -2383,8 +2378,7 @@ fn render_annotation_range_circles(
         None => return,
     };
     let version = wdata.full_version.unwrap_or(wowsunpack::data::Version::base(99, 0, 0));
-    let hull_name = if cfg.hull_name.is_empty() { None } else { Some(cfg.hull_name.as_str()) };
-    let ranges = vehicle.resolve_ranges(Some(metadata.as_ref()), hull_name, version);
+    let ranges = vehicle.resolve_ranges(Some(metadata.as_ref()), cfg.hull_name.as_deref(), version);
     drop(wdata);
 
     let screen_center = minimap_vec2_to_screen(pos, transform);

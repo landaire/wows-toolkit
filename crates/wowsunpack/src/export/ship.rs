@@ -1133,10 +1133,11 @@ impl ShipAssets {
 
             let visual_transform = Some(base_transform);
 
-            // Build per-vertex barrel pitch if pitchDeadZones applies.
-            let min_pitch = mi.min_pitch_at_yaw(0.0);
-            let barrel_pitch =
-                if min_pitch > 0.0 { build_barrel_pitch(turret_visual, &db.strings, min_pitch) } else { None };
+            // Build per-vertex barrel pitch if a pitchDeadZone raises the barrels.
+            let barrel_pitch = match mi.min_pitch_at_yaw(0.0) {
+                Some(min_pitch) if min_pitch > 0.0 => build_barrel_pitch(turret_visual, &db.strings, min_pitch),
+                _ => None,
+            };
 
             mounts.push(ResolvedMount {
                 hp_name: mi.hp_name().to_string(),

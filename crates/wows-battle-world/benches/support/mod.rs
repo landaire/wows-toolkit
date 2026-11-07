@@ -86,7 +86,8 @@ fn bench_context() -> &'static CachedContext<BenchGameData> {
 /// uses. Returns `None` when the archive has no entry for the build.
 fn from_dump(build: u32, version: &Version) -> Option<(VfsPath, Option<PathBuf>)> {
     let base = env_path("WOWS_BUILDS_DIR", r"G:\wows_builds");
-    let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+    let index =
+        wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml")).unwrap_or_else(|err| panic!("{err:?}"));
     let version_str = format!("{}.{}.{}", version.major, version.minor, version.patch);
     let (entry, _exact) = index.resolve_build(build, Some(&version_str))?;
     let cas = wows_data_mgr::cas_vfs::BuildCas::open(&base.join(&entry.dir))?;

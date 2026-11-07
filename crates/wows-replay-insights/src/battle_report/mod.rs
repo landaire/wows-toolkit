@@ -639,15 +639,15 @@ fn build_player(
     let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
         .and_then(|v| v.commander_skills(species))
         .map(|skills| {
-            let points =
-                skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species).get() as usize);
-            let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species).get() as usize).max();
-            let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
-                if skill.tier().get_for_species(species).get() as usize == 1 {
-                    accum += 1;
-                }
-                accum
-            });
+            // Skills without a tier have no known cost and add no points.
+            let costs: Vec<usize> = skills
+                .iter()
+                .filter_map(|skill| skill.tier())
+                .map(|tiers| tiers.get_for_species(species).get() as usize)
+                .collect();
+            let points: usize = costs.iter().sum();
+            let highest_tier = costs.iter().copied().max();
+            let num_tier_1_skills = costs.iter().filter(|cost| **cost == 1).count();
 
             (points, skills.len(), highest_tier.unwrap_or(0), num_tier_1_skills)
         })
@@ -690,7 +690,7 @@ fn build_player(
                         return None;
                     };
 
-                    let ui_name = achievement_data.ui_name().to_string();
+                    let ui_name = achievement_data.ui_name()?.to_string();
                     let display_name =
                         wowsunpack::game_params::translations::translate_achievement_name(&ui_name, provider)?;
                     let description =

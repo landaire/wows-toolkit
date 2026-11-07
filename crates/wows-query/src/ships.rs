@@ -213,6 +213,9 @@ pub(crate) struct Ship {
     pub(crate) tier: Tier,
     pub(crate) category: ShipCategory,
 
+    /// GameParams `group` of the vehicle, such as "special" or "upgradeable".
+    pub(crate) group: String,
+
     /// Search key the ship shares with its variants; see [`family_key`].
     pub(crate) family_key: String,
 
@@ -241,6 +244,7 @@ impl Ship {
             name,
             class,
             tier: Tier(vehicle.level()),
+            group: vehicle.group().to_owned(),
             copies_released: false,
             replica_of: None,
             replicas: Vec::new(),
@@ -257,6 +261,7 @@ impl Ship {
             class: self.class,
             tier: self.tier,
             category: self.category,
+            group: self.group.clone(),
             family_key: self.family_key.clone(),
             copies_released: self.copies_released,
             replica_of: self.replica_of.clone(),
@@ -308,7 +313,7 @@ impl Ship {
     }
 
     pub(crate) fn group(&self) -> &str {
-        self.param.vehicle().map_or("", |vehicle| vehicle.group())
+        &self.group
     }
 
     /// Where the ship stands among ships sharing its name.
@@ -593,8 +598,9 @@ pub struct ShipOverview {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_ship: Option<String>,
 
-    /// Number of upgrade slots.
-    pub upgrade_slots: usize,
+    /// Number of upgrade slots. Absent when the ship's class is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upgrade_slots: Option<usize>,
 
     /// Other variants with the same name (event, clan, retired copies) and premium replicas of this ship.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -808,7 +814,7 @@ impl GameData {
         Ok(ShipOverview {
             interpretations,
             ship: ship.summary(),
-            purchase_credits: research.cost_credits(),
+            purchase_credits: research.cost_credits().filter(|_| sold_for_credits(ship.group())),
             acquisition_note: acquisition_note(ship.group()),
             research_xp: research.cost_xp(),
             researched_from,
@@ -985,6 +991,13 @@ fn tier_prefix(query: &str) -> Option<(Tier, &str)> {
     let name = name.trim();
 
     ((1..=11).contains(&tier) && !name.is_empty()).then_some((Tier(tier), name))
+}
+
+/// Whether ships of `group` are bought for credits. Ships of other groups may
+/// carry a nominal `costCR` that is not a purchase price. A test ship of a
+/// research line carries the price it will have on release.
+fn sold_for_credits(group: &str) -> bool {
+    matches!(group, "upgradeable" | "superShip" | "demoWithoutStats")
 }
 
 /// Groups of ships obtained in ways the price and research fields do not

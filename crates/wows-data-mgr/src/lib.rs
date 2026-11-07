@@ -85,7 +85,7 @@ pub fn available_builds() -> Vec<u32> {
     let Some(data_dir) = game_data_dir() else {
         return Vec::new();
     };
-    let reg = registry::load_registry(&data_dir.join("versions.toml"));
+    let reg = test_registry(&data_dir);
     // A registry entry is a claim, not proof: a build whose directory was moved
     // or renamed is not available to read, and callers treat this list as data
     // they can open.
@@ -98,8 +98,16 @@ pub fn available_builds() -> Vec<u32> {
 /// For downloaded builds, returns `game_data/builds/<build>/`.
 pub fn game_dir_for_build(build: u32) -> Option<PathBuf> {
     let data_dir = game_data_dir()?;
-    let reg = registry::load_registry(&data_dir.join("versions.toml"));
-    reg.game_dir_for_build(build, &data_dir)
+    test_registry(&data_dir).game_dir_for_build(build, &data_dir)
+}
+
+/// Load `versions.toml` for the test helpers.
+fn test_registry(data_dir: &Path) -> registry::LocalRegistry {
+    let path = data_dir.join("versions.toml");
+
+    // Tests skip when game data is absent; an unreadable registry is a broken
+    // setup that would otherwise read as absent and skip silently.
+    registry::load_registry(&path).unwrap_or_else(|err| panic!("{err:?}"))
 }
 
 /// A dump directory resolved for reading, whichever on-disk layout it uses.
@@ -224,7 +232,7 @@ mod dump_tests {
     /// is no `vfs/` tree.
     fn cas_dump(base: &Path, files: &[(&str, &[u8])], derived: &[(&str, &[u8])]) -> PathBuf {
         let cas_root = base.join("common");
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        let mut meta = BuildMetadata::new("1.2.3".into(), 100);
         for (rel, bytes) in files {
             meta.files.insert((*rel).to_string(), cas::store(&cas_root, bytes).unwrap());
         }

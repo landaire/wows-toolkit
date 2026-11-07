@@ -63,7 +63,7 @@ ships:
       repair_party_heal: "14 (rank 14/56, p0)"
       main_battery_reload: "4.84 (rank 14/56, p73)"
       main_battery_range: "18.36 (rank 38/56, p31)"
-      dpm_ap: "585744 (rank 7/54, p87)"
+      dpm_ap: "585744 (rank 5/54, p91)"
       dpm_he: "343636 (rank 9/48, p81)"
       alpha_ap: "47250 (rank 38/54, p28)"
       alpha_he: "27720 (rank 35/48, p26)"
@@ -91,6 +91,7 @@ ships:
       bow_overmatch: "67.21 (rank 1/56, p89)"
       stern_overmatch: "67.21 (rank 1/56, p89)"
     outliers:
+      - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
       - "rudder_shift 4.31 s: better than all 55 other tier 10 cruisers (rank 1/56)"
       - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging: angled 45 deg 37.1%: worse than 94% of the 104 other tier 9-11 cruisers (rank 99/105)"
     matchups:
@@ -146,9 +147,9 @@ ships:
       repair_party_heal: "14 (rank 14/56, p0)"
       main_battery_reload: "5.72 (rank 20/56, p62)"
       main_battery_range: "18.27 (rank 42/56, p25)"
-      dpm_ap: "475804 (rank 16/54, p72)"
+      dpm_ap: "453147 (rank 16/54, p72)"
       dpm_he: "373846 (rank 8/48, p85)"
-      alpha_ap: "60480 (rank 24/54, p57)"
+      alpha_ap: "57600 (rank 28/54, p49)"
       alpha_he: "47520 (rank 6/48, p87)"
       flight_time_ap: "7.47 (rank 36/54, p34)"
       flight_time_he: "7.47 (rank 32/48, p32)"

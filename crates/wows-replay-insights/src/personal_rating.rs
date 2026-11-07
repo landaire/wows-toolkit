@@ -74,7 +74,7 @@ pub fn rate_single_battle(
 }
 
 /// Statistics for a single ship used in PR calculation
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ShipBattleStats {
     pub ship_id: GameParamId,
     pub battles: u32,

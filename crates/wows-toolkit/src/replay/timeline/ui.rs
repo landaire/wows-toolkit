@@ -113,8 +113,7 @@ mod tests {
                 ship_name: ship.to_owned(),
                 player_name: player.to_owned(),
                 team: TeamId::new(0),
-                killer_ship: String::new(),
-                killer_player: String::new(),
+                killer: None,
             },
         }
     }
@@ -154,8 +153,7 @@ mod tests {
                 ship_name: "Yamato".to_owned(),
                 player_name: "a".to_owned(),
                 team: TeamId::new(0),
-                killer_ship: String::new(),
-                killer_player: String::new(),
+                killer: None,
             },
             TimelineEventKind::CapContested { cap_label: "A".to_owned(), cap_index: 0, owner_team: None },
             TimelineEventKind::CapFlipped { cap_label: "A".to_owned(), cap_index: 0, capturer_team: TeamId::new(0) },

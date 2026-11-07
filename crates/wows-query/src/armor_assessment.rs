@@ -1009,7 +1009,9 @@ impl GameData {
             let penetration = match candidate.shell.ammo {
                 Ammo::Ap => {
                     let projectile = self.projectile(&candidate.shell.param)?;
-                    ShellParams::from_shell_info(&projectile.to_shell_info(candidate.shell.param.clone()))
+                    projectile
+                        .to_shell_info(candidate.shell.param.clone())
+                        .and_then(|shell| ShellParams::from_shell_info(&shell))
                         .map(|params| params.raw_penetration(params.muzzle_velocity))
                 }
                 Ammo::He | Ammo::Sap => candidate.shell.penetration_mm,

@@ -19,6 +19,7 @@ use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::components::ArtilleryGunStats;
 use wowsunpack::game_params::ttx::components::ShipTtxComponents;
+use wowsunpack::game_params::ttx::model::AmmoCount;
 use wowsunpack::game_params::ttx::special_abilities::Activation;
 use wowsunpack::game_params::ttx::special_abilities::AlternativeAmmo;
 use wowsunpack::game_params::ttx::special_abilities::AlternativeFireMode;
@@ -133,7 +134,9 @@ pub struct CombatInstructionsInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress_loss: Option<String>,
 
-    pub duration_s: Seconds,
+    /// Absent when GameParams lists no duration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<Seconds>,
 
     /// Changes while active.
     pub effects: Vec<String>,
@@ -146,7 +149,9 @@ pub struct AlternativeFireInfo {
     /// In-game title: "Burst Fire", "Modified Shells" or "Burst Fire and Modified Shells".
     pub name: String,
 
-    pub description: String,
+    /// Absent when the game has no description text for the mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 
     /// Main battery modules that have this mode, when they differ.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -408,11 +413,11 @@ impl GameData {
         let mut names = Vec::new();
         if let Some(instructions) = stock.hull.as_deref().and_then(|hull| components.combat_instructions(hull)) {
             let name = format!("{COMBAT_INSTRUCTIONS}: {}", self.instructions_title(instructions));
-            modifiers.push(AbilityModifiers {
-                source: format!("RageMode:{}", instructions.name),
-                label: name.clone(),
-                modifiers: instructions.modifiers.clone(),
-            });
+            let source = match &instructions.name {
+                Some(name) => format!("RageMode:{name}"),
+                None => "RageMode".to_owned(),
+            };
+            modifiers.push(AbilityModifiers { source, label: name.clone(), modifiers: instructions.modifiers.clone() });
             names.push(name);
         }
 
@@ -444,8 +449,12 @@ impl GameData {
     }
 
     fn instructions_title(&self, instructions: &CombatInstructions) -> String {
-        self.translation(&format!("IDS_DOCK_RAGE_MODE_TITLE_{}", instructions.name.to_uppercase()))
-            .unwrap_or_else(|| instructions.name.clone())
+        let Some(name) = instructions.name.as_deref() else {
+            return COMBAT_INSTRUCTIONS.to_owned();
+        };
+
+        self.translation(&format!("IDS_DOCK_RAGE_MODE_TITLE_{}", name.to_uppercase()))
+            .unwrap_or_else(|| name.to_owned())
     }
 
     fn fire_mode_title(&self, mode: &AlternativeFireMode) -> String {
@@ -486,7 +495,7 @@ impl GameData {
             activation,
             charge: instructions.triggers.iter().map(|trigger| self.trigger_line(trigger)).collect(),
             progress_loss,
-            duration_s: Seconds::new(instructions.duration.value()),
+            duration_s: instructions.duration.map(|duration| Seconds::new(duration.value())),
             effects: self.describe(&instructions.modifiers, species),
             uses_per_battle: USES_PER_BATTLE,
         }
@@ -496,7 +505,7 @@ impl GameData {
     /// words it (`RageModeSystem.buildRageModeTrigger`).
     fn trigger_line(&self, trigger: &ProgressTrigger) -> String {
         let activator = activator_name(&trigger.event);
-        let name_ids = if trigger.progress_name == "default" { activator.as_str() } else { &trigger.progress_name };
+        let name_ids = trigger.progress_name.as_deref().unwrap_or(activator.as_str());
 
         // The client fills the value of activator-named triggers and of the
         // time-based ones only.
@@ -552,9 +561,7 @@ impl GameData {
 
         AlternativeFireInfo {
             name: self.fire_mode_title(mode),
-            description: self
-                .translation(&format!("IDS_DOCK_FIRE_MODE_DESCRIPTION_{}", fire_mode_key(mode)))
-                .unwrap_or_default(),
+            description: self.translation(&format!("IDS_DOCK_FIRE_MODE_DESCRIPTION_{}", fire_mode_key(mode))),
             modules,
             shots_per_burst: burst.map(|burst| burst.shots),
             shot_interval_s: burst.map(|burst| burst.interval(reload)),
@@ -575,7 +582,7 @@ impl GameData {
             .game_param_by_name(&ammo.name)
             .and_then(|param| {
                 let projectile = param.projectile()?;
-                let kind = AmmoType::from_game_str(projectile.ammo_type());
+                let kind = AmmoType::from_game_str(projectile.ammo_type()?);
                 let caliber = projectile.bullet_diametr()?;
                 Some(format!("{} {} mm", kind.display_name(), (caliber * 1000.0).round()))
             })
@@ -586,9 +593,10 @@ impl GameData {
             shell
         };
 
+        // An unlimited pool, or a shell the pool does not list, states no limit.
         match ammo.limit {
-            Some(limit) => format!("{shell}, {limit} per battle"),
-            None => shell,
+            Some(AmmoCount::Finite(limit)) => format!("{shell}, {limit} per battle"),
+            Some(AmmoCount::Infinite) | None => shell,
         }
     }
 }
@@ -617,12 +625,11 @@ impl SpecialAbility {
         match self {
             Self::CombatInstructions(info) => {
                 let activation = if info.activation.starts_with("Press") { "manual" } else { "automatic" };
-                format!(
-                    "{COMBAT_INSTRUCTIONS} \"{}\" ({activation}, {} s): {}",
-                    info.name,
-                    info.duration_s.value(),
-                    info.effects.join(", ")
-                )
+                let timing = match info.duration_s {
+                    Some(duration) => format!("{activation}, {} s", duration.value()),
+                    None => activation.to_owned(),
+                };
+                format!("{COMBAT_INSTRUCTIONS} \"{}\" ({timing}): {}", info.name, info.effects.join(", "))
             }
             Self::AlternativeFireMode(info) => {
                 let cadence = match (info.shots_per_burst, info.shot_interval_s) {

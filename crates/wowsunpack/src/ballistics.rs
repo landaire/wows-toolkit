@@ -107,9 +107,10 @@ impl ShellParams {
     /// Build ballistic parameters from a shell.
     ///
     /// Returns `None` (with a logged reason) when the shell lacks data that has no
-    /// safe default: `normalization` or `fuse_threshold`. Substituting 0.0 for
-    /// either would silently change penetration outcomes, so we skip the shell
-    /// rather than guess. Every real gun shell in GameParams carries both fields.
+    /// safe default: `normalization`, the ricochet angles, `fuse_time` or
+    /// `fuse_threshold`. Substituting a number for any of them would silently
+    /// change penetration outcomes, so we skip the shell rather than guess. Every
+    /// real gun shell in GameParams carries all of them.
     pub fn from_shell_info(shell: &ShellInfo) -> Option<Self> {
         let Some(normalization_deg) = shell.normalization else {
             tracing::warn!("shell '{}' has no normalization angle; skipping ballistic sim", shell.name);
@@ -117,6 +118,15 @@ impl ShellParams {
         };
         let Some(fuse_threshold_mm) = shell.fuse_threshold else {
             tracing::warn!("shell '{}' has no fuse threshold; skipping ballistic sim", shell.name);
+            return None;
+        };
+        let (Some(ricochet_deg), Some(always_ricochet_deg)) = (shell.ricochet_angle, shell.always_ricochet_angle)
+        else {
+            tracing::warn!("shell '{}' has no ricochet angles; skipping ballistic sim", shell.name);
+            return None;
+        };
+        let Some(fuse_time_s) = shell.fuse_time else {
+            tracing::warn!("shell '{}' has no fuse time; skipping ballistic sim", shell.name);
             return None;
         };
 
@@ -131,9 +141,9 @@ impl ShellParams {
             krupp: shell.krupp,
             air_drag: shell.air_drag,
             normalization: Degrees::from(normalization_deg).to_radians(),
-            ricochet_angle: Degrees::from(shell.ricochet_angle).to_radians(),
-            always_ricochet_angle: Degrees::from(shell.always_ricochet_angle).to_radians(),
-            fuse_time: Seconds::from(shell.fuse_time),
+            ricochet_angle: Degrees::from(ricochet_deg).to_radians(),
+            always_ricochet_angle: Degrees::from(always_ricochet_deg).to_radians(),
+            fuse_time: Seconds::from(fuse_time_s),
             fuse_threshold: Millimeters::from(fuse_threshold_mm),
             drag_factor: DragFactor(0.5 * f64::from(shell.air_drag) * radius_m * radius_m * PI / mass_kg),
             penetration_factor: PenetrationFactor(

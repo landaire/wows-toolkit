@@ -65,8 +65,8 @@ impl Analyzer for ChatLogger {
                 // one map resolves chat and voiceline across versions; the two
                 // id spaces are disjoint, so there's no ambiguity.
                 for player in players.iter() {
-                    if player.player_id().raw() != 0 {
-                        self.usernames.insert(AccountId::from(player.player_id().raw()), player.username().to_owned());
+                    if let Some(player_id) = player.player_id() {
+                        self.usernames.insert(AccountId::from(player_id.raw()), player.username().to_owned());
                     }
                     if let Some(avatar) = player.avatar_id() {
                         self.usernames.insert(AccountId::from(avatar.raw()), player.username().to_owned());

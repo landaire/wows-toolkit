@@ -17,7 +17,7 @@ use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::model::Seconds;
 use wowsunpack::game_params::ttx::model::ShellStats;
 use wowsunpack::game_params::ttx::model::ShipStats;
-use wowsunpack::game_params::ttx::model::torpedo_qualifier;
+use wowsunpack::game_params::ttx::model::shell_qualifier;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
 use wowsunpack::game_params::ttx::orchestration::artillery_sigma;
@@ -769,6 +769,7 @@ impl Derivation<'_> {
             });
         }
 
+        // A zero reload has no per-minute rate.
         let reload = self
             .stats
             .artillery
@@ -1001,8 +1002,7 @@ impl Derivation<'_> {
         let damages: Vec<(String, f32)> = torpedoes
             .torpedoes
             .iter()
-            .enumerate()
-            .filter_map(|(idx, torpedo)| Some((torpedo_qualifier(torpedo, idx), torpedo.damage?.value())))
+            .filter_map(|torpedo| Some((torpedo.name.clone(), torpedo.damage?.value())))
             .collect();
 
         let mut rows = Vec::new();
@@ -1092,8 +1092,8 @@ impl Derivation<'_> {
         let mounts = aiming_mounts(self.ship, self.selection, ComponentType::Artillery);
 
         let mut kinds: Vec<(String, Vec<&ShellStats>)> = Vec::new();
-        for (idx, shell) in artillery.shells.iter().enumerate() {
-            let qualifier = shell_qualifier(shell, idx);
+        for shell in &artillery.shells {
+            let qualifier = shell_qualifier(shell);
             match kinds.iter_mut().find(|(kind, _)| *kind == qualifier) {
                 Some((_, shells)) => shells.push(shell),
                 None => kinds.push((qualifier, vec![shell])),
@@ -1103,8 +1103,11 @@ impl Derivation<'_> {
         kinds
             .into_iter()
             .filter_map(|(kind, shells)| {
-                let salvo: f32 =
-                    mounts.iter().map(|(mount, barrels)| mount_salvo(mount.ammo(), *barrels, &shells).value()).sum();
+                let salvo: f32 = mounts
+                    .iter()
+                    .filter_map(|(mount, barrels)| mount_salvo(mount.ammo(), *barrels, &shells))
+                    .map(|salvo| salvo.value())
+                    .sum();
                 (salvo > 0.0).then(|| (kind, Hp::from(salvo)))
             })
             .collect()
@@ -1204,25 +1207,13 @@ struct CadenceRates {
 }
 
 /// Damage of one salvo of a mount that lists `ammo` and has `barrels`: each
-/// barrel fires the first of `shells` the mount lists. Zero when it lists
-/// none of them.
-pub fn mount_salvo(ammo: &[String], barrels: u32, shells: &[&ShellStats]) -> Hp {
-    let damage = ammo
-        .iter()
-        .find_map(|name| shells.iter().find(|shell| shell.name == *name).and_then(|shell| shell.damage))
-        .map_or(0.0, |damage| damage.value());
+/// barrel fires the first of `shells` the mount lists. `None` when it lists
+/// none of them with a damage value.
+pub fn mount_salvo(ammo: &[String], barrels: u32, shells: &[&ShellStats]) -> Option<Hp> {
+    let damage =
+        ammo.iter().find_map(|name| shells.iter().find(|shell| shell.name == *name).and_then(|shell| shell.damage))?;
 
-    Hp::from(barrels as f32 * damage)
-}
-
-/// The qualifier the card gives a shell row: ammo type, else projectile name,
-/// else index (`ShipStats::rows`).
-fn shell_qualifier(shell: &ShellStats, idx: usize) -> String {
-    shell
-        .ammo_kind
-        .clone()
-        .or_else(|| (!shell.name.is_empty()).then(|| shell.name.clone()))
-        .unwrap_or_else(|| idx.to_string())
+    Some(Hp::from(barrels as f32 * damage.value()))
 }
 
 #[cfg(test)]
@@ -1230,7 +1221,18 @@ mod tests {
     use super::*;
 
     fn shell(name: &str, damage: Option<f32>) -> ShellStats {
-        ShellStats { name: name.to_owned(), damage: damage.map(Hp::from), ..ShellStats::default() }
+        ShellStats {
+            name: name.to_owned(),
+            ammo_kind: None,
+            damage: damage.map(Hp::from),
+            caliber: None,
+            speed: None,
+            penetration: None,
+            burn_chance: None,
+            flood_chance: None,
+            max_ammo: None,
+            disabled_underwater: None,
+        }
     }
 
     #[test]
@@ -1240,8 +1242,8 @@ mod tests {
         let unrated = shell("PAPA003_HE", None);
         let ammo = ["PAPA003_HE", "PAPA002_HE", "PAPA001_HE"].map(str::to_owned);
 
-        assert_eq!(mount_salvo(&ammo, 3, &[&he, &alternative, &unrated]), Hp::from(5400.0));
-        assert_eq!(mount_salvo(&ammo[..1], 3, &[&he, &unrated]), Hp::from(0.0));
-        assert_eq!(mount_salvo(&ammo, 2, &[]), Hp::from(0.0));
+        assert_eq!(mount_salvo(&ammo, 3, &[&he, &alternative, &unrated]), Some(Hp::from(5400.0)));
+        assert_eq!(mount_salvo(&ammo[..1], 3, &[&he, &unrated]), None);
+        assert_eq!(mount_salvo(&ammo, 2, &[]), None);
     }
 }

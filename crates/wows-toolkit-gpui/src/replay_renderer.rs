@@ -2319,9 +2319,9 @@ impl ReplayRendererPanel {
             let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else {
                 continue;
             };
-            let Some(param) = provider.game_param_by_id(config.param_id.into()) else { continue };
+            let Some(param) = provider.game_param_by_id(config.param_id) else { continue };
             let Some(vehicle) = param.vehicle() else { continue };
-            let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
+            let hull = config.hull_name.as_deref();
             let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
             circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
         }
@@ -2393,13 +2393,9 @@ impl ReplayRendererPanel {
                 yaw: *yaw,
                 species: format!("{species:?}"),
                 friendly: *friendly,
-                config: Some(wt_collab_client::types::AnnotationShipConfig {
-                    param_id: param.id().raw(),
-                    ship_name: ship.display_name.clone(),
-                    // Stock hull and no modifiers until the reader says
-                    // otherwise, which is where the egui chooser leaves it.
-                    ..Default::default()
-                }),
+                // Stock hull and no modifiers until the reader says otherwise,
+                // which is where the egui chooser leaves it.
+                config: Some(wt_collab_client::types::AnnotationShipConfig::new(param.id(), ship.display_name.clone())),
             },
         );
         self.ship_query.clear();
@@ -5943,10 +5939,12 @@ mod tests {
                         ship_param_id: None,
                         class_icon_key: None,
                         species: None,
-                        hp_current: 100.0,
-                        hp_max: 100.0,
-                        hp_healable: 0.0,
-                        hp_healable_per_charge: 0.0,
+                        hp: Some(wows_minimap_renderer::draw_command::HitPoints {
+                            current: 100.0,
+                            max: 100.0,
+                            healable: 0.0,
+                            healable_per_charge: 0.0,
+                        }),
                         heal_availability: ConsumableAvailability::Unavailable,
                         is_dead: false,
                         is_self: false,

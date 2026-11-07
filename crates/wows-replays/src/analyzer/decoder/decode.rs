@@ -116,8 +116,8 @@ pub struct PlayerStateData {
     pub(crate) username: String,
     /// The player's clan
     pub(crate) clan: String,
-    /// The player's clan DB id
-    pub(crate) clan_id: i64,
+    /// The player's clan DB id. `None` for a player outside any clan.
+    pub(crate) clan_id: Option<i64>,
     /// The color of the player's clan tag as an RGB integer
     pub(crate) clan_color: i64,
     /// The player's DB ID (unique player ID)
@@ -125,7 +125,7 @@ pub struct PlayerStateData {
     /// The realm this player belongs to
     pub(crate) realm: Option<String>,
     /// The game's per-battle player id (`id` in the client's player data)
-    pub(crate) player_id: PlayerId,
+    pub(crate) player_id: Option<PlayerId>,
     /// This player's entity created by a CreateEntity packet
     pub(crate) entity_id: EntityId,
     /// The ship's GameParam id; its roster field changed in 15.9.
@@ -134,7 +134,7 @@ pub struct PlayerStateData {
     /// Which team they're on.
     pub(crate) team_id: i64,
     /// Their starting health
-    pub(crate) max_health: i64,
+    pub(crate) max_health: Option<i64>,
     /// ????
     pub(crate) is_abuser: bool,
     /// Has hidden stats
@@ -497,13 +497,15 @@ impl PlayerStateData {
         }
     }
 
+    /// `None` when the record lacks a ship entity or team, which every roster
+    /// layout carries; without them the player cannot be placed in the battle.
     pub(crate) fn from_pickle(
         value: &pickled::Value,
         version: &Version,
         is_bot: bool,
         player_member_map: Option<&HashMap<String, i64>>,
         bot_member_map: Option<&HashMap<String, i64>>,
-    ) -> Self {
+    ) -> Option<Self> {
         let raw_values = convert_flat_dict_to_real_dict(value);
 
         let member_map = if is_bot { bot_member_map } else { player_member_map };
@@ -518,7 +520,7 @@ impl PlayerStateData {
         raw_values: HashMap<i64, pickled::Value>,
         mut mapped_values: HashMap<&'static str, pickled::Value>,
         _version: &Version,
-    ) -> Self {
+    ) -> Option<Self> {
         // Older arena-state layouts (pre-0.10.7) only provide a subset of these
         // fields, so every lookup must tolerate a missing key rather than unwrap.
         let get_str =
@@ -527,13 +529,16 @@ impl PlayerStateData {
 
         let username = get_str(Self::KEY_NAME).unwrap_or_default();
         let clan = get_str(Self::KEY_CLAN_TAG).unwrap_or_default();
-        let clan_id = get_i64(Self::KEY_CLAN_ID).unwrap_or(0);
+        // The roster writes clanID 0 for a player outside any clan.
+        let clan_id = get_i64(Self::KEY_CLAN_ID).filter(|id| *id != 0);
 
-        let shipid = get_i64(Self::KEY_SHIP_ID).unwrap_or(0);
-        let ship_params_id = get_i64(Self::KEY_SHIP_PARAMS_ID).map(|id| GameParamId::from(id as u32));
-        let player_id = get_i64(Self::KEY_ID).unwrap_or(0);
-        let team = get_i64(Self::KEY_TEAM_ID).unwrap_or(0);
-        let health = get_i64(Self::KEY_MAX_HEALTH).unwrap_or(0);
+        let shipid = get_i64(Self::KEY_SHIP_ID)?;
+        // The roster writes 0 when it names no ship.
+        let ship_params_id =
+            get_i64(Self::KEY_SHIP_PARAMS_ID).filter(|id| *id != 0).map(|id| GameParamId::from(id as u32));
+        let player_id = get_i64(Self::KEY_ID).map(PlayerId::from);
+        let team = get_i64(Self::KEY_TEAM_ID)?;
+        let health = get_i64(Self::KEY_MAX_HEALTH);
 
         let realm = get_str(Self::KEY_REALM);
 
@@ -575,14 +580,14 @@ impl PlayerStateData {
             raw.insert(*k, format!("{:?}", v));
         }
 
-        PlayerStateData {
+        Some(PlayerStateData {
             username,
             clan,
             clan_id,
             clan_color,
             realm,
             db_id: AccountId::from(db_id),
-            player_id: PlayerId::from(player_id),
+            player_id,
             entity_id: EntityId::from(shipid),
             ship_params_id,
             team_id: team,
@@ -593,7 +598,7 @@ impl PlayerStateData {
             human_properties,
             raw,
             raw_with_names: HashMap::from_iter(mapped_values.drain().map(|(k, v)| (k, pickle_to_json(v)))),
-        }
+        })
     }
 
     /// Updates the PlayerStateData from a dictionary of values.
@@ -618,7 +623,8 @@ impl PlayerStateData {
         if let Some(v) = values.get(Self::KEY_CLAN_ID)
             && let Some(id) = v.i64_ref()
         {
-            self.clan_id = *id;
+            // The roster writes clanID 0 for a player outside any clan.
+            self.clan_id = Some(*id).filter(|id| *id != 0);
         }
         if let Some(v) = values.get(Self::KEY_CLAN_COLOR)
             && let Some(id) = v.i64_ref()
@@ -627,6 +633,7 @@ impl PlayerStateData {
         }
         if let Some(v) = values.get(Self::KEY_SHIP_PARAMS_ID)
             && let Some(id) = v.i64_ref()
+            && *id != 0
         {
             self.ship_params_id = Some(GameParamId::from(*id as u32));
         }
@@ -638,7 +645,7 @@ impl PlayerStateData {
         if let Some(v) = values.get(Self::KEY_ID)
             && let Some(id) = v.i64_ref()
         {
-            self.player_id = PlayerId::from(*id);
+            self.player_id = Some(PlayerId::from(*id));
         }
         if let Some(v) = values.get(Self::KEY_TEAM_ID)
             && let Some(id) = v.i64_ref()
@@ -648,7 +655,7 @@ impl PlayerStateData {
         if let Some(v) = values.get(Self::KEY_MAX_HEALTH)
             && let Some(id) = v.i64_ref()
         {
-            self.max_health = *id;
+            self.max_health = Some(*id);
         }
         if let Some(v) = values.get(Self::KEY_REALM)
             && let Some(s) = v.string_ref()
@@ -708,7 +715,7 @@ impl PlayerStateData {
         &self.clan
     }
 
-    pub fn clan_id(&self) -> i64 {
+    pub fn clan_id(&self) -> Option<i64> {
         self.clan_id
     }
 
@@ -728,7 +735,7 @@ impl PlayerStateData {
         self.human_properties.as_ref().map(|hp| hp.avatar_id)
     }
 
-    pub fn player_id(&self) -> PlayerId {
+    pub fn player_id(&self) -> Option<PlayerId> {
         self.player_id
     }
 
@@ -749,7 +756,7 @@ impl PlayerStateData {
         self.db_id() != other.db_id() && self.division_id() > 0 && other.division_id() == self.division_id()
     }
 
-    pub fn max_health(&self) -> i64 {
+    pub fn max_health(&self) -> Option<i64> {
         self.max_health
     }
 
@@ -793,6 +800,8 @@ impl PlayerStateData {
             .and_then(|v| v.as_array())
             .and_then(|params| params.first())
             .and_then(|id| id.as_u64())
+            // The roster writes 0 before a commander is assigned.
+            .filter(|id| *id != 0)
             .map(|id| GameParamId::from(id as u32))
     }
 
@@ -852,7 +861,7 @@ pub(crate) fn player_states_from_blob_with_member_maps(
     players
         .inner()
         .iter()
-        .map(|player| PlayerStateData::from_pickle(player, version, false, player_member_map, bot_member_map))
+        .filter_map(|player| PlayerStateData::from_pickle(player, version, false, player_member_map, bot_member_map))
         .collect()
 }
 
@@ -1215,12 +1224,13 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     DamageStat(Vec<DamageStatEntry>),
     /// Sent when a ship is destroyed.
     ShipDestroyed {
-        /// The ship ID (note: Not the avatar ID) of the killer
-        killer: EntityId,
+        /// The ship ID (note: Not the avatar ID) of the killer. `None` when no
+        /// ship is responsible, such as a sea mine.
+        killer: Option<EntityId>,
         /// The ship ID (note: Not the avatar ID) of the victim
         victim: EntityId,
-        /// Cause of death
-        cause: Recognized<DeathCause>,
+        /// Cause of death. `None` when the game names no cause.
+        cause: Option<Recognized<DeathCause>>,
     },
     EntityMethod(&'rawpacket EntityMethodPacket<'argtype>),
     EntityProperty(&'rawpacket crate::packet2::EntityPropertyPacket<'argtype>),
@@ -1385,12 +1395,12 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     ///
     /// `entity` is the firing vehicle (these are Vehicle entity methods, unlike
     /// the Avatar RPC fire events). `weapon_type` comes from the first arg of
-    /// shootOnClient and is always Secondaries for shootATBAGuns. `gun_bits` is
-    /// the raw per-gun fire mask; expansion to gun indices and target lookup
-    /// happen in ingest where atbaTargets is known.
+    /// shootOnClient (`None` for `NONE`) and is always Secondaries for
+    /// shootATBAGuns. `gun_bits` is the raw per-gun fire mask; expansion to gun
+    /// indices and target lookup happen in ingest where atbaTargets is known.
     WeaponFired {
         entity: EntityId,
-        weapon_type: Recognized<WeaponType, u32>,
+        weapon_type: Option<Recognized<WeaponType, u32>>,
         gun_bits: GunBits,
     },
     /// Torpedoes launched
@@ -1414,10 +1424,8 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     /// Turret rotation sync for a ship
     GunSync {
         entity_id: EntityId,
-        /// `WeaponType` (ARTILLERY = 0 = main battery, ATBA = 1, TORPEDO = 2, ...).
-        /// The enum is generated from `idGenerator(-1)`, so NONE = -1 and the
-        /// first real weapon, ARTILLERY, is 0.
-        weapon_type: u32,
+        /// `None` for `NONE`.
+        weapon_type: Option<Recognized<WeaponType, u32>>,
         /// Gun index within the weapon group.
         gun_id: u32,
         /// Turret yaw in radians relative to ship heading (0 = forward, PI = aft)
@@ -1465,8 +1473,8 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     /// Ammo type selected for a weapon group
     SetAmmoForWeapon {
         entity_id: EntityId,
-        /// 0 = artillery, 2 = torpedo
-        weapon_type: u32,
+        /// `None` for `NONE`.
+        weapon_type: Option<Recognized<WeaponType, u32>>,
         /// GameParamId of the projectile (look up ammoType in GameParams)
         ammo_param_id: GameParamId,
         /// True if the player just switched ammo and is reloading
@@ -1887,7 +1895,7 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(players) = &value {
                         for player in players.inner().iter() {
-                            players_out.push(PlayerStateData::from_pickle(
+                            players_out.extend(PlayerStateData::from_pickle(
                                 player,
                                 version,
                                 false,
@@ -1905,7 +1913,7 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(bots) = &value {
                         for bot in bots.inner().iter() {
-                            bots_out.push(PlayerStateData::from_pickle(
+                            bots_out.extend(PlayerStateData::from_pickle(
                                 bot,
                                 version,
                                 true,
@@ -1983,7 +1991,7 @@ where
                 let mut players_out = vec![];
                 if let pickled::value::Value::List(players) = &value {
                     for player in players.inner().iter() {
-                        players_out.push(PlayerStateData::from_pickle(
+                        players_out.extend(PlayerStateData::from_pickle(
                             player,
                             version,
                             false,
@@ -2000,7 +2008,7 @@ where
                     let value = try_convert_pickle_to_string(value);
                     if let pickled::value::Value::List(bots) = &value {
                         for bot in bots.inner().iter() {
-                            bots_out.push(PlayerStateData::from_pickle(
+                            bots_out.extend(PlayerStateData::from_pickle(
                                 bot,
                                 version,
                                 true,
@@ -2083,19 +2091,20 @@ where
             }
             "receiveVehicleDeath" => {
                 let (victim, killer, cause) = unpack_rpc_args!(args, i32, i32, u32);
-                let cause = if let Some(dc) = DeathCause::from_id(cause as i32, battle_constants, *version) {
-                    dc
-                } else if audit {
-                    return DecodedPacketPayload::Audit(format!(
-                        "receiveVehicleDeath(victim={}, killer={}, unknown cause {})",
-                        victim, killer, cause
-                    ));
-                } else {
-                    Recognized::Unknown(format!("{}", cause))
+                let cause = match battle_constants.death_reason(cause as i32) {
+                    Some(name) => DeathCause::from_name(name, *version),
+                    None if audit => {
+                        return DecodedPacketPayload::Audit(format!(
+                            "receiveVehicleDeath(victim={}, killer={}, unknown cause {})",
+                            victim, killer, cause
+                        ));
+                    }
+                    None => Some(Recognized::Unknown(format!("{}", cause))),
                 };
                 DecodedPacketPayload::ShipDestroyed {
                     victim: EntityId::from(victim),
-                    killer: EntityId::from(killer),
+                    // receiveVehicleDeath writes killer 0 when no ship is responsible.
+                    killer: (killer != 0).then(|| EntityId::from(killer)),
                     cause,
                 }
             }
@@ -2446,7 +2455,7 @@ where
                 };
                 DecodedPacketPayload::WeaponFired {
                     entity: *entity_id,
-                    weapon_type: Recognized::Known(WeaponType::Secondaries),
+                    weapon_type: Some(Recognized::Known(WeaponType::Secondaries)),
                     gun_bits: GunBits::from(gun_bits_raw),
                 }
             }
@@ -2768,7 +2777,13 @@ where
                     ArgValue::Float32(v) => *v,
                     _ => return DecodedPacketPayload::EntityMethod(packet),
                 };
-                DecodedPacketPayload::GunSync { entity_id: *entity_id, weapon_type, gun_id, yaw, pitch }
+                DecodedPacketPayload::GunSync {
+                    entity_id: *entity_id,
+                    weapon_type: WeaponType::from_raw(weapon_type),
+                    gun_id,
+                    yaw,
+                    pitch,
+                }
             }
             "setAmmoForWeapon" => {
                 // args: [weaponType: u8, ammoParamsId: u32, isReload: bool (optional in older replays)]
@@ -2795,7 +2810,12 @@ where
                 } else {
                     false
                 };
-                DecodedPacketPayload::SetAmmoForWeapon { entity_id: *entity_id, weapon_type, ammo_param_id, is_reload }
+                DecodedPacketPayload::SetAmmoForWeapon {
+                    entity_id: *entity_id,
+                    weapon_type: WeaponType::from_raw(weapon_type),
+                    ammo_param_id,
+                    is_reload,
+                }
             }
             "syncShipCracks" => {
                 // args: [state1: BLOB, state2: BLOB] — 72-byte physics body states for each hull half
@@ -3028,7 +3048,8 @@ mod player_key_map_tests {
             (37, Value::I64(1)),
         ]);
         let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &v(15, 9, 0), false);
-        let player = PlayerStateData::from_values(raw_values, mapped_values, &v(15, 9, 0));
+        let player =
+            PlayerStateData::from_values(raw_values, mapped_values, &v(15, 9, 0)).expect("ship and team present");
 
         assert_eq!(player.entity_id(), EntityId::from(438_335u32));
         assert_eq!(player.ship_params_id(), Some(GameParamId::from(4_076_779_344u32)));
@@ -3059,7 +3080,7 @@ mod player_key_map_tests {
             (28, Value::I64(1)),
         ]);
         let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &version, true);
-        let player = PlayerStateData::from_values(raw_values, mapped_values, &version);
+        let player = PlayerStateData::from_values(raw_values, mapped_values, &version).expect("ship and team present");
 
         assert_eq!(player.team_id(), 1);
     }
@@ -3070,25 +3091,40 @@ mod player_key_map_tests {
             (33, Value::I64(968_041)),
             (34, Value::I64(3_655_251_408)),
             (35, Value::I64(3_655_251_408)),
+            (36, Value::I64(0)),
         ]);
         let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &v(15, 8, 0), false);
-        let player = PlayerStateData::from_values(raw_values, mapped_values, &v(15, 8, 0));
+        let player =
+            PlayerStateData::from_values(raw_values, mapped_values, &v(15, 8, 0)).expect("ship and team present");
 
         assert_eq!(player.entity_id(), EntityId::from(968_041u32));
         assert_eq!(player.ship_params_id(), Some(GameParamId::from(3_655_251_408u32)));
+        assert_eq!(player.team_id(), 0);
+    }
+
+    #[test]
+    fn a_record_without_a_team_is_not_read_as_team_zero() {
+        let raw_values = HashMap::from([(34, Value::I64(438_335)), (35, Value::I64(4_076_779_344))]);
+        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &v(15, 9, 0), false);
+
+        assert!(PlayerStateData::from_values(raw_values, mapped_values, &v(15, 9, 0)).is_none());
     }
 
     #[test]
     fn v15_9_reads_captain_id_from_crew_params() {
-        let values = HashMap::from([(
-            7,
-            Value::List(pickled::value::Shared::new(vec![
-                Value::I64(3_556_943_696),
-                Value::List(pickled::value::Shared::new(vec![Value::I64(0), Value::I64(0)])),
-            ])),
-        )]);
+        let values = HashMap::from([
+            (
+                7,
+                Value::List(pickled::value::Shared::new(vec![
+                    Value::I64(3_556_943_696),
+                    Value::List(pickled::value::Shared::new(vec![Value::I64(0), Value::I64(0)])),
+                ])),
+            ),
+            (34, Value::I64(438_335)),
+            (37, Value::I64(0)),
+        ]);
         let mapped = PlayerStateData::convert_raw_dict(&values, &v(15, 9, 0), false);
-        let player = PlayerStateData::from_values(values, mapped, &v(15, 9, 0));
+        let player = PlayerStateData::from_values(values, mapped, &v(15, 9, 0)).expect("ship and team present");
 
         assert_eq!(player.crew_params_id(), Some(GameParamId::from(3_556_943_696u32)));
     }
