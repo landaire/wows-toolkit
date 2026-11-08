@@ -1662,7 +1662,8 @@ impl TabState {
                                 }
                             }
                         }
-                        EventKind::Modify(ModifyKind::Data(_)) => {
+                        // Windows reports a content change as `Any`.
+                        EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Any) => {
                             for path in event.paths {
                                 if let Some(filename) = path.file_name()
                                     && filename == "preferences.xml"

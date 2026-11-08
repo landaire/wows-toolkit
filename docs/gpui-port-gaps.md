@@ -94,14 +94,15 @@ something here steer the one device this port does pick.
    `check_for_updates` says so, and `enable_logging` is read straight from the
    database before anything else starts, because the log file is what a crash
    during startup would otherwise go unrecorded in.
-8. ~~**Auto-export.**~~ Done 2026-09-28: a replay the watcher reports is parsed
-   and written out whether or not it is opened (`auto_export_landed`), skipped
-   when it carries no battle results, which is the egui gate. It is named by
-   ship, map, scenario, mode and time, the same name the egui app writes, through
-   the shared `wows_toolkit_viewmodel::replay_export::exported_file_stem`; all
-   three of the port's export paths -- the watcher's, the tab's own auto-export
-   and the Export menu's save dialog -- agree on it, so a directory both apps
-   write into reads as one set.
+8. ~~**Auto-export.**~~ Done 2026-09-28: a replay the watcher reports as new
+   or changed is parsed and written out whether or not it is opened
+   (`auto_export_landed`), skipped when it carries no battle results, which is
+   the egui gate. A battle the client left early is written when the game adds
+   its results. It is named by ship, map, scenario, mode and time, the same name
+   the egui app writes, through the shared
+   `wows_toolkit_viewmodel::replay_export::exported_file_stem`; the watcher's
+   export and the Export menu's save dialog agree on it, so a directory both
+   apps write into reads as one set.
 9. ~~**"Set as Session Stats" destroys the session on one click.**~~ Done
    2026-09-27: it opens the same confirmation the port already uses for Open in
    Game, on the `confirm.set_as_session_stats` wording.

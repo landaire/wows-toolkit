@@ -70,6 +70,10 @@ const CONTRIBUTE_PROGRESS: &str = "replay-contribute-all";
 /// battles that all fail says so once.
 const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
 
+/// How long a replay must go unchanged before it is exported. The game writes
+/// a replay in bursts and each write is a file event.
+const AUTO_EXPORT_QUIET: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// The same, for the notice that a battle was read through a mapping that does
 /// not fit, which stands until one that does is on disk.
 const CONSTANTS_UNFIT: &str = "replay-constants-unfit";
@@ -197,6 +201,10 @@ pub struct ReplayInspectorView {
     /// The bulk contribution now running, if one is: a second pass over the same
     /// directory would send everything twice.
     contributing: Option<Task<()>>,
+    /// The pending auto-export for each replay. A newer event for the same
+    /// replay replaces, and so cancels, the older one, so a burst of writes
+    /// is read once and an earlier read never overwrites a later one.
+    auto_exports: HashMap<PathBuf, Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -358,6 +366,7 @@ impl ReplayInspectorView {
             constants_asked: std::collections::BTreeSet::new(),
             constants_mismatched: std::collections::BTreeSet::new(),
             contributing: None,
+            auto_exports: HashMap::new(),
             _subscriptions: vec![subscription, dock_subscription],
         }
     }
@@ -550,8 +559,13 @@ impl ReplayInspectorView {
                 }
             }
             // The file under an open tab has changed, so that tab is reading
-            // something that is no longer on disk.
-            ReplayBrowserEvent::ReplayChanged(path) => self.reparse_open_replay(path, window, cx),
+            // something that is no longer on disk. The change may be the
+            // battle results arriving for a battle the client left early, so
+            // the export is tried again.
+            ReplayBrowserEvent::ReplayChanged(path) => {
+                self.auto_export_landed(path, window, cx);
+                self.reparse_open_replay(path, window, cx);
+            }
             ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
             // The app owns the cache and the jobs that fill it, so the offer to
             // fetch these builds is raised to it.
@@ -1174,14 +1188,14 @@ impl ReplayInspectorView {
         .detach();
     }
 
-    /// Writes a battle that has just landed out to the auto-export directory.
+    /// Writes a battle that has landed or changed out to the auto-export
+    /// directory.
     ///
     /// The egui app exports from its background parser as each replay appears
-    /// (`task/replays.rs:558`), so a match nobody opens is still written; the
-    /// port used to write only what was opened, which made the setting say more
-    /// than it did. Skipped for a replay carrying no battle results, as the egui
-    /// gate skips it: the document would be a hollow one for a battle the client
-    /// left before the server reported it.
+    /// or changes (`task/replays.rs`), so a match nobody opens is still
+    /// written. Skipped for a replay carrying no battle results, as the egui
+    /// gate skips it: a battle the client left early is written once the game
+    /// adds the results to its replay, which arrives here as a change.
     ///
     /// Named by ship, map, scenario, mode and time, which is the name the egui
     /// app writes (`wows_toolkit_viewmodel::replay_export::exported_file_stem`),
@@ -1191,9 +1205,15 @@ impl ReplayInspectorView {
         let Some(game_data) = self.game_data.clone() else { return };
 
         let debug = self.debug_mode;
-        let parse = spawn_parse(path.to_path_buf(), game_data, self.personal_rating.clone(), cx);
+        let personal_rating = self.personal_rating.clone();
         let named = path.to_path_buf();
-        cx.spawn_in(window, async move |_this, cx| {
+        let task = cx.spawn_in(window, async move |_this, cx| {
+            cx.background_executor().timer(AUTO_EXPORT_QUIET).await;
+
+            // An error is the window having closed, which ends the export.
+            let Ok(parse) = cx.update(|_window, cx| spawn_parse(named.clone(), game_data, personal_rating, cx)) else {
+                return;
+            };
             let parsed = match parse.await {
                 Ok(parsed) => parsed,
                 Err(err) => {
@@ -1231,8 +1251,8 @@ impl ReplayInspectorView {
                     });
                 }
             }
-        })
-        .detach();
+        });
+        self.auto_exports.insert(path.to_path_buf(), task);
     }
 
     /// Re-reads a replay a tab is open on, leaving the tab where it is.
@@ -1287,11 +1307,7 @@ impl ReplayInspectorView {
 
         let columns = default_columns(&self.replay_settings);
         let personal_rating = self.personal_rating.clone();
-        // Read per open rather than held: a directory the reader has since
-        // removed simply stops being written to.
-        let auto_export = AutoExport::from_settings(&self.replay_settings);
-        let setup =
-            PanelSetup { path: path.clone(), game_data, debug: self.debug_mode, columns, personal_rating, auto_export };
+        let setup = PanelSetup { path: path.clone(), game_data, debug: self.debug_mode, columns, personal_rating };
         let panel = cx.new(|cx| ReplayPanel::new(setup, window, cx));
         // A panel's Actions menu can ask for its own replay to be rendered,
         // which is this view's to do: it owns the dock the viewport opens in.

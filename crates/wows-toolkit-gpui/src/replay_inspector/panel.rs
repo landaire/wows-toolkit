@@ -210,10 +210,7 @@ pub struct ReplayPanel {
     /// The match the Export menu writes, in its debug form. `None` until the
     /// parse finishes, which is what keeps the menu disabled until then.
     export: Option<ExportedMatch>,
-    /// Where a finished parse writes itself without being asked, if anywhere.
-    auto_export: AutoExport,
-    /// The replay this tab is reading, kept because an auto-export is named
-    /// after it.
+    /// The replay this tab is reading.
     path: PathBuf,
     /// Other recordings of the same battle, read alongside it so the report sees
     /// what the primary's team could not.
@@ -271,7 +268,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 impl ReplayPanel {
     pub fn new(setup: PanelSetup, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let PanelSetup { path, game_data, debug, columns, personal_rating, auto_export } = setup;
+        let PanelSetup { path, game_data, debug, columns, personal_rating } = setup;
         let kept_game_data = game_data.clone();
         let focus_handle = cx.focus_handle();
         let parse_task = spawn_parse(path.clone(), game_data, personal_rating.clone(), cx);
@@ -293,7 +290,6 @@ impl ReplayPanel {
             parse_in_flight: true,
             reparse_queued: false,
             queued_alt_trial: None,
-            auto_export,
             path,
             alts: Vec::new(),
             alt_on_trial: None,
@@ -429,40 +425,6 @@ impl ReplayPanel {
     ///
     /// The document is held in its debug form, so an ordinary export strips a
     /// copy here rather than reparsing the replay.
-    /// Writes this battle out on its own, for a reader who asked for every
-    /// battle rather than this one.
-    ///
-    /// Named after the replay file so a directory of exports reads in the
-    /// same order as the directory of replays it came from. A battle opened
-    /// twice is written twice, over the same name, which is what the egui
-    /// app does with the same setting.
-    fn write_auto_export(&mut self, cx: &mut Context<Self>) {
-        let AutoExport::To { directory, format } = &self.auto_export else { return };
-        let Some(export) = self.export.clone() else { return };
-        let export = if self.debug { export } else { export.stripped() };
-
-        // Named the way the egui app names it, so a directory both apps write
-        // into reads as one set rather than two.
-        let Some(stem) = self.export_stem.clone() else {
-            tracing::warn!(path = %self.path.display(), "auto-export: the replay has no name to write under");
-            return;
-        };
-        let path = directory.join(stem).with_extension(format.extension());
-        let format = *format;
-
-        cx.spawn(async move |this, cx| {
-            let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
-            if let Err(err) = written {
-                tracing::warn!("auto-export failed: {err}");
-                let _ = this.update(cx, |this, cx| {
-                    this.export_status = Some(err.to_string());
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
-    }
-
     fn export_match(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
         let Some(export) = self.export.clone() else {
             return;
@@ -593,7 +555,6 @@ impl ReplayPanel {
                 self.alt_on_trial = None;
                 self.export = Some(export);
                 self.export_stem = Some(export_stem);
-                self.write_auto_export(cx);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
                 self.loaded_state(model, game_data.vfs().clone(), fire_chance, payloads, window, cx)
             }
@@ -740,7 +701,6 @@ impl ReplayPanel {
             // gate is that there is one, not what is in it.
             export: Some(ExportedMatch::new(&super::test_support::fixture_empty_battle_report(), &[], &[], true)),
             export_status: None,
-            auto_export: AutoExport::Off,
             path: PathBuf::from("test.wowsreplay"),
             alts: Vec::new(),
             game_data: GameDataCache::new(PathBuf::from("test")),
@@ -864,14 +824,13 @@ pub struct PanelSetup {
     pub columns: Vec<ReplayColumn>,
     /// The expected-values table, when one has been read.
     pub personal_rating: Option<Arc<PersonalRatingData>>,
-    pub auto_export: AutoExport,
 }
 
-/// Whether a finished parse writes itself out, and where.
+/// Whether a battle that lands is written out, and where.
 ///
-/// A directory that is not there is not one: the setting is read at open
-/// time, so a directory removed since then simply turns the writing off
-/// rather than failing once per battle.
+/// A directory that is not there is not one: the setting is read per battle,
+/// so a directory removed since then simply turns the writing off rather than
+/// failing once per battle.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum AutoExport {
     #[default]

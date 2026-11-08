@@ -828,9 +828,13 @@ impl ReplayBrowser {
                 | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
                     DirChange::Appeared
                 }
-                // A replay written to again: a re-save, or a copy that landed
-                // before the writer had finished with it.
-                notify::EventKind::Modify(notify::event::ModifyKind::Data(_)) => DirChange::Changed,
+                // A replay written to again: a re-save, a copy that landed
+                // before the writer had finished with it, or battle results
+                // added to a battle the client left early. Windows reports a
+                // content change as `Any`.
+                notify::EventKind::Modify(notify::event::ModifyKind::Data(_) | notify::event::ModifyKind::Any) => {
+                    DirChange::Changed
+                }
                 notify::EventKind::Remove(_) => DirChange::Removed,
                 _ => return,
             };
