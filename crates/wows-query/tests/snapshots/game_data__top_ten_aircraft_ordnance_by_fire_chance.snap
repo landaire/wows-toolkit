@@ -2,7 +2,7 @@
 source: crates/wows-query/tests/game_data.rs
 expression: "json!({ \"stat\": ranking[\"stat\"], \"ships\": ships })"
 ---
-stat: "aircraft.fire_chance (percent 0-100), highest first"
+stat: "aircraft.fire_chance (percent 0-100), highest first, on the build that raises it most"
 ships:
   - "1 T11 United States (aircraft_carrier, USA): 96% (AN-M56A1 bomb on A-2 Savage), build [\"Pyrotechnician\"]"
   - "2 T10 Hildebrand (cruiser, Germany): 78% (PC 1000 bomb on Ta 152C-1/R14), build null"

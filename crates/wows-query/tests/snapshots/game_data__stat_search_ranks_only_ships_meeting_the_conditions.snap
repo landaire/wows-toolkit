@@ -21,8 +21,8 @@ share_pct: 39.3
 share_pct_by_class:
   cruiser: 39.3
 ranking:
-  stat: "visibility.sea_detection (km), lowest first"
-  rule: "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  stat: "visibility.sea_detection (km), lowest first, on the build that lowers it most"
+  rule: "Each ship is ranked by its value on the build that lowers the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that lower the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
   ranked: 22
   ships:
     - rank: 1

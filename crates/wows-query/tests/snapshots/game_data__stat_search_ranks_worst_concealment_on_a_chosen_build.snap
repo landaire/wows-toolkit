@@ -1,0 +1,22 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({ \"lowest\": ranking(\"lowest\"), \"base\": ranking(\"base\") })"
+---
+lowest:
+  stat: "visibility.sea_detection (km), highest first, on the build that lowers it most"
+  rule: "Each ship is ranked by its value on the build that lowers the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that lower the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  ships:
+    - "1 T10 Stalingrad (cruiser, Russia): 14.24 km (base 17.58 km, build [\"Concealment Expert\",\"Concealment System Modification 1\"])"
+    - "2 T10 Moskva (cruiser, Russia): 14.14 km (base 17.46 km, build [\"Concealment Expert\",\"Concealment System Modification 1\"])"
+    - "3 T10 Ravenna (cruiser, Italy, test): 13.74 km (base 15.27 km, build [\"Concealment Expert\"])"
+    - "4 T10 Petropavlovsk (cruiser, Russia) [replicas: PTRPVLSK]: 13.2 km (base 16.3 km, build [\"Concealment Expert\",\"Concealment System Modification 1\"])"
+    - "5 T10 Bremen (cruiser, Germany) [replicas: Bremen G]: 13.09 km (base 16.16 km, build [\"Concealment Expert\",\"Concealment System Modification 1\"])"
+base:
+  stat: "visibility.sea_detection (km), highest first, on the base value"
+  rule: "Each ship is ranked by its base value: stock hull and modules (or the first modules that have the stat when stock lacks it), no captain skills, no upgrades. Ships are ordered by exact value; ships whose values print the same share a rank."
+  ships:
+    - "1 T10 Stalingrad (cruiser, Russia): 17.58 km (base 17.58 km, build null)"
+    - "2 T10 Moskva (cruiser, Russia): 17.46 km (base 17.46 km, build null)"
+    - "3 T10 Petropavlovsk (cruiser, Russia) [replicas: PTRPVLSK]: 16.3 km (base 16.3 km, build null)"
+    - "4 T10 Bremen (cruiser, Germany) [replicas: Bremen G]: 16.16 km (base 16.16 km, build null)"
+    - "5 T11 Condé (cruiser, France): 16.1 km (base 16.1 km, build null)"

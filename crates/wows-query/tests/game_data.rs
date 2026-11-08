@@ -1705,6 +1705,44 @@ fn stat_search_ranks_derived_and_ricochet_stats() {
     insta::assert_yaml_snapshot!(ranked);
 }
 
+/// Worst concealment among cruisers, highest detection first: as players
+/// build their ships (the build that lowers detection most) and on base
+/// values. Each list is ordered by the value it shows.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_worst_concealment_on_a_chosen_build() {
+    let ranking = |build: &str| -> serde_json::Value {
+        let search = game()
+            .call_tool(
+                "stat_search",
+                json!({
+                    "rank": { "stat": "visibility.sea_detection", "order": "desc", "limit": 5, "build": build },
+                    "class": "cruiser",
+                }),
+            )
+            .expect("rank resolves");
+        let ships: Vec<String> = search["ranking"]["ships"]
+            .as_array()
+            .expect("ships is a list")
+            .iter()
+            .map(|ship| {
+                format!(
+                    "{} {}: {} (base {}, build {})",
+                    ship["rank"],
+                    ship["ship"].as_str().unwrap_or_default(),
+                    ship["value"].as_str().unwrap_or_default(),
+                    ship["base"].as_str().unwrap_or_default(),
+                    ship["build"]
+                )
+            })
+            .collect();
+
+        json!({ "stat": search["ranking"]["stat"], "rule": search["ranking"]["rule"], "ships": ships })
+    };
+
+    insta::assert_yaml_snapshot!(json!({ "lowest": ranking("lowest"), "base": ranking("base") }));
+}
+
 /// One condition on the capacity of time-based consumables lists every ship
 /// with one, released and in testing, naming the consumable and its capacity.
 #[test]
@@ -2417,6 +2455,7 @@ fn armor_stats_are_labelled_nominal() {
                 order: RankOrder::Desc,
                 qualifier: None,
                 limit: Some(RankLimit(3)),
+                build: None,
             }),
             min_tier: Some(Tier(10)),
             max_tier: Some(Tier(10)),

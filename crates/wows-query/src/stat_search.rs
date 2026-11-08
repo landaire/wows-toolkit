@@ -189,14 +189,43 @@ pub struct StatRank {
     /// Stat name from stat_names, e.g. "visibility.sea_detection".
     pub stat: String,
 
-    /// "asc": lowest first, each ship on the build that lowers the stat most. "desc": highest first, on the build that raises it most.
+    /// "asc": lowest first. "desc": highest first.
     pub order: RankOrder,
 
-    /// Only the row with this qualifier, as for conditions. Omit to rank each ship by its lowest ("asc") or highest ("desc") row.
+    /// Only the row with this qualifier, as for conditions. Omit to rank each ship by its lowest or highest row, as build picks.
     pub qualifier: Option<String>,
 
     /// Ships listed. Defaults to 10.
     pub limit: Option<RankLimit>,
+
+    /// The build each ship is ranked on: "base" (stock hull and modules, no captain skills, no upgrades), "lowest" (the build that lowers the stat most) or "highest" (the build that raises it most). Defaults to "lowest" for "asc" and "highest" for "desc". For a ranking as players build their ships, pick the build that improves the stat whatever the order: worst concealment as players build it is order "desc" with build "lowest". For base values, such as base detection, give build "base".
+    pub build: Option<RankBuild>,
+}
+
+/// The build each ranked ship is valued on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RankBuild {
+    /// Stock hull and modules, or the first modules that have the stat
+    /// when stock lacks it; no captain skills or upgrades.
+    Base,
+
+    /// The modules, captain skills and upgrades that lower the stat most.
+    Lowest,
+
+    /// The modules, captain skills and upgrades that raise the stat most.
+    Highest,
+}
+
+impl RankBuild {
+    /// The build an order ranks on when none is given: the one that moves
+    /// the stat furthest in the order.
+    fn for_order(order: RankOrder) -> Self {
+        match order {
+            RankOrder::Asc => Self::Lowest,
+            RankOrder::Desc => Self::Highest,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -318,7 +347,7 @@ pub struct ConditionMatch {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Ranking {
-    /// The stat and order as understood, e.g. "visibility.sea_detection (km), lowest first".
+    /// The stat, order and build as understood, e.g. "visibility.sea_detection (km), lowest first, on the build that lowers it most".
     pub stat: String,
 
     pub rule: &'static str,
@@ -353,15 +382,16 @@ pub struct RankedShip {
     /// "T10 Des Moines (cruiser, USA)".
     pub ship: String,
 
-    /// On the best-fit build.
+    /// On the build the ranking names: the base value, or the build that
+    /// lowers or raises the stat most.
     pub value: String,
 
-    /// Stock modules, or the first modules that have the stat when stock
-    /// lacks it; no captain skills or upgrades.
+    /// Stock hull and modules, or the first modules that have the stat
+    /// when stock lacks it; no captain skills or upgrades.
     pub base: String,
 
-    /// Modules, captain skills and upgrades of the best-fit build. Empty
-    /// when nothing changes the stat.
+    /// Modules, captain skills and upgrades of the build value is on.
+    /// Empty for a base ranking and when nothing changes the stat.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub build: Vec<String>,
 
@@ -379,7 +409,7 @@ pub struct RankedShip {
     pub meets: Option<ConditionMatch>,
 
     /// For the fire start stats: fires against one target at the bearing
-    /// where the best-fit build starts the most, in total and per armament.
+    /// where the ranked build starts the most, in total and per armament.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fires_by_armament: Option<FireBreakdown>,
 
@@ -976,16 +1006,14 @@ impl GameData {
         ConditionSearch { hits, searched_without_skills, unmatched_qualifiers }
     }
 
-    /// `candidates` in rank order, each on its best-fit build for the rank
-    /// stat, then in [`listing_order`].
+    /// `candidates` in rank order, each on the build `rank` names for the
+    /// rank stat, then in [`listing_order`].
     fn rank_ships(
         &self,
         candidates: Vec<(&Ship, Option<ConditionMatch>)>,
         rank: &Rank,
         undetermined: &mut Vec<UndeterminedShip>,
     ) -> Ranking {
-        const RANK_RULE: &str = "Each ship is ranked by its value on the best-fit build for the stat, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that move the stat furthest in the rank order. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
-
         let row_names = RowNames::default();
         let mut entries: Vec<RankEntry<'_>> = Vec::new();
         let mut lacking_stat = 0;
@@ -1003,7 +1031,7 @@ impl GameData {
         }
 
         entries.sort_by(|left, right| {
-            let (left_value, right_value) = (left.builds.best.value.value, right.builds.best.value.value);
+            let (left_value, right_value) = (rank.ranked(&left.builds).value, rank.ranked(&right.builds).value);
             let order = match rank.order {
                 RankOrder::Asc => left_value.total_cmp(&right_value),
                 RankOrder::Desc => right_value.total_cmp(&left_value),
@@ -1012,7 +1040,7 @@ impl GameData {
         });
 
         let limit = rank.limit.0;
-        let printed = |index: usize| entries.get(index).map(|entry| shown(entry.builds.best.value.value));
+        let printed = |index: usize| entries.get(index).map(|entry| shown(rank.ranked(&entry.builds).value));
         let tied_beyond_limit = (limit..entries.len())
             .filter(|&index| printed(index) == printed(limit - 1))
             .map(|index| entries[index].ship.listing_label())
@@ -1035,24 +1063,32 @@ impl GameData {
         let ships: Vec<RankedShip> = entries
             .into_iter()
             .zip(placements)
-            .map(|(RankEntry { ship, builds, fires_by_armament, meets }, (position, tied))| RankedShip {
-                rank: position,
-                ship: ship.listing_label(),
-                value: format_value(builds.best.value.value, unit),
-                base: format_value(builds.base.value, unit),
-                build: builds.best.assumed,
-                tier_fillers: builds.best.tier_fillers,
-                tied,
-                meets,
-                fires_by_armament,
-                row: builds.best.value.row.and_then(|row| row_names.label(self, ship, rank.stat, row)),
+            .map(|(RankEntry { ship, builds, fires_by_armament, meets }, (position, tied))| {
+                let value = rank.ranked(&builds);
+                let (build, tier_fillers) = match rank.build {
+                    RankBuild::Base => (Vec::new(), Vec::new()),
+                    RankBuild::Lowest | RankBuild::Highest => (builds.best.assumed, builds.best.tier_fillers),
+                };
+
+                RankedShip {
+                    rank: position,
+                    ship: ship.listing_label(),
+                    value: format_value(value.value, unit),
+                    base: format_value(builds.base.value, unit),
+                    build,
+                    tier_fillers,
+                    tied,
+                    meets,
+                    fires_by_armament,
+                    row: value.row.and_then(|row| row_names.label(self, ship, rank.stat, row)),
+                }
             })
             .collect();
         let omitted = (ranked > ships.len()).then(|| ranked - ships.len());
 
         Ranking {
             stat: rank.describe(),
-            rule: RANK_RULE,
+            rule: rank.rule(),
             caution: rank.stat.caution(),
             ranked,
             ships,
@@ -1075,7 +1111,7 @@ impl GameData {
                     let caliber = main_battery_caliber(rank.stat, &rows);
                     let values = card_values(self, &rows, stat, rank.qualifier.as_deref())
                         .map(|(row, value)| Amount { value, row: row_names.id(row.qualifier.as_deref(), caliber) });
-                    extreme(rank.order, values)
+                    extreme(rank.direction(), values)
                 };
 
                 planned_builds(&planner, rank, &extract).map(plain)
@@ -1109,7 +1145,7 @@ impl GameData {
                         value: row.value.as_f32(),
                         row: row_names.id(row.qualifier.as_deref(), caliber),
                     });
-                    extreme(rank.order, values)
+                    extreme(rank.direction(), values)
                 };
 
                 let fire_sources = |outcome: &builds::Outcome| {
@@ -1163,9 +1199,13 @@ impl GameData {
                 let Some(BestFit { builds, outcome: best }) = planner.best_fit(&plan)? else {
                     return Ok(None);
                 };
-                let sources = fire_sources(&best);
+                let ranked = match rank.build {
+                    RankBuild::Base => planner.bare(plan.base_selection)?,
+                    RankBuild::Lowest | RankBuild::Highest => best,
+                };
+                let sources = fire_sources(&ranked);
                 let fires_by_armament =
-                    coverage(best.selection).and_then(|coverage| fire_breakdown(&sources, coverage)).map(rounded);
+                    coverage(ranked.selection).and_then(|coverage| fire_breakdown(&sources, coverage)).map(rounded);
 
                 Ok(Some(RankedBuilds { builds, fires_by_armament }))
             }
@@ -1184,7 +1224,7 @@ impl GameData {
                     let shells = main_battery_ricochet(self, ship, selections[outcome.selection]);
                     let angles = shells.iter().filter(|(shell_ammo, _)| *shell_ammo == ammo);
                     let values = angles.map(|(_, angles)| Amount { value: bound.angle(angles), row: None });
-                    extreme(rank.order, values)
+                    extreme(rank.direction(), values)
                 };
 
                 planned_builds(&planner, rank, &extract).map(plain)
@@ -1779,6 +1819,7 @@ struct Rank {
     stat: SearchStat,
     qualifier: Option<String>,
     order: RankOrder,
+    build: RankBuild,
     limit: RankLimit,
 }
 
@@ -1791,8 +1832,44 @@ impl Rank {
             RankOrder::Asc => "lowest first",
             RankOrder::Desc => "highest first",
         };
+        let build = match self.build {
+            RankBuild::Base => "on the base value",
+            RankBuild::Lowest => "on the build that lowers it most",
+            RankBuild::Highest => "on the build that raises it most",
+        };
 
-        format!("{}{rows} ({}), {order}", self.stat.name(), self.stat.unit().name())
+        format!("{}{rows} ({}), {order}, {build}", self.stat.name(), self.stat.unit().name())
+    }
+
+    fn rule(&self) -> &'static str {
+        const BASE_RULE: &str = "Each ship is ranked by its base value: stock hull and modules (or the first modules that have the stat when stock lacks it), no captain skills, no upgrades. Ships are ordered by exact value; ships whose values print the same share a rank.";
+        const LOWEST_RULE: &str = "Each ship is ranked by its value on the build that lowers the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that lower the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
+        const HIGHEST_RULE: &str = "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
+
+        match self.build {
+            RankBuild::Base => BASE_RULE,
+            RankBuild::Lowest => LOWEST_RULE,
+            RankBuild::Highest => HIGHEST_RULE,
+        }
+    }
+
+    /// Which way the build moves the stat, and which row of a ship with
+    /// several the ship is ranked by. A base ranking takes the row first
+    /// in the order.
+    fn direction(&self) -> RankOrder {
+        match self.build {
+            RankBuild::Base => self.order,
+            RankBuild::Lowest => RankOrder::Asc,
+            RankBuild::Highest => RankOrder::Desc,
+        }
+    }
+
+    /// The value of `builds` the ship is ranked by.
+    fn ranked(&self, builds: &Builds<Amount>) -> Amount {
+        match self.build {
+            RankBuild::Base => builds.base,
+            RankBuild::Lowest | RankBuild::Highest => builds.best.value,
+        }
     }
 }
 
@@ -1874,7 +1951,9 @@ fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {
         return Err(QueryError::RankLimitOutOfRange { limit: limit.0, max: MAX_LIMIT.0 });
     }
 
-    Ok(Rank { stat: resolve_stat(&rank.stat)?, qualifier: rank.qualifier.clone(), order: rank.order, limit })
+    let build = rank.build.unwrap_or_else(|| RankBuild::for_order(rank.order));
+
+    Ok(Rank { stat: resolve_stat(&rank.stat)?, qualifier: rank.qualifier.clone(), order: rank.order, build, limit })
 }
 
 fn qualifying_counts(hits: &[(&Ship, ConditionMatch)]) -> QualifyingCounts {
@@ -2257,7 +2336,7 @@ fn rank_plan<'f>(
         return Ok(None);
     };
 
-    let plan = StatPlan::new(rank.stat.name(), rank.order.better(), extract).on_selection(base_selection);
+    let plan = StatPlan::new(rank.stat.name(), rank.direction().better(), extract).on_selection(base_selection);
 
     Ok(Some(if rank.stat.is_consumable() { plan.for_consumable() } else { plan }))
 }
