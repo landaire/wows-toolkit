@@ -806,7 +806,7 @@ impl UiReport {
                         actual_damage_report,
                         actual_damage_text,
                         actual_damage_hover_text,
-                        ship_name: np.ship_name.clone(),
+                        ship_name: np.ship_display_name(),
                         spotting_damage,
                         spotting_damage_text,
                         spotting_damage_hover_text,

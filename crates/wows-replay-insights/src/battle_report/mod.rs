@@ -83,9 +83,10 @@ pub struct NormalizedPlayer {
     /// the username is an `IDS_` key. Export keeps the raw `name`.
     pub display_name: String,
     pub clan: String,
-    /// Clan-league color as packed `0xRRGGBB`; `0` when clanless. Computed
-    /// identically to the export's `Player::from`.
-    pub clan_color_rgb: u32,
+    /// Clan-league color as the game sent it, packed `0xRRGGBB`. The game
+    /// sends `0` for a clanless player. `None` when the replay carries no
+    /// `clanColor`, which older builds omit.
+    pub clan_color_rgb: Option<u32>,
     pub realm: Option<String>,
     pub division_id: Option<u32>,
     pub division_label: Option<String>,
@@ -97,7 +98,9 @@ pub struct NormalizedPlayer {
     pub ship_index: String,
     /// The ship's `GameParams` id, which the personal rating is looked up by.
     pub ship_id: GameParamId,
-    pub ship_name: String,
+    /// Localized ship name. `None` when the build's translations do not name
+    /// the ship. See [`Self::ship_display_name`].
+    pub ship_name: Option<String>,
     pub ship_nation: String,
     pub ship_class: Species,
     /// Ship tier from the vehicle ref. `None` when the entity carries no vehicle
@@ -163,8 +166,7 @@ impl NormalizedPlayer {
         let state = player.initial_state();
         let vehicle_param = player.vehicle();
 
-        self.ship_name =
-            provider.localized_name_from_param(vehicle_param).unwrap_or_else(|| format!("{}", vehicle_param.id()));
+        self.ship_name = provider.localized_name_from_param(vehicle_param);
 
         self.display_name = if state.is_bot() && state.username().starts_with("IDS_") {
             provider
@@ -197,6 +199,15 @@ impl NormalizedPlayer {
             };
             ribbon.display_name = translation.display_name;
             ribbon.description = translation.description;
+        }
+    }
+
+    /// The ship's name for display: the localized name, else the ship's
+    /// `GameParams` id so an untranslated ship still has a label.
+    pub fn ship_display_name(&self) -> String {
+        match &self.ship_name {
+            Some(name) => name.clone(),
+            None => self.ship_id.to_string(),
         }
     }
 }
@@ -367,34 +378,17 @@ pub fn replay_timestamp(meta: &ReplayMeta) -> jiff::Timestamp {
     try_replay_timestamp(meta).expect("failed to parse replay timestamp")
 }
 
-/// Packed `0xRRGGBB` team color, matching the toolkit's
-/// `player_color_for_team_relation` (egui `Color32::WHITE` / `LIGHT_GREEN` /
-/// `LIGHT_RED`). Kept in sync by value since insights is egui-free.
-fn team_relation_rgb(relation: Relation) -> u32 {
-    if relation.is_self() {
-        0xFFFFFF
-    } else if relation.is_ally() {
-        0x90EE90
-    } else {
-        0xFF8080
-    }
-}
-
-/// Clan-league color as packed `0xRRGGBB`, computed exactly as the export's
-/// `Player::from`: `0` when clanless, else `clanColor & 0xFFFFFF`, else the team
-/// color for replays that omit `clanColor`.
-fn clan_color_rgb(player: &Player) -> u32 {
+/// The clan-league color the game sent, packed `0xRRGGBB`. `None` when the
+/// replay carries no `clanColor`.
+fn clan_color_rgb(player: &Player) -> Option<u32> {
     let state = player.initial_state();
-    if state.clan().is_empty() {
-        return 0;
+    let raw = state.raw_with_names().get("clanColor")?;
+
+    let color = raw.as_u64().and_then(|value| u32::try_from(value).ok());
+    if color.is_none() {
+        tracing::warn!("player '{}' has a clanColor that is not an RGB value: {raw}", state.username());
     }
-    match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
-        Some(clan_color) => (clan_color & 0xFFFFFF) as u32,
-        None => {
-            tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-            team_relation_rgb(player.relation())
-        }
-    }
+    color
 }
 
 /// Self-player controller damage for a category, used as the controller
@@ -685,8 +679,7 @@ fn build_player(
 
     let species = vehicle_param.species().and_then(|r| r.known().cloned()).expect("ship has no species?");
 
-    let ship_name =
-        provider.localized_name_from_param(vehicle_param).unwrap_or_else(|| format!("{}", vehicle_param.id()));
+    let ship_name = provider.localized_name_from_param(vehicle_param);
 
     let is_test_ship = vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.is_test_ship()).unwrap_or_default();
 

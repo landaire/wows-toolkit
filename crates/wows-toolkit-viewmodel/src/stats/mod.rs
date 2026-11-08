@@ -154,7 +154,7 @@ impl PerGameStat {
         let battle_result = report.metadata.resolved_battle_result();
 
         Some(PerGameStat {
-            ship_name: player.ship_name.clone(),
+            ship_name: player.ship_display_name(),
             ship_id: player.ship_id,
             game_time: game_time.to_string(),
             sort_key: sortable_game_time(game_time),

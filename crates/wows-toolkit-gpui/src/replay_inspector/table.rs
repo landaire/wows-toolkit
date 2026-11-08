@@ -47,6 +47,7 @@ use super::columns::cell_value;
 use super::columns::name_color_kind;
 use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
+use super::columns::relation_color_rgb;
 use super::expanded;
 use super::icons::IconCache;
 use super::model::MatchContext;
@@ -1013,7 +1014,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         cell = cell.child(
             div()
                 .flex_none()
-                .text_color(resolve_color(ColorRole::Fixed(row.clan_color_rgb)))
+                .text_color(clan_tag_color(row))
                 .child(crate::ui::selectable_text(("replay-clan", ix), clan.clone())),
         );
     }
@@ -1284,12 +1285,22 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
         icon,
         species,
         clan,
-        clan_color: resolve_color(ColorRole::Fixed(row.clan_color_rgb)),
+        clan_color: clan_tag_color(row),
         name: row.display_name.clone().into(),
         name_color: resolve_color(ColorRole::Player(name_color_kind(row))),
         ship,
         spoken: spoken.into(),
     }
+}
+
+/// The game's clan-league color, else the team relation's color for a replay
+/// that carries no clan color, as the egui table does.
+fn clan_tag_color(row: &PlayerRow) -> Hsla {
+    let rgb = match row.clan_color_rgb {
+        Some(rgb) => rgb,
+        None => relation_color_rgb(row.relation),
+    };
+    resolve_color(ColorRole::Fixed(rgb))
 }
 
 /// The heading as the menu's first item: the clan tag and the player in the

@@ -279,7 +279,7 @@ fn assert_translations_are_rebuilt(
 
     for (player, original) in report.players().iter().zip(normalized.players.iter()) {
         let mut scribbled = original.clone();
-        scribbled.ship_name = SCRIBBLE.to_string();
+        scribbled.ship_name = Some(SCRIBBLE.to_string());
         scribbled.display_name = SCRIBBLE.to_string();
         scribbled.build = None;
         for achievement in &mut scribbled.achievements {

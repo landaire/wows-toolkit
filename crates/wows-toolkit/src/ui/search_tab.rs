@@ -1438,9 +1438,9 @@ mod tests {
         assert_eq!(ship_display_name(&hit, None).as_deref(), Some("[4074649424]"));
     }
 
-    /// `refresh_translations` stores a bare id when its own provider cannot name
-    /// the ship. Taking it would print a naked number that no later provider
-    /// could ever displace.
+    /// The index stores a bare id when the indexing provider cannot name the
+    /// ship (`NormalizedPlayer::ship_display_name`). Taking it would print a
+    /// naked number that no later provider could ever displace.
     #[test]
     fn a_stored_bare_id_is_not_treated_as_a_name() {
         let hit = a_hit(Some(GameParamId::from(4_074_649_424_u64)), Some("4074649424"));

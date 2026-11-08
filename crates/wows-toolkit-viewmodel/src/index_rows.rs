@@ -187,7 +187,7 @@ pub fn map_rows(report: &NormalizedBattleReport, context: &IndexContext) -> Mapp
             realm: player.realm.clone(),
             ship_id: player.ship_id,
             ship_index: player.ship_index.clone(),
-            ship_name: player.ship_name.clone(),
+            ship_name: player.ship_display_name(),
             nation: player.ship_nation.clone(),
             species: format!("{:?}", player.ship_class),
             // A ship whose vehicle ref carries no tier stores zero, which is

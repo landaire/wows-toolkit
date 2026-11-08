@@ -331,7 +331,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187928528,
       "ship_index": "PBSC102",
-      "ship_name": "4187928528",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 2,
       "skill_info": {
@@ -540,7 +540,7 @@
       "ship_class": "Battleship",
       "ship_id": 4186912592,
       "ship_index": "PFSB103",
-      "ship_name": "4186912592",
+      "ship_name": null,
       "ship_nation": "France",
       "ship_tier": 3,
       "skill_info": {
@@ -925,7 +925,7 @@
       "ship_class": "Battleship",
       "ship_id": 4082055120,
       "ship_index": "PBSB203",
-      "ship_name": "4082055120",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 3,
       "skill_info": {
@@ -1266,7 +1266,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187928304,
       "ship_index": "PISC102",
-      "ship_name": "4187928304",
+      "ship_name": null,
       "ship_nation": "Italy",
       "ship_tier": 2,
       "skill_info": {
@@ -1720,7 +1720,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4269684432,
       "ship_index": "PJSD024",
-      "ship_name": "4269684432",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 3,
       "skill_info": {
@@ -1929,7 +1929,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187927888,
       "ship_index": "PVSC102",
-      "ship_name": "4187927888",
+      "ship_name": null,
       "ship_nation": "Pan_America",
       "ship_tier": 2,
       "skill_info": {
@@ -2281,7 +2281,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4186846672,
       "ship_index": "PRSD103",
-      "ship_name": "4186846672",
+      "ship_name": null,
       "ship_nation": "Russia",
       "ship_tier": 3,
       "skill_info": {
@@ -2590,7 +2590,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4269684432,
       "ship_index": "PJSD024",
-      "ship_name": "4269684432",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 3,
       "skill_info": {
@@ -2817,7 +2817,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4292786160,
       "ship_index": "PASC002",
-      "ship_name": "4292786160",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 2,
       "skill_info": {
@@ -3022,7 +3022,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187928528,
       "ship_index": "PBSC102",
-      "ship_name": "4187928528",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 2,
       "skill_info": {
@@ -3360,7 +3360,7 @@
       "ship_class": "Battleship",
       "ship_id": 4186912560,
       "ship_index": "PGSB103",
-      "ship_name": "4186912560",
+      "ship_name": null,
       "ship_nation": "Germany",
       "ship_tier": 3,
       "skill_info": {
@@ -3693,7 +3693,7 @@
       "ship_class": "Battleship",
       "ship_id": 4082055120,
       "ship_index": "PBSB203",
-      "ship_name": "4082055120",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 3,
       "skill_info": {
@@ -3887,7 +3887,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187928304,
       "ship_index": "PISC102",
-      "ship_name": "4187928304",
+      "ship_name": null,
       "ship_nation": "Italy",
       "ship_tier": 2,
       "skill_info": {
@@ -4518,7 +4518,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4269684432,
       "ship_index": "PJSD024",
-      "ship_name": "4269684432",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 3,
       "skill_info": {
@@ -5251,7 +5251,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4186846672,
       "ship_index": "PRSD103",
-      "ship_name": "4186846672",
+      "ship_name": null,
       "ship_nation": "Russia",
       "ship_tier": 3,
       "skill_info": {
@@ -5658,7 +5658,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4187928400,
       "ship_index": "PFSC102",
-      "ship_name": "4187928400",
+      "ship_name": null,
       "ship_nation": "France",
       "ship_tier": 2,
       "skill_info": {
@@ -6315,7 +6315,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4269684432,
       "ship_index": "PJSD024",
-      "ship_name": "4269684432",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 3,
       "skill_info": {
@@ -6586,7 +6586,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4292786160,
       "ship_index": "PASC002",
-      "ship_name": "4292786160",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 2,
       "skill_info": {

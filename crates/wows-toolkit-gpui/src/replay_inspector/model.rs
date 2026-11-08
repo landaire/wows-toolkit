@@ -79,8 +79,9 @@ pub struct PlayerRow {
 
     pub display_name: String,
     pub clan_tag: Option<String>,
-    /// Packed `0xRRGGBB` clan-league color, `0` when clanless.
-    pub clan_color_rgb: u32,
+    /// Packed `0xRRGGBB` clan-league color as the game sent it. `None` when
+    /// the replay carries none.
+    pub clan_color_rgb: Option<u32>,
     pub division_label: Option<String>,
     /// True when this row is in the self player's division, but is not the
     /// self player itself (the "gold name" case).
@@ -783,7 +784,7 @@ impl PlayerRow {
             clan_color_rgb: np.clan_color_rgb,
             division_label: np.division_label.clone(),
             is_self_division_mate,
-            ship_name: np.ship_name.clone(),
+            ship_name: np.ship_display_name(),
             ship_species_text,
             ship_class: np.ship_class,
             ship_id,

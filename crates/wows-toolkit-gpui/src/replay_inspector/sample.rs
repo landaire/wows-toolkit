@@ -50,7 +50,7 @@ fn base_row(db_id: i64, team_id: i64, relation: Relation, is_self: bool) -> Play
         manual_stat_hide_toggle: false,
         display_name: format!("Player{db_id}"),
         clan_tag: None,
-        clan_color_rgb: 0,
+        clan_color_rgb: Some(0),
         division_label: None,
         is_self_division_mate: false,
         ship_name: "Test Ship".to_string(),
@@ -141,7 +141,7 @@ fn stat_row(
     PlayerRow {
         display_name: name.to_string(),
         clan_tag: clan.map(|c| format!("[{c}]")),
-        clan_color_rgb: if clan.is_some() { SAMPLE_CLAN_COLOR } else { 0 },
+        clan_color_rgb: Some(if clan.is_some() { SAMPLE_CLAN_COLOR } else { 0 }),
         ship_name: ship.to_string(),
         ship_class: species,
         base_xp: Some(1500),

@@ -40,7 +40,8 @@ impl Match {
     ///
     /// `players` is the battle report's own player list. Normalized rows may
     /// have been reordered for display, so raw player data is joined by entity
-    /// ID rather than by position.
+    /// ID rather than by position. The raw player carries the entity details
+    /// (ship config, captain) that normalization does not keep.
     ///
     /// `is_debug_mode` keeps the fields an ordinary export strips: enemy
     /// builds, and test-ship results for anyone but the recording player.
@@ -156,59 +157,29 @@ pub struct ExportPlayer {
     /// Player name
     name: String,
     clan: String,
-    /// Clan color corresponding to the clan's league (hurricane, typhoon, etc.)
-    clan_color_rgb: u32,
+    /// Clan color corresponding to the clan's league (hurricane, typhoon,
+    /// etc.), as the game sent it. `0` for a clanless player. `None` when the
+    /// replay carries no clan color.
+    clan_color_rgb: Option<u32>,
     /// ID that can be used to find who is in the same division. This is `None` if the player is not in a division.
     division_id: Option<u32>,
-    /// Team assignment. This is `None` if the player is a spectator.
+    /// Team assignment
     team_id: u32,
     /// Whether or not this is who the replay is from
     is_replay_perspective: bool,
 }
 
-/// Fallback clan colours for pre-clan-color replays with no `clanColor`
-/// field. Exported data must not vary with the app's theme, so these are
-/// fixed values rather than a resolved-at-theme call. These are the
-/// historical values (`Color32::WHITE` / `LIGHT_GREEN` / `LIGHT_RED`,
-/// predating the semantic theme layer entirely), deliberately frozen so
-/// files already sent to ShipBuilds.com don't change meaning.
-const EXPORT_FALLBACK_CLAN_COLOR_SELF: u32 = 0x00_FF_FF_FF;
-const EXPORT_FALLBACK_CLAN_COLOR_ALLY: u32 = 0x00_90_EE_90;
-const EXPORT_FALLBACK_CLAN_COLOR_ENEMY: u32 = 0x00_FF_80_80;
-
-impl From<&Player> for ExportPlayer {
-    fn from(value: &Player) -> Self {
-        let state = value.initial_state();
-        let clan = state.clan().to_string();
-        // Clanless players never had a clan color, and older replays omit
-        // clanColor for everyone; in that case fall back to the team color.
-        let clan_color_rgb = if clan.is_empty() {
-            0
-        } else {
-            match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
-                Some(clan_color) => (clan_color & 0xFFFFFF) as u32,
-                None => {
-                    tracing::warn!("player '{}' has no clanColor; using team color", state.username());
-                    let relation = value.relation();
-                    if relation.is_self() {
-                        EXPORT_FALLBACK_CLAN_COLOR_SELF
-                    } else if relation.is_enemy() {
-                        EXPORT_FALLBACK_CLAN_COLOR_ENEMY
-                    } else {
-                        EXPORT_FALLBACK_CLAN_COLOR_ALLY
-                    }
-                }
-            }
-        };
+impl From<&NormalizedPlayer> for ExportPlayer {
+    fn from(value: &NormalizedPlayer) -> Self {
         Self {
-            db_id: state.db_id(),
-            realm: state.realm().map(str::to_owned),
-            name: state.username().to_string(),
-            clan,
-            clan_color_rgb,
-            division_id: if state.division_id() > 0 { Some(state.division_id() as u32) } else { None },
-            team_id: state.team_id() as u32,
-            is_replay_perspective: value.relation().is_self(),
+            db_id: value.db_id,
+            realm: value.realm.clone(),
+            name: value.name.clone(),
+            clan: value.clan.clone(),
+            clan_color_rgb: value.clan_color_rgb,
+            division_id: value.division_id,
+            team_id: value.team_id,
+            is_replay_perspective: value.is_self,
         }
     }
 }
@@ -282,9 +253,10 @@ pub struct FlattenedVehicle {
     player_realm: Option<String>,
     /// Ship index that can be mapped to a GameParam
     index: String,
-    /// Ship name from EN localization
-    ship_name: String,
-    /// Ship nation (e.g. "usa", "pan asia", etc.)
+    /// Ship name in the app's language. `None` when the build's translations
+    /// do not name the ship.
+    ship_name: Option<String>,
+    /// Ship nation as GameParams names it (e.g. "USA", "Pan_Asia")
     ship_nation: String,
     /// Ship class
     ship_class: Species,
@@ -344,8 +316,8 @@ pub struct FlattenedVehicle {
     crits_dealt: Option<u64>,
     distance_traveled: Option<f64>,
     kills: Option<i64>,
-    observed_damage: u64,
-    observed_kills: i64,
+    observed_damage: Option<u64>,
+    observed_kills: Option<i64>,
     skill_points_allocated: Option<usize>,
     num_skills: Option<usize>,
     highest_tier_skill: Option<usize>,
@@ -414,7 +386,7 @@ impl From<Vehicle> for FlattenedVehicle {
             is_enemy,
             modules,
             abilities,
-            captain_id: Some(captain_id),
+            captain_id,
             captain_skills,
             xp: server_results.as_ref().map(|results| results.xp),
             raw_xp: server_results.as_ref().map(|results| results.raw_xp),
@@ -461,8 +433,8 @@ impl From<Vehicle> for FlattenedVehicle {
             crits_dealt: server_results.as_ref().map(|results| results.crits_dealt),
             distance_traveled: server_results.as_ref().map(|results| results.distance_traveled),
             kills: server_results.as_ref().map(|results| results.kills),
-            observed_damage: observed_results.as_ref().map(|results| results.damage).unwrap_or_default(),
-            observed_kills: observed_results.as_ref().map(|results| results.kills).unwrap_or_default(),
+            observed_damage: observed_results.as_ref().map(|results| results.damage),
+            observed_kills: observed_results.as_ref().map(|results| results.kills),
             skill_points_allocated: skill_meta_info.as_ref().map(|info| info.skill_points),
             num_skills: skill_meta_info.as_ref().map(|info| info.num_skills),
             highest_tier_skill: skill_meta_info.as_ref().map(|info| info.highest_tier),
@@ -498,9 +470,10 @@ pub struct Vehicle {
     pub player: ExportPlayer,
     /// Ship index that can be mapped to a GameParam
     pub index: String,
-    /// Ship name from EN localization
-    pub name: String,
-    /// Ship nation (e.g. "usa", "pan asia", etc.)
+    /// Ship name in the app's language. `None` when the build's translations
+    /// do not name the ship.
+    pub name: Option<String>,
+    /// Ship nation as GameParams names it (e.g. "USA", "Pan_Asia")
     pub nation: String,
     /// Ship class
     pub class: Species,
@@ -513,8 +486,9 @@ pub struct Vehicle {
     pub is_enemy: bool,
     pub raw_config: Option<ShipConfig>,
     pub translated_build: Option<TranslatedBuild>,
-    /// Captain ID that can be mapped to a GameParam
-    pub captain_id: String,
+    /// Captain ID that can be mapped to a GameParam. `None` when the player
+    /// had no ship entity or its captain is not in GameParams.
+    pub captain_id: Option<String>,
     /// Player's results as provided by the WG server at match end. May not be present
     /// if the player left the match early and quit the game before the match finished.
     ///
@@ -543,7 +517,7 @@ pub struct Vehicle {
 impl Vehicle {
     fn new(np: &NormalizedPlayer, player_data: &Player) -> Self {
         let vehicle_entity = player_data.vehicle_entity();
-        let player = ExportPlayer::from(player_data);
+        let player = ExportPlayer::from(np);
         let server = np.server_results.as_ref();
 
         Self {
@@ -557,11 +531,7 @@ impl Vehicle {
             is_enemy: np.relation.is_enemy(),
             raw_config: vehicle_entity.map(|v| v.props().ship_config().clone()),
             translated_build: np.build.clone(),
-            captain_id: vehicle_entity
-                .and_then(|v| v.captain())
-                .map(|captain| captain.index())
-                .unwrap_or("PCW001")
-                .to_string(),
+            captain_id: vehicle_entity.and_then(|v| v.captain()).map(|captain| captain.index().to_string()),
             // The results object is exported only when it carried a damage
             // total; old-format results that omit the key are no more a
             // results row here than they are in the table.
@@ -717,13 +687,13 @@ mod tests {
                 realm: None,
                 name: String::new(),
                 clan: String::new(),
-                clan_color_rgb: 0,
+                clan_color_rgb: None,
                 division_id: None,
                 team_id: 0,
                 is_replay_perspective,
             },
             index: String::new(),
-            name: String::new(),
+            name: None,
             nation: String::new(),
             class: Species::Destroyer,
             tier: Some(10),
@@ -737,7 +707,7 @@ mod tests {
                 abilities: Vec::new(),
                 captain_skills: None,
             }),
-            captain_id: String::new(),
+            captain_id: None,
             server_results: None,
             observed_results: Some(ObservedResults { damage: 1, kills: 1 }),
             skill_meta_info: Some(SkillInfo { skill_points: 0, num_skills: 0, highest_tier: 0, num_tier_1_skills: 0 }),

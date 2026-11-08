@@ -251,7 +251,7 @@ pub fn analyze(
                 avatar_entity: state.avatar_id().map(|avatar| EntityId::from(avatar.raw())),
                 division: report.divisions().get(&state.entity_id()).copied(),
                 ship: ShipFacts {
-                    name: normalized.ship_name.clone(),
+                    name: normalized.ship_display_name(),
                     index: normalized.ship_index.clone(),
                     param_id: normalized.ship_id,
                     tier: normalized.ship_tier,

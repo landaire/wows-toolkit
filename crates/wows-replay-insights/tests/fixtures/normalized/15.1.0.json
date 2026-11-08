@@ -631,7 +631,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4286494416,
       "ship_index": "PJSC008",
-      "ship_name": "4286494416",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 7,
       "skill_info": {
@@ -1153,7 +1153,7 @@
       "ship_class": "Battleship",
       "ship_id": 4182718192,
       "ship_index": "PISB107",
-      "ship_name": "4182718192",
+      "ship_name": null,
       "ship_nation": "Italy",
       "ship_tier": 7,
       "skill_info": {
@@ -1823,7 +1823,7 @@
       "ship_class": "Battleship",
       "ship_id": 4180621040,
       "ship_index": "PISB109",
-      "ship_name": "4180621040",
+      "ship_name": null,
       "ship_nation": "Italy",
       "ship_tier": 9,
       "skill_info": {
@@ -2477,7 +2477,7 @@
       "ship_class": "Cruiser",
       "ship_id": 3762206160,
       "ship_index": "PRSC508",
-      "ship_name": "3762206160",
+      "ship_name": null,
       "ship_nation": "Russia",
       "ship_tier": 8,
       "skill_info": {
@@ -3038,7 +3038,7 @@
       "ship_class": "Battleship",
       "ship_id": 4181669872,
       "ship_index": "PASB108",
-      "ship_name": "4181669872",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 8,
       "skill_info": {
@@ -3830,7 +3830,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4181636304,
       "ship_index": "PZSC108",
-      "ship_name": "4181636304",
+      "ship_name": null,
       "ship_nation": "Pan_Asia",
       "ship_tier": 8,
       "skill_info": {
@@ -4418,7 +4418,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4182684880,
       "ship_index": "PZSC107",
-      "ship_name": "4182684880",
+      "ship_name": null,
       "ship_nation": "Pan_Asia",
       "ship_tier": 7,
       "skill_info": {
@@ -5232,7 +5232,7 @@
       "ship_class": "Battleship",
       "ship_id": 4077860656,
       "ship_index": "PGSB207",
-      "ship_name": "4077860656",
+      "ship_name": null,
       "ship_nation": "Germany",
       "ship_tier": 7,
       "skill_info": {
@@ -5881,7 +5881,7 @@
       "ship_class": "Cruiser",
       "ship_id": 3531519792,
       "ship_index": "PGSC728",
-      "ship_name": "3531519792",
+      "ship_name": null,
       "ship_nation": "Germany",
       "ship_tier": 8,
       "skill_info": {
@@ -6711,7 +6711,7 @@
       "ship_class": "Cruiser",
       "ship_id": 3540957136,
       "ship_index": "PBSC719",
-      "ship_name": "3540957136",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 9,
       "skill_info": {
@@ -7372,7 +7372,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4181604048,
       "ship_index": "PJSD108",
-      "ship_name": "4181604048",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 8,
       "skill_info": {
@@ -8045,7 +8045,7 @@
       "ship_class": "Cruiser",
       "ship_id": 3540957008,
       "ship_index": "PFSC719",
-      "ship_name": "3540957008",
+      "ship_name": null,
       "ship_nation": "France",
       "ship_tier": 9,
       "skill_info": {
@@ -8810,7 +8810,7 @@
       "ship_class": "Battleship",
       "ship_id": 3540989264,
       "ship_index": "PVSB719",
-      "ship_name": "3540989264",
+      "ship_name": null,
       "ship_nation": "Pan_America",
       "ship_tier": 9,
       "skill_info": {
@@ -9608,7 +9608,7 @@
       "ship_class": "Destroyer",
       "ship_id": 4076746448,
       "ship_index": "PJSD208",
-      "ship_name": "4076746448",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 8,
       "skill_info": {
@@ -10356,7 +10356,7 @@
       "ship_class": "Battleship",
       "ship_id": 4286527472,
       "ship_index": "PASB008",
-      "ship_name": "4286527472",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 7,
       "skill_info": {
@@ -11179,7 +11179,7 @@
       "ship_class": "Battleship",
       "ship_id": 4181669680,
       "ship_index": "PGSB108",
-      "ship_name": "4181669680",
+      "ship_name": null,
       "ship_nation": "Germany",
       "ship_tier": 8,
       "skill_info": {
@@ -11833,7 +11833,7 @@
       "ship_class": "Battleship",
       "ship_id": 3542038256,
       "ship_index": "PISB718",
-      "ship_name": "3542038256",
+      "ship_name": null,
       "ship_nation": "Italy",
       "ship_tier": 8,
       "skill_info": {
@@ -12564,7 +12564,7 @@
       "ship_class": "AirCarrier",
       "ship_id": 4181702640,
       "ship_index": "PASA108",
-      "ship_name": "4181702640",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 8,
       "skill_info": {
@@ -13282,7 +13282,7 @@
       "ship_class": "AirCarrier",
       "ship_id": 4181702640,
       "ship_index": "PASA108",
-      "ship_name": "4181702640",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 8,
       "skill_info": {
@@ -14089,7 +14089,7 @@
       "ship_class": "Cruiser",
       "ship_id": 4181636304,
       "ship_index": "PZSC108",
-      "ship_name": "4181636304",
+      "ship_name": null,
       "ship_nation": "Pan_Asia",
       "ship_tier": 8,
       "skill_info": {
@@ -14727,7 +14727,7 @@
       "ship_class": "Battleship",
       "ship_id": 4180621264,
       "ship_index": "PBSB109",
-      "ship_name": "4180621264",
+      "ship_name": null,
       "ship_nation": "United_Kingdom",
       "ship_tier": 9,
       "skill_info": {
@@ -15406,7 +15406,7 @@
       "ship_class": "Battleship",
       "ship_id": 3751753552,
       "ship_index": "PFSB518",
-      "ship_name": "3751753552",
+      "ship_name": null,
       "ship_nation": "France",
       "ship_tier": 9,
       "skill_info": {
@@ -16046,7 +16046,7 @@
       "ship_class": "Battleship",
       "ship_id": 4181669872,
       "ship_index": "PASB108",
-      "ship_name": "4181669872",
+      "ship_name": null,
       "ship_nation": "USA",
       "ship_tier": 8,
       "skill_info": {
@@ -16652,7 +16652,7 @@
       "ship_class": "Battleship",
       "ship_id": 4284430032,
       "ship_index": "PJSB010",
-      "ship_name": "4284430032",
+      "ship_name": null,
       "ship_nation": "Japan",
       "ship_tier": 7,
       "skill_info": {
