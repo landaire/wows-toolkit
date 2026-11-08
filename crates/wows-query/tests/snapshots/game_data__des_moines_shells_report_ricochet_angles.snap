@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1921
 expression: shells
 ---
 ship:
@@ -48,6 +49,8 @@ shells:
     ricochet:
       from_deg: 60
       always_from_deg: 67.5
+    fuse_time_s: 0.033
+    fuse_threshold_mm: 34
     ricochet_note: "AP ricochets from 60 deg, always at 67.5 deg (standard 45 / 60)"
   - label: secondary battery 127 mm HE
     name: 127 mm HE Mk32

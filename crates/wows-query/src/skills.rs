@@ -56,6 +56,8 @@ pub(crate) const SKILL_ALIASES: &[(&str, &str, ResolutionMethod)] = &[
     ("Basic Firing Training", "GmReloadAaDamageConstant", ResolutionMethod::Historical),
     ("AFT", "GmRangeAaDamageBubbles", ResolutionMethod::Historical),
     ("Advanced Firing Training", "GmRangeAaDamageBubbles", ResolutionMethod::Historical),
+    ("MFCSA", "AtbaAccuracy", ResolutionMethod::Historical),
+    ("Manual Fire Control for Secondary Armament", "AtbaAccuracy", ResolutionMethod::Historical),
 ];
 
 /// Arguments for `captain_skill`.

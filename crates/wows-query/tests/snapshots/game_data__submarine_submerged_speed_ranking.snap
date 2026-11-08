@@ -1,0 +1,72 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3050
+expression: "search.ranking.expect(\"a rank was asked for\")"
+---
+stat: "underwater_mobility.speed (kn), highest first, on the build that raises it most, the usual build"
+rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in."
+ranked: 14
+ships:
+  - rank: 1
+    ship: "T10 U-4501 (submarine, Germany, premium)"
+    value: 36 kn
+    base: 36 kn
+  - rank: 2
+    ship: "T10 Tonijn (submarine, Netherlands, premium)"
+    value: 27 kn
+    base: 27 kn
+    tied: true
+  - rank: 2
+    ship: "T10 U-2501 (submarine, Germany)"
+    value: 27 kn
+    base: 27 kn
+    tied: true
+  - rank: 4
+    ship: "T10 Balao (submarine, USA)"
+    value: 26.01 kn
+    base: 26.01 kn
+    tied: true
+  - rank: 4
+    ship: "T10 Balao 2 (submarine, USA, test)"
+    value: 26.01 kn
+    base: 26.01 kn
+    tied: true
+  - rank: 6
+    ship: "T10 Surcouf (submarine, France, premium)"
+    value: 18.02 kn
+    base: 18.02 kn
+  - rank: 7
+    ship: "T10 Thrasher (submarine, United_Kingdom)"
+    value: 17.99 kn
+    base: 17.99 kn
+  - rank: 8
+    ship: "T10 Gato (submarine, USA, premium)"
+    value: 17 kn
+    base: 17 kn
+  - rank: 9
+    ship: "T10 Seal (submarine, United_Kingdom, premium)"
+    value: 16.01 kn
+    base: 16.01 kn
+    tied: true
+  - rank: 9
+    ship: "T10 Pietro Calvi (submarine, Italy)"
+    value: 16.01 kn
+    base: 16.01 kn
+    tied: true
+  - rank: 9
+    ship: "T10 Archerfish (submarine, USA, premium)"
+    value: 16.01 kn
+    base: 16.01 kn
+    tied: true
+  - rank: 12
+    ship: "T10 Orzeł (submarine, Europe, premium)"
+    value: 16 kn
+    base: 16 kn
+  - rank: 13
+    ship: "T10 K-1 (submarine, Russia)"
+    value: 15.98 kn
+    base: 15.98 kn
+  - rank: 14
+    ship: "T10 I-56 '44 (submarine, Japan, premium) [replicas: BA Arona's Whale]"
+    value: 12.99 kn
+    base: 12.99 kn

@@ -185,6 +185,9 @@ pub enum QueryError {
     #[error("{ship}'s hull has no fire nodes")]
     FireNodesMissing { ship: String },
 
+    #[error("{ship}'s hulls list no hull sections with HP pools")]
+    HitLocationsMissing { ship: String },
+
     #[error("no stat matches {query:?}; {}", did_you_mean(suggestions, "list stat names with stat_names"))]
     StatNotFound { query: String, suggestions: Vec<String> },
 

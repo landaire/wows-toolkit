@@ -205,6 +205,7 @@ squadrons:
       fire_chance_pct: 28
       fall_time_coef: 1.5
     air_strike:
+      planes_per_strike: 1
       charges: 1
       reload_s: 25
       range_km: 8

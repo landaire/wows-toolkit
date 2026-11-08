@@ -42,6 +42,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::SkillPointCost;
 use wowsunpack::game_params::types::Species;
 
+use crate::armament::AswWeapons;
 use crate::armor::ThicknessSpan;
 use crate::armor::plates;
 use crate::armor::zone_spans;
@@ -474,6 +475,9 @@ enum SearchStat {
         ammo: Ammo,
         bound: RicochetBound,
     },
+
+    /// An anti-submarine weapon value of the selected hull.
+    Asw(AswStat),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -523,6 +527,167 @@ impl RicochetBound {
     }
 }
 
+/// Anti-submarine weapon values, base values without skills or upgrades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AswStat {
+    DepthChargeDamage,
+    DepthChargeSplashRadius,
+    DepthChargePerAttack,
+    DepthChargeDamagePerAttack,
+    DepthChargeCharges,
+    DepthChargeReload,
+    AirStrikeDamage,
+    AirStrikeSplashRadius,
+    AirStrikePerStrike,
+    AirStrikeDamagePerStrike,
+    AirStrikeCharges,
+    AirStrikeReload,
+    AirStrikeRange,
+    BestDamagePerAttack,
+}
+
+/// Row names of the two anti-submarine weapons.
+const SHIP_DEPTH_CHARGES: &str = "ship-mounted depth charges";
+const DEPTH_CHARGE_AIR_STRIKE: &str = "depth charge air strike";
+
+impl AswStat {
+    const ALL: [Self; 14] = [
+        Self::DepthChargeDamage,
+        Self::DepthChargeSplashRadius,
+        Self::DepthChargePerAttack,
+        Self::DepthChargeDamagePerAttack,
+        Self::DepthChargeCharges,
+        Self::DepthChargeReload,
+        Self::AirStrikeDamage,
+        Self::AirStrikeSplashRadius,
+        Self::AirStrikePerStrike,
+        Self::AirStrikeDamagePerStrike,
+        Self::AirStrikeCharges,
+        Self::AirStrikeReload,
+        Self::AirStrikeRange,
+        Self::BestDamagePerAttack,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::DepthChargeDamage => "asw.depth_charge.damage",
+            Self::DepthChargeSplashRadius => "asw.depth_charge.splash_radius",
+            Self::DepthChargePerAttack => "asw.depth_charge.per_attack",
+            Self::DepthChargeDamagePerAttack => "asw.depth_charge.damage_per_attack",
+            Self::DepthChargeCharges => "asw.depth_charge.charges",
+            Self::DepthChargeReload => "asw.depth_charge.reload",
+            Self::AirStrikeDamage => "asw.airstrike.damage",
+            Self::AirStrikeSplashRadius => "asw.airstrike.splash_radius",
+            Self::AirStrikePerStrike => "asw.airstrike.per_strike",
+            Self::AirStrikeDamagePerStrike => "asw.airstrike.damage_per_strike",
+            Self::AirStrikeCharges => "asw.airstrike.charges",
+            Self::AirStrikeReload => "asw.airstrike.reload",
+            Self::AirStrikeRange => "asw.airstrike.range",
+            Self::BestDamagePerAttack => "asw.best_damage_per_attack",
+        }
+    }
+
+    fn unit(self) -> Unit {
+        match self {
+            Self::DepthChargeDamage
+            | Self::DepthChargeDamagePerAttack
+            | Self::AirStrikeDamage
+            | Self::AirStrikeDamagePerStrike
+            | Self::BestDamagePerAttack => Unit::Hp,
+            Self::DepthChargeSplashRadius | Self::AirStrikeSplashRadius => Unit::Meters,
+            Self::DepthChargePerAttack
+            | Self::DepthChargeCharges
+            | Self::AirStrikePerStrike
+            | Self::AirStrikeCharges => Unit::Count,
+            Self::DepthChargeReload | Self::AirStrikeReload => Unit::Seconds,
+            Self::AirStrikeRange => Unit::Km,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::DepthChargeDamage => "Damage of one ship-mounted depth charge",
+            Self::DepthChargeSplashRadius => {
+                "Blast radius of one ship-mounted depth charge, in the game world's meters (the scale of ship models; full damage in the inner part, a third beyond)"
+            }
+            Self::DepthChargePerAttack => "Ship-mounted depth charges dropped in one attack, every launcher together",
+            Self::DepthChargeDamagePerAttack => "Damage of every ship-mounted depth charge of one attack if all hit",
+            Self::DepthChargeCharges => "Ship-mounted depth charge attacks before a reload",
+            Self::DepthChargeReload => "Reload of one ship-mounted depth charge attack",
+            Self::AirStrikeDamage => "Damage of one depth charge of the depth charge air strike",
+            Self::AirStrikeSplashRadius => {
+                "Blast radius of one air strike depth charge, in the game world's meters (the scale of ship models)"
+            }
+            Self::AirStrikePerStrike => "Depth charges one air strike drops, every plane of it together",
+            Self::AirStrikeDamagePerStrike => "Damage of every depth charge of one air strike if all hit",
+            Self::AirStrikeCharges => "Depth charge air strikes before a reload",
+            Self::AirStrikeReload => "Reload of one depth charge air strike",
+            Self::AirStrikeRange => "Farthest point a depth charge air strike can be called on",
+            Self::BestDamagePerAttack => {
+                "Damage of one attack with the ship's stronger anti-submarine weapon, ship-mounted depth charges or depth charge air strike, if every depth charge hits; the row names the weapon"
+            }
+        }
+    }
+
+    /// The value of each weapon row `weapons` gives this stat, with the
+    /// weapon's name.
+    fn readings(self, weapons: &AswWeapons) -> Vec<(&'static str, f32)> {
+        let launchers = weapons.launchers.as_ref();
+        let strike = weapons.air_strike.as_ref();
+        let launcher_damage = launchers.and_then(|launchers| {
+            Some(launchers.damage_per_depth_charge?.value() * launchers.depth_charges_per_attack? as f32)
+        });
+        let strike_damage = strike.and_then(|strike| {
+            Some(strike.damage_per_depth_charge?.value() * strike.depth_charges_per_strike()? as f32)
+        });
+        let from_launchers = |value: Option<f32>| value.map(|value| (SHIP_DEPTH_CHARGES, value));
+        let from_strike = |value: Option<f32>| value.map(|value| (DEPTH_CHARGE_AIR_STRIKE, value));
+
+        let reading = match self {
+            Self::DepthChargeDamage => {
+                from_launchers(launchers.and_then(|launchers| launchers.damage_per_depth_charge).map(|hp| hp.value()))
+            }
+            Self::DepthChargeSplashRadius => {
+                from_launchers(launchers.and_then(|launchers| launchers.splash_radius_m).map(|radius| radius.value()))
+            }
+            Self::DepthChargePerAttack => from_launchers(
+                launchers.and_then(|launchers| launchers.depth_charges_per_attack).map(|count| count as f32),
+            ),
+            Self::DepthChargeDamagePerAttack => from_launchers(launcher_damage),
+            Self::DepthChargeCharges => {
+                from_launchers(launchers.and_then(|launchers| launchers.charges).map(|count| count as f32))
+            }
+            Self::DepthChargeReload => {
+                from_launchers(launchers.and_then(|launchers| launchers.reload_s).map(|reload| reload.value()))
+            }
+            Self::AirStrikeDamage => {
+                from_strike(strike.and_then(|strike| strike.damage_per_depth_charge).map(|hp| hp.value()))
+            }
+            Self::AirStrikeSplashRadius => {
+                from_strike(strike.and_then(|strike| strike.splash_radius_m).map(|radius| radius.value()))
+            }
+            Self::AirStrikePerStrike => {
+                from_strike(strike.and_then(|strike| strike.depth_charges_per_strike()).map(|count| count as f32))
+            }
+            Self::AirStrikeDamagePerStrike => from_strike(strike_damage),
+            Self::AirStrikeCharges => from_strike(strike.and_then(|strike| strike.charges).map(|count| count as f32)),
+            Self::AirStrikeReload => {
+                from_strike(strike.and_then(|strike| strike.reload_s).map(|reload| reload.value()))
+            }
+            Self::AirStrikeRange => from_strike(strike.and_then(|strike| strike.range_km).map(|range| range.value())),
+            Self::BestDamagePerAttack => {
+                // The stronger weapon only, so a ship counts once.
+                match (from_launchers(launcher_damage), from_strike(strike_damage)) {
+                    (Some(ship), Some(air)) => Some(if air.1 > ship.1 { air } else { ship }),
+                    (ship, air) => ship.or(air),
+                }
+            }
+        };
+
+        reading.into_iter().collect()
+    }
+}
+
 impl SearchStat {
     fn all() -> Vec<Self> {
         let mut stats: Vec<Self> = TtxStat::ALL
@@ -540,6 +705,7 @@ impl SearchStat {
             stats.push(Self::Ricochet { ammo, bound: RicochetBound::Start });
             stats.push(Self::Ricochet { ammo, bound: RicochetBound::Always });
         }
+        stats.extend(AswStat::ALL.map(Self::Asw));
 
         stats
     }
@@ -556,6 +722,7 @@ impl SearchStat {
             Self::Ricochet { ammo, bound: RicochetBound::Always } => {
                 format!("artillery.{}.ricochet_always", ammo.label().to_ascii_lowercase())
             }
+            Self::Asw(stat) => stat.key().to_owned(),
         }
     }
 
@@ -565,6 +732,7 @@ impl SearchStat {
             Self::Armor { .. } => Unit::Millimeters,
             Self::Derived(stat) => stat.unit(),
             Self::Ricochet { .. } => Unit::Degrees,
+            Self::Asw(stat) => stat.unit(),
         }
     }
 
@@ -579,6 +747,8 @@ impl SearchStat {
             // A later ricochet suits the shooter and an earlier one the
             // target; neither is better for the ship ranked.
             Self::Ricochet { .. } => None,
+            // Read without skills or upgrades.
+            Self::Asw(_) => None,
         }
     }
 
@@ -606,6 +776,7 @@ impl SearchStat {
                 "Main battery {} shell impact angle from the plate normal where every hit ricochets, from game data",
                 ammo.label()
             ),
+            Self::Asw(stat) => format!("{}; base value, without skills or upgrades", stat.label()),
         }
     }
 
@@ -615,14 +786,17 @@ impl SearchStat {
             Self::Armor { .. } | Self::Card(TtxStat::ArmorMin | TtxStat::ArmorMax) => Some(
                 "Nominal plate thickness ranks plates, not protection: the belt, bulge and decks in front of a zone decide what reaches it. For how well ships are protected, use armor_assessment or ship_comparison (citadel and penetration rates).",
             ),
-            Self::Card(_) | Self::Derived(_) | Self::Ricochet { .. } => None,
+            Self::Card(_) | Self::Derived(_) | Self::Ricochet { .. } | Self::Asw(_) => None,
         }
     }
 
     /// What one row of a multi-row stat stands for.
     fn item(self) -> Option<&'static str> {
         let key = match self {
-            Self::Card(TtxStat::SecondaryRange) | Self::Armor { .. } | Self::Ricochet { .. } => return None,
+            Self::Asw(AswStat::BestDamagePerAttack) => return Some("per weapon, the stronger one"),
+            Self::Card(TtxStat::SecondaryRange) | Self::Armor { .. } | Self::Ricochet { .. } | Self::Asw(_) => {
+                return None;
+            }
             Self::Card(stat) => stat.field_key(),
             Self::Derived(stat) => stat.field_key(),
         };
@@ -660,7 +834,7 @@ impl SearchStat {
     fn shell_battery(self) -> Option<Battery> {
         let key = match self {
             Self::Ricochet { .. } => return Some(Battery::Main),
-            Self::Armor { .. } => return None,
+            Self::Armor { .. } | Self::Asw(_) => return None,
             Self::Card(stat) => stat.field_key(),
             Self::Derived(stat) => stat.field_key(),
         };
@@ -748,6 +922,9 @@ struct View {
     /// Main battery shells of the selected guns.
     ricochet: Vec<(Ammo, RicochetAngles)>,
 
+    /// Anti-submarine weapons of the selected hull, when a condition reads them.
+    asw: Option<AswWeapons>,
+
     /// Internal names of conditional skills counted as triggered.
     triggered: Vec<String>,
 }
@@ -782,6 +959,15 @@ impl View {
 
                 readings
             }
+            SearchStat::Asw(stat) => self
+                .asw
+                .as_ref()
+                .map(|weapons| stat.readings(weapons))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(weapon, _)| qualifier_matches(game, Some(weapon), condition.qualifier.as_deref()))
+                .map(|(weapon, value)| Reading { qualifier: Some(weapon.to_owned()), value })
+                .collect(),
         }
     }
 }
@@ -1264,6 +1450,21 @@ impl GameData {
 
                 planned_builds(&planner, rank, &extract).map(plain)
             }
+            SearchStat::Asw(stat) => {
+                let planner = Planner::new(self, ship);
+                let selections: Vec<&ShipUpgradeSelection> = planner.selections().collect();
+                let extract = |outcome: &builds::Outcome| {
+                    let weapons = self.asw_weapons(ship, selections[outcome.selection].hull.as_deref());
+                    let values = stat
+                        .readings(&weapons)
+                        .into_iter()
+                        .filter(|(weapon, _)| qualifier_matches(self, Some(weapon), rank.qualifier.as_deref()))
+                        .map(|(weapon, value)| Amount { value, row: row_names.id(Some(weapon), None) });
+                    extreme(rank.direction(), values)
+                };
+
+                planned_builds(&planner, rank, &extract).map(plain)
+            }
         }
     }
 }
@@ -1707,7 +1908,13 @@ impl<'a> ShipSearch<'a> {
             Vec::new()
         };
 
-        Ok(View { rows: stats.rows(), derived, ricochet, triggered: effects.active_conditions })
+        let asw = self
+            .conditions
+            .iter()
+            .any(|condition| matches!(condition.stat, SearchStat::Asw(_)))
+            .then(|| self.game.asw_weapons(self.ship, selection.hull.as_deref()));
+
+        Ok(View { rows: stats.rows(), derived, ricochet, asw, triggered: effects.active_conditions })
     }
 
     fn stock_ranges(&self) -> Result<StockRanges, QueryError> {
@@ -2109,7 +2316,7 @@ fn relevant_inputs<'c>(
         let stats: &[TtxStat] = match &condition.stat {
             SearchStat::Card(stat) => std::slice::from_ref(stat),
             SearchStat::Derived(stat) => stat.sources(),
-            SearchStat::Armor { .. } | SearchStat::Ricochet { .. } => continue,
+            SearchStat::Armor { .. } | SearchStat::Ricochet { .. } | SearchStat::Asw(_) => continue,
         };
         pending.extend(
             provenance
@@ -2443,7 +2650,7 @@ mod tests {
             StatValue::Knots(_) => Unit::Knots,
             StatValue::Seconds(_) => Unit::Seconds,
             StatValue::Meters(_) => Unit::Meters,
-            StatValue::MetersPerSecond(_) => Unit::MetersPerSecond,
+            StatValue::MetersPerSecond(_) | StatValue::VerticalSpeed(_) => Unit::MetersPerSecond,
             StatValue::Km(_) => Unit::Km,
             StatValue::Millimeters(_) => Unit::Millimeters,
             StatValue::Percent(_) => Unit::Percent,

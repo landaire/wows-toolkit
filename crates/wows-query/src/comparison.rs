@@ -159,7 +159,38 @@ pub struct ShipComparisonOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ships: Vec<ComparedShip>,
 
+    /// Every pair of named ships of one class, factor by factor.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub head_to_head: Vec<HeadToHead>,
+
     pub notes: Vec<&'static str>,
+}
+
+/// Two named ships of one class compared factor by factor, every factor
+/// counting the same.
+#[derive(Debug, Clone, Serialize)]
+pub struct HeadToHead {
+    /// The two ships, `first` and `second` below.
+    pub ships: [String; 2],
+
+    /// Factors both ships have.
+    pub compared: usize,
+
+    /// Factor keys each ship is better on, and those they tie on.
+    pub first_better: Vec<&'static str>,
+    pub second_better: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tied: Vec<&'static str>,
+
+    /// The largest leads of each ship, the gap as a share of the larger
+    /// value: "dpm_ap 585744 vs 453147 HP/min (23% apart)".
+    pub first_largest_leads: Vec<String>,
+    pub second_largest_leads: Vec<String>,
+
+    /// The split in one sentence: "On paper A is better: ..." when one ship
+    /// leads on at least twice as many factors as the other, else "Mixed:
+    /// ...".
+    pub verdict: String,
 }
 
 /// The best and worst values of one factor in a group.
@@ -1263,6 +1294,24 @@ impl GameData {
                 })
                 .collect(),
         );
+
+        let head_to_head = if named.len() < 2 {
+            Vec::new()
+        } else {
+            let mut pairs = Vec::new();
+            for (position, &first) in listed.iter().enumerate() {
+                for &second in &listed[position + 1..] {
+                    if group[first].class == group[second].class {
+                        pairs.push(head_to_head(
+                            &factors,
+                            [group[first], group[second]],
+                            [&scores[first], &scores[second]],
+                        ));
+                    }
+                }
+            }
+            pairs
+        };
         let ships = listed
             .into_iter()
             .map(|index| {
@@ -1390,6 +1439,7 @@ impl GameData {
             leaders,
             torpedo_leaders,
             ships,
+            head_to_head,
             notes: {
                 let mut notes = NOTES.to_vec();
                 if !anti_aircraft {
@@ -2143,6 +2193,101 @@ fn aspect_key(aspect: Aspect) -> &'static str {
         Aspect::Broadside => "broadside",
         Aspect::Angled30 => "angled_30",
         Aspect::Angled45 => "angled_45",
+    }
+}
+
+/// Two ships factor by factor: the factors each leads on, its largest leads,
+/// and a verdict when one leads on far more factors.
+fn head_to_head(factors: &[Factor], ships: [&Ship; 2], scores: [&ShipScores; 2]) -> HeadToHead {
+    /// Largest leads listed per ship.
+    const LEADS_SHOWN: usize = 3;
+    /// A ship leading on at least this many times the factors the other
+    /// leads on is better on paper.
+    const LOPSIDED: usize = 2;
+
+    struct Lead {
+        key: &'static str,
+        /// The gap as a share of the larger value.
+        gap: f32,
+        text: String,
+    }
+
+    let names = ships.map(|ship| ship.name.clone());
+    let mut leads: [Vec<Lead>; 2] = [Vec::new(), Vec::new()];
+    let mut tied = Vec::new();
+    for factor in factors {
+        let (Some(&first), Some(&second)) = (scores[0].values.get(factor), scores[1].values.get(factor)) else {
+            continue;
+        };
+        let meta = factor.meta();
+        // Values are already rounded to the precision they are compared at.
+        if first == second {
+            tied.push(meta.key);
+            continue;
+        }
+        let first_leads = match meta.better {
+            Better::Higher => first > second,
+            Better::Lower => first < second,
+        };
+        let (leader, value, other) = if first_leads { (0, first, second) } else { (1, second, first) };
+        let gap = (first - second).abs() / first.abs().max(second.abs());
+        leads[leader].push(Lead {
+            key: meta.key,
+            gap,
+            text: format!(
+                "{} {} vs {} ({}% apart)",
+                meta.key,
+                number(value),
+                meta.with_unit(other),
+                (gap * 100.0).round()
+            ),
+        });
+    }
+
+    let compared = leads[0].len() + leads[1].len() + tied.len();
+    let counts = [leads[0].len(), leads[1].len()];
+    let keys = |side: &[Lead]| side.iter().map(|lead| lead.key).collect::<Vec<_>>();
+    let first_better = keys(&leads[0]);
+    let second_better = keys(&leads[1]);
+    for side in &mut leads {
+        side.sort_by(|left, right| right.gap.total_cmp(&left.gap));
+    }
+
+    let ties = if tied.is_empty() { String::new() } else { format!(", {} tied", tied.len()) };
+    let split = format!(
+        "{} is better on {} of {compared} compared factors, {} on {}{ties}",
+        names[0], counts[0], names[1], counts[1]
+    );
+    let lopsided = (0..2).find(|&side| counts[side] > 0 && counts[side] >= LOPSIDED * counts[1 - side]);
+    let verdict = match lopsided {
+        // Sister ships tie on most factors; a lead on the few left is no verdict.
+        _ if tied.len() * 2 > compared => {
+            format!("Nearly the same on paper: they tie on {} of {compared} compared factors. {split}.", tied.len())
+        }
+        Some(side) => {
+            let largest: Vec<&str> = leads[side].iter().take(LEADS_SHOWN).map(|lead| lead.key).collect();
+            format!(
+                "On paper {} is better: it leads on {} of {compared} compared factors, by the most on {}. {split}.",
+                names[side],
+                counts[side],
+                largest.join(", ")
+            )
+        }
+        None => format!(
+            "Mixed: {split}; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+        ),
+    };
+    let largest = |side: &[Lead]| side.iter().take(LEADS_SHOWN).map(|lead| lead.text.clone()).collect();
+
+    HeadToHead {
+        first_largest_leads: largest(&leads[0]),
+        second_largest_leads: largest(&leads[1]),
+        ships: names,
+        compared,
+        first_better,
+        second_better,
+        tied,
+        verdict,
     }
 }
 

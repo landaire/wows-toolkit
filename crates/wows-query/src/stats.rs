@@ -48,6 +48,7 @@ use crate::rates::Rates;
 use crate::ships::Ship;
 use crate::ships::ShipSummary;
 use crate::special_abilities::ActiveAbility;
+use crate::speed::SpeedBuilds;
 use crate::text::clean;
 
 /// Arguments for `ship_stats`.
@@ -150,6 +151,10 @@ pub struct WeaponBuilds {
 
     #[serde(flatten)]
     pub rates: Rates,
+
+    /// Top speed on the surface and, for submarines, at periscope depth and
+    /// submerged.
+    pub speed: SpeedBuilds,
 
     /// Theoretical fire starts per minute of every armament.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -297,7 +302,6 @@ impl GameData {
         let seconds = |value: Option<wowsunpack::game_params::ttx::model::Seconds>| {
             value.map(|value| Seconds::new(round(value.value())))
         };
-        let km = |value: Option<wowsunpack::game_params::types::Km>| value.map(|value| Km::new(round(value.value())));
 
         let burst_fire = match planner.burst() {
             Some(burst) => {
@@ -326,17 +330,15 @@ impl GameData {
             None => None,
         };
 
+        let ranges = self.firing_ranges(&planner)?;
+
         Ok(WeaponBuilds {
             main_battery_reload: planner.plan(&StatPlan::new(
                 "main battery reload".to_owned(),
                 Better::Lower,
                 &|outcome| seconds(outcome.stats.artillery.as_ref()?.reload_time),
             ))?,
-            main_battery_range: planner.plan(&StatPlan::new(
-                "main battery range".to_owned(),
-                Better::Higher,
-                &|outcome| km(outcome.stats.artillery.as_ref()?.range),
-            ))?,
+            main_battery_range: ranges.main_battery,
             main_battery_dispersion: match self.stock_ranges(ship)?.main_battery {
                 Some(range) => planner.plan(&StatPlan::new(
                     format!("main battery horizontal dispersion at {} km", round(range.value())),
@@ -345,16 +347,13 @@ impl GameData {
                 ))?,
                 None => None,
             },
-            secondary_range: planner.plan(&StatPlan::new(
-                "secondary battery range".to_owned(),
-                Better::Higher,
-                &|outcome| km(Some(outcome.stats.secondaries.as_ref()?.range)),
-            ))?,
+            secondary_range: ranges.secondary,
             torpedo_reload: planner.plan(&StatPlan::new("torpedo reload".to_owned(), Better::Lower, &|outcome| {
                 seconds(outcome.stats.torpedoes.as_ref()?.reload_time)
             }))?,
             burst_fire,
             fires_per_minute: self.fire_rates(&planner)?,
+            speed: self.speed_builds(&planner)?,
             rates: self.rates(&planner)?,
         })
     }

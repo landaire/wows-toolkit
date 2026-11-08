@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/src/data.rs
-assertion_line: 439
+assertion_line: 478
 expression: resolutions
 ---
 - name: Großer Kurfürst
@@ -113,6 +113,12 @@ expression: resolutions
   method: historical
 - name: Advanced Firing Training
   resolved: Main Battery and AA Expert
+  method: historical
+- name: MFCSA
+  resolved: Manual Secondary Battery Aiming
+  method: historical
+- name: Manual Fire Control for Secondary Armament
+  resolved: Manual Secondary Battery Aiming
   method: historical
 - name: CSM
   resolved: Concealment System Modification 1

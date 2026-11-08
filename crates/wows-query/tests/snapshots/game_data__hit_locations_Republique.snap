@@ -1,0 +1,77 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3400
+expression: sections
+---
+ship:
+  name: République
+  index: PFSB110
+  tier: 10
+  class: battleship
+  nation: France
+  group: upgradeable
+  category: tech_tree
+  status: released
+explanation: "Damage saturation: a ship's HP is split among hull sections (bow, stern, casemate or midsection, superstructure, auxiliary rooms, citadel), each with its own HP pool, plus a hull pool of 75% of ship HP that has no geometry of its own. A penetrating hit drains the pool of the section it damages and, for a section that lists drains, the hull pool too; overpenetrations, fire and flooding drain only ship HP. penetration_damage_pct is the share of an AP shell's listed damage a penetrating hit deals there while the pools it drains have HP: 33% on most sections, half from each pool, and 100% on the citadel. Once a section's own pool is spent it is saturated (black in the damage model) and penetrations there deal only saturated_damage_pct, half as much. Once the hull pool is spent, every section that drains it counts as saturated and penetrations deal 10% (Wargaming wiki). The citadel never saturates, and neither does the midsection of most destroyers, which always takes its full 33%. Repair Party restores up to repairable_pct of the damage a section has taken (Halland's unique upgrade raises it on every section but the citadel), and its healing refills every section's pool in proportion to what that section has lost, so a healed section takes its full share again. French battleships and cruisers have no special saturation: their sections follow the same rules as those of other nations. \"French saturation\" is a destroyer trait: the midsection of most French destroyers (not Aigle or Kleber TE) and of a few others, such as Shigure and Blyskawica '52, has a pool that saturates, so past that much damage there they take half damage instead of full damage."
+hulls:
+  - hull: République
+    stock: true
+    ship_hp: 92400
+    sections:
+      - section: bow
+        game_key: Bow
+        saturates: true
+        pool_hp: 4800
+        share_of_ship_hp_pct: 5.2
+        penetration_damage_pct: 33
+        saturated_damage_pct: 16.5
+        drains: hull pool
+        repairable_pct: 50
+      - section: stern
+        game_key: St
+        saturates: true
+        pool_hp: 4400
+        share_of_ship_hp_pct: 4.8
+        penetration_damage_pct: 33
+        saturated_damage_pct: 16.5
+        drains: hull pool
+        repairable_pct: 50
+      - section: casemate (midsection)
+        game_key: Cas
+        saturates: true
+        pool_hp: 8000
+        share_of_ship_hp_pct: 8.7
+        penetration_damage_pct: 33
+        saturated_damage_pct: 16.5
+        drains: hull pool
+        repairable_pct: 50
+      - section: auxiliary rooms
+        game_key: SSC
+        saturates: true
+        pool_hp: 5200
+        share_of_ship_hp_pct: 5.6
+        penetration_damage_pct: 33
+        saturated_damage_pct: 16.5
+        drains: hull pool
+        repairable_pct: 50
+      - section: superstructure
+        game_key: SS
+        saturates: true
+        pool_hp: 5300
+        share_of_ship_hp_pct: 5.7
+        penetration_damage_pct: 33
+        saturated_damage_pct: 16.5
+        drains: hull pool
+        repairable_pct: 50
+      - section: citadel
+        game_key: Cit
+        saturates: false
+        penetration_damage_pct: 100
+        repairable_pct: 10
+        repairable_pct_from_torpedoes: 50
+      - section: hull pool
+        game_key: Hull
+        saturates: true
+        pool_hp: 69300
+        share_of_ship_hp_pct: 75
+        repairable_pct: 50

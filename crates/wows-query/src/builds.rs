@@ -39,6 +39,7 @@ use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
 use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
+use wowsunpack::game_params::ttx::model::Knots;
 use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::CrewSkill;
@@ -140,6 +141,16 @@ impl StatAmount for Percent {
 
 impl StatUnit for Percent {
     const UNIT: &'static str = "%";
+}
+
+impl StatAmount for Knots {
+    fn amount(self) -> f32 {
+        self.value()
+    }
+}
+
+impl StatUnit for Knots {
+    const UNIT: &'static str = "kn";
 }
 
 /// Number of charges, or unlimited.
@@ -463,6 +474,11 @@ impl<'a> Planner<'a> {
         !self.abilities.is_empty()
     }
 
+    /// Ship abilities switched on in every build.
+    pub(crate) fn abilities(&self) -> &[AbilityModifiers] {
+        &self.abilities
+    }
+
     /// Bursts of the alternative fire mode switched on.
     pub(crate) fn burst(&self) -> Option<Burst> {
         self.burst
@@ -490,6 +506,26 @@ impl<'a> Planner<'a> {
     /// The outcome of module combination `selection` and no items.
     pub(crate) fn bare(&self, selection: usize) -> Result<Rc<Outcome>, QueryError> {
         self.outcome(selection, &[], None)
+    }
+
+    /// Captain skills of the ship's class tree and upgrades that fit it.
+    pub(crate) fn items(&self) -> &[Item] {
+        &self.items
+    }
+
+    /// Skills of [`Self::items`] with a trigger condition.
+    pub(crate) fn triggered_items(&self) -> &[Item] {
+        &self.triggered
+    }
+
+    /// The outcome of the stock modules with `skill` alone, its trigger met.
+    /// `None` when `skill` is not a skill.
+    pub(crate) fn with_skill_triggered(&self, skill: Item) -> Result<Option<Rc<Outcome>>, QueryError> {
+        let Item::Skill { index, .. } = skill else {
+            return Ok(None);
+        };
+
+        self.outcome(0, &[skill], Some(index)).map(Some)
     }
 
     /// Items whose build labels are in `labels`.
@@ -867,7 +903,9 @@ impl<'a> Planner<'a> {
         skills_fit(&skill_costs(&with)).then_some(with)
     }
 
-    fn trigger_sentence(&self, item: Item) -> Option<String> {
+    /// When the effect of a captain skill with a trigger holds. `None` for
+    /// an upgrade or a skill without a trigger sentence.
+    pub(crate) fn trigger_sentence(&self, item: Item) -> Option<String> {
         let Item::Skill { index, .. } = item else {
             return None;
         };

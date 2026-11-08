@@ -33,6 +33,7 @@ use wows_query::firing_arcs::ShipFiringArcs;
 use wows_query::firing_arcs::Weapon;
 use wows_query::game_modes::GameModeBuffsArgs;
 use wows_query::healing::HealingSourcesArgs;
+use wows_query::hit_locations::ShipHitLocationsArgs;
 use wows_query::penetration::Armament;
 use wows_query::penetration::DefeatMethod;
 use wows_query::penetration::PenetrationSearchArgs;
@@ -558,6 +559,157 @@ fn ship_overview_lists_armament_and_what_is_absent() {
     }
 }
 
+/// Ship-mounted depth charges and the depth charge air strike are reported
+/// apart: Zao has no launchers but has the air strike.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_overview_states_each_anti_submarine_weapon() {
+    let anti_submarine: Vec<serde_json::Value> = ["Zao", "Des Moines", "Vermont", "Gearing", "Archerfish"]
+        .into_iter()
+        .map(|name| {
+            let overview = game().ship_overview(&overview(name)).expect("ship exists");
+            json!({ "ship": overview.ship.name, "anti_submarine": overview.armament.anti_submarine })
+        })
+        .collect();
+    let zao = &anti_submarine[0]["anti_submarine"];
+    assert_eq!(zao["depth_charge_launchers"], "none");
+    assert!(zao["depth_charge_air_strike"].is_object(), "{zao:#}");
+
+    insta::assert_yaml_snapshot!(anti_submarine);
+}
+
+/// Gun Fire Control System Modification 2 is named in the best-fit main
+/// battery range, and Spotting Aircraft is an alternative on top of it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ship_overview_reports_firing_range_builds() {
+    for name in ["Victoria", "Des Moines"] {
+        let overview = game().ship_overview(&overview(name)).expect("ship exists");
+        let snapshot = format!("ship_overview_firing_range_{}", name.replace(' ', "_"));
+        insta::assert_yaml_snapshot!(snapshot, overview.firing_range);
+    }
+}
+
+/// Ships and the value of each listed shell beside its class standard, from
+/// an `ap_shell_traits` call.
+fn shell_trait_rows(output: &serde_json::Value) -> Vec<String> {
+    output["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .flat_map(|ship| {
+            ship["shells"].as_array().into_iter().flatten().map(move |shell| {
+                format!(
+                    "{}: {}, {}",
+                    ship["ship"].as_str().unwrap_or_default(),
+                    shell["name"].as_str().unwrap_or_default(),
+                    shell["versus_standard"].as_str().unwrap_or_default()
+                )
+            })
+        })
+        .collect()
+}
+
+/// Tier 10 ships ranked by anti-submarine weapons, both ends, one call per
+/// stat; rows name the weapon.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_anti_submarine_weapons() {
+    let ranking = |stat: &str, order: &str| {
+        let output = game()
+            .call_tool(
+                "stat_search",
+                json!({ "rank": { "stat": stat, "order": order, "limit": 5 }, "min_tier": 10, "max_tier": 10 }),
+            )
+            .expect("the stat ranks");
+        let rows: Vec<String> = output["ranking"]["ships"]
+            .as_array()
+            .expect("ranked ships")
+            .iter()
+            .map(|ship| {
+                let row = ship["row"].as_str().map(|row| format!(" ({row})")).unwrap_or_default();
+                format!(
+                    "{} {}{row}",
+                    ship["ship"].as_str().unwrap_or_default(),
+                    ship["value"].as_str().unwrap_or_default()
+                )
+            })
+            .collect();
+        json!({ "stat": stat, "order": order, "ranked": output["ranking"]["ranked"], "ships": rows })
+    };
+    let rankings: Vec<serde_json::Value> = [
+        ("asw.best_damage_per_attack", "asc"),
+        ("asw.best_damage_per_attack", "desc"),
+        ("asw.depth_charge.splash_radius", "asc"),
+        ("asw.depth_charge.splash_radius", "desc"),
+        ("asw.airstrike.splash_radius", "asc"),
+        ("asw.airstrike.splash_radius", "desc"),
+    ]
+    .into_iter()
+    .map(|(stat, order)| ranking(stat, order))
+    .collect();
+
+    insta::assert_yaml_snapshot!(rankings);
+}
+
+/// Two named ships of one class get a factor-by-factor split and a verdict:
+/// Yamato leads Amagi on more than twice as many factors; Des Moines and
+/// Zao split evenly.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn comparison_head_to_head_gives_a_verdict() {
+    let pairs: Vec<serde_json::Value> = [["Yamato", "Amagi"], ["Des Moines", "Zao"]]
+        .into_iter()
+        .map(|pair| {
+            let output =
+                game().call_tool("ship_comparison", json!({ "ships": pair })).expect("both ships are of one class");
+            json!({ "group": output["group"], "head_to_head": output["head_to_head"] })
+        })
+        .collect();
+    let verdict = |index: usize| pairs[index]["head_to_head"][0]["verdict"].as_str().unwrap_or_default().to_owned();
+    assert!(verdict(0).starts_with("On paper Yamato is better"), "{}", verdict(0));
+    assert!(verdict(1).starts_with("Mixed:"), "{}", verdict(1));
+
+    insta::assert_yaml_snapshot!(pairs);
+}
+
+/// Des Moines' 203 mm AP ricochets from 60 deg instead of the cruiser
+/// standard 45; Minotaur's 152 mm AP has a 0.005 s fuse against 0.033 s.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ap_shell_traits_find_improved_angles_and_short_fuses() {
+    let improved = game()
+        .call_tool(
+            "ap_shell_traits",
+            json!({ "trait": "improved_ricochet", "class": "cruiser", "min_tier": 8, "max_tier": 10 }),
+        )
+        .expect("cruisers list");
+    let improved_rows = shell_trait_rows(&improved);
+    assert!(improved_rows.iter().any(|row| row.starts_with("T10 Des Moines ")), "{improved_rows:#?}");
+
+    let short = game()
+        .call_tool("ap_shell_traits", json!({ "trait": "short_fuse", "min_tier": 8, "max_tier": 10 }))
+        .expect("ships list");
+    let short_rows = shell_trait_rows(&short);
+    assert!(short_rows.iter().any(|row| row.starts_with("T10 Minotaur ")), "{short_rows:#?}");
+
+    insta::assert_yaml_snapshot!(json!({
+        "standards": improved["standards"],
+        "fuse_threshold_caliber_ratio": improved["fuse_threshold_caliber_ratio"],
+        "improved_ricochet": {
+            "considered": improved["considered"],
+            "qualifying": improved["qualifying"],
+            "ships": improved_rows,
+        },
+        "short_fuse": {
+            "considered": short["considered"],
+            "qualifying": short["qualifying"],
+            "omitted": short["omitted"],
+            "ships": short_rows,
+        },
+    }));
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn penetration_search_states_shares_per_class() {
@@ -669,6 +821,37 @@ fn per_class_skill_names_resolve_by_class() {
         .captain_skill(&CaptainSkillArgs { skill: "ifhe".to_owned(), ..Default::default() })
         .expect("IFHE exists");
     insta::assert_yaml_snapshot!(ifhe);
+}
+
+/// Player abbreviations of captain skills on a battleship, as shiptool_link
+/// resolves them: IFA is Incoming Fire Alert, never Inertia Fuse for HE Shells.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn skill_abbreviations_resolve_to_their_skills() {
+    let abbreviations = [
+        "IFA", "IFHE", "CE", "SE", "AR", "BFT", "AFT", "FP", "FPE", "PM", "PT", "DE", "CQC", "MSBA", "MFCSA", "SI",
+        "BoS", "RL", "RPF", "LS", "GtG", "SHAP", "EM", "PA",
+    ];
+    let resolved: Vec<String> = abbreviations
+        .into_iter()
+        .map(|abbreviation| {
+            let resolution = game().captain_skill(&CaptainSkillArgs {
+                skill: abbreviation.to_owned(),
+                ship: Some("Vermont".to_owned()),
+                ..Default::default()
+            });
+            match resolution {
+                Ok(output) => {
+                    let names: Vec<&str> = output.skills.iter().map(|skill| skill.name.as_str()).collect();
+                    format!("{abbreviation} -> {}", names.join(", "))
+                }
+                Err(error) => format!("{abbreviation} -> error: {error}"),
+            }
+        })
+        .collect();
+    assert!(resolved.contains(&"IFA -> Incoming Fire Alert".to_owned()), "{resolved:#?}");
+
+    insta::assert_yaml_snapshot!(resolved);
 }
 
 /// Adrenaline Rush reduces reload by its coefficient per 1% of health lost.
@@ -2943,6 +3126,36 @@ fn armor_stats_are_labelled_nominal() {
     assert!(ranking.caution.is_some_and(|caution| caution.contains("armor_assessment")), "{:?}", ranking.caution);
 }
 
+/// Submarine top speed per depth with the skills and signals that change it,
+/// and the ranking of tier 10 submarines by submerged speed.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn submarine_speed_per_depth() {
+    for (ship, snapshot) in [("Balao", "submarine_speed_balao"), ("U-2501", "submarine_speed_u_2501")] {
+        let stats =
+            game().ship_stats(&ShipStatsArgs { ship: ship.to_owned(), ..Default::default() }).expect("ship exists");
+        let speed = stats.build_stats.expect("no loadout gives build_stats").speed;
+        insta::assert_yaml_snapshot!(snapshot, speed);
+    }
+
+    let search = game()
+        .stat_search(&StatSearchArgs {
+            rank: Some(StatRank {
+                stat: "underwater_mobility.speed".to_owned(),
+                order: RankOrder::Desc,
+                qualifier: None,
+                limit: Some(RankLimit(25)),
+                build: None,
+            }),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            class: Some(ShipClass::Submarine),
+            ..Default::default()
+        })
+        .expect("search runs");
+    insta::assert_yaml_snapshot!("submarine_submerged_speed_ranking", search.ranking.expect("a rank was asked for"));
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn ship_stats_of_each_class() {
@@ -3171,6 +3384,21 @@ fn akizuki_healing_sources() {
     let sources =
         game().healing_sources(&HealingSourcesArgs { ship: Some("Akizuki".to_owned()) }).expect("Akizuki exists");
     insta::assert_yaml_snapshot!(sources);
+}
+
+/// Republique and Montana, a French and an American battleship, saturate
+/// alike; Henri IV is a French cruiser. Kleber's midsection saturates
+/// (French destroyer saturation); Gearing's does not, nor does that of Aigle,
+/// a French destroyer without it.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn hit_locations_saturate_by_class() {
+    for ship in ["Republique", "Montana", "Henri IV", "Kleber", "Gearing", "Aigle"] {
+        let sections = game()
+            .ship_hit_locations(&ShipHitLocationsArgs { ship: ship.to_owned() })
+            .unwrap_or_else(|error| panic!("{ship}: {error}"));
+        insta::assert_yaml_snapshot!(format!("hit_locations_{}", ship.replace(' ', "_")), sections);
+    }
 }
 
 #[test]

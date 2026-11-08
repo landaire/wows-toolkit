@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 352
 expression: overviews
 ---
 - ship:
@@ -18,6 +19,44 @@ expression: overviews
   unlocks:
     - Annapolis
   upgrade_slots: 6
+  firing_range:
+    main_battery:
+      stat: main battery range
+      unit: km
+      builds:
+        base: 15.83
+        best:
+          value: 18.36
+          assumed:
+            - Gun Fire Control System Modification 2
+        alternatives:
+          - label: without Gun Fire Control System Modification 2
+            value: 15.83
+            assumed: []
+          - label: with Spotting Aircraft active
+            value: 22.04
+            assumed:
+              - Gun Fire Control System Modification 2
+              - Spotting Aircraft
+    secondary:
+      stat: secondary battery range
+      unit: km
+      builds:
+        base: 7.3
+        best:
+          value: 10.51
+          assumed:
+            - Pack a Punch
+            - Secondary Battery Modification 1
+        alternatives:
+          - label: without Pack a Punch
+            value: 8.76
+            assumed:
+              - Secondary Battery Modification 1
+          - label: without Secondary Battery Modification 1
+            value: 8.76
+            assumed:
+              - Pack a Punch
   armament:
     modules:
       - kind: hull
@@ -35,7 +74,26 @@ expression: overviews
         barrels_per_mount: 2
         caliber_mm: 127
     torpedoes: none
-    depth_charge_launchers: none
+    anti_submarine:
+      summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 8 km away); submarine detection: Hydroacoustic Search (5 km)"
+      depth_charge_launchers: none
+      depth_charge_air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        planes: 1
+        depth_charges_per_plane: 2
+        damage_per_depth_charge: 4900
+        splash_radius_m: 12.5
+        charges: 2
+        reload_s: 30
+        range_km: 8
+      submarine_detection:
+        - consumable: Hydroacoustic Search
+          slot: 2
+          choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+          detection_m: 5000
+          charges: 3
+          action_time_s: 100
+          reload_s: 120
     aircraft:
       squadrons: none
       air_strike:
@@ -75,6 +133,39 @@ expression: overviews
     - Des Moines
   requires_ship: Des Moines
   upgrade_slots: 6
+  firing_range:
+    main_battery:
+      stat: main battery range
+      unit: km
+      builds:
+        base: 16.22
+        best:
+          value: 18.82
+          assumed:
+            - Gun Fire Control System Modification 2
+        alternatives:
+          - label: without Gun Fire Control System Modification 2
+            value: 16.22
+            assumed: []
+    secondary:
+      stat: secondary battery range
+      unit: km
+      builds:
+        base: 7.3
+        best:
+          value: 10.51
+          assumed:
+            - Pack a Punch
+            - Secondary Battery Modification 1
+        alternatives:
+          - label: without Pack a Punch
+            value: 8.76
+            assumed:
+              - Secondary Battery Modification 1
+          - label: without Secondary Battery Modification 1
+            value: 8.76
+            assumed:
+              - Pack a Punch
   armament:
     modules:
       - kind: hull
@@ -92,7 +183,26 @@ expression: overviews
         barrels_per_mount: 2
         caliber_mm: 127
     torpedoes: none
-    depth_charge_launchers: none
+    anti_submarine:
+      summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 8 km away); submarine detection: Hydroacoustic Search (5 km)"
+      depth_charge_launchers: none
+      depth_charge_air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        planes: 1
+        depth_charges_per_plane: 2
+        damage_per_depth_charge: 4900
+        splash_radius_m: 12.5
+        charges: 2
+        reload_s: 30
+        range_km: 8
+      submarine_detection:
+        - consumable: Hydroacoustic Search
+          slot: 2
+          choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+          detection_m: 5000
+          charges: 3
+          action_time_s: 100
+          reload_s: 120
     aircraft:
       squadrons: none
       air_strike:
@@ -125,6 +235,39 @@ expression: overviews
     status: released
   acquisition_note: How the ship is obtained and its price are not in game data.
   upgrade_slots: 6
+  firing_range:
+    main_battery:
+      stat: main battery range
+      unit: km
+      builds:
+        base: 15.83
+        best:
+          value: 18.36
+          assumed:
+            - Gun Fire Control System Modification 2
+        alternatives:
+          - label: without Gun Fire Control System Modification 2
+            value: 15.83
+            assumed: []
+    secondary:
+      stat: secondary battery range
+      unit: km
+      builds:
+        base: 7.3
+        best:
+          value: 10.51
+          assumed:
+            - Pack a Punch
+            - Secondary Battery Modification 1
+        alternatives:
+          - label: without Pack a Punch
+            value: 8.76
+            assumed:
+              - Secondary Battery Modification 1
+          - label: without Secondary Battery Modification 1
+            value: 8.76
+            assumed:
+              - Pack a Punch
   armament:
     modules:
       - kind: hull
@@ -142,7 +285,26 @@ expression: overviews
         barrels_per_mount: 2
         caliber_mm: 127
     torpedoes: none
-    depth_charge_launchers: none
+    anti_submarine:
+      summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 8 km away); submarine detection: Hydroacoustic Search (5 km)"
+      depth_charge_launchers: none
+      depth_charge_air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        planes: 1
+        depth_charges_per_plane: 2
+        damage_per_depth_charge: 4900
+        splash_radius_m: 12.5
+        charges: 2
+        reload_s: 30
+        range_km: 8
+      submarine_detection:
+        - consumable: Hydroacoustic Search
+          slot: 3
+          choice: "choose one of: Surveillance Radar, Hydroacoustic Search"
+          detection_m: 5000
+          charges: 3
+          action_time_s: 100
+          reload_s: 120
     aircraft:
       squadrons: none
       air_strike:

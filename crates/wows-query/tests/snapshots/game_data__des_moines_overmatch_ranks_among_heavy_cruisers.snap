@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1195
 expression: "json!({\n    \"ends\": ends, \"signals\": des_moines.signals, \"outliers\":\n    des_moines.outliers\n})"
 ---
 ends:
@@ -17,5 +18,5 @@ signals:
   - "Bow-on it is exposed: most tier 8-11 battleships (67.21%) overmatch its 27 mm bow plating; within 30 deg of the bow 6 of 9 main battery barrels bear and all bear from 30 deg off the bow."
 outliers:
   - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
-  - "rudder_shift 4.31 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
+  - "rudder_shift 3.3 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
   - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging, worse than at least 90% of the 104 other tier 9-11 cruisers: angled 45 deg 37.1% (rank 99/105)"

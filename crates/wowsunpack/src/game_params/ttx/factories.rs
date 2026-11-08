@@ -6,6 +6,8 @@
 //! This module currently covers the direct-field species `durability` and
 //! `mobility`; armor/battery/hull-summary land in later M2 tasks.
 
+use wows_core::game_types::BuoyancyState;
+
 use crate::game_params::ttx::armor_materials::armor_type_classifies;
 use crate::game_params::ttx::armor_materials::collision_material_name;
 use crate::game_params::ttx::components::ArtilleryComponentStats;
@@ -20,6 +22,7 @@ use crate::game_params::ttx::constants::BW_KNOTS_TO_MPS;
 use crate::game_params::ttx::constants::BW_TO_BALLISTIC;
 use crate::game_params::ttx::constants::HULL_HEALTH_ROUND;
 use crate::game_params::ttx::constants::KM_TO_M;
+use crate::game_params::ttx::constants::PORT_SHIP_TIME_SCALE;
 use crate::game_params::ttx::constants::TORPEDO_DAMAGE_CONSTANT;
 use crate::game_params::ttx::effects::EffectCoeff;
 use crate::game_params::ttx::effects::HEALTH_SCALED_RELOAD_STEP;
@@ -40,6 +43,7 @@ use crate::game_params::ttx::model::Seconds;
 use crate::game_params::ttx::model::ShellStats;
 use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
+use crate::game_params::ttx::model::UnderwaterMobility;
 use crate::game_params::ttx::model::Visibility;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::module_options::ModuleSlot;
@@ -141,12 +145,17 @@ pub fn durability<R: Recorder>(
 /// `speed` = `calculateMaxSpeedKnots(prepared) * speedCoef` (FactoryMobility.py:8),
 /// where `calculateMaxSpeedKnots` (ShipParams.py:348) is
 /// `hull.maxSpeed * clamp(hull.speedCoef + engine.speedCoef, 0.0, 1.0)`. `speedCoef`
-/// is multiplicative (base_value 1.0 -> `coef`).
+/// is multiplicative (base_value 1.0 -> `coef`). The port leaves out
+/// `speedCoefBattery`, which the game applies on the surface and at periscope
+/// depth (ModifiersApply.py:540-541, `SKILL_SPEED_BOOST_STATES`); it is applied
+/// here so a triggered Enlarged Propeller Shaft shows on the surface speed.
 ///
 /// `turning_radius` = `hull.turningRadius` directly (FactoryMobility.py:9, no modifier).
 ///
-/// `rudder_time` = `hull.rudderTime * SGRudderTime` (FactoryMobility.py:10).
-/// `SGRudderTime` is multiplicative (base_value 1.0 -> `coef`).
+/// `rudder_time` = `hull.rudderTime * SGRudderTime` (FactoryMobility.py:10), where
+/// the preprocessed `hull.rudderTime` is the raw field `* 2.0 / SHIP_TIME_SCALE`
+/// (PreprocessedHull.py:25, [`PORT_SHIP_TIME_SCALE`]). `SGRudderTime` is
+/// multiplicative (base_value 1.0 -> `coef`).
 pub fn mobility<R: Recorder>(
     hull: &HullComponentStats,
     hull_name: &str,
@@ -163,7 +172,7 @@ pub fn mobility<R: Recorder>(
                 // No engine coefficient adds nothing to the hull's (additive identity).
                 None => hull_speed_coef.clamp(0.0, 1.0),
             };
-            let value = max_speed.value() * coef * modifiers.coef("speedCoef");
+            let value = max_speed.value() * coef * modifiers.coef("speedCoef") * modifiers.coef("speedCoefBattery");
             if R::ON {
                 rec.record(
                     TtxStat::Speed,
@@ -178,6 +187,7 @@ pub fn mobility<R: Recorder>(
                             .unwrap_or(InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() });
                         b.module(engine_src, "speedCoef", coef);
                         b.coef(sources, "speedCoef");
+                        b.coef(sources, "speedCoefBattery");
                     },
                 );
             }
@@ -200,7 +210,8 @@ pub fn mobility<R: Recorder>(
         );
     }
 
-    let rudder_time = hull.rudder_time.map(|t| {
+    let rudder_time = hull.rudder_time.map(|raw| {
+        let t = Seconds::from(raw.value() * 2.0 / PORT_SHIP_TIME_SCALE);
         let value = t.value() * modifiers.coef("SGRudderTime");
         if R::ON {
             rec.record(
@@ -248,6 +259,87 @@ pub fn battery<R: Recorder>(
         });
     }
     Some(Battery { capacity: Some(cap_value), regeneration: Some(regen_value) })
+}
+
+/// Underwater maneuvering section (`FactoryUnderwaterMobility.py:6`). `None` for
+/// hulls that cannot dive.
+///
+/// `speed` = `hull.maxSpeedUnderwater * speedCoef * speedCoefUW`, where
+/// `maxSpeedUnderwater = hull.maxSpeed * max(buoyancyStates[state][1])` over the
+/// `UNDER_WATER` states, operating and maximum depth (PreprocessedHull.py:26,
+/// BuoyancyCommon.py:35). The port applies `speedCoef` only; the game also applies
+/// `speedCoefUW` below periscope depth (ModifiersApply.py:543-544).
+///
+/// `periscope_speed` = `hull.maxSpeed * buoyancyStates['PERISCOPE'][1] * speedCoef *
+/// speedCoefBattery`: the state coefficient scales the physics top speed
+/// (BuoyancyOwner.py:94, ShipPhysics.py:167-168) and the modifiers are those of
+/// `getShipSpeedCoef` at periscope depth (ModifiersApply.py:538-541).
+///
+/// `rudder_time` = `buoyancyRudderTime * 2.0 / SHIP_TIME_SCALE * buoyancyRudderTimeCoeff`
+/// (PreprocessedHull.py:24, FactoryUnderwaterMobility.py:16).
+///
+/// `buoyancy_speed` = `hull.maxBuoyancySpeed` (FactoryUnderwaterMobility.py:17, no modifier).
+pub fn underwater_mobility<R: Recorder>(
+    hull: &HullComponentStats,
+    hull_name: &str,
+    modifiers: &ModifierBundle,
+    sources: &ModifierSources,
+    rec: &mut R,
+) -> Option<UnderwaterMobility> {
+    if hull.depth_speed_coefs.is_empty() {
+        return None;
+    }
+
+    let hull_src = || InputId::Module { slot: ModuleSlot::Hull, name: hull_name.to_string() };
+    let state_coef = |state: BuoyancyState| {
+        hull.depth_speed_coefs.iter().find(|coef| coef.state == state).map(|coef| coef.speed_coef)
+    };
+
+    let periscope_speed = hull.max_speed.zip(state_coef(BuoyancyState::Periscope)).map(|(max_speed, coef)| {
+        let base = max_speed.value() * coef;
+        let value = base * modifiers.coef("speedCoef") * modifiers.coef("speedCoefBattery");
+        if R::ON {
+            rec.record(TtxStat::PeriscopeSpeed, None, base, hull_src(), value, |b| {
+                b.coef(sources, "speedCoef");
+                b.coef(sources, "speedCoefBattery");
+            });
+        }
+        Knots::from(value)
+    });
+
+    let submerged_coef =
+        [BuoyancyState::DeepWater, BuoyancyState::DeepWaterInvul].into_iter().filter_map(state_coef).reduce(f32::max);
+    let speed = hull.max_speed.zip(submerged_coef).map(|(max_speed, coef)| {
+        let base = max_speed.value() * coef;
+        let value = base * modifiers.coef("speedCoef") * modifiers.coef("speedCoefUW");
+        if R::ON {
+            rec.record(TtxStat::SubmergedSpeed, None, base, hull_src(), value, |b| {
+                b.coef(sources, "speedCoef");
+                b.coef(sources, "speedCoefUW");
+            });
+        }
+        Knots::from(value)
+    });
+
+    let rudder_time = hull.buoyancy_rudder_time.map(|raw| {
+        let base = raw.value() * 2.0 / PORT_SHIP_TIME_SCALE;
+        let value = base * modifiers.coef("buoyancyRudderTimeCoeff");
+        if R::ON {
+            rec.record(TtxStat::DivingPlaneShiftTime, None, base, hull_src(), value, |b| {
+                b.coef(sources, "buoyancyRudderTimeCoeff")
+            });
+        }
+        Seconds::from(value)
+    });
+
+    let buoyancy_speed = hull.max_buoyancy_speed;
+    if R::ON
+        && let Some(dive) = buoyancy_speed
+    {
+        rec.record(TtxStat::DiveSpeed, None, dive.value(), hull_src(), dive.value(), |_b| {});
+    }
+
+    Some(UnderwaterMobility { periscope_speed, speed, rudder_time, buoyancy_speed })
 }
 
 /// Default lowest armor thickness when an `armorList` yields no classified plate
@@ -1544,8 +1636,12 @@ mod tests {
             flood_prob: Some(0.0),
             battery_capacity: None,
             battery_regen_rate: None,
+            depth_speed_coefs: Vec::new(),
+            buoyancy_rudder_time: None,
+            max_buoyancy_speed: None,
             burn_nodes: Vec::new(),
             flood_nodes: Vec::new(),
+            hit_locations: Vec::new(),
         }
     }
 
@@ -1556,14 +1652,73 @@ mod tests {
         HullComponentStats { flood_prob: Some(flood_prob), ..Default::default() }
     }
 
-    /// Balao's real submarine battery (GameParams `PASS110_Balao` `A_Hull`
-    /// `SubmarineBattery`): capacity 240, regenRate 1.2.
+    /// Balao's real hull (GameParams `PASS210_Balao` `A_Hull`): `SubmarineBattery`
+    /// capacity 240 and regenRate 1.2, maxSpeed 30, `buoyancyStates` speed
+    /// coefficients 1.0 / 1.0 / 0.867 on the surface, at periscope and at maximum
+    /// depth, buoyancyRudderTime 26.07, maxBuoyancySpeed 3.3.
     fn balao_hull() -> HullComponentStats {
+        use crate::game_params::ttx::components::DepthSpeedCoef;
+
         HullComponentStats {
+            max_speed: Some(Knots::from(30.0)),
+            speed_coef: Some(1.0),
             battery_capacity: Some(BALAO_BATTERY_CAPACITY),
             battery_regen_rate: Some(BALAO_BATTERY_REGEN),
+            depth_speed_coefs: vec![
+                DepthSpeedCoef { state: BuoyancyState::Surface, speed_coef: 1.0 },
+                DepthSpeedCoef { state: BuoyancyState::Periscope, speed_coef: 1.0 },
+                DepthSpeedCoef { state: BuoyancyState::DeepWaterInvul, speed_coef: 0.867 },
+            ],
+            buoyancy_rudder_time: Some(Seconds::from(26.07)),
+            max_buoyancy_speed: Some(MetersPerSecond::from(3.3)),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn balao_underwater_mobility_per_depth() {
+        let speeds = |mods: &[CrewSkillModifier]| {
+            let bundle = ModifierBundle::from_modifiers(mods, Species::Submarine, VERSION)
+                .expect("test modifiers are all known");
+            let surface = mobility(&balao_hull(), "H", None, None, &bundle, &ModifierSources::default(), &mut Off)
+                .speed
+                .expect("surface speed");
+            let underwater = underwater_mobility(&balao_hull(), "H", &bundle, &ModifierSources::default(), &mut Off)
+                .expect("Balao dives");
+            [
+                surface.value(),
+                underwater.periscope_speed.expect("periscope speed").value(),
+                underwater.speed.expect("submerged speed").value(),
+                underwater.rudder_time.expect("diving plane shift time").value(),
+                underwater.buoyancy_speed.expect("dive speed").value(),
+            ]
+        };
+        let close = |got: [f32; 5], want: [f32; 5]| {
+            assert!(got.iter().zip(want).all(|(got, want)| (got - want).abs() < 1e-2), "got {got:?}, want {want:?}");
+        };
+
+        // 30 * 0.867 = 26.01 kn; 26.07 * 2.0 / 2.61 = 19.98 s.
+        close(speeds(&[]), [30.0, 30.0, 26.01, 19.98, 3.3]);
+        // Enlarged Propeller Shaft (speedCoefBattery) on the surface and at periscope only.
+        close(speeds(&[modifier("speedCoefBattery", 1.18)]), [35.4, 35.4, 26.01, 19.98, 3.3]);
+        // Sierra Mike (speedCoef) at every depth.
+        close(speeds(&[modifier("speedCoef", 1.05)]), [31.5, 31.5, 27.31, 19.98, 3.3]);
+        // speedCoefUW below periscope depth only; Submarine Steering Gears on the diving planes.
+        close(
+            speeds(&[modifier("speedCoefUW", 1.35), modifier("buoyancyRudderTimeCoeff", 0.5)]),
+            [30.0, 30.0, 35.11, 9.99, 3.3],
+        );
+
+        assert!(
+            underwater_mobility(
+                &gearing_hull(),
+                "H",
+                &ModifierBundle::empty(Species::Destroyer),
+                &ModifierSources::default(),
+                &mut Off
+            )
+            .is_none()
+        );
     }
 
     /// Gearing's engine `speedCoef` is 0.0 (hull carries the full coef).
@@ -1672,8 +1827,9 @@ mod tests {
         assert_eq!(mobility.speed, Some(Knots::from(GEARING_SPEED_KN)));
         // turningRadius is a direct field.
         assert_eq!(mobility.turning_radius, Some(Meters::from(GEARING_TURNING_M)));
-        // GEARING_RUDDER_S * 1.0 (stock SGRudderTime) = GEARING_RUDDER_S.
-        assert_eq!(mobility.rudder_time, Some(Seconds::from(GEARING_RUDDER_S)));
+        // Port rudder shift time: 4.25 * 2.0 / 2.61 = 3.26 s, shown as 3.3 s.
+        let rudder = mobility.rudder_time.expect("rudder time computed").value();
+        assert!((rudder - 3.2567).abs() < 1e-3, "got {rudder}");
     }
 
     #[test]

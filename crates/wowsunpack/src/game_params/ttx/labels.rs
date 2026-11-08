@@ -31,6 +31,11 @@ pub enum TtxStat {
     Speed,
     TurningRadius,
     RudderTime,
+    // Underwater mobility (submarines)
+    PeriscopeSpeed,
+    SubmergedSpeed,
+    DivingPlaneShiftTime,
+    DiveSpeed,
     // Armor
     ArmorMin,
     ArmorMax,
@@ -126,6 +131,10 @@ impl TtxStat {
         TtxStat::Speed,
         TtxStat::TurningRadius,
         TtxStat::RudderTime,
+        TtxStat::PeriscopeSpeed,
+        TtxStat::SubmergedSpeed,
+        TtxStat::DivingPlaneShiftTime,
+        TtxStat::DiveSpeed,
         TtxStat::ArmorMin,
         TtxStat::ArmorMax,
         TtxStat::BatteryCapacity,
@@ -209,6 +218,10 @@ impl TtxStat {
             TtxStat::Speed => "mobility.speed",
             TtxStat::TurningRadius => "mobility.turning_radius",
             TtxStat::RudderTime => "mobility.rudder_time",
+            TtxStat::PeriscopeSpeed => "underwater_mobility.periscope_speed",
+            TtxStat::SubmergedSpeed => "underwater_mobility.speed",
+            TtxStat::DivingPlaneShiftTime => "underwater_mobility.rudder_time",
+            TtxStat::DiveSpeed => "underwater_mobility.buoyancy_speed",
             TtxStat::ArmorMin => "armor.min",
             TtxStat::ArmorMax => "armor.max",
             TtxStat::BatteryCapacity => "battery.capacity",
@@ -319,6 +332,12 @@ impl TtxStat {
             TtxStat::TurningRadius => "IDS_SHIP_PARAM_TURNINGRADIUS",
             // "Rudder Shift Time"
             TtxStat::RudderTime => "IDS_SHIP_PARAM_RUDDER_TIME",
+            // "Maximum Submerged Speed"
+            TtxStat::SubmergedSpeed => "IDS_SHIP_PARAM_MAX_SPEED_UNDER_WATER",
+            // "Diving Plane Shift Time"
+            TtxStat::DivingPlaneShiftTime => "IDS_SHIP_PARAM_BUOYANCY_RUDDER_TIME",
+            // "Maximum Dive and Ascent Speed"
+            TtxStat::DiveSpeed => "IDS_SHIP_PARAM_MAX_BUOYANCY_SPEED",
             // "Dive Capacity"
             TtxStat::BatteryCapacity => "IDS_SHIP_PARAM_BATTERY_MAX_CAPACITY",
             // "Dive Capacity Recharge Rate"
@@ -395,6 +414,8 @@ impl TtxStat {
             // No confident catalog match: the section header (IDS_SHIP_PARAM_ARMOR
             // = "Armor") names the whole armor block, not min/max thickness.
             TtxStat::ArmorMin | TtxStat::ArmorMax => return None,
+            // The port lists no periscope depth speed.
+            TtxStat::PeriscopeSpeed => return None,
             // No port label: the client shows only horizontal "Maximum Dispersion".
             TtxStat::ArtilleryDispersionVertical => return None,
             // Barrels-per-mount has no distinct port label (only mount/tube counts).
@@ -555,6 +576,7 @@ mod tests {
 
         let mut expected = vec![
             TtxStat::ArmorMin,
+            TtxStat::PeriscopeSpeed,
             TtxStat::ArmorMax,
             TtxStat::GunNumBarrels,
             TtxStat::ArtilleryDispersionVertical,

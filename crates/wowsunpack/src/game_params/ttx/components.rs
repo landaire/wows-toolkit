@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use wows_core::game_types::BuoyancyState;
+
 use crate::game_params::ttx::constants::DispersionCurve;
 use crate::game_params::ttx::model::DegreesPerSecond;
 use crate::game_params::ttx::model::Hp;
@@ -22,6 +24,7 @@ use crate::game_params::ttx::special_abilities::AlternativeFireMode;
 use crate::game_params::ttx::special_abilities::CombatInstructions;
 use crate::game_params::types::Km;
 use crate::game_params::types::Meters;
+use crate::game_params::types::MetersPerSecond;
 
 /// One hull burn node: a fire section's resistance, damage rate and duration.
 ///
@@ -51,6 +54,67 @@ pub struct FloodNode {
     /// Maximum health lost per second, e.g. 0.5%.
     pub damage_per_sec: Percent,
     pub duration: Seconds,
+}
+
+/// `hlType` of a hull section: a part of the hull with its own HP pool. Module
+/// hit locations (guns, engine, steering gear) are not hull sections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum HullSectionType {
+    /// `simple_hitlocation`: bow, stern, auxiliary rooms, and the casemate of
+    /// most ships.
+    Simple,
+    /// `citadel_hitlocation`.
+    Citadel,
+    /// `supersctructure_hitlocation`, spelled so in game data.
+    Superstructure,
+    /// `casemate_hitlocation`: the midsection of most destroyers.
+    Casemate,
+    /// `hull_hitlocation`: a pool without geometry that the sections naming it
+    /// as `parentHL` also drain.
+    Hull,
+}
+
+impl HullSectionType {
+    /// The section type of an `hlType`, `None` for module hit locations.
+    pub fn from_hl_type(hl_type: &str) -> Option<Self> {
+        match hl_type {
+            "simple_hitlocation" => Some(Self::Simple),
+            "citadel_hitlocation" => Some(Self::Citadel),
+            "supersctructure_hitlocation" => Some(Self::Superstructure),
+            "casemate_hitlocation" => Some(Self::Casemate),
+            "hull_hitlocation" => Some(Self::Hull),
+            _ => None,
+        }
+    }
+}
+
+/// One hull section of a `*_Hull` component, e.g. `Bow` or `Cit`, with raw
+/// GameParams values. Fields are `None` when the source field is absent.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct HullHitLocation {
+    /// Key of the section in the hull component, e.g. `Bow`, `Cas`, `SSC`.
+    pub name: String,
+    pub section_type: HullSectionType,
+
+    /// Raw `maxHP`, before the ship HP modifiers that also scale it
+    /// (ModifiersApply.py:157-160).
+    pub max_hp: Option<Hp>,
+    /// `parentHL`: the section whose pool damage to this one also drains.
+    pub parent: Option<String>,
+    /// Raw `volumeCoeff`.
+    pub volume_coeff: Option<f32>,
+
+    /// `regeneratedHPPart`: share of damage taken here that Repair Party can
+    /// restore.
+    pub regenerated_hp_part: Option<f32>,
+    /// `enhancedRegeneratedHPPart`: replaces `regeneratedHPPart` when larger,
+    /// for damage from ammo with `useEnhancedRegenerationRules`
+    /// (ModifiersApply.py:687-697).
+    pub enhanced_regenerated_hp_part: Option<f32>,
 }
 
 /// Base hull-component stats, raw from the `*_Hull` component sub-object.
@@ -103,6 +167,16 @@ pub struct HullComponentStats {
     /// Submarine `SubmarineBattery.regenRate` (charge units per second). `None` for
     /// non-subs.
     pub battery_regen_rate: Option<f32>,
+    /// `buoyancyStates[state][1]`, the hull's maximum speed multiplier at each
+    /// depth state (BuoyancyOwner.py:94, ShipPhysics.py:167-168). Empty for
+    /// hulls that cannot dive.
+    pub depth_speed_coefs: Vec<DepthSpeedCoef>,
+    /// Raw `buoyancyRudderTime` (diving plane shift time before the port's
+    /// time scale). `None` for hulls that cannot dive.
+    pub buoyancy_rudder_time: Option<Seconds>,
+    /// Raw `maxBuoyancySpeed`, the maximum dive and ascent speed. `None` for
+    /// hulls that cannot dive.
+    pub max_buoyancy_speed: Option<MetersPerSecond>,
     /// Hull `burnNodes`, one entry per fire section. The length is the section
     /// count and is per-hull: surface combatants carry four, most submarines one,
     /// some auxiliaries two. Empty when the hull has no `burnNodes` key.
@@ -110,6 +184,19 @@ pub struct HullComponentStats {
     /// Hull `floodNodes`, one entry per flooding section. Empty when the hull
     /// has no `floodNodes` key.
     pub flood_nodes: Vec<FloodNode>,
+    /// Hull sections with their own HP pool, sorted by name. Empty when the
+    /// hull lists none.
+    pub hit_locations: Vec<HullHitLocation>,
+}
+
+/// One `buoyancyStates` entry of a submarine hull: the depth state and the
+/// multiplier on the hull's `maxSpeed` there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DepthSpeedCoef {
+    pub state: BuoyancyState,
+    pub speed_coef: f32,
 }
 
 /// Base engine-component stats, raw from the `*_Engine` component sub-object.
@@ -300,6 +387,47 @@ pub struct AirSupportStats {
     pub max_dist: Option<Meters>,
 }
 
+/// Ship-mounted depth charges, raw from the hull's `depthCharges` component
+/// (PreprocessedDepthCharges.py:7-18).
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DepthChargeStats {
+    /// `maxPacks`: attacks before a reload.
+    pub charges: Option<u32>,
+    pub reload_time: Option<Seconds>,
+    /// `numShots`: times every launcher drops per attack.
+    pub shots_per_attack: Option<u32>,
+    /// The `HP_*` launchers.
+    pub launchers: Vec<DepthChargeLauncher>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DepthChargeLauncher {
+    /// `numBombs`: depth charges one shot drops.
+    pub bombs: Option<u32>,
+    /// Projectile param names from `ammoList`.
+    pub ammo: Vec<String>,
+}
+
+impl DepthChargeStats {
+    /// Depth charges one attack drops: every launcher's `numBombs` summed,
+    /// times `numShots` (PreprocessedDepthCharges.py:12). `None` when a
+    /// field is missing.
+    pub fn depth_charges_per_attack(&self) -> Option<u32> {
+        let per_shot: Option<u32> = self.launchers.iter().map(|launcher| launcher.bombs).sum();
+        Some(per_shot? * self.shots_per_attack?)
+    }
+
+    /// The projectile whose damage the port shows: the first launcher's
+    /// first ammo (PreprocessedDepthCharges.py:13-15).
+    pub fn projectile(&self) -> Option<&str> {
+        self.launchers.first()?.ammo.first().map(String::as_str)
+    }
+}
+
 /// Number of launchers of a group that reload at the same time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
@@ -407,6 +535,9 @@ pub struct ShipTtxComponents {
     /// Air strike per `_Hull` upgrade name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub air_supports: HashMap<String, AirSupportStats>,
+    /// Ship-mounted depth charges per `_Hull` upgrade name.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub depth_charges: HashMap<String, DepthChargeStats>,
     /// Combat Instructions per `_Hull` upgrade name, from the hull's
     /// `specials` component.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -424,7 +555,7 @@ pub struct ShipTtxComponents {
 
 impl ShipTtxComponents {
     /// True when no hull, engine, torpedo, artillery, secondary, fire-control,
-    /// squadron, air strike or ability stats were extracted.
+    /// squadron, air strike, depth charge or ability stats were extracted.
     pub fn is_empty(&self) -> bool {
         self.hulls.is_empty()
             && self.engines.is_empty()
@@ -434,6 +565,7 @@ impl ShipTtxComponents {
             && self.fire_controls.is_empty()
             && self.squadrons.is_empty()
             && self.air_supports.is_empty()
+            && self.depth_charges.is_empty()
             && self.combat_instructions.is_empty()
             && self.alternative_fire.is_empty()
     }

@@ -24,7 +24,17 @@ torpedoes:
     - name: Mk16 mod. 1
       param: PAPT027_Mk_16_mod_1
       caliber_mm: 533
-depth_charge_launchers: 8
+anti_submarine:
+  summary: "8 ship-mounted depth charge launchers (2 charges, 14 depth charges per attack, 5100 damage each, 40 s reload); no depth charge air strike; no submarine detection consumable"
+  depth_charge_launchers:
+    launchers: 8
+    charges: 2
+    reload_s: 40
+    depth_charges_per_attack: 14
+    damage_per_depth_charge: 5100
+    splash_radius_m: 26.67
+  depth_charge_air_strike: none
+  submarine_detection: none
 aircraft: none
 consumables:
   - slot: 1

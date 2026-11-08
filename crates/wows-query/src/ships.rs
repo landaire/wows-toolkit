@@ -16,9 +16,11 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
 use crate::armament::Armament;
+use crate::builds::Planner;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::firing_arcs::round_to;
+use crate::firing_range::FiringRanges;
 use crate::names::Interpretation;
 use crate::names::Interpretations;
 use crate::names::NameIndex;
@@ -618,6 +620,12 @@ pub struct ShipOverview {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<ShipSummary>,
 
+    /// Main battery and secondary firing range: base on stock modules without
+    /// upgrades or captain skills, best on the best-fit build naming the
+    /// modules, upgrades and skills it assumes, and alternatives such as a
+    /// range consumable or conditional skill active. Independent of `modules`.
+    pub firing_range: FiringRanges,
+
     /// Armament of the stock modules, or of the modules given.
     pub armament: Armament,
 }
@@ -790,7 +798,8 @@ impl GameData {
         if !modules.chosen.is_empty() {
             self.check_hull_fit(ship, &modules)?;
         }
-        let armament = self.armament(ship, &modules.selection);
+        let armament = self.armament(ship, &modules.selection)?;
+        let firing_range = self.firing_ranges(&Planner::new(self, ship))?;
         let research = vehicle.research();
 
         // Retired copies keep their research links; only owned-ship groups
@@ -837,6 +846,7 @@ impl GameData {
                 &ship.param,
             ),
             variants,
+            firing_range,
             armament,
         })
     }

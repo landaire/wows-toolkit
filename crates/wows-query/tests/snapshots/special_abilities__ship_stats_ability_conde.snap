@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
+assertion_line: 87
 expression: stats
 ---
 ship:
@@ -1179,6 +1180,31 @@ build_stats:
     - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
     - "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval."
     - "The main battery alternative \"with Main Battery Reload Booster active\" is the rate while the booster runs: the main battery reload time times main_battery_reload_factor. It holds only while the booster is active; with special_ability_active it is the rate with both the special ability and the booster active."
+  speed:
+    surface:
+      stat: top speed on the surface
+      unit: kn
+      builds:
+        base: 34.5
+        best:
+          value: 34.5
+          assumed: []
+        alternatives:
+          - label: with Outnumbered active
+            value: 37.26
+            assumed:
+              - Outnumbered
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Sierra Mike signal
+            value: 36.22
+            assumed:
+              - Sierra Mike signal
+          - label: with Outnumbered active and Sierra Mike signal
+            value: 39.12
+            assumed:
+              - Outnumbered
+              - Sierra Mike signal
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
   fires_per_minute:
     total:
       stat: "fire starts per minute, all armament"

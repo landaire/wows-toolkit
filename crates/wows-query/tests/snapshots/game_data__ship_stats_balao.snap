@@ -1,12 +1,17 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 3066
 expression: stats.stats
 ---
 - "Hit Points: 20200"
 - "Torpedo Protection: Damage Reduction: 0%"
 - "Maximum Speed: 30.0 kn"
 - "Turning Circle Radius: 510 m"
-- "Rudder Shift Time: 9.4 s"
+- "Rudder Shift Time: 7.2 s"
+- "Underwater Mobility Periscope Speed: 30.0 kn"
+- "Maximum Submerged Speed: 26.0 kn"
+- "Diving Plane Shift Time: 20.0 s"
+- "Maximum Dive and Ascent Speed: 3.3 m/s"
 - "Armor Min: 6 mm"
 - "Armor Max: 25 mm"
 - "Dive Capacity: 240.0"

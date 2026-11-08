@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1386
 expression: comparison
 ---
 group: tier 10 cruisers
@@ -281,9 +282,9 @@ leaders:
       - "Fearmaw (United_Kingdom, light cruiser, test) 31.5 kn"
   rudder_shift:
     best:
-      - "Des Moines (USA, heavy cruiser, with unique upgrade Enhanced Propulsion Plant) 4.31 s"
+      - "Des Moines (USA, heavy cruiser, with unique upgrade Enhanced Propulsion Plant) 3.3 s"
     worst:
-      - "Ravenna (Italy, heavy cruiser, test) 14.16 s"
+      - "Ravenna (Italy, heavy cruiser, test) 10.85 s"
   turning_circle:
     best:
       - "Colbert (France, light cruiser, premium) 620 m"
@@ -380,7 +381,7 @@ ships:
       concealment: "10.89 (rank 28/56, p49; heavy cruisers rank 7/23, p68)"
       air_concealment: "6.4 (rank 13/56, p76; heavy cruisers rank 3/23, p86)"
       speed: "33 (rank 37/56, p16; heavy cruisers rank 15/23, p23)"
-      rudder_shift: "4.31 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Enhanced Propulsion Plant)"
+      rudder_shift: "3.3 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Enhanced Propulsion Plant)"
       turning_circle: "770 (rank 20/56, p60; heavy cruisers rank 4/23, p82)"
       bb_ap_citadel: "5.8 (rank 28/56, p47; heavy cruisers rank 10/23, p55)"
       bb_ap_overpenetration: "58.9 (rank 17/56, p65; heavy cruisers rank 3/23, p77)"
@@ -388,7 +389,7 @@ ships:
       stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
     outliers:
       - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
-      - "rudder_shift 4.31 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
+      - "rudder_shift 3.3 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
       - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging, worse than at least 90% of the 104 other tier 9-11 cruisers: angled 45 deg 37.1% (rank 99/105)"
     matchups:
       - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
@@ -462,7 +463,7 @@ ships:
       concealment: "12.18 (rank 41/56, p27; light cruisers rank 20/21, p5)"
       air_concealment: "7.69 (rank 37/56, p35; light cruisers rank 20/21, p5)"
       speed: "33 (rank 37/56, p16; light cruisers rank 14/21, p20)"
-      rudder_shift: "8.65 (rank 47/56, p16; light cruisers rank 21/21, p0)"
+      rudder_shift: "6.63 (rank 47/56, p16; light cruisers rank 21/21, p0)"
       turning_circle: "840 (rank 33/56, p29; light cruisers rank 19/21, p5)"
       bb_ap_citadel: "7.1 (rank 35/56, p36; light cruisers rank 16/21, p25)"
       bb_ap_overpenetration: "61.6 (rank 14/56, p76; light cruisers rank 13/21, p40)"
@@ -556,7 +557,7 @@ ships:
       concealment: "9.9 (rank 16/56, p73; heavy cruisers rank 1/23, p100)"
       air_concealment: "6.04 (rank 11/56, p82; heavy cruisers rank 1/23, p100)"
       speed: "34.5 (rank 18/56, p62; heavy cruisers rank 9/23, p50)"
-      rudder_shift: "4.8 (rank 3/56, p95; heavy cruisers rank 2/23, p91)"
+      rudder_shift: "3.68 (rank 3/56, p95; heavy cruisers rank 2/23, p91)"
       turning_circle: "840 (rank 33/56, p29; heavy cruisers rank 12/23, p32)"
       bb_ap_citadel: "3.6 (rank 14/56, p73; heavy cruisers rank 3/23, p86)"
       bb_ap_overpenetration: "59.5 (rank 15/56, p75; heavy cruisers rank 2/23, p95)"
@@ -567,7 +568,7 @@ ships:
       - "torpedo_dpm 185307 HP/min: better than all 35 other tier 10 cruisers (rank 1/36)"
       - "torpedoes_per_minute 7.54 torpedoes/min: better than 97% of the 35 other tier 10 cruisers (rank 2/36)"
       - "torpedo_launch_from_bow 50 deg: worse than 97% of the 35 other tier 10 cruisers (rank 35/36)"
-      - "rudder_shift 4.8 s: better than 95% of the 55 other tier 10 cruisers (rank 3/56)"
+      - "rudder_shift 3.68 s: better than 95% of the 55 other tier 10 cruisers (rank 3/56)"
       - "torpedo Type F3 damage_per_minute 185307 HP/min: better than all 38 other torpedo options of tier 10 cruisers (rank 1/39)"
       - "torpedo Type 93 mod. 3 damage 27332 HP: better than 95% of the 38 other torpedo options of tier 10 cruisers (rank 1/39)"
       - "torpedo Type 93 mod. 3 damage_at_max_range 27332 HP: better than 95% of the 38 other torpedo options of tier 10 cruisers (rank 1/39)"
@@ -654,6 +655,140 @@ ships:
       - "Fighters (3 charges, 90 s reload) or Spotting Aircraft (4 charges, 240 s reload)"
       - "Submarine Surveillance (3 charges, 120 s reload)"
       - "Repair Party (3 charges, 80 s reload)"
+head_to_head:
+  - ships:
+      - Des Moines
+      - Hawaii
+    compared: 27
+    first_better:
+      - main_battery_reload
+      - main_battery_range
+      - dpm_ap
+      - fires_per_minute
+      - aa_damage
+      - aa_range
+      - concealment
+      - air_concealment
+      - rudder_shift
+      - turning_circle
+      - bb_ap_citadel
+    second_better:
+      - health
+      - dpm_he
+      - alpha_ap
+      - alpha_he
+      - flight_time_ap
+      - flight_time_he
+      - turret_traverse
+      - stern_barrels
+      - bb_ap_overpenetration
+    tied:
+      - repair_party_heal
+      - dispersion
+      - sigma
+      - bow_barrels
+      - speed
+      - bow_overmatch
+      - stern_overmatch
+    first_largest_leads:
+      - rudder_shift 3.3 vs 6.63 s (50% apart)
+      - aa_damage 609 vs 340 HP/s (44% apart)
+      - aa_range 5.8 vs 4 km (31% apart)
+    second_largest_leads:
+      - turret_traverse 3.4 vs 22.68 s (85% apart)
+      - stern_barrels 66.67 vs 33.33% (50% apart)
+      - alpha_he 47520 vs 27720 HP (42% apart)
+    verdict: "Mixed: Des Moines is better on 11 of 27 compared factors, Hawaii on 9, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - Des Moines
+      - Zaō
+    compared: 31
+    first_better:
+      - health
+      - main_battery_reload
+      - dpm_ap
+      - dpm_he
+      - fires_per_minute
+      - bow_barrels
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - aa_damage
+      - rudder_shift
+      - turning_circle
+      - bow_overmatch
+      - stern_overmatch
+    second_better:
+      - main_battery_range
+      - alpha_ap
+      - alpha_he
+      - flight_time_ap
+      - flight_time_he
+      - dispersion
+      - stern_barrels
+      - secondary_dpm
+      - concealment
+      - air_concealment
+      - speed
+      - bb_ap_citadel
+      - bb_ap_overpenetration
+    tied:
+      - repair_party_heal
+      - turret_traverse
+      - sigma
+      - secondary_range
+      - aa_range
+    first_largest_leads:
+      - main_battery_reload 4.84 vs 12.06 s (60% apart)
+      - dpm_ap 585744 vs 338620 HP/min (42% apart)
+      - dpm_he 343636 vs 223358 HP/min (35% apart)
+    second_largest_leads:
+      - alpha_he 44880 vs 27720 HP (38% apart)
+      - bb_ap_citadel 3.6 vs 5.8% (38% apart)
+      - stern_barrels 50 vs 33.33% (33% apart)
+    verdict: "Mixed: Des Moines is better on 13 of 31 compared factors, Zaō on 13, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - Hawaii
+      - Zaō
+    compared: 27
+    first_better:
+      - health
+      - main_battery_reload
+      - dpm_ap
+      - dpm_he
+      - alpha_he
+      - turret_traverse
+      - bow_barrels
+      - stern_barrels
+      - bb_ap_overpenetration
+      - bow_overmatch
+      - stern_overmatch
+    second_better:
+      - main_battery_range
+      - alpha_ap
+      - flight_time_ap
+      - flight_time_he
+      - dispersion
+      - fires_per_minute
+      - aa_damage
+      - aa_range
+      - concealment
+      - air_concealment
+      - speed
+      - rudder_shift
+      - bb_ap_citadel
+    tied:
+      - repair_party_heal
+      - sigma
+      - turning_circle
+    first_largest_leads:
+      - turret_traverse 3.4 vs 22.68 s (85% apart)
+      - main_battery_reload 5.72 vs 12.06 s (53% apart)
+      - dpm_he 373846 vs 223358 HP/min (40% apart)
+    second_largest_leads:
+      - bb_ap_citadel 3.6 vs 7.1% (49% apart)
+      - rudder_shift 3.68 vs 6.63 s (44% apart)
+      - aa_range 5.8 vs 4 km (31% apart)
+    verdict: "Mixed: Hawaii is better on 11 of 27 compared factors, Zaō on 13, 3 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

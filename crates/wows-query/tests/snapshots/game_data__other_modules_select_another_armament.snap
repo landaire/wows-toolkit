@@ -27,7 +27,17 @@ expression: selected
         - name: Mk17 mod. 0
           param: PAPT008_Mk_17
           caliber_mm: 533
-    depth_charge_launchers: 8
+    anti_submarine:
+      summary: "8 ship-mounted depth charge launchers (2 charges, 14 depth charges per attack, 5100 damage each, 40 s reload); no depth charge air strike; no submarine detection consumable"
+      depth_charge_launchers:
+        launchers: 8
+        charges: 2
+        reload_s: 40
+        depth_charges_per_attack: 14
+        damage_per_depth_charge: 5100
+        splash_radius_m: 26.670000076293945
+      depth_charge_air_strike: none
+      submarine_detection: none
     aircraft: none
     consumables:
       - slot: 1
@@ -63,7 +73,25 @@ expression: selected
         barrels_per_mount: 2
         caliber_mm: 127
     torpedoes: none
-    depth_charge_launchers: none
+    anti_submarine:
+      summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4200 damage each, 2 charges, 30 s reload, up to 7 km away); submarine detection: Hydroacoustic Search (5 km)"
+      depth_charge_launchers: none
+      depth_charge_air_strike:
+        aircraft: Consolidated PB4Y-2 Privateer
+        planes: 1
+        depth_charges_per_plane: 2
+        damage_per_depth_charge: 4200
+        splash_radius_m: 12.5
+        charges: 2
+        reload_s: 30
+        range_km: 7
+      submarine_detection:
+        - consumable: Hydroacoustic Search
+          slot: 4
+          detection_m: 5000
+          charges: 3
+          action_time_s: 100
+          reload_s: 120
     aircraft:
       squadrons: none
       air_strike:

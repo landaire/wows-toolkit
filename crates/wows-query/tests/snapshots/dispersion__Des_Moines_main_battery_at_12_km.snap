@@ -1,0 +1,118 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+  category: tech_tree
+  status: released
+battery: main_battery
+range_km: 12
+conclusion: "At 12 km, a 39.2% longer main battery range (15.83 km to 22.04 km with Spotting Aircraft + Gun Fire Control System Modification 2) shrinks vertical dispersion from 63.9 m to 58.9 m; horizontal is unchanged at 115.8 m. Aiming Systems Modification 1 narrows both: horizontal 115.8 m to 107.7 m, vertical 63.9 m to 59.4 m."
+guns:
+  - mount: main battery
+    min_radius: 1.1
+    ideal_radius: 8
+    ideal_distance: 1000
+    radius_on_zero: 0.2
+    radius_on_delim: 0.5
+    radius_on_max: 0.6
+    delim: 0.5
+builds:
+  - build: base
+    kind: base
+    max_range_km: 15.83
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 115.8
+            vertical_m: 63.9
+            vertical_ratio: 0.552
+  - build: Spotting Aircraft
+    kind: range
+    max_range_km: 19
+    max_range_change_pct: 20
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 115.8
+            vertical_m: 61
+            vertical_ratio: 0.526
+            horizontal_change_pct: 0
+            vertical_change_pct: -4.6
+  - build: Gun Fire Control System Modification 2
+    kind: range
+    max_range_km: 18.36
+    max_range_change_pct: 16
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 115.8
+            vertical_m: 61.5
+            vertical_ratio: 0.531
+            horizontal_change_pct: 0
+            vertical_change_pct: -3.8
+  - build: Aiming Systems Modification 1
+    kind: accuracy
+    max_range_km: 15.83
+    max_range_change_pct: 0
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 107.7
+            vertical_m: 59.4
+            vertical_ratio: 0.552
+            horizontal_change_pct: -7
+            vertical_change_pct: -7
+  - build: Outnumbered
+    kind: accuracy
+    condition: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+    max_range_km: 15.83
+    max_range_change_pct: 0
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 104.2
+            vertical_m: 57.5
+            vertical_ratio: 0.552
+            horizontal_change_pct: -10
+            vertical_change_pct: -10
+  - build: Spotting Aircraft + Gun Fire Control System Modification 2
+    kind: range
+    max_range_km: 22.04
+    max_range_change_pct: 39.2
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 115.8
+            vertical_m: 58.9
+            vertical_ratio: 0.509
+            horizontal_change_pct: 0
+            vertical_change_pct: -7.7
+  - build: Spotting Aircraft + Gun Fire Control System Modification 2 + Aiming Systems Modification 1
+    kind: range_and_accuracy
+    max_range_km: 22.04
+    max_range_change_pct: 39.2
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 107.7
+            vertical_m: 54.8
+            vertical_ratio: 0.509
+            horizontal_change_pct: -7
+            vertical_change_pct: -14.2
+notes:
+  - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured."

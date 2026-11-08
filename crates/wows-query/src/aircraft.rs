@@ -156,6 +156,12 @@ pub struct Squadron {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AirStrike {
+    /// Planes one strike sends: `attackerSize`, which the client keeps as the
+    /// air strike's plane reserve (ShipParams.py:275, 318). `squadron_size`
+    /// is the GameParams squadron size, not what one strike sends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planes_per_strike: Option<u32>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub charges: Option<u32>,
 
@@ -393,6 +399,7 @@ impl GameData {
                 };
                 squadrons.push(Squadron {
                     air_strike: Some(AirStrike {
+                        planes_per_strike: squadron.attack_flight_size,
                         charges: strike.charges,
                         reload_s: strike.reload_time.map(|reload| Seconds::new(reload.value())),
                         range_km: strike.max_dist.map(|meters| Km::new(meters.value() / 1000.0)),

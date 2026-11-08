@@ -30,6 +30,7 @@ squadrons:
       fall_time_coef: 1
       he_penetration_mm: 37
     air_strike:
+      planes_per_strike: 12
       charges: 2
       reload_s: 100
       range_km: 13

@@ -1,0 +1,66 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3032
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 30
+    best:
+      value: 30
+      assumed: []
+    alternatives:
+      - label: with Enlarged Propeller Shaft active
+        value: 35.4
+        assumed:
+          - Enlarged Propeller Shaft
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Sierra Mike signal
+        value: 31.5
+        assumed:
+          - Sierra Mike signal
+      - label: with Enlarged Propeller Shaft active and Sierra Mike signal
+        value: 37.17
+        assumed:
+          - Enlarged Propeller Shaft
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+periscope_depth:
+  stat: top speed at periscope depth
+  unit: kn
+  builds:
+    base: 30
+    best:
+      value: 30
+      assumed: []
+    alternatives:
+      - label: with Enlarged Propeller Shaft active
+        value: 35.4
+        assumed:
+          - Enlarged Propeller Shaft
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Sierra Mike signal
+        value: 31.5
+        assumed:
+          - Sierra Mike signal
+      - label: with Enlarged Propeller Shaft active and Sierra Mike signal
+        value: 37.17
+        assumed:
+          - Enlarged Propeller Shaft
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+submerged:
+  stat: top speed submerged
+  unit: kn
+  builds:
+    base: 26.01
+    best:
+      value: 26.01
+      assumed: []
+    alternatives:
+      - label: with Sierra Mike signal
+        value: 27.31
+        assumed:
+          - Sierra Mike signal

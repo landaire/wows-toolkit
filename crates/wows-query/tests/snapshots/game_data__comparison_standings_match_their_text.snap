@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1342
 expression: "json!({\n    \"ship\": chateaurenault.ship, \"index\": chateaurenault.index, \"standings\":\n    chateaurenault.standings.iter().map(beaten).collect::<Vec<_>>(),\n    \"torpedoes\":\n    chateaurenault.torpedoes.iter().map(|torpedo|\n    json!({\n        \"torpedo\": torpedo.torpedo, \"standings\":\n        torpedo.standings.iter().map(beaten).collect::<Vec<_>>()\n    })).collect::<Vec<_>>(),\n})"
 ---
 ship: "T10 Châteaurenault (destroyer, France, premium)"
@@ -32,7 +33,7 @@ standings:
   - "concealment 6.34 km (Lower is better): rank 25/40, better 24, worse 15, tied 0, outlier None, beaten 38.46%, ties half 38.46%"
   - "air_concealment 3.01 km (Lower is better): rank 18/40, better 17, worse 21, tied 1, outlier None, beaten 53.85%, ties half 55.13%"
   - "speed 41.00 kn (Higher is better): rank 8/40, better 7, worse 31, tied 1, outlier None, beaten 79.49%, ties half 80.77%"
-  - "rudder_shift 2.68 s (Lower is better): rank 9/40, better 8, worse 31, tied 0, outlier None, beaten 79.49%, ties half 79.49%"
+  - "rudder_shift 2.06 s (Lower is better): rank 9/40, better 8, worse 28, tied 3, outlier None, beaten 71.79%, ties half 75.64%"
   - "turning_circle 770.00 m (Lower is better): rank 33/40, better 32, worse 5, tied 2, outlier None, beaten 12.82%, ties half 15.38%"
 torpedoes:
   - torpedo: 550 mm

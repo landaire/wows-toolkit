@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1139
 expression: comparison
 ---
 group: tier 10 battleships
@@ -268,9 +269,9 @@ leaders:
       - "Sete de Setembro (Pan_America, premium) 22.8 kn"
   rudder_shift:
     best:
-      - "Thunderer (United_Kingdom, premium) 10.86 s"
+      - "Thunderer (United_Kingdom, premium) 8.32 s"
     worst:
-      - "Montana 2 (USA, test) 23.18 s"
+      - "Montana 2 (USA, test) 17.76 s"
   turning_circle:
     best:
       - "Sete de Setembro (Pan_America, premium) 700 m"
@@ -371,7 +372,7 @@ ships:
       concealment: "10.6 (rank 1/43, p100)"
       air_concealment: "8.1 (rank 1/43, p2)"
       speed: "33 (rank 7/43, p81)"
-      rudder_shift: "16.75 (rank 12/43, p74)"
+      rudder_shift: "12.84 (rank 12/43, p74)"
       turning_circle: "1160 (rank 43/43, p0)"
       bb_ap_citadel: "7.2 (rank 33/43, p24)"
       bb_ap_overpenetration: "43.4 (rank 3/43, p95)"
@@ -479,7 +480,7 @@ ships:
       concealment: "14.05 (rank 34/43, p17)"
       air_concealment: "8.1 (rank 1/43, p2)"
       speed: "29.6 (rank 27/43, p33)"
-      rudder_shift: "16.02 (rank 6/43, p83)"
+      rudder_shift: "12.27 (rank 6/43, p83)"
       turning_circle: "960 (rank 27/43, p31)"
       bb_ap_citadel: "0 (rank 1/43, p81)"
       bb_ap_overpenetration: "27.2 (rank 36/43, p14)"
@@ -576,7 +577,7 @@ ships:
       concealment: "12.26 (rank 5/43, p90)"
       air_concealment: "8.1 (rank 1/43, p2)"
       speed: "29.5 (rank 30/43, p19)"
-      rudder_shift: "16.56 (rank 11/43, p76)"
+      rudder_shift: "12.69 (rank 11/43, p76)"
       turning_circle: "880 (rank 7/43, p86)"
       bb_ap_citadel: "0.8 (rank 15/43, p64)"
       bb_ap_overpenetration: "35.3 (rank 21/43, p52)"
@@ -655,6 +656,147 @@ ships:
       - "Spotting Aircraft (4 charges, 240 s reload) or Fighters (3 charges, 90 s reload)"
     special_abilities:
       - Modified Shells (+28% AP shell armor penetration capability)
+head_to_head:
+  - ships:
+      - Incomparable
+      - C. Colombo
+    compared: 28
+    first_better:
+      - repair_party_heal
+      - main_battery_reload
+      - main_battery_range
+      - turret_traverse
+      - dispersion
+      - sigma
+      - fires_per_minute
+      - all_bear_from_stern
+      - aa_damage
+      - aa_range
+      - concealment
+      - speed
+      - bb_ap_overpenetration
+    second_better:
+      - health
+      - dpm_ap
+      - alpha_ap
+      - flight_time_ap
+      - bow_barrels
+      - stern_barrels
+      - all_bear_from_bow
+      - secondary_dpm
+      - secondary_range
+      - rudder_shift
+      - turning_circle
+      - bb_ap_citadel
+      - bow_overmatch
+      - stern_overmatch
+    tied:
+      - air_concealment
+    first_largest_leads:
+      - repair_party_heal 40 vs 14% (65% apart)
+      - bb_ap_overpenetration 43.4 vs 27.2% (37% apart)
+      - sigma 2 vs 1.5 sigma (25% apart)
+    second_largest_leads:
+      - bb_ap_citadel 0 vs 7.2% (100% apart)
+      - bow_overmatch 5.74 vs 87.7% (93% apart)
+      - stern_overmatch 5.74 vs 87.7% (93% apart)
+    verdict: "Mixed: Incomparable is better on 13 of 28 compared factors, C. Colombo on 14, 1 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - Incomparable
+      - Tōgasa
+    compared: 36
+    first_better:
+      - health
+      - repair_party_heal
+      - turret_traverse
+      - sigma
+      - bow_barrels
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - secondary_dpm
+      - torpedoes_per_minute
+      - torpedo_reload
+      - torpedo_launch_from_bow
+      - aa_damage
+      - concealment
+      - speed
+      - bb_ap_overpenetration
+    second_better:
+      - main_battery_reload
+      - main_battery_range
+      - dpm_ap
+      - dpm_he
+      - alpha_ap
+      - alpha_he
+      - flight_time_ap
+      - flight_time_he
+      - dispersion
+      - fires_per_minute
+      - stern_barrels
+      - secondary_range
+      - torpedo_dpm
+      - rudder_shift
+      - turning_circle
+      - bb_ap_citadel
+    tied:
+      - broadside_tubes
+      - aa_range
+      - air_concealment
+      - bow_overmatch
+      - stern_overmatch
+    first_largest_leads:
+      - repair_party_heal 40 vs 14% (65% apart)
+      - aa_damage 1008 vs 430 HP/s (57% apart)
+      - bow_barrels 66.67 vs 40% (40% apart)
+    second_largest_leads:
+      - bb_ap_citadel 0.8 vs 7.2% (89% apart)
+      - dpm_he 226779 vs 108117 HP/min (52% apart)
+      - stern_barrels 60 vs 33.33% (44% apart)
+    verdict: "Mixed: Incomparable is better on 15 of 36 compared factors, Tōgasa on 16, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - C. Colombo
+      - Tōgasa
+    compared: 28
+    first_better:
+      - health
+      - alpha_ap
+      - flight_time_ap
+      - bow_barrels
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - secondary_dpm
+      - aa_damage
+      - speed
+      - rudder_shift
+      - bb_ap_citadel
+      - bow_overmatch
+      - stern_overmatch
+    second_better:
+      - main_battery_reload
+      - main_battery_range
+      - dpm_ap
+      - turret_traverse
+      - dispersion
+      - sigma
+      - fires_per_minute
+      - stern_barrels
+      - aa_range
+      - concealment
+      - turning_circle
+      - bb_ap_overpenetration
+    tied:
+      - repair_party_heal
+      - secondary_range
+      - air_concealment
+    first_largest_leads:
+      - bb_ap_citadel 0 vs 0.8% (100% apart)
+      - bow_overmatch 5.74 vs 87.7% (93% apart)
+      - stern_overmatch 5.74 vs 87.7% (93% apart)
+    second_largest_leads:
+      - main_battery_reload 20.24 vs 32.56 s (38% apart)
+      - bb_ap_overpenetration 35.3 vs 27.2% (23% apart)
+      - dispersion 146 vs 186 m (22% apart)
+    verdict: "Mixed: C. Colombo is better on 13 of 28 compared factors, Tōgasa on 12, 3 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

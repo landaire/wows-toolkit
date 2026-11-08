@@ -8,6 +8,7 @@ use wows_core::units::Degrees;
 use wows_core::units::MetersPerSecond;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
+use wows_core::units::Seconds;
 use wowsunpack::ballistics::OVERMATCH_RATIO;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::types::AmmoType;
@@ -154,6 +155,15 @@ pub struct Shell {
     /// From the projectile's `bulletRicochetAt` and `bulletAlwaysRicochetAt`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ricochet: Option<RicochetAngles>,
+
+    /// AP only: time from arming to detonation (`bulletDetonator`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fuse_time_s: Option<Seconds>,
+
+    /// AP only: the thinnest plate whose penetration arms the fuse
+    /// (`bulletDetonatorThreshold`); thinner plates let it pass through.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fuse_threshold_mm: Option<Millimeters>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,6 +490,11 @@ fn shell_from_param(param: &Param, name: String, battery: Battery, ifhe: Option<
             .filter(|chance| *chance > 0.0)
             .map(|chance| Percent::new(round_tenth(chance * 100.0))),
         ricochet: ricochet_angles(ammo, projectile),
+        fuse_time_s: (ammo == Ammo::Ap).then(|| projectile.bullet_detonator()).flatten().map(Seconds::new),
+        fuse_threshold_mm: (ammo == Ammo::Ap)
+            .then(|| projectile.bullet_detonator_threshold())
+            .flatten()
+            .map(Millimeters::new),
     })
 }
 

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1270
 expression: output
 ---
 group: tier 10 destroyers
@@ -385,13 +386,13 @@ leaders:
       - "Tromp (Netherlands, premium) 33.5 kn"
   rudder_shift:
     best:
-      - Shimakaze (Japan) 1.87 s
-      - "Laffey (USA, premium) 1.95 s"
-      - Yueyang (Pan_Asia) 1.95 s
+      - Shimakaze (Japan) 1.43 s
+      - "Laffey (USA, premium) 1.5 s"
+      - Yueyang (Pan_Asia) 1.5 s
     worst:
-      - "Khabarovsk (Russia, premium) 6.96 s"
-      - "Lübeck (Germany, test) 3.96 s"
-      - Elbing (Germany) 3.96 s
+      - "Khabarovsk (Russia, premium) 5.33 s"
+      - "Lübeck (Germany, test) 3.04 s"
+      - Elbing (Germany) 3.04 s
   turning_circle:
     best:
       - 20 de Julio (Pan_America) 560 m

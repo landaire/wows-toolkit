@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 188
 expression: overview.armament
 ---
 modules:
@@ -22,7 +21,17 @@ torpedoes:
     - name: Mk28 MIE
       param: PAPT061_Mk28_Sub_Magnetic_Balao
       caliber_mm: 533
-depth_charge_launchers: none
+anti_submarine:
+  summary: "no anti-submarine weapons: no ship-mounted depth charge launchers and no depth charge air strike; submarine detection: Submarine Surveillance (6 km)"
+  depth_charge_launchers: none
+  depth_charge_air_strike: none
+  submarine_detection:
+    - consumable: Submarine Surveillance
+      slot: 3
+      detection_m: 6000
+      charges: unlimited
+      action_time_s: 60
+      reload_s: 120
 aircraft: none
 consumables:
   - slot: 1

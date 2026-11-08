@@ -73,11 +73,16 @@ pub const BW_TO_SHIP: f32 = 15.0;
 /// `SHIP_TO_BW = 1 / BW_TO_SHIP`. Inverse of the recovered scale above.
 pub const SHIP_TO_BW: f32 = 1.0 / BW_TO_SHIP;
 
+/// `SHIP_TIME_SCALE = 2.61` of the module the port TTX factories import
+/// (m63fc2621.py:45), not [`SHIP_TIME_SCALE`] above. `PreprocessedHull.py:24-25`
+/// shows rudder and diving plane shift times as `raw * 2.0 / PORT_SHIP_TIME_SCALE`.
+pub const PORT_SHIP_TIME_SCALE: f32 = 2.61;
+
 /// BigWorld units per second per knot of torpedo and ship speed:
 /// `BW_KNOTS_TO_MPS = KNOTS_TO_MPS * SHIP_TO_BW * SHIP_TIME_SCALE`, where that
-/// module's `KNOTS_TO_MPS` is `1.852 / 3.6` and its `SHIP_TIME_SCALE` is 2.61
-/// (m63fc2621.py:41,45,47), not the constants of the same names above.
-pub const BW_KNOTS_TO_MPS: f32 = 1.852 / 3.6 * SHIP_TO_BW * 2.61;
+/// module's `KNOTS_TO_MPS` is `1.852 / 3.6` (m63fc2621.py:41,47) and its
+/// `SHIP_TIME_SCALE` is [`PORT_SHIP_TIME_SCALE`].
+pub const BW_KNOTS_TO_MPS: f32 = 1.852 / 3.6 * SHIP_TO_BW * PORT_SHIP_TIME_SCALE;
 
 /// The shell dispersion ellipse: both semi-axes in BigWorld units. Convert each to
 /// display meters with `.to_meters()` (the TTX card), or use the BigWorld values

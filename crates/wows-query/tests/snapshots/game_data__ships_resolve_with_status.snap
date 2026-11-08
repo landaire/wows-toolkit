@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1788
 expression: overview
 ---
 ship:
@@ -15,6 +16,34 @@ ship:
 purchase_credits: 21000000
 research_xp: 260000
 upgrade_slots: 6
+firing_range:
+  main_battery:
+    stat: main battery range
+    unit: km
+    builds:
+      base: 20.5
+      best:
+        value: 20.5
+        assumed: []
+  secondary:
+    stat: secondary battery range
+    unit: km
+    builds:
+      base: 7.3
+      best:
+        value: 10.51
+        assumed:
+          - Long-Range Secondary Battery Shells
+          - Secondary Battery Modification 1
+      alternatives:
+        - label: without Long-Range Secondary Battery Shells
+          value: 8.76
+          assumed:
+            - Secondary Battery Modification 1
+        - label: without Secondary Battery Modification 1
+          value: 8.76
+          assumed:
+            - Long-Range Secondary Battery Shells
 armament:
   modules:
     - kind: hull
@@ -32,7 +61,11 @@ armament:
       barrels_per_mount: 2
       caliber_mm: 120
   torpedoes: none
-  depth_charge_launchers: none
+  anti_submarine:
+    summary: "no anti-submarine weapons: no ship-mounted depth charge launchers and no depth charge air strike; no submarine detection consumable"
+    depth_charge_launchers: none
+    depth_charge_air_strike: none
+    submarine_detection: none
   aircraft:
     squadrons: none
     air_strike:

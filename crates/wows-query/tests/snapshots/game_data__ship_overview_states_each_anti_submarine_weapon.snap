@@ -1,0 +1,91 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 578
+expression: anti_submarine
+---
+- ship: Zaō
+  anti_submarine:
+    summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Kawanishi H6K, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 8 km away); submarine detection: Hydroacoustic Search (5 km), Submarine Surveillance (7 km)"
+    depth_charge_launchers: none
+    depth_charge_air_strike:
+      aircraft: Kawanishi H6K
+      planes: 1
+      depth_charges_per_plane: 2
+      damage_per_depth_charge: 4900
+      splash_radius_m: 12.5
+      charges: 2
+      reload_s: 30
+      range_km: 8
+    submarine_detection:
+      - consumable: Hydroacoustic Search
+        slot: 2
+        choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+        detection_m: 5000
+        charges: 3
+        action_time_s: 100
+        reload_s: 120
+      - consumable: Submarine Surveillance
+        slot: 4
+        detection_m: 7000
+        charges: 3
+        action_time_s: 20
+        reload_s: 120
+- ship: Des Moines
+  anti_submarine:
+    summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 8 km away); submarine detection: Hydroacoustic Search (5 km)"
+    depth_charge_launchers: none
+    depth_charge_air_strike:
+      aircraft: Consolidated PB4Y-2 Privateer
+      planes: 1
+      depth_charges_per_plane: 2
+      damage_per_depth_charge: 4900
+      splash_radius_m: 12.5
+      charges: 2
+      reload_s: 30
+      range_km: 8
+    submarine_detection:
+      - consumable: Hydroacoustic Search
+        slot: 2
+        choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+        detection_m: 5000
+        charges: 3
+        action_time_s: 100
+        reload_s: 120
+- ship: Vermont
+  anti_submarine:
+    summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 11 km away); no submarine detection consumable"
+    depth_charge_launchers: none
+    depth_charge_air_strike:
+      aircraft: Consolidated PB4Y-2 Privateer
+      planes: 1
+      depth_charges_per_plane: 2
+      damage_per_depth_charge: 4900
+      splash_radius_m: 12.5
+      charges: 2
+      reload_s: 30
+      range_km: 11
+    submarine_detection: none
+- ship: Gearing
+  anti_submarine:
+    summary: "8 ship-mounted depth charge launchers (2 charges, 14 depth charges per attack, 5100 damage each, 40 s reload); no depth charge air strike; no submarine detection consumable"
+    depth_charge_launchers:
+      launchers: 8
+      charges: 2
+      reload_s: 40
+      depth_charges_per_attack: 14
+      damage_per_depth_charge: 5100
+      splash_radius_m: 26.670000076293945
+    depth_charge_air_strike: none
+    submarine_detection: none
+- ship: Archerfish
+  anti_submarine:
+    summary: "no anti-submarine weapons: no ship-mounted depth charge launchers and no depth charge air strike; submarine detection: Submarine Surveillance (6 km)"
+    depth_charge_launchers: none
+    depth_charge_air_strike: none
+    submarine_detection:
+      - consumable: Submarine Surveillance
+        slot: 3
+        detection_m: 6000
+        charges: unlimited
+        action_time_s: 60
+        reload_s: 120

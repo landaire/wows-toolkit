@@ -22,7 +22,19 @@ secondary_battery:
     barrels_per_mount: 2
     caliber_mm: 127
 torpedoes: none
-depth_charge_launchers: none
+anti_submarine:
+  summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Kawanishi H6K, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 11 km away); no submarine detection consumable"
+  depth_charge_launchers: none
+  depth_charge_air_strike:
+    aircraft: Kawanishi H6K
+    planes: 1
+    depth_charges_per_plane: 2
+    damage_per_depth_charge: 4900
+    splash_radius_m: 12.5
+    charges: 2
+    reload_s: 30
+    range_km: 11
+  submarine_detection: none
 aircraft:
   squadrons: none
   air_strike:

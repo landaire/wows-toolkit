@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 188
 expression: overview.armament
 ---
 modules:
@@ -19,7 +18,19 @@ secondary_battery:
     barrels_per_mount: 2
     caliber_mm: 127
 torpedoes: none
-depth_charge_launchers: none
+anti_submarine:
+  summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Kawanishi H8K, 1 depth charge per plane, 2900 damage each, 1 charge, 20 s reload, up to 8 km away); no submarine detection consumable"
+  depth_charge_launchers: none
+  depth_charge_air_strike:
+    aircraft: Kawanishi H8K
+    planes: 1
+    depth_charges_per_plane: 1
+    damage_per_depth_charge: 2900
+    splash_radius_m: 12.5
+    charges: 1
+    reload_s: 20
+    range_km: 8
+  submarine_detection: none
 aircraft:
   squadrons:
     - role: torpedo_bombers

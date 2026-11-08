@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1170
 expression: stats.build_stats
 ---
 main_battery_reload:
@@ -34,6 +35,11 @@ main_battery_range:
       - label: without Gun Fire Control System Modification 2
         value: 15.83
         assumed: []
+      - label: with Spotting Aircraft active
+        value: 22.04
+        assumed:
+          - Gun Fire Control System Modification 2
+          - Spotting Aircraft
 main_battery_dispersion:
   stat: main battery horizontal dispersion at 15.83 km
   unit: m
@@ -380,6 +386,31 @@ secondary_damage:
               - Top Grade Gunner
 rate_notes:
   - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+speed:
+  surface:
+    stat: top speed on the surface
+    unit: kn
+    builds:
+      base: 33
+      best:
+        value: 33
+        assumed: []
+      alternatives:
+        - label: with Outnumbered active
+          value: 35.64
+          assumed:
+            - Outnumbered
+          note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+        - label: with Sierra Mike signal
+          value: 34.65
+          assumed:
+            - Sierra Mike signal
+        - label: with Outnumbered active and Sierra Mike signal
+          value: 37.42
+          assumed:
+            - Outnumbered
+            - Sierra Mike signal
+          note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
 fires_per_minute:
   total:
     stat: "fire starts per minute, all armament"

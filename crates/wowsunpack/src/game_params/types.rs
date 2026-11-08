@@ -3519,6 +3519,9 @@ pub struct Projectile {
     /// Fuse threshold thickness in mm.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_detonator_threshold: Option<f32>,
+    /// Blast radius of a depth charge (`depthSplashRadius`) in BigWorld units.
+    #[cfg_attr(feature = "serde", serde(default))]
+    depth_splash_radius: Option<f32>,
     /// Ricochet start angle in degrees.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_ricochet_at: Option<f32>,
@@ -3626,6 +3629,10 @@ impl Projectile {
 
     pub fn bullet_detonator_threshold(&self) -> Option<f32> {
         self.bullet_detonator_threshold
+    }
+
+    pub fn depth_splash_radius(&self) -> Option<f32> {
+        self.depth_splash_radius
     }
 
     pub fn bullet_ricochet_at(&self) -> Option<f32> {

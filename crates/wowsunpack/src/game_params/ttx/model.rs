@@ -173,6 +173,8 @@ pub enum StatValue {
     Seconds(Seconds),
     Meters(Meters),
     MetersPerSecond(MetersPerSecond),
+    /// Dive and ascent speed, shown to a tenth as the port does.
+    VerticalSpeed(MetersPerSecond),
     Km(Km),
     Millimeters(Millimeters),
     Percent(Percent),
@@ -193,6 +195,7 @@ impl std::fmt::Display for StatValue {
             StatValue::Seconds(v) => write!(f, "{v}"),
             StatValue::Meters(v) => write!(f, "{v}"),
             StatValue::MetersPerSecond(v) => write!(f, "{v}"),
+            StatValue::VerticalSpeed(v) => write!(f, "{:.1} m/s", v.value()),
             StatValue::Km(v) => write!(f, "{v}"),
             StatValue::Millimeters(v) => write!(f, "{v}"),
             StatValue::Percent(v) => write!(f, "{v}"),
@@ -215,7 +218,7 @@ impl StatValue {
             StatValue::Knots(v) => Some(v.value()),
             StatValue::Seconds(v) => Some(v.value()),
             StatValue::Meters(v) => Some(v.value()),
-            StatValue::MetersPerSecond(v) => Some(v.value()),
+            StatValue::MetersPerSecond(v) | StatValue::VerticalSpeed(v) => Some(v.value()),
             StatValue::Km(v) => Some(v.value()),
             StatValue::Millimeters(v) => Some(v.value()),
             StatValue::Percent(v) => Some(v.value()),
@@ -292,6 +295,8 @@ impl From<AmmoCount> for StatValue {
 pub struct ShipStats {
     pub durability: Option<Durability>,
     pub mobility: Option<Mobility>,
+    /// Hulls that can dive only.
+    pub underwater_mobility: Option<UnderwaterMobility>,
     pub armor: Option<Armor>,
     pub battery: Option<Battery>,
     /// Main battery: guns + shells.
@@ -346,6 +351,12 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::Speed, m.speed.map(StatValue::Knots));
             scalar(&mut rows, TtxStat::TurningRadius, m.turning_radius.map(StatValue::Meters));
             scalar(&mut rows, TtxStat::RudderTime, m.rudder_time.map(StatValue::Seconds));
+        }
+        if let Some(u) = &self.underwater_mobility {
+            scalar(&mut rows, TtxStat::PeriscopeSpeed, u.periscope_speed.map(StatValue::Knots));
+            scalar(&mut rows, TtxStat::SubmergedSpeed, u.speed.map(StatValue::Knots));
+            scalar(&mut rows, TtxStat::DivingPlaneShiftTime, u.rudder_time.map(StatValue::Seconds));
+            scalar(&mut rows, TtxStat::DiveSpeed, u.buoyancy_speed.map(StatValue::VerticalSpeed));
         }
         if let Some(a) = &self.armor {
             scalar(&mut rows, TtxStat::ArmorMin, a.min.map(StatValue::Millimeters));
@@ -629,6 +640,20 @@ pub struct Mobility {
     pub speed: Option<Knots>,
     pub turning_radius: Option<Meters>,
     pub rudder_time: Option<Seconds>,
+}
+
+/// Submarine maneuvering below the surface (`FactoryUnderwaterMobility`), plus
+/// the periscope depth speed the port does not list.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UnderwaterMobility {
+    pub periscope_speed: Option<Knots>,
+    /// Maximum submerged speed, at the fastest of operating and maximum depth.
+    pub speed: Option<Knots>,
+    /// Diving plane shift time.
+    pub rudder_time: Option<Seconds>,
+    /// Maximum dive and ascent speed.
+    pub buoyancy_speed: Option<MetersPerSecond>,
 }
 
 /// Armor thickness extremes (`FactoryArmor`).
@@ -1060,6 +1085,12 @@ mod tests {
                 speed: Some(Knots::from(1.0)),
                 turning_radius: Some(Meters::from(1.0)),
                 rudder_time: Some(Seconds::from(1.0)),
+            }),
+            underwater_mobility: Some(UnderwaterMobility {
+                periscope_speed: Some(Knots::from(1.0)),
+                speed: Some(Knots::from(1.0)),
+                rudder_time: Some(Seconds::from(1.0)),
+                buoyancy_speed: Some(MetersPerSecond::from(1.0)),
             }),
             armor: Some(Armor { min: Some(Millimeters::from(1.0)), max: Some(Millimeters::from(1.0)) }),
             battery: Some(Battery { capacity: Some(1.0), regeneration: Some(1.0) }),

@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 1161
 expression: comparison
 ---
 group: tier 10 destroyers
@@ -261,9 +262,9 @@ leaders:
       - 20 de Julio (Pan_America) 32 kn
   rudder_shift:
     best:
-      - Shimakaze (Japan) 1.87 s
+      - Shimakaze (Japan) 1.43 s
     worst:
-      - "Khabarovsk (Russia, premium) 6.96 s"
+      - "Khabarovsk (Russia, premium) 5.33 s"
   turning_circle:
     best:
       - 20 de Julio (Pan_America) 560 m
@@ -341,7 +342,7 @@ ships:
       concealment: "6.34 (rank 25/40, p38)"
       air_concealment: "3.01 (rank 18/40, p54)"
       speed: "41 (rank 8/40, p79)"
-      rudder_shift: "2.68 (rank 9/40, p79)"
+      rudder_shift: "2.06 (rank 9/40, p72)"
       turning_circle: "770 (rank 33/40, p13)"
     outliers:
       - "all_bear_from_bow 42 deg: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
@@ -405,7 +406,7 @@ ships:
       concealment: "5.59 (rank 1/40, p100)"
       air_concealment: "2.74 (rank 6/40, p79)"
       speed: "39 (rank 13/40, p69)"
-      rudder_shift: "1.87 (rank 1/40, p100)"
+      rudder_shift: "1.43 (rank 1/40, p100)"
       turning_circle: "690 (rank 16/40, p59)"
     outliers:
       - "health 21400 HP: worse than 95% of the 39 other tier 10 destroyers (rank 38/40)"
@@ -417,7 +418,7 @@ ships:
       - "broadside_tubes 15 tubes: better than 97% of the 36 other tier 10 destroyers (rank 1/37)"
       - "aa_range 2.5 km: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
       - "concealment 5.59 km: better than all 39 other tier 10 destroyers (rank 1/40)"
-      - "rudder_shift 1.87 s: better than all 39 other tier 10 destroyers (rank 1/40)"
+      - "rudder_shift 1.43 s: better than all 39 other tier 10 destroyers (rank 1/40)"
       - "torpedo Type 93 range 20.01 km: better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
       - "torpedo Type 93 detectability 2.5 km: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
       - "torpedo Type 93 reaction_time 13.62 s: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
@@ -513,7 +514,7 @@ ships:
       concealment: "6.15 (rank 16/40, p62)"
       air_concealment: "2.81 (rank 11/40, p74)"
       speed: "35 (rank 27/40, p18)"
-      rudder_shift: "2.69 (rank 10/40, p72)"
+      rudder_shift: "2.06 (rank 9/40, p72)"
       turning_circle: "660 (rank 9/40, p74)"
     outliers:
       - "main_battery_reload 1.42 s: better than 95% of the 39 other tier 10 destroyers (rank 2/40)"
@@ -546,6 +547,142 @@ ships:
       - "Engine Boost (4 charges, 100 s reload)"
       - "Repair Party (3 charges, 80 s reload)"
       - "Surveillance Radar (3 charges, 120 s reload)"
+head_to_head:
+  - ships:
+      - Châteaurenault
+      - Shimakaze
+    compared: 29
+    first_better:
+      - health
+      - main_battery_reload
+      - main_battery_range
+      - dpm_ap
+      - alpha_ap
+      - flight_time_ap
+      - flight_time_he
+      - turret_traverse
+      - fires_per_minute
+      - torpedo_reload
+      - torpedo_launch_from_bow
+      - aa_damage
+      - aa_range
+      - speed
+    second_better:
+      - dpm_he
+      - alpha_he
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - torpedo_dpm
+      - torpedoes_per_minute
+      - broadside_tubes
+      - concealment
+      - air_concealment
+      - rudder_shift
+      - turning_circle
+    tied:
+      - dispersion
+      - sigma
+      - bow_barrels
+      - stern_barrels
+    first_largest_leads:
+      - torpedo_launch_from_bow 6 vs 56 deg (89% apart)
+      - aa_damage 238 vs 98 HP/s (59% apart)
+      - turret_traverse 7.56 vs 17.23 s (56% apart)
+    second_largest_leads:
+      - broadside_tubes 15 vs 6 tubes (60% apart)
+      - torpedo_dpm 217472 vs 91922 HP/min (58% apart)
+      - torpedoes_per_minute 10.18 vs 4.71 torpedoes/min (54% apart)
+    verdict: "Mixed: Châteaurenault is better on 14 of 29 compared factors, Shimakaze on 11, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - Châteaurenault
+      - Småland
+    compared: 29
+    first_better:
+      - health
+      - main_battery_range
+      - alpha_ap
+      - alpha_he
+      - flight_time_ap
+      - flight_time_he
+      - torpedo_dpm
+      - torpedo_launch_from_bow
+      - speed
+    second_better:
+      - main_battery_reload
+      - dpm_ap
+      - dpm_he
+      - turret_traverse
+      - fires_per_minute
+      - bow_barrels
+      - stern_barrels
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - torpedoes_per_minute
+      - broadside_tubes
+      - aa_damage
+      - aa_range
+      - concealment
+      - air_concealment
+      - turning_circle
+    tied:
+      - dispersion
+      - sigma
+      - torpedo_reload
+      - rudder_shift
+    first_largest_leads:
+      - torpedo_launch_from_bow 6 vs 63 deg (90% apart)
+      - alpha_ap 14835 vs 9030 HP (39% apart)
+      - torpedo_dpm 91922 vs 67137 HP/min (27% apart)
+    second_largest_leads:
+      - main_battery_reload 1.42 vs 2.76 s (49% apart)
+      - fires_per_minute 15.2 vs 7.83 fires/min (48% apart)
+      - dpm_he 295525 vs 156590 HP/min (47% apart)
+    verdict: "Mixed: Châteaurenault is better on 9 of 29 compared factors, Småland on 16, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+  - ships:
+      - Shimakaze
+      - Småland
+    compared: 29
+    first_better:
+      - alpha_ap
+      - alpha_he
+      - flight_time_ap
+      - flight_time_he
+      - torpedo_dpm
+      - torpedoes_per_minute
+      - torpedo_launch_from_bow
+      - broadside_tubes
+      - concealment
+      - air_concealment
+      - speed
+      - rudder_shift
+    second_better:
+      - health
+      - main_battery_reload
+      - main_battery_range
+      - dpm_ap
+      - dpm_he
+      - turret_traverse
+      - fires_per_minute
+      - bow_barrels
+      - stern_barrels
+      - all_bear_from_bow
+      - all_bear_from_stern
+      - torpedo_reload
+      - aa_damage
+      - aa_range
+      - turning_circle
+    tied:
+      - dispersion
+      - sigma
+    first_largest_leads:
+      - torpedo_dpm 217472 vs 67137 HP/min (69% apart)
+      - broadside_tubes 15 vs 8 tubes (47% apart)
+      - alpha_he 12900 vs 7000 HP (46% apart)
+    second_largest_leads:
+      - aa_damage 347 vs 98 HP/s (72% apart)
+      - main_battery_reload 1.42 vs 4.8 s (70% apart)
+      - turret_traverse 5.44 vs 17.23 s (68% apart)
+    verdict: "Mixed: Shimakaze is better on 12 of 29 compared factors, Småland on 15, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

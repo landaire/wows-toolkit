@@ -1,28 +1,36 @@
 //! What one ship carries for the selected hull and modules: guns, torpedoes,
-//! depth charges, aircraft and consumables. Every category the ship lacks is
-//! reported as `none`.
+//! anti-submarine weapons, aircraft and consumables. Every category the ship
+//! lacks is reported as `none`.
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use serde::Serialize;
 use serde::Serializer;
+use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Millimeters;
+use wows_core::units::Seconds;
 use wows_ship_stats::mounts::BarrelCount;
 use wows_ship_stats::mounts::MountCount;
 use wows_ship_stats::mounts::selected_mounts;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::translations::translate_unit;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
+use wowsunpack::game_params::ttx::model::Hp;
+use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::MountPoint;
 
 use crate::aircraft::OrdnanceKind;
 use crate::aircraft::Squadron;
 use crate::aircraft::SquadronRole;
+use crate::builds::Charges;
+use crate::consumables::ConsumableStats;
+use crate::consumables::consumable_stats;
 use crate::consumables::slot_choice;
 use crate::data::GameData;
+use crate::error::QueryError;
 use crate::firing_arcs::round_to;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
@@ -69,9 +77,9 @@ pub struct Armament {
     pub secondary_battery: Equipped<Vec<GunGroup>>,
     pub torpedoes: Equipped<TorpedoArmament>,
 
-    /// Launchers on the ship. An anti-submarine air strike is listed under
-    /// `aircraft`.
-    pub depth_charge_launchers: Equipped<MountCount>,
+    /// Ship-mounted depth charges, the depth charge air strike and submarine
+    /// detection consumables, each stated present or absent.
+    pub anti_submarine: AntiSubmarine,
 
     pub aircraft: Equipped<AircraftArmament>,
     pub consumables: Equipped<Vec<ConsumableChoice>>,
@@ -178,9 +186,120 @@ pub struct ConsumableChoice {
     pub options: Vec<String>,
 }
 
+/// What a ship has against submarines. Ship-mounted depth charges and the
+/// depth charge air strike are separate weapons: lacking one says nothing of
+/// the other.
+#[derive(Debug, Clone, Serialize)]
+pub struct AntiSubmarine {
+    /// Both kinds of weapon and the detection consumables in one sentence,
+    /// e.g. "no ship-mounted depth charge launchers; has a depth charge air
+    /// strike: ...".
+    pub summary: String,
+
+    pub depth_charge_launchers: Equipped<DepthChargeLaunchers>,
+    pub depth_charge_air_strike: Equipped<DepthChargeAirStrike>,
+    pub submarine_detection: Equipped<Vec<SubmarineDetection>>,
+}
+
+/// Depth charges dropped or thrown from the ship itself, stock, as the port
+/// shows them (FactoryDepthCharges.py:8-15).
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthChargeLaunchers {
+    pub launchers: MountCount,
+
+    /// Attacks before a reload (`maxPacks`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charges: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reload_s: Option<Seconds>,
+
+    /// Every launcher's depth charges per shot, times shots per attack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_charges_per_attack: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damage_per_depth_charge: Option<Hp>,
+
+    /// Radius of one depth charge's blast (`depthSplashRadius`) in the
+    /// game world's meters, the scale ship models are drawn at; full damage
+    /// within the inner part of it, a third beyond (`pointsOfDamage`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub splash_radius_m: Option<Meters>,
+}
+
+/// An air strike whose aircraft drop depth charges, called from the ship.
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthChargeAirStrike {
+    pub aircraft: String,
+
+    /// Planes one strike sends (`attackerSize`, which the client keeps per
+    /// air strike plane, ShipParams.py:275).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planes: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_charges_per_plane: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damage_per_depth_charge: Option<Hp>,
+
+    /// As [`DepthChargeLaunchers::splash_radius_m`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub splash_radius_m: Option<Meters>,
+
+    /// Strikes before a reload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charges: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reload_s: Option<Seconds>,
+
+    /// Farthest point the strike can be called on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_km: Option<Km>,
+}
+
+impl DepthChargeAirStrike {
+    /// Depth charges one strike drops: every plane's.
+    pub fn depth_charges_per_strike(&self) -> Option<u32> {
+        Some(self.planes? * self.depth_charges_per_plane?)
+    }
+}
+
+/// The anti-submarine weapons of one hull.
+pub(crate) struct AswWeapons {
+    pub(crate) launchers: Option<DepthChargeLaunchers>,
+    pub(crate) air_strike: Option<DepthChargeAirStrike>,
+}
+
+/// A consumable that reveals submarines, stock.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubmarineDetection {
+    pub consumable: String,
+
+    /// 1-based consumable slot.
+    pub slot: usize,
+
+    /// "choose one of: A, B" when the slot offers other consumables.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection_m: Option<Meters>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charges: Option<Charges>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_time_s: Option<Seconds>,
+
+    pub reload_s: Seconds,
+}
+
 impl GameData {
     /// The armament of `ship` with the modules in `selection`.
-    pub(crate) fn armament(&self, ship: &Ship, selection: &ShipUpgradeSelection) -> Armament {
+    pub(crate) fn armament(&self, ship: &Ship, selection: &ShipUpgradeSelection) -> Result<Armament, QueryError> {
         let modules = self.ship_modules(ship);
         let armed = [ModuleKind::Hull, ModuleKind::Guns, ModuleKind::Torpedoes];
         let mounted = |param: &str| {
@@ -203,22 +322,110 @@ impl GameData {
         let main = selected_mounts(&ship.param, selection, ComponentType::Artillery);
         let secondaries = selected_mounts(&ship.param, selection, ComponentType::Atba);
         let torpedoes = selected_mounts(&ship.param, selection, ComponentType::Torpedoes);
-        let depth_charges = selected_mounts(&ship.param, selection, ComponentType::DepthCharges).len();
-        let depth_charge_launchers = match u32::try_from(depth_charges).expect("a hull has fewer than 2^32 mounts") {
-            0 => Equipped::None,
-            count => Equipped::Some(MountCount(count)),
-        };
+        let stock = self.effective_modifiers(ship, &self.stock_loadout())?;
 
-        Armament {
+        Ok(Armament {
             modules: mounted_modules.iter().map(choice).collect(),
             main_battery: Equipped::from_list(self.gun_groups(main)),
             secondary_battery: Equipped::from_list(self.gun_groups(secondaries)),
             torpedoes: self.torpedo_armament(torpedoes),
-            depth_charge_launchers,
+            anti_submarine: self.anti_submarine(ship, selection, stock.build.modifiers.bundle()),
             aircraft: self.aircraft_armament(ship, selection, &stock_squadrons),
             consumables: Equipped::from_list(self.consumable_choices(ship)),
             other_modules: other_modules.iter().map(choice).collect(),
             other_squadrons,
+        })
+    }
+
+    /// Ship-mounted depth charges and the depth charge air strike of `hull`,
+    /// base values without skills or upgrades.
+    pub(crate) fn asw_weapons(&self, ship: &Ship, hull: Option<&str>) -> AswWeapons {
+        let components = ship.param.vehicle().and_then(|vehicle| vehicle.ttx_components());
+        let projectile = |name: &str| self.provider().game_param_by_name(name);
+        let damage_of = |name: &str| {
+            let damage = projectile(name)?.projectile()?.alpha_damage()?;
+            Some(Hp::from(damage.round()))
+        };
+        let splash_of = |name: &str| {
+            projectile(name)?.projectile()?.depth_splash_radius().map(|radius| Meters::new(round_to(radius, 100.0)))
+        };
+
+        let launchers =
+            components.zip(hull).and_then(|(components, hull)| components.depth_charges.get(hull)).map(|charges| {
+                DepthChargeLaunchers {
+                    launchers: MountCount(
+                        u32::try_from(charges.launchers.len()).expect("a hull has fewer than 2^32 launchers"),
+                    ),
+                    charges: charges.charges,
+                    reload_s: charges.reload_time.map(|reload| Seconds::new(reload.value())),
+                    depth_charges_per_attack: charges.depth_charges_per_attack(),
+                    damage_per_depth_charge: charges.projectile().and_then(damage_of),
+                    splash_radius_m: charges.projectile().and_then(splash_of),
+                }
+            });
+
+        let strike = components.zip(hull).and_then(|(components, hull)| components.air_supports.get(hull));
+        let air_strike = strike.and_then(|strike| {
+            let squadron = strike.planes.iter().find_map(|plane| self.squadron(plane, SquadronRole::AirStrike))?;
+            let ordnance = squadron.ordnance.filter(|ordnance| ordnance.kind == OrdnanceKind::DepthCharge)?;
+            Some(DepthChargeAirStrike {
+                aircraft: squadron.aircraft,
+                planes: squadron.attack_flight_size,
+                depth_charges_per_plane: squadron.payload_per_plane,
+                damage_per_depth_charge: ordnance.damage,
+                splash_radius_m: splash_of(&ordnance.param),
+                charges: strike.charges,
+                reload_s: strike.reload_time.map(|reload| Seconds::new(reload.value())),
+                range_km: strike.max_dist.map(|meters| Km::new(meters.value() / 1000.0)),
+            })
+        });
+
+        AswWeapons { launchers, air_strike }
+    }
+
+    /// Ship-mounted depth charges and the depth charge air strike of the
+    /// selected hull, and the stock submarine detection consumables.
+    fn anti_submarine(&self, ship: &Ship, selection: &ShipUpgradeSelection, bundle: &ModifierBundle) -> AntiSubmarine {
+        /// Consumable types that reveal submarines: Hydroacoustic Search and
+        /// Submarine Surveillance.
+        const DETECTION_TYPES: [&str; 2] = ["sonar", "submarineLocator"];
+
+        let AswWeapons { launchers, air_strike } = self.asw_weapons(ship, selection.hull.as_deref());
+
+        let slots = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default();
+        let mut detection = Vec::new();
+        for (index, slot) in slots.iter().enumerate() {
+            let options: Vec<(String, Option<ConsumableStats>)> = slot
+                .iter()
+                .filter_map(|(ability, variant)| {
+                    let param = self.provider().game_param_by_name(ability)?;
+                    let category = param.ability()?.get_category(variant)?;
+                    let name = self.consumable_name(ability, category);
+                    let stats = DETECTION_TYPES
+                        .contains(&category.consumable_type_raw())
+                        .then(|| consumable_stats(name.clone(), category, bundle));
+                    Some((name, stats))
+                })
+                .collect();
+            let names: Vec<String> = options.iter().map(|(name, _)| name.clone()).collect();
+            for stats in options.into_iter().filter_map(|(_, stats)| stats) {
+                detection.push(SubmarineDetection {
+                    consumable: stats.name,
+                    slot: index + 1,
+                    choice: slot_choice(&names),
+                    detection_m: stats.ship_detection_m,
+                    charges: stats.charges,
+                    action_time_s: stats.action_time_s,
+                    reload_s: stats.reload_s,
+                });
+            }
+        }
+
+        AntiSubmarine {
+            summary: anti_submarine_summary(launchers.as_ref(), air_strike.as_ref(), &detection),
+            depth_charge_launchers: launchers.map_or(Equipped::None, Equipped::Some),
+            depth_charge_air_strike: air_strike.map_or(Equipped::None, Equipped::Some),
+            submarine_detection: Equipped::from_list(detection),
         }
     }
 
@@ -427,4 +634,81 @@ fn squadron_line(squadron: &Squadron) -> SquadronLine {
         squadron_size: squadron.squadron_size,
         ordnance: ordnance_kind(squadron),
     }
+}
+
+/// Each kind of anti-submarine weapon and the detection consumables, absent
+/// ones named as absent, so a missing kind is not read as the ship having
+/// no depth charges at all.
+fn anti_submarine_summary(
+    launchers: Option<&DepthChargeLaunchers>,
+    air_strike: Option<&DepthChargeAirStrike>,
+    detection: &[SubmarineDetection],
+) -> String {
+    let details = |parts: Vec<Option<String>>| parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
+    let counted = |count: u32, one: &str, many: &str| format!("{count} {}", if count == 1 { one } else { many });
+    let damage = |damage: Option<Hp>| damage.map(|damage| format!("{} damage each", damage.value()));
+    let reload = |reload: Option<Seconds>| reload.map(|reload| format!("{} s reload", reload.value()));
+    let charges = |charges: Option<u32>| charges.map(|charges| counted(charges, "charge", "charges"));
+
+    let launcher_text = launchers.map(|launchers| {
+        format!(
+            "{} ({})",
+            counted(launchers.launchers.0, "ship-mounted depth charge launcher", "ship-mounted depth charge launchers"),
+            details(vec![
+                charges(launchers.charges),
+                launchers.depth_charges_per_attack.map(|count| counted(
+                    count,
+                    "depth charge per attack",
+                    "depth charges per attack"
+                )),
+                damage(launchers.damage_per_depth_charge),
+                reload(launchers.reload_s),
+            ])
+        )
+    });
+    let strike_text = air_strike.map(|strike| {
+        let flight = match strike.planes {
+            Some(planes) => format!("{planes} x {}", strike.aircraft),
+            None => strike.aircraft.clone(),
+        };
+        format!(
+            "has a depth charge air strike ({})",
+            details(vec![
+                Some(flight),
+                strike.depth_charges_per_plane.map(|count| counted(
+                    count,
+                    "depth charge per plane",
+                    "depth charges per plane"
+                )),
+                damage(strike.damage_per_depth_charge),
+                charges(strike.charges),
+                reload(strike.reload_s),
+                strike.range_km.map(|range| format!("up to {} km away", range.value())),
+            ])
+        )
+    });
+    let weapons = match (launcher_text, strike_text) {
+        (None, None) => {
+            "no anti-submarine weapons: no ship-mounted depth charge launchers and no depth charge air strike"
+                .to_owned()
+        }
+        (Some(launchers), None) => format!("{launchers}; no depth charge air strike"),
+        (None, Some(strike)) => format!("no ship-mounted depth charge launchers; {strike}"),
+        (Some(launchers), Some(strike)) => format!("{launchers}; {strike}"),
+    };
+
+    let detection_text = if detection.is_empty() {
+        "no submarine detection consumable".to_owned()
+    } else {
+        let consumables: Vec<String> = detection
+            .iter()
+            .map(|consumable| match consumable.detection_m {
+                Some(range) => format!("{} ({} km)", consumable.consumable, range.value() / 1000.0),
+                None => consumable.consumable.clone(),
+            })
+            .collect();
+        format!("submarine detection: {}", consumables.join(", "))
+    };
+
+    format!("{weapons}; {detection_text}")
 }

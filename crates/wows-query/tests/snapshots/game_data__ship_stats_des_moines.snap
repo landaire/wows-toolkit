@@ -1,12 +1,13 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 3066
 expression: stats.stats
 ---
 - "Hit Points: 50600"
 - "Torpedo Protection: Damage Reduction: 7%"
 - "Maximum Speed: 33.0 kn"
 - "Turning Circle Radius: 770 m"
-- "Rudder Shift Time: 11.2 s"
+- "Rudder Shift Time: 8.6 s"
 - "Armor Min: 6 mm"
 - "Armor Max: 203 mm"
 - "Main Battery Reload Time: 5.5 s"

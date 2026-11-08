@@ -87,8 +87,9 @@ pub enum Direction {
 pub fn unit(stat: TtxStat) -> Unit {
     match stat {
         TtxStat::Health | TtxStat::ShellDamage | TtxStat::SecondaryShellDamage | TtxStat::TorpedoDamage => Unit::Hp,
-        TtxStat::Speed | TtxStat::TorpedoSpeed => Unit::Knots,
+        TtxStat::Speed | TtxStat::PeriscopeSpeed | TtxStat::SubmergedSpeed | TtxStat::TorpedoSpeed => Unit::Knots,
         TtxStat::RudderTime
+        | TtxStat::DivingPlaneShiftTime
         | TtxStat::ArtilleryReloadTime
         | TtxStat::ArtilleryAmmoSwitchTime
         | TtxStat::GunRotationTime
@@ -109,7 +110,7 @@ pub fn unit(stat: TtxStat) -> Unit {
         | TtxStat::SecondaryDispersion
         | TtxStat::SecondaryDispersionVertical
         | TtxStat::ConsumableDetectionRadius => Unit::Meters,
-        TtxStat::ShellSpeed | TtxStat::SecondaryShellSpeed => Unit::MetersPerSecond,
+        TtxStat::ShellSpeed | TtxStat::SecondaryShellSpeed | TtxStat::DiveSpeed => Unit::MetersPerSecond,
         TtxStat::ArtilleryRange
         | TtxStat::SecondaryRange
         | TtxStat::TorpedoRange
@@ -174,6 +175,7 @@ pub fn direction(stat: TtxStat) -> Option<Direction> {
         | TtxStat::SecondaryDispersionVertical
         | TtxStat::ArtilleryAmmoSwitchTime
         | TtxStat::RudderTime
+        | TtxStat::DivingPlaneShiftTime
         | TtxStat::GunRotationTime
         | TtxStat::SecondaryGunRotationTime
         | TtxStat::LauncherRotationTime
@@ -202,6 +204,9 @@ pub fn direction(stat: TtxStat) -> Option<Direction> {
         TtxStat::Health
         | TtxStat::TorpedoProtection
         | TtxStat::Speed
+        | TtxStat::PeriscopeSpeed
+        | TtxStat::SubmergedSpeed
+        | TtxStat::DiveSpeed
         | TtxStat::ArmorMin
         | TtxStat::ArmorMax
         | TtxStat::BatteryCapacity

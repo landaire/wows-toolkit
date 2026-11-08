@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
+assertion_line: 87
 expression: stats
 ---
 ship:
@@ -469,6 +470,31 @@ build_stats:
                 - Manual Secondary Battery Aiming
   rate_notes:
     - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+  speed:
+    surface:
+      stat: top speed on the surface
+      unit: kn
+      builds:
+        base: 30
+        best:
+          value: 30
+          assumed: []
+        alternatives:
+          - label: with Brisk active
+            value: 33
+            assumed:
+              - Brisk
+            note: "Increases your ship's speed while she remains undetected."
+          - label: with Sierra Mike signal
+            value: 31.5
+            assumed:
+              - Sierra Mike signal
+          - label: with Brisk active and Sierra Mike signal
+            value: 34.65
+            assumed:
+              - Brisk
+              - Sierra Mike signal
+            note: "Increases your ship's speed while she remains undetected."
   fires_per_minute:
     total:
       stat: "fire starts per minute, all armament"

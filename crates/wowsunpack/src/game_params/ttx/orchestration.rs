@@ -223,6 +223,9 @@ pub(crate) fn ship_stats_with<R: Recorder>(
         factories::mobility(h, hull_name, engine, selection.engine.as_deref(), modifiers, sources, rec)
     });
 
+    let underwater_mobility =
+        hull.and_then(|(hull_name, h)| factories::underwater_mobility(h, hull_name, modifiers, sources, rec));
+
     let battery = hull.and_then(|(hull_name, h)| factories::battery(h, hull_name, modifiers, sources, rec));
 
     // Fire-control coefficient feeds main-battery range (default 1.0 when no FC).
@@ -307,6 +310,7 @@ pub(crate) fn ship_stats_with<R: Recorder>(
     Some(ShipStats {
         durability,
         mobility,
+        underwater_mobility,
         armor,
         battery,
         artillery,
@@ -734,8 +738,12 @@ mod tests {
             flood_prob: Some(0.0),
             battery_capacity: None,
             battery_regen_rate: None,
+            depth_speed_coefs: Vec::new(),
+            buoyancy_rudder_time: None,
+            max_buoyancy_speed: None,
             burn_nodes: Vec::new(),
             flood_nodes: Vec::new(),
+            hit_locations: Vec::new(),
         }
     }
 

@@ -335,10 +335,17 @@ fn build_crew_skills(skills: &pickled::Dict) -> Vec<CrewSkill> {
                     })
                     .unwrap_or_default();
 
+                // The pairs arrive as a tuple or a list.
                 let read_interpolator = |key: &str| {
-                    let list = logic_trigger_data.get(&pk(key))?.list_ref()?;
-                    let points: Vec<(f32, f32)> =
-                        list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect();
+                    let points: Vec<(f32, f32)> = match logic_trigger_data.get(&pk(key))? {
+                        Value::List(list) => {
+                            list.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect()
+                        }
+                        Value::Tuple(tuple) => {
+                            tuple.inner().iter().filter_map(read_pair_both).map(|[x, y]| (x, y)).collect()
+                        }
+                        _ => return None,
+                    };
                     (!points.is_empty()).then(|| Interpolator::from_points(points))
                 };
                 let heat_interpolator = read_interpolator("heatInterpolator");
@@ -1362,6 +1369,35 @@ fn read_flood_nodes(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::c
         .collect()
 }
 
+/// The hull sections of a hull component: its entries whose `hlType` is a hull
+/// section type, sorted by name.
+fn read_hull_hit_locations(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::HullHitLocation> {
+    use crate::game_params::ttx::components::HullHitLocation;
+    use crate::game_params::ttx::components::HullSectionType;
+
+    let mut sections: Vec<HullHitLocation> = hull_data
+        .iter()
+        .filter_map(|(key, value)| {
+            let name = key.string_ref()?.inner().to_string();
+            let section = value.dict_or_object_dict()?;
+            let section = section.inner();
+            let section_type = HullSectionType::from_hl_type(&read_string(&section, keys::HL_TYPE)?)?;
+            Some(HullHitLocation {
+                name,
+                section_type,
+                max_hp: read_float(&section, keys::MAX_HP).map(crate::game_params::ttx::model::Hp::from),
+                parent: read_string(&section, keys::PARENT_HL),
+                volume_coeff: read_float(&section, keys::VOLUME_COEFF),
+                regenerated_hp_part: read_float(&section, keys::REGENERATED_HP_PART),
+                enhanced_regenerated_hp_part: read_float(&section, keys::ENHANCED_REGENERATED_HP_PART),
+            })
+        })
+        .collect();
+    sections.sort_by(|left, right| left.name.cmp(&right.name));
+
+    sections
+}
+
 /// The float triples of a hull node list. Returns empty when the key is absent.
 fn read_node_triples(hull_data: &pickled::Dict, key: &str) -> Vec<[f32; 3]> {
     let Some(value) = hull_data.get(&pk(key)) else {
@@ -1414,6 +1450,55 @@ fn read_visibility_by_periscope(hull_data: &pickled::Dict) -> Option<f32> {
     let dict = hull_data.get(&pk(keys::VISIBILITY_FACTORS_BY_SUBMARINE)).and_then(|v| v.dict_or_object_dict())?;
     let dict = dict.inner();
     read_float(&dict, keys::VISIBILITY_PERISCOPE)
+}
+
+/// Whether the hull can leave the surface. Every hull carries `buoyancyStates`;
+/// the port reads them only when `maxBuoyancyLevel` is nonzero
+/// (FactoryUnderwaterMobility.py:7, PreprocessedHull.py:36).
+fn can_dive(hull_data: &pickled::Dict) -> bool {
+    read_float(hull_data, keys::MAX_BUOYANCY_LEVEL).is_some_and(|level| level != 0.0)
+}
+
+/// Read `buoyancyStates`: per depth state `[[top, bottom], speed coefficient,
+/// transition time]` (BuoyancyOwner.py:94). Ordered by depth state. Empty
+/// for hulls that cannot dive.
+fn read_depth_speed_coefs(hull_data: &pickled::Dict) -> Vec<crate::game_params::ttx::components::DepthSpeedCoef> {
+    use wows_core::game_types::BuoyancyState;
+
+    if !can_dive(hull_data) {
+        return Vec::new();
+    }
+    let Some(states) = hull_data.get(&pk(keys::BUOYANCY_STATES)).and_then(|v| v.dict_or_object_dict()) else {
+        return Vec::new();
+    };
+
+    let mut coefs: Vec<crate::game_params::ttx::components::DepthSpeedCoef> = states
+        .inner()
+        .iter()
+        .filter_map(|(key, value)| {
+            let name = key.string_ref()?.inner();
+            let state = match name.as_str() {
+                "SURFACE" => BuoyancyState::Surface,
+                "PERISCOPE" => BuoyancyState::Periscope,
+                "SEMI_DEEP_WATER" => BuoyancyState::SemiDeepWater,
+                "DEEP_WATER" => BuoyancyState::DeepWater,
+                "DEEP_WATER_INVUL" => BuoyancyState::DeepWaterInvul,
+                other => {
+                    tracing::warn!(state = other, "unknown buoyancy state; its speed coefficient is ignored");
+                    return None;
+                }
+            };
+            let speed_coef = if let Some(l) = value.list_ref() {
+                value_f32(l.inner().get(1)?)
+            } else {
+                value_f32(value.tuple_ref()?.inner().get(1)?)
+            }?;
+            Some(crate::game_params::ttx::components::DepthSpeedCoef { state, speed_coef })
+        })
+        .collect();
+    coefs.sort_by_key(|coef| coef.state as u8);
+
+    coefs
 }
 
 /// Read `visibilityCoefGKInSmoke`, the in-smoke detection range.
@@ -2073,6 +2158,55 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             }
         }
 
+        // Ship-mounted depth charges hang off the hull as well: its
+        // `depthCharges` component holds the reload and charges, and one
+        // `HP_*` launcher per mount.
+        if uc_type == keys::UC_TYPE_HULL
+            && let Some(charges_comp) = upgrade_dict
+                .get(&pk(keys::COMPONENTS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|c| c.inner().get(&pk(keys::COMP_DEPTH_CHARGES)).and_then(read_first_string))
+            && let Some(charges_data) = ship_data.get(&pk(&charges_comp)).and_then(|v| v.dict_or_object_dict())
+        {
+            let charges_data = charges_data.inner();
+            // A negative or fractional count is malformed and left absent.
+            let count = |dict: &pickled::Dict, key: &str| {
+                read_float(dict, key).filter(|count| *count >= 0.0 && count.fract() == 0.0).map(|count| count as u32)
+            };
+            let mut launchers: Vec<(String, crate::game_params::ttx::components::DepthChargeLauncher)> = charges_data
+                .iter()
+                .filter_map(|(key, value)| {
+                    let name = key.string_ref()?.inner();
+                    if !name.starts_with(keys::HP_PREFIX) {
+                        return None;
+                    }
+                    let launcher = value.dict_or_object_dict()?;
+                    let launcher = launcher.inner();
+                    Some((
+                        name.clone(),
+                        crate::game_params::ttx::components::DepthChargeLauncher {
+                            bombs: count(&launcher, keys::NUM_BOMBS),
+                            ammo: launcher.get(&pk(keys::AMMO_LIST)).map(read_string_sequence).unwrap_or_default(),
+                        },
+                    ))
+                })
+                .collect();
+            // By hardpoint, so the first launcher does not depend on dict order.
+            launchers.sort_by(|(left, _), (right, _)| left.cmp(right));
+            if !launchers.is_empty() {
+                ttx_components.depth_charges.insert(
+                    upgrade_name.clone(),
+                    crate::game_params::ttx::components::DepthChargeStats {
+                        charges: count(&charges_data, keys::MAX_PACKS),
+                        reload_time: read_float(&charges_data, keys::RELOAD_TIME)
+                            .map(crate::game_params::ttx::model::Seconds::from),
+                        shots_per_attack: count(&charges_data, keys::NUM_SHOTS),
+                        launchers: launchers.into_iter().map(|(_, launcher)| launcher).collect(),
+                    },
+                );
+            }
+        }
+
         // Fire control is a standalone _Suo upgrade naming an FC component with
         // maxDistCoef and sigmaCountCoef (PreprocessedFireControl.py:7); store both
         // keyed by upgrade name.
@@ -2194,8 +2328,18 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                     flood_prob: read_flood_prob(&hull_data),
                     battery_capacity,
                     battery_regen_rate,
+                    depth_speed_coefs: read_depth_speed_coefs(&hull_data),
+                    buoyancy_rudder_time: can_dive(&hull_data)
+                        .then(|| read_float(&hull_data, keys::BUOYANCY_RUDDER_TIME))
+                        .flatten()
+                        .map(crate::game_params::ttx::model::Seconds::from),
+                    max_buoyancy_speed: can_dive(&hull_data)
+                        .then(|| read_float(&hull_data, keys::MAX_BUOYANCY_SPEED))
+                        .flatten()
+                        .map(MetersPerSecond::from),
                     burn_nodes: read_burn_nodes(&hull_data),
                     flood_nodes: read_flood_nodes(&hull_data),
+                    hit_locations: read_hull_hit_locations(&hull_data),
                 },
             );
         }
@@ -2882,6 +3026,7 @@ impl GameMetadataProvider {
                         .maybe_bullet_cap_normalize_max_angle(bullet_cap_normalize_max_angle)
                         .maybe_bullet_detonator(bullet_detonator)
                         .maybe_bullet_detonator_threshold(bullet_detonator_threshold)
+                        .maybe_depth_splash_radius(read_opt_f32("depthSplashRadius"))
                         .maybe_bullet_ricochet_at(bullet_ricochet_at)
                         .maybe_bullet_always_ricochet_at(bullet_always_ricochet_at)
                         .maybe_alpha_piercing_he(alpha_piercing_he)
@@ -3796,6 +3941,107 @@ mod camera_tests {
         assert_eq!(strike.max_dist, Some(Meters::from(8000.0)));
     }
 
+    /// Gearing (`PASD013_Gearing_1945`) shape: a hull whose `depthCharges`
+    /// component has two roller tracks of 4 and six throwers of 1 (real
+    /// values, two of the throwers here).
+    #[test]
+    fn build_ship_extracts_depth_charges() {
+        let hull_components = dict(vec![
+            (pk("hull"), list(vec![sv("A_Hull")])),
+            (pk("depthCharges"), list(vec![sv("A_DepthChargeGuns")])),
+        ]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let a_hull = dict(vec![(pk("health"), fv(19100.0)), (pk("model"), sv("A_Hull.model"))]);
+        let roller =
+            || dict(vec![(pk("numBombs"), Value::I64(4)), (pk("ammoList"), list(vec![sv("PAPD001_mk6_mod1")]))]);
+        let thrower =
+            || dict(vec![(pk("numBombs"), Value::I64(1)), (pk("ammoList"), list(vec![sv("PAPD003_mk6_mod1_shoot")]))]);
+        let depth_charges = dict(vec![
+            (pk("HP_AGB_7"), roller()),
+            (pk("HP_AGB_8"), roller()),
+            (pk("HP_AGB_1"), thrower()),
+            (pk("HP_AGB_2"), thrower()),
+            (pk("maxPacks"), Value::I64(2)),
+            (pk("numShots"), Value::I64(1)),
+            (pk("reloadTime"), fv(40.0)),
+        ]);
+
+        let upgrade_info = dict(vec![(pk("PAUH911_Gearing_1945"), hull_upgrade)]);
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("upgradeable")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+            (pk("A_DepthChargeGuns"), depth_charges),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let charges = ttx.depth_charges.get("PAUH911_Gearing_1945").expect("depth charges parsed");
+        assert_eq!(charges.charges, Some(2));
+        assert_eq!(charges.reload_time, Some(crate::game_params::ttx::model::Seconds::from(40.0)));
+        assert_eq!(charges.launchers.len(), 4);
+        assert_eq!(charges.depth_charges_per_attack(), Some(10));
+        assert_eq!(charges.projectile(), Some("PAPD003_mk6_mod1_shoot"));
+    }
+
+    /// Kleber (`PFSD110_Kleber`) shape: hull sections with `hlType`, where the
+    /// midsection is a saturating `simple_hitlocation` draining `Hull`, beside
+    /// a gun hit location that is not a hull section (real values).
+    #[test]
+    fn build_ship_extracts_hull_hit_locations() {
+        use crate::game_params::ttx::components::HullSectionType;
+
+        let hull_components = dict(vec![(pk("hull"), list(vec![sv("A_Hull")]))]);
+        let hull_upgrade = dict(vec![(pk("ucType"), sv("_Hull")), (pk("components"), hull_components)]);
+        let section = |hl_type: &str, max_hp: f64, volume_coeff: f64, parent: Option<&str>| {
+            let mut entries = vec![
+                (pk("hlType"), sv(hl_type)),
+                (pk("maxHP"), fv(max_hp)),
+                (pk("volumeCoeff"), fv(volume_coeff)),
+                (pk("regeneratedHPPart"), fv(0.5)),
+                (pk("enhancedRegeneratedHPPart"), fv(0.0)),
+            ];
+            if let Some(parent) = parent {
+                entries.push((pk("parentHL"), sv(parent)));
+            }
+            dict(entries)
+        };
+        let a_hull = dict(vec![
+            (pk("health"), fv(21900.0)),
+            (pk("Cas"), section("simple_hitlocation", 2800.0, 0.165, Some("Hull"))),
+            (pk("Bow"), section("simple_hitlocation", 1700.0, 0.165, Some("Hull"))),
+            (pk("Hull"), section("hull_hitlocation", 16400.0, 0.165, None)),
+            (pk("HP_FGM_1"), section("artillery_hitlocation", 500.0, 0.1, None)),
+        ]);
+
+        let upgrade_info = dict(vec![(pk("PFUH110_Kleber"), hull_upgrade)]);
+        let ship_data: pickled::Dict = vec![
+            (pk("level"), Value::I64(10)),
+            (pk("group"), sv("upgradeable")),
+            (pk("ShipUpgradeInfo"), upgrade_info),
+            (pk("A_Hull"), a_hull),
+        ]
+        .into_iter()
+        .collect();
+
+        let vehicle = build_ship(&ship_data);
+        let ttx = vehicle.ttx_components().expect("ttx components extracted");
+        let sections = &ttx.hull("PFUH110_Kleber").expect("hull parsed").hit_locations;
+        let names: Vec<&str> = sections.iter().map(|section| section.name.as_str()).collect();
+        assert_eq!(names, ["Bow", "Cas", "Hull"], "sorted by name, gun hit location left out");
+
+        let midsection = &sections[1];
+        assert_eq!(midsection.section_type, HullSectionType::Simple);
+        assert_eq!(midsection.max_hp, Some(crate::game_params::ttx::model::Hp::from(2800.0)));
+        assert_eq!(midsection.parent.as_deref(), Some("Hull"));
+        assert_eq!(midsection.volume_coeff, Some(0.165));
+        assert_eq!(sections[2].section_type, HullSectionType::Hull);
+        assert_eq!(sections[2].parent, None);
+    }
+
     /// Build a ship dict mirroring Worcester's (`PASC016_Worcester_1948`) real
     /// `ArtilleryDefault` shape: an `_Artillery` upgrade naming an `ArtilleryDefault`
     /// component with a component-level `maxDist` and `HP_AGM_*` guns (real values).
@@ -4195,6 +4441,24 @@ mod crew_skill_logic_trigger_tests {
         assert_eq!(heat.points(), &[(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)]);
         let cool = trigger.cooling_interpolator().expect("cooling interpolator present");
         assert_eq!(cool.points(), &[(0.0, 1.0), (10.0, 0.0)]);
+    }
+
+    #[test]
+    fn interpolators_parsed_from_tuples() {
+        let mut entries = base_trigger_entries("atbaHeat");
+        entries.push((
+            pk("heatInterpolator"),
+            Value::Tuple(pickled::value::SharedFrozen::new(vec![
+                list(vec![fv(0.0), fv(0.0)]),
+                list(vec![fv(10.0), fv(0.5)]),
+                list(vec![fv(45.0), fv(1.0)]),
+            ])),
+        ));
+
+        let skills = build_skill_with_trigger(entries);
+        let trigger = skills[0].logic_trigger().expect("trigger present");
+        let heat = trigger.heat_interpolator().expect("heat interpolator present");
+        assert_eq!(heat.points(), &[(0.0, 0.0), (10.0, 0.5), (45.0, 1.0)]);
     }
 
     #[test]

@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 188
 expression: overview.armament
 ---
 modules:
@@ -13,7 +12,19 @@ secondary_battery:
     barrels_per_mount: 1
     caliber_mm: 127
 torpedoes: none
-depth_charge_launchers: none
+anti_submarine:
+  summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Consolidated PB4Y-2 Privateer, 1 depth charge per plane, 4900 damage each, 1 charge, 25 s reload, up to 8 km away); no submarine detection consumable"
+  depth_charge_launchers: none
+  depth_charge_air_strike:
+    aircraft: Consolidated PB4Y-2 Privateer
+    planes: 1
+    depth_charges_per_plane: 1
+    damage_per_depth_charge: 4900
+    splash_radius_m: 20
+    charges: 1
+    reload_s: 25
+    range_km: 8
+  submarine_detection: none
 aircraft:
   squadrons:
     - role: rocket_planes

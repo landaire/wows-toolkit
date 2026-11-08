@@ -1,0 +1,131 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output
+---
+ship:
+  name: Hannover
+  index: PGSB111
+  tier: 11
+  class: battleship
+  nation: Germany
+  group: superShip
+  category: tech_tree
+  status: released
+battery: secondary
+range_km: 6
+conclusion: "At 6 km, a 20% longer secondary battery range (8.3 km to 9.96 km with Long-Range Secondary Battery Shells) shrinks vertical dispersion from 250.7 m to 233.2 m; horizontal is unchanged at 291 m. Manual Secondary Battery Aiming narrows both: horizontal 291 m to 261.9 m, vertical 250.7 m to 225.6 m."
+guns:
+  - mount: 128 mm
+    min_radius: 1
+    ideal_radius: 15.5
+    ideal_distance: 333.333
+    radius_on_zero: 0.1
+    radius_on_delim: 0.8
+    radius_on_max: 1
+    delim: 0.6
+builds:
+  - build: base
+    kind: base
+    max_range_km: 8.3
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 291
+            vertical_m: 250.7
+            vertical_ratio: 0.861
+  - build: Secondary Battery Modification 1
+    kind: range_and_accuracy
+    max_range_km: 9.96
+    max_range_change_pct: 20
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 232.8
+            vertical_m: 186.5
+            vertical_ratio: 0.801
+            horizontal_change_pct: -20
+            vertical_change_pct: -25.6
+  - build: Long-Range Secondary Battery Shells
+    kind: range
+    max_range_km: 9.96
+    max_range_change_pct: 20
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 291
+            vertical_m: 233.2
+            vertical_ratio: 0.801
+            horizontal_change_pct: 0
+            vertical_change_pct: -7
+  - build: Aiming Systems Modification 1
+    kind: range_and_accuracy
+    max_range_km: 8.72
+    max_range_change_pct: 5
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 276.5
+            vertical_m: 233.4
+            vertical_ratio: 0.844
+            horizontal_change_pct: -5
+            vertical_change_pct: -6.9
+  - build: Manual Secondary Battery Aiming
+    kind: accuracy
+    max_range_km: 8.3
+    max_range_change_pct: 0
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 261.9
+            vertical_m: 225.6
+            vertical_ratio: 0.861
+            horizontal_change_pct: -10
+            vertical_change_pct: -10
+  - build: Manual Secondary Battery Aiming
+    kind: accuracy
+    condition: "at the priority target within secondary range, after sustained fire"
+    max_range_km: 8.3
+    max_range_change_pct: 0
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 131
+            vertical_m: 112.8
+            vertical_ratio: 0.861
+            horizontal_change_pct: -55
+            vertical_change_pct: -55
+  - build: Secondary Battery Modification 1 + Long-Range Secondary Battery Shells
+    kind: range_and_accuracy
+    max_range_km: 11.95
+    max_range_change_pct: 44
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 232.8
+            vertical_m: 159.6
+            vertical_ratio: 0.686
+            horizontal_change_pct: -20
+            vertical_change_pct: -36.3
+  - build: Secondary Battery Modification 1 + Long-Range Secondary Battery Shells + Manual Secondary Battery Aiming
+    kind: range_and_accuracy
+    max_range_km: 11.95
+    max_range_change_pct: 44
+    mounts:
+      - mount: 128 mm
+        at_range:
+          ellipse:
+            horizontal_m: 209.5
+            vertical_m: 143.7
+            vertical_ratio: 0.686
+            horizontal_change_pct: -28
+            vertical_change_pct: -42.7
+notes:
+  - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled."

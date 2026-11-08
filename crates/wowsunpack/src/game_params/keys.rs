@@ -70,6 +70,11 @@ pub const PLANES: &str = "planes";
 /// Air strike charges and reload of an `airSupport` component.
 pub const CHARGES_NUM: &str = "chargesNum";
 pub const RELOAD_TIME: &str = "reloadTime";
+/// Attacks before a reload, shots per attack and depth charges per launcher
+/// of a `depthCharges` component (PreprocessedDepthCharges.py:12-17).
+pub const MAX_PACKS: &str = "maxPacks";
+pub const NUM_SHOTS: &str = "numShots";
+pub const NUM_BOMBS: &str = "numBombs";
 
 /// Typed representation of component type keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -215,6 +220,9 @@ pub const HIT_LOCATION_GROUPS: &str = "hitLocationGroups";
 pub const HL_TYPE: &str = "hlType";
 pub const MAX_HP: &str = "maxHP";
 pub const REGENERATED_HP_PART: &str = "regeneratedHPPart";
+pub const ENHANCED_REGENERATED_HP_PART: &str = "enhancedRegeneratedHPPart";
+pub const PARENT_HL: &str = "parentHL";
+pub const VOLUME_COEFF: &str = "volumeCoeff";
 pub const SPLASH_BOXES: &str = "splashBoxes";
 pub const THICKNESS: &str = "thickness";
 pub const DRAFT: &str = "draft";
@@ -222,6 +230,10 @@ pub const DOCK_Y_OFFSET: &str = "dockYOffset";
 pub const HEALTH: &str = "health";
 pub const MAX_SPEED: &str = "maxSpeed";
 pub const SPEED_COEF: &str = "speedCoef";
+pub const MAX_BUOYANCY_LEVEL: &str = "maxBuoyancyLevel";
+pub const BUOYANCY_STATES: &str = "buoyancyStates";
+pub const BUOYANCY_RUDDER_TIME: &str = "buoyancyRudderTime";
+pub const MAX_BUOYANCY_SPEED: &str = "maxBuoyancySpeed";
 pub const TURNING_RADIUS: &str = "turningRadius";
 pub const RUDDER_TIME: &str = "rudderTime";
 pub const VISIBILITY_FACTOR: &str = "visibilityFactor";
