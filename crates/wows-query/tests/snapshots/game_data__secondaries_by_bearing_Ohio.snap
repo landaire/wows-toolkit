@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 977
 expression: "Bearings { fires_per_minute: &fires.builds, damage_per_minute }"
 ---
 fires_per_minute:
@@ -73,9 +72,6 @@ fires_per_minute:
       - Manual Secondary Battery Aiming
       - Demolition Expert
       - Auxiliary Armaments Modification 2
-    tier_fillers:
-      - AA Defense and ASW Expert
-      - Focus Fire Training
   alternatives:
     - label: without Manual Secondary Battery Aiming
       value:
@@ -93,10 +89,6 @@ fires_per_minute:
       assumed:
         - Manual Secondary Battery Aiming
         - Auxiliary Armaments Modification 2
-      tier_fillers:
-        - Emergency Repair Specialist
-        - AA Defense and ASW Expert
-        - Focus Fire Training
     - label: without Auxiliary Armaments Modification 2
       value:
         fires_per_minute: 19.05
@@ -105,9 +97,6 @@ fires_per_minute:
       assumed:
         - Manual Secondary Battery Aiming
         - Demolition Expert
-      tier_fillers:
-        - AA Defense and ASW Expert
-        - Focus Fire Training
     - label: with Inertia Fuse for HE Shells
       value:
         fires_per_minute: 13.1
@@ -118,8 +107,6 @@ fires_per_minute:
         - Demolition Expert
         - Auxiliary Armaments Modification 2
         - Inertia Fuse for HE Shells
-      tier_fillers:
-        - Focus Fire Training
       note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
 damage_per_minute:
   - ammo: 127 mm HE
@@ -193,7 +180,3 @@ damage_per_minute:
       assumed:
         - Manual Secondary Battery Aiming
         - Auxiliary Armaments Modification 2
-      tier_fillers:
-        - Emergency Repair Specialist
-        - AA Defense and ASW Expert
-        - Focus Fire Training

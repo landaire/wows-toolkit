@@ -23,10 +23,6 @@ surface:
       assumed:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Extra-Heavy Ammunition
-        - Adrenaline Rush
     alternatives:
       - label: without Concealment Expert
         value: 6.83
@@ -36,10 +32,6 @@ surface:
         value: 6.83
         assumed:
           - Concealment Expert
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
-          - Adrenaline Rush
 air:
   stat: detectability by aircraft
   unit: km
@@ -50,10 +42,6 @@ air:
       assumed:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Extra-Heavy Ammunition
-        - Adrenaline Rush
     alternatives:
       - label: without Concealment Expert
         value: 3.12
@@ -63,10 +51,6 @@ air:
         value: 3.12
         assumed:
           - Concealment Expert
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
-          - Adrenaline Rush
 after_main_battery:
   stat: detectability after firing the main battery
   unit: km

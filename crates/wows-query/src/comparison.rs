@@ -136,6 +136,9 @@ pub struct ShipComparisonOutput {
     pub torpedo_factors: Vec<String>,
 
     /// Names of the ranked ships, in listing order.
+    /// [`GameData::ship_comparison_summary`] gives them only without ships
+    /// named.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ship_names: Vec<String>,
 
     /// Per factor, the best and the worst ships of the group with their
@@ -159,7 +162,7 @@ pub struct ShipComparisonOutput {
 /// The best and worst values of one factor in a group.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FactorLeaders {
-    /// "Moskva 14.14 km", best first.
+    /// "Moskva (Russia) 14.14 km", best first.
     pub best: Vec<String>,
 
     /// Worst first.
@@ -1084,6 +1087,8 @@ impl GameData {
         // With ships named their entries say where they stand; the group
         // needs only its extremes beside them.
         let shown = if named.is_empty() { 3 } else { 1 };
+        // The nation keeps the model from guessing it from the name.
+        let leader_name = |ship: &Ship| format!("{} ({})", ship.name, ship.param.nation());
         let leaders = FactorLeaderTable(
             factors
                 .iter()
@@ -1092,7 +1097,7 @@ impl GameData {
                     let values = group
                         .iter()
                         .zip(&scores)
-                        .filter_map(|(ship, score)| score.values.get(factor).map(|value| (ship.name.clone(), *value)));
+                        .filter_map(|(ship, score)| score.values.get(factor).map(|value| (leader_name(ship), *value)));
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
                 })
                 .collect(),
@@ -1104,7 +1109,10 @@ impl GameData {
                     let meta = factor.meta();
                     let values = group.iter().zip(&scores).flat_map(|(ship, score)| {
                         score.torpedoes.iter().filter_map(move |torpedo| {
-                            torpedo.values.get(factor).map(|value| (format!("{} {}", ship.name, torpedo.name), *value))
+                            torpedo
+                                .values
+                                .get(factor)
+                                .map(|value| (format!("{} {}", leader_name(ship), torpedo.name), *value))
                         })
                     });
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
@@ -1232,11 +1240,14 @@ impl GameData {
 
     /// [`GameData::ship_comparison`] as the ship_comparison tool returns it:
     /// without ships named, the group summary alone, which keeps a whole
-    /// class and tier within a small model's context.
+    /// class and tier within a small model's context; with ships named,
+    /// their entries and the leaders without the list of ship names.
     pub fn ship_comparison_summary(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
         let mut output = self.ship_comparison(args)?;
         if args.ships.as_ref().is_none_or(Vec::is_empty) {
             output.ships.clear();
+        } else {
+            output.ship_names.clear();
         }
 
         Ok(output)

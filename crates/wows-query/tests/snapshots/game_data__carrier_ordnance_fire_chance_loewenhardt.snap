@@ -19,9 +19,6 @@ expression: lines(ship)
       value: 74
       assumed:
         - Pyrotechnician
-      tier_fillers:
-        - Direction Center for Interceptors
-        - Secondary Armament Expert
     alternatives:
       - label: without Pyrotechnician
         value: 69

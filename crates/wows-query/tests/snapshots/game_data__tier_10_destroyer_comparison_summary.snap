@@ -96,384 +96,384 @@ ship_names:
 leaders:
   health:
     best:
-      - A. da Barbiano 35600 HP
-      - Elbing 34400 HP
-      - Lübeck 34400 HP
+      - A. da Barbiano (Italy) 35600 HP
+      - Elbing (Germany) 34400 HP
+      - Lübeck (Germany) 34400 HP
     worst:
-      - Peredovoy 20400 HP
-      - Somers 20800 HP
-      - Shimakaze 21400 HP
+      - Peredovoy (Russia) 20400 HP
+      - Somers (USA) 20800 HP
+      - Shimakaze (Japan) 21400 HP
   repair_party_heal:
     best:
-      - Laffey 30%
-      - Lüshun 30%
-      - Peredovoy 30%
+      - Laffey (USA) 30%
+      - Lüshun (Pan_Asia) 30%
+      - Peredovoy (Russia) 30%
     worst:
-      - Kléber TE 10%
-      - Druid 10%
-      - Daring 10%
+      - Kléber TE (France) 10%
+      - Druid (United_Kingdom) 10%
+      - Daring (United_Kingdom) 10%
   main_battery_reload:
     best:
-      - F. Sherman 1.25 s
-      - Lüshun 1.42 s
-      - Småland 1.42 s
+      - F. Sherman (USA) 1.25 s
+      - Lüshun (Pan_Asia) 1.42 s
+      - Småland (Europe) 1.42 s
     worst:
-      - Lübeck 6.46 s
-      - G. Hoffmann 6.19 s
-      - Elbing 5.94 s
+      - Lübeck (Germany) 6.46 s
+      - G. Hoffmann (Germany) 6.19 s
+      - Elbing (Germany) 5.94 s
   main_battery_range:
     best:
-      - Kléber 18.88 km
-      - Elbing 18.56 km
-      - Tromp 18.46 km
+      - Kléber (France) 18.88 km
+      - Elbing (Germany) 18.56 km
+      - Tromp (Netherlands) 18.46 km
     worst:
-      - Kléber TE 10.2 km
-      - Södermanland 12.54 km
-      - A. Regolo 13.36 km
+      - Kléber TE (France) 10.2 km
+      - Södermanland (Europe) 12.54 km
+      - A. Regolo (Italy) 13.36 km
   dpm_ap:
     best:
-      - Harugumo 465107 HP/min
-      - Marceau 432057 HP/min
-      - Lüshun 399381 HP/min
+      - Harugumo (Japan) 465107 HP/min
+      - Marceau (France) 432057 HP/min
+      - Lüshun (Pan_Asia) 399381 HP/min
     worst:
-      - Shimakaze 177425 HP/min
-      - La Pampa 196390 HP/min
-      - Somers 216029 HP/min
+      - Shimakaze (Japan) 177425 HP/min
+      - La Pampa (Pan_America) 196390 HP/min
+      - Somers (USA) 216029 HP/min
   dpm_he:
     best:
-      - Harugumo 305406 HP/min
-      - Marceau 303486 HP/min
-      - Småland 295525 HP/min
+      - Harugumo (Japan) 305406 HP/min
+      - Marceau (France) 303486 HP/min
+      - Småland (Europe) 295525 HP/min
     worst:
-      - Lübeck 100310 HP/min
-      - Elbing 109172 HP/min
-      - G. Hoffmann 128023 HP/min
+      - Lübeck (Germany) 100310 HP/min
+      - Elbing (Germany) 109172 HP/min
+      - G. Hoffmann (Germany) 128023 HP/min
   dpm_sap:
     best:
-      - A. da Barbiano 765550 HP/min
-      - F. Sherman 387560 HP/min
-      - Burrows 369105 HP/min
+      - A. da Barbiano (Italy) 765550 HP/min
+      - F. Sherman (USA) 387560 HP/min
+      - Burrows (USA) 369105 HP/min
     worst:
-      - A. Regolo 318399 HP/min
-      - Burrows 369105 HP/min
-      - F. Sherman 387560 HP/min
+      - A. Regolo (Italy) 318399 HP/min
+      - Burrows (USA) 369105 HP/min
+      - F. Sherman (USA) 387560 HP/min
   alpha_ap:
     best:
-      - Elbing 26445 HP
-      - G. Hoffmann 26445 HP
-      - Lübeck 26445 HP
+      - Elbing (Germany) 26445 HP
+      - G. Hoffmann (Germany) 26445 HP
+      - Lübeck (Germany) 26445 HP
     worst:
-      - Södermanland 9030 HP
-      - Småland 9030 HP
-      - La Pampa 9030 HP
+      - Södermanland (Europe) 9030 HP
+      - Småland (Europe) 9030 HP
+      - La Pampa (Pan_America) 9030 HP
   alpha_he:
     best:
-      - Kléber 16000 HP
-      - Kléber TE 16000 HP
-      - A. Regolo 15600 HP
+      - Kléber (France) 16000 HP
+      - Kléber TE (France) 16000 HP
+      - A. Regolo (Italy) 15600 HP
     worst:
-      - F. Sherman 5400 HP
-      - Lüshun 5600 HP
-      - La Pampa 6800 HP
+      - F. Sherman (USA) 5400 HP
+      - Lüshun (Pan_Asia) 5600 HP
+      - La Pampa (Pan_America) 6800 HP
   alpha_sap:
     best:
-      - A. da Barbiano 32000 HP
-      - A. Regolo 24400 HP
-      - Burrows 18000 HP
+      - A. da Barbiano (Italy) 32000 HP
+      - A. Regolo (Italy) 24400 HP
+      - Burrows (USA) 18000 HP
     worst:
-      - F. Sherman 8100 HP
-      - Burrows 18000 HP
-      - A. Regolo 24400 HP
+      - F. Sherman (USA) 8100 HP
+      - Burrows (USA) 18000 HP
+      - A. Regolo (Italy) 24400 HP
   flight_time_ap:
     best:
-      - Elbing 4.92 s
-      - G. Hoffmann 4.92 s
-      - Lübeck 4.92 s
+      - Elbing (Germany) 4.92 s
+      - G. Hoffmann (Germany) 4.92 s
+      - Lübeck (Germany) 4.92 s
     worst:
-      - Yueyang 8.23 s
-      - Somers 8.23 s
-      - Laffey 8.23 s
+      - Yueyang (Pan_Asia) 8.23 s
+      - Somers (USA) 8.23 s
+      - Laffey (USA) 8.23 s
   flight_time_he:
     best:
-      - Elbing 4.92 s
-      - Lübeck 4.92 s
-      - G. Hoffmann 4.94 s
+      - Elbing (Germany) 4.92 s
+      - Lübeck (Germany) 4.92 s
+      - G. Hoffmann (Germany) 4.94 s
     worst:
-      - Yueyang 8.34 s
-      - Somers 8.34 s
-      - Laffey 8.34 s
+      - Yueyang (Pan_Asia) 8.34 s
+      - Somers (USA) 8.34 s
+      - Laffey (USA) 8.34 s
   flight_time_sap:
     best:
-      - F. Sherman 5.89 s
-      - Burrows 6.16 s
-      - A. Regolo 6.27 s
+      - F. Sherman (USA) 5.89 s
+      - Burrows (USA) 6.16 s
+      - A. Regolo (Italy) 6.27 s
     worst:
-      - A. da Barbiano 7.27 s
-      - A. Regolo 6.27 s
-      - Burrows 6.16 s
+      - A. da Barbiano (Italy) 7.27 s
+      - A. Regolo (Italy) 6.27 s
+      - Burrows (USA) 6.16 s
   turret_traverse:
     best:
-      - F. Sherman 3.4 s
-      - Hull 4.54 s
-      - Marceau 4.54 s
+      - F. Sherman (USA) 3.4 s
+      - Hull (USA) 4.54 s
+      - Marceau (France) 4.54 s
     worst:
-      - Shimakaze 17.23 s
-      - Kléber TE 13.61 s
-      - Álvaro de Bazán 13.61 s
+      - Shimakaze (Japan) 17.23 s
+      - Kléber TE (France) 13.61 s
+      - Álvaro de Bazán (Spain) 13.61 s
   dispersion:
     best:
-      - Elbing 47 m
-      - G. Hoffmann 47 m
-      - Ragnar 47 m
+      - Elbing (Germany) 47 m
+      - G. Hoffmann (Germany) 47 m
+      - Ragnar (Europe) 47 m
     worst:
-      - Södermanland 84 m
-      - Peredovoy 84 m
-      - Álvaro de Bazán 84 m
+      - Södermanland (Europe) 84 m
+      - Peredovoy (Russia) 84 m
+      - Álvaro de Bazán (Spain) 84 m
   sigma:
     best:
-      - 20 de Julio 2 sigma
-      - A. Regolo 2 sigma
-      - A. da Barbiano 2 sigma
+      - 20 de Julio (Pan_America) 2 sigma
+      - A. Regolo (Italy) 2 sigma
+      - A. da Barbiano (Italy) 2 sigma
     worst:
-      - Södermanland 2 sigma
-      - Peredovoy 2 sigma
-      - Lübeck 2 sigma
+      - Södermanland (Europe) 2 sigma
+      - Peredovoy (Russia) 2 sigma
+      - Lübeck (Germany) 2 sigma
   fires_per_minute:
     best:
-      - Tromp 25.06 fires/min
-      - Vampire II 15.5 fires/min
-      - Harugumo 15.27 fires/min
+      - Tromp (Netherlands) 25.06 fires/min
+      - Vampire II (Commonwealth) 15.5 fires/min
+      - Harugumo (Japan) 15.27 fires/min
     worst:
-      - Somers 5.74 fires/min
-      - Lübeck 7.24 fires/min
-      - Shimakaze 7.5 fires/min
+      - Somers (USA) 5.74 fires/min
+      - Lübeck (Germany) 7.24 fires/min
+      - Shimakaze (Japan) 7.5 fires/min
   bow_barrels:
     best:
-      - Daring 100%
-      - Delny 100%
-      - Druid 100%
+      - Daring (United_Kingdom) 100%
+      - Delny (Russia) 100%
+      - Druid (United_Kingdom) 100%
     worst:
-      - Lübeck 33.33%
-      - Shimakaze 33.33%
-      - Hayate 33.33%
+      - Lübeck (Germany) 33.33%
+      - Shimakaze (Japan) 33.33%
+      - Hayate (Japan) 33.33%
   stern_barrels:
     best:
-      - Delny 100%
-      - Halland 100%
-      - Hull 100%
+      - Delny (Russia) 100%
+      - Halland (Europe) 100%
+      - Hull (USA) 100%
     worst:
-      - Druid 0%
-      - Peredovoy 33.33%
-      - Vampire II 33.33%
+      - Druid (United_Kingdom) 0%
+      - Peredovoy (Russia) 33.33%
+      - Vampire II (Commonwealth) 33.33%
   all_bear_from_bow:
     best:
-      - Druid 0 deg
-      - La Pampa 0 deg
-      - Daring 24 deg
+      - Druid (United_Kingdom) 0 deg
+      - La Pampa (Pan_America) 0 deg
+      - Daring (United_Kingdom) 24 deg
     worst:
-      - A. da Barbiano 71 deg
-      - Z-42 45 deg
-      - Gdańsk 44 deg
+      - A. da Barbiano (Italy) 71 deg
+      - Z-42 (Germany) 45 deg
+      - Gdańsk (Europe) 44 deg
   all_bear_from_stern:
     best:
-      - Kléber 24 deg
-      - Kléber TE 24 deg
-      - Marceau 27 deg
+      - Kléber (France) 24 deg
+      - Kléber TE (France) 24 deg
+      - Marceau (France) 27 deg
     worst:
-      - A. da Barbiano 71 deg
-      - Burrows 50 deg
-      - Z-42 45 deg
+      - A. da Barbiano (Italy) 71 deg
+      - Burrows (USA) 50 deg
+      - Z-42 (Germany) 45 deg
   secondary_dpm:
     best:
-      - Peredovoy 45000 HP/min
+      - Peredovoy (Russia) 45000 HP/min
     worst:
-      - Peredovoy 45000 HP/min
+      - Peredovoy (Russia) 45000 HP/min
   secondary_range:
     best:
-      - Peredovoy 6.3 km
+      - Peredovoy (Russia) 6.3 km
     worst:
-      - Peredovoy 6.3 km
+      - Peredovoy (Russia) 6.3 km
   torpedo_dpm:
     best:
-      - Shimakaze 217472 HP/min
-      - La Pampa 158371 HP/min
-      - Gearing 144933 HP/min
+      - Shimakaze (Japan) 217472 HP/min
+      - La Pampa (Pan_America) 158371 HP/min
+      - Gearing (USA) 144933 HP/min
     worst:
-      - Hull 38464 HP/min
-      - F. Sherman 38464 HP/min
-      - Marceau 49158 HP/min
+      - Hull (USA) 38464 HP/min
+      - F. Sherman (USA) 38464 HP/min
+      - Marceau (France) 49158 HP/min
   torpedoes_per_minute:
     best:
-      - Shimakaze 10.18 torpedoes/min
-      - G. Hoffmann 9.8 torpedoes/min
-      - La Pampa 9.05 torpedoes/min
+      - Shimakaze (Japan) 10.18 torpedoes/min
+      - G. Hoffmann (Germany) 9.8 torpedoes/min
+      - La Pampa (Pan_America) 9.05 torpedoes/min
     worst:
-      - Hull 2.15 torpedoes/min
-      - F. Sherman 2.15 torpedoes/min
-      - Harugumo 3 torpedoes/min
+      - Hull (USA) 2.15 torpedoes/min
+      - F. Sherman (USA) 2.15 torpedoes/min
+      - Harugumo (Japan) 3 torpedoes/min
   torpedo_reload:
     best:
-      - Tromp 53.55 s
-      - F. Sherman 55.84 s
-      - Hull 55.84 s
+      - Tromp (Netherlands) 53.55 s
+      - F. Sherman (USA) 55.84 s
+      - Hull (USA) 55.84 s
     worst:
-      - Harugumo 120.1 s
-      - Hayate 117.04 s
-      - Marceau 108.63 s
+      - Harugumo (Japan) 120.1 s
+      - Hayate (Japan) 117.04 s
+      - Marceau (France) 108.63 s
   torpedo_launch_from_bow:
     best:
-      - Châteaurenault 6 deg
-      - Kléber 18 deg
-      - Kléber TE 18 deg
+      - Châteaurenault (France) 6 deg
+      - Kléber (France) 18 deg
+      - Kléber TE (France) 18 deg
     worst:
-      - Södermanland 64 deg
-      - Halland 64 deg
-      - Småland 63 deg
+      - Södermanland (Europe) 64 deg
+      - Halland (Europe) 64 deg
+      - Småland (Europe) 63 deg
   broadside_tubes:
     best:
-      - La Pampa 15 tubes
-      - Shimakaze 15 tubes
-      - Somers 12 tubes
+      - La Pampa (Pan_America) 15 tubes
+      - Shimakaze (Japan) 15 tubes
+      - Somers (USA) 12 tubes
     worst:
-      - Hull 2 tubes
-      - F. Sherman 2 tubes
-      - Tromp 3 tubes
+      - Hull (USA) 2 tubes
+      - F. Sherman (USA) 2 tubes
+      - Tromp (Netherlands) 3 tubes
   aa_damage:
     best:
-      - Ragnar 669 HP/s
-      - Elbing 392 HP/s
-      - Lübeck 392 HP/s
+      - Ragnar (Europe) 669 HP/s
+      - Elbing (Germany) 392 HP/s
+      - Lübeck (Germany) 392 HP/s
     worst:
-      - Somers 32 HP/s
-      - 20 de Julio 63 HP/s
-      - Hull 77 HP/s
+      - Somers (USA) 32 HP/s
+      - 20 de Julio (Pan_America) 63 HP/s
+      - Hull (USA) 77 HP/s
   aa_range:
     best:
-      - Burrows 4 km
-      - Elbing 4 km
-      - F. Sherman 4 km
+      - Burrows (USA) 4 km
+      - Elbing (Germany) 4 km
+      - F. Sherman (USA) 4 km
     worst:
-      - A. da Barbiano 2 km
-      - Somers 2.4 km
-      - Shimakaze 2.5 km
+      - A. da Barbiano (Italy) 2 km
+      - Somers (USA) 2.4 km
+      - Shimakaze (Japan) 2.5 km
   concealment:
     best:
-      - Shimakaze 5.59 km
-      - Gearing 5.61 km
-      - La Pampa 5.78 km
+      - Shimakaze (Japan) 5.59 km
+      - Gearing (USA) 5.61 km
+      - La Pampa (Pan_America) 5.78 km
     worst:
-      - A. da Barbiano 7.96 km
-      - Khabarovsk 7.86 km
-      - Ragnar 7.51 km
+      - A. da Barbiano (Italy) 7.96 km
+      - Khabarovsk (Russia) 7.86 km
+      - Ragnar (Europe) 7.51 km
   air_concealment:
     best:
-      - 20 de Julio 2.36 km
-      - Somers 2.53 km
-      - Gearing 2.61 km
+      - 20 de Julio (Pan_America) 2.36 km
+      - Somers (USA) 2.53 km
+      - Gearing (USA) 2.61 km
     worst:
-      - Kléber TE 4.36 km
-      - Lübeck 4.06 km
-      - Elbing 4.06 km
+      - Kléber TE (France) 4.36 km
+      - Lübeck (Germany) 4.06 km
+      - Elbing (Germany) 4.06 km
   speed:
     best:
-      - Kléber 44 kn
-      - Marceau 44 kn
-      - Kléber TE 44 kn
+      - Kléber (France) 44 kn
+      - Marceau (France) 44 kn
+      - Kléber TE (France) 44 kn
     worst:
-      - 20 de Julio 32 kn
-      - Fuyutsuki 33 kn
-      - Tromp 33.5 kn
+      - 20 de Julio (Pan_America) 32 kn
+      - Fuyutsuki (Japan) 33 kn
+      - Tromp (Netherlands) 33.5 kn
   rudder_shift:
     best:
-      - Shimakaze 1.87 s
-      - Laffey 1.95 s
-      - Yueyang 1.95 s
+      - Shimakaze (Japan) 1.87 s
+      - Laffey (USA) 1.95 s
+      - Yueyang (Pan_Asia) 1.95 s
     worst:
-      - Khabarovsk 6.96 s
-      - Lübeck 3.96 s
-      - Elbing 3.96 s
+      - Khabarovsk (Russia) 6.96 s
+      - Lübeck (Germany) 3.96 s
+      - Elbing (Germany) 3.96 s
   turning_circle:
     best:
-      - 20 de Julio 560 m
-      - La Pampa 560 m
-      - Cassard 610 m
+      - 20 de Julio (Pan_America) 560 m
+      - La Pampa (Pan_America) 560 m
+      - Cassard (France) 610 m
     worst:
-      - Lübeck 890 m
-      - Elbing 890 m
-      - Harugumo 830 m
+      - Lübeck (Germany) 890 m
+      - Elbing (Germany) 890 m
+      - Harugumo (Japan) 830 m
 torpedo_leaders:
   speed:
     best:
-      - Gdańsk Torped M1947 mod 0 94.81 kn
-      - Halland Torped M1947 mod 1 94.81 kn
-      - Södermanland Torped M1947 mod 1 94.81 kn
+      - Gdańsk (Europe) Torped M1947 mod 0 94.81 kn
+      - Halland (Europe) Torped M1947 mod 1 94.81 kn
+      - Södermanland (Europe) Torped M1947 mod 1 94.81 kn
     worst:
-      - Lübeck G7 T1 Ausf.C 55.12 kn
-      - Elbing G7 T1 Ausf.C 55.12 kn
-      - Khabarovsk ET-46 58.43 kn
+      - Lübeck (Germany) G7 T1 Ausf.C 55.12 kn
+      - Elbing (Germany) G7 T1 Ausf.C 55.12 kn
+      - Khabarovsk (Russia) ET-46 58.43 kn
   range:
     best:
-      - Shimakaze Type 93 20.01 km
-      - Châteaurenault 550 mm 20 km
-      - F. Sherman Mk17 16.5 km
+      - Shimakaze (Japan) Type 93 20.01 km
+      - Châteaurenault (France) 550 mm 20 km
+      - F. Sherman (USA) Mk17 16.5 km
     worst:
-      - Peredovoy ET-46M 6 km
-      - Khabarovsk ET-46 6 km
-      - Laffey Mk17 8 km
+      - Peredovoy (Russia) ET-46M 6 km
+      - Khabarovsk (Russia) ET-46 6 km
+      - Laffey (USA) Mk17 8 km
   damage:
     best:
-      - Fuyutsuki Type93 mod. 3 23767 HP
-      - Harugumo Type 93 mod. 3 23767 HP
-      - Hayate Type 93 mod. 3 23767 HP
+      - Fuyutsuki (Japan) Type93 mod. 3 23767 HP
+      - Harugumo (Japan) Type 93 mod. 3 23767 HP
+      - Hayate (Japan) Type 93 mod. 3 23767 HP
     worst:
-      - Södermanland Torped M1947 mod 1 10700 HP
-      - Småland Torped M1943 mod 1 10700 HP
-      - Halland Torped M1947 mod 1 10700 HP
+      - Södermanland (Europe) Torped M1947 mod 1 10700 HP
+      - Småland (Europe) Torped M1943 mod 1 10700 HP
+      - Halland (Europe) Torped M1947 mod 1 10700 HP
   damage_at_max_range:
     best:
-      - Fuyutsuki Type93 mod. 3 23767 HP
-      - Harugumo Type 93 mod. 3 23767 HP
-      - Hayate Type 93 mod. 3 23767 HP
+      - Fuyutsuki (Japan) Type93 mod. 3 23767 HP
+      - Harugumo (Japan) Type 93 mod. 3 23767 HP
+      - Hayate (Japan) Type 93 mod. 3 23767 HP
     worst:
-      - Châteaurenault 550 mm 9767 HP
-      - Södermanland Torped M1947 mod 1 10700 HP
-      - Småland Torped M1943 mod 1 10700 HP
+      - Châteaurenault (France) 550 mm 9767 HP
+      - Södermanland (Europe) Torped M1947 mod 1 10700 HP
+      - Småland (Europe) Torped M1943 mod 1 10700 HP
   flood_coefficient:
     best:
-      - Fuyutsuki Type93 mod. 3 4.06x
-      - Harugumo Type 93 mod. 3 4.06x
-      - Hayate Type 93 mod. 3 4.06x
+      - Fuyutsuki (Japan) Type93 mod. 3 4.06x
+      - Harugumo (Japan) Type 93 mod. 3 4.06x
+      - Hayate (Japan) Type 93 mod. 3 4.06x
     worst:
-      - Södermanland Torped M1947 mod 1 1.73x
-      - Småland Torped M1943 mod 1 1.73x
-      - Halland Torped M1947 mod 1 1.73x
+      - Södermanland (Europe) Torped M1947 mod 1 1.73x
+      - Småland (Europe) Torped M1943 mod 1 1.73x
+      - Halland (Europe) Torped M1947 mod 1 1.73x
   detectability:
     best:
-      - Khabarovsk ET-46 0.6 km
-      - Lüshun 53-51 0.8 km
-      - Yueyang Mark 17 0.8 km
+      - Khabarovsk (Russia) ET-46 0.6 km
+      - Lüshun (Pan_Asia) 53-51 0.8 km
+      - Yueyang (Pan_Asia) Mark 17 0.8 km
     worst:
-      - Shimakaze Type 93 2.5 km
-      - Södermanland Torped M1947 mod 1 1.8 km
-      - Kléber TE 550 mm 24V Mle 2 1.8 km
+      - Shimakaze (Japan) Type 93 2.5 km
+      - Södermanland (Europe) Torped M1947 mod 1 1.8 km
+      - Kléber TE (France) 550 mm 24V Mle 2 1.8 km
   reaction_time:
     best:
-      - Khabarovsk ET-46 3.82 s
-      - Yueyang Mark 17 3.92 s
-      - Lüshun 53-51 4.16 s
+      - Khabarovsk (Russia) ET-46 3.82 s
+      - Yueyang (Pan_Asia) Mark 17 3.92 s
+      - Lüshun (Pan_Asia) 53-51 4.16 s
     worst:
-      - Shimakaze Type 93 13.62 s
-      - Shimakaze Type 93 mod. 3 8.57 s
-      - Hayate Type 93 mod. 3 8.57 s
+      - Shimakaze (Japan) Type 93 13.62 s
+      - Shimakaze (Japan) Type 93 mod. 3 8.57 s
+      - Hayate (Japan) Type 93 mod. 3 8.57 s
   damage_per_minute:
     best:
-      - Shimakaze Type F3 217472 HP/min
-      - Shimakaze Type 93 mod. 3 207117 HP/min
-      - Shimakaze Type 93 186370 HP/min
+      - Shimakaze (Japan) Type F3 217472 HP/min
+      - Shimakaze (Japan) Type 93 mod. 3 207117 HP/min
+      - Shimakaze (Japan) Type 93 186370 HP/min
     worst:
-      - Hull Mk17 38464 HP/min
-      - F. Sherman Mk17 38464 HP/min
-      - Marceau 550 mm 23DT 49158 HP/min
+      - Hull (USA) Mk17 38464 HP/min
+      - F. Sherman (USA) Mk17 38464 HP/min
+      - Marceau (France) 550 mm 23DT 49158 HP/min
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

@@ -32,10 +32,6 @@ ranking:
       build:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
-        - Heavy AP Shells
       meets:
         stock: true
         values:
@@ -47,10 +43,6 @@ ranking:
       build:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
-        - Heavy AP Shells
       meets:
         stock: true
         values:
@@ -62,10 +54,6 @@ ranking:
       build:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
-        - Heavy AP Shells
       meets:
         stock: true
         values:
@@ -77,10 +65,6 @@ ranking:
       build:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
-        - Heavy AP Shells
       meets:
         stock: false
         requires:
@@ -94,10 +78,6 @@ ranking:
       build:
         - Concealment Expert
         - Concealment System Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
-        - Heavy AP Shells
       tied: true
       meets:
         stock: false

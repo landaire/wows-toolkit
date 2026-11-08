@@ -50,8 +50,6 @@ torpedoes_per_minute:
           assumed:
             - Torpedo Tubes Modification 2
             - Torpedo Crew Training
-          tier_fillers:
-            - Priority Target
           note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
 main_battery_damage:
   - ammo: SAP
@@ -177,8 +175,6 @@ torpedo_damage:
               - Torpedo Tubes Modification 3
               - Torpedo Tubes Modification 2
               - Torpedo Crew Training
-            tier_fillers:
-              - Priority Target
             note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
   - ammo: 533 mm wz.AB
     damage: 17133
@@ -218,8 +214,6 @@ torpedo_damage:
               - Torpedo Tubes Modification 3
               - Torpedo Tubes Modification 2
               - Torpedo Crew Training
-            tier_fillers:
-              - Priority Target
             note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."

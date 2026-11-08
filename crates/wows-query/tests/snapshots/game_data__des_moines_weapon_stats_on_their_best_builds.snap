@@ -20,10 +20,6 @@ main_battery_reload:
         assumed:
           - Main Battery Modification 3
           - Top Grade Gunner
-        tier_fillers:
-          - Consumable Specialist
-          - Focus Fire Training
-          - Heavy AP Shells
         note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
 main_battery_range:
   stat: main battery range
@@ -56,10 +52,6 @@ main_battery_dispersion:
         assumed:
           - Aiming Systems Modification 1
           - Outnumbered
-        tier_fillers:
-          - Consumable Specialist
-          - Focus Fire Training
-          - Heavy AP Shells
         note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
 secondary_range:
   stat: secondary battery range
@@ -71,9 +63,6 @@ secondary_range:
       assumed:
         - Pack a Punch
         - Secondary Battery Modification 1
-      tier_fillers:
-        - Consumable Specialist
-        - Focus Fire Training
     alternatives:
       - label: without Pack a Punch
         value: 8.76
@@ -83,9 +72,6 @@ secondary_range:
         value: 8.76
         assumed:
           - Pack a Punch
-        tier_fillers:
-          - Consumable Specialist
-          - Focus Fire Training
 main_battery_damage:
   - ammo: AP
     damage: 5000
@@ -164,9 +150,6 @@ main_battery_damage:
           assumed:
             - Heavy AP Shells
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         alternatives:
           - label: without Heavy AP Shells
             value:
@@ -184,9 +167,6 @@ main_battery_damage:
               all_barrels_ceiling: 515455
             assumed:
               - Heavy AP Shells
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
           - label: with Top Grade Gunner active
             value:
               damage_per_minute: 636678
@@ -197,9 +177,6 @@ main_battery_damage:
               - Heavy AP Shells
               - Main Battery Modification 3
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
             note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
   - ammo: HE
     damage: 2800
@@ -278,9 +255,6 @@ main_battery_damage:
           assumed:
             - Heavy HE and SAP Shells
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         alternatives:
           - label: without Heavy HE and SAP Shells
             value:
@@ -298,9 +272,6 @@ main_battery_damage:
               all_barrels_ceiling: 302400
             assumed:
               - Heavy HE and SAP Shells
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
           - label: with Top Grade Gunner active
             value:
               damage_per_minute: 373518
@@ -311,9 +282,6 @@ main_battery_damage:
               - Heavy HE and SAP Shells
               - Main Battery Modification 3
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
             note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
 secondary_damage:
   - ammo: 127 mm HE
@@ -393,10 +361,6 @@ secondary_damage:
           assumed:
             - Top Grade Gunner
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
         alternatives:
           - label: without Top Grade Gunner
             value:
@@ -414,10 +378,6 @@ secondary_damage:
               all_barrels_ceiling: 240000
             assumed:
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
-              - Heavy AP Shells
 rate_notes:
   - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
 fires_per_minute:
@@ -494,9 +454,6 @@ fires_per_minute:
           - Demolition Expert
           - Top Grade Gunner
           - Main Battery Modification 3
-        tier_fillers:
-          - Consumable Specialist
-          - Heavy AP Shells
       alternatives:
         - label: without Demolition Expert
           value:
@@ -506,10 +463,6 @@ fires_per_minute:
           assumed:
             - Top Grade Gunner
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
         - label: without Top Grade Gunner
           value:
             fires_per_minute: 31.62
@@ -518,8 +471,6 @@ fires_per_minute:
           assumed:
             - Demolition Expert
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
         - label: without Main Battery Modification 3
           value:
             fires_per_minute: 30.14
@@ -528,9 +479,6 @@ fires_per_minute:
           assumed:
             - Demolition Expert
             - Top Grade Gunner
-          tier_fillers:
-            - Consumable Specialist
-            - Heavy AP Shells
         - label: with Inertia Fuse for HE Shells
           value:
             fires_per_minute: 22.12
@@ -541,9 +489,6 @@ fires_per_minute:
             - Top Grade Gunner
             - Main Battery Modification 3
             - Inertia Fuse for HE Shells
-          tier_fillers:
-            - Consumable Specialist
-            - Heavy AP Shells
           note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
         - label: with Top Grade Gunner active
           value:
@@ -554,9 +499,6 @@ fires_per_minute:
             - Demolition Expert
             - Main Battery Modification 3
             - Top Grade Gunner
-          tier_fillers:
-            - Consumable Specialist
-            - Heavy AP Shells
           note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
   secondaries:
     stat: "secondary fire starts per minute, every group"
@@ -631,9 +573,6 @@ fires_per_minute:
           - Demolition Expert
           - Top Grade Gunner
           - Auxiliary Armaments Modification 2
-        tier_fillers:
-          - Consumable Specialist
-          - Heavy AP Shells
       alternatives:
         - label: without Demolition Expert
           value:
@@ -643,10 +582,6 @@ fires_per_minute:
           assumed:
             - Top Grade Gunner
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
         - label: without Top Grade Gunner
           value:
             fires_per_minute: 6
@@ -655,8 +590,6 @@ fires_per_minute:
           assumed:
             - Demolition Expert
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Consumable Specialist
         - label: without Auxiliary Armaments Modification 2
           value:
             fires_per_minute: 5.33
@@ -665,9 +598,6 @@ fires_per_minute:
           assumed:
             - Demolition Expert
             - Top Grade Gunner
-          tier_fillers:
-            - Consumable Specialist
-            - Heavy AP Shells
         - label: with Inertia Fuse for HE Shells
           value:
             fires_per_minute: 3.89
@@ -678,9 +608,6 @@ fires_per_minute:
             - Top Grade Gunner
             - Auxiliary Armaments Modification 2
             - Inertia Fuse for HE Shells
-          tier_fillers:
-            - Consumable Specialist
-            - Heavy AP Shells
           note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
   sources:
     - armament: main_battery
@@ -707,8 +634,6 @@ fires_per_minute:
             assumed:
               - Demolition Expert
               - Main Battery Modification 3
-            tier_fillers:
-              - Consumable Specialist
           alternatives:
             - label: without Demolition Expert
               value:
@@ -730,8 +655,6 @@ fires_per_minute:
                 all_mounts_ceiling: 14.73
               assumed:
                 - Demolition Expert
-              tier_fillers:
-                - Consumable Specialist
             - label: with Inertia Fuse for HE Shells
               value:
                 fires_per_minute: 8.93
@@ -744,9 +667,6 @@ fires_per_minute:
                 - Demolition Expert
                 - Main Battery Modification 3
                 - Inertia Fuse for HE Shells
-              tier_fillers:
-                - Consumable Specialist
-                - Heavy AP Shells
               note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
             - label: with Top Grade Gunner active
               value:
@@ -760,9 +680,6 @@ fires_per_minute:
                 - Demolition Expert
                 - Main Battery Modification 3
                 - Top Grade Gunner
-              tier_fillers:
-                - Consumable Specialist
-                - Heavy AP Shells
               note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
     - armament: secondary
       source: secondary battery 127 mm
@@ -789,9 +706,6 @@ fires_per_minute:
               - Demolition Expert
               - Top Grade Gunner
               - Auxiliary Armaments Modification 2
-            tier_fillers:
-              - Consumable Specialist
-              - Heavy AP Shells
           alternatives:
             - label: without Demolition Expert
               value:
@@ -804,10 +718,6 @@ fires_per_minute:
               assumed:
                 - Top Grade Gunner
                 - Auxiliary Armaments Modification 2
-              tier_fillers:
-                - Consumable Specialist
-                - Focus Fire Training
-                - Heavy AP Shells
             - label: without Top Grade Gunner
               value:
                 fires_per_minute: 6
@@ -819,8 +729,6 @@ fires_per_minute:
               assumed:
                 - Demolition Expert
                 - Auxiliary Armaments Modification 2
-              tier_fillers:
-                - Consumable Specialist
             - label: without Auxiliary Armaments Modification 2
               value:
                 fires_per_minute: 5.33
@@ -832,9 +740,6 @@ fires_per_minute:
               assumed:
                 - Demolition Expert
                 - Top Grade Gunner
-              tier_fillers:
-                - Consumable Specialist
-                - Heavy AP Shells
             - label: with Inertia Fuse for HE Shells
               value:
                 fires_per_minute: 3.89
@@ -848,9 +753,6 @@ fires_per_minute:
                 - Top Grade Gunner
                 - Auxiliary Armaments Modification 2
                 - Inertia Fuse for HE Shells
-              tier_fillers:
-                - Consumable Specialist
-                - Heavy AP Shells
               note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
     - armament: air_strike
       source: air strike Consolidated PB4Y-2 Privateer

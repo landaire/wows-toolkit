@@ -37,8 +37,6 @@ slots:
                   - Consumable Enhancements
                   - Surveillance Radar Modification 1
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
               alternatives:
                 - label: without Consumable Enhancements
                   value: 39.6
@@ -50,15 +48,11 @@ slots:
                   assumed:
                     - Consumable Enhancements
                     - Ship Consumable Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
                 - label: without Ship Consumable Modification 1
                   value: 39.6
                   assumed:
                     - Consumable Enhancements
                     - Surveillance Radar Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
           charges:
             stat: Surveillance Radar charges
             unit: charges
@@ -68,9 +62,6 @@ slots:
                 value: 4
                 assumed:
                   - Superintendent
-                tier_fillers:
-                  - Consumable Specialist
-                  - Focus Fire Training
               alternatives:
                 - label: without Superintendent
                   value: 3

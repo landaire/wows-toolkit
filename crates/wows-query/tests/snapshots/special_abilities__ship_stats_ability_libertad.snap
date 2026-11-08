@@ -32,10 +32,6 @@ build_stats:
           assumed:
             - Main Battery Modification 3
             - Close Quarters Combat
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
-            - Focus Fire Training
           note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
   main_battery_range:
     stat: main battery range
@@ -73,9 +69,6 @@ build_stats:
         assumed:
           - Long-Range Secondary Battery Shells
           - Secondary Battery Modification 1
-        tier_fillers:
-          - Emergency Repair Specialist
-          - AA Defense and ASW Expert
       alternatives:
         - label: without Long-Range Secondary Battery Shells
           value: 11.95
@@ -85,9 +78,6 @@ build_stats:
           value: 11.95
           assumed:
             - Long-Range Secondary Battery Shells
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
   main_battery_damage:
     - ammo: AP
       damage: 11700
@@ -166,9 +156,6 @@ build_stats:
             assumed:
               - Super-Heavy AP Shells
               - Main Battery Modification 3
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
           alternatives:
             - label: without Super-Heavy AP Shells
               value:
@@ -186,9 +173,6 @@ build_stats:
                 all_barrels_ceiling: 274418
               assumed:
                 - Super-Heavy AP Shells
-              tier_fillers:
-                - Emergency Repair Specialist
-                - AA Defense and ASW Expert
             - label: with Close Quarters Combat active
               value:
                 damage_per_minute: 346488
@@ -199,9 +183,6 @@ build_stats:
                 - Super-Heavy AP Shells
                 - Main Battery Modification 3
                 - Close Quarters Combat
-              tier_fillers:
-                - Emergency Repair Specialist
-                - AA Defense and ASW Expert
               note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
     - ammo: HE
       damage: 6100
@@ -296,10 +277,6 @@ build_stats:
               assumed:
                 - Main Battery Modification 3
                 - Close Quarters Combat
-              tier_fillers:
-                - Emergency Repair Specialist
-                - AA Defense and ASW Expert
-                - Focus Fire Training
               note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
   secondary_damage:
     - ammo: 234 mm HE
@@ -379,10 +356,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           alternatives:
             - label: without Manual Secondary Battery Aiming
               value:
@@ -400,10 +373,6 @@ build_stats:
                 all_barrels_ceiling: 758333
               assumed:
                 - Manual Secondary Battery Aiming
-              tier_fillers:
-                - Emergency Repair Specialist
-                - AA Defense and ASW Expert
-                - Focus Fire Training
     - ammo: 127 mm HE
       damage: 2340
       barrels: 8
@@ -481,10 +450,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           alternatives:
             - label: without Manual Secondary Battery Aiming
               value:
@@ -502,10 +467,6 @@ build_stats:
                 all_barrels_ceiling: 312000
               assumed:
                 - Manual Secondary Battery Aiming
-              tier_fillers:
-                - Emergency Repair Specialist
-                - AA Defense and ASW Expert
-                - Focus Fire Training
   rate_notes:
     - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
   fires_per_minute:
@@ -582,9 +543,6 @@ build_stats:
             - Manual Secondary Battery Aiming
             - Demolition Expert
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - AA Defense and ASW Expert
-            - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
@@ -602,10 +560,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           - label: without Auxiliary Armaments Modification 2
             value:
               fires_per_minute: 38.38
@@ -614,9 +568,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Demolition Expert
-            tier_fillers:
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           - label: with Inertia Fuse for HE Shells
             value:
               fires_per_minute: 27.81
@@ -627,8 +578,6 @@ build_stats:
               - Demolition Expert
               - Auxiliary Armaments Modification 2
               - Inertia Fuse for HE Shells
-            tier_fillers:
-              - Focus Fire Training
             note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
           - label: with Close Quarters Combat active
             value:
@@ -640,9 +589,6 @@ build_stats:
               - Demolition Expert
               - Auxiliary Armaments Modification 2
               - Close Quarters Combat
-            tier_fillers:
-              - AA Defense and ASW Expert
-              - Focus Fire Training
             note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
     secondaries:
       stat: "secondary fire starts per minute, every group"
@@ -717,9 +663,6 @@ build_stats:
             - Manual Secondary Battery Aiming
             - Demolition Expert
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - AA Defense and ASW Expert
-            - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
@@ -737,10 +680,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Auxiliary Armaments Modification 2
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           - label: without Auxiliary Armaments Modification 2
             value:
               fires_per_minute: 20.67
@@ -749,9 +688,6 @@ build_stats:
             assumed:
               - Manual Secondary Battery Aiming
               - Demolition Expert
-            tier_fillers:
-              - AA Defense and ASW Expert
-              - Focus Fire Training
           - label: with Inertia Fuse for HE Shells
             value:
               fires_per_minute: 13.81
@@ -762,8 +698,6 @@ build_stats:
               - Demolition Expert
               - Auxiliary Armaments Modification 2
               - Inertia Fuse for HE Shells
-            tier_fillers:
-              - Focus Fire Training
             note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
     sources:
       - armament: main_battery
@@ -836,9 +770,6 @@ build_stats:
                   - Demolition Expert
                   - Main Battery Modification 3
                   - Close Quarters Combat
-                tier_fillers:
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
                 note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
       - armament: secondary
         source: secondary battery 234 mm
@@ -865,9 +796,6 @@ build_stats:
                 - Manual Secondary Battery Aiming
                 - Demolition Expert
                 - Auxiliary Armaments Modification 2
-              tier_fillers:
-                - AA Defense and ASW Expert
-                - Focus Fire Training
             alternatives:
               - label: without Manual Secondary Battery Aiming
                 value:
@@ -891,10 +819,6 @@ build_stats:
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Auxiliary Armaments Modification 2
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               - label: without Auxiliary Armaments Modification 2
                 value:
                   fires_per_minute: 16.67
@@ -906,9 +830,6 @@ build_stats:
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Demolition Expert
-                tier_fillers:
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               - label: with Inertia Fuse for HE Shells
                 value:
                   fires_per_minute: 10.89
@@ -922,8 +843,6 @@ build_stats:
                   - Demolition Expert
                   - Auxiliary Armaments Modification 2
                   - Inertia Fuse for HE Shells
-                tier_fillers:
-                  - Focus Fire Training
                 note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
       - armament: secondary
         source: secondary battery 127 mm
@@ -950,9 +869,6 @@ build_stats:
                 - Demolition Expert
                 - Manual Secondary Battery Aiming
                 - Auxiliary Armaments Modification 2
-              tier_fillers:
-                - AA Defense and ASW Expert
-                - Focus Fire Training
             alternatives:
               - label: without Demolition Expert
                 value:
@@ -965,10 +881,6 @@ build_stats:
                 assumed:
                   - Manual Secondary Battery Aiming
                   - Auxiliary Armaments Modification 2
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               - label: without Manual Secondary Battery Aiming
                 value:
                   fires_per_minute: 4.5
@@ -991,9 +903,6 @@ build_stats:
                 assumed:
                   - Demolition Expert
                   - Manual Secondary Battery Aiming
-                tier_fillers:
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               - label: with Inertia Fuse for HE Shells
                 value:
                   fires_per_minute: 2.92
@@ -1007,8 +916,6 @@ build_stats:
                   - Manual Secondary Battery Aiming
                   - Auxiliary Armaments Modification 2
                   - Inertia Fuse for HE Shells
-                tier_fillers:
-                  - Focus Fire Training
                 note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
       - armament: air_strike
         source: air strike Consolidated PB4Y-2 Privateer

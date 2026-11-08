@@ -83,8 +83,6 @@ AP:
           - Extra-Heavy Ammunition
           - Main Battery and AA Specialist
           - Main Battery Modification 3
-        tier_fillers:
-          - Consumable Specialist
       alternatives:
         - label: without Extra-Heavy Ammunition
           value:
@@ -95,9 +93,6 @@ AP:
           assumed:
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Consumable Enhancements
         - label: without Main Battery and AA Specialist
           value:
             damage_per_minute: 432901
@@ -107,8 +102,6 @@ AP:
           assumed:
             - Extra-Heavy Ammunition
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
         - label: without Main Battery Modification 3
           value:
             damage_per_minute: 401003
@@ -118,8 +111,6 @@ AP:
           assumed:
             - Extra-Heavy Ammunition
             - Main Battery and AA Specialist
-          tier_fillers:
-            - Consumable Specialist
         - label: with Fearless Brawler active
           value:
             damage_per_minute: 506317
@@ -131,8 +122,6 @@ AP:
             - Main Battery and AA Specialist
             - Main Battery Modification 3
             - Fearless Brawler
-          tier_fillers:
-            - Consumable Specialist
           note: Reduces main battery reload time while your ship remains detected by an enemy.
         - label: with Main Battery Reload Booster active
           value:
@@ -144,6 +133,4 @@ AP:
             - Extra-Heavy Ammunition
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
           note: "Only while Main Battery Reload Booster is active: 80 s of use per battle in activations of at least 1 s, 5 s between activations, stock build. It multiplies the main battery reload time by 0.5."

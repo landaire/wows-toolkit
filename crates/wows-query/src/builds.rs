@@ -218,8 +218,9 @@ pub struct BuildValue<V> {
 
     /// Captain skills taken only because a skill in `assumed` needs one on
     /// every cheaper tier, each the skill of its tier that leaves the stat
-    /// best. They fill tiers; they are not conditions of the build.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// best. They fill tiers; they are not conditions of the build. Not in
+    /// the tool output, where the model read them as advice.
+    #[serde(skip)]
     pub tier_fillers: Vec<String>,
 }
 
@@ -230,7 +231,8 @@ pub struct BuildAlternative<V> {
     pub value: V,
     pub assumed: Vec<String>,
 
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// As [`BuildValue::tier_fillers`]; not in the tool output.
+    #[serde(skip)]
     pub tier_fillers: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]

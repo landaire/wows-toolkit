@@ -41,10 +41,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value: 8.8
@@ -54,10 +50,6 @@ slots:
                   value: 8.8
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
           charges:
             stat: Repair Party charges
             unit: charges
@@ -67,10 +59,6 @@ slots:
                 value: 7
                 assumed:
                   - Emergency Repair Expert
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value: 6
@@ -104,10 +92,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value:
@@ -123,10 +107,6 @@ slots:
                     max_hp: 71600
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
           heal_per_battle:
             stat: Repair Party heal per battle
             unit: HP
@@ -143,10 +123,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value:
@@ -162,7 +138,3 @@ slots:
                     max_hp: 71600
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training

@@ -78,9 +78,6 @@ torpedoes_per_minute:
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
       alternatives:
         - label: without Fill the Tubes
           value:
@@ -96,9 +93,6 @@ torpedoes_per_minute:
             all_launchers_ceiling: 5.33
           assumed:
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
 main_battery_damage:
   - ammo: AP
     damage: 2100
@@ -178,8 +172,6 @@ main_battery_damage:
             - Extra-Heavy Ammunition
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
         alternatives:
           - label: without Extra-Heavy Ammunition
             value:
@@ -190,9 +182,6 @@ main_battery_damage:
             assumed:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
-            tier_fillers:
-              - Consumable Specialist
-              - Consumable Enhancements
           - label: without Main Battery and AA Specialist
             value:
               damage_per_minute: 362166
@@ -202,8 +191,6 @@ main_battery_damage:
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery Modification 3
-            tier_fillers:
-              - Consumable Specialist
           - label: without Main Battery Modification 3
             value:
               damage_per_minute: 335480
@@ -213,8 +200,6 @@ main_battery_damage:
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery and AA Specialist
-            tier_fillers:
-              - Consumable Specialist
           - label: with Fearless Brawler active
             value:
               damage_per_minute: 423586
@@ -226,8 +211,6 @@ main_battery_damage:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
               - Fearless Brawler
-            tier_fillers:
-              - Consumable Specialist
             note: Reduces main battery reload time while your ship remains detected by an enemy.
   - ammo: HE
     damage: 1750
@@ -306,9 +289,6 @@ main_battery_damage:
           assumed:
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
         alternatives:
           - label: without Main Battery and AA Specialist
             value:
@@ -326,9 +306,6 @@ main_battery_damage:
               all_barrels_ceiling: 260062
             assumed:
               - Main Battery and AA Specialist
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
           - label: with Fearless Brawler active
             value:
               damage_per_minute: 328361
@@ -339,9 +316,6 @@ main_battery_damage:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
               - Fearless Brawler
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
             note: Reduces main battery reload time while your ship remains detected by an enemy.
 torpedo_damage:
   - ammo: Torped M1943 mod 1
@@ -421,9 +395,6 @@ torpedo_damage:
           assumed:
             - Fill the Tubes
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
         alternatives:
           - label: without Fill the Tubes
             value:
@@ -441,9 +412,6 @@ torpedo_damage:
               all_barrels_ceiling: 57067
             assumed:
               - Fill the Tubes
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
   - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

@@ -80,9 +80,6 @@ main_battery_damage:
           assumed:
             - Super-Heavy AP Shells
             - Main Battery Modification 3
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
         alternatives:
           - label: without Super-Heavy AP Shells
             value:
@@ -100,9 +97,6 @@ main_battery_damage:
               all_barrels_ceiling: 286380
             assumed:
               - Super-Heavy AP Shells
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
           - label: with Close Quarters Combat active
             value:
               damage_per_minute: 361591
@@ -113,9 +107,6 @@ main_battery_damage:
               - Super-Heavy AP Shells
               - Main Battery Modification 3
               - Close Quarters Combat
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
             note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
   - ammo: HE
     damage: 7300
@@ -210,10 +201,6 @@ main_battery_damage:
             assumed:
               - Main Battery Modification 3
               - Close Quarters Combat
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
             note: "Increases main battery reload speed after an enemy has been spotted within your ship's secondary battery firing range. Changes to the secondary battery firing range induced by the effect of temporary modifiers are not taken into account."
 secondary_damage:
   - ammo: 155 mm HE
@@ -293,10 +280,6 @@ secondary_damage:
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
-            - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
@@ -314,10 +297,6 @@ secondary_damage:
               all_barrels_ceiling: 86667
             assumed:
               - Manual Secondary Battery Aiming
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
   - ammo: 127 mm HE
     damage: 2100
     barrels: 12
@@ -395,10 +374,6 @@ secondary_damage:
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
-            - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
@@ -416,10 +391,6 @@ secondary_damage:
               all_barrels_ceiling: 280000
             assumed:
               - Manual Secondary Battery Aiming
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
   - ammo: 127 mm (2) HE
     damage: 2100
     barrels: 12
@@ -497,10 +468,6 @@ secondary_damage:
           assumed:
             - Manual Secondary Battery Aiming
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Emergency Repair Specialist
-            - AA Defense and ASW Expert
-            - Focus Fire Training
         alternatives:
           - label: without Manual Secondary Battery Aiming
             value:
@@ -518,9 +485,5 @@ secondary_damage:
               all_barrels_ceiling: 336000
             assumed:
               - Manual Secondary Battery Aiming
-            tier_fillers:
-              - Emergency Repair Specialist
-              - AA Defense and ASW Expert
-              - Focus Fire Training
 rate_notes:
   - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

@@ -417,8 +417,8 @@ pub struct RankedShip {
     pub build: Vec<String>,
 
     /// Captain skills taken only to fill cheaper skill tiers; not conditions
-    /// of the build.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// of the build. Not in the tool output.
+    #[serde(skip)]
     pub tier_fillers: Vec<String>,
 
     /// Another ranked ship has the same value.

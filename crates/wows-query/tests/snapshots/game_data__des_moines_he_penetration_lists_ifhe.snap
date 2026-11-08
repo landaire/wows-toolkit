@@ -17,10 +17,6 @@ expression: "he_penetration(\"DM\")"
           value: 42
           assumed:
             - Inertia Fuse for HE Shells
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
           note: "Main battery HE: 34 mm base; 42 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 34 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
 - battery: secondary
   caliber_mm: 127
@@ -37,8 +33,4 @@ expression: "he_penetration(\"DM\")"
           value: 26
           assumed:
             - Inertia Fuse for HE Shells
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
           note: "Secondary battery HE: 21 mm base; 26 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because even 26 mm does not penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

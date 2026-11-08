@@ -74,8 +74,6 @@ slots:
                   - Consumable Enhancements
                   - Engine Boost Modification 1
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
               alternatives:
                 - label: without Consumable Enhancements
                   value: 171.6
@@ -87,15 +85,11 @@ slots:
                   assumed:
                     - Consumable Enhancements
                     - Ship Consumable Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
                 - label: without Ship Consumable Modification 1
                   value: 171.6
                   assumed:
                     - Consumable Enhancements
                     - Engine Boost Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
           charges:
             stat: Engine Boost charges
             unit: charges
@@ -105,9 +99,6 @@ slots:
                 value: 4
                 assumed:
                   - Superintendent
-                tier_fillers:
-                  - Consumable Specialist
-                  - Extra-Heavy Ammunition
               alternatives:
                 - label: without Superintendent
                   value: 3
@@ -166,9 +157,6 @@ slots:
                 value: 4
                 assumed:
                   - Superintendent
-                tier_fillers:
-                  - Consumable Specialist
-                  - Extra-Heavy Ammunition
               alternatives:
                 - label: without Superintendent
                   value: 3
@@ -197,9 +185,6 @@ slots:
                 assumed:
                   - Survivability Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
-                  - Extra-Heavy Ammunition
               alternatives:
                 - label: without Survivability Expert
                   value:
@@ -215,9 +200,6 @@ slots:
                     max_hp: 22300
                   assumed:
                     - Survivability Expert
-                  tier_fillers:
-                    - Consumable Specialist
-                    - Extra-Heavy Ammunition
           heal_per_battle:
             stat: Repair Party heal per battle
             unit: HP
@@ -235,9 +217,6 @@ slots:
                   - Superintendent
                   - Survivability Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
-                  - Extra-Heavy Ammunition
               alternatives:
                 - label: without Superintendent
                   value:
@@ -247,9 +226,6 @@ slots:
                   assumed:
                     - Survivability Expert
                     - Ship Consumable Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
-                    - Extra-Heavy Ammunition
                 - label: without Survivability Expert
                   value:
                     hp: 16544
@@ -258,9 +234,6 @@ slots:
                   assumed:
                     - Superintendent
                     - Ship Consumable Modification 1
-                  tier_fillers:
-                    - Consumable Specialist
-                    - Extra-Heavy Ammunition
                 - label: without Ship Consumable Modification 1
                   value:
                     hp: 17840
@@ -269,9 +242,6 @@ slots:
                   assumed:
                     - Superintendent
                     - Survivability Expert
-                  tier_fillers:
-                    - Consumable Specialist
-                    - Extra-Heavy Ammunition
   - slot: 4
     options:
       - name: Main Battery Reload Booster
@@ -291,9 +261,6 @@ slots:
                 assumed:
                   - Superintendent
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
-                  - Extra-Heavy Ammunition
               alternatives:
                 - label: without Superintendent
                   value: 82
@@ -303,9 +270,6 @@ slots:
                   value: 86
                   assumed:
                     - Superintendent
-                  tier_fillers:
-                    - Consumable Specialist
-                    - Extra-Heavy Ammunition
           reload:
             stat: Main Battery Reload Booster reload
             unit: s

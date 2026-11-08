@@ -78,9 +78,6 @@ torpedoes_per_minute:
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
       alternatives:
         - label: without Fill the Tubes
           value:
@@ -96,9 +93,6 @@ torpedoes_per_minute:
             all_launchers_ceiling: 7.69
           assumed:
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
 main_battery_damage:
   - ammo: AP
     damage: 2100
@@ -178,8 +172,6 @@ main_battery_damage:
             - Extra-Heavy Ammunition
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
         alternatives:
           - label: without Extra-Heavy Ammunition
             value:
@@ -190,9 +182,6 @@ main_battery_damage:
             assumed:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
-            tier_fillers:
-              - Consumable Specialist
-              - Consumable Enhancements
           - label: without Main Battery and AA Specialist
             value:
               damage_per_minute: 186570
@@ -202,8 +191,6 @@ main_battery_damage:
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery Modification 3
-            tier_fillers:
-              - Consumable Specialist
           - label: without Main Battery Modification 3
             value:
               damage_per_minute: 172823
@@ -213,8 +200,6 @@ main_battery_damage:
             assumed:
               - Extra-Heavy Ammunition
               - Main Battery and AA Specialist
-            tier_fillers:
-              - Consumable Specialist
           - label: with Fearless Brawler active
             value:
               damage_per_minute: 218211
@@ -226,8 +211,6 @@ main_battery_damage:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
               - Fearless Brawler
-            tier_fillers:
-              - Consumable Specialist
             note: Reduces main battery reload time while your ship remains detected by an enemy.
   - ammo: HE
     damage: 1700
@@ -306,9 +289,6 @@ main_battery_damage:
           assumed:
             - Main Battery and AA Specialist
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
         alternatives:
           - label: without Main Battery and AA Specialist
             value:
@@ -326,9 +306,6 @@ main_battery_damage:
               all_barrels_ceiling: 130144
             assumed:
               - Main Battery and AA Specialist
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
           - label: with Fearless Brawler active
             value:
               damage_per_minute: 164323
@@ -339,9 +316,6 @@ main_battery_damage:
               - Main Battery and AA Specialist
               - Main Battery Modification 3
               - Fearless Brawler
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
             note: Reduces main battery reload time while your ship remains detected by an enemy.
 torpedo_damage:
   - ammo: 533 mm Mk 17
@@ -421,9 +395,6 @@ torpedo_damage:
           assumed:
             - Fill the Tubes
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
         alternatives:
           - label: without Fill the Tubes
             value:
@@ -441,9 +412,6 @@ torpedo_damage:
               all_barrels_ceiling: 134615
             assumed:
               - Fill the Tubes
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
 torpedo_reload_booster:
   consumable: Torpedo Reload Booster
   launchers_loaded_in_s: 5
@@ -456,9 +424,6 @@ torpedo_reload_booster:
         value: 3
         assumed:
           - Superintendent
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
       alternatives:
         - label: without Superintendent
           value: 2
@@ -570,9 +535,6 @@ torpedo_reload_booster:
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
-          - Extra-Heavy Ammunition
       alternatives:
         - label: without Fill the Tubes
           value:
@@ -592,9 +554,6 @@ torpedo_reload_booster:
             salvos_per_cycle: 4
           assumed:
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist
-            - Extra-Heavy Ammunition
         - label: "with Combat Instructions: Covert Consumable Readiness active"
           value:
             torpedoes_per_minute: 19.24
@@ -683,9 +642,6 @@ torpedo_reload_booster:
             assumed:
               - Fill the Tubes
               - Torpedo Tubes Modification 2
-            tier_fillers:
-              - Consumable Specialist
-              - Extra-Heavy Ammunition
           alternatives:
             - label: without Fill the Tubes
               value:
@@ -703,9 +659,6 @@ torpedo_reload_booster:
                 all_barrels_ceiling: 176966
               assumed:
                 - Fill the Tubes
-              tier_fillers:
-                - Consumable Specialist
-                - Extra-Heavy Ammunition
             - label: "with Combat Instructions: Covert Consumable Readiness active"
               value:
                 damage_per_minute: 336628

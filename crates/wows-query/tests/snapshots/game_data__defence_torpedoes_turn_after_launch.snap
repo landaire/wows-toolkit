@@ -78,8 +78,6 @@ torpedoes_per_minute:
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
       alternatives:
         - label: without Fill the Tubes
           value:
@@ -95,8 +93,6 @@ torpedoes_per_minute:
             all_launchers_ceiling: 5.93
           assumed:
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist
 torpedo_damage:
   - ammo: 622 mm Mk I
     rates:
@@ -171,8 +167,6 @@ torpedo_damage:
           - Pack a Punch
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
       alternatives:
         - label: without Pack a Punch
           value:
@@ -183,8 +177,6 @@ torpedo_damage:
           assumed:
             - Fill the Tubes
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
         - label: without Fill the Tubes
           value:
             damage_per_minute: 76005
@@ -194,9 +186,6 @@ torpedo_damage:
           assumed:
             - Pack a Punch
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         - label: without Torpedo Tubes Modification 2
           value:
             damage_per_minute: 71783
@@ -206,5 +195,3 @@ torpedo_damage:
           assumed:
             - Pack a Punch
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist

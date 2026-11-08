@@ -78,8 +78,6 @@ torpedoes_per_minute:
         assumed:
           - Fill the Tubes
           - Torpedo Tubes Modification 2
-        tier_fillers:
-          - Consumable Specialist
       alternatives:
         - label: without Fill the Tubes
           value:
@@ -95,8 +93,6 @@ torpedoes_per_minute:
             all_launchers_ceiling: 10.67
           assumed:
             - Fill the Tubes
-          tier_fillers:
-            - Consumable Specialist
 main_battery_damage:
   - ammo: AP
     damage: 2850
@@ -191,10 +187,6 @@ main_battery_damage:
             assumed:
               - Main Battery Modification 3
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
-              - Heavy AP Shells
             note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
   - ammo: HE
     damage: 2850
@@ -273,9 +265,6 @@ main_battery_damage:
           assumed:
             - Heavy HE and SAP Shells
             - Main Battery Modification 3
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         alternatives:
           - label: without Heavy HE and SAP Shells
             value:
@@ -293,9 +282,6 @@ main_battery_damage:
               all_barrels_ceiling: 270864
             assumed:
               - Heavy HE and SAP Shells
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
           - label: with Top Grade Gunner active
             value:
               damage_per_minute: 334565
@@ -306,9 +292,6 @@ main_battery_damage:
               - Heavy HE and SAP Shells
               - Main Battery Modification 3
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
             note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
 secondary_damage:
   - ammo: 100 mm HE
@@ -388,10 +371,6 @@ secondary_damage:
           assumed:
             - Top Grade Gunner
             - Auxiliary Armaments Modification 2
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
-            - Heavy AP Shells
         alternatives:
           - label: without Top Grade Gunner
             value:
@@ -409,10 +388,6 @@ secondary_damage:
               all_barrels_ceiling: 317016
             assumed:
               - Top Grade Gunner
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
-              - Heavy AP Shells
 torpedo_damage:
   - ammo: Type 93
     damage: 23767
@@ -492,8 +467,6 @@ torpedo_damage:
             - Pack a Punch
             - Fill the Tubes
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
         alternatives:
           - label: without Pack a Punch
             value:
@@ -504,8 +477,6 @@ torpedo_damage:
             assumed:
               - Fill the Tubes
               - Torpedo Tubes Modification 2
-            tier_fillers:
-              - Consumable Specialist
           - label: without Fill the Tubes
             value:
               damage_per_minute: 154344
@@ -515,9 +486,6 @@ torpedo_damage:
             assumed:
               - Pack a Punch
               - Torpedo Tubes Modification 2
-            tier_fillers:
-              - Consumable Specialist
-              - Focus Fire Training
           - label: without Torpedo Tubes Modification 2
             value:
               damage_per_minute: 145769
@@ -527,8 +495,6 @@ torpedo_damage:
             assumed:
               - Pack a Punch
               - Fill the Tubes
-            tier_fillers:
-              - Consumable Specialist
 torpedo_reload_buffs:
   - consumable: Auxiliary and Torpedo Weaponry Coordination
     choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
@@ -542,9 +508,6 @@ torpedo_reload_buffs:
           value: 4
           assumed:
             - Superintendent
-          tier_fillers:
-            - Consumable Specialist
-            - Focus Fire Training
         alternatives:
           - label: without Superintendent
             value: 3
@@ -643,8 +606,6 @@ torpedo_reload_buffs:
             - Fill the Tubes
             - Ship Consumable Modification 1
             - Torpedo Tubes Modification 2
-          tier_fillers:
-            - Consumable Specialist
         alternatives:
           - label: without Fill the Tubes
             value:
@@ -662,8 +623,6 @@ torpedo_reload_buffs:
             assumed:
               - Fill the Tubes
               - Torpedo Tubes Modification 2
-            tier_fillers:
-              - Consumable Specialist
           - label: without Torpedo Tubes Modification 2
             value:
               torpedoes_per_minute: 5.62
@@ -672,8 +631,6 @@ torpedo_reload_buffs:
             assumed:
               - Fill the Tubes
               - Ship Consumable Modification 1
-            tier_fillers:
-              - Consumable Specialist
           - label: with AA Defense and ASW Expert active
             value:
               torpedoes_per_minute: 6.83
@@ -684,9 +641,6 @@ torpedo_reload_buffs:
               - Ship Consumable Modification 1
               - Torpedo Tubes Modification 2
               - AA Defense and ASW Expert
-            tier_fillers:
-              - Consumable Specialist
-              - Heavy AP Shells
             note: "Improves your ship's characteristics when her AA guns are active."
     torpedo_damage:
       - ammo: Type 93
@@ -768,8 +722,6 @@ torpedo_reload_buffs:
                 - Fill the Tubes
                 - Ship Consumable Modification 1
                 - Torpedo Tubes Modification 2
-              tier_fillers:
-                - Consumable Specialist
             alternatives:
               - label: without Pack a Punch
                 value:
@@ -781,8 +733,6 @@ torpedo_reload_buffs:
                   - Fill the Tubes
                   - Ship Consumable Modification 1
                   - Torpedo Tubes Modification 2
-                tier_fillers:
-                  - Consumable Specialist
               - label: without Fill the Tubes
                 value:
                   damage_per_minute: 162666
@@ -793,9 +743,6 @@ torpedo_reload_buffs:
                   - Pack a Punch
                   - Ship Consumable Modification 1
                   - Torpedo Tubes Modification 2
-                tier_fillers:
-                  - Consumable Specialist
-                  - Focus Fire Training
               - label: without Ship Consumable Modification 1
                 value:
                   damage_per_minute: 180067
@@ -806,8 +753,6 @@ torpedo_reload_buffs:
                   - Pack a Punch
                   - Fill the Tubes
                   - Torpedo Tubes Modification 2
-                tier_fillers:
-                  - Consumable Specialist
               - label: without Torpedo Tubes Modification 2
                 value:
                   damage_per_minute: 153629
@@ -818,8 +763,6 @@ torpedo_reload_buffs:
                   - Pack a Punch
                   - Fill the Tubes
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Consumable Specialist
               - label: with AA Defense and ASW Expert active
                 value:
                   damage_per_minute: 186706
@@ -832,8 +775,6 @@ torpedo_reload_buffs:
                   - Ship Consumable Modification 1
                   - Torpedo Tubes Modification 2
                   - AA Defense and ASW Expert
-                tier_fillers:
-                  - Consumable Specialist
                 note: "Improves your ship's characteristics when her AA guns are active."
 rate_notes:
   - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."

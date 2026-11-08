@@ -17,8 +17,6 @@ expression: "he_penetration(\"Conqueror\")"
           value: 131
           assumed:
             - Inertia Fuse for HE Shells
-          tier_fillers:
-            - Emergency Repair Specialist
           note: "Main battery HE: 105 mm base; 131 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 105 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
 - battery: secondary
   caliber_mm: 133
@@ -31,8 +29,6 @@ expression: "he_penetration(\"Conqueror\")"
         value: 27
         assumed:
           - Inertia Fuse for HE Shells
-        tier_fillers:
-          - Emergency Repair Specialist
       alternatives:
         - label: without Inertia Fuse for HE Shells
           value: 22

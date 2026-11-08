@@ -116,240 +116,240 @@ ship_names:
 leaders:
   health:
     best:
-      - Stalingrad 76950 HP
+      - Stalingrad (Russia) 76950 HP
     worst:
-      - Kitakami 33000 HP
+      - Kitakami (Japan) 33000 HP
   repair_party_heal:
     best:
-      - Almte. Irízar 40%
+      - Almte. Irízar (Pan_America) 40%
     worst:
-      - Yari 14%
+      - Yari (Japan) 14%
   main_battery_reload:
     best:
-      - Jinan 2.64 s
+      - Jinan (Pan_Asia) 2.64 s
     worst:
-      - Latouche-Tréville 23.76 s
+      - Latouche-Tréville (France) 23.76 s
   main_battery_range:
     best:
-      - Yoshino 24.7 km
+      - Yoshino (Japan) 24.7 km
     worst:
-      - Kitakami 12.99 km
+      - Kitakami (Japan) 12.99 km
   dpm_ap:
     best:
-      - Colbert 834225 HP/min
+      - Colbert (France) 834225 HP/min
     worst:
-      - Sevastopol 216563 HP/min
+      - Sevastopol (Russia) 216563 HP/min
   dpm_he:
     best:
-      - Colbert 741176 HP/min
+      - Colbert (France) 741176 HP/min
     worst:
-      - Prinz Adalbert 100000 HP/min
+      - Prinz Adalbert (Germany) 100000 HP/min
   dpm_sap:
     best:
-      - Austin 324000 HP/min
+      - Austin (USA) 324000 HP/min
     worst:
-      - Ravenna 278571 HP/min
+      - Ravenna (Italy) 278571 HP/min
   alpha_ap:
     best:
-      - Puerto Rico 112140 HP
+      - Puerto Rico (USA) 112140 HP
     worst:
-      - Svea 21000 HP
+      - Svea (Europe) 21000 HP
   alpha_he:
     best:
-      - Puerto Rico 56760 HP
+      - Puerto Rico (USA) 56760 HP
     worst:
-      - Kitakami 11880 HP
+      - Kitakami (Japan) 11880 HP
   alpha_sap:
     best:
-      - Venezia 85800 HP
+      - Venezia (Italy) 85800 HP
     worst:
-      - Austin 35640 HP
+      - Austin (USA) 35640 HP
   flight_time_ap:
     best:
-      - Petropavlovsk 5.24 s
+      - Petropavlovsk (Russia) 5.24 s
     worst:
-      - Unie 9.79 s
+      - Unie (Netherlands) 9.79 s
   flight_time_he:
     best:
-      - Petropavlovsk 5.24 s
+      - Petropavlovsk (Russia) 5.24 s
     worst:
-      - Unie 9.79 s
+      - Unie (Netherlands) 9.79 s
   flight_time_sap:
     best:
-      - Venezia 5.97 s
+      - Venezia (Italy) 5.97 s
     worst:
-      - Austin 7.47 s
+      - Austin (USA) 7.47 s
   turret_traverse:
     best:
-      - Austin 3.4 s
+      - Austin (USA) 3.4 s
     worst:
-      - Petrozavodsk 28.96 s
+      - Petrozavodsk (Russia) 28.96 s
   dispersion:
     best:
-      - Zaō 91 m
+      - Zaō (Japan) 91 m
     worst:
-      - Puerto Rico 167 m
+      - Puerto Rico (USA) 167 m
   sigma:
     best:
-      - Stalingrad 2.65 sigma
+      - Stalingrad (Russia) 2.65 sigma
     worst:
-      - Marseille 1.8 sigma
+      - Marseille (France) 1.8 sigma
   fires_per_minute:
     best:
-      - Unie 49.83 fires/min
+      - Unie (Netherlands) 49.83 fires/min
     worst:
-      - Kitakami 8.18 fires/min
+      - Kitakami (Japan) 8.18 fires/min
   bow_barrels:
     best:
-      - Amiral Lartigue 100%
+      - Amiral Lartigue (France) 100%
     worst:
-      - Yodo 33.33%
+      - Yodo (Japan) 33.33%
   stern_barrels:
     best:
-      - Brennus 100%
+      - Brennus (France) 100%
     worst:
-      - Hildebrand 0%
+      - Hildebrand (Germany) 0%
   all_bear_from_bow:
     best:
-      - Amiral Lartigue 0 deg
+      - Amiral Lartigue (France) 0 deg
     worst:
-      - Colbert 77 deg
+      - Colbert (France) 77 deg
   all_bear_from_stern:
     best:
-      - Brennus 25 deg
+      - Brennus (France) 25 deg
     worst:
-      - Colbert 82 deg
+      - Colbert (France) 82 deg
   secondary_dpm:
     best:
-      - Napoli 579861 HP/min
+      - Napoli (Italy) 579861 HP/min
     worst:
-      - Petrozavodsk 180000 HP/min
+      - Petrozavodsk (Russia) 180000 HP/min
   secondary_range:
     best:
-      - Amiral Lartigue 11.95 km
+      - Amiral Lartigue (France) 11.95 km
     worst:
-      - Almte. Irízar 9.07 km
+      - Almte. Irízar (Pan_America) 9.07 km
   torpedo_dpm:
     best:
-      - Zaō 185307 HP/min
+      - Zaō (Japan) 185307 HP/min
     worst:
-      - V. Monomakh 42137 HP/min
+      - V. Monomakh (Russia) 42137 HP/min
   torpedoes_per_minute:
     best:
-      - Yari 7.84 torpedoes/min
+      - Yari (Japan) 7.84 torpedoes/min
     worst:
-      - V. Monomakh 2.54 torpedoes/min
+      - V. Monomakh (Russia) 2.54 torpedoes/min
   torpedo_reload:
     best:
-      - Svea 53.55 s
+      - Svea (Europe) 53.55 s
     worst:
-      - Yoshino 127.75 s
+      - Yoshino (Japan) 127.75 s
   torpedo_launch_from_bow:
     best:
-      - Venezia 21 deg
+      - Venezia (Italy) 21 deg
     worst:
-      - Yari 58 deg
+      - Yari (Japan) 58 deg
   broadside_tubes:
     best:
-      - Kitakami 20 tubes
+      - Kitakami (Japan) 20 tubes
     worst:
-      - Ravenna 3 tubes
+      - Ravenna (Italy) 3 tubes
   aa_damage:
     best:
-      - Komissar 903 HP/s
+      - Komissar (Russia) 903 HP/s
     worst:
-      - Kitakami 11 HP/s
+      - Kitakami (Japan) 11 HP/s
   aa_range:
     best:
-      - A. Nevsky 6.9 km
+      - A. Nevsky (Russia) 6.9 km
     worst:
-      - Kitakami 2.5 km
+      - Kitakami (Japan) 2.5 km
   concealment:
     best:
-      - Kitakami 7.92 km
+      - Kitakami (Japan) 7.92 km
     worst:
-      - Stalingrad 14.24 km
+      - Stalingrad (Russia) 14.24 km
   air_concealment:
     best:
-      - Kitakami 4.02 km
+      - Kitakami (Japan) 4.02 km
     worst:
-      - Ravenna 8.93 km
+      - Ravenna (Italy) 8.93 km
   speed:
     best:
-      - Castilla 37 kn
+      - Castilla (Spain) 37 kn
     worst:
-      - Fearmaw 31.5 kn
+      - Fearmaw (United_Kingdom) 31.5 kn
   rudder_shift:
     best:
-      - Des Moines 4.31 s
+      - Des Moines (USA) 4.31 s
     worst:
-      - Ravenna 14.16 s
+      - Ravenna (Italy) 14.16 s
   turning_circle:
     best:
-      - Colbert 620 m
+      - Colbert (France) 620 m
     worst:
-      - Stalingrad 1130 m
+      - Stalingrad (Russia) 1130 m
   bb_ap_citadel:
     best:
-      - Kitakami 0%
+      - Kitakami (Japan) 0%
     worst:
-      - Yoshino 12.7%
+      - Yoshino (Japan) 12.7%
   bb_ap_overpenetration:
     best:
-      - Kitakami 89.7%
+      - Kitakami (Japan) 89.7%
     worst:
-      - Marseille 38.5%
+      - Marseille (France) 38.5%
   bow_overmatch:
     best:
-      - Des Moines 67.21%
+      - Des Moines (USA) 67.21%
     worst:
-      - Unie 98.36%
+      - Unie (Netherlands) 98.36%
   stern_overmatch:
     best:
-      - Des Moines 67.21%
+      - Des Moines (USA) 67.21%
     worst:
-      - Unie 98.36%
+      - Unie (Netherlands) 98.36%
 torpedo_leaders:
   speed:
     best:
-      - Kitakami Type90 mod. 5 94.81 kn
+      - Kitakami (Japan) Type90 mod. 5 94.81 kn
     worst:
-      - Bremen 533 mm Fünfling 55.12 kn
+      - Bremen (Germany) 533 mm Fünfling 55.12 kn
   range:
     best:
-      - Kitakami Type 93 mod. 2 dw 20.01 km
+      - Kitakami (Japan) Type 93 mod. 2 dw 20.01 km
     worst:
-      - Pioneer 533 mm Mk XM* 6 km
+      - Pioneer (Commonwealth) 533 mm Mk XM* 6 km
   damage:
     best:
-      - Yodo Type 93 27332 HP
+      - Yodo (Japan) Type 93 27332 HP
     worst:
-      - Svea Torped M1947 12305 HP
+      - Svea (Europe) Torped M1947 12305 HP
   damage_at_max_range:
     best:
-      - Yodo Type 93 27332 HP
+      - Yodo (Japan) Type 93 27332 HP
     worst:
-      - Svea Torped M1947 12305 HP
+      - Svea (Europe) Torped M1947 12305 HP
   flood_coefficient:
     best:
-      - Kitakami Type 93 mod. 2 dw 4.36x
+      - Kitakami (Japan) Type 93 mod. 2 dw 4.36x
     worst:
-      - Svea Torped M1947 1.73x
+      - Svea (Europe) Torped M1947 1.73x
   detectability:
     best:
-      - Incheon Mark 17* 0.8 km
+      - Incheon (Pan_Asia) Mark 17* 0.8 km
     worst:
-      - Yoshino Type 93 2.5 km
+      - Yoshino (Japan) Type 93 2.5 km
   reaction_time:
     best:
-      - Incheon Mark 17* 3.92 s
+      - Incheon (Pan_Asia) Mark 17* 3.92 s
     worst:
-      - Yoshino Type 93 13.62 s
+      - Yoshino (Japan) Type 93 13.62 s
   damage_per_minute:
     best:
-      - Zaō Type F3 185307 HP/min
+      - Zaō (Japan) Type F3 185307 HP/min
     worst:
-      - V. Monomakh 53-51 42137 HP/min
+      - V. Monomakh (Russia) 53-51 42137 HP/min
 ships:
   - ship: "T10 Des Moines (cruiser, USA)"
     values:

@@ -32,10 +32,6 @@ slots:
                   - Emergency Repair Expert
                   - Damage Control Party Modification 1
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value: 30.8
@@ -47,19 +43,11 @@ slots:
                   assumed:
                     - Emergency Repair Expert
                     - Ship Consumable Modification 1
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
                 - label: without Ship Consumable Modification 1
                   value: 30.8
                   assumed:
                     - Emergency Repair Expert
                     - Damage Control Party Modification 1
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
           charges:
             stat: Damage Control Party charges
             unit: charges
@@ -110,10 +98,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value: 30.8
@@ -123,10 +107,6 @@ slots:
                   value: 30.8
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
           charges:
             stat: Repair Party charges
             unit: charges
@@ -136,10 +116,6 @@ slots:
                 value: 5
                 assumed:
                   - Emergency Repair Expert
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value: 4
@@ -173,10 +149,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value:
@@ -192,10 +164,6 @@ slots:
                     max_hp: 81100
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
           heal_per_battle:
             stat: Repair Party heal per battle
             unit: HP
@@ -212,10 +180,6 @@ slots:
                 assumed:
                   - Emergency Repair Expert
                   - Ship Consumable Modification 1
-                tier_fillers:
-                  - Emergency Repair Specialist
-                  - AA Defense and ASW Expert
-                  - Focus Fire Training
               alternatives:
                 - label: without Emergency Repair Expert
                   value:
@@ -231,10 +195,6 @@ slots:
                     max_hp: 81100
                   assumed:
                     - Emergency Repair Expert
-                  tier_fillers:
-                    - Emergency Repair Specialist
-                    - AA Defense and ASW Expert
-                    - Focus Fire Training
   - slot: 3
     options:
       - name: Gun Crew Assistance
