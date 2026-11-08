@@ -12,17 +12,40 @@ lines:
     nation: Japan
     class: destroyer
     path:
-      - Hashidate
-      - Chikuma
-      - Umikaze
-      - Wakatake
-      - Isokaze
-      - Minekaze
-      - Hatsuharu
-      - Shiratsuyu
-      - Akizuki
-      - Kitakaze
-      - Harugumo
+      - name: Hashidate
+        tier: 1
+        class: cruiser
+      - name: Chikuma
+        tier: 2
+        class: cruiser
+      - name: Umikaze
+        tier: 2
+        class: destroyer
+      - name: Wakatake
+        tier: 3
+        class: destroyer
+      - name: Isokaze
+        tier: 4
+        class: destroyer
+      - name: Minekaze
+        tier: 5
+        class: destroyer
+      - name: Hatsuharu
+        tier: 6
+        class: destroyer
+      - name: Shiratsuyu
+        tier: 7
+        class: destroyer
+      - name: Akizuki
+        tier: 8
+        class: destroyer
+      - name: Kitakaze
+        tier: 9
+        class: destroyer
+      - name: Harugumo
+        tier: 10
+        class: destroyer
+    class_starts_at: Umikaze
     branches_from: Isokaze
     ships:
       - name: Isokaze
@@ -58,52 +81,44 @@ lines:
         purchase_credits: 19500000
     total_research_xp: 602600
     total_purchase_credits: 51835000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Minekaze
-          tier: 5
-          points: 200
-        - name: Hatsuharu
-          tier: 6
-          points: 500
-        - name: Shiratsuyu
-          tier: 7
-          points: 500
-        - name: Akizuki
-          tier: 8
-          points: 1500
-        - name: Kitakaze
-          tier: 9
-          points: 1500
-        - name: Harugumo
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 605420
-        purchase_credits: 52220000
-      paying_ships:
-        research_xp: 597500
-        purchase_credits: 51130000
-      credits_per_point: 5119.6
-      xp_per_point: 59.4
-      sale_credits: 26110000
-      net_credits_if_owned: 26110000
   - tier_10_ship: Shimakaze
     nation: Japan
     class: destroyer
     path:
-      - Hashidate
-      - Chikuma
-      - Umikaze
-      - Wakatake
-      - Isokaze
-      - Mutsuki
-      - Fubuki
-      - Akatsuki
-      - Kagerō
-      - Yūgumo
-      - Shimakaze
+      - name: Hashidate
+        tier: 1
+        class: cruiser
+      - name: Chikuma
+        tier: 2
+        class: cruiser
+      - name: Umikaze
+        tier: 2
+        class: destroyer
+      - name: Wakatake
+        tier: 3
+        class: destroyer
+      - name: Isokaze
+        tier: 4
+        class: destroyer
+      - name: Mutsuki
+        tier: 5
+        class: destroyer
+      - name: Fubuki
+        tier: 6
+        class: destroyer
+      - name: Akatsuki
+        tier: 7
+        class: destroyer
+      - name: Kagerō
+        tier: 8
+        class: destroyer
+      - name: Yūgumo
+        tier: 9
+        class: destroyer
+      - name: Shimakaze
+        tier: 10
+        class: destroyer
+    class_starts_at: Umikaze
     branches_from: Isokaze
     ships:
       - name: Isokaze
@@ -139,34 +154,3 @@ lines:
         purchase_credits: 19300000
     total_research_xp: 605100
     total_purchase_credits: 51735000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Mutsuki
-          tier: 5
-          points: 200
-        - name: Fubuki
-          tier: 6
-          points: 500
-        - name: Akatsuki
-          tier: 7
-          points: 500
-        - name: Kagerō
-          tier: 8
-          points: 1500
-        - name: Yūgumo
-          tier: 9
-          points: 1500
-        - name: Shimakaze
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 607920
-        purchase_credits: 52120000
-      paying_ships:
-        research_xp: 600000
-        purchase_credits: 51030000
-      credits_per_point: 5109.8
-      xp_per_point: 59.6
-      sale_credits: 26060000
-      net_credits_if_owned: 26060000

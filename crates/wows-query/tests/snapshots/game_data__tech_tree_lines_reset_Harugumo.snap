@@ -6,17 +6,40 @@ expression: named
   nation: Japan
   class: destroyer
   path:
-    - Hashidate
-    - Chikuma
-    - Umikaze
-    - Wakatake
-    - Isokaze
-    - Minekaze
-    - Hatsuharu
-    - Shiratsuyu
-    - Akizuki
-    - Kitakaze
-    - Harugumo
+    - name: Hashidate
+      tier: 1
+      class: cruiser
+    - name: Chikuma
+      tier: 2
+      class: cruiser
+    - name: Umikaze
+      tier: 2
+      class: destroyer
+    - name: Wakatake
+      tier: 3
+      class: destroyer
+    - name: Isokaze
+      tier: 4
+      class: destroyer
+    - name: Minekaze
+      tier: 5
+      class: destroyer
+    - name: Hatsuharu
+      tier: 6
+      class: destroyer
+    - name: Shiratsuyu
+      tier: 7
+      class: destroyer
+    - name: Akizuki
+      tier: 8
+      class: destroyer
+    - name: Kitakaze
+      tier: 9
+      class: destroyer
+    - name: Harugumo
+      tier: 10
+      class: destroyer
+  class_starts_at: Umikaze
   branches_from: Isokaze
   ships:
     - name: Akizuki

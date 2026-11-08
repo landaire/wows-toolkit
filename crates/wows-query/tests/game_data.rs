@@ -441,13 +441,16 @@ fn reset_ranks(sort_by: LineOrder) -> Vec<ResetRank> {
     lines
         .lines
         .into_iter()
-        .map(|line| ResetRank {
-            tier_10_ship: line.tier_10_ship,
-            class: line.class,
-            research_points: line.reset.research_points,
-            credits_per_point: line.reset.credits_per_point,
-            xp_per_point: line.reset.xp_per_point,
-            regrind: line.reset.regrind,
+        .map(|line| {
+            let reset = line.reset.expect("lines sorted by reset carry it");
+            ResetRank {
+                tier_10_ship: line.tier_10_ship,
+                class: line.class,
+                research_points: reset.research_points,
+                credits_per_point: reset.credits_per_point,
+                xp_per_point: reset.xp_per_point,
+                regrind: reset.regrind,
+            }
         })
         .collect()
 }
@@ -470,15 +473,45 @@ fn tech_tree_lines_cheapest_to_reset_by_xp_per_point() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn tech_tree_lines_reset_value_of_named_lines() {
     let lines = game()
-        .tech_tree_lines(&TechTreeLinesArgs { limit: Some(usize::MAX), ..Default::default() })
+        .tech_tree_lines(&TechTreeLinesArgs { include_reset: true, limit: Some(usize::MAX), ..Default::default() })
         .expect("default tiers are valid");
-    assert_eq!(lines.sort_by, LineOrder::CreditsPerPoint);
+    assert_eq!(lines.sort_by, LineOrder::Nation);
 
     for end in ["Harugumo", "Shimakaze", "Essex", "Midway"] {
         let named: Vec<_> = lines.lines.iter().filter(|line| line.tier_10_ship == end).collect();
         assert!(!named.is_empty(), "{end} ends a line");
         insta::assert_yaml_snapshot!(format!("tech_tree_lines_reset_{end}"), named);
     }
+}
+
+/// Path entries carry their tier and class: a carrier line runs through
+/// cruisers and destroyers before its first carrier. The tool leaves the
+/// reset out unless it is asked for or sorts the lines.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_carrier_paths_name_tier_and_class() {
+    let output = game()
+        .call_tool("tech_tree_lines", json!({ "class": "aircraft_carrier", "nation": "USA" }))
+        .expect("carrier lines list");
+    let lines = output["lines"].as_array().expect("lines is an array");
+    assert!(lines.iter().all(|line| line.get("reset").is_none()), "{output:#}");
+
+    let paths: Vec<serde_json::Value> = lines
+        .iter()
+        .map(|line| {
+            json!({
+                "tier_10_ship": line["tier_10_ship"],
+                "class_starts_at": line["class_starts_at"],
+                "path": line["path"],
+            })
+        })
+        .collect();
+    insta::assert_yaml_snapshot!(paths);
+
+    let by_reset = game()
+        .call_tool("tech_tree_lines", json!({ "class": "aircraft_carrier", "sort_by": "credits_per_point" }))
+        .expect("carrier lines list");
+    assert!(by_reset["lines"].as_array().is_some_and(|lines| lines.iter().all(|line| line.get("reset").is_some())));
 }
 
 #[test]
@@ -2049,7 +2082,7 @@ fn tech_tree_lines_by_tier_10_ship() {
                 .tech_tree_lines(&TechTreeLinesArgs { tier_10_ship: Some(ship.to_owned()), ..Default::default() })
                 .expect("the ship ends a line");
             assert_eq!(lines.total, 1);
-            lines.lines[0].path.join(" > ")
+            lines.lines[0].path.iter().map(|ship| ship.name.as_str()).collect::<Vec<_>>().join(" > ")
         })
         .collect();
     insta::assert_yaml_snapshot!(lines);

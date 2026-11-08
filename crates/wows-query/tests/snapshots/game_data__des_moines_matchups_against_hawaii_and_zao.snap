@@ -384,8 +384,8 @@ ships:
       turning_circle: "770 (rank 20/56, p60; heavy cruisers rank 4/23, p82)"
       bb_ap_citadel: "5.8 (rank 28/56, p47; heavy cruisers rank 10/23, p55)"
       bb_ap_overpenetration: "58.9 (rank 17/56, p65; heavy cruisers rank 3/23, p77)"
-      bow_overmatch: "67.21 (rank 1/56, p89; heavy cruisers rank 1/23, p91): most battleships it meets overmatch its bow"
-      stern_overmatch: "67.21 (rank 1/56, p89; heavy cruisers rank 1/23, p91): most battleships it meets overmatch its stern"
+      bow_overmatch: "weakness: 67.21% of the battleships it meets overmatch its bow (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
+      stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
     outliers:
       - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
       - "rudder_shift 4.31 s: better than all 55 other tier 10 cruisers (rank 1/56)"
@@ -466,8 +466,8 @@ ships:
       turning_circle: "840 (rank 33/56, p29; light cruisers rank 19/21, p5)"
       bb_ap_citadel: "7.1 (rank 35/56, p36; light cruisers rank 16/21, p25)"
       bb_ap_overpenetration: "61.6 (rank 14/56, p76; light cruisers rank 13/21, p40)"
-      bow_overmatch: "67.21 (rank 1/56, p89; light cruisers rank 1/21, p100): most battleships it meets overmatch its bow"
-      stern_overmatch: "67.21 (rank 1/56, p89; light cruisers rank 1/21, p100): most battleships it meets overmatch its stern"
+      bow_overmatch: "weakness: 67.21% of the battleships it meets overmatch its bow (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; light cruisers rank 1/21, p100)"
+      stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; light cruisers rank 1/21, p100)"
     outliers:
       - "health 75600 HP: better than 96% of the 55 other tier 10 cruisers (rank 3/56)"
       - "turret_traverse 3.4 s: better than 95% of the 55 other tier 10 cruisers (rank 1/56)"
@@ -560,8 +560,8 @@ ships:
       turning_circle: "840 (rank 33/56, p29; heavy cruisers rank 12/23, p32)"
       bb_ap_citadel: "3.6 (rank 14/56, p73; heavy cruisers rank 3/23, p86)"
       bb_ap_overpenetration: "59.5 (rank 15/56, p75; heavy cruisers rank 2/23, p95)"
-      bow_overmatch: "87.7 (rank 8/56, p31; heavy cruisers rank 4/23, p18): most battleships it meets overmatch its bow"
-      stern_overmatch: "87.7 (rank 8/56, p35; heavy cruisers rank 4/23, p23): most battleships it meets overmatch its stern"
+      bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 8/56, p31; heavy cruisers rank 4/23, p18"
+      stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 8/56, p35; heavy cruisers rank 4/23, p23"
     outliers:
       - "dispersion 91 m: better than all 55 other tier 10 cruisers (rank 1/56)"
       - "torpedo_dpm 185307 HP/min: better than all 35 other tier 10 cruisers (rank 1/36)"

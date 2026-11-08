@@ -6,15 +6,34 @@ expression: named
   nation: USA
   class: aircraft_carrier
   path:
-    - Erie
-    - Chester
-    - Sampson
-    - Wickes
-    - Clemson
-    - Langley
-    - Ranger
-    - Lexington
-    - Midway
+    - name: Erie
+      tier: 1
+      class: cruiser
+    - name: Chester
+      tier: 2
+      class: cruiser
+    - name: Sampson
+      tier: 2
+      class: destroyer
+    - name: Wickes
+      tier: 3
+      class: destroyer
+    - name: Clemson
+      tier: 4
+      class: destroyer
+    - name: Langley
+      tier: 4
+      class: aircraft_carrier
+    - name: Ranger
+      tier: 6
+      class: aircraft_carrier
+    - name: Lexington
+      tier: 8
+      class: aircraft_carrier
+    - name: Midway
+      tier: 10
+      class: aircraft_carrier
+  class_starts_at: Langley
   branches_from: Ranger
   ships:
     - name: Lexington

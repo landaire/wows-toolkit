@@ -6,17 +6,40 @@ expression: named
   nation: Japan
   class: destroyer
   path:
-    - Hashidate
-    - Chikuma
-    - Umikaze
-    - Wakatake
-    - Isokaze
-    - Mutsuki
-    - Fubuki
-    - Akatsuki
-    - Kagerō
-    - Yūgumo
-    - Shimakaze
+    - name: Hashidate
+      tier: 1
+      class: cruiser
+    - name: Chikuma
+      tier: 2
+      class: cruiser
+    - name: Umikaze
+      tier: 2
+      class: destroyer
+    - name: Wakatake
+      tier: 3
+      class: destroyer
+    - name: Isokaze
+      tier: 4
+      class: destroyer
+    - name: Mutsuki
+      tier: 5
+      class: destroyer
+    - name: Fubuki
+      tier: 6
+      class: destroyer
+    - name: Akatsuki
+      tier: 7
+      class: destroyer
+    - name: Kagerō
+      tier: 8
+      class: destroyer
+    - name: Yūgumo
+      tier: 9
+      class: destroyer
+    - name: Shimakaze
+      tier: 10
+      class: destroyer
+  class_starts_at: Umikaze
   branches_from: Isokaze
   ships:
     - name: Kagerō

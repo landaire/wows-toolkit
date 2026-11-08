@@ -12,17 +12,40 @@ lines:
     nation: Russia
     class: destroyer
     path:
-      - Orlan
-      - Novik
-      - Storozhevoi
-      - Derzki
-      - Izyaslav
-      - Podvoisky
-      - Gnevny
-      - Minsk
-      - Ognevoi
-      - Udaloi
-      - Grozovoi
+      - name: Orlan
+        tier: 1
+        class: cruiser
+      - name: Novik
+        tier: 2
+        class: cruiser
+      - name: Storozhevoi
+        tier: 2
+        class: destroyer
+      - name: Derzki
+        tier: 3
+        class: destroyer
+      - name: Izyaslav
+        tier: 4
+        class: destroyer
+      - name: Podvoisky
+        tier: 5
+        class: destroyer
+      - name: Gnevny
+        tier: 6
+        class: destroyer
+      - name: Minsk
+        tier: 7
+        class: destroyer
+      - name: Ognevoi
+        tier: 8
+        class: destroyer
+      - name: Udaloi
+        tier: 9
+        class: destroyer
+      - name: Grozovoi
+        tier: 10
+        class: destroyer
+    class_starts_at: Storozhevoi
     branches_from: Minsk
     ships:
       - name: Ognevoi
@@ -39,51 +62,41 @@ lines:
         purchase_credits: 18000000
     total_research_xp: 490000
     total_purchase_credits: 40000000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Podvoisky
-          tier: 5
-          points: 200
-        - name: Gnevny
-          tier: 6
-          points: 500
-        - name: Minsk
-          tier: 7
-          points: 500
-        - name: Ognevoi
-          tier: 8
-          points: 1500
-        - name: Udaloi
-          tier: 9
-          points: 1500
-        - name: Grozovoi
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 612550
-        purchase_credits: 51013600
-      paying_ships:
-        research_xp: 603500
-        purchase_credits: 49890000
-      credits_per_point: 5001.3
-      xp_per_point: 60.1
-      sale_credits: 25506800
-      net_credits_if_owned: 25506800
   - tier_10_ship: Essex
     nation: USA
     class: aircraft_carrier
     path:
-      - Erie
-      - Chester
-      - Sampson
-      - Wickes
-      - Clemson
-      - Langley
-      - Ranger
-      - Independence
-      - Yorktown
-      - Essex
+      - name: Erie
+        tier: 1
+        class: cruiser
+      - name: Chester
+        tier: 2
+        class: cruiser
+      - name: Sampson
+        tier: 2
+        class: destroyer
+      - name: Wickes
+        tier: 3
+        class: destroyer
+      - name: Clemson
+        tier: 4
+        class: destroyer
+      - name: Langley
+        tier: 4
+        class: aircraft_carrier
+      - name: Ranger
+        tier: 6
+        class: aircraft_carrier
+      - name: Independence
+        tier: 6
+        class: aircraft_carrier
+      - name: Yorktown
+        tier: 8
+        class: aircraft_carrier
+      - name: Essex
+        tier: 10
+        class: aircraft_carrier
+    class_starts_at: Langley
     branches_from: Ranger
     ships:
       - name: Yorktown
@@ -96,46 +109,44 @@ lines:
         purchase_credits: 28500000
     total_research_xp: 491000
     total_purchase_credits: 37500000
-    reset:
-      research_points: 8500
-      points_by_ship:
-        - name: Ranger
-          tier: 6
-          points: 500
-        - name: Independence
-          tier: 6
-          points: 500
-        - name: Yorktown
-          tier: 8
-          points: 1500
-        - name: Essex
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 576020
-        purchase_credits: 46099300
-      paying_ships:
-        research_xp: 556000
-        purchase_credits: 44000000
-      credits_per_point: 5423.4
-      xp_per_point: 67.8
-      sale_credits: 23049650
-      net_credits_if_owned: 23049650
   - tier_10_ship: Shimakaze
     nation: Japan
     class: destroyer
     path:
-      - Hashidate
-      - Chikuma
-      - Umikaze
-      - Wakatake
-      - Isokaze
-      - Mutsuki
-      - Fubuki
-      - Akatsuki
-      - Kagerō
-      - Yūgumo
-      - Shimakaze
+      - name: Hashidate
+        tier: 1
+        class: cruiser
+      - name: Chikuma
+        tier: 2
+        class: cruiser
+      - name: Umikaze
+        tier: 2
+        class: destroyer
+      - name: Wakatake
+        tier: 3
+        class: destroyer
+      - name: Isokaze
+        tier: 4
+        class: destroyer
+      - name: Mutsuki
+        tier: 5
+        class: destroyer
+      - name: Fubuki
+        tier: 6
+        class: destroyer
+      - name: Akatsuki
+        tier: 7
+        class: destroyer
+      - name: Kagerō
+        tier: 8
+        class: destroyer
+      - name: Yūgumo
+        tier: 9
+        class: destroyer
+      - name: Shimakaze
+        tier: 10
+        class: destroyer
+    class_starts_at: Umikaze
     branches_from: Isokaze
     ships:
       - name: Kagerō
@@ -152,52 +163,44 @@ lines:
         purchase_credits: 19300000
     total_research_xp: 492000
     total_purchase_credits: 41600000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Mutsuki
-          tier: 5
-          points: 200
-        - name: Fubuki
-          tier: 6
-          points: 500
-        - name: Akatsuki
-          tier: 7
-          points: 500
-        - name: Kagerō
-          tier: 8
-          points: 1500
-        - name: Yūgumo
-          tier: 9
-          points: 1500
-        - name: Shimakaze
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 607920
-        purchase_credits: 52120000
-      paying_ships:
-        research_xp: 600000
-        purchase_credits: 51030000
-      credits_per_point: 5109.8
-      xp_per_point: 59.6
-      sale_credits: 26060000
-      net_credits_if_owned: 26060000
   - tier_10_ship: Harugumo
     nation: Japan
     class: destroyer
     path:
-      - Hashidate
-      - Chikuma
-      - Umikaze
-      - Wakatake
-      - Isokaze
-      - Minekaze
-      - Hatsuharu
-      - Shiratsuyu
-      - Akizuki
-      - Kitakaze
-      - Harugumo
+      - name: Hashidate
+        tier: 1
+        class: cruiser
+      - name: Chikuma
+        tier: 2
+        class: cruiser
+      - name: Umikaze
+        tier: 2
+        class: destroyer
+      - name: Wakatake
+        tier: 3
+        class: destroyer
+      - name: Isokaze
+        tier: 4
+        class: destroyer
+      - name: Minekaze
+        tier: 5
+        class: destroyer
+      - name: Hatsuharu
+        tier: 6
+        class: destroyer
+      - name: Shiratsuyu
+        tier: 7
+        class: destroyer
+      - name: Akizuki
+        tier: 8
+        class: destroyer
+      - name: Kitakaze
+        tier: 9
+        class: destroyer
+      - name: Harugumo
+        tier: 10
+        class: destroyer
+    class_starts_at: Umikaze
     branches_from: Isokaze
     ships:
       - name: Akizuki
@@ -214,52 +217,44 @@ lines:
         purchase_credits: 19500000
     total_research_xp: 492000
     total_purchase_credits: 41700000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Minekaze
-          tier: 5
-          points: 200
-        - name: Hatsuharu
-          tier: 6
-          points: 500
-        - name: Shiratsuyu
-          tier: 7
-          points: 500
-        - name: Akizuki
-          tier: 8
-          points: 1500
-        - name: Kitakaze
-          tier: 9
-          points: 1500
-        - name: Harugumo
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 605420
-        purchase_credits: 52220000
-      paying_ships:
-        research_xp: 597500
-        purchase_credits: 51130000
-      credits_per_point: 5119.6
-      xp_per_point: 59.4
-      sale_credits: 26110000
-      net_credits_if_owned: 26110000
   - tier_10_ship: Delny
     nation: Russia
     class: destroyer
     path:
-      - Orlan
-      - Novik
-      - Storozhevoi
-      - Derzki
-      - Izyaslav
-      - Podvoisky
-      - Gnevny
-      - Minsk
-      - Kiev
-      - Tashkent
-      - Delny
+      - name: Orlan
+        tier: 1
+        class: cruiser
+      - name: Novik
+        tier: 2
+        class: cruiser
+      - name: Storozhevoi
+        tier: 2
+        class: destroyer
+      - name: Derzki
+        tier: 3
+        class: destroyer
+      - name: Izyaslav
+        tier: 4
+        class: destroyer
+      - name: Podvoisky
+        tier: 5
+        class: destroyer
+      - name: Gnevny
+        tier: 6
+        class: destroyer
+      - name: Minsk
+        tier: 7
+        class: destroyer
+      - name: Kiev
+        tier: 8
+        class: destroyer
+      - name: Tashkent
+        tier: 9
+        class: destroyer
+      - name: Delny
+        tier: 10
+        class: destroyer
+    class_starts_at: Storozhevoi
     branches_from: Minsk
     ships:
       - name: Kiev
@@ -276,35 +271,4 @@ lines:
         purchase_credits: 18800000
     total_research_xp: 495000
     total_purchase_credits: 40800000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: Podvoisky
-          tier: 5
-          points: 200
-        - name: Gnevny
-          tier: 6
-          points: 500
-        - name: Minsk
-          tier: 7
-          points: 500
-        - name: Kiev
-          tier: 8
-          points: 1500
-        - name: Tashkent
-          tier: 9
-          points: 1500
-        - name: Delny
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 617550
-        purchase_credits: 51813600
-      paying_ships:
-        research_xp: 608500
-        purchase_credits: 50690000
-      credits_per_point: 5079.8
-      xp_per_point: 60.5
-      sale_credits: 25906800
-      net_credits_if_owned: 25906800
 omitted: 55

@@ -1,6 +1,6 @@
 //! Tech tree lines: research paths ending at a tier 10 ship, with the
-//! research XP and purchase credits of their ships in a tier range and the
-//! cost of a Research Bureau reset per Research Point.
+//! research XP and purchase credits of their ships in a tier range and, on
+//! request, the cost of a Research Bureau reset per Research Point.
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -54,30 +54,44 @@ pub struct TechTreeLinesArgs {
     #[schemars(range(min = 1, max = 10))]
     pub max_tier: Option<Tier>,
 
-    /// Order of the lines, cheapest first. Defaults to credits_per_point.
+    /// Order of the lines. Defaults to nation.
     pub sort_by: Option<LineOrder>,
+
+    /// Give each line its Research Bureau reset: Research Points and the cost per point. Always given when sort_by is credits_per_point or xp_per_point.
+    #[serde(default)]
+    pub include_reset: bool,
 
     /// Most lines to list. Defaults to 20.
     pub limit: Option<usize>,
 }
 
-/// Order of tech tree lines, cheapest first. Every order breaks remaining
-/// ties by the tier 10 ship's name, then by the path.
+/// Order of tech tree lines. Every order breaks remaining ties by the tier 10
+/// ship's name, then by the path.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LineOrder {
-    /// Reset purchase credits per Research Point, then reset XP per point.
+    /// Nation, then the tier 10 ship's name.
     #[default]
+    Nation,
+
+    /// Cheapest first by reset purchase credits per Research Point, then reset XP per point.
     CreditsPerPoint,
 
-    /// Reset research XP per Research Point, then reset credits per point.
+    /// Cheapest first by reset research XP per Research Point, then reset credits per point.
     XpPerPoint,
 
-    /// Total research XP in the tier range, then total purchase credits.
+    /// Cheapest first by total research XP in the tier range, then total purchase credits.
     ResearchXp,
 
-    /// Total purchase credits in the tier range, then total research XP.
+    /// Cheapest first by total purchase credits in the tier range, then total research XP.
     PurchaseCredits,
+}
+
+impl LineOrder {
+    /// Orders by the Research Bureau reset, which lines then carry.
+    fn by_reset(self) -> bool {
+        matches!(self, Self::CreditsPerPoint | Self::XpPerPoint)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,8 +123,13 @@ pub struct TechTreeLine {
     pub nation: String,
     pub class: ShipClass,
 
-    /// Ship names from tier 1 to tier 10.
-    pub path: Vec<String>,
+    /// Ships from tier 1 to tier 10, each with its tier and class.
+    pub path: Vec<PathShip>,
+
+    /// The first path ship of the line's class, when ships of other classes
+    /// precede it: those are only the research route to the line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class_starts_at: Option<String>,
 
     /// The highest-tier ship this line shares with another line. The line's
     /// own ships follow it.
@@ -124,7 +143,17 @@ pub struct TechTreeLine {
     pub total_research_xp: Experience,
     pub total_purchase_credits: Credits,
 
-    pub reset: LineReset,
+    /// Present when the reset was asked for or orders the lines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset: Option<LineReset>,
+}
+
+/// One ship of a line's research path.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct PathShip {
+    pub name: String,
+    pub tier: Tier,
+    pub class: ShipClass,
 }
 
 /// What a Research Bureau reset of the line pays and what regrinding it
@@ -323,9 +352,8 @@ impl LinePath {
 
 impl GameData {
     /// Research paths ending at a tier 10 ship, with the research XP and
-    /// purchase credits of their ships in a tier range and the value of a
-    /// Research Bureau reset, cheapest first, by default by reset credits per
-    /// Research Point.
+    /// purchase credits of their ships in a tier range and, when asked for or
+    /// sorted by, the value of a Research Bureau reset. By default by nation.
     pub fn tech_tree_lines(&self, args: &TechTreeLinesArgs) -> Result<TechTreeLinesOutput, QueryError> {
         let tiers = TierRange { min: args.min_tier.unwrap_or(Tier(8)), max: args.max_tier.unwrap_or(LINE_END) };
         if tiers.max > LINE_END {
@@ -367,27 +395,31 @@ impl GameData {
             exclude_test: true,
             include_replicas: false,
         };
+        let sort_by = args.sort_by.unwrap_or_default();
+        let with_reset = args.include_reset || sort_by.by_reset();
         let mut lines: Vec<TechTreeLine> = paths
             .iter()
             .filter(|path| filter.matches(&self.ships[path.end()]))
             .filter(|path| end.is_none_or(|end| std::ptr::eq(&self.ships[path.end()], end)))
-            .map(|path| self.tech_tree_line(path, tiers, &lines_through))
+            .map(|path| self.tech_tree_line(path, tiers, &lines_through, with_reset))
             .collect();
 
-        let sort_by = args.sort_by.unwrap_or_default();
         lines.sort_by(|left, right| {
             let xp = left.total_research_xp.cmp(&right.total_research_xp);
             let credits = left.total_purchase_credits.cmp(&right.total_purchase_credits);
-            let credits_per_point = left.reset.credits_per_point.cmp(&right.reset.credits_per_point);
-            let xp_per_point = left.reset.xp_per_point.cmp(&right.reset.xp_per_point);
-            let costs = match sort_by {
+            let per_point = |line: &TechTreeLine| line.reset.as_ref().map(|reset| reset.credits_per_point);
+            let credits_per_point = per_point(left).cmp(&per_point(right));
+            let xp_per_point = |line: &TechTreeLine| line.reset.as_ref().map(|reset| reset.xp_per_point);
+            let xp_per_point = xp_per_point(left).cmp(&xp_per_point(right));
+            let order = match sort_by {
+                LineOrder::Nation => left.nation.cmp(&right.nation),
                 LineOrder::CreditsPerPoint => credits_per_point.then(xp_per_point),
                 LineOrder::XpPerPoint => xp_per_point.then(credits_per_point),
                 LineOrder::ResearchXp => xp.then(credits),
                 LineOrder::PurchaseCredits => credits.then(xp),
             };
 
-            costs.then_with(|| left.tier_10_ship.cmp(&right.tier_10_ship)).then_with(|| left.path.cmp(&right.path))
+            order.then_with(|| left.tier_10_ship.cmp(&right.tier_10_ship)).then_with(|| left.path.cmp(&right.path))
         });
 
         let total = lines.len();
@@ -449,6 +481,7 @@ impl GameData {
         path: &LinePath,
         tiers: TierRange,
         lines_through: &HashMap<usize, BTreeSet<usize>>,
+        with_reset: bool,
     ) -> TechTreeLine {
         let end = &self.ships[path.end()];
         let shares =
@@ -489,16 +522,30 @@ impl GameData {
         let total_purchase_credits =
             Credits::new(ships.iter().filter_map(|ship| ship.purchase_credits).map(Credits::value).sum());
 
+        let route: Vec<PathShip> = path
+            .ships
+            .iter()
+            .map(|index| {
+                let ship = &self.ships[*index];
+                PathShip { name: ship.name.clone(), tier: ship.tier, class: ship.class }
+            })
+            .collect();
+        let class_starts_at = match route.iter().position(|ship| ship.class == end.class) {
+            Some(0) | None => None,
+            Some(first) => Some(route[first].name.clone()),
+        };
+
         TechTreeLine {
             tier_10_ship: end.name.clone(),
             nation: end.param.nation().to_owned(),
             class: end.class,
-            path: path.ships.iter().map(|ship| self.ships[*ship].name.clone()).collect(),
+            path: route,
+            class_starts_at,
             branches_from,
             ships,
             total_research_xp,
             total_purchase_credits,
-            reset: self.line_reset(path),
+            reset: with_reset.then(|| self.line_reset(path)),
         }
     }
 

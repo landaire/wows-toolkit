@@ -98,9 +98,6 @@ pub struct ShipComparisonArgs {
     pub min_tier: Option<Tier>,
     pub max_tier: Option<Tier>,
 
-    /// Nation as GameParams spells it, e.g. "USA".
-    pub nation: Option<String>,
-
     /// Ships to give full entries, e.g. ["Incomparable", "C. Colombo"]; name the ship asked about. Without ships only a summary of the group is returned. Ranks still compare each with the whole group, which also takes in every ship named. Without tiers, the group spans the tiers of the ships named. Matchups against shooter groups are listed only for ships named.
     pub ships: Option<Vec<String>>,
 
@@ -411,15 +408,15 @@ impl GroupRank {
         }
     }
 
-    /// [`GroupRank::ranked`] followed by `within`, the rank among cruisers of
-    /// `cruiser` type: "67 (rank 3/56, p96; heavy cruisers rank 9/24, p65)".
-    fn ranked_with_type(&self, shown: &str, scope: &str, cruiser: CruiserType, within: &GroupRank) -> String {
+    /// [`GroupRank::position_text`] followed by `within`, the rank among
+    /// cruisers of `cruiser` type: "rank 3/56, p96; heavy cruisers rank 9/24, p65".
+    fn position_text_with_type(&self, scope: &str, cruiser: CruiserType, within: &GroupRank) -> String {
         let typed = match within.beaten() {
             None => format!("the only {} with it", cruiser.label()),
             Some(_) => format!("{} {}", cruiser.plural(), within.position_text(cruiser.plural())),
         };
 
-        format!("{shown} ({}; {typed})", self.position_text(scope))
+        format!("{}; {typed}", self.position_text(scope))
     }
 
     /// "worse than 95% of the 40 other tier 10 destroyers (rank 41/41)" when
@@ -777,18 +774,20 @@ impl Factor {
         Meta { key, unit, better, description }
     }
 
-    /// Words that keep a battleship share above half from reading as small:
-    /// "most battleships it meets overmatch its bow".
-    fn majority_note(self, value: f32) -> Option<&'static str> {
+    /// The share as a plain statement when it is above half, so a majority
+    /// reads as one whatever its rank: "67.21% of the battleships it meets
+    /// overmatch its bow".
+    fn majority_statement(self, value: f32) -> Option<String> {
         const HALF: f32 = 50.0;
 
         if value <= HALF {
             return None;
         }
+        let share = number(value);
         match self {
-            Self::BowOvermatch => Some("most battleships it meets overmatch its bow"),
-            Self::SternOvermatch => Some("most battleships it meets overmatch its stern"),
-            Self::BattleshipApCitadel => Some("most of these battleship AP hits detonate in its citadel"),
+            Self::BowOvermatch => Some(format!("{share}% of the battleships it meets overmatch its bow")),
+            Self::SternOvermatch => Some(format!("{share}% of the battleships it meets overmatch its stern")),
+            Self::BattleshipApCitadel => Some(format!("{share}% of these battleship AP hits detonate in its citadel")),
             _ => None,
         }
     }
@@ -1119,7 +1118,7 @@ impl GameData {
         let filter = ShipFilter {
             tiers: Some(tiers),
             class: Some(class),
-            nation: args.nation.clone(),
+            nation: None,
             include_irregular: false,
             exclude_test: false,
             include_replicas: false,
@@ -1161,8 +1160,7 @@ impl GameData {
             (Some(min), Some(max)) => TierRange { min, max },
             _ => tiers,
         };
-        let nation = args.nation.as_deref().map(|nation| format!("{nation} ")).unwrap_or_default();
-        let noun = format!("{nation}{}", class_plural(class));
+        let noun = class_plural(class);
         let group_label = format!("{} {noun}", tier_label(shown_tiers));
         let torpedo_scope = format!("torpedo options of {group_label}");
 
@@ -1275,14 +1273,8 @@ impl GameData {
                             .filter_map(|((_, other), _)| other.values.get(factor).copied());
                         GroupRank::new(value, meta.better, peers)
                     });
-                    let mut text = match (own_type, &type_rank) {
-                        (Some(cruiser), Some(within)) => rank.ranked_with_type(&number(value), &scope, cruiser, within),
-                        _ => rank.ranked(&number(value), &scope),
-                    };
-                    if let Some(note) = factor.majority_note(value) {
-                        text.push_str(": ");
-                        text.push_str(note);
-                    }
+                    let typed = own_type.zip(type_rank.as_ref());
+                    let text = factor_text(*factor, value, &rank, &scope, typed);
                     values.push((meta.key, text));
                     standings.push(meta.standing(value, rank, type_rank));
                 }
@@ -2111,6 +2103,42 @@ fn aspect_key(aspect: Aspect) -> &'static str {
         Aspect::Angled30 => "angled_30",
         Aspect::Angled45 => "angled_45",
     }
+}
+
+/// A ship factor's value with its ranks: "4.84 (rank 14/56, p73; heavy
+/// cruisers rank 1/23, p91)". A majority share leads with the judgment, the
+/// ranks after it: "weakness: 67.21% of the battleships it meets overmatch
+/// its bow (a majority); still tied for the lowest share among tier 10
+/// cruisers (rank 1/56, p89; ...)".
+fn factor_text(
+    factor: Factor,
+    value: f32,
+    rank: &GroupRank,
+    scope: &str,
+    typed: Option<(CruiserType, &GroupRank)>,
+) -> String {
+    let ranks = match typed {
+        Some((cruiser, within)) => rank.position_text_with_type(scope, cruiser, within),
+        None => rank.position_text(scope),
+    };
+    let Some(statement) = factor.majority_statement(value) else {
+        return format!("{} ({ranks})", number(value));
+    };
+
+    // Majority factors are better lower: rank 1 holds the lowest share.
+    let lowest = |within: &GroupRank, among: &str| {
+        (within.position == 1).then(|| {
+            let tie = if within.tied > 0 { "tied for the lowest" } else { "the lowest" };
+            format!("still {tie} share among {among}")
+        })
+    };
+    let best = lowest(rank, scope).or_else(|| typed.and_then(|(cruiser, within)| lowest(within, cruiser.plural())));
+    let standing = match best {
+        Some(best) => format!("{best} ({ranks})"),
+        None => format!("for comparison, {ranks}"),
+    };
+
+    format!("weakness: {statement} (a majority); {standing}")
 }
 
 /// The play style a ship's arcs, plating and matchups point to, each with

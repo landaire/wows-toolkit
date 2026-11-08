@@ -12,17 +12,40 @@ lines:
     nation: USA
     class: battleship
     path:
-      - Erie
-      - Chester
-      - St. Louis
-      - S. Carolina
-      - Wyoming
-      - New York
-      - New Mexico
-      - Colorado
-      - N. Carolina
-      - Iowa
-      - Montana
+      - name: Erie
+        tier: 1
+        class: cruiser
+      - name: Chester
+        tier: 2
+        class: cruiser
+      - name: St. Louis
+        tier: 3
+        class: cruiser
+      - name: S. Carolina
+        tier: 3
+        class: battleship
+      - name: Wyoming
+        tier: 4
+        class: battleship
+      - name: New York
+        tier: 5
+        class: battleship
+      - name: New Mexico
+        tier: 6
+        class: battleship
+      - name: Colorado
+        tier: 7
+        class: battleship
+      - name: N. Carolina
+        tier: 8
+        class: battleship
+      - name: Iowa
+        tier: 9
+        class: battleship
+      - name: Montana
+        tier: 10
+        class: battleship
+    class_starts_at: S. Carolina
     branches_from: Colorado
     ships:
       - name: N. Carolina
@@ -39,52 +62,44 @@ lines:
         purchase_credits: 20800000
     total_research_xp: 542000
     total_purchase_credits: 46100000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: New York
-          tier: 5
-          points: 200
-        - name: New Mexico
-          tier: 6
-          points: 500
-        - name: Colorado
-          tier: 7
-          points: 500
-        - name: N. Carolina
-          tier: 8
-          points: 1500
-        - name: Iowa
-          tier: 9
-          points: 1500
-        - name: Montana
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 679800
-        purchase_credits: 58460300
-      paying_ships:
-        research_xp: 667500
-        purchase_credits: 57050000
-      credits_per_point: 5731.4
-      xp_per_point: 66.6
-      sale_credits: 29230150
-      net_credits_if_owned: 29230150
   - tier_10_ship: Louisiana
     nation: USA
     class: battleship
     path:
-      - Erie
-      - Chester
-      - St. Louis
-      - S. Carolina
-      - Wyoming
-      - New York
-      - New Mexico
-      - Colorado
-      - Nebraska
-      - Delaware
-      - Louisiana
+      - name: Erie
+        tier: 1
+        class: cruiser
+      - name: Chester
+        tier: 2
+        class: cruiser
+      - name: St. Louis
+        tier: 3
+        class: cruiser
+      - name: S. Carolina
+        tier: 3
+        class: battleship
+      - name: Wyoming
+        tier: 4
+        class: battleship
+      - name: New York
+        tier: 5
+        class: battleship
+      - name: New Mexico
+        tier: 6
+        class: battleship
+      - name: Colorado
+        tier: 7
+        class: battleship
+      - name: Nebraska
+        tier: 8
+        class: battleship
+      - name: Delaware
+        tier: 9
+        class: battleship
+      - name: Louisiana
+        tier: 10
+        class: battleship
+    class_starts_at: S. Carolina
     branches_from: Colorado
     ships:
       - name: Nebraska
@@ -101,52 +116,44 @@ lines:
         purchase_credits: 21000000
     total_research_xp: 575000
     total_purchase_credits: 46500000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: New York
-          tier: 5
-          points: 200
-        - name: New Mexico
-          tier: 6
-          points: 500
-        - name: Colorado
-          tier: 7
-          points: 500
-        - name: Nebraska
-          tier: 8
-          points: 1500
-        - name: Delaware
-          tier: 9
-          points: 1500
-        - name: Louisiana
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 712800
-        purchase_credits: 58860300
-      paying_ships:
-        research_xp: 700500
-        purchase_credits: 57450000
-      credits_per_point: 5770.6
-      xp_per_point: 69.9
-      sale_credits: 29430150
-      net_credits_if_owned: 29430150
   - tier_10_ship: Vermont
     nation: USA
     class: battleship
     path:
-      - Erie
-      - Chester
-      - St. Louis
-      - S. Carolina
-      - Wyoming
-      - New York
-      - New Mexico
-      - Colorado
-      - Kansas
-      - Minnesota
-      - Vermont
+      - name: Erie
+        tier: 1
+        class: cruiser
+      - name: Chester
+        tier: 2
+        class: cruiser
+      - name: St. Louis
+        tier: 3
+        class: cruiser
+      - name: S. Carolina
+        tier: 3
+        class: battleship
+      - name: Wyoming
+        tier: 4
+        class: battleship
+      - name: New York
+        tier: 5
+        class: battleship
+      - name: New Mexico
+        tier: 6
+        class: battleship
+      - name: Colorado
+        tier: 7
+        class: battleship
+      - name: Kansas
+        tier: 8
+        class: battleship
+      - name: Minnesota
+        tier: 9
+        class: battleship
+      - name: Vermont
+        tier: 10
+        class: battleship
+    class_starts_at: S. Carolina
     branches_from: Colorado
     ships:
       - name: Kansas
@@ -163,34 +170,3 @@ lines:
         purchase_credits: 20700000
     total_research_xp: 575000
     total_purchase_credits: 47200000
-    reset:
-      research_points: 10200
-      points_by_ship:
-        - name: New York
-          tier: 5
-          points: 200
-        - name: New Mexico
-          tier: 6
-          points: 500
-        - name: Colorado
-          tier: 7
-          points: 500
-        - name: Kansas
-          tier: 8
-          points: 1500
-        - name: Minnesota
-          tier: 9
-          points: 1500
-        - name: Vermont
-          tier: 10
-          points: 6000
-      regrind:
-        research_xp: 712800
-        purchase_credits: 59560300
-      paying_ships:
-        research_xp: 700500
-        purchase_credits: 58150000
-      credits_per_point: 5839.2
-      xp_per_point: 69.9
-      sale_credits: 29780150
-      net_credits_if_owned: 29780150
