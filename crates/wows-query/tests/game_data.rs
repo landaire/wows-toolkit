@@ -24,6 +24,7 @@ use wows_query::citadel::CitadelProfileArgs;
 use wows_query::citadel::Turtleback;
 use wows_query::commanders::CommanderArgs;
 use wows_query::commanders::CommanderSearchArgs;
+use wows_query::comparison::CruiserType;
 use wows_query::comparison::ShipComparisonArgs;
 use wows_query::consumables::ShipConsumablesArgs;
 use wows_query::firing_arcs::BatteryArcs;
@@ -1023,6 +1024,43 @@ fn defence_torpedoes_turn_after_launch() {
         .map(|ammo| json!({ "ammo": ammo["ammo"], "rates": ammo["rates"]["builds"] }))
         .collect();
     insta::assert_yaml_snapshot!(json!({ "torpedoes_per_minute": torpedoes, "torpedo_damage": damage }));
+}
+
+/// Des Moines' plating ranks among tier 10 heavy cruisers as well as among
+/// every tier 10 cruiser, and a majority of battleships overmatching it reads
+/// as a majority.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn des_moines_overmatch_ranks_among_heavy_cruisers() {
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Cruiser),
+            tier: Some(Tier(10)),
+            ships: Some(vec!["Des Moines".to_owned()]),
+            ..Default::default()
+        })
+        .expect("tier 10 cruisers compare");
+    let des_moines = &comparison.ships[0];
+    assert_eq!(des_moines.cruiser_type, Some(CruiserType::Heavy));
+
+    let text = serde_json::to_value(&des_moines.values).expect("values serialize");
+    let ends: Vec<serde_json::Value> = ["bow_overmatch", "stern_overmatch", "bb_ap_citadel"]
+        .into_iter()
+        .filter_map(|factor| {
+            let standing = des_moines.standings.iter().find(|standing| standing.factor == factor)?;
+            let within = standing.type_rank.expect("cruiser groups rank within the type");
+            Some(json!({
+                "factor": factor,
+                "text": text[factor],
+                "heavy_cruisers_better_pct": within.share_better().map(|share| format!("{:.1}", share.value())),
+            }))
+        })
+        .collect();
+    assert!(ends.iter().all(|end| end["text"].as_str().is_some_and(|shown| shown.contains("heavy cruisers rank"))));
+
+    insta::assert_yaml_snapshot!(
+        json!({ "ends": ends, "signals": des_moines.signals, "outliers": des_moines.outliers })
+    );
 }
 
 /// The ship_comparison tool output fits a small model's context: a group of

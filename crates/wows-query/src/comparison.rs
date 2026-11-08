@@ -78,6 +78,10 @@ const OUTLIER_MIN_OTHERS: usize = 4;
 /// an outlier.
 const OUTLIER_SHARE: f32 = 0.9;
 
+/// The note on torpedo reaction time, left out of the tool output when no
+/// named ship carries torpedoes.
+const REACTION_TIME_NOTE: &str = "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit).";
+
 /// Ballistic meters per second per knot of torpedo speed: BigWorld units
 /// per second per knot times ballistic meters per BigWorld unit.
 const TORPEDO_METERS_PER_SECOND_PER_KNOT: f32 = BW_KNOTS_TO_MPS * BW_TO_BALLISTIC;
@@ -203,6 +207,11 @@ pub struct ComparedShip {
     /// Research Bureau ships) or test.
     pub category: ShipCategory,
 
+    /// A cruiser's type by its largest main battery caliber; absent for
+    /// other classes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cruiser_type: Option<CruiserType>,
+
     /// GameParams index, e.g. "PISB110". Not in the tool output.
     #[serde(skip)]
     pub index: String,
@@ -316,6 +325,11 @@ pub struct FactorStanding {
     pub unit: &'static str,
     pub better: FactorDirection,
     pub rank: GroupRank,
+
+    /// Rank among the cruisers of the same type in the group (the same tier
+    /// too for per-tier factors). `None` outside cruiser groups, for torpedo
+    /// options, and when every cruiser of the group is of one type.
+    pub type_rank: Option<GroupRank>,
 }
 
 /// Which values of a factor are better.
@@ -386,10 +400,26 @@ impl GroupRank {
     /// "value (rank r/n, pNN)": pNN is the share of the other values the
     /// ship's beats.
     fn ranked(&self, shown: &str, scope: &str) -> String {
+        format!("{shown} ({})", self.position_text(scope))
+    }
+
+    /// "rank r/n, pNN", or "the only one of the {scope} with it".
+    fn position_text(&self, scope: &str) -> String {
         match self.beaten() {
-            None => format!("{shown} (the only one of the {scope} with it)"),
-            Some(beaten) => format!("{shown} (rank {}/{}, p{})", self.position, self.count, beaten.value().round()),
+            None => format!("the only one of the {scope} with it"),
+            Some(beaten) => format!("rank {}/{}, p{}", self.position, self.count, beaten.value().round()),
         }
+    }
+
+    /// [`GroupRank::ranked`] followed by `within`, the rank among cruisers of
+    /// `cruiser` type: "67 (rank 3/56, p96; heavy cruisers rank 9/24, p65)".
+    fn ranked_with_type(&self, shown: &str, scope: &str, cruiser: CruiserType, within: &GroupRank) -> String {
+        let typed = match within.beaten() {
+            None => format!("the only {} with it", cruiser.label()),
+            Some(_) => format!("{} {}", cruiser.plural(), within.position_text(cruiser.plural())),
+        };
+
+        format!("{shown} ({}; {typed})", self.position_text(scope))
     }
 
     /// "worse than 95% of the 40 other tier 10 destroyers (rank 41/41)" when
@@ -426,6 +456,12 @@ impl GroupRank {
         self.share(self.worse as f32 + self.tied as f32 / 2.0)
     }
 
+    /// Share of the other values better than this one. `None` when it is
+    /// the only value.
+    pub fn share_better(&self) -> Option<Percent> {
+        self.share(self.better as f32)
+    }
+
     fn share(&self, beaten: f32) -> Option<Percent> {
         let others = self.others();
 
@@ -439,6 +475,54 @@ impl GroupRank {
 pub enum Outlier {
     Better,
     Worse,
+}
+
+/// A cruiser's type by its largest main battery caliber. The game draws no
+/// such line; the thresholds fall in the gaps of the calibers cruisers carry:
+/// up to 165 mm (the 152 to 155 mm guns of most light cruisers, Jurien's
+/// 165 mm), 180 to 254 mm (Soviet 180 mm, the common 203 mm, Moskva's
+/// 220 mm, Henri IV's 240 mm, Napoli's 254 mm), and 280 mm and up (Graf
+/// Spee's 283 mm, Alaska's and Stalingrad's 305 mm, Marseille's 330 mm,
+/// Siegfried's and Sevastopol's 380 mm).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CruiserType {
+    Light,
+    Heavy,
+    Large,
+}
+
+impl CruiserType {
+    pub fn from_caliber(caliber: Millimeters) -> Self {
+        // Below 170 mm, and up to 260 mm: each bound sits in a gap no
+        // cruiser's guns fall in.
+        const LIGHT_BELOW: f32 = 170.0;
+        const HEAVY_UP_TO: f32 = 260.0;
+
+        if caliber.value() < LIGHT_BELOW {
+            Self::Light
+        } else if caliber.value() <= HEAVY_UP_TO {
+            Self::Heavy
+        } else {
+            Self::Large
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Light => "light cruiser",
+            Self::Heavy => "heavy cruiser",
+            Self::Large => "large cruiser",
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Light => "light cruisers",
+            Self::Heavy => "heavy cruisers",
+            Self::Large => "large cruisers",
+        }
+    }
 }
 
 /// What a factor measures and which way it improves.
@@ -458,13 +542,13 @@ impl Meta {
         format!("{} ({}, {better} is better): {}", self.key, self.unit, self.description)
     }
 
-    fn standing(&self, value: f32, rank: GroupRank) -> FactorStanding {
+    fn standing(&self, value: f32, rank: GroupRank, type_rank: Option<GroupRank>) -> FactorStanding {
         let better = match self.better {
             Better::Lower => FactorDirection::Lower,
             Better::Higher => FactorDirection::Higher,
         };
 
-        FactorStanding { factor: self.key, value, unit: self.unit, better, rank }
+        FactorStanding { factor: self.key, value, unit: self.unit, better, rank, type_rank }
     }
 
     /// `value` with its unit, e.g. "2.1 km" or "35%".
@@ -691,6 +775,22 @@ impl Factor {
         };
 
         Meta { key, unit, better, description }
+    }
+
+    /// Words that keep a battleship share above half from reading as small:
+    /// "most battleships it meets overmatch its bow".
+    fn majority_note(self, value: f32) -> Option<&'static str> {
+        const HALF: f32 = 50.0;
+
+        if value <= HALF {
+            return None;
+        }
+        match self {
+            Self::BowOvermatch => Some("most battleships it meets overmatch its bow"),
+            Self::SternOvermatch => Some("most battleships it meets overmatch its stern"),
+            Self::BattleshipApCitadel => Some("most of these battleship AP hits detonate in its citadel"),
+            _ => None,
+        }
     }
 
     /// Ranked only among ships of one tier: these are measured against the
@@ -973,9 +1073,10 @@ impl GameData {
             "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with.",
             "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others.",
             "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel.",
-            "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit).",
+            REACTION_TIME_NOTE,
             "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style.",
         ];
+        const CRUISER_TYPE_NOTE: &str = "Cruisers are typed by their largest main battery caliber: light below 170 mm, heavy 170 to 260 mm, large above. Each cruiser value also ranks among the group's cruisers of its type, after the class rank, e.g. \"(rank 3/56, p96; heavy cruisers rank 9/24, p65)\": judge a cruiser against its own type.";
 
         let mut interpretations = Interpretations::default();
         let mut named: Vec<&Ship> = Vec::new();
@@ -1093,21 +1194,29 @@ impl GameData {
         // With ships named their entries say where they stand; the group
         // needs only its extremes beside them.
         let shown = if named.is_empty() { 3 } else { 1 };
+        // Cruisers rank among their own type as well: a light cruiser's
+        // plating and guns say little about a heavy cruiser's.
+        let cruiser_types: Vec<Option<CruiserType>> = group.iter().map(|ship| self.cruiser_type(ship)).collect();
+        let first_type = cruiser_types.iter().flatten().next();
+        let mixed_types = cruiser_types.iter().flatten().any(|cruiser| Some(cruiser) != first_type);
         // The nation keeps the model from guessing it from the name, and
         // "premium" from reading a premium ship as the head of a line.
-        let leader_name = |ship: &Ship| match ship.obtained_note() {
-            Some(note) => format!("{} ({}, {note})", ship.name, ship.param.nation()),
-            None => format!("{} ({})", ship.name, ship.param.nation()),
+        let leader_name = |ship: &Ship, cruiser: Option<CruiserType>| {
+            let notes: Vec<&str> = [Some(ship.param.nation()), cruiser.map(CruiserType::label), ship.obtained_note()]
+                .into_iter()
+                .flatten()
+                .collect();
+            format!("{} ({})", ship.name, notes.join(", "))
         };
         let leaders = FactorLeaderTable(
             factors
                 .iter()
                 .map(|factor| {
                     let meta = factor.meta();
-                    let values = group
-                        .iter()
-                        .zip(&scores)
-                        .filter_map(|(ship, score)| score.values.get(factor).map(|value| (leader_name(ship), *value)));
+                    let values =
+                        group.iter().zip(&scores).zip(&cruiser_types).filter_map(|((ship, score), cruiser)| {
+                            score.values.get(factor).map(|value| (leader_name(ship, *cruiser), *value))
+                        });
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
                 })
                 .collect(),
@@ -1117,12 +1226,12 @@ impl GameData {
                 .iter()
                 .map(|factor| {
                     let meta = factor.meta();
-                    let values = group.iter().zip(&scores).flat_map(|(ship, score)| {
+                    let values = group.iter().zip(&scores).zip(&cruiser_types).flat_map(|((ship, score), cruiser)| {
                         score.torpedoes.iter().filter_map(move |torpedo| {
                             torpedo
                                 .values
                                 .get(factor)
-                                .map(|value| (format!("{} {}", leader_name(ship), torpedo.name), *value))
+                                .map(|value| (format!("{} {}", leader_name(ship, *cruiser), torpedo.name), *value))
                         })
                     });
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
@@ -1154,8 +1263,28 @@ impl GameData {
                     if let Some(outlier) = rank.outlier_line(&scope) {
                         outliers.push(format!("{} {}: {outlier}", meta.key, meta.with_unit(value)));
                     }
-                    values.push((meta.key, rank.ranked(&number(value), &scope)));
-                    standings.push(meta.standing(value, rank));
+                    let own_type = cruiser_types[index].filter(|_| mixed_types);
+                    let type_rank = own_type.map(|cruiser| {
+                        let peers = group
+                            .iter()
+                            .zip(&scores)
+                            .zip(&cruiser_types)
+                            .filter(|((other, _), other_type)| {
+                                **other_type == Some(cruiser) && (!factor.per_tier() || other.tier == ship.tier)
+                            })
+                            .filter_map(|((_, other), _)| other.values.get(factor).copied());
+                        GroupRank::new(value, meta.better, peers)
+                    });
+                    let mut text = match (own_type, &type_rank) {
+                        (Some(cruiser), Some(within)) => rank.ranked_with_type(&number(value), &scope, cruiser, within),
+                        _ => rank.ranked(&number(value), &scope),
+                    };
+                    if let Some(note) = factor.majority_note(value) {
+                        text.push_str(": ");
+                        text.push_str(note);
+                    }
+                    values.push((meta.key, text));
+                    standings.push(meta.standing(value, rank, type_rank));
                 }
 
                 let torpedoes = score
@@ -1179,7 +1308,7 @@ impl GameData {
                                 ));
                             }
                             values.push((meta.key, rank.ranked(&number(value), &torpedo_scope)));
-                            standings.push(meta.standing(value, rank));
+                            standings.push(meta.standing(value, rank, None));
                         }
 
                         TorpedoOption {
@@ -1209,6 +1338,7 @@ impl GameData {
                 ComparedShip {
                     ship: ship.label(),
                     category: ship.category,
+                    cruiser_type: cruiser_types[index],
                     index: ship.param.index().to_owned(),
                     replicas: ship.replicas.clone(),
                     values: FactorValues(values),
@@ -1244,6 +1374,9 @@ impl GameData {
                         "Anti-aircraft is not compared: the server has no cache directory to read raw GameParams into.",
                     );
                 }
+                if mixed_types {
+                    notes.push(CRUISER_TYPE_NOTE);
+                }
                 notes
             },
         })
@@ -1252,16 +1385,38 @@ impl GameData {
     /// [`GameData::ship_comparison`] as the ship_comparison tool returns it:
     /// without ships named, the group summary alone, which keeps a whole
     /// class and tier within a small model's context; with ships named,
-    /// their entries and the leaders without the list of ship names.
+    /// their entries and the leaders without the list of ship names, and
+    /// without the torpedo sections when no named ship carries torpedoes.
     pub fn ship_comparison_summary(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
         let mut output = self.ship_comparison(args)?;
         if args.ships.as_ref().is_none_or(Vec::is_empty) {
             output.ships.clear();
         } else {
             output.ship_names.clear();
+            if output.ships.iter().all(|ship| ship.torpedoes.is_empty()) {
+                output.torpedo_factors.clear();
+                output.torpedo_leaders = FactorLeaderTable::default();
+                output.notes.retain(|note| *note != REACTION_TIME_NOTE);
+            }
         }
 
         Ok(output)
+    }
+
+    /// A cruiser's type by its largest main battery caliber over every gun
+    /// module. `None` for other classes and for a cruiser without main
+    /// battery shells.
+    fn cruiser_type(&self, ship: &Ship) -> Option<CruiserType> {
+        if ship.class != ShipClass::Cruiser {
+            return None;
+        }
+
+        self.shells(ship)
+            .iter()
+            .filter(|shell| shell.battery == Battery::Main)
+            .map(|shell| shell.caliber_mm)
+            .max_by(|left, right| left.value().total_cmp(&right.value()))
+            .map(CruiserType::from_caliber)
     }
 
     /// Every factor of one ship but protection, on its best-fit builds.
@@ -1899,7 +2054,9 @@ fn matchup_lines(
         let label = format!("{shooter} ({}), {}", first.shooter_ship, span(&first.ranges));
 
         let mut aspects = Vec::new();
-        let mut flagged: BTreeMap<(&'static str, &'static str), Vec<String>> = BTreeMap::new();
+        // One line per metric and direction: the aspects share the peer
+        // group, so it is named once.
+        let mut flagged: BTreeMap<(&'static str, &'static str), (usize, Vec<String>)> = BTreeMap::new();
         for matchup in &at_band {
             let rates = [
                 ("citadel", Better::Lower, matchup.citadel.as_ref()),
@@ -1914,22 +2071,30 @@ fn matchup_lines(
                 let value = value.value();
                 let rank = GroupRank::new(value, better, values.iter().copied().chain([value]));
                 parts.push(format!("{metric} {}", rank.ranked(&format!("{}%", number(value)), &peers)));
-                if let (Some(outlier), Some(line)) = (rank.outlier, rank.outlier_line(&peers)) {
+                if let Some(outlier) = rank.outlier {
                     let word = match outlier {
                         Outlier::Better => "better",
                         Outlier::Worse => "worse",
                     };
-                    flagged.entry((metric, word)).or_default().push(format!(
-                        "{} {}%: {line}",
+                    let (others, cases) = flagged.entry((metric, word)).or_default();
+                    *others = rank.others();
+                    cases.push(format!(
+                        "{} {}% (rank {}/{})",
                         matchup.aspect.label(),
-                        number(value)
+                        number(value),
+                        rank.position,
+                        rank.count
                     ));
                 }
             }
             aspects.push((aspect_key(matchup.aspect), parts.join(", ")));
         }
-        for ((metric, _), cases) in flagged {
-            outliers.push(format!("vs {label}, {metric}: {}", cases.join("; ")));
+        for ((metric, word), (others, cases)) in flagged {
+            outliers.push(format!(
+                "vs {label}, {metric}, {word} than at least {}% of the {others} other {peers}: {}",
+                number(OUTLIER_SHARE * 100.0),
+                cases.join(", ")
+            ));
         }
 
         if listed {
@@ -1961,10 +2126,14 @@ fn signals(ship: &Ship, score: &ShipScores) -> Vec<String> {
     let battleships = format!("tier {}-{} battleships", matchmaking.min.0, matchmaking.max.0);
     let plate_clause = |share: Option<f32>, plate: Option<Millimeters>, end: &str| -> Option<(f32, String)> {
         let (share, plate) = (share?, plate?);
-        Some((
-            share,
-            format!("{}% of {battleships} overmatch its {} mm {end} plating", number(share), number(plate.value())),
-        ))
+        // A majority reads as one, whatever its rank among cruisers.
+        let who = if share > HALF {
+            format!("most {battleships} ({}%)", number(share))
+        } else {
+            format!("{}% of {battleships}", number(share))
+        };
+
+        Some((share, format!("{who} overmatch its {} mm {end} plating", number(plate.value()))))
     };
     let stern = plate_clause(value(Factor::SternOvermatch), score.stern_plate, "stern");
     let bow = plate_clause(value(Factor::BowOvermatch), score.bow_plate, "bow");
