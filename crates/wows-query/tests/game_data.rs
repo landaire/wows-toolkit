@@ -1025,6 +1025,47 @@ fn defence_torpedoes_turn_after_launch() {
     insta::assert_yaml_snapshot!(json!({ "torpedoes_per_minute": torpedoes, "torpedo_damage": damage }));
 }
 
+/// The ship_comparison tool output fits a small model's context: a group of
+/// one class and tier, with one ship named and with none.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn comparison_output_stays_bounded() {
+    let mut sizes = Vec::new();
+    for (class, named) in [
+        ("cruiser", Some("Sevastopol")),
+        ("cruiser", None),
+        ("battleship", Some("Yamato")),
+        ("battleship", None),
+        ("destroyer", Some("Shimakaze")),
+        ("destroyer", None),
+    ] {
+        let mut args = json!({ "class": class, "min_tier": 10, "max_tier": 10 });
+        if let Some(ship) = named {
+            args["ships"] = json!([ship]);
+        }
+        let output = game().call_tool("ship_comparison", args).expect("group compares");
+        let chars = serde_json::to_string(&output).expect("output serializes").len();
+        let limit = if named.is_some() { 20_000 } else { 30_000 };
+        assert!(chars < limit, "tier 10 {class} named {named:?}: {chars} chars, over {limit}");
+        sizes.push(format!("tier 10 {class} named {named:?}: {chars} chars, about {} tokens", chars * 2 / 7));
+        if class == "destroyer" && named.is_none() {
+            assert!(output.get("ships").is_none(), "{output:#}");
+            insta::assert_yaml_snapshot!("tier_10_destroyer_comparison_summary", output);
+        }
+    }
+    println!("{sizes:#?}");
+
+    // The library keeps every ship of a group compared without names.
+    let full = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Cruiser),
+            tier: Some(Tier(10)),
+            ..Default::default()
+        })
+        .expect("tier 10 cruisers compare");
+    assert_eq!(full.ships.len(), full.ranked);
+}
+
 /// The numbers behind each "value (rank r/n, pNN)" text, with the GameParams
 /// index of each ship, for callers that rank ships themselves.
 #[test]

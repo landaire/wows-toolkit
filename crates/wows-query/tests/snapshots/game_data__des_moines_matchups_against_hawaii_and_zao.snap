@@ -56,6 +56,300 @@ torpedo_factors:
   - "detectability (km, lower is better): distance at which ships detect the torpedo"
   - "reaction_time (s, lower is better): time a target has from detecting the torpedo until it arrives: detectability / speed"
   - "damage_per_minute (HP/min, higher is better): torpedo damage per minute, every torpedo hitting"
+ship_names:
+  - A. Nevsky
+  - Almte. Irízar
+  - Amiral Lartigue
+  - Austin
+  - Bremen
+  - Brennus
+  - Brisbane
+  - Castilla
+  - Cerberus
+  - Colbert
+  - Defence
+  - Des Moines
+  - Gibraltar
+  - Goliath
+  - Gouden Leeuw
+  - Hawaii
+  - Henri IV
+  - Hildebrand
+  - Hindenburg
+  - Incheon
+  - Jinan
+  - Kitakami
+  - Komissar
+  - Kushiro
+  - Marseille
+  - Minotaur
+  - Monmouth
+  - Moskva
+  - Napoli
+  - Petropavlovsk
+  - Pioneer
+  - Plymouth
+  - Prins van Oranje
+  - Prinz Adalbert
+  - Puerto Rico
+  - Salem
+  - San Martín
+  - Sevastopol
+  - Smolensk
+  - Stalingrad
+  - Svea
+  - Taejong
+  - Utrecht
+  - Vanadis
+  - Venezia
+  - Worcester
+  - Yodo
+  - Yoshino
+  - Zaō
+  - Fearmaw
+  - Latouche-Tréville
+  - Petrozavodsk
+  - Ravenna
+  - Unie
+  - V. Monomakh
+  - Yari
+leaders:
+  health:
+    best:
+      - Stalingrad 76950 HP
+    worst:
+      - Kitakami 33000 HP
+  repair_party_heal:
+    best:
+      - Almte. Irízar 40%
+    worst:
+      - Yari 14%
+  main_battery_reload:
+    best:
+      - Jinan 2.64 s
+    worst:
+      - Latouche-Tréville 23.76 s
+  main_battery_range:
+    best:
+      - Yoshino 24.7 km
+    worst:
+      - Kitakami 12.99 km
+  dpm_ap:
+    best:
+      - Colbert 834225 HP/min
+    worst:
+      - Sevastopol 216563 HP/min
+  dpm_he:
+    best:
+      - Colbert 741176 HP/min
+    worst:
+      - Prinz Adalbert 100000 HP/min
+  dpm_sap:
+    best:
+      - Austin 324000 HP/min
+    worst:
+      - Ravenna 278571 HP/min
+  alpha_ap:
+    best:
+      - Puerto Rico 112140 HP
+    worst:
+      - Svea 21000 HP
+  alpha_he:
+    best:
+      - Puerto Rico 56760 HP
+    worst:
+      - Kitakami 11880 HP
+  alpha_sap:
+    best:
+      - Venezia 85800 HP
+    worst:
+      - Austin 35640 HP
+  flight_time_ap:
+    best:
+      - Petropavlovsk 5.24 s
+    worst:
+      - Unie 9.79 s
+  flight_time_he:
+    best:
+      - Petropavlovsk 5.24 s
+    worst:
+      - Unie 9.79 s
+  flight_time_sap:
+    best:
+      - Venezia 5.97 s
+    worst:
+      - Austin 7.47 s
+  turret_traverse:
+    best:
+      - Austin 3.4 s
+    worst:
+      - Petrozavodsk 28.96 s
+  dispersion:
+    best:
+      - Zaō 91 m
+    worst:
+      - Puerto Rico 167 m
+  sigma:
+    best:
+      - Stalingrad 2.65 sigma
+    worst:
+      - Marseille 1.8 sigma
+  fires_per_minute:
+    best:
+      - Unie 49.83 fires/min
+    worst:
+      - Kitakami 8.18 fires/min
+  bow_barrels:
+    best:
+      - Amiral Lartigue 100%
+    worst:
+      - Yodo 33.33%
+  stern_barrels:
+    best:
+      - Brennus 100%
+    worst:
+      - Hildebrand 0%
+  all_bear_from_bow:
+    best:
+      - Amiral Lartigue 0 deg
+    worst:
+      - Colbert 77 deg
+  all_bear_from_stern:
+    best:
+      - Brennus 25 deg
+    worst:
+      - Colbert 82 deg
+  secondary_dpm:
+    best:
+      - Napoli 579861 HP/min
+    worst:
+      - Petrozavodsk 180000 HP/min
+  secondary_range:
+    best:
+      - Amiral Lartigue 11.95 km
+    worst:
+      - Almte. Irízar 9.07 km
+  torpedo_dpm:
+    best:
+      - Zaō 185307 HP/min
+    worst:
+      - V. Monomakh 42137 HP/min
+  torpedoes_per_minute:
+    best:
+      - Yari 7.84 torpedoes/min
+    worst:
+      - V. Monomakh 2.54 torpedoes/min
+  torpedo_reload:
+    best:
+      - Svea 53.55 s
+    worst:
+      - Yoshino 127.75 s
+  torpedo_launch_from_bow:
+    best:
+      - Venezia 21 deg
+    worst:
+      - Yari 58 deg
+  broadside_tubes:
+    best:
+      - Kitakami 20 tubes
+    worst:
+      - Ravenna 3 tubes
+  aa_damage:
+    best:
+      - Komissar 903 HP/s
+    worst:
+      - Kitakami 11 HP/s
+  aa_range:
+    best:
+      - A. Nevsky 6.9 km
+    worst:
+      - Kitakami 2.5 km
+  concealment:
+    best:
+      - Kitakami 7.92 km
+    worst:
+      - Stalingrad 14.24 km
+  air_concealment:
+    best:
+      - Kitakami 4.02 km
+    worst:
+      - Ravenna 8.93 km
+  speed:
+    best:
+      - Castilla 37 kn
+    worst:
+      - Fearmaw 31.5 kn
+  rudder_shift:
+    best:
+      - Des Moines 4.31 s
+    worst:
+      - Ravenna 14.16 s
+  turning_circle:
+    best:
+      - Colbert 620 m
+    worst:
+      - Stalingrad 1130 m
+  bb_ap_citadel:
+    best:
+      - Kitakami 0%
+    worst:
+      - Yoshino 12.7%
+  bb_ap_overpenetration:
+    best:
+      - Kitakami 89.7%
+    worst:
+      - Marseille 38.5%
+  bow_overmatch:
+    best:
+      - Des Moines 67.21%
+    worst:
+      - Unie 98.36%
+  stern_overmatch:
+    best:
+      - Des Moines 67.21%
+    worst:
+      - Unie 98.36%
+torpedo_leaders:
+  speed:
+    best:
+      - Kitakami Type90 mod. 5 94.81 kn
+    worst:
+      - Bremen 533 mm Fünfling 55.12 kn
+  range:
+    best:
+      - Kitakami Type 93 mod. 2 dw 20.01 km
+    worst:
+      - Pioneer 533 mm Mk XM* 6 km
+  damage:
+    best:
+      - Yodo Type 93 27332 HP
+    worst:
+      - Svea Torped M1947 12305 HP
+  damage_at_max_range:
+    best:
+      - Yodo Type 93 27332 HP
+    worst:
+      - Svea Torped M1947 12305 HP
+  flood_coefficient:
+    best:
+      - Kitakami Type 93 mod. 2 dw 4.36x
+    worst:
+      - Svea Torped M1947 1.73x
+  detectability:
+    best:
+      - Incheon Mark 17* 0.8 km
+    worst:
+      - Yoshino Type 93 2.5 km
+  reaction_time:
+    best:
+      - Incheon Mark 17* 3.92 s
+    worst:
+      - Yoshino Type 93 13.62 s
+  damage_per_minute:
+    best:
+      - Zaō Type F3 185307 HP/min
+    worst:
+      - V. Monomakh 53-51 42137 HP/min
 ships:
   - ship: "T10 Des Moines (cruiser, USA)"
     values:

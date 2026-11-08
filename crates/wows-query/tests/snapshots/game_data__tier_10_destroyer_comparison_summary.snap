@@ -1,0 +1,483 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: output
+---
+group: tier 10 destroyers
+ranked: 40
+test: 4
+torpedo_options: 43
+reference_range_km: 10
+factors:
+  - "health (HP, higher is better): hit points"
+  - "repair_party_heal (%, higher is better): share of maximum HP one Repair Party charge restores, stock"
+  - "main_battery_reload (s, lower is better): main battery reload"
+  - "main_battery_range (km, higher is better): main battery firing range"
+  - "dpm_ap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
+  - "dpm_he (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
+  - "dpm_sap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
+  - "alpha_ap (HP, higher is better): damage of one salvo of every main battery barrel of this ammo"
+  - "alpha_he (HP, higher is better): damage of one salvo of every main battery barrel of this ammo"
+  - "alpha_sap (HP, higher is better): damage of one salvo of every main battery barrel of this ammo"
+  - "flight_time_ap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
+  - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
+  - "sigma (sigma, higher is better): main battery sigma; higher puts more shells near the aim point"
+  - "fires_per_minute (fires/min, higher is better): fire starts per minute of every armament against one target at its best bearing, every projectile hitting"
+  - "bow_barrels (%, higher is better): share of main battery barrels that bear on a target within 30 deg of the bow, at the best bearing"
+  - "stern_barrels (%, higher is better): share of main battery barrels that bear on a target within 30 deg of the stern, at the best bearing; kiting"
+  - "all_bear_from_bow (deg, lower is better): smallest angle off the bow at which every main battery barrel bears"
+  - "all_bear_from_stern (deg, lower is better): smallest angle off the stern at which every main battery barrel bears; the kiting angle"
+  - "secondary_dpm (HP/min, higher is better): secondary battery damage per minute, each group at its own best bearing, added up, every shell hitting"
+  - "secondary_range (km, higher is better): secondary battery firing range"
+  - "torpedo_dpm (HP/min, higher is better): torpedo damage per minute of the best torpedo against one target at its best bearing, every torpedo hitting"
+  - "torpedoes_per_minute (torpedoes/min, higher is better): torpedoes launched per minute against one target at its best bearing, with the loaders' limit"
+  - "torpedo_reload (s, lower is better): torpedo tube reload"
+  - "torpedo_launch_from_bow (deg, lower is better): smallest angle off the bow at which a torpedo launcher bears; 0 launches bow-on"
+  - "broadside_tubes (tubes, higher is better): torpedo tubes that bear on one broadside at once"
+  - "aa_damage (HP/s, higher is better): continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted"
+  - "aa_range (km, higher is better): reach of the longest anti-aircraft aura, stock"
+  - "concealment (km, lower is better): detectability by ships"
+  - "air_concealment (km, lower is better): detectability by aircraft"
+  - "speed (kn, higher is better): top speed"
+  - "rudder_shift (s, lower is better): rudder shift time"
+  - "turning_circle (m, lower is better): turning circle radius"
+torpedo_factors:
+  - "speed (kn, higher is better): torpedo speed"
+  - "range (km, higher is better): torpedo range"
+  - "damage (HP, higher is better): damage of one torpedo hit at full damage"
+  - "damage_at_max_range (HP, higher is better): damage of one torpedo hit at the end of its run; less than damage for torpedoes whose damage falls with distance"
+  - "flood_coefficient (x, higher is better): flooding coefficient of one hit (uwCritical), reduced by the target's torpedo protection; a relative weight, not a probability"
+  - "detectability (km, lower is better): distance at which ships detect the torpedo"
+  - "reaction_time (s, lower is better): time a target has from detecting the torpedo until it arrives: detectability / speed"
+  - "damage_per_minute (HP/min, higher is better): torpedo damage per minute, every torpedo hitting"
+ship_names:
+  - 20 de Julio
+  - A. Regolo
+  - A. da Barbiano
+  - Burrows
+  - Cassard
+  - Châteaurenault
+  - Daring
+  - Delny
+  - Druid
+  - Elbing
+  - F. Sherman
+  - Fuyutsuki
+  - G. Hoffmann
+  - Gdańsk
+  - Gearing
+  - Grozovoi
+  - Halland
+  - Harugumo
+  - Hayate
+  - Hull
+  - Khabarovsk
+  - Kléber
+  - La Pampa
+  - Laffey
+  - Lüshun
+  - Marceau
+  - Ragnar
+  - Shimakaze
+  - Småland
+  - Somers
+  - Tromp
+  - Vampire II
+  - Yueyang
+  - Z-42
+  - Z-52
+  - Álvaro de Bazán
+  - Kléber TE
+  - Lübeck
+  - Peredovoy
+  - Södermanland
+leaders:
+  health:
+    best:
+      - A. da Barbiano 35600 HP
+      - Elbing 34400 HP
+      - Lübeck 34400 HP
+    worst:
+      - Peredovoy 20400 HP
+      - Somers 20800 HP
+      - Shimakaze 21400 HP
+  repair_party_heal:
+    best:
+      - Laffey 30%
+      - Lüshun 30%
+      - Peredovoy 30%
+    worst:
+      - Kléber TE 10%
+      - Druid 10%
+      - Daring 10%
+  main_battery_reload:
+    best:
+      - F. Sherman 1.25 s
+      - Lüshun 1.42 s
+      - Småland 1.42 s
+    worst:
+      - Lübeck 6.46 s
+      - G. Hoffmann 6.19 s
+      - Elbing 5.94 s
+  main_battery_range:
+    best:
+      - Kléber 18.88 km
+      - Elbing 18.56 km
+      - Tromp 18.46 km
+    worst:
+      - Kléber TE 10.2 km
+      - Södermanland 12.54 km
+      - A. Regolo 13.36 km
+  dpm_ap:
+    best:
+      - Harugumo 465107 HP/min
+      - Marceau 432057 HP/min
+      - Lüshun 399381 HP/min
+    worst:
+      - Shimakaze 177425 HP/min
+      - La Pampa 196390 HP/min
+      - Somers 216029 HP/min
+  dpm_he:
+    best:
+      - Harugumo 305406 HP/min
+      - Marceau 303486 HP/min
+      - Småland 295525 HP/min
+    worst:
+      - Lübeck 100310 HP/min
+      - Elbing 109172 HP/min
+      - G. Hoffmann 128023 HP/min
+  dpm_sap:
+    best:
+      - A. da Barbiano 765550 HP/min
+      - F. Sherman 387560 HP/min
+      - Burrows 369105 HP/min
+    worst:
+      - A. Regolo 318399 HP/min
+      - Burrows 369105 HP/min
+      - F. Sherman 387560 HP/min
+  alpha_ap:
+    best:
+      - Elbing 26445 HP
+      - G. Hoffmann 26445 HP
+      - Lübeck 26445 HP
+    worst:
+      - Södermanland 9030 HP
+      - Småland 9030 HP
+      - La Pampa 9030 HP
+  alpha_he:
+    best:
+      - Kléber 16000 HP
+      - Kléber TE 16000 HP
+      - A. Regolo 15600 HP
+    worst:
+      - F. Sherman 5400 HP
+      - Lüshun 5600 HP
+      - La Pampa 6800 HP
+  alpha_sap:
+    best:
+      - A. da Barbiano 32000 HP
+      - A. Regolo 24400 HP
+      - Burrows 18000 HP
+    worst:
+      - F. Sherman 8100 HP
+      - Burrows 18000 HP
+      - A. Regolo 24400 HP
+  flight_time_ap:
+    best:
+      - Elbing 4.92 s
+      - G. Hoffmann 4.92 s
+      - Lübeck 4.92 s
+    worst:
+      - Yueyang 8.23 s
+      - Somers 8.23 s
+      - Laffey 8.23 s
+  flight_time_he:
+    best:
+      - Elbing 4.92 s
+      - Lübeck 4.92 s
+      - G. Hoffmann 4.94 s
+    worst:
+      - Yueyang 8.34 s
+      - Somers 8.34 s
+      - Laffey 8.34 s
+  flight_time_sap:
+    best:
+      - F. Sherman 5.89 s
+      - Burrows 6.16 s
+      - A. Regolo 6.27 s
+    worst:
+      - A. da Barbiano 7.27 s
+      - A. Regolo 6.27 s
+      - Burrows 6.16 s
+  turret_traverse:
+    best:
+      - F. Sherman 3.4 s
+      - Hull 4.54 s
+      - Marceau 4.54 s
+    worst:
+      - Shimakaze 17.23 s
+      - Kléber TE 13.61 s
+      - Álvaro de Bazán 13.61 s
+  dispersion:
+    best:
+      - Elbing 47 m
+      - G. Hoffmann 47 m
+      - Ragnar 47 m
+    worst:
+      - Södermanland 84 m
+      - Peredovoy 84 m
+      - Álvaro de Bazán 84 m
+  sigma:
+    best:
+      - 20 de Julio 2 sigma
+      - A. Regolo 2 sigma
+      - A. da Barbiano 2 sigma
+    worst:
+      - Södermanland 2 sigma
+      - Peredovoy 2 sigma
+      - Lübeck 2 sigma
+  fires_per_minute:
+    best:
+      - Tromp 25.06 fires/min
+      - Vampire II 15.5 fires/min
+      - Harugumo 15.27 fires/min
+    worst:
+      - Somers 5.74 fires/min
+      - Lübeck 7.24 fires/min
+      - Shimakaze 7.5 fires/min
+  bow_barrels:
+    best:
+      - Daring 100%
+      - Delny 100%
+      - Druid 100%
+    worst:
+      - Lübeck 33.33%
+      - Shimakaze 33.33%
+      - Hayate 33.33%
+  stern_barrels:
+    best:
+      - Delny 100%
+      - Halland 100%
+      - Hull 100%
+    worst:
+      - Druid 0%
+      - Peredovoy 33.33%
+      - Vampire II 33.33%
+  all_bear_from_bow:
+    best:
+      - Druid 0 deg
+      - La Pampa 0 deg
+      - Daring 24 deg
+    worst:
+      - A. da Barbiano 71 deg
+      - Z-42 45 deg
+      - Gdańsk 44 deg
+  all_bear_from_stern:
+    best:
+      - Kléber 24 deg
+      - Kléber TE 24 deg
+      - Marceau 27 deg
+    worst:
+      - A. da Barbiano 71 deg
+      - Burrows 50 deg
+      - Z-42 45 deg
+  secondary_dpm:
+    best:
+      - Peredovoy 45000 HP/min
+    worst:
+      - Peredovoy 45000 HP/min
+  secondary_range:
+    best:
+      - Peredovoy 6.3 km
+    worst:
+      - Peredovoy 6.3 km
+  torpedo_dpm:
+    best:
+      - Shimakaze 217472 HP/min
+      - La Pampa 158371 HP/min
+      - Gearing 144933 HP/min
+    worst:
+      - Hull 38464 HP/min
+      - F. Sherman 38464 HP/min
+      - Marceau 49158 HP/min
+  torpedoes_per_minute:
+    best:
+      - Shimakaze 10.18 torpedoes/min
+      - G. Hoffmann 9.8 torpedoes/min
+      - La Pampa 9.05 torpedoes/min
+    worst:
+      - Hull 2.15 torpedoes/min
+      - F. Sherman 2.15 torpedoes/min
+      - Harugumo 3 torpedoes/min
+  torpedo_reload:
+    best:
+      - Tromp 53.55 s
+      - F. Sherman 55.84 s
+      - Hull 55.84 s
+    worst:
+      - Harugumo 120.1 s
+      - Hayate 117.04 s
+      - Marceau 108.63 s
+  torpedo_launch_from_bow:
+    best:
+      - Châteaurenault 6 deg
+      - Kléber 18 deg
+      - Kléber TE 18 deg
+    worst:
+      - Södermanland 64 deg
+      - Halland 64 deg
+      - Småland 63 deg
+  broadside_tubes:
+    best:
+      - La Pampa 15 tubes
+      - Shimakaze 15 tubes
+      - Somers 12 tubes
+    worst:
+      - Hull 2 tubes
+      - F. Sherman 2 tubes
+      - Tromp 3 tubes
+  aa_damage:
+    best:
+      - Ragnar 669 HP/s
+      - Elbing 392 HP/s
+      - Lübeck 392 HP/s
+    worst:
+      - Somers 32 HP/s
+      - 20 de Julio 63 HP/s
+      - Hull 77 HP/s
+  aa_range:
+    best:
+      - Burrows 4 km
+      - Elbing 4 km
+      - F. Sherman 4 km
+    worst:
+      - A. da Barbiano 2 km
+      - Somers 2.4 km
+      - Shimakaze 2.5 km
+  concealment:
+    best:
+      - Shimakaze 5.59 km
+      - Gearing 5.61 km
+      - La Pampa 5.78 km
+    worst:
+      - A. da Barbiano 7.96 km
+      - Khabarovsk 7.86 km
+      - Ragnar 7.51 km
+  air_concealment:
+    best:
+      - 20 de Julio 2.36 km
+      - Somers 2.53 km
+      - Gearing 2.61 km
+    worst:
+      - Kléber TE 4.36 km
+      - Lübeck 4.06 km
+      - Elbing 4.06 km
+  speed:
+    best:
+      - Kléber 44 kn
+      - Marceau 44 kn
+      - Kléber TE 44 kn
+    worst:
+      - 20 de Julio 32 kn
+      - Fuyutsuki 33 kn
+      - Tromp 33.5 kn
+  rudder_shift:
+    best:
+      - Shimakaze 1.87 s
+      - Laffey 1.95 s
+      - Yueyang 1.95 s
+    worst:
+      - Khabarovsk 6.96 s
+      - Lübeck 3.96 s
+      - Elbing 3.96 s
+  turning_circle:
+    best:
+      - 20 de Julio 560 m
+      - La Pampa 560 m
+      - Cassard 610 m
+    worst:
+      - Lübeck 890 m
+      - Elbing 890 m
+      - Harugumo 830 m
+torpedo_leaders:
+  speed:
+    best:
+      - Gdańsk Torped M1947 mod 0 94.81 kn
+      - Halland Torped M1947 mod 1 94.81 kn
+      - Södermanland Torped M1947 mod 1 94.81 kn
+    worst:
+      - Lübeck G7 T1 Ausf.C 55.12 kn
+      - Elbing G7 T1 Ausf.C 55.12 kn
+      - Khabarovsk ET-46 58.43 kn
+  range:
+    best:
+      - Shimakaze Type 93 20.01 km
+      - Châteaurenault 550 mm 20 km
+      - F. Sherman Mk17 16.5 km
+    worst:
+      - Peredovoy ET-46M 6 km
+      - Khabarovsk ET-46 6 km
+      - Laffey Mk17 8 km
+  damage:
+    best:
+      - Fuyutsuki Type93 mod. 3 23767 HP
+      - Harugumo Type 93 mod. 3 23767 HP
+      - Hayate Type 93 mod. 3 23767 HP
+    worst:
+      - Södermanland Torped M1947 mod 1 10700 HP
+      - Småland Torped M1943 mod 1 10700 HP
+      - Halland Torped M1947 mod 1 10700 HP
+  damage_at_max_range:
+    best:
+      - Fuyutsuki Type93 mod. 3 23767 HP
+      - Harugumo Type 93 mod. 3 23767 HP
+      - Hayate Type 93 mod. 3 23767 HP
+    worst:
+      - Châteaurenault 550 mm 9767 HP
+      - Södermanland Torped M1947 mod 1 10700 HP
+      - Småland Torped M1943 mod 1 10700 HP
+  flood_coefficient:
+    best:
+      - Fuyutsuki Type93 mod. 3 4.06x
+      - Harugumo Type 93 mod. 3 4.06x
+      - Hayate Type 93 mod. 3 4.06x
+    worst:
+      - Södermanland Torped M1947 mod 1 1.73x
+      - Småland Torped M1943 mod 1 1.73x
+      - Halland Torped M1947 mod 1 1.73x
+  detectability:
+    best:
+      - Khabarovsk ET-46 0.6 km
+      - Lüshun 53-51 0.8 km
+      - Yueyang Mark 17 0.8 km
+    worst:
+      - Shimakaze Type 93 2.5 km
+      - Södermanland Torped M1947 mod 1 1.8 km
+      - Kléber TE 550 mm 24V Mle 2 1.8 km
+  reaction_time:
+    best:
+      - Khabarovsk ET-46 3.82 s
+      - Yueyang Mark 17 3.92 s
+      - Lüshun 53-51 4.16 s
+    worst:
+      - Shimakaze Type 93 13.62 s
+      - Shimakaze Type 93 mod. 3 8.57 s
+      - Hayate Type 93 mod. 3 8.57 s
+  damage_per_minute:
+    best:
+      - Shimakaze Type F3 217472 HP/min
+      - Shimakaze Type 93 mod. 3 207117 HP/min
+      - Shimakaze Type 93 186370 HP/min
+    worst:
+      - Hull Mk17 38464 HP/min
+      - F. Sherman Mk17 38464 HP/min
+      - Marceau 550 mm 23DT 49158 HP/min
+notes:
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
+  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
+  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
+  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."

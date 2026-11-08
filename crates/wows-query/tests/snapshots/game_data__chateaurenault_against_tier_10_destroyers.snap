@@ -52,6 +52,264 @@ torpedo_factors:
   - "detectability (km, lower is better): distance at which ships detect the torpedo"
   - "reaction_time (s, lower is better): time a target has from detecting the torpedo until it arrives: detectability / speed"
   - "damage_per_minute (HP/min, higher is better): torpedo damage per minute, every torpedo hitting"
+ship_names:
+  - 20 de Julio
+  - A. Regolo
+  - A. da Barbiano
+  - Burrows
+  - Cassard
+  - Châteaurenault
+  - Daring
+  - Delny
+  - Druid
+  - Elbing
+  - F. Sherman
+  - Fuyutsuki
+  - G. Hoffmann
+  - Gdańsk
+  - Gearing
+  - Grozovoi
+  - Halland
+  - Harugumo
+  - Hayate
+  - Hull
+  - Khabarovsk
+  - Kléber
+  - La Pampa
+  - Laffey
+  - Lüshun
+  - Marceau
+  - Ragnar
+  - Shimakaze
+  - Småland
+  - Somers
+  - Tromp
+  - Vampire II
+  - Yueyang
+  - Z-42
+  - Z-52
+  - Álvaro de Bazán
+  - Kléber TE
+  - Lübeck
+  - Peredovoy
+  - Södermanland
+leaders:
+  health:
+    best:
+      - A. da Barbiano 35600 HP
+    worst:
+      - Peredovoy 20400 HP
+  repair_party_heal:
+    best:
+      - Laffey 30%
+    worst:
+      - Kléber TE 10%
+  main_battery_reload:
+    best:
+      - F. Sherman 1.25 s
+    worst:
+      - Lübeck 6.46 s
+  main_battery_range:
+    best:
+      - Kléber 18.88 km
+    worst:
+      - Kléber TE 10.2 km
+  dpm_ap:
+    best:
+      - Harugumo 465107 HP/min
+    worst:
+      - Shimakaze 177425 HP/min
+  dpm_he:
+    best:
+      - Harugumo 305406 HP/min
+    worst:
+      - Lübeck 100310 HP/min
+  dpm_sap:
+    best:
+      - A. da Barbiano 765550 HP/min
+    worst:
+      - A. Regolo 318399 HP/min
+  alpha_ap:
+    best:
+      - Elbing 26445 HP
+    worst:
+      - Södermanland 9030 HP
+  alpha_he:
+    best:
+      - Kléber 16000 HP
+    worst:
+      - F. Sherman 5400 HP
+  alpha_sap:
+    best:
+      - A. da Barbiano 32000 HP
+    worst:
+      - F. Sherman 8100 HP
+  flight_time_ap:
+    best:
+      - Elbing 4.92 s
+    worst:
+      - Yueyang 8.23 s
+  flight_time_he:
+    best:
+      - Elbing 4.92 s
+    worst:
+      - Yueyang 8.34 s
+  flight_time_sap:
+    best:
+      - F. Sherman 5.89 s
+    worst:
+      - A. da Barbiano 7.27 s
+  turret_traverse:
+    best:
+      - F. Sherman 3.4 s
+    worst:
+      - Shimakaze 17.23 s
+  dispersion:
+    best:
+      - Elbing 47 m
+    worst:
+      - Södermanland 84 m
+  sigma:
+    best:
+      - 20 de Julio 2 sigma
+    worst:
+      - Södermanland 2 sigma
+  fires_per_minute:
+    best:
+      - Tromp 25.06 fires/min
+    worst:
+      - Somers 5.74 fires/min
+  bow_barrels:
+    best:
+      - Daring 100%
+    worst:
+      - Lübeck 33.33%
+  stern_barrels:
+    best:
+      - Delny 100%
+    worst:
+      - Druid 0%
+  all_bear_from_bow:
+    best:
+      - Druid 0 deg
+    worst:
+      - A. da Barbiano 71 deg
+  all_bear_from_stern:
+    best:
+      - Kléber 24 deg
+    worst:
+      - A. da Barbiano 71 deg
+  secondary_dpm:
+    best:
+      - Peredovoy 45000 HP/min
+    worst:
+      - Peredovoy 45000 HP/min
+  secondary_range:
+    best:
+      - Peredovoy 6.3 km
+    worst:
+      - Peredovoy 6.3 km
+  torpedo_dpm:
+    best:
+      - Shimakaze 217472 HP/min
+    worst:
+      - Hull 38464 HP/min
+  torpedoes_per_minute:
+    best:
+      - Shimakaze 10.18 torpedoes/min
+    worst:
+      - Hull 2.15 torpedoes/min
+  torpedo_reload:
+    best:
+      - Tromp 53.55 s
+    worst:
+      - Harugumo 120.1 s
+  torpedo_launch_from_bow:
+    best:
+      - Châteaurenault 6 deg
+    worst:
+      - Södermanland 64 deg
+  broadside_tubes:
+    best:
+      - La Pampa 15 tubes
+    worst:
+      - Hull 2 tubes
+  aa_damage:
+    best:
+      - Ragnar 669 HP/s
+    worst:
+      - Somers 32 HP/s
+  aa_range:
+    best:
+      - Burrows 4 km
+    worst:
+      - A. da Barbiano 2 km
+  concealment:
+    best:
+      - Shimakaze 5.59 km
+    worst:
+      - A. da Barbiano 7.96 km
+  air_concealment:
+    best:
+      - 20 de Julio 2.36 km
+    worst:
+      - Kléber TE 4.36 km
+  speed:
+    best:
+      - Kléber 44 kn
+    worst:
+      - 20 de Julio 32 kn
+  rudder_shift:
+    best:
+      - Shimakaze 1.87 s
+    worst:
+      - Khabarovsk 6.96 s
+  turning_circle:
+    best:
+      - 20 de Julio 560 m
+    worst:
+      - Lübeck 890 m
+torpedo_leaders:
+  speed:
+    best:
+      - Gdańsk Torped M1947 mod 0 94.81 kn
+    worst:
+      - Lübeck G7 T1 Ausf.C 55.12 kn
+  range:
+    best:
+      - Shimakaze Type 93 20.01 km
+    worst:
+      - Peredovoy ET-46M 6 km
+  damage:
+    best:
+      - Fuyutsuki Type93 mod. 3 23767 HP
+    worst:
+      - Södermanland Torped M1947 mod 1 10700 HP
+  damage_at_max_range:
+    best:
+      - Fuyutsuki Type93 mod. 3 23767 HP
+    worst:
+      - Châteaurenault 550 mm 9767 HP
+  flood_coefficient:
+    best:
+      - Fuyutsuki Type93 mod. 3 4.06x
+    worst:
+      - Södermanland Torped M1947 mod 1 1.73x
+  detectability:
+    best:
+      - Khabarovsk ET-46 0.6 km
+    worst:
+      - Shimakaze Type 93 2.5 km
+  reaction_time:
+    best:
+      - Khabarovsk ET-46 3.82 s
+    worst:
+      - Shimakaze Type 93 13.62 s
+  damage_per_minute:
+    best:
+      - Shimakaze Type F3 217472 HP/min
+    worst:
+      - Hull Mk17 38464 HP/min
 ships:
   - ship: "T10 Châteaurenault (destroyer, France)"
     values:

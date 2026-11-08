@@ -96,7 +96,7 @@ pub struct ShipComparisonArgs {
     /// Nation as GameParams spells it, e.g. "USA".
     pub nation: Option<String>,
 
-    /// Ships to list, e.g. ["Incomparable", "C. Colombo"]. Ranks still compare each with the whole group, which also takes in every ship named. Without tiers, the group spans the tiers of the ships named. Matchups against shooter groups are listed only for ships named.
+    /// Ships to give full entries, e.g. ["Incomparable", "C. Colombo"]; name the ship asked about. Without ships only a summary of the group is returned. Ranks still compare each with the whole group, which also takes in every ship named. Without tiers, the group spans the tiers of the ships named. Matchups against shooter groups are listed only for ships named.
     pub ships: Option<Vec<String>>,
 
     /// Range in km at which dispersion and shell flight time are compared. Defaults to 15 for battleships, 12 for cruisers and 10 for other classes.
@@ -135,8 +135,58 @@ pub struct ShipComparisonOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub torpedo_factors: Vec<String>,
 
+    /// Names of the ranked ships, in listing order.
+    pub ship_names: Vec<String>,
+
+    /// Per factor, the best and the worst ships of the group with their
+    /// values, best first and worst first: three each without ships named,
+    /// one each with them.
+    pub leaders: FactorLeaderTable,
+
+    /// The same among every torpedo option of the group.
+    #[serde(skip_serializing_if = "FactorLeaderTable::is_empty")]
+    pub torpedo_leaders: FactorLeaderTable,
+
+    /// Full entries: the ships named, or with none named every ranked ship.
+    /// [`GameData::ship_comparison_summary`], which the tool returns, lists
+    /// none without ships named.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ships: Vec<ComparedShip>,
+
     pub notes: Vec<&'static str>,
+}
+
+/// The best and worst values of one factor in a group.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FactorLeaders {
+    /// "Moskva 14.14 km", best first.
+    pub best: Vec<String>,
+
+    /// Worst first.
+    pub worst: Vec<String>,
+}
+
+/// Leaders per factor in factor order, serialized as a map from factor key.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FactorLeaderTable(pub Vec<(&'static str, FactorLeaders)>);
+
+impl FactorLeaderTable {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Serialize for FactorLeaderTable {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, leaders) in &self.0 {
+            map.serialize_entry(key, leaders)?;
+        }
+        map.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1031,6 +1081,36 @@ impl GameData {
                 .collect()
         };
 
+        // With ships named their entries say where they stand; the group
+        // needs only its extremes beside them.
+        let shown = if named.is_empty() { 3 } else { 1 };
+        let leaders = FactorLeaderTable(
+            factors
+                .iter()
+                .map(|factor| {
+                    let meta = factor.meta();
+                    let values = group
+                        .iter()
+                        .zip(&scores)
+                        .filter_map(|(ship, score)| score.values.get(factor).map(|value| (ship.name.clone(), *value)));
+                    (meta.key, factor_leaders(values.collect(), &meta, shown))
+                })
+                .collect(),
+        );
+        let torpedo_leaders = FactorLeaderTable(
+            torpedo_factors
+                .iter()
+                .map(|factor| {
+                    let meta = factor.meta();
+                    let values = group.iter().zip(&scores).flat_map(|(ship, score)| {
+                        score.torpedoes.iter().filter_map(move |torpedo| {
+                            torpedo.values.get(factor).map(|value| (format!("{} {}", ship.name, torpedo.name), *value))
+                        })
+                    });
+                    (meta.key, factor_leaders(values.collect(), &meta, shown))
+                })
+                .collect(),
+        );
         let ships = listed
             .into_iter()
             .map(|index| {
@@ -1134,6 +1214,9 @@ impl GameData {
             reference_range_km: reference_range,
             factors: factors.iter().map(|factor| factor.meta().legend()).collect(),
             torpedo_factors: torpedo_factors.iter().map(|factor| factor.meta().legend()).collect(),
+            ship_names: group.iter().map(|ship| ship.name.clone()).collect(),
+            leaders,
+            torpedo_leaders,
             ships,
             notes: {
                 let mut notes = NOTES.to_vec();
@@ -1145,6 +1228,18 @@ impl GameData {
                 notes
             },
         })
+    }
+
+    /// [`GameData::ship_comparison`] as the ship_comparison tool returns it:
+    /// without ships named, the group summary alone, which keeps a whole
+    /// class and tier within a small model's context.
+    pub fn ship_comparison_summary(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
+        let mut output = self.ship_comparison(args)?;
+        if args.ships.as_ref().is_none_or(Vec::is_empty) {
+            output.ships.clear();
+        }
+
+        Ok(output)
     }
 
     /// Every factor of one ship but protection, on its best-fit builds.
@@ -1733,6 +1828,21 @@ fn fighting_band(role: ShooterRole) -> RangeBand {
         ShooterRole::DestroyerAp | ShooterRole::LightCruiserAp | ShooterRole::CruiserHe | ShooterRole::Sap => {
             RangeBand::Close
         }
+    }
+}
+
+/// The `shown` best and worst of `values`, named with their values. A
+/// stable sort keeps tied values in the given order.
+fn factor_leaders(mut values: Vec<(String, f32)>, meta: &Meta, shown: usize) -> FactorLeaders {
+    values.sort_by(|(_, left), (_, right)| match meta.better {
+        Better::Lower => left.total_cmp(right),
+        Better::Higher => right.total_cmp(left),
+    });
+    let label = |(name, value): &(String, f32)| format!("{name} {}", meta.with_unit(*value));
+
+    FactorLeaders {
+        best: values.iter().take(shown).map(label).collect(),
+        worst: values.iter().rev().take(shown).map(label).collect(),
     }
 }
 
