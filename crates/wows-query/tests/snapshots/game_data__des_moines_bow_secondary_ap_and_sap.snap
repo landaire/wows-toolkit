@@ -21,12 +21,12 @@ expression: groups
     battleship: 100
     submarine: 0
   ships:
-    - "T10 Napoli (cruiser, Italy) [replicas: Napoli B]: secondary battery 120 mm SAP, 42 mm pen"
-    - "T10 R. Lauria (battleship, Italy) [replicas: Tempesta Nera]: secondary battery 135 mm SAP, 38 mm pen"
-    - "T10 Sicilia (battleship, Italy): secondary battery 152 mm SAP, 42 mm pen"
-    - "T9 Giuseppe Verdi (battleship, Italy) [replicas: Pilus Posterior]: secondary battery 120 mm SAP, 42 mm pen"
-    - "T9 Michelangelo (cruiser, Italy): secondary battery 120 mm SAP, 42 mm pen"
-    - "T8 M. Colonna (battleship, Italy) [replicas: BA Binah]: secondary battery 120 mm SAP, 42 mm pen"
+    - "T10 Napoli (cruiser, Italy, premium) [replicas: Napoli B]: secondary battery 120 mm SAP, 42 mm pen"
+    - "T10 R. Lauria (battleship, Italy, premium) [replicas: Tempesta Nera]: secondary battery 135 mm SAP, 38 mm pen"
+    - "T10 Sicilia (battleship, Italy, premium): secondary battery 152 mm SAP, 42 mm pen"
+    - "T9 Giuseppe Verdi (battleship, Italy, premium) [replicas: Pilus Posterior]: secondary battery 120 mm SAP, 42 mm pen"
+    - "T9 Michelangelo (cruiser, Italy, premium): secondary battery 120 mm SAP, 42 mm pen"
+    - "T8 M. Colonna (battleship, Italy, premium) [replicas: BA Binah]: secondary battery 120 mm SAP, 42 mm pen"
 - armament: secondary_battery
   method: ap_overmatch
   considered:

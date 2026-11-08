@@ -1,9 +1,8 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 989
 expression: trace
 ---
-shooter: "T10 Aki (battleship, Japan)"
+shooter: "T10 Aki (battleship, Japan, premium)"
 target: "T10 Vermont (battleship, USA)"
 target_hull: Vermont
 target_angle_deg: 0

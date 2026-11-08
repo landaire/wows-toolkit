@@ -105,122 +105,122 @@ leaders:
     best:
       - Kremlin (Russia) 108300 HP
     worst:
-      - Pérez Gacitúa (Pan_America) 68000 HP
+      - "Pérez Gacitúa (Pan_America, test) 68000 HP"
   repair_party_heal:
     best:
       - Conqueror (United_Kingdom) 40%
     worst:
-      - Utah (USA) 14%
+      - "Utah (USA, test) 14%"
   main_battery_reload:
     best:
-      - Irresistible (Commonwealth) 10.56 s
+      - "Irresistible (Commonwealth, premium) 10.56 s"
     worst:
-      - Sete de Setembro (Pan_America) 35.2 s
+      - "Sete de Setembro (Pan_America, premium) 35.2 s"
   main_battery_range:
     best:
-      - Shikishima (Japan) 30.89 km
+      - "Shikishima (Japan, premium) 30.89 km"
     worst:
-      - A. Vespucci (Italy) 18.91 km
+      - "A. Vespucci (Italy, test) 18.91 km"
   dpm_ap:
     best:
-      - Irresistible (Commonwealth) 561932 HP/min
+      - "Irresistible (Commonwealth, premium) 561932 HP/min"
     worst:
-      - Aki (Japan) 232451 HP/min
+      - "Aki (Japan, premium) 232451 HP/min"
   dpm_he:
     best:
-      - Irresistible (Commonwealth) 304545 HP/min
+      - "Irresistible (Commonwealth, premium) 304545 HP/min"
     worst:
-      - Jiuhua (Pan_Asia) 87273 HP/min
+      - "Jiuhua (Pan_Asia, test) 87273 HP/min"
   dpm_sap:
     best:
       - C. Colombo (Italy) 353808 HP/min
     worst:
-      - R. Lauria (Italy) 301818 HP/min
+      - "R. Lauria (Italy, premium) 301818 HP/min"
   alpha_ap:
     best:
       - C. Colombo (Italy) 206400 HP
     worst:
-      - Conte Verde (Italy) 82560 HP
+      - "Conte Verde (Italy, premium) 82560 HP"
   alpha_he:
     best:
-      - Cumberland (United_Kingdom) 92800 HP
+      - "Cumberland (United_Kingdom, test) 92800 HP"
     worst:
       - Schlieffen (Germany) 36800 HP
   alpha_sap:
     best:
       - C. Colombo (Italy) 192000 HP
     worst:
-      - Conte Verde (Italy) 80000 HP
+      - "Conte Verde (Italy, premium) 80000 HP"
   flight_time_ap:
     best:
-      - Sete de Setembro (Pan_America) 6.98 s
+      - "Sete de Setembro (Pan_America, premium) 6.98 s"
     worst:
-      - Utah (USA) 8.85 s
+      - "Utah (USA, test) 8.85 s"
   flight_time_he:
     best:
-      - Sete de Setembro (Pan_America) 6.98 s
+      - "Sete de Setembro (Pan_America, premium) 6.98 s"
     worst:
       - Yamato (Japan) 9.35 s
   flight_time_sap:
     best:
       - C. Colombo (Italy) 7.43 s
     worst:
-      - R. Lauria (Italy) 8.21 s
+      - "R. Lauria (Italy, premium) 8.21 s"
   turret_traverse:
     best:
-      - Conte Verde (Italy) 21.74 s
+      - "Conte Verde (Italy, premium) 21.74 s"
     worst:
       - Yamato (Japan) 43.48 s
   dispersion:
     best:
-      - Conte Verde (Italy) 127 m
+      - "Conte Verde (Italy, premium) 127 m"
     worst:
-      - Cumberland (United_Kingdom) 234 m
+      - "Cumberland (United_Kingdom, test) 234 m"
   sigma:
     best:
       - Bungo (Japan) 2.2 sigma
     worst:
-      - Cumberland (United_Kingdom) 1.45 sigma
+      - "Cumberland (United_Kingdom, test) 1.45 sigma"
   fires_per_minute:
     best:
-      - Sibir (Russia) 59.91 fires/min
+      - "Sibir (Russia, premium) 59.91 fires/min"
     worst:
-      - R. Lauria (Italy) 8.96 fires/min
+      - "R. Lauria (Italy, premium) 8.96 fires/min"
   bow_barrels:
     best:
-      - Aki (Japan) 100%
+      - "Aki (Japan, premium) 100%"
     worst:
-      - Tōgasa (Japan) 40%
+      - "Tōgasa (Japan, test) 40%"
   stern_barrels:
     best:
-      - Conte Verde (Italy) 100%
+      - "Conte Verde (Italy, premium) 100%"
     worst:
-      - Aki (Japan) 0%
+      - "Aki (Japan, premium) 0%"
   all_bear_from_bow:
     best:
-      - Aki (Japan) 0 deg
+      - "Aki (Japan, premium) 0 deg"
     worst:
-      - Mecklenburg (Germany) 47 deg
+      - "Mecklenburg (Germany, premium) 47 deg"
   all_bear_from_stern:
     best:
-      - Conte Verde (Italy) 28 deg
+      - "Conte Verde (Italy, premium) 28 deg"
     worst:
-      - Pérez Gacitúa (Pan_America) 47 deg
+      - "Pérez Gacitúa (Pan_America, test) 47 deg"
   secondary_dpm:
     best:
-      - Sibir (Russia) 692308 HP/min
+      - "Sibir (Russia, premium) 692308 HP/min"
     worst:
-      - Pérez Gacitúa (Pan_America) 189905 HP/min
+      - "Pérez Gacitúa (Pan_America, test) 189905 HP/min"
   secondary_range:
     best:
-      - Bourgogne (France) 11.95 km
+      - "Bourgogne (France, premium) 11.95 km"
     worst:
-      - Incomparable (United_Kingdom) 10.08 km
+      - "Incomparable (United_Kingdom, premium) 10.08 km"
   torpedo_dpm:
     best:
       - Thor (Europe) 85934 HP/min
     worst:
-      - Mecklenburg (Germany) 42980 HP/min
+      - "Mecklenburg (Germany, premium) 42980 HP/min"
   torpedoes_per_minute:
     best:
       - Thor (Europe) 4.91 torpedoes/min
@@ -235,7 +235,7 @@ leaders:
     best:
       - St. Vincent (United_Kingdom) 10 deg
     worst:
-      - Tōgasa (Japan) 41 deg
+      - "Tōgasa (Japan, test) 41 deg"
   broadside_tubes:
     best:
       - Schlieffen (Germany) 8 tubes
@@ -243,44 +243,44 @@ leaders:
       - St. Vincent (United_Kingdom) 1 tubes
   aa_damage:
     best:
-      - Utah (USA) 1260 HP/s
+      - "Utah (USA, test) 1260 HP/s"
     worst:
-      - Tōgasa (Japan) 430 HP/s
+      - "Tōgasa (Japan, test) 430 HP/s"
   aa_range:
     best:
       - Kremlin (Russia) 6.6 km
     worst:
-      - A. Vespucci (Italy) 4.6 km
+      - "A. Vespucci (Italy, test) 4.6 km"
   concealment:
     best:
-      - Incomparable (United_Kingdom) 10.6 km
+      - "Incomparable (United_Kingdom, premium) 10.6 km"
     worst:
-      - Rodina (Russia) 14.34 km
+      - "Rodina (Russia, test) 14.34 km"
   air_concealment:
     best:
-      - Aki (Japan) 8.1 km
+      - "Aki (Japan, premium) 8.1 km"
     worst:
-      - Utah (USA) 9 km
+      - "Utah (USA, test) 9 km"
   speed:
     best:
-      - Neptunus (Netherlands) 36 kn
+      - "Neptunus (Netherlands, test) 36 kn"
     worst:
-      - Sete de Setembro (Pan_America) 22.8 kn
+      - "Sete de Setembro (Pan_America, premium) 22.8 kn"
   rudder_shift:
     best:
-      - Thunderer (United_Kingdom) 10.86 s
+      - "Thunderer (United_Kingdom, premium) 10.86 s"
     worst:
-      - Montana 2 (USA) 23.18 s
+      - "Montana 2 (USA, test) 23.18 s"
   turning_circle:
     best:
-      - Sete de Setembro (Pan_America) 700 m
+      - "Sete de Setembro (Pan_America, premium) 700 m"
     worst:
-      - Incomparable (United_Kingdom) 1160 m
+      - "Incomparable (United_Kingdom, premium) 1160 m"
   bb_ap_citadel:
     best:
       - C. Colombo (Italy) 0%
     worst:
-      - Irresistible (Commonwealth) 14.1%
+      - "Irresistible (Commonwealth, premium) 14.1%"
   bb_ap_overpenetration:
     best:
       - St. Vincent (United_Kingdom) 49.7%
@@ -288,14 +288,14 @@ leaders:
       - Louisiana (USA) 23.2%
   bow_overmatch:
     best:
-      - Aki (Japan) 5.74%
+      - "Aki (Japan, premium) 5.74%"
     worst:
-      - Tōgasa (Japan) 87.7%
+      - "Tōgasa (Japan, test) 87.7%"
   stern_overmatch:
     best:
-      - Bourgogne (France) 5.74%
+      - "Bourgogne (France, premium) 5.74%"
     worst:
-      - Aki (Japan) 100%
+      - "Aki (Japan, premium) 100%"
 torpedo_leaders:
   speed:
     best:
@@ -306,39 +306,40 @@ torpedo_leaders:
     best:
       - Thor (Europe) Torped M1945 mod 2 15 km
     worst:
-      - Mecklenburg (Germany) G7a T1 6 km
+      - "Mecklenburg (Germany, premium) G7a T1 6 km"
   damage:
     best:
       - St. Vincent (United_Kingdom) 622 mm Mk I 29367 HP
     worst:
-      - Mecklenburg (Germany) G7a T1 13700 HP
+      - "Mecklenburg (Germany, premium) G7a T1 13700 HP"
   damage_at_max_range:
     best:
       - St. Vincent (United_Kingdom) 622 mm Mk I 29367 HP
     worst:
-      - Mecklenburg (Germany) G7a T1 13700 HP
+      - "Mecklenburg (Germany, premium) G7a T1 13700 HP"
   flood_coefficient:
     best:
-      - Tōgasa (Japan) Type 93 mod. 3 4.06x
+      - "Tōgasa (Japan, test) Type 93 mod. 3 4.06x"
     worst:
-      - Mecklenburg (Germany) G7a T1 2.27x
+      - "Mecklenburg (Germany, premium) G7a T1 2.27x"
   detectability:
     best:
       - Schlieffen (Germany) G7 T1 Ausf.C 1.2 km
     worst:
-      - Tōgasa (Japan) Type 93 mod. 3 1.7 km
+      - "Tōgasa (Japan, test) Type 93 mod. 3 1.7 km"
   reaction_time:
     best:
-      - Mecklenburg (Germany) G7a T1 7.2 s
+      - "Mecklenburg (Germany, premium) G7a T1 7.2 s"
     worst:
-      - Tōgasa (Japan) Type 93 mod. 3 9 s
+      - "Tōgasa (Japan, test) Type 93 mod. 3 9 s"
   damage_per_minute:
     best:
       - Thor (Europe) Torped M1945 mod 2 85934 HP/min
     worst:
-      - Mecklenburg (Germany) G7a T1 42980 HP/min
+      - "Mecklenburg (Germany, premium) G7a T1 42980 HP/min"
 ships:
-  - ship: "T10 Incomparable (battleship, United_Kingdom)"
+  - ship: "T10 Incomparable (battleship, United_Kingdom, premium)"
+    category: premium
     values:
       health: "70000 (rank 41/43, p5)"
       repair_party_heal: "40 (rank 1/42, p95)"
@@ -451,6 +452,7 @@ ships:
       - "Hydroacoustic Search (3 charges, 120 s reload)"
       - "Spotting Aircraft (4 charges, 240 s reload) or Fighters (3 charges, 90 s reload)"
   - ship: "T10 C. Colombo (battleship, Italy)"
+    category: tech_tree
     values:
       health: "89900 (rank 18/43, p55)"
       repair_party_heal: "14 (rank 14/42, p0)"
@@ -542,6 +544,7 @@ ships:
       - "Smoke Generator (3 charges, 180 s reload)"
       - "Fighters (3 charges, 90 s reload)"
   - ship: "T10 Tōgasa (battleship, Japan, test)"
+    category: test
     values:
       health: "68300 (rank 42/43, p2)"
       repair_party_heal: "14 (rank 14/42, p0)"

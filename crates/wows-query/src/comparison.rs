@@ -59,6 +59,7 @@ use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
 use crate::shells::Shell;
+use crate::ship_variants::ShipCategory;
 use crate::ship_variants::listing_order;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -194,8 +195,13 @@ impl Serialize for FactorLeaderTable {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ComparedShip {
-    /// "T10 C. Colombo (battleship, Italy)", ending ", test" for a ship in testing.
+    /// "T10 C. Colombo (battleship, Italy, premium)", ending ", premium" or
+    /// ", test" for a ship not of the tech tree.
     pub ship: String,
+
+    /// How players get the ship: tech_tree, premium (including special and
+    /// Research Bureau ships) or test.
+    pub category: ShipCategory,
 
     /// GameParams index, e.g. "PISB110". Not in the tool output.
     #[serde(skip)]
@@ -1087,8 +1093,12 @@ impl GameData {
         // With ships named their entries say where they stand; the group
         // needs only its extremes beside them.
         let shown = if named.is_empty() { 3 } else { 1 };
-        // The nation keeps the model from guessing it from the name.
-        let leader_name = |ship: &Ship| format!("{} ({})", ship.name, ship.param.nation());
+        // The nation keeps the model from guessing it from the name, and
+        // "premium" from reading a premium ship as the head of a line.
+        let leader_name = |ship: &Ship| match ship.obtained_note() {
+            Some(note) => format!("{} ({}, {note})", ship.name, ship.param.nation()),
+            None => format!("{} ({})", ship.name, ship.param.nation()),
+        };
         let leaders = FactorLeaderTable(
             factors
                 .iter()
@@ -1198,6 +1208,7 @@ impl GameData {
 
                 ComparedShip {
                     ship: ship.label(),
+                    category: ship.category,
                     index: ship.param.index().to_owned(),
                     replicas: ship.replicas.clone(),
                     values: FactorValues(values),

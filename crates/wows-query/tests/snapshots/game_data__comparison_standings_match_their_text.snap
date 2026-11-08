@@ -2,7 +2,7 @@
 source: crates/wows-query/tests/game_data.rs
 expression: "json!({\n    \"ship\": chateaurenault.ship, \"index\": chateaurenault.index, \"standings\":\n    chateaurenault.standings.iter().map(beaten).collect::<Vec<_>>(),\n    \"torpedoes\":\n    chateaurenault.torpedoes.iter().map(|torpedo|\n    json!({\n        \"torpedo\": torpedo.torpedo, \"standings\":\n        torpedo.standings.iter().map(beaten).collect::<Vec<_>>()\n    })).collect::<Vec<_>>(),\n})"
 ---
-ship: "T10 Châteaurenault (destroyer, France)"
+ship: "T10 Châteaurenault (destroyer, France, premium)"
 index: PFSD710
 standings:
   - "health 30300.00 HP (Higher is better): rank 4/40, better 3, worse 35, tied 1, outlier None, beaten 89.74%, ties half 91.03%"

@@ -96,24 +96,24 @@ ship_names:
 leaders:
   health:
     best:
-      - A. da Barbiano (Italy) 35600 HP
+      - "A. da Barbiano (Italy, premium) 35600 HP"
     worst:
-      - Peredovoy (Russia) 20400 HP
+      - "Peredovoy (Russia, test) 20400 HP"
   repair_party_heal:
     best:
-      - Laffey (USA) 30%
+      - "Laffey (USA, premium) 30%"
     worst:
-      - Kléber TE (France) 10%
+      - "Kléber TE (France, test) 10%"
   main_battery_reload:
     best:
-      - F. Sherman (USA) 1.25 s
+      - "F. Sherman (USA, premium) 1.25 s"
     worst:
-      - Lübeck (Germany) 6.46 s
+      - "Lübeck (Germany, test) 6.46 s"
   main_battery_range:
     best:
       - Kléber (France) 18.88 km
     worst:
-      - Kléber TE (France) 10.2 km
+      - "Kléber TE (France, test) 10.2 km"
   dpm_ap:
     best:
       - Harugumo (Japan) 465107 HP/min
@@ -123,27 +123,27 @@ leaders:
     best:
       - Harugumo (Japan) 305406 HP/min
     worst:
-      - Lübeck (Germany) 100310 HP/min
+      - "Lübeck (Germany, test) 100310 HP/min"
   dpm_sap:
     best:
-      - A. da Barbiano (Italy) 765550 HP/min
+      - "A. da Barbiano (Italy, premium) 765550 HP/min"
     worst:
       - A. Regolo (Italy) 318399 HP/min
   alpha_ap:
     best:
       - Elbing (Germany) 26445 HP
     worst:
-      - Södermanland (Europe) 9030 HP
+      - "Södermanland (Europe, test) 9030 HP"
   alpha_he:
     best:
       - Kléber (France) 16000 HP
     worst:
-      - F. Sherman (USA) 5400 HP
+      - "F. Sherman (USA, premium) 5400 HP"
   alpha_sap:
     best:
-      - A. da Barbiano (Italy) 32000 HP
+      - "A. da Barbiano (Italy, premium) 32000 HP"
     worst:
-      - F. Sherman (USA) 8100 HP
+      - "F. Sherman (USA, premium) 8100 HP"
   flight_time_ap:
     best:
       - Elbing (Germany) 4.92 s
@@ -156,104 +156,104 @@ leaders:
       - Yueyang (Pan_Asia) 8.34 s
   flight_time_sap:
     best:
-      - F. Sherman (USA) 5.89 s
+      - "F. Sherman (USA, premium) 5.89 s"
     worst:
-      - A. da Barbiano (Italy) 7.27 s
+      - "A. da Barbiano (Italy, premium) 7.27 s"
   turret_traverse:
     best:
-      - F. Sherman (USA) 3.4 s
+      - "F. Sherman (USA, premium) 3.4 s"
     worst:
       - Shimakaze (Japan) 17.23 s
   dispersion:
     best:
       - Elbing (Germany) 47 m
     worst:
-      - Södermanland (Europe) 84 m
+      - "Södermanland (Europe, test) 84 m"
   sigma:
     best:
       - 20 de Julio (Pan_America) 2 sigma
     worst:
-      - Södermanland (Europe) 2 sigma
+      - "Södermanland (Europe, test) 2 sigma"
   fires_per_minute:
     best:
-      - Tromp (Netherlands) 25.06 fires/min
+      - "Tromp (Netherlands, premium) 25.06 fires/min"
     worst:
-      - Somers (USA) 5.74 fires/min
+      - "Somers (USA, premium) 5.74 fires/min"
   bow_barrels:
     best:
       - Daring (United_Kingdom) 100%
     worst:
-      - Lübeck (Germany) 33.33%
+      - "Lübeck (Germany, test) 33.33%"
   stern_barrels:
     best:
       - Delny (Russia) 100%
     worst:
-      - Druid (United_Kingdom) 0%
+      - "Druid (United_Kingdom, premium) 0%"
   all_bear_from_bow:
     best:
-      - Druid (United_Kingdom) 0 deg
+      - "Druid (United_Kingdom, premium) 0 deg"
     worst:
-      - A. da Barbiano (Italy) 71 deg
+      - "A. da Barbiano (Italy, premium) 71 deg"
   all_bear_from_stern:
     best:
       - Kléber (France) 24 deg
     worst:
-      - A. da Barbiano (Italy) 71 deg
+      - "A. da Barbiano (Italy, premium) 71 deg"
   secondary_dpm:
     best:
-      - Peredovoy (Russia) 45000 HP/min
+      - "Peredovoy (Russia, test) 45000 HP/min"
     worst:
-      - Peredovoy (Russia) 45000 HP/min
+      - "Peredovoy (Russia, test) 45000 HP/min"
   secondary_range:
     best:
-      - Peredovoy (Russia) 6.3 km
+      - "Peredovoy (Russia, test) 6.3 km"
     worst:
-      - Peredovoy (Russia) 6.3 km
+      - "Peredovoy (Russia, test) 6.3 km"
   torpedo_dpm:
     best:
       - Shimakaze (Japan) 217472 HP/min
     worst:
-      - Hull (USA) 38464 HP/min
+      - "Hull (USA, premium) 38464 HP/min"
   torpedoes_per_minute:
     best:
       - Shimakaze (Japan) 10.18 torpedoes/min
     worst:
-      - Hull (USA) 2.15 torpedoes/min
+      - "Hull (USA, premium) 2.15 torpedoes/min"
   torpedo_reload:
     best:
-      - Tromp (Netherlands) 53.55 s
+      - "Tromp (Netherlands, premium) 53.55 s"
     worst:
       - Harugumo (Japan) 120.1 s
   torpedo_launch_from_bow:
     best:
-      - Châteaurenault (France) 6 deg
+      - "Châteaurenault (France, premium) 6 deg"
     worst:
-      - Södermanland (Europe) 64 deg
+      - "Södermanland (Europe, test) 64 deg"
   broadside_tubes:
     best:
-      - La Pampa (Pan_America) 15 tubes
+      - "La Pampa (Pan_America, premium) 15 tubes"
     worst:
-      - Hull (USA) 2 tubes
+      - "Hull (USA, premium) 2 tubes"
   aa_damage:
     best:
-      - Ragnar (Europe) 669 HP/s
+      - "Ragnar (Europe, premium) 669 HP/s"
     worst:
-      - Somers (USA) 32 HP/s
+      - "Somers (USA, premium) 32 HP/s"
   aa_range:
     best:
       - Burrows (USA) 4 km
     worst:
-      - A. da Barbiano (Italy) 2 km
+      - "A. da Barbiano (Italy, premium) 2 km"
   concealment:
     best:
       - Shimakaze (Japan) 5.59 km
     worst:
-      - A. da Barbiano (Italy) 7.96 km
+      - "A. da Barbiano (Italy, premium) 7.96 km"
   air_concealment:
     best:
       - 20 de Julio (Pan_America) 2.36 km
     worst:
-      - Kléber TE (France) 4.36 km
+      - "Kléber TE (France, test) 4.36 km"
   speed:
     best:
       - Kléber (France) 44 kn
@@ -263,55 +263,56 @@ leaders:
     best:
       - Shimakaze (Japan) 1.87 s
     worst:
-      - Khabarovsk (Russia) 6.96 s
+      - "Khabarovsk (Russia, premium) 6.96 s"
   turning_circle:
     best:
       - 20 de Julio (Pan_America) 560 m
     worst:
-      - Lübeck (Germany) 890 m
+      - "Lübeck (Germany, test) 890 m"
 torpedo_leaders:
   speed:
     best:
       - Gdańsk (Europe) Torped M1947 mod 0 94.81 kn
     worst:
-      - Lübeck (Germany) G7 T1 Ausf.C 55.12 kn
+      - "Lübeck (Germany, test) G7 T1 Ausf.C 55.12 kn"
   range:
     best:
       - Shimakaze (Japan) Type 93 20.01 km
     worst:
-      - Peredovoy (Russia) ET-46M 6 km
+      - "Peredovoy (Russia, test) ET-46M 6 km"
   damage:
     best:
-      - Fuyutsuki (Japan) Type93 mod. 3 23767 HP
+      - "Fuyutsuki (Japan, premium) Type93 mod. 3 23767 HP"
     worst:
-      - Södermanland (Europe) Torped M1947 mod 1 10700 HP
+      - "Södermanland (Europe, test) Torped M1947 mod 1 10700 HP"
   damage_at_max_range:
     best:
-      - Fuyutsuki (Japan) Type93 mod. 3 23767 HP
+      - "Fuyutsuki (Japan, premium) Type93 mod. 3 23767 HP"
     worst:
-      - Châteaurenault (France) 550 mm 9767 HP
+      - "Châteaurenault (France, premium) 550 mm 9767 HP"
   flood_coefficient:
     best:
-      - Fuyutsuki (Japan) Type93 mod. 3 4.06x
+      - "Fuyutsuki (Japan, premium) Type93 mod. 3 4.06x"
     worst:
-      - Södermanland (Europe) Torped M1947 mod 1 1.73x
+      - "Södermanland (Europe, test) Torped M1947 mod 1 1.73x"
   detectability:
     best:
-      - Khabarovsk (Russia) ET-46 0.6 km
+      - "Khabarovsk (Russia, premium) ET-46 0.6 km"
     worst:
       - Shimakaze (Japan) Type 93 2.5 km
   reaction_time:
     best:
-      - Khabarovsk (Russia) ET-46 3.82 s
+      - "Khabarovsk (Russia, premium) ET-46 3.82 s"
     worst:
       - Shimakaze (Japan) Type 93 13.62 s
   damage_per_minute:
     best:
       - Shimakaze (Japan) Type F3 217472 HP/min
     worst:
-      - Hull (USA) Mk17 38464 HP/min
+      - "Hull (USA, premium) Mk17 38464 HP/min"
 ships:
-  - ship: "T10 Châteaurenault (destroyer, France)"
+  - ship: "T10 Châteaurenault (destroyer, France, premium)"
+    category: premium
     values:
       health: "30300 (rank 4/40, p90)"
       main_battery_reload: "2.76 (rank 16/40, p59)"
@@ -373,6 +374,7 @@ ships:
       - "Torpedo Reload Booster (2 charges, 240 s reload)"
       - "Auxiliary and Torpedo Weaponry Coordination (3 charges, 120 s reload)"
   - ship: "T10 Shimakaze (destroyer, Japan)"
+    category: tech_tree
     replicas:
       - AL Shimakaze
     values:
@@ -478,7 +480,8 @@ ships:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Smoke Generator (3 charges, 160 s reload)"
       - "Engine Boost (3 charges, 120 s reload)"
-  - ship: "T10 Småland (destroyer, Europe)"
+  - ship: "T10 Småland (destroyer, Europe, premium)"
+    category: premium
     replicas:
       - Oväsen
     values:

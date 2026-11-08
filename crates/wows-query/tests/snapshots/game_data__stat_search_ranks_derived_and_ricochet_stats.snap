@@ -3,8 +3,8 @@ source: crates/wows-query/tests/game_data.rs
 expression: ranked
 ---
 - "artillery.barrels: 1 \"T10 C. Colombo (battleship, Italy)\" \"16\""
-- "artillery.barrels: 1 \"T10 Conte Verde (battleship, Italy)\" \"16\""
-- "artillery.barrels: 1 \"T10 Irresistible (battleship, Commonwealth)\" \"16\""
-- "artillery.ap.ricochet_start: 1 \"T10 Rhode Island (battleship, USA) [replicas: Rhode Island B]\" \"50 deg\""
-- "artillery.ap.ricochet_start: 2 \"T10 Aki (battleship, Japan) [replicas: Aki G]\" \"45 deg\""
-- "artillery.ap.ricochet_start: 2 \"T10 Bourgogne (battleship, France)\" \"45 deg\""
+- "artillery.barrels: 1 \"T10 Conte Verde (battleship, Italy, premium)\" \"16\""
+- "artillery.barrels: 1 \"T10 Irresistible (battleship, Commonwealth, premium)\" \"16\""
+- "artillery.ap.ricochet_start: 1 \"T10 Rhode Island (battleship, USA, premium) [replicas: Rhode Island B]\" \"50 deg\""
+- "artillery.ap.ricochet_start: 2 \"T10 Aki (battleship, Japan, premium) [replicas: Aki G]\" \"45 deg\""
+- "artillery.ap.ricochet_start: 2 \"T10 Bourgogne (battleship, France, premium)\" \"45 deg\""

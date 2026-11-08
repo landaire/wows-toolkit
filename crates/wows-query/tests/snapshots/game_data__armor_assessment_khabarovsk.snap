@@ -2,7 +2,7 @@
 source: crates/wows-query/tests/game_data.rs
 expression: assessment
 ---
-ship: "T10 Khabarovsk (destroyer, Russia)"
+ship: "T10 Khabarovsk (destroyer, Russia, premium)"
 hull: Khabarovsk
 citadel_metrics: "do not apply: destroyers have no citadel, so citadel rates are zero for every destroyer and a missing citadel is no weakness. Judge destroyer protection by health and by how often hits penetrate or overpenetrate."
 shooter_tiers:
@@ -59,7 +59,7 @@ shooters:
     caliber_mm: 457
     ships_with_caliber: 14
     ships_in_role: 122
-    ship: "T9 Georgia (battleship, USA)"
+    ship: "T9 Georgia (battleship, USA, premium)"
     projectile: 457 mm AP Type B
     param: PAPA105_457MM_AP_GEORGIA_SH
     max_range_km: 20.04

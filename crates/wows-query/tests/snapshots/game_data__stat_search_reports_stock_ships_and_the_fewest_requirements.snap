@@ -29,7 +29,7 @@ ships:
       - "upgrade: Main Battery Modification 3 (slot 6)"
     values:
       - "artillery.reload_time: 4.84 s"
-  - ship: "T10 Salem (cruiser, USA)"
+  - ship: "T10 Salem (cruiser, USA, premium)"
     stock: false
     requires:
       - "upgrade: Main Battery Modification 3 (slot 6)"

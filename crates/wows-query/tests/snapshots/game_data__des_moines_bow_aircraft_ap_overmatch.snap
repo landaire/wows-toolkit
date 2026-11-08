@@ -32,7 +32,7 @@ groups:
     ships:
       - "T10 Hakuryū (aircraft_carrier, Japan): J5N Tenrai dive bombers, 404 mm AP bomb (Type 99 No. 80 Mk. 5)"
       - "T10 M. Richthofen (aircraft_carrier, Germany) [replicas: Süsshofen]: Fw 190G8 dive bombers, 406 mm AP bomb (PC 500)"
-      - "T10 Shinano (aircraft_carrier, Japan) [replicas: AL Shinano]: B7A Ryūsei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)"
+      - "T10 Shinano (aircraft_carrier, Japan, premium) [replicas: AL Shinano]: B7A Ryūsei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)"
   - armament: airstrike
     method: ap_overmatch
     considered:

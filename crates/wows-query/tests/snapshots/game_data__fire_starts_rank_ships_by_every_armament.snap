@@ -1,10 +1,9 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1013
 expression: "json!({\n    \"by_fire_starts_one_target\": by_fires,\n    \"by_fire_starts_every_mount_ceiling\": every_mount,\n    \"cruisers_by_fire_starts\": cruisers, \"by_shell_fire_chance\": by_shell,\n})"
 ---
 by_fire_starts_one_target:
-  - line: "1 T8 Indomitable (aircraft_carrier, United_Kingdom) \"104.15 fires/min\""
+  - line: "1 T8 Indomitable (aircraft_carrier, United_Kingdom, premium) \"104.15 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 104.15
@@ -23,7 +22,7 @@ by_fire_starts_one_target:
       main_battery: 11.76
       secondary: 43.3
       aircraft: 6.72
-  - line: "4 T10 Malta (aircraft_carrier, United_Kingdom) \"61.37 fires/min\""
+  - line: "4 T10 Malta (aircraft_carrier, United_Kingdom, premium) \"61.37 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 61.37
@@ -35,7 +34,7 @@ by_fire_starts_one_target:
       total: 61.11
       secondary: 23.33
       aircraft: 37.78
-  - line: "6 T10 Sibir (battleship, Russia) \"59.91 fires/min\""
+  - line: "6 T10 Sibir (battleship, Russia, premium) \"59.91 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 59.91
@@ -62,7 +61,7 @@ by_fire_starts_one_target:
       main_battery: 7.53
       secondary: 40
       aircraft: 10.08
-  - line: "10 T10 Independencia (aircraft_carrier, Pan_America) \"54.65 fires/min\""
+  - line: "10 T10 Independencia (aircraft_carrier, Pan_America, premium) \"54.65 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 54.65
@@ -85,62 +84,62 @@ by_fire_starts_one_target:
       total: 49.85
       secondary: 15
       aircraft: 34.85
-  - line: "14 T8 Graf Zeppelin (aircraft_carrier, Germany) [replicas: Graf Zeppelin B] \"47.2 fires/min\""
+  - line: "14 T8 Graf Zeppelin (aircraft_carrier, Germany, premium) [replicas: Graf Zeppelin B] \"47.2 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 47.2
       secondary: 17.63
       aircraft: 29.57
-  - line: "15 T8 Colossus (aircraft_carrier, United_Kingdom) \"46.66 fires/min\""
+  - line: "15 T8 Colossus (aircraft_carrier, United_Kingdom, premium) \"46.66 fires/min\""
     fires_by_armament:
       bearing: 90
       total: 46.66
       aircraft: 46.66
 by_fire_starts_every_mount_ceiling:
-  - "1 T8 Indomitable (aircraft_carrier, United_Kingdom) \"112.68 fires/min\""
+  - "1 T8 Indomitable (aircraft_carrier, United_Kingdom, premium) \"112.68 fires/min\""
   - "2 T11 Patrie (battleship, France) \"92.89 fires/min\""
   - "3 T11 Sekiryu (aircraft_carrier, Japan) \"84.44 fires/min\""
   - "4 T10 Hakuryū (aircraft_carrier, Japan) \"79.73 fires/min\""
   - "5 T11 Eagle (aircraft_carrier, United_Kingdom) \"74.79 fires/min\""
-  - "6 T10 Sibir (battleship, Russia) \"74.02 fires/min\""
-  - "7 T9 Navarin (battleship, Russia) [replicas: Mahtaga] \"73.95 fires/min\""
-  - "8 T9 Yimeng (battleship, Pan_Asia) \"73.92 fires/min\""
+  - "6 T10 Sibir (battleship, Russia, premium) \"74.02 fires/min\""
+  - "7 T9 Navarin (battleship, Russia, premium) [replicas: Mahtaga] \"73.95 fires/min\""
+  - "8 T9 Yimeng (battleship, Pan_Asia, premium) \"73.92 fires/min\""
   - "9 T11 Ushakov (battleship, Russia) \"70.94 fires/min\""
-  - "10 T10 Malta (aircraft_carrier, United_Kingdom) \"70.7 fires/min\""
+  - "10 T10 Malta (aircraft_carrier, United_Kingdom, premium) \"70.7 fires/min\""
   - "11 T10 Midway (aircraft_carrier, USA) \"68.6 fires/min\""
   - "12 T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff] \"68.34 fires/min\""
-  - "13 T5 Agincourt (battleship, United_Kingdom) \"66.03 fires/min\""
-  - "14 T10 Ohio (battleship, USA) \"65.38 fires/min\""
+  - "13 T5 Agincourt (battleship, United_Kingdom, premium) \"66.03 fires/min\""
+  - "14 T10 Ohio (battleship, USA, premium) \"65.38 fires/min\""
   - "15 T11 United States (aircraft_carrier, USA) \"64.85 fires/min\""
 cruisers_by_fire_starts:
   - "1 T11 Annapolis (cruiser, USA) \"46.38 fires/min\""
-  - "2 T10 Puerto Rico (cruiser, USA) [replicas: Puerto Rico B] \"40.08 fires/min\""
+  - "2 T10 Puerto Rico (cruiser, USA, premium) [replicas: Puerto Rico B] \"40.08 fires/min\""
   - "3 T11 Kurama (cruiser, Japan) \"38.92 fires/min\""
   - "4 T10 Utrecht (cruiser, Netherlands) \"37.95 fires/min\""
   - "5 T10 Gouden Leeuw (cruiser, Netherlands) \"37.74 fires/min\""
-  - "6 T8 Vrijheid (cruiser, Netherlands) \"37.69 fires/min\""
-  - "7 T10 Bremen (cruiser, Germany) [replicas: Bremen G] \"37.48 fires/min\""
-  - "8 T10 Amiral Lartigue (cruiser, France) \"37.14 fires/min\""
-  - "9 T10 Prins van Oranje (cruiser, Netherlands) [replicas: Pr. van Oranje G] \"37 fires/min\""
+  - "6 T8 Vrijheid (cruiser, Netherlands, premium) \"37.69 fires/min\""
+  - "7 T10 Bremen (cruiser, Germany, premium) [replicas: Bremen G] \"37.48 fires/min\""
+  - "8 T10 Amiral Lartigue (cruiser, France, premium) \"37.14 fires/min\""
+  - "9 T10 Prins van Oranje (cruiser, Netherlands, premium) [replicas: Pr. van Oranje G] \"37 fires/min\""
   - "10 T11 Jacksonville (cruiser, USA) \"36.67 fires/min\""
-  - "11 T10 Hildebrand (cruiser, Germany) \"36.56 fires/min\""
+  - "11 T10 Hildebrand (cruiser, Germany, premium) \"36.56 fires/min\""
   - "12 T10 Marseille (cruiser, France) [replicas: Zhuge Liang] \"35.97 fires/min\""
   - "13 T10 Prinz Adalbert (cruiser, Germany) \"35.59 fires/min\""
   - "14 T9 Johan de Witt (cruiser, Netherlands) \"35.54 fires/min\""
-  - "15 T9 Schröder (cruiser, Germany) \"35.34 fires/min\""
+  - "15 T9 Schröder (cruiser, Germany, premium) \"35.34 fires/min\""
 by_shell_fire_chance:
   - "1 T10 St. Vincent (battleship, United_Kingdom) \"64%\""
-  - "1 T10 Thunderer (battleship, United_Kingdom) \"64%\""
-  - "3 T10 Incomparable (battleship, United_Kingdom) \"56%\""
-  - "4 T9 Roussillon (battleship, France) \"50%\""
-  - "4 T8 Champagne (battleship, France) \"50%\""
+  - "1 T10 Thunderer (battleship, United_Kingdom, premium) \"64%\""
+  - "3 T10 Incomparable (battleship, United_Kingdom, premium) \"56%\""
+  - "4 T9 Roussillon (battleship, France, premium) \"50%\""
+  - "4 T8 Champagne (battleship, France, premium) \"50%\""
   - "6 T11 Devastation (battleship, United_Kingdom) \"49%\""
   - "6 T11 Patrie (battleship, France) \"49%\""
   - "6 T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR] \"49%\""
   - "6 T10 République (battleship, France) \"49%\""
   - "6 T9 Lion (battleship, United_Kingdom) [replicas: Louchuan] \"49%\""
-  - "6 T9 S. Thunder (battleship, United_Kingdom) \"49%\""
-  - "12 T10 Willem de Eerste (battleship, Netherlands) \"48%\""
+  - "6 T9 S. Thunder (battleship, United_Kingdom, premium) \"49%\""
+  - "12 T10 Willem de Eerste (battleship, Netherlands, premium) \"48%\""
   - "12 T9 Duncan (battleship, United_Kingdom) \"48%\""
-  - "12 T8 Turgut Reis (battleship, Europe) \"48%\""
-  - "12 T7 Collingwood (battleship, United_Kingdom) \"48%\""
+  - "12 T8 Turgut Reis (battleship, Europe, premium) \"48%\""
+  - "12 T7 Collingwood (battleship, United_Kingdom, premium) \"48%\""

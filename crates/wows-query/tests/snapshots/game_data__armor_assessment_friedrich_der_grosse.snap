@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1216
 expression: friedrich
 ---
 interpretations:
@@ -64,7 +63,7 @@ shooters:
     caliber_mm: 381
     ships_with_caliber: 21
     ships_in_role: 152
-    ship: "T8 Vanguard (battleship, United_Kingdom)"
+    ship: "T8 Vanguard (battleship, United_Kingdom, premium)"
     projectile: 381 mm AP Mk XXIIb SC
     param: PBPA072_381MM_AP_VANGUARD
     max_range_km: 20.02

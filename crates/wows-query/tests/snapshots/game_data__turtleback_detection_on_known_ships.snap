@@ -7,7 +7,7 @@ expression: detected
     median_deck_mm: 110
     median_belt_mm: 320
     share_pct: 100
-- - "T8 Tirpitz (battleship, Germany)"
+- - "T8 Tirpitz (battleship, Germany, premium)"
   - slope_deg: 65.9
     median_deck_mm: 110
     median_belt_mm: 315
@@ -17,7 +17,7 @@ expression: detected
     median_deck_mm: 120
     median_belt_mm: 300
     share_pct: 57.1
-- - "T10 G. Kurfürst (battleship, Germany)"
+- - "T10 G. Kurfürst (battleship, Germany, premium)"
   - slope_deg: 60.3
     median_deck_mm: 150
     median_belt_mm: 380
@@ -28,7 +28,7 @@ expression: detected
   - ~
 - - "T9 Sov. Soyuz (battleship, Russia)"
   - ~
-- - "T8 Roma (battleship, Italy)"
+- - "T8 Roma (battleship, Italy, premium)"
   - ~
 - - "T9 Iowa (battleship, USA)"
   - ~

@@ -13,7 +13,7 @@ ranking:
   ranked: 43
   ships:
     - rank: 1
-      ship: "T10 Shikishima (battleship, Japan)"
+      ship: "T10 Shikishima (battleship, Japan, premium)"
       value: 30.89 km
       base: 26.63 km
       build:
@@ -27,7 +27,7 @@ ranking:
         - Gun Fire Control System Modification 2
       tied: true
     - rank: 3
-      ship: "T10 Aki (battleship, Japan) [replicas: Aki G]"
+      ship: "T10 Aki (battleship, Japan, premium) [replicas: Aki G]"
       value: 30.26 km
       base: 26.09 km
       build:
@@ -39,7 +39,7 @@ ranking:
       build:
         - Gun Fire Control System Modification 2
     - rank: 5
-      ship: "T10 Sete de Setembro (battleship, Pan_America)"
+      ship: "T10 Sete de Setembro (battleship, Pan_America, premium)"
       value: 29.36 km
       base: 25.31 km
       build:
@@ -51,13 +51,13 @@ ranking:
       build:
         - Gun Fire Control System Modification 2
     - rank: 7
-      ship: "T10 Bourgogne (battleship, France)"
+      ship: "T10 Bourgogne (battleship, France, premium)"
       value: 28.77 km
       base: 24.8 km
       build:
         - Gun Fire Control System Modification 2
     - rank: 8
-      ship: "T10 Slava (battleship, Russia)"
+      ship: "T10 Slava (battleship, Russia, premium)"
       value: 28.63 km
       base: 24.68 km
       build:

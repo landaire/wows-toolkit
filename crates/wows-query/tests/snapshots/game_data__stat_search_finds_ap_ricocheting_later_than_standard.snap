@@ -49,7 +49,7 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Defence (cruiser, United_Kingdom)"
+  - ship: "T10 Defence (cruiser, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -57,7 +57,7 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Druid (destroyer, United_Kingdom)"
+  - ship: "T10 Druid (destroyer, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -65,23 +65,23 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Gibraltar (cruiser, United_Kingdom)"
+  - ship: "T10 Gibraltar (cruiser, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Hull (destroyer, USA)"
+  - ship: "T10 Hull (destroyer, USA, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Incheon (cruiser, Pan_Asia) [replicas: Incheon B]"
+  - ship: "T10 Incheon (cruiser, Pan_Asia, premium) [replicas: Incheon B]"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Komissar (cruiser, Russia)"
+  - ship: "T10 Komissar (cruiser, Russia, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 50 deg"
-  - ship: "T10 La Pampa (destroyer, Pan_America)"
+  - ship: "T10 La Pampa (destroyer, Pan_America, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -89,7 +89,7 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Monmouth (cruiser, United_Kingdom)"
+  - ship: "T10 Monmouth (cruiser, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -97,19 +97,19 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 50 deg"
-  - ship: "T10 Plymouth (cruiser, United_Kingdom)"
+  - ship: "T10 Plymouth (cruiser, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Puerto Rico (cruiser, USA) [replicas: Puerto Rico B]"
+  - ship: "T10 Puerto Rico (cruiser, USA, premium) [replicas: Puerto Rico B]"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Rhode Island (battleship, USA) [replicas: Rhode Island B]"
+  - ship: "T10 Rhode Island (battleship, USA, premium) [replicas: Rhode Island B]"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 50 deg"
-  - ship: "T10 Salem (cruiser, USA)"
+  - ship: "T10 Salem (cruiser, USA, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -117,35 +117,35 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T10 Sevastopol (cruiser, Russia)"
+  - ship: "T10 Sevastopol (cruiser, Russia, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 50 deg"
-  - ship: "T10 Stalingrad (cruiser, Russia)"
+  - ship: "T10 Stalingrad (cruiser, Russia, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 55 deg"
-  - ship: "T10 Vampire II (destroyer, Commonwealth)"
+  - ship: "T10 Vampire II (destroyer, Commonwealth, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Aberdeen (cruiser, United_Kingdom)"
+  - ship: "T9 Aberdeen (cruiser, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Alaska (cruiser, USA) [replicas: Alaska B]"
+  - ship: "T9 Alaska (cruiser, USA, premium) [replicas: Alaska B]"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Baotou (cruiser, Pan_Asia)"
+  - ship: "T9 Baotou (cruiser, Pan_Asia, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 50 deg"
-  - ship: "T9 Barfleur (destroyer, United_Kingdom)"
+  - ship: "T9 Barfleur (destroyer, United_Kingdom, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Blücher (cruiser, Germany)"
+  - ship: "T9 Blücher (cruiser, Germany, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 55 deg"
@@ -153,7 +153,7 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Cambridge (cruiser, USA)"
+  - ship: "T9 Cambridge (cruiser, USA, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
@@ -161,11 +161,11 @@ ships:
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Fort Worth (cruiser, USA) [replicas: Fort Worth G]"
+  - ship: "T9 Fort Worth (cruiser, USA, premium) [replicas: Fort Worth G]"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"
-  - ship: "T9 Illinois (battleship, USA)"
+  - ship: "T9 Illinois (battleship, USA, premium)"
     stock: true
     values:
       - "artillery.ap.ricochet_start (main battery): 60 deg"

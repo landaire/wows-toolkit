@@ -16,7 +16,7 @@ expression: search.groups
   share_pct_by_class:
     battleship: 100
   ships:
-    - "T10 Aki (battleship, Japan) [replicas: Aki G]: Aichi M6A2 Seiran dive bombers, HE bomb (Type 99 No. 80 Mk. 11), 61 mm pen"
+    - "T10 Aki (battleship, Japan, premium) [replicas: Aki G]: Aichi M6A2 Seiran dive bombers, HE bomb (Type 99 No. 80 Mk. 11), 61 mm pen"
     - "T10 Louisiana (battleship, USA): BTD Destroyer dive bombers, HE bomb (AN-M65 Mod 1), 53 mm pen"
 - armament: airstrike
   method: he_penetration

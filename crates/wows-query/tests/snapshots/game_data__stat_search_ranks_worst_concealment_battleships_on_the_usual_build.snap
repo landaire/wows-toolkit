@@ -6,7 +6,7 @@ stat: "visibility.sea_detection (km), highest first, on the build that lowers it
 rule: "Each ship is ranked by its value on the build that lowers the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that lower the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in."
 ships:
   - "1 T6 Fusō (battleship, Japan): 16.5 km (base 18.33 km, build [\"Concealment Expert\"])"
-  - "2 T7 Ashitaka (battleship, Japan): 15.08 km (base 16.76 km, build [\"Concealment Expert\"])"
+  - "2 T7 Ashitaka (battleship, Japan, premium): 15.08 km (base 16.76 km, build [\"Concealment Expert\"])"
   - "3 T11 Hannover (battleship, Germany): 15.04 km (base 18.57 km, build [\"Concealment Expert\",\"Concealment System Modification 1\"])"
   - "4 T7 Nagato (battleship, Japan): 14.93 km (base 16.59 km, build [\"Concealment Expert\"])"
-  - "5 T7 Strasbourg (battleship, France): 14.77 km (base 16.41 km, build [\"Concealment Expert\"])"
+  - "5 T7 Strasbourg (battleship, France, premium): 14.77 km (base 16.41 km, build [\"Concealment Expert\"])"

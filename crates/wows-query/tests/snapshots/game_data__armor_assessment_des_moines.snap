@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1227
 expression: armor_assessment(ship)
 ---
 ship: "T10 Des Moines (cruiser, USA)"
@@ -59,7 +58,7 @@ shooters:
     caliber_mm: 457
     ships_with_caliber: 14
     ships_in_role: 122
-    ship: "T9 Georgia (battleship, USA)"
+    ship: "T9 Georgia (battleship, USA, premium)"
     projectile: 457 mm AP Type B
     param: PAPA105_457MM_AP_GEORGIA_SH
     max_range_km: 20.04

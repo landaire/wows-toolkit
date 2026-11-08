@@ -346,12 +346,24 @@ impl Ship {
         }
     }
 
-    /// "T10 Des Moines (cruiser, USA)", for compact lists; test ships end in
-    /// ", test" and replicas name their original.
+    /// "premium" or "test" for a ship not of the tech tree, which players
+    /// get otherwise than by research. `None` for tech tree ships, and for
+    /// rentals, bot copies and other variants their names and listing
+    /// sections already set apart.
+    pub(crate) fn obtained_note(&self) -> Option<&'static str> {
+        match self.category {
+            ShipCategory::Premium => Some("premium"),
+            ShipCategory::Test => Some("test"),
+            _ => None,
+        }
+    }
+
+    /// "T10 Des Moines (cruiser, USA)", for compact lists; premium and test
+    /// ships end in ", premium" or ", test" and replicas name their original.
     pub(crate) fn label(&self) -> String {
-        let test = if self.status() == ShipStatus::Test { ", test" } else { "" };
+        let obtained = self.obtained_note().map(|note| format!(", {note}")).unwrap_or_default();
         let replica = self.replica_of.as_ref().map(|of| format!(", replica of {}", of.ship)).unwrap_or_default();
-        format!("T{} {} ({}, {}{test}{replica})", self.tier.0, self.name, self.class.label(), self.param.nation())
+        format!("T{} {} ({}, {}{obtained}{replica})", self.tier.0, self.name, self.class.label(), self.param.nation())
     }
 
     /// "Schlieffen (co-op bot copy): T10 battleship, PGSB920", naming one of
