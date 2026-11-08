@@ -481,8 +481,15 @@ fn tech_tree_lines_cheapest_to_reset_by_reset_cost() {
         .expect("default tiers are valid");
     assert!(lines.ranking.is_some());
     assert!(lines.lines.iter().all(|line| line.reset.as_ref().is_some_and(|reset| reset.reset_cost.is_some())));
+    let summary = lines.summary.as_ref().expect("reset_cost carries a summary");
+    assert_eq!(summary.lines.len(), lines.lines.len());
+    assert!(summary.lines[0].starts_with(&format!("1. {} (", lines.lines[0].tier_10_ship)));
 
-    insta::assert_yaml_snapshot!(json!({ "ranking": lines.ranking, "lines": reset_ranks(LineOrder::ResetCost) }));
+    insta::assert_yaml_snapshot!(json!({
+        "ranking": lines.ranking,
+        "summary": lines.summary,
+        "lines": reset_ranks(LineOrder::ResetCost),
+    }));
 }
 
 /// Carrier lines pay fewer Research Points than gunship lines. The Harugumo

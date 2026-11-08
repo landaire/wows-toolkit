@@ -1,8 +1,32 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-expression: "json!({\n    \"ranking\": lines.ranking, \"lines\": reset_ranks(LineOrder::ResetCost)\n})"
+expression: "json!({\n    \"ranking\": lines.ranking, \"summary\": lines.summary, \"lines\":\n    reset_ranks(LineOrder::ResetCost),\n})"
 ---
 ranking: "reset_cost.mean_rank is the mean of the line's rank by credits_per_point and its rank by xp_per_point among all lines matching the filters, listed or omitted (1 is cheapest; equal values share a rank). Lines go from the lowest mean_rank; ties go by credits_per_point, then xp_per_point."
+summary:
+  lines:
+    - "1. Grozovoi (Russia destroyer): 2nd cheapest in credits per point (5,001.3), 3rd cheapest in XP per point (60.1); mean rank 2.5"
+    - "2. Z-52 (Germany destroyer): cheapest in credits per point (5,001.1), 5th cheapest in XP per point (60.6); mean rank 3"
+    - "3. Shimakaze (Japan destroyer): 5th cheapest in credits per point (5,109.8), 2nd cheapest in XP per point (59.6); mean rank 3.5"
+    - "4. Delny (Russia destroyer): 4th cheapest in credits per point (5,079.8), 4th cheapest in XP per point (60.5); mean rank 4"
+    - "5. Harugumo (Japan destroyer): 7th cheapest in credits per point (5,119.6), cheapest in XP per point (59.4); mean rank 4"
+    - "6. Yueyang (Pan_Asia destroyer): 3rd cheapest in credits per point (5,071.4), 9th cheapest in XP per point (61.5); mean rank 6"
+    - "7. Zaō (Japan cruiser): 6th cheapest in credits per point (5,111.7), 6th cheapest in XP per point (60.7); mean rank 6"
+    - "8. Gearing (USA destroyer): 8th cheapest in credits per point (5,123.5), 10th cheapest in XP per point (61.7); mean rank 9"
+    - "9. Burrows (USA destroyer): 9th cheapest in credits per point (5,138.2), 13th cheapest in XP per point (62.3); mean rank 11"
+    - "10. Halland (Europe destroyer): 15th cheapest in credits per point (5,165.4), 8th cheapest in XP per point (61.2); mean rank 11.5"
+    - "11. Kléber (France destroyer): 10th cheapest in credits per point (5,143.6), 14th cheapest in XP per point (62.3); mean rank 12"
+    - "12. Henri IV (France cruiser): 13th cheapest in credits per point (5,159.6), 12th cheapest in XP per point (62.2); mean rank 12.5"
+    - "13. Cassard (France destroyer): 12th cheapest in credits per point (5,158.3), 15th cheapest in XP per point (62.5); mean rank 13.5"
+    - "14. Daring (United_Kingdom destroyer): 10th cheapest in credits per point (5,143.6), 18th cheapest in XP per point (62.6); mean rank 14"
+    - "15. Des Moines (USA cruiser): 17th cheapest in credits per point (5,181.0), 11th cheapest in XP per point (62.1); mean rank 14"
+    - "16. Marseille (France cruiser): 13th cheapest in credits per point (5,159.6), 24th cheapest in XP per point (62.9); mean rank 18.5"
+    - "17. 20 de Julio (Pan_America destroyer): 16th cheapest in credits per point (5,179.9), 21st cheapest in XP per point (62.8); mean rank 18.5"
+    - "18. Venezia (Italy cruiser): 33rd cheapest in credits per point (5,282.8), 7th cheapest in XP per point (60.9); mean rank 20"
+    - "19. Gdańsk (Europe destroyer): 25th cheapest in credits per point (5,204.6), 17th cheapest in XP per point (62.6); mean rank 21"
+    - "20. Yodo (Japan cruiser): 18th cheapest in credits per point (5,201.9), 27th cheapest in XP per point (63.4); mean rank 22.5"
+  best_in_credits: "Z-52 (Germany destroyer), 5,001.1 credits per point: the lowest of the 60 lines considered"
+  best_in_xp: "Harugumo (Japan destroyer), 59.4 XP per point: the lowest of the 60 lines considered"
 lines:
   - tier_10_ship: Grozovoi
     class: destroyer

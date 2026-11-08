@@ -119,6 +119,10 @@ pub struct TechTreeLinesOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking: Option<&'static str>,
 
+    /// The reset_cost order in words, when sort_by is reset_cost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ResetCostSummary>,
+
     /// Lines left out of `lines` by the limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
@@ -223,6 +227,110 @@ impl LineRank {
     fn of<T: Ord>(value: &T, values: impl Iterator<Item = T>) -> Self {
         Self(1 + values.filter(|other| other < value).count())
     }
+}
+
+/// The reset_cost ranking stated as sentences, so the order and each line's
+/// two ranks are read rather than inferred.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResetCostSummary {
+    /// One sentence per listed line, in order: "1. Grozovoi (Russia
+    /// destroyer): 2nd cheapest in credits per point (5,001.3), 3rd cheapest
+    /// in XP per point (60.1); mean rank 2.5".
+    pub lines: Vec<String>,
+
+    /// The lines ranked 1 by credits per point among all lines considered.
+    pub best_in_credits: String,
+
+    /// The lines ranked 1 by XP per point among all lines considered.
+    pub best_in_xp: String,
+}
+
+impl ResetCostSummary {
+    /// `lines` in reset_cost order, every line considered; the first
+    /// `listed` are listed.
+    fn new(lines: &[TechTreeLine], listed: usize) -> Self {
+        struct Ranked<'a> {
+            line: &'a TechTreeLine,
+            reset: &'a LineReset,
+            rank: ResetCostRank,
+        }
+
+        let ranked: Vec<Ranked<'_>> = lines
+            .iter()
+            .filter_map(|line| {
+                let reset = line.reset.as_ref()?;
+                Some(Ranked { line, reset, rank: reset.reset_cost? })
+            })
+            .collect();
+        let name = |line: &TechTreeLine| {
+            format!("{} ({} {})", line.tier_10_ship, line.nation, line.class.label().replace('_', " "))
+        };
+        let sentences = ranked
+            .iter()
+            .take(listed)
+            .enumerate()
+            .map(|(index, Ranked { line, reset, rank })| {
+                format!(
+                    "{}. {}: {} in credits per point ({}), {} in XP per point ({}); mean rank {}",
+                    index + 1,
+                    name(line),
+                    cheapest(rank.credits_per_point_rank),
+                    one_decimal(reset.credits_per_point.value()),
+                    cheapest(rank.xp_per_point_rank),
+                    one_decimal(reset.xp_per_point.value()),
+                    rank.mean_rank
+                )
+            })
+            .collect();
+        let best = |rank_of: fn(&ResetCostRank) -> LineRank, value_of: fn(&LineReset) -> f64, unit: &str| {
+            let firsts: Vec<String> = ranked
+                .iter()
+                .filter(|ranked| rank_of(&ranked.rank) == LineRank(1))
+                .map(|ranked| format!("{}, {} {unit}", name(ranked.line), one_decimal(value_of(ranked.reset))))
+                .collect();
+            format!("{}: the lowest of the {} lines considered", firsts.join(" and "), ranked.len())
+        };
+
+        Self {
+            lines: sentences,
+            best_in_credits: best(
+                |rank| rank.credits_per_point_rank,
+                |reset| reset.credits_per_point.value(),
+                "credits per point",
+            ),
+            best_in_xp: best(|rank| rank.xp_per_point_rank, |reset| reset.xp_per_point.value(), "XP per point"),
+        }
+    }
+}
+
+/// "cheapest" for rank 1, else "2nd cheapest", "3rd cheapest", ...
+fn cheapest(rank: LineRank) -> String {
+    let suffix = match (rank.0 % 10, rank.0 % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+
+    if rank.0 == 1 { "cheapest".to_owned() } else { format!("{}{suffix} cheapest", rank.0) }
+}
+
+/// One decimal with thousands separators: "5,001.3".
+fn one_decimal(value: f64) -> String {
+    let text = format!("{value:.1}");
+    let (whole, fraction) = text.split_once('.').unwrap_or((&text, "0"));
+    let digits = whole.trim_start_matches('-');
+    let mut grouped = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    let sign = if whole.starts_with('-') { "-" } else { "" };
+
+    format!("{sign}{grouped}.{fraction}")
 }
 
 /// Research Points, the Research Bureau currency.
@@ -483,12 +591,16 @@ impl GameData {
         });
 
         let total = lines.len();
-        lines.truncate(args.limit.unwrap_or(DEFAULT_LIMIT));
+        let listed = args.limit.unwrap_or(DEFAULT_LIMIT).min(total);
+        // The best lines are named among every line considered, before the
+        // limit drops any.
+        let summary = (sort_by == LineOrder::ResetCost).then(|| ResetCostSummary::new(&lines, listed));
+        lines.truncate(listed);
         let omitted = (total > lines.len()).then(|| total - lines.len());
 
         let ranking = (sort_by == LineOrder::ResetCost).then_some(RESET_COST_RANKING);
 
-        Ok(TechTreeLinesOutput { interpretations, tiers, sort_by, total, lines, ranking, omitted })
+        Ok(TechTreeLinesOutput { interpretations, tiers, sort_by, total, lines, ranking, summary, omitted })
     }
 
     /// Every research path from a tier 1 ship to a released tier 10 tech
