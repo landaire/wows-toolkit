@@ -240,13 +240,13 @@ jobs:
           cp "$rel" dist/wows_toolkit
           chmod +w dist/wows_toolkit
 
-      # Linking through the Nix toolchain records store paths as the ELF
-      # interpreter and runpath, and the Flatpak runtime has neither. Verified
-      # against org.freedesktop.Platform//24.08: patched, the binary runs there.
-      - name: Make the binary loadable outside Nix
+      # Buck links the GUI against the host's loader, but the dev shell's
+      # NIX_LDFLAGS adds a runpath to the checkout, which the Flatpak runtime
+      # does not have.
+      - name: Remove the dev shell runpath
         run: |
-          nix develop --command patchelf             --set-interpreter /lib64/ld-linux-x86-64.so.2             --remove-rpath dist/wows_toolkit
-          readelf -l dist/wows_toolkit | grep -i interpreter
+          nix develop --command patchelf --remove-rpath dist/wows_toolkit
+          readelf -l dist/wows_toolkit | grep -F '/lib64/ld-linux-x86-64.so.2'
 
       - name: Install Flatpak
         run: |

@@ -59,6 +59,17 @@ def os_select(macos, linux, windows):
         "config//os/constraints:windows": windows,
     })
 
+# Linux GUI binaries start under the host's dynamic loader, which resolves the
+# graphics drivers and the libraries they link against through the host's
+# ld.so.cache. The Nix loader the toolchain records by default searches only
+# store paths. `-lld` stops rustc substituting its own lld wrapper, which adds a
+# runpath to the Nix glibc, so the toolchain's ld.lld links and the binary
+# carries no store path.
+LINUX_GUI_RUSTC_FLAGS = [
+    "-Clinker-features=-lld",
+    "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+]
+
 def wasm_select(wasm, native):
     """Select a value for wasm32 (wt-web's target) or any native target.
 

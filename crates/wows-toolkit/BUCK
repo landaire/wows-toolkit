@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows_toolkit_build",
@@ -166,7 +166,7 @@ workspace_library(
 # state. The icon resource is linked from //toolchains/windows:app_resource.
 GUI_LINK_FLAGS = os_select(
     macos = [],
-    linux = [],
+    linux = LINUX_GUI_RUSTC_FLAGS,
     # The vendor hybrid-graphics shims look these up in the export table by name.
     # Defining the statics is not enough; an executable exports nothing unless
     # the linker is told to. Scoped to the GUI binary, which is where the statics

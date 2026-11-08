@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "gpui_build",
@@ -88,7 +88,7 @@ workspace_binary(
     # same manifest with the pinned rc.exe and links the result here instead.
     rustc_flags = os_select(
         macos = [],
-        linux = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
         windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
     ),
 )
@@ -107,7 +107,7 @@ workspace_binary(
     deps = GPUI_DEPS + ["//third-party/rust:dhat"],
     rustc_flags = os_select(
         macos = [],
-        linux = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
         windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
     ),
 )
