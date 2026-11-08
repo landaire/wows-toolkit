@@ -366,12 +366,12 @@ traces:
     verdict: "Yes: 3513 of 4661 rays over Yamato's citadel (75%) detonate inside it. 504 of them cross a plate at an angle where the game rolls a ricochet."
     assumptions:
       - "Bomb impact speed is assumed to be its bulletSpeed (490 m/s) and its fall angle the aircraft's angleOfDive (75 deg). The client does not define bomb impact kinematics; the server does."
-      - AP bombs are simulated with the gun shell formulas; the game may treat bombs differently on the server.
+      - "AP bomb penetration is computed at bulletSpeed, 350.8 mm; the game does not simulate the fall for it. Strike angles, ricochets, velocity loss and the fuse follow the AP shell simulation."
       - "Each ray stands for an equal area of the target seen along the line of fire; fractions are by area, not weighted by dispersion or aim."
       - Rays whose first armor contact is below the waterline entered the water first and are not modelled.
       - "Target hull level and stationary, turrets at their default heading, and the projectile travels straight through the ship."
       - "Penetration, ricochet and fuse behaviour are resolved by the game server; the client data holds only the inputs."
       - "Effective thickness spreads and stacks leave out glancing rays, counted in glancing_rays: a plate before or at the citadel is struck at or past the AP shell's always-ricochet angle and not overmatched, or, without an AP shell or on an overmatched plate, at 80 deg or more from its normal."
-      - "AP uses the toolkit armor viewer's plate-by-plate simulation with community formulas from wows_shell (jcw780): penetration = krupp-scaled mass and caliber x velocity^1.38, normalization, overmatch when caliber > 14.3 x thickness, velocity loss after each plate, fuse armed by a plate at least the fuse threshold thick and fired after the fuse time."
+      - "AP uses the toolkit armor viewer's plate-by-plate simulation. Raw penetration is the game's formula krupp x (mass x velocity^2)^0.69 x caliber^-1.07 x 1e-7 (mm, from bulletKrupp, bulletMass in kg, bulletDiametr in m and velocity in m/s). Normalization, velocity loss after each plate and the fuse use community formulas from wows_shell (jcw780); overmatch when caliber > 14.3 x thickness; the fuse is armed by a plate at least the fuse threshold thick and fires after the fuse time."
       - A plate struck at or past the always-ricochet angle ricochets. Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.
       - "A citadel hit is a detonation inside the citadel volume, judged by how many citadel plates the ray crossed before the detonation (armor viewer rule)."

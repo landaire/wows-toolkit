@@ -349,17 +349,25 @@ and `powf` caller in the game logic address range, and all functions from
 The client receives `TerminalBallisticsInfo` with impact velocities and hit
 results but does not compute penetration itself.
 
-### Our penetration formula (from wows_shell / jcw780)
+### Our penetration formula
 
 ```rust
-p_ppc = 1e-7 * krupp * mass^0.69 * caliber^(-1.07)
-raw_pen = p_ppc * impact_velocity^1.38
+raw_pen = krupp * (mass * impact_velocity^2)^0.69 * caliber^(-1.07) * 1e-7
 post_pen_velocity = velocity * (1 - exp(1 - raw_pen / effective_thickness))
 ```
 
-These constants (0.69, -1.07, 1.38) and the post-penetration velocity formula
-cannot be verified from the client binary. They were empirically derived by the
-community (jcw780's wows_shell project) through in-game testing and curve fitting.
+`krupp`, `mass` (kg) and `caliber` (m) are the projectile's `bulletKrupp`,
+`bulletMass` and `bulletDiametr`; `raw_pen` is in mm. The raw penetration is the
+game's formula. AP bombs and rockets have a fixed penetration at `bulletSpeed`,
+with no fall or flight simulated, and the formula at that speed reproduces the
+port value for most of them (Rhein, Bearn and Colossus are exceptions in
+15.10). It is the same expression wows_shell (jcw780) uses,
+`1e-7 * krupp * mass^0.69 * caliber^(-1.07) * velocity^1.38`. For shells the
+velocity is the impact velocity at range.
+
+The post-penetration velocity formula cannot be verified from the client
+binary. It was derived by the community (wows_shell) through in-game testing
+and curve fitting.
 
 ---
 
@@ -882,7 +890,7 @@ The `Cd` (water drag coefficient) should be available in GameParams shell data
 | Integration | Forward Euler, adaptive dt | RK4, fixed dt=0.02s | Different |
 | Max range | 42 000 m | 200 s timeout | ~Same |
 | Time multiplier | Not in trajectory code | 2.75 (applied to output) | N/A |
-| Penetration | Server-only | wows_shell formula (community) | Unverifiable |
+| Penetration | Server-only | Game formula, matches most port AP bomb and rocket values | Not in binary |
 | Normalization/ricochet | Server-only | Community constants | Unverifiable |
 | Fuse mechanics | Server-only | Community formula | Unverifiable |
 | HE splash geometry | AABB boxes + BVH | AABB overlap + pen check | **Partial** (no effective armor averaging) |

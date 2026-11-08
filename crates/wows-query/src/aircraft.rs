@@ -14,6 +14,7 @@ use wows_core::units::Percent;
 use wows_core::units::Seconds;
 use wows_ship_stats::FireArmament;
 use wows_ship_stats::FireInputs;
+use wowsunpack::ballistics::PenetrationFactor;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::game_params::translations::translate_unit;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
@@ -247,24 +248,28 @@ pub struct Ordnance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sap_penetration_mm: Option<Millimeters>,
 
-    /// Inputs of the server-side AP penetration check, for AP bombs and rockets.
+    /// AP bomb and rocket penetration with the inputs it is computed from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ap: Option<ApOrdnance>,
 }
 
-/// The fields that decide whether an AP bomb or rocket penetrates a plate it
-/// does not overmatch. The client has no formula combining them; the server
-/// decides.
+/// Penetration of an AP bomb or rocket and the fields that decide how it
+/// strikes a plate.
 #[derive(Debug, Clone, Serialize)]
 pub struct ApOrdnance {
+    /// Raw penetration `krupp * (mass * bulletSpeed^2)^0.69 * caliber^-1.07 * 1e-7`,
+    /// to 0.1 mm. The game fixes it at `bulletSpeed` without simulating the fall
+    /// or flight. It agrees with the port for most ordnance, not all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub penetration_mm: Option<Millimeters>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caliber_mm: Option<Millimeters>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mass_kg: Option<Kilograms>,
 
-    /// `bulletSpeed`. The client uses drop kinematics only for fall time and
-    /// aiming, so the impact speed the server uses is not known here.
+    /// `bulletSpeed`, the speed the penetration is computed at.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mps: Option<MetersPerSecond>,
 
@@ -355,7 +360,7 @@ impl GameData {
             squadrons,
             thickness_mm: thickness,
             rule: thickness.map(|_| {
-                "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise the server decides and ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
+                "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise they defeat it when their penetration at bulletSpeed (ordnance.ap.penetration_mm) is at least the thickness, struck head-on: strike angle, normalization and ricochet are not applied. Torpedoes, depth charges and mines do not test plates."
             }),
         })
     }
@@ -507,8 +512,8 @@ impl GameData {
 /// their fixed penetration; no skill raises it for aircraft ordnance
 /// (`calculateHECSPenetration`, ModifiersApply.py:400-425, scales only main
 /// and secondary battery shells). AP bombs and rockets overmatch by the shell
-/// rule; whether they penetrate a thicker plate is undetermined, as the
-/// client holds no formula for them and the server decides.
+/// rule and otherwise compare their fixed penetration at `bulletSpeed` against
+/// the plate struck head-on.
 pub fn ordnance_vs_plate(ordnance: &Ordnance, thickness: Millimeters) -> PlateVerdict {
     if ordnance.kind.is_underwater() {
         return PlateVerdict::NotApplicable { reason: "strikes below the waterline and does not test plates" };
@@ -518,13 +523,13 @@ pub fn ordnance_vs_plate(ordnance: &Ordnance, thickness: Millimeters) -> PlateVe
         Some(Ammo::He) => ordnance.he_penetration_mm,
         Some(Ammo::Sap) => ordnance.sap_penetration_mm,
         Some(Ammo::Ap) => {
-            let caliber = ordnance.ap.as_ref().and_then(|ap| ap.caliber_mm);
-            return match caliber {
-                Some(caliber) if is_overmatch(caliber, thickness) => PlateVerdict::Overmatches { caliber_mm: caliber },
-                _ => PlateVerdict::Undetermined {
-                    reason: "the plate is not overmatched and the client has no AP bomb or rocket penetration formula; the server decides",
-                },
-            };
+            let ap = ordnance.ap.as_ref();
+            if let Some(caliber) = ap.and_then(|ap| ap.caliber_mm)
+                && is_overmatch(caliber, thickness)
+            {
+                return PlateVerdict::Overmatches { caliber_mm: caliber };
+            }
+            ap.and_then(|ap| ap.penetration_mm)
         }
         None => return PlateVerdict::Undetermined { reason: "the ordnance has no known shell type" },
     };
@@ -584,13 +589,24 @@ fn ordnance(param: &Param, name: String, aircraft: &Aircraft) -> Option<Ordnance
 fn ap_inputs(projectile: &Projectile, aircraft: &Aircraft) -> ApOrdnance {
     let ricochet = ricochet_angles(Ammo::Ap, projectile);
 
+    let caliber = projectile.bullet_diametr().map(|meters| Meters::new(meters).to_mm());
+    let mass = projectile.bullet_mass().map(Kilograms::new);
+    let speed = projectile.bullet_speed().map(MetersPerSecond::new);
+    let krupp = projectile.bullet_krupp();
+    let penetration = match (krupp, mass, caliber, speed) {
+        (Some(krupp), Some(mass), Some(caliber), Some(speed)) => {
+            let raw = PenetrationFactor::new(krupp, mass, caliber).raw_penetration(speed);
+            Some(Millimeters::new(round_to(raw.value(), 10.0)))
+        }
+        _ => None,
+    };
+
     ApOrdnance {
-        caliber_mm: projectile
-            .bullet_diametr()
-            .map(|meters| Millimeters::new(Meters::new(meters).to_mm().value().round())),
-        mass_kg: projectile.bullet_mass().map(Kilograms::new),
-        speed_mps: projectile.bullet_speed().map(MetersPerSecond::new),
-        krupp: projectile.bullet_krupp(),
+        penetration_mm: penetration,
+        caliber_mm: caliber.map(|caliber| Millimeters::new(caliber.value().round())),
+        mass_kg: mass,
+        speed_mps: speed,
+        krupp,
         normalization_deg: projectile.bullet_cap_normalize_max_angle().map(Degrees::new),
         ricochet_from_deg: ricochet.map(|angles| angles.from_deg),
         ricochet_always_from_deg: ricochet.map(|angles| angles.always_from_deg),
@@ -634,9 +650,10 @@ mod tests {
     }
 
     #[test]
-    fn ap_ordnance_overmatches_thin_plates_and_is_otherwise_undetermined() {
+    fn ap_ordnance_overmatches_thin_plates_and_compares_its_penetration_otherwise() {
         let mut bomb = ordnance(OrdnanceKind::SkipBomb, Some(Ammo::Ap), None);
         bomb.ap = Some(ApOrdnance {
+            penetration_mm: Some(Millimeters::new(120.0)),
             caliber_mm: Some(Millimeters::new(460.0)),
             mass_kg: None,
             speed_mps: None,
@@ -653,7 +670,14 @@ mod tests {
             ordnance_vs_plate(&bomb, Millimeters::new(32.0)),
             PlateVerdict::Overmatches { caliber_mm: Millimeters::new(460.0) }
         );
-        assert!(matches!(ordnance_vs_plate(&bomb, Millimeters::new(33.0)), PlateVerdict::Undetermined { .. }));
+        assert_eq!(
+            ordnance_vs_plate(&bomb, Millimeters::new(120.0)),
+            PlateVerdict::Penetrates { penetration_mm: Millimeters::new(120.0) }
+        );
+        assert_eq!(
+            ordnance_vs_plate(&bomb, Millimeters::new(121.0)),
+            PlateVerdict::Fails { penetration_mm: Millimeters::new(120.0) }
+        );
     }
 
     #[test]

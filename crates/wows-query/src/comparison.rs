@@ -14,6 +14,7 @@ use serde::ser::SerializeMap;
 use wows_core::units::Degrees;
 use wows_core::units::Km;
 use wows_core::units::Millimeters;
+use wows_core::units::Percent;
 use wows_ship_stats::Bearing;
 use wows_ship_stats::bearing::mount_bears;
 use wows_ship_stats::mount_salvo;
@@ -143,12 +144,20 @@ pub struct ComparedShip {
     /// "T10 C. Colombo (battleship, Italy)", ending ", test" for a ship in testing.
     pub ship: String,
 
+    /// GameParams index, e.g. "PISB110". Not in the tool output.
+    #[serde(skip)]
+    pub index: String,
+
     /// Premium replicas of this ship, left out of the ranks.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub replicas: Vec<String>,
 
     /// Per factor, "value (rank r/n, pNN)".
     pub values: FactorValues,
+
+    /// `values` as numbers, in the same order. Not in the tool output.
+    #[serde(skip)]
+    pub standings: Vec<FactorStanding>,
 
     /// Values that beat, or lose to, at least 90% of the other ships, or
     /// torpedo options or peers in a matchup, in groups of five or more.
@@ -194,6 +203,10 @@ pub struct TorpedoOption {
     /// of the group.
     pub values: FactorValues,
 
+    /// `values` as numbers, in the same order. Not in the tool output.
+    #[serde(skip)]
+    pub standings: Vec<FactorStanding>,
+
     /// For a torpedo whose damage depends on the distance it has run, the
     /// share of full damage by distance.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -233,6 +246,142 @@ impl Serialize for FactorValues {
     }
 }
 
+/// One factor of a ship or torpedo option and where its value ranks.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FactorStanding {
+    /// Factor key, as `factors` and `torpedo_factors` name it, e.g. "dispersion".
+    pub factor: &'static str,
+
+    /// In `unit`, unrounded.
+    pub value: f32,
+    pub unit: &'static str,
+    pub better: FactorDirection,
+    pub rank: GroupRank,
+}
+
+/// Which values of a factor are better.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactorDirection {
+    Lower,
+    Higher,
+}
+
+/// Where a value ranks among the values of its group, its own included: the
+/// ships of the group, of the ship's tier for per-tier factors, or every
+/// torpedo option of the group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct GroupRank {
+    /// From 1, the best first; equal values share a position.
+    pub position: usize,
+
+    /// Values ranked, the n of "rank r/n".
+    pub count: usize,
+
+    /// Other values better than, worse than and equal to this one.
+    pub better: usize,
+    pub worse: usize,
+    pub tied: usize,
+
+    /// Set when the value beats, or loses to, at least 90% of the others,
+    /// with at least 4 others.
+    pub outlier: Option<Outlier>,
+}
+
+impl GroupRank {
+    /// The rank of `value` among `values`, its own included.
+    fn new(value: f32, better: Better, values: impl Iterator<Item = f32>) -> Self {
+        let mut count: usize = 0;
+        let mut above: usize = 0;
+        let mut below: usize = 0;
+        for other in values {
+            count += 1;
+            if better.improves(other, value) {
+                above += 1;
+            } else if better.improves(value, other) {
+                below += 1;
+            }
+        }
+        let others = count.saturating_sub(1);
+
+        let outlier = if others < OUTLIER_MIN_OTHERS {
+            None
+        } else if above as f32 >= OUTLIER_SHARE * others as f32 {
+            Some(Outlier::Worse)
+        } else if below as f32 >= OUTLIER_SHARE * others as f32 {
+            Some(Outlier::Better)
+        } else {
+            None
+        };
+
+        Self {
+            position: 1 + above,
+            count,
+            better: above,
+            worse: below,
+            tied: others.saturating_sub(above + below),
+            outlier,
+        }
+    }
+
+    /// "value (rank r/n, pNN)": pNN is the share of the other values the
+    /// ship's beats.
+    fn ranked(&self, shown: &str, scope: &str) -> String {
+        match self.beaten() {
+            None => format!("{shown} (the only one of the {scope} with it)"),
+            Some(beaten) => format!("{shown} (rank {}/{}, p{})", self.position, self.count, beaten.value().round()),
+        }
+    }
+
+    /// "worse than 95% of the 40 other tier 10 destroyers (rank 41/41)" when
+    /// the value is an outlier.
+    fn outlier_line(&self, scope: &str) -> Option<String> {
+        let others = self.others();
+        let (word, beyond) = match self.outlier? {
+            Outlier::Worse => ("worse", self.better),
+            Outlier::Better => ("better", self.worse),
+        };
+        let than = if beyond == others {
+            format!("all {others} other {scope}")
+        } else {
+            format!("{}% of the {others} other {scope}", (beyond as f32 * 100.0 / others as f32).round())
+        };
+
+        Some(format!("{word} than {than} (rank {}/{})", self.position, self.count))
+    }
+
+    /// Values ranked besides this one.
+    pub fn others(&self) -> usize {
+        self.count.saturating_sub(1)
+    }
+
+    /// Share of the other values this one beats, the pNN of "rank r/n,
+    /// pNN" unrounded. `None` when it is the only value.
+    pub fn beaten(&self) -> Option<Percent> {
+        self.share(self.worse as f32)
+    }
+
+    /// Share of the other values this one beats, ties counting half.
+    /// `None` when it is the only value.
+    pub fn beaten_ties_half(&self) -> Option<Percent> {
+        self.share(self.worse as f32 + self.tied as f32 / 2.0)
+    }
+
+    fn share(&self, beaten: f32) -> Option<Percent> {
+        let others = self.others();
+
+        (others > 0).then(|| Percent::new(beaten * 100.0 / others as f32))
+    }
+}
+
+/// Which way a value stands out from its group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outlier {
+    Better,
+    Worse,
+}
+
 /// What a factor measures and which way it improves.
 struct Meta {
     key: &'static str,
@@ -248,6 +397,15 @@ impl Meta {
             Better::Higher => "higher",
         };
         format!("{} ({}, {better} is better): {}", self.key, self.unit, self.description)
+    }
+
+    fn standing(&self, value: f32, rank: GroupRank) -> FactorStanding {
+        let better = match self.better {
+            Better::Lower => FactorDirection::Lower,
+            Better::Higher => FactorDirection::Higher,
+        };
+
+        FactorStanding { factor: self.key, value, unit: self.unit, better, rank }
     }
 
     /// `value` with its unit, e.g. "2.1 km" or "35%".
@@ -747,71 +905,6 @@ impl MountArcs {
     }
 }
 
-/// A ship's rank among the values of a group, the ship's own included.
-struct Standing {
-    count: usize,
-
-    /// Other values better and worse than the ship's.
-    better: usize,
-    worse: usize,
-}
-
-impl Standing {
-    fn new(value: f32, better: Better, values: impl Iterator<Item = f32>) -> Self {
-        let mut standing = Self { count: 0, better: 0, worse: 0 };
-        for other in values {
-            standing.count += 1;
-            if better.improves(other, value) {
-                standing.better += 1;
-            } else if better.improves(value, other) {
-                standing.worse += 1;
-            }
-        }
-
-        standing
-    }
-
-    fn others(&self) -> usize {
-        self.count.saturating_sub(1)
-    }
-
-    /// "value (rank r/n, pNN)": pNN is the share of the other values the
-    /// ship's beats.
-    fn ranked(&self, shown: &str, scope: &str) -> String {
-        match self.others() {
-            0 => format!("{shown} (the only one of the {scope} with it)"),
-            others => {
-                let percentile = (self.worse as f32 * 100.0 / others as f32).round();
-                format!("{shown} (rank {}/{}, p{percentile})", 1 + self.better, self.count)
-            }
-        }
-    }
-
-    /// "worse than 95% of the 40 other tier 10 destroyers (rank 41/41)" when
-    /// the value is an outlier.
-    fn outlier(&self, scope: &str) -> Option<String> {
-        let others = self.others();
-        if others < OUTLIER_MIN_OTHERS {
-            return None;
-        }
-
-        let (word, beyond) = if self.better as f32 >= OUTLIER_SHARE * others as f32 {
-            ("worse", self.better)
-        } else if self.worse as f32 >= OUTLIER_SHARE * others as f32 {
-            ("better", self.worse)
-        } else {
-            return None;
-        };
-        let than = if beyond == others {
-            format!("all {others} other {scope}")
-        } else {
-            format!("{}% of the {others} other {scope}", (beyond as f32 * 100.0 / others as f32).round())
-        };
-
-        Some(format!("{word} than {than} (rank {}/{})", 1 + self.better, self.count))
-    }
-}
-
 impl GameData {
     /// The ships of one class and tier range with each factor of strength
     /// and its rank in the group.
@@ -946,6 +1039,7 @@ impl GameData {
                 let mut outliers = Vec::new();
 
                 let mut values = Vec::new();
+                let mut standings = Vec::new();
                 for factor in &factors {
                     let Some(&value) = score.values.get(factor) else {
                         continue;
@@ -958,11 +1052,12 @@ impl GameData {
                         .zip(&scores)
                         .filter(|(other, _)| !factor.per_tier() || other.tier == ship.tier)
                         .filter_map(|(_, other)| other.values.get(factor).copied());
-                    let standing = Standing::new(value, meta.better, peers);
-                    if let Some(outlier) = standing.outlier(&scope) {
+                    let rank = GroupRank::new(value, meta.better, peers);
+                    if let Some(outlier) = rank.outlier_line(&scope) {
                         outliers.push(format!("{} {}: {outlier}", meta.key, meta.with_unit(value)));
                     }
-                    values.push((meta.key, standing.ranked(&number(value), &scope)));
+                    values.push((meta.key, rank.ranked(&number(value), &scope)));
+                    standings.push(meta.standing(value, rank));
                 }
 
                 let torpedoes = score
@@ -970,13 +1065,14 @@ impl GameData {
                     .iter()
                     .map(|torpedo| {
                         let mut values = Vec::new();
+                        let mut standings = Vec::new();
                         for factor in &torpedo_factors {
                             let Some(&value) = torpedo.values.get(factor) else {
                                 continue;
                             };
                             let meta = factor.meta();
-                            let standing = Standing::new(value, meta.better, torpedo_pool(*factor));
-                            if let Some(outlier) = standing.outlier(&torpedo_scope) {
+                            let rank = GroupRank::new(value, meta.better, torpedo_pool(*factor));
+                            if let Some(outlier) = rank.outlier_line(&torpedo_scope) {
                                 outliers.push(format!(
                                     "torpedo {} {} {}: {outlier}",
                                     torpedo.name,
@@ -984,13 +1080,15 @@ impl GameData {
                                     meta.with_unit(value)
                                 ));
                             }
-                            values.push((meta.key, standing.ranked(&number(value), &torpedo_scope)));
+                            values.push((meta.key, rank.ranked(&number(value), &torpedo_scope)));
+                            standings.push(meta.standing(value, rank));
                         }
 
                         TorpedoOption {
                             torpedo: torpedo.name.clone(),
                             modules: torpedo.modules.clone(),
                             values: FactorValues(values),
+                            standings,
                             damage_by_distance: torpedo.damage_by_distance.clone(),
                             builds: torpedo.builds.clone(),
                         }
@@ -1012,8 +1110,10 @@ impl GameData {
 
                 ComparedShip {
                     ship: ship.label(),
+                    index: ship.param.index().to_owned(),
                     replicas: ship.replicas.clone(),
                     values: FactorValues(values),
+                    standings,
                     outliers,
                     torpedoes,
                     matchups,
@@ -1680,12 +1780,15 @@ fn matchup_lines(
                     continue;
                 };
                 let value = value.value();
-                let standing = Standing::new(value, better, values.iter().copied().chain([value]));
-                parts.push(format!("{metric} {}", standing.ranked(&format!("{}%", number(value)), &peers)));
-                if let Some(outlier) = standing.outlier(&peers) {
-                    let word = if outlier.starts_with("better") { "better" } else { "worse" };
+                let rank = GroupRank::new(value, better, values.iter().copied().chain([value]));
+                parts.push(format!("{metric} {}", rank.ranked(&format!("{}%", number(value)), &peers)));
+                if let (Some(outlier), Some(line)) = (rank.outlier, rank.outlier_line(&peers)) {
+                    let word = match outlier {
+                        Outlier::Better => "better",
+                        Outlier::Worse => "worse",
+                    };
                     flagged.entry((metric, word)).or_default().push(format!(
-                        "{} {}%: {outlier}",
+                        "{} {}%: {line}",
                         matchup.aspect.label(),
                         number(value)
                     ));
@@ -1804,22 +1907,22 @@ fn signals(ship: &Ship, score: &ShipScores) -> Vec<String> {
         let peers = peers.unwrap_or_default();
         let at = format!("{} ({}) at {}", matchup.shooter, matchup.shooter_ship, span(&matchup.ranges));
         if let Some(Measured { value, peers: values }) = &matchup.overpenetration {
-            let standing = Standing::new(value.value(), Better::Higher, values.iter().copied().chain([value.value()]));
-            if standing.others() >= OUTLIER_MIN_OTHERS && standing.worse * 4 >= standing.others() * 3 {
+            let rank = GroupRank::new(value.value(), Better::Higher, values.iter().copied().chain([value.value()]));
+            if rank.others() >= OUTLIER_MIN_OTHERS && rank.worse * 4 >= rank.others() * 3 {
                 signals.push(format!(
                     "Battleship AP mostly passes through it: {at}, {}% of broadside hits overpenetrate, more than {}% of {peers}. Overpenetration-prone plating is a strength against battleships.",
                     number(value.value()),
-                    (standing.worse as f32 * 100.0 / standing.others() as f32).round()
+                    (rank.worse as f32 * 100.0 / rank.others() as f32).round()
                 ));
             }
         }
         if let Some(Measured { value, peers: values }) = &matchup.citadel {
-            let standing = Standing::new(value.value(), Better::Lower, values.iter().copied().chain([value.value()]));
-            if standing.others() >= OUTLIER_MIN_OTHERS && standing.better * 4 >= standing.others() * 3 {
+            let rank = GroupRank::new(value.value(), Better::Lower, values.iter().copied().chain([value.value()]));
+            if rank.others() >= OUTLIER_MIN_OTHERS && rank.better * 4 >= rank.others() * 3 {
                 signals.push(format!(
                     "Vulnerable to battleship AP broadside: {at}, {}% of broadside hits detonate in the citadel, more than {}% of {peers}. Angle against battleships.",
                     number(value.value()),
-                    (standing.better as f32 * 100.0 / standing.others() as f32).round()
+                    (rank.better as f32 * 100.0 / rank.others() as f32).round()
                 ));
             }
         }

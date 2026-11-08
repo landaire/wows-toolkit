@@ -1,0 +1,32 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: table
+---
+M. Richthofen | Fw 190A8 | rocket | PGPR004_M_RICHTHOFEN_STOCK | krupp 3300 mass 30 kg caliber 83 mm speed 520 m/s | 276.9 mm | calculated 277 match, port 277 match
+M. Richthofen | Me 155G | rocket | PGPR005_M_RICHTHOFEN_TOP | krupp 3300 mass 30 kg caliber 83 mm speed 520 m/s | 276.9 mm | calculated 277 match, port 277 match
+M. Richthofen | Fw 190G8 | bomb | PGPB007_M_RICHTHOFEN_STOCK | krupp 2150 mass 780 kg caliber 406 mm speed 450 m/s | 256 mm | no reference
+M. Richthofen | Ta 152C-1/R14 | bomb | PGPB008_M_RICHTHOFEN_TOP | krupp 2000 mass 1025 kg caliber 356 mm speed 450 m/s | 331 mm | calculated 331 match, port 331 match
+A. Parseval | Bf 109T | rocket | PGPR001_PARSEVAL_STOCK | krupp 3300 mass 18 kg caliber 83 mm speed 500 m/s | 184.4 mm | calculated 184 match
+A. Parseval | Bf 109G | rocket | PGPR002_PARSEVAL_TOP | krupp 3300 mass 18 kg caliber 83 mm speed 500 m/s | 184.4 mm | calculated 184 match
+A. Parseval | Fi 167 | bomb | PGPB003_PARSEVAL_STOCK | krupp 2240 mass 616 kg caliber 406 mm speed 450 m/s | 226.7 mm | no reference
+A. Parseval | Bf 110C | bomb | PGPB004_PARSEVAL_TOP | krupp 2150 mass 780 kg caliber 406 mm speed 450 m/s | 256 mm | calculated 256 match
+Weser | Ar 197 | rocket | PGPR006_WESER_STOCK | krupp 3300 mass 10 kg caliber 73 mm speed 500 m/s | 141 mm | calculated 141 match
+Weser | Bf 109E | rocket | PGPR007_WESER_TOP | krupp 3300 mass 10 kg caliber 73 mm speed 500 m/s | 141 mm | calculated 141 match
+Weser | Ar 81 | bomb | PGPB009_WESER_STOCK | krupp 2240 mass 616 kg caliber 406 mm speed 450 m/s | 226.7 mm | calculated 227 match
+Weser | Hs 123 | bomb | PGPB010_WESER_TOP | krupp 2240 mass 616 kg caliber 406 mm speed 450 m/s | 226.7 mm | calculated 227 match
+Rhein | Ar 68 | rocket | PGPR003_RHEIN_STOCK | krupp 3300 mass 10 kg caliber 73 mm speed 500 m/s | 141 mm | calculated 141 match
+Rhein | He 50 | bomb | PGPB005_RHEIN_STOCK | krupp 2750 mass 300 kg caliber 406 mm speed 450 m/s | 169.4 mm | calculated 169 match, port 149 differs, known difference: in-game tests show 160 to 177
+Hakuryū | A7M Reppū | bomb | PJPB110_Hakuryu_stock | krupp 3170 mass 587 kg caliber 404 mm speed 490 m/s | 350.8 mm | calculated 351 match
+Hakuryū | J5N Tenrai | bomb | PJPB210_Hakuryu_top | krupp 3170 mass 587 kg caliber 404 mm speed 490 m/s | 350.8 mm | calculated 351 match
+Shōkaku | D4Y3 Suisei | bomb | PJPB108_Shokaku_stock | krupp 2850 mass 315 kg caliber 300 mm speed 420 m/s | 228.2 mm | no reference
+Shōkaku | B7A Ryūsei | bomb | PJPB208_Shokaku_top | krupp 2950 mass 491 kg caliber 396 mm speed 475 m/s | 282.5 mm | calculated 283 match
+Ryūjō | D3A Val | bomb | PJPB106_Ryujo_stock | krupp 2750 mass 251.1 kg caliber 304 mm speed 400 m/s | 173.5 mm | no reference
+Ryūjō | D4Y2 Suisei | bomb | PJPB206_Ryujo_top | krupp 2850 mass 315 kg caliber 300 mm speed 420 m/s | 228.2 mm | calculated 228 match
+Hōshō | D1A Susie | bomb | PJPB104_Hosho_stock | krupp 2750 mass 251.1 kg caliber 304 mm speed 400 m/s | 173.5 mm | calculated 174 match
+Enterprise | SB2C Helldiver | bomb | PAPB508_Enterprise_stock | krupp 2800 mass 288 kg caliber 254 mm speed 410 m/s | 243.6 mm | calculated 244 match
+Graf Zeppelin | Ta 152C-1/R14 | bomb | PGPB508_Graf_Zeppelin_stock | krupp 2600 mass 500 kg caliber 276 mm speed 450 m/s | 344.3 mm | calculated 344 match, port 334 differs, known difference: port value predates a change to the bomb
+Hornet | Douglas SBD-5 | bomb | PAPB548_HORNET_STOCK | krupp 3000 mass 150 kg caliber 152 mm speed 450 m/s | 327.7 mm | calculated 328 match
+Malta | Blackburn Firebrand | bomb | PBPB112_MALTA_STOCK | krupp 1500 mass 222.3 kg caliber 254 mm speed 410 m/s | 109.1 mm | calculated 109 match
+Béarn | Vought V-156F | bomb | PFPB001_BEARN_STOCK | krupp 2900 mass 150 kg caliber 250 mm speed 500 m/s | 215.1 mm | calculated 215 match, port 219 differs, known difference: unexplained
+Colossus | Vought Corsair MkIV | rocket | PBPR308_COLOSSUS_STOCK | krupp 3000 mass 63.96 kg caliber 127 mm speed 420 m/s | 200.5 mm | calculated 200.5 match, port 122 differs, known difference: unexplained
+Aquila | Reggiane Re.2001 | rocket | PIPR001_AQUILA_STOCK | krupp 3300 mass 8 kg caliber 76 mm speed 540 m/s | 128.8 mm | calculated 129 match

@@ -100,6 +100,7 @@ squadrons:
       fire_chance_pct: 0
       fall_time_coef: 1.15
       ap:
+        penetration_mm: 350.8
         caliber_mm: 404
         mass_kg: 587
         speed_mps: 490
@@ -111,8 +112,8 @@ squadrons:
         fuse_threshold_mm: 30
         dive_angle_deg: -75
     vs_plate:
-      result: undetermined
-      reason: the plate is not overmatched and the client has no AP bomb or rocket penetration formula; the server decides
+      result: penetrates
+      penetration_mm: 350.8
   - role: torpedo_bombers
     aircraft: J5N Tenrai
     aircraft_param: PJAB120_SEKIRYU_STOCK
@@ -178,4 +179,4 @@ squadrons:
       result: not_applicable
       reason: strikes below the waterline and does not test plates
 thickness_mm: 32
-rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise the server decides and ordnance.ap lists the inputs. Torpedoes, depth charges and mines do not test plates."
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise they defeat it when their penetration at bulletSpeed (ordnance.ap.penetration_mm) is at least the thickness, struck head-on: strike angle, normalization and ricochet are not applied. Torpedoes, depth charges and mines do not test plates."

@@ -1,0 +1,47 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({\n    \"ship\": chateaurenault.ship, \"index\": chateaurenault.index, \"standings\":\n    chateaurenault.standings.iter().map(beaten).collect::<Vec<_>>(),\n    \"torpedoes\":\n    chateaurenault.torpedoes.iter().map(|torpedo|\n    json!({\n        \"torpedo\": torpedo.torpedo, \"standings\":\n        torpedo.standings.iter().map(beaten).collect::<Vec<_>>()\n    })).collect::<Vec<_>>(),\n})"
+---
+ship: "T10 Châteaurenault (destroyer, France)"
+index: PFSD710
+standings:
+  - "health 30300.00 HP (Higher is better): rank 4/40, better 3, worse 35, tied 1, outlier None, beaten 89.74%, ties half 91.03%"
+  - "main_battery_reload 2.76 s (Lower is better): rank 16/40, better 15, worse 23, tied 1, outlier None, beaten 58.97%, ties half 60.26%"
+  - "main_battery_range 17.22 km (Higher is better): rank 17/40, better 16, worse 23, tied 0, outlier None, beaten 58.97%, ties half 58.97%"
+  - "dpm_ap 322640.00 HP/min (Higher is better): rank 18/35, better 17, worse 17, tied 0, outlier None, beaten 50.00%, ties half 50.00%"
+  - "dpm_he 156590.00 HP/min (Higher is better): rank 32/37, better 31, worse 5, tied 0, outlier None, beaten 13.89%, ties half 13.89%"
+  - "alpha_ap 14835.00 HP (Higher is better): rank 19/35, better 18, worse 16, tied 0, outlier None, beaten 47.06%, ties half 47.06%"
+  - "alpha_he 7200.00 HP (Higher is better): rank 31/37, better 30, worse 6, tied 0, outlier None, beaten 16.67%, ties half 16.67%"
+  - "flight_time_ap 6.98 s (Lower is better): rank 20/35, better 19, worse 14, tied 1, outlier None, beaten 41.18%, ties half 42.65%"
+  - "flight_time_he 6.98 s (Lower is better): rank 22/37, better 21, worse 14, tied 1, outlier None, beaten 38.89%, ties half 40.28%"
+  - "turret_traverse 7.56 s (Lower is better): rank 20/40, better 19, worse 15, tied 5, outlier None, beaten 38.46%, ties half 44.87%"
+  - "dispersion 84.00 m (Lower is better): rank 7/40, better 6, worse 0, tied 33, outlier None, beaten 0.00%, ties half 42.31%"
+  - "sigma 2.00 sigma (Higher is better): rank 1/40, better 0, worse 0, tied 39, outlier None, beaten 0.00%, ties half 50.00%"
+  - "fires_per_minute 7.83 fires/min (Higher is better): rank 31/37, better 30, worse 5, tied 1, outlier None, beaten 13.89%, ties half 15.28%"
+  - "bow_barrels 33.33 % (Higher is better): rank 36/40, better 35, worse 0, tied 4, outlier None, beaten 0.00%, ties half 5.13%"
+  - "stern_barrels 66.67 % (Higher is better): rank 13/40, better 12, worse 20, tied 7, outlier None, beaten 51.28%, ties half 60.26%"
+  - "all_bear_from_bow 42.00 deg (Lower is better): rank 37/40, better 36, worse 3, tied 0, outlier Some(Worse), beaten 7.69%, ties half 7.69%"
+  - "all_bear_from_stern 45.00 deg (Lower is better): rank 37/40, better 36, worse 2, tied 1, outlier Some(Worse), beaten 5.13%, ties half 6.41%"
+  - "torpedo_dpm 91922.00 HP/min (Higher is better): rank 21/37, better 20, worse 16, tied 0, outlier None, beaten 44.44%, ties half 44.44%"
+  - "torpedoes_per_minute 4.71 torpedoes/min (Higher is better): rank 27/37, better 26, worse 10, tied 0, outlier None, beaten 27.78%, ties half 27.78%"
+  - "torpedo_reload 76.50 s (Lower is better): rank 13/37, better 12, worse 20, tied 4, outlier None, beaten 55.56%, ties half 61.11%"
+  - "torpedo_launch_from_bow 20.00 deg (Lower is better): rank 3/37, better 2, worse 33, tied 1, outlier Some(Better), beaten 91.67%, ties half 93.06%"
+  - "broadside_tubes 6.00 tubes (Higher is better): rank 25/37, better 24, worse 7, tied 5, outlier None, beaten 19.44%, ties half 26.39%"
+  - "aa_damage 238.00 HP/s (Higher is better): rank 13/40, better 12, worse 27, tied 0, outlier None, beaten 69.23%, ties half 69.23%"
+  - "aa_range 3.80 km (Higher is better): rank 14/40, better 13, worse 23, tied 3, outlier None, beaten 58.97%, ties half 62.82%"
+  - "concealment 6.34 km (Lower is better): rank 25/40, better 24, worse 15, tied 0, outlier None, beaten 38.46%, ties half 38.46%"
+  - "air_concealment 3.01 km (Lower is better): rank 18/40, better 17, worse 21, tied 1, outlier None, beaten 53.85%, ties half 55.13%"
+  - "speed 41.00 kn (Higher is better): rank 8/40, better 7, worse 31, tied 1, outlier None, beaten 79.49%, ties half 80.77%"
+  - "rudder_shift 2.68 s (Lower is better): rank 9/40, better 8, worse 31, tied 0, outlier None, beaten 79.49%, ties half 79.49%"
+  - "turning_circle 770.00 m (Lower is better): rank 33/40, better 32, worse 5, tied 2, outlier None, beaten 12.82%, ties half 15.38%"
+torpedoes:
+  - torpedo: 550 mm
+    standings:
+      - "speed 82.69 kn (Higher is better): rank 9/43, better 8, worse 31, tied 3, outlier None, beaten 73.81%, ties half 77.38%"
+      - "range 20.00 km (Higher is better): rank 2/43, better 1, worse 41, tied 0, outlier Some(Better), beaten 97.62%, ties half 97.62%"
+      - "damage 19533.00 HP (Higher is better): rank 9/43, better 8, worse 34, tied 0, outlier None, beaten 80.95%, ties half 80.95%"
+      - "damage_at_max_range 9767.00 HP (Higher is better): rank 43/43, better 42, worse 0, tied 0, outlier Some(Worse), beaten 0.00%, ties half 0.00%"
+      - "flood_coefficient 2.15 x (Higher is better): rank 39/43, better 38, worse 4, tied 0, outlier Some(Worse), beaten 9.52%, ties half 9.52%"
+      - "detectability 1.80 km (Lower is better): rank 36/43, better 35, worse 1, tied 6, outlier None, beaten 2.38%, ties half 9.52%"
+      - "reaction_time 8.11 s (Lower is better): rank 34/43, better 33, worse 5, tied 4, outlier None, beaten 11.90%, ties half 16.67%"
+      - "damage_per_minute 91922.00 HP/min (Higher is better): rank 25/43, better 24, worse 18, tied 0, outlier None, beaten 42.86%, ties half 42.86%"

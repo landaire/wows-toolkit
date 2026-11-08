@@ -1,10 +1,13 @@
 //! Shell ballistics: trajectory simulation, penetration, and the per-plate
 //! armor interaction chain.
 //!
-//! Trajectory physics match the game client (see `docs/BALLISTICS.md`); the
-//! penetration formulas are the community-derived ones from wows_shell and
-//! cannot be verified against the client binary (armor interaction is
-//! server-side).
+//! Trajectory physics match the game client (see `docs/BALLISTICS.md`). Raw AP
+//! penetration is the game's formula
+//! `krupp * (mass * velocity^2)^0.69 * caliber^-1.07 * 1e-7`, which at
+//! `bulletSpeed` reproduces the port's penetration of most AP bombs and rockets. The
+//! normalization, velocity loss and fuse formulas are the community-derived
+//! ones from wows_shell and cannot be verified against the client binary
+//! (armor interaction is server-side).
 //!
 //! Formulas ported from <https://github.com/jcw780/wows_shell>
 //! by jcw780, licensed under the MIT License.
@@ -75,8 +78,22 @@ impl DragFactor {
 }
 
 impl PenetrationFactor {
+    /// `krupp` is `bulletKrupp`.
+    pub fn new(krupp: f32, mass: Kilograms, caliber: Millimeters) -> Self {
+        let mass_kg = f64::from(mass.value());
+        let caliber_m = f64::from(caliber.to_meters().value());
+
+        Self(1e-7 * f64::from(krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07))
+    }
+
     pub fn value(self) -> f64 {
         self.0
+    }
+
+    /// Armor a projectile arriving at `velocity` defeats when it strikes head-on.
+    pub fn raw_penetration(self, velocity: MetersPerSecond) -> Millimeters {
+        let pen = self.0 * f64::from(velocity.value()).powf(VELOCITY_POWER);
+        Millimeters::from(pen as f32)
     }
 }
 
@@ -146,17 +163,14 @@ impl ShellParams {
             fuse_time: Seconds::from(fuse_time_s),
             fuse_threshold: Millimeters::from(fuse_threshold_mm),
             drag_factor: DragFactor(0.5 * f64::from(shell.air_drag) * radius_m * radius_m * PI / mass_kg),
-            penetration_factor: PenetrationFactor(
-                1e-7 * f64::from(shell.krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07),
-            ),
+            penetration_factor: PenetrationFactor::new(shell.krupp, Kilograms::from(shell.mass_kg), shell.caliber),
             capped: shell.cap,
         })
     }
 
     /// Armor a shell arriving at `velocity` defeats when it strikes head-on.
     pub fn raw_penetration(&self, velocity: MetersPerSecond) -> Millimeters {
-        let pen = self.penetration_factor.0 * f64::from(velocity.value()).powf(VELOCITY_POWER);
-        Millimeters::from(pen as f32)
+        self.penetration_factor.raw_penetration(velocity)
     }
 
     /// Normalization the shell actually gets: uncapped shells get none.
@@ -731,8 +745,8 @@ impl ArmedFuse {
 /// Simulate a shell passing through a sequence of armor plates along one ray,
 /// arriving at `impact_velocity`.
 ///
-/// Uses formulas from wows_shell (jcw780):
-///   raw_pen = penetration_factor * velocity^1.38
+/// Uses the game's raw penetration and formulas from wows_shell (jcw780):
+///   raw_pen = krupp * (mass * velocity^2)^0.69 * caliber^-1.07 * 1e-7
 ///   normalized_angle = max(0, angle_from_normal - normalization)
 ///   effective_thickness = thickness / cos(normalized_angle)
 ///   post_pen_velocity = velocity * (1 - exp(1 - raw_pen / effective_thickness))
@@ -899,7 +913,7 @@ mod tests {
             fuse_time: Seconds::from(0.033),
             fuse_threshold: Millimeters::from(64.0),
             drag_factor: DragFactor(0.5 * f64::from(air_drag) * radius_m * radius_m * PI / mass_kg),
-            penetration_factor: PenetrationFactor(1e-7 * f64::from(krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07)),
+            penetration_factor: PenetrationFactor::new(krupp, mass, caliber),
             capped: true,
         }
     }
@@ -939,7 +953,7 @@ mod tests {
             fuse_time: Seconds::from(0.01),
             fuse_threshold: Millimeters::from(20.0),
             drag_factor: DragFactor(0.5 * f64::from(air_drag) * radius_m * radius_m * PI / mass_kg),
-            penetration_factor: PenetrationFactor(1e-7 * f64::from(krupp) * mass_kg.powf(0.69) * caliber_m.powf(-1.07)),
+            penetration_factor: PenetrationFactor::new(krupp, mass, caliber),
             capped: true,
         }
     }

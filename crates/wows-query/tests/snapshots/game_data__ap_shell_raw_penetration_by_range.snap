@@ -1,0 +1,9 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: table
+---
+Yamato | main battery 460 mm AP | 0 km 780 m/s 883.0 mm | 5 km 705 m/s 767.8 mm | 10 km 639 m/s 670.6 mm | 15 km 584 m/s 592.3 mm | 20 km 541 m/s 533.6 mm
+Des Moines | main battery 203 mm AP | 0 km 762 m/s 488.4 mm | 5 km 605 m/s 355.2 mm | 10 km 486 m/s 262.5 mm | 15 km 405 m/s 204.3 mm | 20 km 366 m/s 177.3 mm
+Shimakaze | main battery 127 mm AP | 0 km 915 m/s 219.0 mm | 5 km 523 m/s 101.1 mm | 10 km 314 m/s 50.1 mm | 15 km 248 m/s 36.2 mm
+Worcester | main battery 152 mm AP | 0 km 762 m/s 319.5 mm | 5 km 563 m/s 210.7 mm | 10 km 425 m/s 142.6 mm | 15 km 343 m/s 106.4 mm | 20 km 323 m/s 97.6 mm
+Montana | main battery 406 mm AP | 0 km 762 m/s 847.6 mm | 5 km 680 m/s 724.8 mm | 10 km 610 m/s 623.3 mm | 15 km 552 m/s 543.6 mm | 20 km 509 m/s 486.3 mm

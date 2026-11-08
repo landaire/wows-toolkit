@@ -13,6 +13,7 @@ use wows_core::units::Millimeters;
 use wows_core::units::Percent;
 use wows_query::GameData;
 use wows_query::QueryError;
+use wows_query::aircraft::ShipAircraftArgs;
 use wows_query::armor_assessment::ArmorAssessmentArgs;
 use wows_query::armor_assessment::ArmorAssessmentOutput;
 use wows_query::armor_trace::AmmoTrace;
@@ -55,6 +56,8 @@ use wows_query::tech_tree::ResearchPoints;
 use wows_query::tech_tree::TechTreeLinesArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
 use wows_query::upgrades::UniqueUpgradesArgs;
+use wowsunpack::ballistics::ShellParams;
+use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::Credits;
 use wowsunpack::game_params::types::Experience;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -1001,6 +1004,72 @@ fn chateaurenault_against_tier_10_destroyers() {
     insta::assert_yaml_snapshot!(comparison);
 }
 
+/// The numbers behind each "value (rank r/n, pNN)" text, with the GameParams
+/// index of each ship, for callers that rank ships themselves.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn comparison_standings_match_their_text() {
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Destroyer),
+            tier: Some(Tier(10)),
+            ..Default::default()
+        })
+        .expect("tier 10 destroyers compare");
+
+    let mut tied = 0;
+    for ship in &comparison.ships {
+        assert!(!ship.index.is_empty(), "{} has no index", ship.ship);
+        let text = serde_json::to_value(&ship.values).expect("values serialize");
+        for standing in &ship.standings {
+            let shown = text[standing.factor].as_str().expect("each standing has its text");
+            let rank = standing.rank;
+            assert_eq!(rank.better + rank.worse + rank.tied, rank.others(), "{} {standing:?}", ship.ship);
+            if let Some(beaten) = rank.beaten() {
+                let expected = format!("(rank {}/{}, p{})", rank.position, rank.count, beaten.value().round());
+                assert!(shown.ends_with(&expected), "{}: {shown} against {expected}", ship.ship);
+            }
+            tied += rank.tied;
+        }
+    }
+    assert!(tied > 0, "some factor has ties");
+
+    let chateaurenault = comparison
+        .ships
+        .iter()
+        .find(|ship| ship.ship.contains("teaurenault"))
+        .expect("Chateaurenault is a tier 10 destroyer");
+    let beaten = |standing: &wows_query::comparison::FactorStanding| {
+        let rank = standing.rank;
+        let share = |share: Option<Percent>| share.map_or("none".to_owned(), |share| format!("{:.2}%", share.value()));
+        format!(
+            "{} {:.2} {} ({:?} is better): rank {}/{}, better {}, worse {}, tied {}, outlier {:?}, beaten {}, ties half {}",
+            standing.factor,
+            standing.value,
+            standing.unit,
+            standing.better,
+            rank.position,
+            rank.count,
+            rank.better,
+            rank.worse,
+            rank.tied,
+            rank.outlier,
+            share(rank.beaten()),
+            share(rank.beaten_ties_half())
+        )
+    };
+    insta::assert_yaml_snapshot!(json!({
+        "ship": chateaurenault.ship,
+        "index": chateaurenault.index,
+        "standings": chateaurenault.standings.iter().map(beaten).collect::<Vec<_>>(),
+        "torpedoes": chateaurenault
+            .torpedoes
+            .iter()
+            .map(|torpedo| json!({ "torpedo": torpedo.torpedo, "standings": torpedo.standings.iter().map(beaten).collect::<Vec<_>>() }))
+            .collect::<Vec<_>>(),
+    }));
+}
+
 /// Des Moines, Hawaii and Zao against the shooter groups of tier 10.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
@@ -1868,6 +1937,175 @@ fn ship_aircraft_lists_squadrons_air_strikes_and_plate_verdicts() {
             game().call_tool("ship_aircraft", json!({ "ship": name, "thickness_mm": thickness })).expect("ship exists");
         insta::assert_yaml_snapshot!(format!("ship_aircraft_{}", name.replace(' ', "_")), aircraft);
     }
+}
+
+/// AP bomb and rocket penetration at bulletSpeed against a community
+/// calculation of the same formula and, where reported, the port value.
+/// Known differences are port values the formula does not reproduce.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ap_bomb_and_rocket_penetration_matches_reference_values() {
+    struct Reference {
+        projectile: &'static str,
+        calculated_mm: f32,
+        port_mm: Option<f32>,
+        known_difference: Option<&'static str>,
+    }
+    const fn calculated(projectile: &'static str, calculated_mm: f32) -> Reference {
+        Reference { projectile, calculated_mm, port_mm: None, known_difference: None }
+    }
+    const fn port(projectile: &'static str, calculated_mm: f32, port_mm: f32) -> Reference {
+        Reference { projectile, calculated_mm, port_mm: Some(port_mm), known_difference: None }
+    }
+    const fn known(projectile: &'static str, calculated_mm: f32, port_mm: f32, why: &'static str) -> Reference {
+        Reference { projectile, calculated_mm, port_mm: Some(port_mm), known_difference: Some(why) }
+    }
+    const SHIPS: &[&str] = &[
+        "Richthofen",
+        "Parseval",
+        "Weser",
+        "Rhein",
+        "Hakuryu",
+        "Shokaku",
+        "Ryujo",
+        "Hosho",
+        "Enterprise",
+        "Graf Zeppelin",
+        "Hornet",
+        "Malta",
+        "Bearn",
+        "Colossus",
+        "Aquila",
+    ];
+    const REFERENCES: &[Reference] = &[
+        port("PGPR004_M_RICHTHOFEN_STOCK", 277.0, 277.0),
+        port("PGPR005_M_RICHTHOFEN_TOP", 277.0, 277.0),
+        port("PGPB008_M_RICHTHOFEN_TOP", 331.0, 331.0),
+        calculated("PGPR001_PARSEVAL_STOCK", 184.0),
+        calculated("PGPR002_PARSEVAL_TOP", 184.0),
+        calculated("PGPB004_PARSEVAL_TOP", 256.0),
+        calculated("PGPR006_WESER_STOCK", 141.0),
+        calculated("PGPR007_WESER_TOP", 141.0),
+        calculated("PGPB009_WESER_STOCK", 227.0),
+        calculated("PGPB010_WESER_TOP", 227.0),
+        calculated("PGPR003_RHEIN_STOCK", 141.0),
+        known("PGPB005_RHEIN_STOCK", 169.0, 149.0, "in-game tests show 160 to 177"),
+        calculated("PJPB110_Hakuryu_stock", 351.0),
+        calculated("PJPB210_Hakuryu_top", 351.0),
+        calculated("PJPB208_Shokaku_top", 283.0),
+        calculated("PJPB206_Ryujo_top", 228.0),
+        calculated("PJPB104_Hosho_stock", 174.0),
+        calculated("PAPB508_Enterprise_stock", 244.0),
+        known("PGPB508_Graf_Zeppelin_stock", 344.0, 334.0, "port value predates a change to the bomb"),
+        calculated("PAPB548_HORNET_STOCK", 328.0),
+        calculated("PBPB112_MALTA_STOCK", 109.0),
+        known("PFPB001_BEARN_STOCK", 215.0, 219.0, "unexplained"),
+        known("PBPR308_COLOSSUS_STOCK", 200.5, 122.0, "unexplained"),
+        calculated("PIPR001_AQUILA_STOCK", 129.0),
+    ];
+    // References are whole mm except where the source gave a fraction.
+    let agrees = |penetration: Millimeters, reference_mm: f32| (penetration.value() - reference_mm).abs() <= 0.5;
+
+    let mut table = String::new();
+    let mut referenced = BTreeSet::new();
+    for name in SHIPS {
+        let aircraft = game()
+            .ship_aircraft(&ShipAircraftArgs { ship: (*name).to_owned(), thickness_mm: None })
+            .expect("ship exists");
+        let mut seen = BTreeSet::new();
+        for squadron in &aircraft.squadrons {
+            let Some(ordnance) = &squadron.ordnance else {
+                continue;
+            };
+            let Some(ap) = &ordnance.ap else {
+                continue;
+            };
+            if !seen.insert(ordnance.param.clone()) {
+                continue;
+            }
+
+            let penetration = ap.penetration_mm.expect("AP ordnance has penetration inputs");
+            let comparison = match REFERENCES.iter().find(|reference| reference.projectile == ordnance.param) {
+                Some(reference) => {
+                    referenced.insert(reference.projectile);
+                    assert!(
+                        agrees(penetration, reference.calculated_mm),
+                        "{} computes {} mm, calculated {} mm",
+                        reference.projectile,
+                        penetration.value(),
+                        reference.calculated_mm
+                    );
+                    let mut text = format!("calculated {} match", reference.calculated_mm);
+                    if let Some(port_mm) = reference.port_mm {
+                        let agrees_with_port = agrees(penetration, port_mm);
+                        assert_eq!(
+                            agrees_with_port,
+                            reference.known_difference.is_none(),
+                            "{} computes {} mm, port {port_mm} mm",
+                            reference.projectile,
+                            penetration.value()
+                        );
+                        let verdict = if agrees_with_port { "match" } else { "differs" };
+                        text.push_str(&format!(", port {port_mm} {verdict}"));
+                    }
+                    if let Some(why) = reference.known_difference {
+                        text.push_str(&format!(", known difference: {why}"));
+                    }
+                    text
+                }
+                None => "no reference".to_owned(),
+            };
+            table.push_str(&format!(
+                "{} | {} | {} | {} | krupp {} mass {} kg caliber {} mm speed {} m/s | {} mm | {comparison}\n",
+                aircraft.ship.name,
+                squadron.aircraft,
+                ordnance.kind.label(),
+                ordnance.param,
+                ap.krupp.expect("krupp"),
+                ap.mass_kg.expect("mass").value(),
+                ap.caliber_mm.expect("caliber").value(),
+                ap.speed_mps.expect("speed").value(),
+                penetration.value(),
+            ));
+        }
+    }
+    assert_eq!(referenced.len(), REFERENCES.len(), "every reference names a projectile of the listed ships");
+    insta::assert_snapshot!(table);
+}
+
+/// Raw AP penetration at the impact velocity of the trajectory solution.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ap_shell_raw_penetration_by_range() {
+    let mut table = String::new();
+    for name in ["Yamato", "Des Moines", "Shimakaze", "Worcester", "Montana"] {
+        let shells = game().ship_shells(&ship(name)).expect("ship exists");
+        for report in shells.shells.iter().filter(|report| report.shell.ammo == Ammo::Ap) {
+            let projectile = game()
+                .provider()
+                .game_param_by_name(&report.shell.param)
+                .and_then(|param| param.projectile().cloned())
+                .expect("shell projectile exists");
+            let params = projectile
+                .to_shell_info(report.shell.param.clone())
+                .and_then(|info| ShellParams::from_shell_info(&info))
+                .expect("AP shell has ballistic data");
+
+            let mut cells = Vec::new();
+            for km in [0.0, 5.0, 10.0, 15.0, 20.0] {
+                let Some(impact) = solve_for_range(&params, Km::new(km).to_meters()) else {
+                    continue;
+                };
+                cells.push(format!(
+                    "{km} km {:.0} m/s {:.1} mm",
+                    impact.impact_velocity.value(),
+                    impact.raw_penetration.value()
+                ));
+            }
+            table.push_str(&format!("{} | {} | {}\n", shells.ship.name, report.label, cells.join(" | ")));
+        }
+    }
+    insta::assert_snapshot!(table);
 }
 
 #[test]

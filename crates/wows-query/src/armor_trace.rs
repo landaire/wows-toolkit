@@ -811,10 +811,10 @@ impl GameData {
                     .and_then(|info| ShellParams::from_shell_info(&info))
                     .ok_or_else(|| not_traceable("the bomb lacks ballistic data"))?;
                 let raw = round_mm(params.raw_penetration(speed));
-                assumptions.push(
-                    "AP bombs are simulated with the gun shell formulas; the game may treat bombs differently on the server."
-                        .to_owned(),
-                );
+                assumptions.push(format!(
+                    "AP bomb penetration is computed at bulletSpeed, {} mm; the game does not simulate the fall for it. Strike angles, ricochets, velocity loss and the fuse follow the AP shell simulation.",
+                    raw.value()
+                ));
                 (WeaponModel::ArmorPiercing { params, impact_velocity: speed }, None, Some(raw))
             }
             Ammo::He | Ammo::Sap => {
@@ -1362,7 +1362,7 @@ fn common_assumptions(model: &WeaponModel) -> Vec<&'static str> {
     ];
     match model {
         WeaponModel::ArmorPiercing { .. } => assumptions.extend([
-            "AP uses the toolkit armor viewer's plate-by-plate simulation with community formulas from wows_shell (jcw780): penetration = krupp-scaled mass and caliber x velocity^1.38, normalization, overmatch when caliber > 14.3 x thickness, velocity loss after each plate, fuse armed by a plate at least the fuse threshold thick and fired after the fuse time.",
+            "AP uses the toolkit armor viewer's plate-by-plate simulation. Raw penetration is the game's formula krupp x (mass x velocity^2)^0.69 x caliber^-1.07 x 1e-7 (mm, from bulletKrupp, bulletMass in kg, bulletDiametr in m and velocity in m/s). Normalization, velocity loss after each plate and the fuse use community formulas from wows_shell (jcw780); overmatch when caliber > 14.3 x thickness; the fuse is armed by a plate at least the fuse threshold thick and fires after the fuse time.",
             "A plate struck at or past the always-ricochet angle ricochets. Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.",
             "A citadel hit is a detonation inside the citadel volume, judged by how many citadel plates the ray crossed before the detonation (armor viewer rule).",
         ]),

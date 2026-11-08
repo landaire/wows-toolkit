@@ -141,7 +141,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "ship_aircraft",
-        description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile, HE penetration and fire chance per projectile, plus air strike charges, reload and range. ordnance.fire_chance_pct is the port value without skills and is 0 when the ordnance cannot start fires; fire_chance gives base and best-fit build with the skills that raise it. With thickness_mm, says whether each ordnance defeats that plate.",
+        description: "Squadrons of a carrier, hybrid ship or ship with an air strike: role, aircraft, squadron size, attack flight size, payload per plane, ordnance kind (bomb, skip bomb, rocket, torpedo, depth charge), ammo type, damage per projectile, HE, SAP and AP penetration and fire chance per projectile, plus air strike charges, reload and range. AP bomb and rocket penetration (ordnance.ap.penetration_mm) is computed at bulletSpeed with the game's AP penetration formula; for some ordnance it differs from the port. ordnance.fire_chance_pct is the port value without skills and is 0 when the ordnance cannot start fires; fire_chance gives base and best-fit build with the skills that raise it. With thickness_mm, says whether each ordnance defeats that plate.",
         schema: input_schema::<ShipAircraftArgs>,
         call: |game, arguments| run(arguments, |args| game.ship_aircraft(args)),
     },
