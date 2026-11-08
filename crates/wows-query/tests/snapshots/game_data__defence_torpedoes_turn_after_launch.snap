@@ -1,0 +1,210 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({ \"torpedoes_per_minute\": torpedoes, \"torpedo_damage\": damage })"
+---
+torpedoes_per_minute:
+  launchers: 2
+  tubes: 8
+  tubes_per_reload: 8
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base:
+        torpedoes_per_minute: 2.67
+        bearing: 87
+        all_launchers_ceiling: 5.33
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 2.67
+            port: 2.67
+          - bearing: 45
+            starboard: 2.67
+            port: 2.67
+          - bearing: 60
+            starboard: 2.67
+            port: 2.67
+          - bearing: 90
+            starboard: 0
+            port: 0
+          - bearing: 120
+            starboard: 0
+            port: 0
+          - bearing: 135
+            starboard: 0
+            port: 0
+          - bearing: 150
+            starboard: 0
+            port: 0
+          - bearing: 180
+            starboard: 0
+            port: 0
+      best:
+        value:
+          torpedoes_per_minute: 3.49
+          bearing: 87
+          all_launchers_ceiling: 6.97
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 3.49
+              port: 3.49
+            - bearing: 45
+              starboard: 3.49
+              port: 3.49
+            - bearing: 60
+              starboard: 3.49
+              port: 3.49
+            - bearing: 90
+              starboard: 0
+              port: 0
+            - bearing: 120
+              starboard: 0
+              port: 0
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
+        assumed:
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+        tier_fillers:
+          - Consumable Specialist
+      alternatives:
+        - label: without Fill the Tubes
+          value:
+            torpedoes_per_minute: 3.14
+            bearing: 87
+            all_launchers_ceiling: 6.27
+          assumed:
+            - Torpedo Tubes Modification 2
+        - label: without Torpedo Tubes Modification 2
+          value:
+            torpedoes_per_minute: 2.96
+            bearing: 87
+            all_launchers_ceiling: 5.93
+          assumed:
+            - Fill the Tubes
+          tier_fillers:
+            - Consumable Specialist
+torpedo_damage:
+  - ammo: 622 mm Mk I
+    rates:
+      base:
+        damage_per_minute: 56178
+        damage_per_second: 936.3
+        bearing: 87
+        all_barrels_ceiling: 112356
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 56178
+            port: 56178
+          - bearing: 45
+            starboard: 56178
+            port: 56178
+          - bearing: 60
+            starboard: 56178
+            port: 56178
+          - bearing: 90
+            starboard: 0
+            port: 0
+          - bearing: 120
+            starboard: 0
+            port: 0
+          - bearing: 135
+            starboard: 0
+            port: 0
+          - bearing: 150
+            starboard: 0
+            port: 0
+          - bearing: 180
+            starboard: 0
+            port: 0
+      best:
+        value:
+          damage_per_minute: 84450
+          damage_per_second: 1407.5
+          bearing: 87
+          all_barrels_ceiling: 168901
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 84450
+              port: 84450
+            - bearing: 45
+              starboard: 84450
+              port: 84450
+            - bearing: 60
+              starboard: 84450
+              port: 84450
+            - bearing: 90
+              starboard: 0
+              port: 0
+            - bearing: 120
+              starboard: 0
+              port: 0
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
+        assumed:
+          - Pack a Punch
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+        tier_fillers:
+          - Consumable Specialist
+      alternatives:
+        - label: without Pack a Punch
+          value:
+            damage_per_minute: 73435
+            damage_per_second: 1223.9
+            bearing: 87
+            all_barrels_ceiling: 146870
+          assumed:
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+          tier_fillers:
+            - Consumable Specialist
+        - label: without Fill the Tubes
+          value:
+            damage_per_minute: 76005
+            damage_per_second: 1266.8
+            bearing: 87
+            all_barrels_ceiling: 152010
+          assumed:
+            - Pack a Punch
+            - Torpedo Tubes Modification 2
+          tier_fillers:
+            - Consumable Specialist
+            - Focus Fire Training
+        - label: without Torpedo Tubes Modification 2
+          value:
+            damage_per_minute: 71783
+            damage_per_second: 1196.4
+            bearing: 87
+            all_barrels_ceiling: 143565
+          assumed:
+            - Pack a Punch
+            - Fill the Tubes
+          tier_fillers:
+            - Consumable Specialist

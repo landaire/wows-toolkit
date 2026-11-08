@@ -22,20 +22,20 @@ torpedoes_per_minute:
             starboard: 0
             port: 0
           - bearing: 45
-            starboard: 2.4
-            port: 2.4
+            starboard: 4.8
+            port: 4.8
           - bearing: 60
-            starboard: 2.4
-            port: 2.4
+            starboard: 4.8
+            port: 4.8
           - bearing: 90
             starboard: 4.8
             port: 4.8
           - bearing: 120
-            starboard: 2.4
-            port: 2.4
+            starboard: 4.8
+            port: 4.8
           - bearing: 135
-            starboard: 2.4
-            port: 2.4
+            starboard: 4.8
+            port: 4.8
           - bearing: 150
             starboard: 0
             port: 0
@@ -55,20 +55,20 @@ torpedoes_per_minute:
               starboard: 0
               port: 0
             - bearing: 45
-              starboard: 3.14
-              port: 3.14
+              starboard: 6.27
+              port: 6.27
             - bearing: 60
-              starboard: 3.14
-              port: 3.14
+              starboard: 6.27
+              port: 6.27
             - bearing: 90
               starboard: 6.27
               port: 6.27
             - bearing: 120
-              starboard: 3.14
-              port: 3.14
+              starboard: 6.27
+              port: 6.27
             - bearing: 135
-              starboard: 3.14
-              port: 3.14
+              starboard: 6.27
+              port: 6.27
             - bearing: 150
               starboard: 0
               port: 0
@@ -434,20 +434,20 @@ torpedo_damage:
               starboard: 0
               port: 0
             - bearing: 45
-              starboard: 57040
-              port: 57040
+              starboard: 114080
+              port: 114080
             - bearing: 60
-              starboard: 57040
-              port: 57040
+              starboard: 114080
+              port: 114080
             - bearing: 90
               starboard: 114080
               port: 114080
             - bearing: 120
-              starboard: 57040
-              port: 57040
+              starboard: 114080
+              port: 114080
             - bearing: 135
-              starboard: 57040
-              port: 57040
+              starboard: 114080
+              port: 114080
             - bearing: 150
               starboard: 0
               port: 0
@@ -468,20 +468,20 @@ torpedo_damage:
                 starboard: 0
                 port: 0
               - bearing: 45
-                starboard: 85746
-                port: 85746
+                starboard: 171493
+                port: 171493
               - bearing: 60
-                starboard: 85746
-                port: 85746
+                starboard: 171493
+                port: 171493
               - bearing: 90
                 starboard: 171493
                 port: 171493
               - bearing: 120
-                starboard: 85746
-                port: 85746
+                starboard: 171493
+                port: 171493
               - bearing: 135
-                starboard: 85746
-                port: 85746
+                starboard: 171493
+                port: 171493
               - bearing: 150
                 starboard: 0
                 port: 0
@@ -586,20 +586,20 @@ torpedo_reload_buffs:
               starboard: 0
               port: 0
             - bearing: 45
-              starboard: 2.52
-              port: 2.52
+              starboard: 5.04
+              port: 5.04
             - bearing: 60
-              starboard: 2.52
-              port: 2.52
+              starboard: 5.04
+              port: 5.04
             - bearing: 90
               starboard: 5.04
               port: 5.04
             - bearing: 120
-              starboard: 2.52
-              port: 2.52
+              starboard: 5.04
+              port: 5.04
             - bearing: 135
-              starboard: 2.52
-              port: 2.52
+              starboard: 5.04
+              port: 5.04
             - bearing: 150
               starboard: 0
               port: 0
@@ -619,20 +619,20 @@ torpedo_reload_buffs:
                 starboard: 0
                 port: 0
               - bearing: 45
-                starboard: 3.31
-                port: 3.31
+                starboard: 6.61
+                port: 6.61
               - bearing: 60
-                starboard: 3.31
-                port: 3.31
+                starboard: 6.61
+                port: 6.61
               - bearing: 90
                 starboard: 6.61
                 port: 6.61
               - bearing: 120
-                starboard: 3.31
-                port: 3.31
+                starboard: 6.61
+                port: 6.61
               - bearing: 135
-                starboard: 3.31
-                port: 3.31
+                starboard: 6.61
+                port: 6.61
               - bearing: 150
                 starboard: 0
                 port: 0
@@ -709,20 +709,20 @@ torpedo_reload_buffs:
                   starboard: 0
                   port: 0
                 - bearing: 45
-                  starboard: 59892
-                  port: 59892
+                  starboard: 119784
+                  port: 119784
                 - bearing: 60
-                  starboard: 59892
-                  port: 59892
+                  starboard: 119784
+                  port: 119784
                 - bearing: 90
                   starboard: 119784
                   port: 119784
                 - bearing: 120
-                  starboard: 59892
-                  port: 59892
+                  starboard: 119784
+                  port: 119784
                 - bearing: 135
-                  starboard: 59892
-                  port: 59892
+                  starboard: 119784
+                  port: 119784
                 - bearing: 150
                   starboard: 0
                   port: 0
@@ -743,20 +743,20 @@ torpedo_reload_buffs:
                     starboard: 0
                     port: 0
                   - bearing: 45
-                    starboard: 90370
-                    port: 90370
+                    starboard: 180740
+                    port: 180740
                   - bearing: 60
-                    starboard: 90370
-                    port: 90370
+                    starboard: 180740
+                    port: 180740
                   - bearing: 90
                     starboard: 180740
                     port: 180740
                   - bearing: 120
-                    starboard: 90370
-                    port: 90370
+                    starboard: 180740
+                    port: 180740
                   - bearing: 135
-                    starboard: 90370
-                    port: 90370
+                    starboard: 180740
+                    port: 180740
                   - bearing: 150
                     starboard: 0
                     port: 0

@@ -25,7 +25,7 @@ standings:
   - "torpedo_dpm 91922.00 HP/min (Higher is better): rank 21/37, better 20, worse 16, tied 0, outlier None, beaten 44.44%, ties half 44.44%"
   - "torpedoes_per_minute 4.71 torpedoes/min (Higher is better): rank 27/37, better 26, worse 10, tied 0, outlier None, beaten 27.78%, ties half 27.78%"
   - "torpedo_reload 76.50 s (Lower is better): rank 13/37, better 12, worse 20, tied 4, outlier None, beaten 55.56%, ties half 61.11%"
-  - "torpedo_launch_from_bow 20.00 deg (Lower is better): rank 3/37, better 2, worse 33, tied 1, outlier Some(Better), beaten 91.67%, ties half 93.06%"
+  - "torpedo_launch_from_bow 6.00 deg (Lower is better): rank 1/37, better 0, worse 36, tied 0, outlier Some(Better), beaten 100.00%, ties half 100.00%"
   - "broadside_tubes 6.00 tubes (Higher is better): rank 25/37, better 24, worse 7, tied 5, outlier None, beaten 19.44%, ties half 26.39%"
   - "aa_damage 238.00 HP/s (Higher is better): rank 13/40, better 12, worse 27, tied 0, outlier None, beaten 69.23%, ties half 69.23%"
   - "aa_range 3.80 km (Higher is better): rank 14/40, better 13, worse 23, tied 3, outlier None, beaten 58.97%, ties half 62.82%"

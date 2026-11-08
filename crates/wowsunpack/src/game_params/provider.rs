@@ -1538,9 +1538,11 @@ fn read_number(value: &Value) -> Option<f32> {
     value.f64_ref().map(|float| *float as f32).or_else(|| value.i64_ref().map(|int| *int as f32))
 }
 
-/// Attaches `horizSector`, `deadZone`, `numBarrels` and `ammoList` of a mount
-/// dict. `horizSector` with equal ends means unlimited rotation (the client's
-/// `limitedRotation` test); a span of a full turn is unlimited as well.
+/// Attaches `horizSector`, `deadZone`, `additionalAimSector`, `numBarrels`
+/// and `ammoList` of a mount dict. `horizSector` with equal ends means
+/// unlimited rotation (the client's `limitedRotation` test); a span of a
+/// full turn is unlimited as well. An `additionalAimSector` of zeros is no
+/// start maneuver (the client's `hasAdditionalAimSector`).
 fn with_aiming(mount_point: MountPoint, mount: &pickled::Dict) -> MountPoint {
     let traverse = mount.get(&pk("horizSector")).and_then(read_yaw_sector).map(|sector| {
         let span = (sector.end.value() - sector.start.value()).abs();
@@ -1552,6 +1554,11 @@ fn with_aiming(mount_point: MountPoint, mount: &pickled::Dict) -> MountPoint {
         Some(Value::Tuple(tuple)) => tuple.inner().iter().filter_map(read_yaw_sector).collect(),
         _ => Vec::new(),
     };
+
+    let aim_offsets = mount
+        .get(&pk("additionalAimSector"))
+        .and_then(read_yaw_sector)
+        .filter(|offsets| offsets.start.value() != 0.0 || offsets.end.value() != 0.0);
 
     // GameParams stores the count as a float; a fractional or negative count
     // is malformed and left absent.
@@ -1568,7 +1575,7 @@ fn with_aiming(mount_point: MountPoint, mount: &pickled::Dict) -> MountPoint {
         None => Vec::new(),
     };
 
-    mount_point.with_aiming(traverse, dead_zones, num_barrels, ammo)
+    mount_point.with_aiming(traverse, dead_zones, aim_offsets, num_barrels, ammo)
 }
 
 /// Parse a raw GameParams armor dict into an [`ArmorMap`].
@@ -4029,6 +4036,54 @@ mod camera_tests {
         assert_eq!(turret.can_fire_at(Degrees::new(-150.0)), Some(true));
         assert_eq!(turret.can_fire_at(Degrees::new(0.0)), Some(true));
         assert_eq!(turret.can_fire_at(Degrees::new(180.0)), Some(false));
+    }
+
+    /// Fixed tubes whose torpedoes turn after launch fire across the turn,
+    /// and a dead zone keeps the launcher yaws it covers out of it.
+    #[test]
+    fn torpedo_start_maneuver_widens_where_launchers_fire() {
+        // Defence PBSC810 HP_BGT_2: fixed tubes, torpedoes turn up to 65 deg
+        // to starboard. Myoko PJSC705 HP_JGT_3: a dead zone near the bow and
+        // a turn of up to 15 deg aft.
+        let torpedoes = dict(vec![
+            (
+                pk("HP_BGT_2"),
+                dict(vec![
+                    (pk("model"), sv("content/tubes.model")),
+                    (pk("horizSector"), tuple(vec![fv(-0.1), fv(0.1)])),
+                    (pk("deadZone"), tuple(vec![])),
+                    (pk("additionalAimSector"), tuple(vec![fv(0.0), fv(65.0)])),
+                    (pk("numBarrels"), fv(4.0)),
+                ]),
+            ),
+            (
+                pk("HP_JGT_3"),
+                dict(vec![
+                    (pk("model"), sv("content/tubes.model")),
+                    (pk("horizSector"), tuple(vec![fv(0.0), fv(88.0)])),
+                    (pk("deadZone"), tuple(vec![tuple(vec![fv(0.0), fv(36.0)])])),
+                    (pk("additionalAimSector"), tuple(vec![fv(-0.0), fv(15.0)])),
+                    (pk("numBarrels"), fv(3.0)),
+                ]),
+            ),
+        ]);
+        let ship_data: pickled::Dict = vec![(pk("A_Torpedoes"), torpedoes)].into_iter().collect();
+        let mounts = extract_mounts(&ship_data, "A_Torpedoes");
+        let mount = |name: &str| mounts.iter().find(|mount| mount.hp_name() == name).expect("mount parsed");
+
+        let fixed = mount("HP_BGT_2");
+        assert_eq!(fixed.aim_offsets(), Some(YawSector::new(Degrees::new(0.0), Degrees::new(65.0))));
+        assert_eq!(fixed.can_fire_at(Degrees::new(0.0)), Some(true));
+        assert_eq!(fixed.can_fire_at(Degrees::new(30.0)), Some(true));
+        assert_eq!(fixed.can_fire_at(Degrees::new(65.0)), Some(true));
+        assert_eq!(fixed.can_fire_at(Degrees::new(66.0)), Some(false));
+        assert_eq!(fixed.can_fire_at(Degrees::new(-5.0)), Some(false));
+
+        let turning = mount("HP_JGT_3");
+        assert_eq!(turning.can_fire_at(Degrees::new(20.0)), Some(false));
+        assert_eq!(turning.can_fire_at(Degrees::new(37.0)), Some(true));
+        assert_eq!(turning.can_fire_at(Degrees::new(100.0)), Some(true));
+        assert_eq!(turning.can_fire_at(Degrees::new(104.0)), Some(false));
     }
 }
 

@@ -249,7 +249,7 @@ ships:
       torpedo_dpm: "185307 (rank 1/36, p100)"
       torpedoes_per_minute: "7.54 (rank 2/36, p97)"
       torpedo_reload: "79.56 (rank 20/36, p46)"
-      torpedo_launch_from_bow: "60 (rank 34/35, p3)"
+      torpedo_launch_from_bow: "50 (rank 35/36, p3)"
       broadside_tubes: "10 (rank 3/36, p83)"
       aa_damage: "473 (rank 39/56, p31)"
       aa_range: "5.8 (rank 20/56, p38)"
@@ -266,7 +266,7 @@ ships:
       - "dispersion 91 m: better than all 55 other tier 10 cruisers (rank 1/56)"
       - "torpedo_dpm 185307 HP/min: better than all 35 other tier 10 cruisers (rank 1/36)"
       - "torpedoes_per_minute 7.54 torpedoes/min: better than 97% of the 35 other tier 10 cruisers (rank 2/36)"
-      - "torpedo_launch_from_bow 60 deg: worse than 97% of the 34 other tier 10 cruisers (rank 34/35)"
+      - "torpedo_launch_from_bow 50 deg: worse than 97% of the 35 other tier 10 cruisers (rank 35/36)"
       - "rudder_shift 4.8 s: better than 95% of the 55 other tier 10 cruisers (rank 3/56)"
       - "torpedo Type F3 damage_per_minute 185307 HP/min: better than all 38 other torpedo options of tier 10 cruisers (rank 1/39)"
       - "torpedo Type 93 mod. 3 damage 27332 HP: better than 95% of the 38 other torpedo options of tier 10 cruisers (rank 1/39)"
@@ -346,7 +346,7 @@ ships:
     signals:
       - "Kites with its guns (within 30 deg of the stern 6 of 12 main battery barrels bear and all bear from 34 deg off the stern), but 87.7% of tier 8-11 battleships overmatch its 25 mm stern plating."
       - "Bow-on it is exposed: 87.7% of tier 8-11 battleships overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 12 main battery barrels bear and all bear from 36 deg off the bow."
-      - "Its torpedo launchers bear only from 60 deg off the bow, so a launch needs a wide turn toward broadside."
+      - "Its torpedo launchers bear only from 50 deg off the bow, so a launch needs a wide turn toward broadside."
     unique_upgrade: "Improved Bridge (unique upgrade), taken for: dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"

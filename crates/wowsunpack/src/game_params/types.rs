@@ -960,6 +960,12 @@ pub struct MountPoint {
     /// `deadZone` arcs: the mount turns through them but does not fire.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     yaw_dead_zones: Vec<YawSector>,
+    /// `additionalAimSector`: the turn, relative to the mount's yaw, a
+    /// torpedo makes after launch (the client's start maneuver; its aim
+    /// sector is `horizSector` widened by these offsets). `None` when the
+    /// mount has no start maneuver.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    aim_offsets: Option<YawSector>,
     /// `numBarrels`: barrels or tubes on the mount.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     num_barrels: Option<u32>,
@@ -988,6 +994,7 @@ impl MountPoint {
             pitch_dead_zones: Vec::new(),
             traverse: None,
             yaw_dead_zones: Vec::new(),
+            aim_offsets: None,
             num_barrels: None,
             ammo: Vec::new(),
             misc_filter: Vec::new(),
@@ -1010,6 +1017,7 @@ impl MountPoint {
             pitch_dead_zones,
             traverse: None,
             yaw_dead_zones: Vec::new(),
+            aim_offsets: None,
             num_barrels: None,
             ammo: Vec::new(),
             misc_filter: Vec::new(),
@@ -1024,16 +1032,19 @@ impl MountPoint {
         self
     }
 
-    /// Attach aiming data: yaw limits, yaw dead zones, barrel count and ammo.
+    /// Attach aiming data: yaw limits, yaw dead zones, the start maneuver
+    /// offsets, barrel count and ammo.
     pub fn with_aiming(
         mut self,
         traverse: Option<Traverse>,
         yaw_dead_zones: Vec<YawSector>,
+        aim_offsets: Option<YawSector>,
         num_barrels: Option<u32>,
         ammo: Vec<String>,
     ) -> Self {
         self.traverse = traverse;
         self.yaw_dead_zones = yaw_dead_zones;
+        self.aim_offsets = aim_offsets;
         self.num_barrels = num_barrels;
         self.ammo = ammo;
         self
@@ -1047,6 +1058,10 @@ impl MountPoint {
         &self.yaw_dead_zones
     }
 
+    pub fn aim_offsets(&self) -> Option<YawSector> {
+        self.aim_offsets
+    }
+
     pub fn num_barrels(&self) -> Option<u32> {
         self.num_barrels
     }
@@ -1055,13 +1070,39 @@ impl MountPoint {
         &self.ammo
     }
 
-    /// Whether the mount can fire at `yaw` in its own frame: inside its
-    /// traverse and outside every yaw dead zone. `None` when the mount has no
-    /// traverse data.
+    /// Whether the mount can fire at `yaw` in its own frame: from a yaw
+    /// inside its traverse and outside every yaw dead zone, and for a mount
+    /// with a start maneuver, from any such yaw its torpedoes turn onto
+    /// `yaw` from. `None` when the mount has no traverse data.
     pub fn can_fire_at(&self, yaw: Degrees) -> Option<bool> {
-        let traverse = self.traverse?;
+        // Nudge either side of an arc end, past the closed end itself.
+        const NUDGE: f32 = 0.01;
 
-        Some(traverse.allows(yaw) && !self.yaw_dead_zones.iter().any(|zone| zone.contains(yaw)))
+        let traverse = self.traverse?;
+        let fires_from = |launcher: Degrees| {
+            traverse.allows(launcher) && !self.yaw_dead_zones.iter().any(|zone| zone.contains(launcher))
+        };
+        let Some(offsets) = self.aim_offsets else {
+            return Some(fires_from(yaw));
+        };
+
+        // The launcher yaws whose torpedoes turn onto `yaw`. The yaws a
+        // launcher fires from are arcs ending at traverse and dead zone
+        // ends, so this arc meets one exactly when one of its own ends, or
+        // a point just beside such an end, fires.
+        let launchers = YawSector::new(
+            Degrees::new(yaw.value() - offsets.end.value()),
+            Degrees::new(yaw.value() - offsets.start.value()),
+        );
+        let traverse_ends = match traverse {
+            Traverse::Unlimited => Vec::new(),
+            Traverse::Limited(sector) => vec![sector.start, sector.end],
+        };
+        let ends = traverse_ends.into_iter().chain(self.yaw_dead_zones.iter().flat_map(|zone| [zone.start, zone.end]));
+        let beside_ends = ends.flat_map(|end| [Degrees::new(end.value() - NUDGE), Degrees::new(end.value() + NUDGE)]);
+        let mut candidates = [launchers.start, launchers.end].into_iter().chain(beside_ends);
+
+        Some(candidates.any(|launcher| launchers.contains(launcher) && fires_from(launcher)))
     }
 
     pub fn misc_filter(&self) -> &[String] {

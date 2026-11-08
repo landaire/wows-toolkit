@@ -75,7 +75,7 @@ ships:
       torpedo_dpm: "91922 (rank 21/37, p44)"
       torpedoes_per_minute: "4.71 (rank 27/37, p28)"
       torpedo_reload: "76.5 (rank 13/37, p56)"
-      torpedo_launch_from_bow: "20 (rank 3/37, p92)"
+      torpedo_launch_from_bow: "6 (rank 1/37, p100)"
       broadside_tubes: "6 (rank 25/37, p19)"
       aa_damage: "238 (rank 13/40, p69)"
       aa_range: "3.8 (rank 14/40, p59)"
@@ -87,7 +87,7 @@ ships:
     outliers:
       - "all_bear_from_bow 42 deg: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
       - "all_bear_from_stern 45 deg: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
-      - "torpedo_launch_from_bow 20 deg: better than 92% of the 36 other tier 10 destroyers (rank 3/37)"
+      - "torpedo_launch_from_bow 6 deg: better than all 36 other tier 10 destroyers (rank 1/37)"
       - "torpedo 550 mm range 20 km: better than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
       - "torpedo 550 mm damage_at_max_range 9767 HP: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
       - "torpedo 550 mm flood_coefficient 2.15x: worse than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
@@ -108,6 +108,7 @@ ships:
           - "reaction_time 8.11 s with Swift Fish, Torpedo Tubes Modification 1; 8.94 s without"
     signals:
       - "Kites well: within 30 deg of the stern 4 of 6 main battery barrels bear and all bear from 45 deg off the stern."
+      - "Its torpedo launchers bear from 6 deg off the bow, so it can launch while nearly bow-on."
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Engine Boost (3 charges, 90 s reload)"

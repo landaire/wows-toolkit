@@ -1004,6 +1004,27 @@ fn chateaurenault_against_tier_10_destroyers() {
     insta::assert_yaml_snapshot!(comparison);
 }
 
+/// Defence's torpedo tubes are fixed facing the bow and its torpedoes turn up
+/// to 65 deg after launch, so its launchers bear on targets off the bow.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn defence_torpedoes_turn_after_launch() {
+    let stats = game().call_tool("ship_stats", json!({ "ship": "Defence" })).expect("Defence exists");
+    let torpedoes = &stats["build_stats"]["torpedoes_per_minute"];
+    let best = torpedoes["rate"]["builds"]["best"]["value"]["torpedoes_per_minute"]
+        .as_f64()
+        .expect("Defence launches torpedoes");
+    assert!(best > 0.0, "{torpedoes:#}");
+
+    let damage: Vec<serde_json::Value> = stats["build_stats"]["torpedo_damage"]
+        .as_array()
+        .expect("torpedo damage listed")
+        .iter()
+        .map(|ammo| json!({ "ammo": ammo["ammo"], "rates": ammo["rates"]["builds"] }))
+        .collect();
+    insta::assert_yaml_snapshot!(json!({ "torpedoes_per_minute": torpedoes, "torpedo_damage": damage }));
+}
+
 /// The numbers behind each "value (rank r/n, pNN)" text, with the GameParams
 /// index of each ship, for callers that rank ships themselves.
 #[test]

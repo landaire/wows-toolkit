@@ -31,14 +31,14 @@ torpedoes_per_minute:
             starboard: 5.77
             port: 5.77
           - bearing: 120
-            starboard: 0
-            port: 0
+            starboard: 5.77
+            port: 5.77
           - bearing: 135
-            starboard: 0
-            port: 0
+            starboard: 5.77
+            port: 5.77
           - bearing: 150
-            starboard: 0
-            port: 0
+            starboard: 5.77
+            port: 5.77
           - bearing: 180
             starboard: 0
             port: 0
@@ -64,14 +64,14 @@ torpedoes_per_minute:
               starboard: 7.54
               port: 7.54
             - bearing: 120
-              starboard: 0
-              port: 0
+              starboard: 7.54
+              port: 7.54
             - bearing: 135
-              starboard: 0
-              port: 0
+              starboard: 7.54
+              port: 7.54
             - bearing: 150
-              starboard: 0
-              port: 0
+              starboard: 7.54
+              port: 7.54
             - bearing: 180
               starboard: 0
               port: 0
@@ -459,14 +459,14 @@ torpedo_damage:
               starboard: 123269
               port: 123269
             - bearing: 120
-              starboard: 0
-              port: 0
+              starboard: 123269
+              port: 123269
             - bearing: 135
-              starboard: 0
-              port: 0
+              starboard: 123269
+              port: 123269
             - bearing: 150
-              starboard: 0
-              port: 0
+              starboard: 123269
+              port: 123269
             - bearing: 180
               starboard: 0
               port: 0
@@ -493,14 +493,14 @@ torpedo_damage:
                 starboard: 185307
                 port: 185307
               - bearing: 120
-                starboard: 0
-                port: 0
+                starboard: 185307
+                port: 185307
               - bearing: 135
-                starboard: 0
-                port: 0
+                starboard: 185307
+                port: 185307
               - bearing: 150
-                starboard: 0
-                port: 0
+                starboard: 185307
+                port: 185307
               - bearing: 180
                 starboard: 0
                 port: 0
@@ -576,14 +576,14 @@ torpedo_damage:
               starboard: 83392
               port: 83392
             - bearing: 120
-              starboard: 0
-              port: 0
+              starboard: 83392
+              port: 83392
             - bearing: 135
-              starboard: 0
-              port: 0
+              starboard: 83392
+              port: 83392
             - bearing: 150
-              starboard: 0
-              port: 0
+              starboard: 83392
+              port: 83392
             - bearing: 180
               starboard: 0
               port: 0
@@ -610,14 +610,14 @@ torpedo_damage:
                 starboard: 125360
                 port: 125360
               - bearing: 120
-                starboard: 0
-                port: 0
+                starboard: 125360
+                port: 125360
               - bearing: 135
-                starboard: 0
-                port: 0
+                starboard: 125360
+                port: 125360
               - bearing: 150
-                starboard: 0
-                port: 0
+                starboard: 125360
+                port: 125360
               - bearing: 180
                 starboard: 0
                 port: 0
@@ -732,14 +732,14 @@ torpedo_reload_buffs:
               starboard: 6.06
               port: 6.06
             - bearing: 120
-              starboard: 0
-              port: 0
+              starboard: 6.06
+              port: 6.06
             - bearing: 135
-              starboard: 0
-              port: 0
+              starboard: 6.06
+              port: 6.06
             - bearing: 150
-              starboard: 0
-              port: 0
+              starboard: 6.06
+              port: 6.06
             - bearing: 180
               starboard: 0
               port: 0
@@ -765,14 +765,14 @@ torpedo_reload_buffs:
                 starboard: 7.95
                 port: 7.95
               - bearing: 120
-                starboard: 0
-                port: 0
+                starboard: 7.95
+                port: 7.95
               - bearing: 135
-                starboard: 0
-                port: 0
+                starboard: 7.95
+                port: 7.95
               - bearing: 150
-                starboard: 0
-                port: 0
+                starboard: 7.95
+                port: 7.95
               - bearing: 180
                 starboard: 0
                 port: 0
@@ -855,14 +855,14 @@ torpedo_reload_buffs:
                   starboard: 129433
                   port: 129433
                 - bearing: 120
-                  starboard: 0
-                  port: 0
+                  starboard: 129433
+                  port: 129433
                 - bearing: 135
-                  starboard: 0
-                  port: 0
+                  starboard: 129433
+                  port: 129433
                 - bearing: 150
-                  starboard: 0
-                  port: 0
+                  starboard: 129433
+                  port: 129433
                 - bearing: 180
                   starboard: 0
                   port: 0
@@ -889,14 +889,14 @@ torpedo_reload_buffs:
                     starboard: 195299
                     port: 195299
                   - bearing: 120
-                    starboard: 0
-                    port: 0
+                    starboard: 195299
+                    port: 195299
                   - bearing: 135
-                    starboard: 0
-                    port: 0
+                    starboard: 195299
+                    port: 195299
                   - bearing: 150
-                    starboard: 0
-                    port: 0
+                    starboard: 195299
+                    port: 195299
                   - bearing: 180
                     starboard: 0
                     port: 0
@@ -1003,14 +1003,14 @@ torpedo_reload_buffs:
                   starboard: 87561
                   port: 87561
                 - bearing: 120
-                  starboard: 0
-                  port: 0
+                  starboard: 87561
+                  port: 87561
                 - bearing: 135
-                  starboard: 0
-                  port: 0
+                  starboard: 87561
+                  port: 87561
                 - bearing: 150
-                  starboard: 0
-                  port: 0
+                  starboard: 87561
+                  port: 87561
                 - bearing: 180
                   starboard: 0
                   port: 0
@@ -1037,14 +1037,14 @@ torpedo_reload_buffs:
                     starboard: 132120
                     port: 132120
                   - bearing: 120
-                    starboard: 0
-                    port: 0
+                    starboard: 132120
+                    port: 132120
                   - bearing: 135
-                    starboard: 0
-                    port: 0
+                    starboard: 132120
+                    port: 132120
                   - bearing: 150
-                    starboard: 0
-                    port: 0
+                    starboard: 132120
+                    port: 132120
                   - bearing: 180
                     starboard: 0
                     port: 0

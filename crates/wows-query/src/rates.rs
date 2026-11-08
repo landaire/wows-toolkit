@@ -1335,4 +1335,42 @@ mod tests {
         assert!(limited.iter().any(|name| name == "Barfleur"), "{limited:?}");
         insta::assert_yaml_snapshot!((limited.len(), limited));
     }
+
+    /// Every surface ship with torpedoes has a bearing where its stock
+    /// launchers bear, so no one-target torpedo rate is zero.
+    #[test]
+    #[cfg_attr(not(has_build_13533378), ignore)]
+    fn no_stock_launchers_miss_every_bearing() {
+        let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
+        let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
+            .expect("dump root has a readable builds.toml");
+        let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
+        let cache = std::env::temp_dir().join("wows-query-test-cache");
+        let game = GameData::load_dump(&root.join(&entry.dir), Some(&cache)).expect("dump loads");
+
+        let mut checked = 0;
+        let mut blind: Vec<String> = Vec::new();
+        for ship in &game.ships {
+            let stock = ShipUpgradeSelection::stock(&ship.param);
+            let Some(layout) = TorpedoLayout::from_selection(&ship.param, &stock) else {
+                continue;
+            };
+            let coverages = game.mount_coverages(ship, std::iter::once(&stock)).expect("facings read");
+            let Some(coverage) = coverages.into_iter().next().flatten() else {
+                continue;
+            };
+            let Some(tubes) = layout.tubes_per_reload_by_bearing(&coverage) else {
+                continue;
+            };
+            checked += 1;
+            if tubes.at(tubes.best()) <= 0.0 {
+                blind.push(format!("{} ({})", ship.name, ship.param.index()));
+            }
+        }
+        blind.sort();
+        blind.dedup();
+
+        assert!(checked > 100, "only {checked} ships checked");
+        assert!(blind.is_empty(), "{blind:#?}");
+    }
 }
