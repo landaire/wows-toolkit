@@ -1114,6 +1114,51 @@ fn des_moines_overmatch_ranks_among_heavy_cruisers() {
     );
 }
 
+/// Only values whose best-fit build takes a unique upgrade say so. Colbert
+/// and Irresistible have none; Harugumo has one.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn comparison_marks_unique_upgrades_only_where_taken() {
+    let entry = |class: &str, ship: &str| {
+        let output = game()
+            .call_tool("ship_comparison", json!({ "class": class, "tier": 10, "ships": [ship] }))
+            .expect("group compares");
+        (output["ships"][0].clone(), output["leaders"].clone())
+    };
+    let marked_leaders = |leaders: &serde_json::Value| -> Vec<String> {
+        leaders
+            .as_object()
+            .expect("leaders is a map")
+            .values()
+            .flat_map(|leader| ["best", "worst"].map(|end| leader[end].clone()))
+            .flat_map(|labels| labels.as_array().cloned().unwrap_or_default())
+            .filter_map(|label| label.as_str().map(str::to_owned))
+            .filter(|label| label.contains("with unique upgrade"))
+            .collect()
+    };
+    for (class, ship) in [("cruiser", "Colbert"), ("battleship", "Irresistible")] {
+        let (entry, leaders) = entry(class, ship);
+        assert!(!entry.to_string().contains("unique"), "{entry:#}");
+        let own = format!("{ship} (");
+        assert!(marked_leaders(&leaders).iter().all(|label| !label.starts_with(&own)), "{leaders:#}");
+    }
+
+    let (harugumo, leaders) = entry("destroyer", "Harugumo");
+    let marked_values: Vec<String> = harugumo["values"]
+        .as_object()
+        .expect("values is a map")
+        .iter()
+        .filter(|(_, text)| text.as_str().is_some_and(|text| text.contains("with unique upgrade")))
+        .map(|(key, text)| format!("{key}: {}", text.as_str().unwrap_or_default()))
+        .collect();
+    let marked_leaders = marked_leaders(&leaders);
+    insta::assert_yaml_snapshot!(json!({
+        "unique_upgrade": harugumo["unique_upgrade"],
+        "marked_values": marked_values,
+        "marked_leaders": marked_leaders,
+    }));
+}
+
 /// The ship_comparison tool output fits a small model's context: a group of
 /// one class and tier, with one ship named and with none.
 #[test]
@@ -1178,7 +1223,9 @@ fn comparison_standings_match_their_text() {
             assert_eq!(rank.better + rank.worse + rank.tied, rank.others(), "{} {standing:?}", ship.ship);
             if let Some(beaten) = rank.beaten() {
                 let expected = format!("(rank {}/{}, p{})", rank.position, rank.count, beaten.value().round());
-                assert!(shown.ends_with(&expected), "{}: {shown} against {expected}", ship.ship);
+                // A unique upgrade marker may follow the ranks.
+                let ranks = shown.split(" (with unique upgrade").next().unwrap_or(shown);
+                assert!(ranks.ends_with(&expected), "{}: {shown} against {expected}", ship.ship);
             }
             tied += rank.tied;
         }

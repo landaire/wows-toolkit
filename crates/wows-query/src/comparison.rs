@@ -69,6 +69,7 @@ use crate::ships::Tier;
 use crate::ships::TierRange;
 use crate::special_abilities::SpecialAbility;
 use crate::stats::extended_horizontal_dispersion;
+use crate::upgrades::Upgrade;
 
 /// Ships besides the one labelled a group must hold before a value is
 /// labelled an outlier: in smaller groups the extremes say little.
@@ -960,12 +961,36 @@ struct ShipScores {
     matchups: Option<ShipMatchups>,
 }
 
+impl ShipScores {
+    /// The unique upgrade `factor`'s value takes, if any.
+    fn unique_for(&self, factor: Factor) -> Option<&str> {
+        self.unique_upgrade.as_deref().filter(|_| self.unique_used.contains(&factor))
+    }
+}
+
+/// Marks the values whose best-fit build takes a unique upgrade, so no other
+/// value reads as taking one.
+fn unique_marker(name: &str) -> String {
+    format!("with unique upgrade {name}")
+}
+
 struct TorpedoScores {
     name: String,
     modules: Vec<String>,
     values: HashMap<TorpedoFactor, f32>,
     damage_by_distance: Option<String>,
     builds: Vec<String>,
+
+    /// The ship's unique upgrade and the factors whose best-fit build takes it.
+    unique_upgrade: Option<String>,
+    unique_used: Vec<TorpedoFactor>,
+}
+
+impl TorpedoScores {
+    /// The unique upgrade `factor`'s value takes, if any.
+    fn unique_for(&self, factor: TorpedoFactor) -> Option<&str> {
+        self.unique_upgrade.as_deref().filter(|_| self.unique_used.contains(&factor))
+    }
 }
 
 /// The stat card values of one torpedo under one build.
@@ -1068,7 +1093,7 @@ impl GameData {
     /// and its rank in the group.
     pub fn ship_comparison(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
         const NOTES: &[&str] = &[
-            "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock.",
+            "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock.",
             "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with.",
             "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others.",
             "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel.",
@@ -1197,13 +1222,16 @@ impl GameData {
         let cruiser_types: Vec<Option<CruiserType>> = group.iter().map(|ship| self.cruiser_type(ship)).collect();
         let first_type = cruiser_types.iter().flatten().next();
         let mixed_types = cruiser_types.iter().flatten().any(|cruiser| Some(cruiser) != first_type);
-        // The nation keeps the model from guessing it from the name, and
-        // "premium" from reading a premium ship as the head of a line.
-        let leader_name = |ship: &Ship, cruiser: Option<CruiserType>| {
-            let notes: Vec<&str> = [Some(ship.param.nation()), cruiser.map(CruiserType::label), ship.obtained_note()]
-                .into_iter()
-                .flatten()
-                .collect();
+        // The nation keeps the model from guessing it from the name,
+        // "premium" from reading a premium ship as the head of a line, and
+        // the unique upgrade marks the only values that take one.
+        let leader_name = |ship: &Ship, cruiser: Option<CruiserType>, unique: Option<&str>| {
+            let unique = unique.map(unique_marker);
+            let notes: Vec<&str> =
+                [Some(ship.param.nation()), cruiser.map(CruiserType::label), ship.obtained_note(), unique.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
             format!("{} ({})", ship.name, notes.join(", "))
         };
         let leaders = FactorLeaderTable(
@@ -1213,7 +1241,8 @@ impl GameData {
                     let meta = factor.meta();
                     let values =
                         group.iter().zip(&scores).zip(&cruiser_types).filter_map(|((ship, score), cruiser)| {
-                            score.values.get(factor).map(|value| (leader_name(ship, *cruiser), *value))
+                            let label = leader_name(ship, *cruiser, score.unique_for(*factor));
+                            score.values.get(factor).map(|value| (label, *value))
                         });
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
                 })
@@ -1226,10 +1255,8 @@ impl GameData {
                     let meta = factor.meta();
                     let values = group.iter().zip(&scores).zip(&cruiser_types).flat_map(|((ship, score), cruiser)| {
                         score.torpedoes.iter().filter_map(move |torpedo| {
-                            torpedo
-                                .values
-                                .get(factor)
-                                .map(|value| (format!("{} {}", leader_name(ship, *cruiser), torpedo.name), *value))
+                            let label = leader_name(ship, *cruiser, torpedo.unique_for(*factor));
+                            torpedo.values.get(factor).map(|value| (format!("{label} {}", torpedo.name), *value))
                         })
                     });
                     (meta.key, factor_leaders(values.collect(), &meta, shown))
@@ -1258,8 +1285,10 @@ impl GameData {
                         .filter(|(other, _)| !factor.per_tier() || other.tier == ship.tier)
                         .filter_map(|(_, other)| other.values.get(factor).copied());
                     let rank = GroupRank::new(value, meta.better, peers);
+                    let unique = score.unique_for(*factor).map(|name| format!(" ({})", unique_marker(name)));
+                    let unique = unique.unwrap_or_default();
                     if let Some(outlier) = rank.outlier_line(&scope) {
-                        outliers.push(format!("{} {}: {outlier}", meta.key, meta.with_unit(value)));
+                        outliers.push(format!("{} {}{unique}: {outlier}", meta.key, meta.with_unit(value)));
                     }
                     let own_type = cruiser_types[index].filter(|_| mixed_types);
                     let type_rank = own_type.map(|cruiser| {
@@ -1275,7 +1304,7 @@ impl GameData {
                     });
                     let typed = own_type.zip(type_rank.as_ref());
                     let text = factor_text(*factor, value, &rank, &scope, typed);
-                    values.push((meta.key, text));
+                    values.push((meta.key, format!("{text}{unique}")));
                     standings.push(meta.standing(value, rank, type_rank));
                 }
 
@@ -1291,15 +1320,17 @@ impl GameData {
                             };
                             let meta = factor.meta();
                             let rank = GroupRank::new(value, meta.better, torpedo_pool(*factor));
+                            let unique = torpedo.unique_for(*factor).map(|name| format!(" ({})", unique_marker(name)));
+                            let unique = unique.unwrap_or_default();
                             if let Some(outlier) = rank.outlier_line(&torpedo_scope) {
                                 outliers.push(format!(
-                                    "torpedo {} {} {}: {outlier}",
+                                    "torpedo {} {} {}{unique}: {outlier}",
                                     torpedo.name,
                                     meta.key,
                                     meta.with_unit(value)
                                 ));
                             }
-                            values.push((meta.key, rank.ranked(&number(value), &torpedo_scope)));
+                            values.push((meta.key, format!("{}{unique}", rank.ranked(&number(value), &torpedo_scope))));
                             standings.push(meta.standing(value, rank, None));
                         }
 
@@ -1565,7 +1596,7 @@ impl GameData {
             scores.stern_plate = self.zone_plate(ship, "Stern")?;
         }
 
-        scores.torpedoes = self.torpedo_scores(&planner, &rates)?;
+        scores.torpedoes = self.torpedo_scores(&planner, &rates, unique)?;
         scores.values = values;
         scores.unique_used = unique_used;
         scores.arcs = main_arcs;
@@ -1578,6 +1609,7 @@ impl GameData {
         &self,
         planner: &Planner<'_>,
         rates: &crate::rates::Rates,
+        unique: Option<&Upgrade>,
     ) -> Result<Vec<TorpedoScores>, QueryError> {
         /// A torpedo and the first module combination that carries it.
         struct Carried {
@@ -1607,6 +1639,9 @@ impl GameData {
             let card = |outcome: &Outcome| TorpedoCard::of(outcome, &param);
             let mut values = HashMap::new();
             let mut build_lines = Vec::new();
+            let unique_label = unique.map(Upgrade::build_label);
+            let takes_unique = |assumed: &[String]| unique_label.as_ref().is_some_and(|label| assumed.contains(label));
+            let mut unique_used = Vec::new();
             let plans: [(TorpedoFactor, CardValue<'_>); 5] = [
                 (TorpedoFactor::Speed, &|outcome| card(outcome)?.speed),
                 (TorpedoFactor::Range, &|outcome| card(outcome)?.range),
@@ -1642,16 +1677,20 @@ impl GameData {
                             meta.with_unit(base)
                         ));
                     }
+                    if takes_unique(&builds.best.assumed) {
+                        unique_used.push(factor);
+                    }
                     values.insert(factor, best);
                 }
             }
 
             let name = self.projectile_name(&param);
             if let Some(ammo) = rates.torpedo_damage.iter().find(|ammo| ammo.ammo == name) {
-                values.insert(
-                    TorpedoFactor::DamagePerMinute,
-                    ammo.rates.builds.best.value.damage_per_minute.value().round(),
-                );
+                let best = &ammo.rates.builds.best;
+                values.insert(TorpedoFactor::DamagePerMinute, best.value.damage_per_minute.value().round());
+                if takes_unique(&best.assumed) {
+                    unique_used.push(TorpedoFactor::DamagePerMinute);
+                }
             }
 
             let projectile = self.projectile(&param)?;
@@ -1674,6 +1713,8 @@ impl GameData {
                 values,
                 damage_by_distance: points.map(|points| describe_falloff(&points)),
                 builds: build_lines,
+                unique_upgrade: unique.map(|upgrade| upgrade.name.clone()),
+                unique_used,
             });
         }
 

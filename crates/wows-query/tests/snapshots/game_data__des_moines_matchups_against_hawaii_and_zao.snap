@@ -186,7 +186,7 @@ leaders:
       - "Petrozavodsk (Russia, heavy cruiser, test) 28.96 s"
   dispersion:
     best:
-      - "Zaō (Japan, heavy cruiser) 91 m"
+      - "Zaō (Japan, heavy cruiser, with unique upgrade Improved Bridge) 91 m"
     worst:
       - "Puerto Rico (USA, large cruiser, premium) 167 m"
   sigma:
@@ -281,7 +281,7 @@ leaders:
       - "Fearmaw (United_Kingdom, light cruiser, test) 31.5 kn"
   rudder_shift:
     best:
-      - "Des Moines (USA, heavy cruiser) 4.31 s"
+      - "Des Moines (USA, heavy cruiser, with unique upgrade Enhanced Propulsion Plant) 4.31 s"
     worst:
       - "Ravenna (Italy, heavy cruiser, test) 14.16 s"
   turning_circle:
@@ -380,7 +380,7 @@ ships:
       concealment: "10.89 (rank 28/56, p49; heavy cruisers rank 7/23, p68)"
       air_concealment: "6.4 (rank 13/56, p76; heavy cruisers rank 3/23, p86)"
       speed: "33 (rank 37/56, p16; heavy cruisers rank 15/23, p23)"
-      rudder_shift: "4.31 (rank 1/56, p100; heavy cruisers rank 1/23, p100)"
+      rudder_shift: "4.31 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Enhanced Propulsion Plant)"
       turning_circle: "770 (rank 20/56, p60; heavy cruisers rank 4/23, p82)"
       bb_ap_citadel: "5.8 (rank 28/56, p47; heavy cruisers rank 10/23, p55)"
       bb_ap_overpenetration: "58.9 (rank 17/56, p65; heavy cruisers rank 3/23, p77)"
@@ -388,7 +388,7 @@ ships:
       stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
     outliers:
       - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
-      - "rudder_shift 4.31 s: better than all 55 other tier 10 cruisers (rank 1/56)"
+      - "rudder_shift 4.31 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
       - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging, worse than at least 90% of the 104 other tier 9-11 cruisers: angled 45 deg 37.1% (rank 99/105)"
     matchups:
       - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
@@ -537,7 +537,7 @@ ships:
       flight_time_ap: "6.21 (rank 20/54, p62; heavy cruisers rank 11/23, p50)"
       flight_time_he: "6.21 (rank 17/48, p64; heavy cruisers rank 9/19, p50)"
       turret_traverse: "22.68 (rank 36/56, p18; heavy cruisers rank 14/23, p23)"
-      dispersion: "91 (rank 1/56, p100; heavy cruisers rank 1/23, p100)"
+      dispersion: "91 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Improved Bridge)"
       sigma: "2.05 (rank 5/56, p5; heavy cruisers rank 2/23, p0)"
       fires_per_minute: "31.14 (rank 22/55, p61; heavy cruisers rank 9/23, p64)"
       bow_barrels: "50 (rank 36/56, p4; heavy cruisers rank 16/23, p5)"
@@ -563,7 +563,7 @@ ships:
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 8/56, p31; heavy cruisers rank 4/23, p18"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 8/56, p35; heavy cruisers rank 4/23, p23"
     outliers:
-      - "dispersion 91 m: better than all 55 other tier 10 cruisers (rank 1/56)"
+      - "dispersion 91 m (with unique upgrade Improved Bridge): better than all 55 other tier 10 cruisers (rank 1/56)"
       - "torpedo_dpm 185307 HP/min: better than all 35 other tier 10 cruisers (rank 1/36)"
       - "torpedoes_per_minute 7.54 torpedoes/min: better than 97% of the 35 other tier 10 cruisers (rank 2/36)"
       - "torpedo_launch_from_bow 50 deg: worse than 97% of the 35 other tier 10 cruisers (rank 35/36)"
@@ -655,7 +655,7 @@ ships:
       - "Submarine Surveillance (3 charges, 120 s reload)"
       - "Repair Party (3 charges, 80 s reload)"
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
   - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."

@@ -116,12 +116,12 @@ leaders:
       - "Kléber TE (France, test) 10.2 km"
   dpm_ap:
     best:
-      - Harugumo (Japan) 465107 HP/min
+      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 465107 HP/min"
     worst:
       - Shimakaze (Japan) 177425 HP/min
   dpm_he:
     best:
-      - Harugumo (Japan) 305406 HP/min
+      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 305406 HP/min"
     worst:
       - "Lübeck (Germany, test) 100310 HP/min"
   dpm_sap:
@@ -211,12 +211,12 @@ leaders:
       - "Peredovoy (Russia, test) 6.3 km"
   torpedo_dpm:
     best:
-      - Shimakaze (Japan) 217472 HP/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 217472 HP/min"
     worst:
       - "Hull (USA, premium) 38464 HP/min"
   torpedoes_per_minute:
     best:
-      - Shimakaze (Japan) 10.18 torpedoes/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 10.18 torpedoes/min"
     worst:
       - "Hull (USA, premium) 2.15 torpedoes/min"
   torpedo_reload:
@@ -307,7 +307,7 @@ torpedo_leaders:
       - Shimakaze (Japan) Type 93 13.62 s
   damage_per_minute:
     best:
-      - Shimakaze (Japan) Type F3 217472 HP/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type F3 217472 HP/min"
     worst:
       - "Hull (USA, premium) Mk17 38464 HP/min"
 ships:
@@ -395,9 +395,9 @@ ships:
       stern_barrels: "66.67 (rank 13/40, p51)"
       all_bear_from_bow: "35 (rank 34/40, p15)"
       all_bear_from_stern: "30 (rank 13/40, p59)"
-      torpedo_dpm: "217472 (rank 1/37, p100)"
-      torpedoes_per_minute: "10.18 (rank 1/37, p100)"
-      torpedo_reload: "88.42 (rank 23/37, p39)"
+      torpedo_dpm: "217472 (rank 1/37, p100) (with unique upgrade Torpedo Quick Reload System)"
+      torpedoes_per_minute: "10.18 (rank 1/37, p100) (with unique upgrade Torpedo Quick Reload System)"
+      torpedo_reload: "88.42 (rank 23/37, p39) (with unique upgrade Torpedo Quick Reload System)"
       torpedo_launch_from_bow: "56 (rank 26/37, p25)"
       broadside_tubes: "15 (rank 1/37, p97)"
       aa_damage: "98 (rank 33/40, p18)"
@@ -412,8 +412,8 @@ ships:
       - "dpm_ap 177425 HP/min: worse than all 34 other tier 10 destroyers (rank 35/35)"
       - "turret_traverse 17.23 s: worse than all 39 other tier 10 destroyers (rank 40/40)"
       - "fires_per_minute 7.5 fires/min: worse than 94% of the 36 other tier 10 destroyers (rank 35/37)"
-      - "torpedo_dpm 217472 HP/min: better than all 36 other tier 10 destroyers (rank 1/37)"
-      - "torpedoes_per_minute 10.18 torpedoes/min: better than all 36 other tier 10 destroyers (rank 1/37)"
+      - "torpedo_dpm 217472 HP/min (with unique upgrade Torpedo Quick Reload System): better than all 36 other tier 10 destroyers (rank 1/37)"
+      - "torpedoes_per_minute 10.18 torpedoes/min (with unique upgrade Torpedo Quick Reload System): better than all 36 other tier 10 destroyers (rank 1/37)"
       - "broadside_tubes 15 tubes: better than 97% of the 36 other tier 10 destroyers (rank 1/37)"
       - "aa_range 2.5 km: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
       - "concealment 5.59 km: better than all 39 other tier 10 destroyers (rank 1/40)"
@@ -421,13 +421,13 @@ ships:
       - "torpedo Type 93 range 20.01 km: better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
       - "torpedo Type 93 detectability 2.5 km: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
       - "torpedo Type 93 reaction_time 13.62 s: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
-      - "torpedo Type 93 damage_per_minute 186370 HP/min: better than 95% of the 42 other torpedo options of tier 10 destroyers (rank 3/43)"
+      - "torpedo Type 93 damage_per_minute 186370 HP/min (with unique upgrade Torpedo Quick Reload System): better than 95% of the 42 other torpedo options of tier 10 destroyers (rank 3/43)"
       - "torpedo Type 93 mod. 3 damage 23767 HP: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
       - "torpedo Type 93 mod. 3 damage_at_max_range 23767 HP: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
       - "torpedo Type 93 mod. 3 flood_coefficient 4.06x: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
       - "torpedo Type 93 mod. 3 reaction_time 8.57 s: worse than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
-      - "torpedo Type 93 mod. 3 damage_per_minute 207117 HP/min: better than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
-      - "torpedo Type F3 damage_per_minute 217472 HP/min: better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
+      - "torpedo Type 93 mod. 3 damage_per_minute 207117 HP/min (with unique upgrade Torpedo Quick Reload System): better than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
+      - "torpedo Type F3 damage_per_minute 217472 HP/min (with unique upgrade Torpedo Quick Reload System): better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
     torpedoes:
       - torpedo: Type 93
         values:
@@ -438,7 +438,7 @@ ships:
           flood_coefficient: "3.55 (rank 9/43, p81)"
           detectability: "2.5 (rank 43/43, p0)"
           reaction_time: "13.62 (rank 43/43, p0)"
-          damage_per_minute: "186370 (rank 3/43, p95)"
+          damage_per_minute: "186370 (rank 3/43, p95) (with unique upgrade Torpedo Quick Reload System)"
         builds:
           - "speed 68.35 kn with Swift Fish, Torpedo Tubes Modification 1; 62 kn without"
           - "reaction_time 13.62 s with Swift Fish, Torpedo Tubes Modification 1; 15.02 s without"
@@ -453,7 +453,7 @@ ships:
           flood_coefficient: "4.06 (rank 1/43, p93)"
           detectability: "1.7 (rank 32/43, p19)"
           reaction_time: "8.57 (rank 39/43, p2)"
-          damage_per_minute: "207117 (rank 2/43, p98)"
+          damage_per_minute: "207117 (rank 2/43, p98) (with unique upgrade Torpedo Quick Reload System)"
         builds:
           - "speed 73.87 kn with Swift Fish, Torpedo Tubes Modification 1; 67 kn without"
           - "reaction_time 8.57 s with Swift Fish, Torpedo Tubes Modification 1; 9.45 s without"
@@ -468,7 +468,7 @@ ships:
           flood_coefficient: "3.61 (rank 7/43, p83)"
           detectability: "1.8 (rank 36/43, p2)"
           reaction_time: "8 (rank 32/43, p24)"
-          damage_per_minute: "217472 (rank 1/43, p100)"
+          damage_per_minute: "217472 (rank 1/43, p100) (with unique upgrade Torpedo Quick Reload System)"
         builds:
           - "speed 83.79 kn with Swift Fish, Torpedo Tubes Modification 1; 76 kn without"
           - "reaction_time 8 s with Swift Fish, Torpedo Tubes Modification 1; 8.82 s without"
@@ -547,7 +547,7 @@ ships:
       - "Repair Party (3 charges, 80 s reload)"
       - "Surveillance Radar (3 charges, 120 s reload)"
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
   - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."

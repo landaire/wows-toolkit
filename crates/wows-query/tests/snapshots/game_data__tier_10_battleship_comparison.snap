@@ -465,7 +465,7 @@ ships:
       flight_time_ap: "7.7 (rank 7/43, p81)"
       flight_time_sap: "7.43 (rank 1/4, p67)"
       turret_traverse: "27.75 (rank 20/43, p50)"
-      dispersion: "186 (rank 18/43, p60)"
+      dispersion: "186 (rank 18/43, p60) (with unique upgrade Improved Rangefinders)"
       sigma: "1.5 (rank 42/43, p2)"
       fires_per_minute: "31.46 (rank 30/43, p31)"
       bow_barrels: "100 (rank 1/43, p93)"
@@ -656,7 +656,7 @@ ships:
     special_abilities:
       - Modified Shells (+28% AP shell armor penetration capability)
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
   - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."

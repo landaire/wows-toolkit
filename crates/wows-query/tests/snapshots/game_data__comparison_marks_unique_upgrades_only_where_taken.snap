@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({\n    \"unique_upgrade\": harugumo[\"unique_upgrade\"], \"marked_values\":\n    marked_values, \"marked_leaders\": marked_leaders,\n})"
+---
+unique_upgrade: "Additional Smoke Generators (unique upgrade), taken for: main_battery_reload, dpm_ap, dpm_he, fires_per_minute"
+marked_values:
+  - "main_battery_reload: 2.36 (rank 9/40, p79) (with unique upgrade Additional Smoke Generators)"
+  - "dpm_ap: 465107 (rank 1/35, p100) (with unique upgrade Additional Smoke Generators)"
+  - "dpm_he: 305406 (rank 1/37, p100) (with unique upgrade Additional Smoke Generators)"
+  - "fires_per_minute: 15.27 (rank 3/37, p94) (with unique upgrade Additional Smoke Generators)"
+marked_leaders:
+  - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 465107 HP/min"
+  - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 305406 HP/min"
+  - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 217472 HP/min"
+  - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 10.18 torpedoes/min"

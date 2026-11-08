@@ -132,7 +132,7 @@ leaders:
       - A. Regolo (Italy) 13.36 km
   dpm_ap:
     best:
-      - Harugumo (Japan) 465107 HP/min
+      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 465107 HP/min"
       - "Marceau (France, premium) 432057 HP/min"
       - "Lüshun (Pan_Asia, premium) 399381 HP/min"
     worst:
@@ -141,7 +141,7 @@ leaders:
       - "Somers (USA, premium) 216029 HP/min"
   dpm_he:
     best:
-      - Harugumo (Japan) 305406 HP/min
+      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 305406 HP/min"
       - "Marceau (France, premium) 303486 HP/min"
       - "Småland (Europe, premium) 295525 HP/min"
     worst:
@@ -242,7 +242,7 @@ leaders:
     best:
       - "Tromp (Netherlands, premium) 25.06 fires/min"
       - "Vampire II (Commonwealth, premium) 15.5 fires/min"
-      - Harugumo (Japan) 15.27 fires/min
+      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 15.27 fires/min"
     worst:
       - "Somers (USA, premium) 5.74 fires/min"
       - "Lübeck (Germany, test) 7.24 fires/min"
@@ -295,7 +295,7 @@ leaders:
       - "Peredovoy (Russia, test) 6.3 km"
   torpedo_dpm:
     best:
-      - Shimakaze (Japan) 217472 HP/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 217472 HP/min"
       - "La Pampa (Pan_America, premium) 158371 HP/min"
       - Gearing (USA) 144933 HP/min
     worst:
@@ -304,7 +304,7 @@ leaders:
       - "Marceau (France, premium) 49158 HP/min"
   torpedoes_per_minute:
     best:
-      - Shimakaze (Japan) 10.18 torpedoes/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 10.18 torpedoes/min"
       - "G. Hoffmann (Germany, premium) 9.8 torpedoes/min"
       - "La Pampa (Pan_America, premium) 9.05 torpedoes/min"
     worst:
@@ -359,7 +359,7 @@ leaders:
   concealment:
     best:
       - Shimakaze (Japan) 5.59 km
-      - Gearing (USA) 5.61 km
+      - "Gearing (USA, with unique upgrade Improved Hull Concealment) 5.61 km"
       - "La Pampa (Pan_America, premium) 5.78 km"
     worst:
       - "A. da Barbiano (Italy, premium) 7.96 km"
@@ -369,7 +369,7 @@ leaders:
     best:
       - 20 de Julio (Pan_America) 2.36 km
       - "Somers (USA, premium) 2.53 km"
-      - Gearing (USA) 2.61 km
+      - "Gearing (USA, with unique upgrade Improved Hull Concealment) 2.61 km"
     worst:
       - "Kléber TE (France, test) 4.36 km"
       - "Lübeck (Germany, test) 4.06 km"
@@ -467,15 +467,15 @@ torpedo_leaders:
       - "Hayate (Japan, premium) Type 93 mod. 3 8.57 s"
   damage_per_minute:
     best:
-      - Shimakaze (Japan) Type F3 217472 HP/min
-      - Shimakaze (Japan) Type 93 mod. 3 207117 HP/min
-      - Shimakaze (Japan) Type 93 186370 HP/min
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type F3 217472 HP/min"
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type 93 mod. 3 207117 HP/min"
+      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type 93 186370 HP/min"
     worst:
       - "Hull (USA, premium) Mk17 38464 HP/min"
       - "F. Sherman (USA, premium) Mk17 38464 HP/min"
       - "Marceau (France, premium) 550 mm 23DT 49158 HP/min"
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them, with the ship's unique upgrade where it improves the factor; unique_upgrade names the factors that take it. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
   - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
   - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
