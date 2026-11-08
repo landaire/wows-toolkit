@@ -8,8 +8,8 @@ considered:
     battleship: 43
   test: 11
 ranking:
-  stat: "artillery.range (km), highest first, on the build that raises it most"
-  rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank."
+  stat: "artillery.range (km), highest first, on the build that raises it most, the usual build"
+  rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in."
   ranked: 43
   ships:
     - rank: 1

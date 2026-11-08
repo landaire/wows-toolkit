@@ -198,7 +198,7 @@ pub struct StatRank {
     /// Ships listed. Defaults to 10.
     pub limit: Option<RankLimit>,
 
-    /// The build each ship is ranked on: "base" (stock hull and modules, no captain skills, no upgrades), "lowest" (the build that lowers the stat most) or "highest" (the build that raises it most). Defaults to "lowest" for "asc" and "highest" for "desc". For a ranking as players build their ships, pick the build that improves the stat whatever the order: worst concealment as players build it is order "desc" with build "lowest". For base values, such as base detection, give build "base".
+    /// The build each ship is ranked on. Omit it to rank each ship on the build players run for the stat, the one that makes it better whatever the order: lower detection, reload, dispersion and flight time; higher damage, range and health. So "desc" on visibility.sea_detection lists the worst concealment as players build their ships. "base": stock hull and modules, no captain skills, no upgrades, for base values such as base detection. "lowest" or "highest": the build that lowers or raises the stat most, e.g. how bad a stat can get. A stat with no better direction ranks on the build that moves it furthest in the order.
     pub build: Option<RankBuild>,
 }
 
@@ -218,14 +218,35 @@ pub enum RankBuild {
 }
 
 impl RankBuild {
-    /// The build an order ranks on when none is given: the one that moves
-    /// the stat furthest in the order.
-    fn for_order(order: RankOrder) -> Self {
-        match order {
-            RankOrder::Asc => Self::Lowest,
-            RankOrder::Desc => Self::Highest,
+    /// The build to rank on when none is given: the one that improves
+    /// `stat`, or with no better direction the one that moves it furthest
+    /// in `order`.
+    fn default_for(stat: SearchStat, order: RankOrder) -> (Self, BuildBasis) {
+        match stat.better() {
+            Some(Direction::Lower) => (Self::Lowest, BuildBasis::Usual),
+            Some(Direction::Higher) => (Self::Highest, BuildBasis::Usual),
+            None => {
+                let build = match order {
+                    RankOrder::Asc => Self::Lowest,
+                    RankOrder::Desc => Self::Highest,
+                };
+                (build, BuildBasis::Order)
+            }
         }
     }
+}
+
+/// Why a ranking is on its build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildBasis {
+    /// The request named it.
+    Given,
+
+    /// The build that improves the stat, which players run.
+    Usual,
+
+    /// The stat has no better direction; the build follows the order.
+    Order,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -350,7 +371,7 @@ pub struct Ranking {
     /// The stat, order and build as understood, e.g. "visibility.sea_detection (km), lowest first, on the build that lowers it most".
     pub stat: String,
 
-    pub rule: &'static str,
+    pub rule: String,
 
     /// What the stat does not measure, for nominal armor thickness.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -544,6 +565,20 @@ impl SearchStat {
             Self::Armor { .. } => Unit::Millimeters,
             Self::Derived(stat) => stat.unit(),
             Self::Ricochet { .. } => Unit::Degrees,
+        }
+    }
+
+    /// Which way the stat improves. `None` for stats with no better
+    /// direction and for those builds do not change.
+    fn better(self) -> Option<Direction> {
+        match self {
+            Self::Card(stat) => wows_ship_stats::stat::direction(stat),
+            Self::Derived(stat) => stat.direction(),
+            // Plate thickness is the same on every build.
+            Self::Armor { .. } => None,
+            // A later ricochet suits the shooter and an earlier one the
+            // target; neither is better for the ship ranked.
+            Self::Ricochet { .. } => None,
         }
     }
 
@@ -1820,6 +1855,7 @@ struct Rank {
     qualifier: Option<String>,
     order: RankOrder,
     build: RankBuild,
+    basis: BuildBasis,
     limit: RankLimit,
 }
 
@@ -1837,20 +1873,35 @@ impl Rank {
             RankBuild::Lowest => "on the build that lowers it most",
             RankBuild::Highest => "on the build that raises it most",
         };
+        let basis = match self.basis {
+            BuildBasis::Given => "",
+            BuildBasis::Usual => ", the usual build",
+            BuildBasis::Order => ", as the order runs",
+        };
 
-        format!("{}{rows} ({}), {order}, {build}", self.stat.name(), self.stat.unit().name())
+        format!("{}{rows} ({}), {order}, {build}{basis}", self.stat.name(), self.stat.unit().name())
     }
 
-    fn rule(&self) -> &'static str {
+    fn rule(&self) -> String {
         const BASE_RULE: &str = "Each ship is ranked by its base value: stock hull and modules (or the first modules that have the stat when stock lacks it), no captain skills, no upgrades. Ships are ordered by exact value; ships whose values print the same share a rank.";
         const LOWEST_RULE: &str = "Each ship is ranked by its value on the build that lowers the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that lower the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
         const HIGHEST_RULE: &str = "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank.";
+        const USUAL: &str =
+            " That is the usual build, the one players run for the stat, whichever order the ships are listed in.";
+        const ORDER: &str = " The stat is no better higher than lower, so the build is the one that moves it furthest in the rank order.";
 
-        match self.build {
+        let rule = match self.build {
             RankBuild::Base => BASE_RULE,
             RankBuild::Lowest => LOWEST_RULE,
             RankBuild::Highest => HIGHEST_RULE,
-        }
+        };
+        let basis = match self.basis {
+            BuildBasis::Given => "",
+            BuildBasis::Usual => USUAL,
+            BuildBasis::Order => ORDER,
+        };
+
+        format!("{rule}{basis}")
     }
 
     /// Which way the build moves the stat, and which row of a ship with
@@ -1951,9 +2002,13 @@ fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {
         return Err(QueryError::RankLimitOutOfRange { limit: limit.0, max: MAX_LIMIT.0 });
     }
 
-    let build = rank.build.unwrap_or_else(|| RankBuild::for_order(rank.order));
+    let stat = resolve_stat(&rank.stat)?;
+    let (build, basis) = match rank.build {
+        Some(build) => (build, BuildBasis::Given),
+        None => RankBuild::default_for(stat, rank.order),
+    };
 
-    Ok(Rank { stat: resolve_stat(&rank.stat)?, qualifier: rank.qualifier.clone(), order: rank.order, build, limit })
+    Ok(Rank { stat, qualifier: rank.qualifier.clone(), order: rank.order, build, basis, limit })
 }
 
 fn qualifying_counts(hits: &[(&Ship, ConditionMatch)]) -> QualifyingCounts {

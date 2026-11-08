@@ -1833,6 +1833,39 @@ fn stat_search_ranks_worst_concealment_on_a_chosen_build() {
     insta::assert_yaml_snapshot!(json!({ "lowest": ranking("lowest"), "base": ranking("base") }));
 }
 
+/// Worst concealment among battleships with no build named: each ship on the
+/// build that lowers detection, as players build them, highest first.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_ranks_worst_concealment_battleships_on_the_usual_build() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({ "rank": { "stat": "visibility.sea_detection", "order": "desc", "limit": 5 }, "class": "battleship" }),
+        )
+        .expect("rank resolves");
+    let ships: Vec<String> = search["ranking"]["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .map(|ship| {
+            format!(
+                "{} {}: {} (base {}, build {})",
+                ship["rank"],
+                ship["ship"].as_str().unwrap_or_default(),
+                ship["value"].as_str().unwrap_or_default(),
+                ship["base"].as_str().unwrap_or_default(),
+                ship["build"]
+            )
+        })
+        .collect();
+    assert!(ships.iter().all(|ship| ship.contains("Concealment Expert")), "{ships:#?}");
+
+    insta::assert_yaml_snapshot!(
+        json!({ "stat": search["ranking"]["stat"], "rule": search["ranking"]["rule"], "ships": ships })
+    );
+}
+
 /// One condition on the capacity of time-based consumables lists every ship
 /// with one, released and in testing, naming the consumable and its capacity.
 #[test]
