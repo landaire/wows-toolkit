@@ -54,6 +54,7 @@ use wows_query::tech_tree::Cost;
 use wows_query::tech_tree::CostPerPoint;
 use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::ResearchPoints;
+use wows_query::tech_tree::ResetCostRank;
 use wows_query::tech_tree::TechTreeLinesArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
 use wows_query::upgrades::UniqueUpgradesArgs;
@@ -355,7 +356,7 @@ fn ship_overview_reports_cost_and_research() {
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn ship_overview_reports_purchase_and_research_costs() {
-    let costs: Vec<_> = ["Zao", "Kurama", "Montana", "Maine"]
+    let costs: Vec<_> = ["Zao", "Kurama", "Montana", "Maine", "Rhode Island", "Sibir"]
         .into_iter()
         .map(|name| {
             let overview = game().ship_overview(&overview(name)).expect("ship exists");
@@ -430,6 +431,8 @@ struct ResetRank {
     credits_per_point: CostPerPoint<Credits>,
     xp_per_point: CostPerPoint<Experience>,
     regrind: Cost,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reset_cost: Option<ResetCostRank>,
 }
 
 fn reset_ranks(sort_by: LineOrder) -> Vec<ResetRank> {
@@ -450,6 +453,7 @@ fn reset_ranks(sort_by: LineOrder) -> Vec<ResetRank> {
                 credits_per_point: reset.credits_per_point,
                 xp_per_point: reset.xp_per_point,
                 regrind: reset.regrind,
+                reset_cost: reset.reset_cost,
             }
         })
         .collect()
@@ -465,6 +469,20 @@ fn tech_tree_lines_cheapest_to_reset_by_credits_per_point() {
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn tech_tree_lines_cheapest_to_reset_by_xp_per_point() {
     insta::assert_yaml_snapshot!(reset_ranks(LineOrder::XpPerPoint));
+}
+
+/// reset_cost weighs credits and XP per point alike: each line's mean rank
+/// by the two, with the formula stated beside the lines.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tech_tree_lines_cheapest_to_reset_by_reset_cost() {
+    let lines = game()
+        .tech_tree_lines(&TechTreeLinesArgs { sort_by: Some(LineOrder::ResetCost), ..Default::default() })
+        .expect("default tiers are valid");
+    assert!(lines.ranking.is_some());
+    assert!(lines.lines.iter().all(|line| line.reset.as_ref().is_some_and(|reset| reset.reset_cost.is_some())));
+
+    insta::assert_yaml_snapshot!(json!({ "ranking": lines.ranking, "lines": reset_ranks(LineOrder::ResetCost) }));
 }
 
 /// Carrier lines pay fewer Research Points than gunship lines. The Harugumo

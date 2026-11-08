@@ -80,6 +80,9 @@ pub enum LineOrder {
     /// Cheapest first by reset research XP per Research Point, then reset credits per point.
     XpPerPoint,
 
+    /// Cheapest first by the mean of the line's ranks by credits_per_point and by xp_per_point.
+    ResetCost,
+
     /// Cheapest first by total research XP in the tier range, then total purchase credits.
     ResearchXp,
 
@@ -90,9 +93,12 @@ pub enum LineOrder {
 impl LineOrder {
     /// Orders by the Research Bureau reset, which lines then carry.
     fn by_reset(self) -> bool {
-        matches!(self, Self::CreditsPerPoint | Self::XpPerPoint)
+        matches!(self, Self::CreditsPerPoint | Self::XpPerPoint | Self::ResetCost)
     }
 }
+
+/// How `LineOrder::ResetCost` ranks, stated in the output beside it.
+const RESET_COST_RANKING: &str = "reset_cost.mean_rank is the mean of the line's rank by credits_per_point and its rank by xp_per_point among all lines matching the filters, listed or omitted (1 is cheapest; equal values share a rank). Lines go from the lowest mean_rank; ties go by credits_per_point, then xp_per_point.";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TechTreeLinesOutput {
@@ -108,6 +114,10 @@ pub struct TechTreeLinesOutput {
     pub total: usize,
 
     pub lines: Vec<TechTreeLine>,
+
+    /// How sort_by ranks when it combines measures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking: Option<&'static str>,
 
     /// Lines left out of `lines` by the limit.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,12 +190,39 @@ pub struct LineReset {
     pub credits_per_point: CostPerPoint<Credits>,
     pub xp_per_point: CostPerPoint<Experience>,
 
+    /// The line's ranks by both costs per point, when sort_by is reset_cost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_cost: Option<ResetCostRank>,
+
     /// Credits the reset pays for the line's ships when the player owns every
     /// ship from tier 2 to 10: half their purchase price.
     pub sale_credits: Credits,
 
     /// `regrind` credits less `sale_credits`.
     pub net_credits_if_owned: Credits,
+}
+
+/// A line's place by both reset costs per Research Point among the lines
+/// matching the filters. See `RESET_COST_RANKING`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ResetCostRank {
+    pub credits_per_point_rank: LineRank,
+    pub xp_per_point_rank: LineRank,
+
+    /// Mean of the two ranks: whole or half.
+    pub mean_rank: f32,
+}
+
+/// Position of a line in a ranking, 1 cheapest. Equal values share a rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct LineRank(pub usize);
+
+impl LineRank {
+    /// One more than the number of `values` below `value`.
+    fn of<T: Ord>(value: &T, values: impl Iterator<Item = T>) -> Self {
+        Self(1 + values.filter(|other| other < value).count())
+    }
 }
 
 /// Research Points, the Research Bureau currency.
@@ -404,6 +441,21 @@ impl GameData {
             .map(|path| self.tech_tree_line(path, tiers, &lines_through, with_reset))
             .collect();
 
+        if sort_by == LineOrder::ResetCost {
+            let resets = || lines.iter().filter_map(|line| line.reset.as_ref());
+            let credits: Vec<CostPerPoint<Credits>> = resets().map(|reset| reset.credits_per_point).collect();
+            let xp: Vec<CostPerPoint<Experience>> = resets().map(|reset| reset.xp_per_point).collect();
+            for reset in lines.iter_mut().filter_map(|line| line.reset.as_mut()) {
+                let credits_per_point_rank = LineRank::of(&reset.credits_per_point, credits.iter().copied());
+                let xp_per_point_rank = LineRank::of(&reset.xp_per_point, xp.iter().copied());
+                reset.reset_cost = Some(ResetCostRank {
+                    credits_per_point_rank,
+                    xp_per_point_rank,
+                    mean_rank: (credits_per_point_rank.0 + xp_per_point_rank.0) as f32 / 2.0,
+                });
+            }
+        }
+
         lines.sort_by(|left, right| {
             let xp = left.total_research_xp.cmp(&right.total_research_xp);
             let credits = left.total_purchase_credits.cmp(&right.total_purchase_credits);
@@ -411,10 +463,18 @@ impl GameData {
             let credits_per_point = per_point(left).cmp(&per_point(right));
             let xp_per_point = |line: &TechTreeLine| line.reset.as_ref().map(|reset| reset.xp_per_point);
             let xp_per_point = xp_per_point(left).cmp(&xp_per_point(right));
+            // The sum orders as the mean does, without comparing floats.
+            let rank_sum = |line: &TechTreeLine| {
+                line.reset
+                    .as_ref()
+                    .and_then(|reset| reset.reset_cost)
+                    .map(|rank| rank.credits_per_point_rank.0 + rank.xp_per_point_rank.0)
+            };
             let order = match sort_by {
                 LineOrder::Nation => left.nation.cmp(&right.nation),
                 LineOrder::CreditsPerPoint => credits_per_point.then(xp_per_point),
                 LineOrder::XpPerPoint => xp_per_point.then(credits_per_point),
+                LineOrder::ResetCost => rank_sum(left).cmp(&rank_sum(right)).then(credits_per_point).then(xp_per_point),
                 LineOrder::ResearchXp => xp.then(credits),
                 LineOrder::PurchaseCredits => credits.then(xp),
             };
@@ -426,7 +486,9 @@ impl GameData {
         lines.truncate(args.limit.unwrap_or(DEFAULT_LIMIT));
         let omitted = (total > lines.len()).then(|| total - lines.len());
 
-        Ok(TechTreeLinesOutput { interpretations, tiers, sort_by, total, lines, omitted })
+        let ranking = (sort_by == LineOrder::ResetCost).then_some(RESET_COST_RANKING);
+
+        Ok(TechTreeLinesOutput { interpretations, tiers, sort_by, total, lines, ranking, omitted })
     }
 
     /// Every research path from a tier 1 ship to a released tier 10 tech
@@ -593,6 +655,7 @@ impl GameData {
             paying_ships,
             credits_per_point: CostPerPoint { cost: regrind.purchase_credits, points: research_points },
             xp_per_point: CostPerPoint { cost: regrind.research_xp, points: research_points },
+            reset_cost: None,
             sale_credits: Credits::new(sale_credits),
             net_credits_if_owned: Credits::new(regrind.purchase_credits.value() - sale_credits),
         }

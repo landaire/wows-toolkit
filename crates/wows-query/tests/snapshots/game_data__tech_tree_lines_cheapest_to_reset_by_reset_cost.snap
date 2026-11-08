@@ -1,0 +1,126 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({\n    \"ranking\": lines.ranking, \"lines\": reset_ranks(LineOrder::ResetCost)\n})"
+---
+ranking: "reset_cost.mean_rank is the mean of the line's rank by credits_per_point and its rank by xp_per_point among all lines matching the filters, listed or omitted (1 is cheapest; equal values share a rank). Lines go from the lowest mean_rank; ties go by credits_per_point, then xp_per_point."
+lines:
+  - tier_10_ship: Grozovoi
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5001.3
+    xp_per_point: 60.1
+    regrind:
+      research_xp: 612550
+      purchase_credits: 51013600
+    reset_cost:
+      credits_per_point_rank: 2
+      xp_per_point_rank: 3
+      mean_rank: 2.5
+  - tier_10_ship: Z-52
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5001.1
+    xp_per_point: 60.6
+    regrind:
+      research_xp: 617700
+      purchase_credits: 51011300
+    reset_cost:
+      credits_per_point_rank: 1
+      xp_per_point_rank: 5
+      mean_rank: 3
+  - tier_10_ship: Shimakaze
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5109.8
+    xp_per_point: 59.6
+    regrind:
+      research_xp: 607920
+      purchase_credits: 52120000
+    reset_cost:
+      credits_per_point_rank: 5
+      xp_per_point_rank: 2
+      mean_rank: 3.5
+  - tier_10_ship: Delny
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5079.8
+    xp_per_point: 60.5
+    regrind:
+      research_xp: 617550
+      purchase_credits: 51813600
+    reset_cost:
+      credits_per_point_rank: 4
+      xp_per_point_rank: 4
+      mean_rank: 4
+  - tier_10_ship: Harugumo
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5119.6
+    xp_per_point: 59.4
+    regrind:
+      research_xp: 605420
+      purchase_credits: 52220000
+    reset_cost:
+      credits_per_point_rank: 7
+      xp_per_point_rank: 1
+      mean_rank: 4
+  - tier_10_ship: Yueyang
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5071.4
+    xp_per_point: 61.5
+    regrind:
+      research_xp: 627300
+      purchase_credits: 51728000
+    reset_cost:
+      credits_per_point_rank: 3
+      xp_per_point_rank: 9
+      mean_rank: 6
+  - tier_10_ship: Zaō
+    class: cruiser
+    research_points: 10200
+    credits_per_point: 5111.7
+    xp_per_point: 60.7
+    regrind:
+      research_xp: 619100
+      purchase_credits: 52139000
+    reset_cost:
+      credits_per_point_rank: 6
+      xp_per_point_rank: 6
+      mean_rank: 6
+  - tier_10_ship: Gearing
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5123.5
+    xp_per_point: 61.7
+    regrind:
+      research_xp: 629520
+      purchase_credits: 52259300
+    reset_cost:
+      credits_per_point_rank: 8
+      xp_per_point_rank: 10
+      mean_rank: 9
+  - tier_10_ship: Burrows
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5138.2
+    xp_per_point: 62.3
+    regrind:
+      research_xp: 635520
+      purchase_credits: 52409300
+    reset_cost:
+      credits_per_point_rank: 9
+      xp_per_point_rank: 13
+      mean_rank: 11
+  - tier_10_ship: Halland
+    class: destroyer
+    research_points: 10200
+    credits_per_point: 5165.4
+    xp_per_point: 61.2
+    regrind:
+      research_xp: 624100
+      purchase_credits: 52687000
+    reset_cost:
+      credits_per_point_rank: 15
+      xp_per_point_rank: 8
+      mean_rank: 11.5

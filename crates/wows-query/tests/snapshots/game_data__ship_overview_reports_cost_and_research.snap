@@ -123,7 +123,7 @@ expression: overviews
     group: ultimate
     category: premium
     status: released
-  acquisition_note: "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price."
+  acquisition_note: How the ship is obtained and its price are not in game data.
   upgrade_slots: 6
   armament:
     modules:

@@ -589,7 +589,7 @@ pub struct ShipOverview {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub purchase_credits: Option<Credits>,
 
-    /// How the ship is obtained when the price and research fields do not tell it.
+    /// What the price and research fields leave out about how the ship is obtained.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acquisition_note: Option<&'static str>,
 
@@ -1012,21 +1012,16 @@ fn sold_for_credits(group: &str) -> bool {
     matches!(group, "upgradeable" | "superShip" | "demoWithoutStats")
 }
 
-/// Groups of ships obtained in ways the price and research fields do not
-/// show. Armory prices are server side and absent from game data.
+/// What the price and research fields leave out. How a ship outside the
+/// research tree is sold, for which currency and at what price, is decided on
+/// the server and changes with sales and events, so the note names none.
 fn acquisition_note(group: &str) -> Option<&'static str> {
     match group {
-        "ultimate" => Some(
-            "Sold in the Armory for a resource such as coal, steel or research bureau points, not for doubloons. Game data does not hold that price.",
-        ),
-        "specialUnsellable" => Some(
-            "Obtained from the Armory, events, containers or bundles, not as a doubloon store item. Game data does not hold that price.",
-        ),
-        "disabled" => Some("Not obtainable."),
+        "upgradeable" | "start" | "demoWithoutStats" => None,
         "superShip" => Some(
             "Bought for credits, with no experience cost, once the ship in requires_ship is researched. The account must also own or have researched at least three tier X ships.",
         ),
-        _ => None,
+        _ => Some("How the ship is obtained and its price are not in game data."),
     }
 }
 

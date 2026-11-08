@@ -36,3 +36,17 @@ expression: costs
     - Montana
   unlocks: []
   requires_ship: Montana
+- ship: Rhode Island
+  purchase_credits: ~
+  research_xp: ~
+  acquisition_note: How the ship is obtained and its price are not in game data.
+  researched_from: []
+  unlocks: []
+  requires_ship: ~
+- ship: Sibir
+  purchase_credits: ~
+  research_xp: ~
+  acquisition_note: How the ship is obtained and its price are not in game data.
+  researched_from: []
+  unlocks: []
+  requires_ship: ~

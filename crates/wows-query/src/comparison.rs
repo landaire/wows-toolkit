@@ -200,8 +200,8 @@ pub struct ComparedShip {
     /// ", test" for a ship not of the tech tree.
     pub ship: String,
 
-    /// How players get the ship: tech_tree, premium (including special and
-    /// Research Bureau ships) or test.
+    /// tech_tree, premium (premium and special ships, outside the tech tree)
+    /// or test.
     pub category: ShipCategory,
 
     /// A cruiser's type by its largest main battery caliber; absent for
