@@ -21,6 +21,7 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::types::AccountId;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
@@ -72,6 +73,10 @@ impl MatchMetadata {
 /// values.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct NormalizedPlayer {
+    /// Stable roster identity used to join this normalized row back to packet
+    /// data after consumers reorder the report. Not part of serialized output.
+    #[serde(skip)]
+    pub entity_id: EntityId,
     pub db_id: AccountId,
     pub name: String,
     /// Display name: the raw `name` for humans, or the translated bot name when
@@ -817,6 +822,7 @@ fn build_player(
     };
 
     NormalizedPlayer {
+        entity_id: state.entity_id(),
         db_id: state.db_id(),
         name: state.username().to_string(),
         display_name,

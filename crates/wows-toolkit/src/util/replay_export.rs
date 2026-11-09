@@ -71,6 +71,19 @@ mod tests {
         let debug = export_match(&replay, true);
         println!("{} enemy builds survive a debug export", enemy_builds(&debug));
 
+        let battle_report = replay.battle_report.as_ref().expect("the replay has a battle report");
+        let ui_report = replay.ui_report.as_ref().expect("the replay has a UI report");
+        let mut reordered = ui_report.normalized().clone();
+        reordered.players.reverse();
+        let reordered_export = ExportedMatch::new(&reordered, battle_report.players(), battle_report.game_chat(), true);
+        for (vehicle, normalized) in reordered_export.vehicles.iter().zip(reordered.players.iter()) {
+            assert_eq!(vehicle.index, normalized.ship_index);
+            assert_eq!(vehicle.name, normalized.ship_name);
+            assert_eq!(vehicle.nation, normalized.ship_nation);
+            assert_eq!(vehicle.class, normalized.ship_class);
+            assert_eq!(vehicle.tier, normalized.ship_tier);
+        }
+
         let json = serde_json::to_string(&exported).expect("the export serializes");
         assert!(json.len() > 1000, "the document is not a stub");
     }

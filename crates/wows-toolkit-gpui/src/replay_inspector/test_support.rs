@@ -12,6 +12,7 @@ use wows_replay_insights::battle_report::ObservedResults;
 use wows_replay_insights::battle_report::SkillInfo;
 use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
+use wows_replays::types::EntityId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wowsunpack::data::Version;
@@ -136,6 +137,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
 /// default, for `ReplayReportModel::build` tests.
 pub(crate) fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> NormalizedPlayer {
     NormalizedPlayer {
+        entity_id: EntityId::from(db_id as u32),
         ship_id: 1u64.into(),
         db_id: AccountId(db_id),
         name: format!("Player{db_id}"),

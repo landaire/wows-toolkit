@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- *(toolkit)* Keep replay export ship data attached after roster sorting
+
 ## [1.0.1] - 2026-08-12
 
 ### 🚀 Features

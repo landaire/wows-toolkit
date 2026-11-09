@@ -22,6 +22,7 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
+use wows_replays::types::EntityId;
 use wows_replays::types::Relation;
 use wowsunpack::data::Version;
 use wowsunpack::data::ship_config::ShipConfig;
@@ -37,11 +38,9 @@ pub struct Match {
 impl Match {
     /// The match `normalized` describes.
     ///
-    /// `players` is the battle report's own player list, which
-    /// `normalized.players` is built positionally from; the two are zipped, so
-    /// they must come from the same report. The raw player carries the
-    /// identity and entity details (realm, clan colour, ship config, captain)
-    /// that normalization does not keep.
+    /// `players` is the battle report's own player list. Normalized rows may
+    /// have been reordered for display, so raw player data is joined by entity
+    /// ID rather than by position.
     ///
     /// `is_debug_mode` keeps the fields an ordinary export strips: enemy
     /// builds, and test-ship results for anyone but the recording player.
@@ -64,24 +63,28 @@ impl Match {
             battle_result: normalized.metadata.battle_result,
         };
 
-        // The two lists are the same roster in the same order, and a document
-        // built from a mismatched pair would attribute one player's results
-        // to another's account. Checked rather than assumed: this document is
-        // read by a service that cannot tell.
         assert_eq!(
             normalized.players.len(),
             players.len(),
             "the normalized roster and the battle report's own must be the same players"
         );
+        let mut players_by_entity_id = roster_by_entity_id(players, |player| player.initial_state().entity_id());
+
         let vehicles: Vec<Vehicle> = normalized
             .players
             .iter()
-            .zip(players.iter())
-            .map(|(np, player)| {
-                debug_assert_eq!(np.db_id, player.initial_state().db_id(), "roster order drifted");
+            .map(|np| {
+                let player = players_by_entity_id.remove(&np.entity_id).unwrap_or_else(|| {
+                    panic!("normalized player has no unmatched entity in the battle report: {:?}", np.entity_id)
+                });
+
                 Vehicle::new(np, player)
             })
             .collect();
+        assert!(
+            players_by_entity_id.is_empty(),
+            "the battle report contains entities absent from the normalized roster"
+        );
 
         let match_data = Match {
             vehicles,
@@ -118,6 +121,13 @@ impl Match {
 
         self
     }
+}
+
+fn roster_by_entity_id<T>(values: &[T], entity_id: impl Fn(&T) -> EntityId) -> HashMap<EntityId, &T> {
+    let values_by_entity_id: HashMap<_, _> = values.iter().map(|value| (entity_id(value), value)).collect();
+    assert_eq!(values_by_entity_id.len(), values.len(), "the battle report roster contains duplicate entity IDs");
+
+    values_by_entity_id
 }
 
 #[derive(Clone, Serialize)]
@@ -758,6 +768,25 @@ mod tests {
             },
             game_chat: Vec::new(),
         }
+    }
+
+    #[test]
+    fn roster_join_preserves_ship_identity_after_reordering() {
+        struct RawPlayer {
+            entity_id: EntityId,
+            ship: &'static str,
+        }
+
+        let players = [
+            RawPlayer { entity_id: EntityId::from(10u32), ship: "Nueva Esparta" },
+            RawPlayer { entity_id: EntityId::from(20u32), ship: "Hindenburg" },
+        ];
+        let players_by_entity_id = roster_by_entity_id(&players, |player| player.entity_id);
+        let display_order = [EntityId::from(20u32), EntityId::from(10u32)];
+        let exported_ships: Vec<_> =
+            display_order.iter().map(|entity_id| players_by_entity_id[entity_id].ship).collect();
+
+        assert_eq!(exported_ships, ["Hindenburg", "Nueva Esparta"]);
     }
 
     #[test]
