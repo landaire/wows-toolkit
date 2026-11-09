@@ -1,35 +1,41 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use nsh_core::AccessibilityState;
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
-use std::sync::Arc;
 use wows_replays::ReplayFile;
 
-/// One player listed in replay metadata.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct ReplayPlayer {
-    pub name: String,
-    pub ship_id: String,
-    pub relation: u32,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplayPlayer {
+    name: String,
+    ship_id: String,
+    relation: u32,
 }
 
-/// Replay metadata displayed before packet decoding is available.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct ReplayDocument {
-    pub path: String,
-    pub file_name: String,
-    pub date: String,
-    pub map_name: String,
-    pub map_key: String,
-    pub game_mode: String,
-    pub scenario: String,
-    pub player_name: String,
-    pub player_ship: String,
-    pub client_version: String,
-    pub duration_seconds: u32,
-    pub players_per_team: u32,
-    pub teams_count: u32,
-    pub players: Vec<ReplayPlayer>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplayDocument {
+    path: PathBuf,
+    file_name: String,
+    date: String,
+    map_name: String,
+    map_key: String,
+    game_mode: String,
+    scenario: String,
+    player_name: String,
+    player_ship: String,
+    client_version: String,
+    duration_seconds: u32,
+    players_per_team: u32,
+    teams_count: u32,
+    players: Vec<ReplayPlayer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplayDirectory {
+    path: PathBuf,
+    documents: Vec<Arc<ReplayDocument>>,
+    failed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -38,41 +44,93 @@ pub struct ReplayInspectorProps {}
 #[component]
 pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
     let document = signal(None::<Arc<ReplayDocument>>);
+    let directory = signal(None::<Arc<ReplayDirectory>>);
     let error = signal(None::<String>);
     let picking = signal(false);
 
     view()
-        .app_class(|| Some("flex-1 p-3 gap-3".into()))
+        .app_class(|| Some("flex-1 min-h-0 p-3 gap-3".into()))
         .child(
-            view().app_class(|| Some("flex-row items-center justify-end".into())).child(
-                view()
-                    .accessible(true)
-                    .role(AccessibilityRole::Button)
-                    .disabled(move || picking.get())
-                    .app_class(|| {
-                        Some(
-                            "min-h-8 px-3 rounded-(--radius) border border-border bg-primary \
-                                 text-primary-foreground items-center justify-center hover:opacity-85 active:opacity-70"
-                                .into(),
-                        )
-                    })
-                    .on_press(move |_: &()| {
-                        if picking.get_untracked() {
-                            return;
-                        }
-                        picking.set(true);
-                        error.set(None);
-                        spawn(async move {
-                            match open_replay().await {
-                                Ok(Some(replay)) => document.set(Some(Arc::new(replay))),
-                                Ok(None) => {}
-                                Err(message) => error.set(Some(message)),
+            view()
+                .app_class(|| Some("flex-row items-center justify-end gap-2".into()))
+                .child(
+                    view()
+                        .accessible(true)
+                        .role(AccessibilityRole::Button)
+                        .disabled(move || picking.get())
+                        .app_class(|| {
+                            Some(
+                                "min-h-8 px-3 rounded-(--radius) border border-border bg-secondary \
+                                 text-secondary-foreground items-center justify-center hover:opacity-85 active:opacity-70"
+                                    .into(),
+                            )
+                        })
+                        .on_press(move |_: &()| {
+                            if picking.get_untracked() {
+                                return;
                             }
-                            picking.set(false);
-                        });
-                    })
-                    .child(text(move || if picking.get() { "Opening..." } else { "Open Replay File..." })),
-            ),
+                            picking.set(true);
+                            error.set(None);
+                            spawn(async move {
+                                match open_replay_directory().await {
+                                    Ok(Some(listing)) => {
+                                        document.set(listing.documents.first().cloned());
+                                        if listing.failed > 0 {
+                                            let prefix = if listing.documents.is_empty() {
+                                                "No readable replay files. "
+                                            } else {
+                                                ""
+                                            };
+                                            error.set(Some(format!(
+                                                "{prefix}{} replay file(s) could not be read.",
+                                                listing.failed
+                                            )));
+                                        } else if listing.documents.is_empty() {
+                                            error.set(Some("The selected directory contains no replay files.".into()));
+                                        }
+                                        directory.set(Some(Arc::new(listing)));
+                                    }
+                                    Ok(None) => {}
+                                    Err(message) => error.set(Some(message)),
+                                }
+                                picking.set(false);
+                            });
+                        })
+                        .child(text(move || {
+                            if picking.get() { "Opening..." } else { "Open Replay Directory..." }
+                        })),
+                )
+                .child(
+                    view()
+                        .accessible(true)
+                        .role(AccessibilityRole::Button)
+                        .disabled(move || picking.get())
+                        .app_class(|| {
+                            Some(
+                                "min-h-8 px-3 rounded-(--radius) border border-border bg-primary \
+                                 text-primary-foreground items-center justify-center hover:opacity-85 active:opacity-70"
+                                    .into(),
+                            )
+                        })
+                        .on_press(move |_: &()| {
+                            if picking.get_untracked() {
+                                return;
+                            }
+                            picking.set(true);
+                            error.set(None);
+                            spawn(async move {
+                                match open_replay().await {
+                                    Ok(Some(replay)) => document.set(Some(Arc::new(replay))),
+                                    Ok(None) => {}
+                                    Err(message) => error.set(Some(message)),
+                                }
+                                picking.set(false);
+                            });
+                        })
+                        .child(text(move || {
+                            if picking.get() { "Opening..." } else { "Open Replay File..." }
+                        })),
+                ),
         )
         .child(text(move || error.get().unwrap_or_default()).app_class(move || {
             Some(
@@ -84,8 +142,113 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                 .into(),
             )
         }))
-        .child(empty_view(document, error))
-        .child(replay_view(document))
+        .child(
+            view()
+                .app_class(|| Some("flex-1 min-h-0 flex-row gap-3".into()))
+                .child(directory_browser(directory, document))
+                .child(
+                    view()
+                        .app_class(|| Some("flex-1 min-h-0".into()))
+                        .child(empty_view(document, error))
+                        .child(replay_view(document)),
+                ),
+        )
+}
+
+fn directory_browser(
+    directory: Signal<Option<Arc<ReplayDirectory>>>,
+    document: Signal<Option<Arc<ReplayDocument>>>,
+) -> AnyElement {
+    let rows = each(
+        move || directory.with(|value| value.as_ref().map_or_else(Vec::new, |value| value.documents.clone())),
+        |replay| replay.path.clone(),
+        move |replay, _| {
+            view()
+                .accessible(true)
+                .role(AccessibilityRole::Button)
+                .accessibility_state(move || AccessibilityState {
+                    selected: replay.with(|replay| {
+                        document.with(|current| {
+                            current.as_ref().is_some_and(|current| current.path == replay.path)
+                        })
+                    }),
+                    ..AccessibilityState::default()
+                })
+                .app_class(move || {
+                    Some(
+                        if replay.with(|replay| {
+                            document.with(|current| {
+                                current.as_ref().is_some_and(|current| current.path == replay.path)
+                            })
+                        }) {
+                            "min-h-12 px-2 py-1 gap-0.5 border-b border-border bg-accent hover:bg-accent active:opacity-70"
+                        } else {
+                            "min-h-12 px-2 py-1 gap-0.5 border-b border-border hover:bg-muted active:opacity-70"
+                        }
+                        .into(),
+                    )
+                })
+                .on_press(move |_: &()| document.set(Some(replay.get())))
+                .child(
+                    text(move || replay.get().file_name.clone()).app_class(move || {
+                        Some(
+                            if replay.with(|replay| {
+                                document.with(|current| {
+                                    current.as_ref().is_some_and(|current| current.path == replay.path)
+                                })
+                            }) {
+                                "text-xs text-accent-foreground"
+                            } else {
+                                "text-xs text-card-foreground"
+                            }
+                            .into(),
+                        )
+                    }),
+                )
+                .child(
+                    text(move || {
+                        let replay = replay.get();
+                        format!("{} - {}", replay.map_name, replay.date)
+                    })
+                    .app_class(|| Some("text-xs text-muted-foreground".into())),
+                )
+        },
+    );
+
+    view()
+        .app_class(move || {
+            Some(
+                if directory.get().is_some() {
+                    "w-80 min-h-0 p-3 rounded-(--radius) border border-border bg-card"
+                } else {
+                    "hidden"
+                }
+                .into(),
+            )
+        })
+        .child(
+            text(move || {
+                directory.with(|value| {
+                    value.as_ref().map_or_else(String::new, |value| {
+                        value.path.file_name().map_or_else(
+                            || value.path.display().to_string(),
+                            |name| name.to_string_lossy().into_owned(),
+                        )
+                    })
+                })
+            })
+            .app_class(|| Some("text-sm font-semibold text-card-foreground".into())),
+        )
+        .child(
+            text(move || {
+                directory.with(|value| {
+                    value.as_ref().map_or_else(String::new, |value| format!("{} replay file(s)", value.documents.len()))
+                })
+            })
+            .app_class(|| Some("mb-2 text-xs text-muted-foreground".into())),
+        )
+        .child(scroll().app_class(|| Some("flex-1 min-h-0".into())).child(rows))
+        .into_element()
 }
 
 fn empty_view(document: Signal<Option<Arc<ReplayDocument>>>, error: Signal<Option<String>>) -> AnyElement {
@@ -137,7 +300,9 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
                 )
                 .child(
                     text(move || {
-                        document.with(|value| value.as_ref().map_or_else(String::new, |value| value.path.clone()))
+                        document.with(|value| {
+                            value.as_ref().map_or_else(String::new, |value| value.path.display().to_string())
+                        })
                     })
                     .app_class(|| Some("text-xs text-muted-foreground".into())),
                 ),
@@ -266,15 +431,71 @@ async fn open_replay() -> Result<Option<ReplayDocument>, String> {
         return Ok(None);
     };
 
+    blocking(move || parse_replay(&path))
+        .await
+        .map_err(|error| format!("replay parser task failed: {error}"))?
+        .map(Some)
+}
+
+async fn open_replay_directory() -> Result<Option<ReplayDirectory>, String> {
+    let picked = pick_paths(OpenDialog::folders().title("Open Replay Directory").button_label("Open"))
+        .await
+        .map_err(|error| format!("could not show replay directory dialog: {error}"))?;
+    let Some(path) = picked.and_then(|mut paths| paths.pop()) else {
+        return Ok(None);
+    };
+
+    blocking(move || scan_replay_directory(path))
+        .await
+        .map_err(|error| format!("replay directory task failed: {error}"))?
+        .map(Some)
+}
+
+fn scan_replay_directory(path: PathBuf) -> Result<ReplayDirectory, String> {
+    let entries = std::fs::read_dir(&path)
+        .map_err(|error| format!("could not read replay directory {}: {error}", path.display()))?;
+    let mut replay_paths = Vec::new();
+    let mut failed = 0;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let entry_path = entry.path();
+        if entry_path.extension().and_then(|extension| extension.to_str()) != Some("wowsreplay")
+            || entry_path.file_name().is_some_and(|name| name == "temp.wowsreplay")
+        {
+            continue;
+        }
+        replay_paths.push(entry_path);
+    }
+    replay_paths.sort_by(|left, right| right.cmp(left));
+
+    let documents = replay_paths
+        .into_iter()
+        .filter_map(|replay_path| match parse_replay(&replay_path) {
+            Ok(document) => Some(Arc::new(document)),
+            Err(_) => {
+                failed += 1;
+                None
+            }
+        })
+        .collect();
+    Ok(ReplayDirectory { path, documents, failed })
+}
+
+fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
     let file_name = path
         .file_name()
         .ok_or_else(|| format!("selected replay path has no file name: {}", path.display()))?
         .to_string_lossy()
         .into_owned();
-    let parse_path = path.clone();
-    let replay = blocking(move || ReplayFile::meta_only_from_file(&parse_path))
-        .await
-        .map_err(|error| format!("replay parser task failed: {error}"))?
+    let replay = ReplayFile::meta_only_from_file(path)
         .map_err(|error| format!("could not parse replay {}: {error}", path.display()))?;
     let meta = replay.meta;
     let game_mode =
@@ -289,8 +510,8 @@ async fn open_replay() -> Result<Option<ReplayDocument>, String> {
         })
         .collect();
 
-    Ok(Some(ReplayDocument {
-        path: path.to_string_lossy().into_owned(),
+    Ok(ReplayDocument {
+        path: path.to_path_buf(),
         file_name,
         date: meta.dateTime,
         map_name: meta.mapDisplayName,
@@ -304,5 +525,5 @@ async fn open_replay() -> Result<Option<ReplayDocument>, String> {
         players_per_team: meta.playersPerTeam,
         teams_count: meta.teamsCount,
         players,
-    }))
+    })
 }

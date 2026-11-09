@@ -3,7 +3,7 @@ mod native;
 mod replay;
 
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
-pub use replay::{ReplayDocument, ReplayInspector, ReplayInspectorProps, ReplayPlayer};
+pub use replay::{ReplayInspector, ReplayInspectorProps};
 
 use nsh_core::prelude::{Registry, native_module};
 
