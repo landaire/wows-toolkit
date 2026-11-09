@@ -610,6 +610,66 @@ fn shell_trait_rows(output: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Destroyers without any anti-submarine weapon are listed apart from the
+/// ranked ships the limit leaves out, with the tiers that meet submarines.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stat_search_lists_ships_lacking_the_ranked_stat() {
+    let output = game()
+        .call_tool(
+            "stat_search",
+            json!({ "rank": { "stat": "asw.best_damage_per_attack", "order": "asc", "limit": 3 }, "class": "destroyer" }),
+        )
+        .expect("the stat ranks");
+    let ranking = &output["ranking"];
+    assert!(ranking["omitted"].as_u64().is_some_and(|omitted| omitted > 0), "{ranking:#}");
+    assert!(ranking["lacking"]["total"].as_u64().is_some_and(|total| total > 0), "{ranking:#}");
+
+    insta::assert_yaml_snapshot!(json!({
+        "ranked": ranking["ranked"],
+        "omitted": ranking["omitted"],
+        "lacking": ranking["lacking"],
+        "note": ranking["note"],
+    }));
+
+    // Every class, low tiers listed by name and higher tiers by class: where
+    // anti-submarine weapons start.
+    let ranking = |min_tier: u32, max_tier: u32, limit: usize| {
+        let output = game()
+            .call_tool(
+                "stat_search",
+                json!({
+                    "rank": { "stat": "asw.best_damage_per_attack", "order": "desc", "limit": limit },
+                    "min_tier": min_tier,
+                    "max_tier": max_tier,
+                }),
+            )
+            .expect("the stat ranks");
+        output["ranking"].clone()
+    };
+    let low_tiers = ranking(1, 6, 1);
+    let armed_low_tiers = ranking(1, 4, 25);
+    let high_tiers = ranking(5, 11, 1);
+    let armed: Vec<&serde_json::Value> =
+        armed_low_tiers["ships"].as_array().expect("ships").iter().map(|ship| &ship["ship"]).collect();
+    insta::assert_yaml_snapshot!(
+        "lacking_by_tier_and_class",
+        json!({
+            "tiers_1_to_6": {
+                "by_tier": low_tiers["lacking"]["by_tier"],
+                "by_class": low_tiers["lacking"]["by_class"],
+                "note": low_tiers["note"],
+            },
+            "armed_tiers_1_to_4": { "ranked": armed_low_tiers["ranked"], "ships": armed },
+            "tiers_5_to_11": {
+                "by_tier": high_tiers["lacking"]["by_tier"],
+                "by_class": high_tiers["lacking"]["by_class"],
+                "ships": high_tiers["lacking"]["ships"],
+            },
+        })
+    );
+}
+
 /// Tier 10 ships ranked by anti-submarine weapons, both ends, one call per
 /// stat; rows name the weapon.
 #[test]

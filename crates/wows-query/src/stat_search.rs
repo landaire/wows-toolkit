@@ -5,6 +5,7 @@
 use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -387,13 +388,63 @@ pub struct Ranking {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tied_beyond_limit: Vec<String>,
 
-    /// Ranked ships left out by the limit.
+    /// Ranked ships left out by the limit. They have the stat; ships without
+    /// it are in `lacking`, not here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
 
-    /// Ships that lack the stat, or the qualifier's row, with every module combination.
-    #[serde(skip_serializing_if = "is_zero")]
-    pub lacking_stat: usize,
+    /// Ships that lack the stat, or the qualifier's row, with every module
+    /// combination: they are not ranked and not among `omitted`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lacking: Option<LackingShips>,
+
+    /// Context the stat needs, e.g. which tiers meet submarines for
+    /// anti-submarine stats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Ships matching the filters that lack a ranked stat, answering "which
+/// ships have no X".
+#[derive(Debug, Clone, Serialize)]
+pub struct LackingShips {
+    pub total: usize,
+    pub by_tier: BTreeMap<Tier, usize>,
+    pub by_class: BTreeMap<ShipClass, usize>,
+
+    /// "T4 Isokaze (destroyer, Japan)", highest tier first.
+    pub ships: Vec<String>,
+
+    /// Lacking ships left out of `ships` by the list cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not_listed: Option<usize>,
+}
+
+impl LackingShips {
+    /// `ships` in any order; `None` when there are none.
+    fn new(mut ships: Vec<&Ship>) -> Option<Self> {
+        /// Lacking ships named; the counts cover every one.
+        const LISTED: usize = 60;
+
+        if ships.is_empty() {
+            return None;
+        }
+        ships.sort_by(|left, right| listing_order(left, right));
+        let mut by_tier = BTreeMap::new();
+        let mut by_class = BTreeMap::new();
+        for ship in &ships {
+            *by_tier.entry(ship.tier).or_default() += 1;
+            *by_class.entry(ship.class).or_default() += 1;
+        }
+
+        Some(Self {
+            total: ships.len(),
+            by_tier,
+            by_class,
+            not_listed: (ships.len() > LISTED).then(|| ships.len() - LISTED),
+            ships: ships.iter().take(LISTED).map(|ship| ship.listing_label()).collect(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1239,13 +1290,13 @@ impl GameData {
     ) -> Ranking {
         let row_names = RowNames::default();
         let mut entries: Vec<RankEntry<'_>> = Vec::new();
-        let mut lacking_stat = 0;
+        let mut lacking: Vec<&Ship> = Vec::new();
         for (ship, meets) in candidates {
             match self.rank_builds(ship, rank, &row_names) {
                 Ok(Some(RankedBuilds { builds, fires_by_armament })) => {
                     entries.push(RankEntry { ship, builds, fires_by_armament, meets })
                 }
-                Ok(None) => lacking_stat += 1,
+                Ok(None) => lacking.push(ship),
                 Err(error) => undetermined.push(UndeterminedShip {
                     ship: ship.listing_label(),
                     reason: format!("{} could not be computed: {error}", rank.stat.name()),
@@ -1282,6 +1333,7 @@ impl GameData {
         }
 
         let ranked = entries.len();
+        let lowest_ranked_tier = entries.iter().map(|entry| entry.ship.tier).min();
         let unit = rank.stat.unit();
         let ships: Vec<RankedShip> = entries
             .into_iter()
@@ -1317,8 +1369,33 @@ impl GameData {
             ships,
             tied_beyond_limit,
             omitted,
-            lacking_stat,
+            lacking: LackingShips::new(lacking),
+            note: matches!(rank.stat, SearchStat::Asw(_)).then(|| self.submarine_note(lowest_ranked_tier)),
         }
+    }
+
+    /// Which submarines exist and from which tier the searched ships carry
+    /// anti-submarine weapons, for asw.* rankings.
+    fn submarine_note(&self, lowest_ranked_tier: Option<Tier>) -> String {
+        let filter = ShipFilter { class: Some(ShipClass::Submarine), exclude_test: true, ..ShipFilter::default() };
+        let tiers: BTreeSet<Tier> =
+            self.ships.iter().filter(|ship| filter.matches(ship)).map(|ship| ship.tier).collect();
+        let listed: Vec<String> = tiers.iter().map(|tier| tier.0.to_string()).collect();
+        let submarines = if listed.is_empty() {
+            "No released submarines are in this game data.".to_owned()
+        } else {
+            format!("Released submarines are of tiers {}.", listed.join(", "))
+        };
+        let armed = match lowest_ranked_tier {
+            Some(tier) => {
+                format!(" Of the searched ships, those with anti-submarine weapons start at tier {}.", tier.0)
+            }
+            None => String::new(),
+        };
+
+        format!(
+            "{submarines}{armed} Most battleships and cruisers of tiers V to X received anti-submarine weapons when submarines entered Random Battles in update 0.10.9 (https://blog.worldofwarships.com/blog/225); few ships below tier V have them."
+        )
     }
 
     /// Base and best-fit build value of the rank stat, `None` when the ship
