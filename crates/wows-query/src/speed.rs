@@ -16,6 +16,13 @@
 //! (Components/__init__.py:326, CommonConsumables/Logic/Ship.py:56).
 //! Replays agree: the server top speed of a Marceau with Sierra Mike rises
 //! by 1.25 / 1.05 when its +20% Engine Boost starts, not by 1.2.
+//!
+//! The fastest speed a ship reaches holds every condition that can hold at
+//! once. Conditional skills stack only when their triggers can hold at the
+//! same moment: Swift in Silence and Brisk need the ship undetected
+//! (`entityIsInvisibleTrigger`), Dazzle starts at detection
+//! (`activationOnDetectTrigger`, 15 s), so Dazzle never stacks with them
+//! although a captain can learn both within 21 points.
 
 use std::iter;
 
@@ -28,6 +35,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use crate::builds::Better;
 use crate::builds::BuildAlternative;
 use crate::builds::BuildStat;
+use crate::builds::BuildValue;
+use crate::builds::Item;
 use crate::builds::Outcome;
 use crate::builds::Planner;
 use crate::builds::StatPlan;
@@ -144,6 +153,14 @@ struct Conditions<'a> {
     boosters: Vec<SpeedBooster>,
 }
 
+/// A special ability that changes top speed, with its effects.
+struct SpeedAbility {
+    /// e.g. "Combat Instructions: Consumable Operational Readiness".
+    names: String,
+
+    modifiers: Vec<AbilityModifiers>,
+}
+
 /// One condition held: modifiers switched on, a speed booster active, or
 /// both.
 #[derive(Clone, Copy)]
@@ -216,24 +233,15 @@ impl GameData {
             })
             .collect();
 
-        if !planner.has_ability() {
-            match self.active_ability(planner.ship()) {
-                Ok(ability) if ability.switched.is_none() && ability.modifiers.iter().any(changes_speed) => {
-                    let names = ability.names.join(", ");
-                    let mut abilities = planner.abilities().to_vec();
-                    abilities.extend(ability.modifiers);
-                    switched.push(Switched {
-                        planner: planner.with_abilities_on(abilities),
-                        phrase: format!("{names} active"),
-                        assumed: names.clone(),
-                        note: Some(format!("Only while {names} is active.")),
-                    });
-                }
-                Ok(_) | Err(QueryError::NoSpecialAbility { .. }) => {
-                    // No ability, one that leaves speed alone, or another fire mode.
-                }
-                Err(error) => return Err(error),
-            }
+        if let Some(ability) = self.speed_ability(planner)? {
+            let mut abilities = planner.abilities().to_vec();
+            abilities.extend(ability.modifiers);
+            switched.push(Switched {
+                planner: planner.with_abilities_on(abilities),
+                phrase: format!("{} active", ability.names),
+                assumed: ability.names.clone(),
+                note: Some(format!("Only while {} is active.", ability.names)),
+            });
         }
 
         if let Some(commander) = planner.commander() {
@@ -272,6 +280,139 @@ impl GameData {
         }
 
         Ok(Conditions { switched, boosters: self.speed_boosters(planner) })
+    }
+
+    /// The fastest top speed at `depth` with every condition that can hold
+    /// at once: each speed signal mounted, the special ability active, the
+    /// strongest speed booster active and the conditional skills whose
+    /// triggers can hold together met (see
+    /// [`Planner::triggers_hold_together`]). Of combinations equally fast,
+    /// the one with fewer timed triggers, then fewer skills, is named.
+    /// Commander talents are not counted. `None` when the ship lacks the
+    /// speed or nothing raises its always-on best.
+    pub(crate) fn fastest_speed(
+        &self,
+        planner: &Planner<'_>,
+        depth: SpeedDepth,
+    ) -> Result<Option<BuildAlternative<Knots>>, QueryError> {
+        let knots = |value: Knots| Knots::from(round(value.value()));
+        let card = |outcome: &Outcome| depth.speed(outcome).map(knots);
+        let Some(always_on) = planner.best(&StatPlan::new(depth.label().to_owned(), Better::Higher, &card))? else {
+            return Ok(None);
+        };
+
+        let signals = self.speed_signals();
+        let ability = self.speed_ability(planner)?;
+        let mut abilities = planner.abilities().to_vec();
+        abilities.extend(signals.iter().cloned());
+        if let Some(ability) = &ability {
+            abilities.extend(ability.modifiers.iter().cloned());
+        }
+        let held = planner.with_abilities_on(abilities);
+        let booster = self
+            .speed_boosters(planner)
+            .into_iter()
+            .reduce(|strongest, booster| if booster.boost.0 > strongest.boost.0 { booster } else { strongest });
+
+        let raised = |skill: Item| -> Result<bool, QueryError> {
+            let idle = depth.speed(&*held.with_items(&[skill])?);
+            let active = held.with_skill_triggered(skill)?.and_then(|outcome| depth.speed(&outcome));
+            Ok(idle.zip(active).is_some_and(|(idle, active)| Better::Higher.improves(active.value(), idle.value())))
+        };
+        let mut skills: Vec<Item> = Vec::new();
+        for &skill in held.triggered_items() {
+            if raised(skill)? {
+                skills.push(skill);
+            }
+        }
+
+        let speed = |outcome: &Outcome| {
+            let speed = match &booster {
+                Some(booster) => booster.speed(depth, outcome),
+                None => depth.speed(outcome),
+            };
+            speed.map(knots)
+        };
+        let plan = StatPlan::new(depth.label().to_owned(), Better::Higher, &speed);
+        let mut fastest: Option<(Vec<Item>, BuildValue<Knots>)> = None;
+        for mask in 0..1_usize << skills.len() {
+            let subset: Vec<Item> = skills
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| mask & (1 << index) != 0)
+                .map(|(_, skill)| *skill)
+                .collect();
+            if !held.triggers_hold_together(&subset) {
+                continue;
+            }
+            let Some(value) = held.best_triggered(&plan, &subset)? else {
+                continue;
+            };
+
+            let timed = |skills: &[Item]| skills.iter().filter(|skill| held.trigger_is_timed(**skill)).count();
+            let replaces = match &fastest {
+                None => true,
+                Some((best_skills, best)) => {
+                    Better::Higher.improves(value.value.value(), best.value.value())
+                        || (!Better::Higher.improves(best.value.value(), value.value.value())
+                            && (timed(&subset), subset.len()) < (timed(best_skills), best_skills.len()))
+                }
+            };
+            if replaces {
+                fastest = Some((subset, value));
+            }
+        }
+
+        let Some((subset, best)) = fastest else {
+            return Ok(None);
+        };
+        if !Better::Higher.improves(best.value.value(), always_on.best.value.value()) {
+            return Ok(None);
+        }
+
+        let mut phrases: Vec<String> = subset.iter().map(|skill| format!("{} active", held.name(*skill))).collect();
+        let mut assumed = best.assumed;
+        let mut notes: Vec<String> = subset.iter().filter_map(|skill| held.trigger_sentence(*skill)).collect();
+        if let Some(booster) = &booster {
+            phrases.push(format!("{} active", booster.name));
+            assumed.push(booster.name.clone());
+            notes.push(booster.note());
+        }
+        for signal in &signals {
+            let phrase = format!("{} signal", signal.label);
+            phrases.push(phrase.clone());
+            assumed.push(phrase);
+        }
+        if let Some(ability) = ability {
+            phrases.push(format!("{} active", ability.names));
+            notes.push(format!("Only while {} is active.", ability.names));
+            assumed.push(ability.names);
+        }
+
+        Ok(Some(BuildAlternative {
+            label: format!("with {}", phrases.join(" and ")),
+            value: best.value,
+            assumed,
+            tier_fillers: best.tier_fillers,
+            note: (!notes.is_empty()).then(|| notes.join(" ")),
+        }))
+    }
+
+    /// The ship's special ability when it changes top speed and is not
+    /// switched on in every build. Another fire mode does not count: it
+    /// changes the guns, not the hull.
+    fn speed_ability(&self, planner: &Planner<'_>) -> Result<Option<SpeedAbility>, QueryError> {
+        if planner.has_ability() {
+            return Ok(None);
+        }
+
+        match self.active_ability(planner.ship()) {
+            Ok(ability) if ability.switched.is_none() && ability.modifiers.iter().any(changes_speed) => {
+                Ok(Some(SpeedAbility { names: ability.names.join(", "), modifiers: ability.modifiers }))
+            }
+            Ok(_) | Err(QueryError::NoSpecialAbility { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Signal flags whose modifiers change top speed.

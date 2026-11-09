@@ -308,8 +308,9 @@ struct OutcomeKey {
     selection: usize,
     items: Vec<Item>,
 
-    /// Index into the indexed skills of the skill whose triggers are met.
-    triggered: Option<usize>,
+    /// Indexes into the indexed skills of the skills whose triggers are met,
+    /// sorted.
+    triggered: Vec<usize>,
 }
 
 /// The items of one build: those taken for the stat, and the skills their
@@ -342,6 +343,47 @@ struct Fit<V> {
 
     chosen: Build,
     value: V,
+}
+
+/// What a conditional skill's trigger needs of the battle, on the two axes
+/// where triggers contradict each other. The server evaluates triggers, so
+/// only their type names (`CREW_SKILL_TRIGGERS`,
+/// shared_constants/m0e80a902.py:258) say what they need.
+#[derive(Debug, Clone, Copy, Default)]
+struct TriggerNeeds {
+    /// Whether the ship must be detected.
+    detected: Option<bool>,
+
+    /// Whether an enemy must be within the ship's detection range.
+    enemies_near: Option<bool>,
+}
+
+impl TriggerNeeds {
+    fn of(skill: &CrewSkill) -> Self {
+        let Some(trigger) = skill.logic_trigger().and_then(|trigger| trigger.trigger_type()) else {
+            // A skill without a trigger needs nothing.
+            return Self::default();
+        };
+
+        match trigger {
+            "entityIsInvisibleTrigger" => Self { detected: Some(false), enemies_near: None },
+            // An activationOnDetect effect (Dazzle) runs a set time from the
+            // moment of detection, so it holds while detected.
+            "entityIsVisibleTrigger" | "activationOnDetectTrigger" => Self { detected: Some(true), enemies_near: None },
+            "noEnemiesWithinVisibilityTrigger" => Self { detected: None, enemies_near: Some(false) },
+            "enemyWithinVisibilityTrigger" | "visibleEnemyWithinGsTrigger" | "VisibleEnemyWithinGmTrigger" => {
+                Self { detected: None, enemies_near: Some(true) }
+            }
+            _ => Self::default(),
+        }
+    }
+
+    fn conflicts(self, other: Self) -> bool {
+        let clash =
+            |left: Option<bool>, right: Option<bool>| left.zip(right).is_some_and(|(left, right)| left != right);
+
+        clash(self.detected, other.detected) || clash(self.enemies_near, other.enemies_near)
+    }
 }
 
 /// The builds of one ship, with the outcomes computed so far.
@@ -536,7 +578,7 @@ impl<'a> Planner<'a> {
     /// The modifiers of the stock modules with `items`, without computing
     /// a stat card.
     pub(crate) fn modifiers_with(&self, items: &[Item]) -> Result<ModifierBundle, QueryError> {
-        let effects = self.game.effective_modifiers(self.ship, &self.loadout(items, None))?;
+        let effects = self.game.effective_modifiers(self.ship, &self.loadout(items, &[]))?;
 
         Ok(effects.build.modifiers.bundle().clone())
     }
@@ -608,7 +650,7 @@ impl<'a> Planner<'a> {
 
     /// The loadout [`Self::with_items_triggered`] applies.
     pub(crate) fn loadout_of(&self, items: &[Item], triggered: Option<Item>) -> ResolvedLoadout {
-        self.loadout(items, triggered.and_then(Item::skill_index))
+        self.loadout(items, triggered.and_then(Item::skill_index).as_slice())
     }
 
     /// The slot of an upgrade; `None` for a skill.
@@ -619,14 +661,27 @@ impl<'a> Planner<'a> {
     /// The outcome of `items` on module combination `selection`, with the
     /// triggers of the skill at index `triggered` met.
     fn outcome(&self, selection: usize, items: &[Item], triggered: Option<usize>) -> Result<Rc<Outcome>, QueryError> {
+        self.outcome_triggered(selection, items, triggered.as_slice())
+    }
+
+    /// The outcome of `items` on module combination `selection`, with the
+    /// triggers of the skills at indexes `triggered` met together.
+    fn outcome_triggered(
+        &self,
+        selection: usize,
+        items: &[Item],
+        triggered: &[usize],
+    ) -> Result<Rc<Outcome>, QueryError> {
         let mut sorted = items.to_vec();
         sorted.sort_unstable();
+        let mut triggered = triggered.to_vec();
+        triggered.sort_unstable();
         let key = OutcomeKey { selection, items: sorted, triggered };
         if let Some(outcome) = self.outcomes.borrow().get(&key) {
             return Ok(Rc::clone(outcome));
         }
 
-        let loadout = self.loadout(&key.items, triggered);
+        let loadout = self.loadout(&key.items, &key.triggered);
         let effects = self.game.effective_modifiers(self.ship, &loadout)?;
         let stats = effects
             .build
@@ -642,11 +697,12 @@ impl<'a> Planner<'a> {
         Ok(outcome)
     }
 
-    fn loadout(&self, items: &[Item], triggered: Option<usize>) -> ResolvedLoadout {
+    fn loadout(&self, items: &[Item], triggered: &[usize]) -> ResolvedLoadout {
         let mut loadout = self.game.stock_loadout();
         loadout.activate(&self.abilities);
-        if let Some(index) = triggered {
-            loadout.triggers = Triggers::Skill(self.skills[index].internal_name().clone());
+        if !triggered.is_empty() {
+            let names = triggered.iter().map(|&index| self.skills[index].internal_name().clone()).collect();
+            loadout.triggers = Triggers::Skills(names);
         }
         for &item in items {
             match item {
@@ -954,6 +1010,57 @@ impl<'a> Planner<'a> {
             return None;
         };
         self.game.skill_trigger_sentence(&self.skills[index])
+    }
+
+    /// Whether the triggers of `skills` can all hold at the same moment.
+    pub(crate) fn triggers_hold_together(&self, skills: &[Item]) -> bool {
+        let needs: Vec<TriggerNeeds> = skills
+            .iter()
+            .filter_map(|skill| skill.skill_index())
+            .map(|index| TriggerNeeds::of(&self.skills[index]))
+            .collect();
+
+        needs.iter().enumerate().all(|(index, left)| needs[index + 1..].iter().all(|right| !left.conflicts(*right)))
+    }
+
+    /// Whether the effect of `skill` runs a set time after its trigger
+    /// instead of for as long as the trigger holds.
+    pub(crate) fn trigger_is_timed(&self, skill: Item) -> bool {
+        skill
+            .skill_index()
+            .and_then(|index| self.skills[index].logic_trigger())
+            .and_then(|trigger| trigger.duration())
+            .is_some_and(|duration| duration > 0.0)
+    }
+
+    /// The best-fit build of `plan` with every skill of `triggered` taken and
+    /// all their triggers met at once, cheaper tiers filled as needed. `None`
+    /// when the ship lacks the stat or the skills exceed the captain's points.
+    pub(crate) fn best_triggered<V: StatAmount>(
+        &self,
+        plan: &StatPlan<'_, V>,
+        triggered: &[Item],
+    ) -> Result<Option<BuildValue<V>>, QueryError> {
+        let Some(fit) = self.fit(plan)? else {
+            return Ok(None);
+        };
+
+        let mut items = fit.chosen.items.clone();
+        for &skill in triggered {
+            let Some(with) = self.with_item(&items, skill) else {
+                return Ok(None);
+            };
+            items = with;
+        }
+        let build = self.complete(fit.selection, items, plan, &fit.excluded)?;
+
+        let indexes: Vec<usize> = triggered.iter().filter_map(|skill| skill.skill_index()).collect();
+        let outcome = self.outcome_triggered(fit.selection, &build.all(), &indexes)?;
+        let Some(value) = (plan.extract)(&outcome) else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.build_value(fit.selection, &build, value)))
     }
 }
 

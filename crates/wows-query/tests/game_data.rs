@@ -2148,7 +2148,7 @@ fn stat_search_reports_stock_ships_and_the_fewest_requirements() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
-fn stat_search_needing_a_skill_flags_its_trigger() {
+fn stat_search_conditions_leave_conditional_skills_off() {
     let search = game()
         .call_tool(
             "stat_search",
@@ -2164,6 +2164,8 @@ fn stat_search_needing_a_skill_flags_its_trigger() {
         )
         .expect("conditions resolve");
 
+    let requires = search["ships"].to_string();
+    assert!(!requires.contains("Brisk"), "Brisk counts only with its trigger met: {requires}");
     insta::assert_yaml_snapshot!(search);
 }
 
@@ -3428,6 +3430,57 @@ fn speed_ranking_with_engine_boost() {
 
     assert!(matches!(search(rank("visibility.sea_detection", None)), Err(QueryError::RankConditionNotSpeed { .. })));
     assert!(matches!(search(rank("mobility.speed", Some(RankBuild::Base))), Err(QueryError::RankConditionWithBuild)));
+}
+
+/// The fastest surface ships with every condition that can hold at once:
+/// speed boost, conditional skills whose triggers hold together, signals
+/// and special ability. Swift in Silence never stacks with Dazzle.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn fastest_ships_with_every_condition() {
+    let ranking = game()
+        .stat_search(&StatSearchArgs {
+            rank: Some(StatRank {
+                stat: "mobility.speed".to_owned(),
+                order: RankOrder::Desc,
+                qualifier: None,
+                limit: Some(RankLimit(5)),
+                build: None,
+                condition: Some("all".to_owned()),
+            }),
+            ..Default::default()
+        })
+        .expect("search runs")
+        .ranking
+        .expect("a rank was asked for");
+
+    let kleber = game()
+        .stat_search(&StatSearchArgs {
+            rank: Some(StatRank {
+                stat: "mobility.speed".to_owned(),
+                order: RankOrder::Desc,
+                qualifier: None,
+                limit: Some(RankLimit(25)),
+                build: None,
+                condition: Some("all".to_owned()),
+            }),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            class: Some(ShipClass::Destroyer),
+            ..Default::default()
+        })
+        .expect("search runs")
+        .ranking
+        .expect("a rank was asked for")
+        .ships
+        .into_iter()
+        .find(|ship| ship.ship.starts_with("T10 Kl") && ship.ship.contains("(destroyer, France)"))
+        .expect("Kleber is ranked");
+    assert_eq!(kleber.value, "58.7 kn");
+    assert_eq!(kleber.build, ["Swift in Silence", "Engine Boost", "Sierra Mike signal"]);
+    assert!(ranking.ships.iter().all(|ship| !(ship.build.iter().any(|item| item == "Dazzle")
+        && ship.build.iter().any(|item| item == "Swift in Silence"))));
+    insta::assert_yaml_snapshot!("fastest_surface_ships_with_every_condition", ranking);
 }
 
 #[test]

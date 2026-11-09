@@ -1,10 +1,11 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 2319
 expression: search
 ---
 conditions:
   - artillery.reload_time < 6 s
-rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health."
+rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count with their triggers unmet, as on the always-on build; health-scaled effects use full health."
 considered:
   total: 56
   by_class:

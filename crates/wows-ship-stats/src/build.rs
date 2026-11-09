@@ -28,8 +28,8 @@ pub enum Triggers {
     Unmet,
     All,
 
-    /// Only the triggers of this skill.
-    Skill(CrewSkillName),
+    /// Only the triggers of these skills.
+    Skills(Vec<CrewSkillName>),
 }
 
 /// What a ship carries besides its modules: captain skills, upgrades and the
@@ -88,7 +88,7 @@ impl Build<'_> {
             let met = match self.triggers {
                 Triggers::Unmet => false,
                 Triggers::All => true,
-                Triggers::Skill(skill) => matches!(effect.id(), EffectId::Skill(name) if name == skill),
+                Triggers::Skills(skills) => matches!(effect.id(), EffectId::Skill(name) if skills.contains(name)),
             };
             let activation = match effect.kind() {
                 EffectKind::Binary { .. } if met => Some(EffectActivation::On),

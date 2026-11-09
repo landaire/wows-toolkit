@@ -22,7 +22,6 @@ use wows_ship_stats::FireBreakdown;
 use wows_ship_stats::FireInputs;
 use wows_ship_stats::MountCoverage;
 use wows_ship_stats::StockRanges;
-use wows_ship_stats::Triggers;
 use wows_ship_stats::Unit;
 use wows_ship_stats::fire_breakdown;
 use wows_ship_stats::resistance::merges_fire_zones;
@@ -206,7 +205,7 @@ pub struct StatRank {
     /// The build each ship is ranked on. Omit it to rank each ship on the build players run for the stat, the one that makes it better whatever the order: lower detection, reload, dispersion and flight time; higher damage, range and health. So "desc" on visibility.sea_detection lists the worst concealment as players build their ships. "base": stock hull and modules, no captain skills, no upgrades, for base values such as base detection. "lowest" or "highest": the build that lowers or raises the stat most, e.g. how bad a stat can get. A stat with no better direction ranks on the build that moves it furthest in the order.
     pub build: Option<RankBuild>,
 
-    /// For speed stats only (mobility.speed, underwater_mobility.periscope_speed, underwater_mobility.speed): rank each ship on its top speed while a condition holds, named as in the ship_stats speed alternatives, e.g. "Engine Boost", "Sierra Mike", "Swift in Silence", "Engine Boost and Sierra Mike". Ships without that condition rank on their always-on best build and their entries carry no condition. Omit it to rank on the always-on best build, without conditional skills, signals, consumables or special abilities. Leave build out with it.
+    /// For speed stats only (mobility.speed, underwater_mobility.periscope_speed, underwater_mobility.speed): rank each ship on its top speed while a condition holds. "all" ranks each ship on its fastest combination of everything that can hold at once: speed boost consumable active, conditional skills whose triggers can hold together (e.g. Swift in Silence, but not with Dazzle: one needs the ship undetected, the other detected), signals mounted and the special ability active; the row's build names every item. Any other value names one condition as in the ship_stats speed alternatives, e.g. "Engine Boost", "Sierra Mike", "Swift in Silence", "Engine Boost and Sierra Mike". Ships without the condition rank on their always-on best build and their entries carry no condition. Omit it to rank on the always-on best build, without conditional skills, signals, consumables or special abilities. Leave build out with it.
     pub condition: Option<String>,
 }
 
@@ -999,9 +998,6 @@ struct View {
 
     /// Anti-submarine weapons of the selected hull, when a condition reads them.
     asw: Option<AswWeapons>,
-
-    /// Internal names of conditional skills counted as triggered.
-    triggered: Vec<String>,
 }
 
 impl View {
@@ -1091,21 +1087,14 @@ impl Item<'_> {
         self.order() == other.order()
     }
 
-    fn describe(&self, game: &GameData, triggered: &[String]) -> String {
+    fn describe(&self, game: &GameData) -> String {
         match self {
             Item::Module(module) => format!("{}: {}", module.kind.label(), module.name),
             Item::Upgrade(upgrade) if upgrade.is_unique() => {
                 format!("unique upgrade: {} (slot {})", upgrade.name, upgrade.port_slot())
             }
             Item::Upgrade(upgrade) => format!("upgrade: {} (slot {})", upgrade.name, upgrade.port_slot()),
-            Item::Skill { skill, points } => {
-                let trigger = if triggered.iter().any(|name| name == skill.internal_name().as_str()) {
-                    ", trigger counted as met"
-                } else {
-                    ""
-                };
-                format!("skill: {} ({} points{trigger})", game.skill_name(skill), points.get())
-            }
+            Item::Skill { skill, points } => format!("skill: {} ({} points)", game.skill_name(skill), points.get()),
         }
     }
 }
@@ -1179,7 +1168,7 @@ impl GameData {
     /// modules, upgrades and captain skills, or ships in order of one stat on
     /// their best-fit builds.
     pub fn stat_search(&self, args: &StatSearchArgs) -> Result<StatSearchOutput, QueryError> {
-        const CONDITION_RULE: &str = "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count as triggered; health-scaled effects use full health.";
+        const CONDITION_RULE: &str = "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count with their triggers unmet, as on the always-on build; health-scaled effects use full health.";
 
         let conditions: Vec<Condition> =
             args.conditions.iter().map(resolve_condition).collect::<Result<_, QueryError>>()?;
@@ -1589,8 +1578,12 @@ impl GameData {
 
         let builds = stat.builds;
         let amount = |value: Knots| Amount { value: value.value(), row: None };
-        let held =
-            builds.alternatives.into_iter().find(|alternative| names_condition(&alternative.label, &condition.name));
+        let held = match &condition.kind {
+            SpeedCondition::Fastest => self.fastest_speed(&planner, condition.depth)?,
+            SpeedCondition::Named(name) => {
+                builds.alternatives.into_iter().find(|alternative| names_condition(&alternative.label, name))
+            }
+        };
         let (best, label) = match held {
             Some(alternative) => (
                 BuildValue {
@@ -1877,8 +1870,7 @@ impl<'a> ShipSearch<'a> {
                         if let Some(view) = self.recorded(self.view(&items)) {
                             let readings = self.readings(&view);
                             if self.all_hold(&readings) {
-                                let requires =
-                                    items.iter().map(|item| item.describe(self.game, &view.triggered)).collect();
+                                let requires = items.iter().map(|item| item.describe(self.game)).collect();
                                 return Outcome::Requires { requires, values: self.values(&readings), unchecked: None };
                             }
                         }
@@ -2063,7 +2055,7 @@ impl<'a> ShipSearch<'a> {
             .any(|condition| matches!(condition.stat, SearchStat::Asw(_)))
             .then(|| self.game.asw_weapons(self.ship, selection.hull.as_deref()));
 
-        Ok(View { rows: stats.rows(), derived, ricochet, asw, triggered: effects.active_conditions })
+        Ok(View { rows: stats.rows(), derived, ricochet, asw })
     }
 
     fn stock_ranges(&self) -> Result<StockRanges, QueryError> {
@@ -2108,7 +2100,6 @@ impl<'a> ShipSearch<'a> {
     fn configuration(&self, items: &[Item<'_>]) -> (ShipUpgradeSelection, ResolvedLoadout) {
         let mut selection = self.stock_selection.clone();
         let mut loadout = self.game.stock_loadout();
-        loadout.triggers = Triggers::All;
         for item in items {
             match item {
                 Item::Module(module) => {
@@ -2219,9 +2210,17 @@ struct Rank {
 /// A condition a speed ranking holds, with the depth of the speed.
 struct RankCondition {
     depth: SpeedDepth,
+    kind: SpeedCondition,
+}
 
-    /// As the request names it, matched against speed alternative labels.
-    name: String,
+/// Which conditions a speed ranking holds.
+enum SpeedCondition {
+    /// Every condition that can hold at once ("all").
+    Fastest,
+
+    /// One condition as the request names it, matched against speed
+    /// alternative labels.
+    Named(String),
 }
 
 impl Rank {
@@ -2245,7 +2244,10 @@ impl Rank {
         };
 
         let condition = match &self.condition {
-            Some(condition) => format!(", with {} held", condition.name),
+            Some(RankCondition { kind: SpeedCondition::Fastest, .. }) => {
+                ", with every condition that can hold at once".to_owned()
+            }
+            Some(RankCondition { kind: SpeedCondition::Named(name), .. }) => format!(", with {name} held"),
             None => String::new(),
         };
 
@@ -2272,9 +2274,9 @@ impl Rank {
         };
 
         let condition = match &self.condition {
-            Some(condition) => format!(
-                " With the condition \"{}\": each ship that has it is ranked on its ship_stats speed alternative with it held, on top of that build; its entry names the alternative under condition. A ship without it is ranked on its always-on best build and its entry has no condition.",
-                condition.name
+            Some(RankCondition { kind: SpeedCondition::Fastest, .. }) => " With the condition \"all\": each ship is ranked on its fastest combination of everything that can hold at once on top of that build: its strongest speed boost consumable active, every speed signal mounted, its special ability active when it raises speed, and the conditional skills whose triggers can hold at the same moment (a skill needing the ship undetected never stacks with one needing it detected, such as Swift in Silence with Dazzle), within 21 skill points. Its entry names the combination under condition and every item under build. A ship with nothing to add is ranked on its always-on best build and its entry has no condition. Commander talents are not counted.".to_owned(),
+            Some(RankCondition { kind: SpeedCondition::Named(name), .. }) => format!(
+                " With the condition \"{name}\": each ship that has it is ranked on its ship_stats speed alternative with it held, on top of that build; its entry names the alternative under condition. A ship without it is ranked on its always-on best build and its entry has no condition."
             ),
             None => String::new(),
         };
@@ -2398,7 +2400,12 @@ fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {
             if rank.build.is_some() {
                 return Err(QueryError::RankConditionWithBuild);
             }
-            Some(RankCondition { depth, name: name.clone() })
+            let kind = if name.trim().eq_ignore_ascii_case("all") {
+                SpeedCondition::Fastest
+            } else {
+                SpeedCondition::Named(name.clone())
+            };
+            Some(RankCondition { depth, kind })
         }
         None => None,
     };
