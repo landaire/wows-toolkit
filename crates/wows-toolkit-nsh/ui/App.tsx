@@ -1,7 +1,7 @@
 import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
+import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
 
@@ -25,6 +25,13 @@ const playerTrackerLoading = signal(false);
 const playerTrackerError = signal<string | null>(null);
 const playerTrackerPeriod = signal("day");
 const playerTrackerQuery = signal("");
+const searchQuery = signal("");
+const searchState = signal<SearchState | null>(null);
+const searchLoading = signal(false);
+const searchError = signal<string | null>(null);
+const searchHasRun = signal(false);
+const searchSortColumn = signal("date");
+const searchSortDescending = signal(true);
 let settingsRequested = false;
 let statisticsRequested = false;
 let playerTrackerRequested = false;
@@ -188,6 +195,67 @@ function updatePlayerTrackerQuery(query: string) {
     }, 200);
   }
 }
+type SearchSort = {
+  column: string;
+  descending: boolean;
+};
+
+async function runSearch(preserveResults = false, rollback?: SearchSort) {
+  if (searchLoading()) return;
+  searchLoading.set(true);
+  if (!preserveResults) searchState.set(null);
+  searchError.set(null);
+  searchHasRun.set(true);
+  try {
+    searchState.set(await Toolkit.searchIndex(searchQuery(), searchSortColumn(), searchSortDescending()));
+  } catch (error) {
+    if (rollback) {
+      searchSortColumn.set(rollback.column);
+      searchSortDescending.set(rollback.descending);
+    }
+    searchError.set(`Search could not be completed: ${errorMessage(error)}`);
+  } finally {
+    searchLoading.set(false);
+  }
+}
+function defaultSearchSortDescending(column: string) {
+  return column !== "map" && column !== "mode";
+}
+
+function selectSearchSort(column: string) {
+  if (searchLoading()) return;
+  const rollback = { column: searchSortColumn(), descending: searchSortDescending() };
+  const defaultDescending = defaultSearchSortDescending(column);
+  if (column !== searchSortColumn()) {
+    searchSortColumn.set(column);
+    searchSortDescending.set(defaultDescending);
+  } else if (searchSortDescending() === defaultDescending) {
+    searchSortDescending.set(!defaultDescending);
+  } else {
+    searchSortColumn.set("date");
+    searchSortDescending.set(true);
+  }
+  void runSearch(true, rollback);
+}
+
+function searchColumnHeader(label: string, column: string, width: number) {
+  const selected = () => searchSortColumn() === column;
+  const sortLabel = () => selected() ? `${label} (${searchSortDescending() ? "desc" : "asc"})` : label;
+  return (
+    <View
+      role="columnheader"
+      accessibilityLabel={selected() ? `${label}, sorted ${searchSortDescending() ? "descending" : "ascending"}` : `Sort by ${label}`}
+      accessibilityState={{ selected: selected() }}
+      onPress={() => selectSearchSort(column)}
+      hoverStyle={{ backgroundColor: colors.accent }}
+      style={{ width, minHeight: 34, justifyContent: "center" }}
+    >
+      <Text style={{ fontSize: 12, fontWeight: "600", color: selected() ? colors.foreground : colors.mutedForeground }}>{sortLabel()}</Text>
+    </View>
+  );
+}
+
+
 
 
 function showNotice(message: string) {
@@ -514,6 +582,93 @@ function PlayerTrackerView() {
   );
 }
 
+function SearchView() {
+  const current = () => searchState();
+  return (
+    <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Search</Text>
+          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Query the shared replay index</Text>
+        </View>
+        <Button label={searchLoading() ? "Searching..." : "Run Search"} disabled={searchLoading()} onPress={() => void runSearch()}/>
+      </View>
+      <View style={{ flex: 1, minHeight: 0, padding: 18, gap: 12 }}>
+        <Input
+          accessibilityLabel="Replay search query"
+          disabled={searchLoading()}
+          value={searchQuery()}
+          placeholder="map:Ocean and outcome:win"
+          onChange={({ value }) => searchQuery.set(value)}
+          style={inputStyle}
+        />
+        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
+          An empty query matches every indexed replay. Use fields such as map, mode, outcome, player, clan, ship, tier, and damage.
+        </Text>
+        <If when={!searchHasRun()}>
+          <EmptyState title="Search indexed replays" description="Enter a query or run an empty query to list recent indexed battles."/>
+        </If>
+        <If when={searchLoading() && !current()}>
+          <EmptyState title="Searching replays" description="Reading the shared replay index."/>
+        </If>
+        <If when={!searchLoading() && searchError() && !current()}>
+          <EmptyState title="Search unavailable" description={searchError()!} action={<Button label="Try Again" onPress={() => void runSearch()}/>}/>
+        </If>
+        <If when={!searchLoading() && !searchError() && current() && current()!.results.length === 0}>
+          <EmptyState title="No matching replays" description="Change the query and run the search again."/>
+        </If>
+        <If when={current() && current()!.results.length > 0}>
+          <View style={{ flex: 1, minHeight: 0, gap: 6 }}>
+            <If when={searchError()}>
+              <Surface style={{ padding: 12, borderColor: colors.destructive }}>
+                <Text style={{ fontSize: 12, color: colors.destructive }}>{searchError()}</Text>
+              </Surface>
+            </If>
+            <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
+              {current()!.truncated ? "Showing the first 500 matches" : `${current()!.results.length.toFixed(0)} matches`}
+            </Text>
+            <Scroll style={{ flex: 1 }}>
+              <Scroll horizontal style={{ width: "100%" }} contentStyle={{ minWidth: 1070 }}>
+                <Surface style={{ minWidth: 1070, overflow: "hidden" }}>
+                  <View role="table" accessibilityLabel="Replay search results">
+                    <View role="row" style={{ minHeight: 34, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.muted }}>
+                      {searchColumnHeader("Date", "date", 180)}
+                      {searchColumnHeader("Map", "map", 150)}
+                      {searchColumnHeader("Mode", "mode", 150)}
+                      <Text role="columnheader" style={{ width: 150, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Ship</Text>
+                      {searchColumnHeader("Outcome", "outcome", 90)}
+                      {searchColumnHeader("Damage", "damage", 110)}
+                      {searchColumnHeader("Kills", "kills", 80)}
+                      {searchColumnHeader("PR", "pr", 90)}
+                    </View>
+                    <Each of={current()!.results}>
+                      {(result) => (
+                        <View role="row" accessibilityLabel={result().replayPath} style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                          <Text role="cell" style={{ width: 180, fontSize: 11.5, color: colors.cardForeground }}>{result().timestamp}</Text>
+                          <Text role="cell" style={{ width: 150, fontSize: 12, color: colors.cardForeground }}>{result().map}</Text>
+                          <View role="cell" style={{ width: 150 }}>
+                            <Text style={{ fontSize: 12, color: colors.cardForeground }}>{result().mode}</Text>
+                            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{result().gameType}</Text>
+                          </View>
+                          <Text role="cell" style={{ width: 150, fontSize: 12, color: colors.cardForeground }}>{result().ship}</Text>
+                          <Text role="cell" style={{ width: 90, fontSize: 12, color: colors.cardForeground }}>{result().outcome}</Text>
+                          <Text role="cell" style={{ width: 110, fontSize: 12, color: colors.cardForeground }}>{result().damage}</Text>
+                          <Text role="cell" style={{ width: 80, fontSize: 12, color: colors.cardForeground }}>{result().kills}</Text>
+                          <Text role="cell" style={{ width: 90, fontSize: 12, color: colors.cardForeground }}>{result().pr}</Text>
+                        </View>
+                      )}
+                    </Each>
+                  </View>
+                </Surface>
+              </Scroll>
+            </Scroll>
+          </View>
+        </If>
+      </View>
+    </View>
+  );
+}
+
 const inputStyle = {
   minHeight: 34,
   paddingHorizontal: 9,
@@ -753,10 +908,13 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "player-tracker" ? "flex" : "none" }}>
         <PlayerTrackerView/>
       </View>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "search" ? "flex" : "none" }}>
+        <SearchView/>
+      </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
       </View>
-      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "settings"}>
+      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings"}>
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>

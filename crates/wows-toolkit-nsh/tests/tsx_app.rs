@@ -367,6 +367,111 @@ fn player_tracker_reads_and_filters_indexed_players() {
 }
 
 #[test]
+fn search_queries_the_shared_replay_index() {
+    let mut app = app();
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            use std::path::{Path, PathBuf};
+
+            use wows_core::game_types::{AccountId, ArenaId, GameParamId};
+            use wows_toolkit_config::index::rows::{
+                IndexedVehicleRow, MatchOutcome, ObjectiveMatch, ReplayRecord, VehicleRelation,
+            };
+
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            sqlx::query("DELETE FROM replay_record").execute(&pool).await.expect("old replay records are cleared");
+            sqlx::query("DELETE FROM indexed_vehicle").execute(&pool).await.expect("old indexed players are cleared");
+            sqlx::query("DELETE FROM indexed_match").execute(&pool).await.expect("old indexed matches are cleared");
+            let timestamp = jiff::Timestamp::now();
+            let arena_id = ArenaId::new(982_002);
+            let source =
+                wows_toolkit_config::index::query::ensure_default_source(&pool, Path::new("/tmp/replays"), timestamp)
+                    .await
+                    .expect("the test replay source exists");
+            wows_toolkit_config::index::query::upsert_match(
+                &pool,
+                &ObjectiveMatch {
+                    arena_id,
+                    timestamp,
+                    map: "Ocean".into(),
+                    game_mode: "Domination".into(),
+                    game_mode_id: None,
+                    game_type: "pvp".into(),
+                    match_group: "pvp".into(),
+                    version_build: Some(1234),
+                },
+            )
+            .await
+            .expect("the searchable match is written");
+            wows_toolkit_config::index::query::upsert_vehicles(
+                &pool,
+                &[IndexedVehicleRow {
+                    arena_id,
+                    account_id: AccountId(99_010),
+                    player_name: "SearchCaptain".into(),
+                    clan: "TEST".into(),
+                    realm: Some("na".into()),
+                    ship_id: GameParamId::from(999u64),
+                    ship_index: "PJSD018".into(),
+                    ship_name: "Harugumo".into(),
+                    nation: "japan".into(),
+                    species: "Destroyer".into(),
+                    tier: 10,
+                    relation: VehicleRelation::SelfPlayer,
+                    division_id: None,
+                    survived: Some(true),
+                    damage: Some(123_456),
+                    kills: Some(2),
+                    spotting: Some(10_000),
+                    potential: Some(500_000),
+                    received: Some(5_000),
+                    pr: Some(1500.0),
+                    is_test_ship: false,
+                    disconnected: Some(false),
+                    is_stream_sniper: None,
+                    sniper_twitch_login: None,
+                }],
+            )
+            .await
+            .expect("the searchable roster is written");
+            wows_toolkit_config::index::query::upsert_record(
+                &pool,
+                &ReplayRecord {
+                    arena_id,
+                    source_id: source,
+                    replay_path: PathBuf::from("/tmp/search-test.wowsreplay"),
+                    file_mtime: Some(timestamp.as_second()),
+                    outcome: MatchOutcome::Win,
+                    self_account_id: Some(AccountId(99_010)),
+                    self_ship_id: Some(GameParamId::from(999u64)),
+                    self_survived: Some(true),
+                    self_damage: Some(123_456),
+                    self_kills: Some(2),
+                    self_pr: Some(1500.0),
+                    results_available: true,
+                    indexed_at: timestamp,
+                },
+            )
+            .await
+            .expect("the searchable replay record is written");
+        },
+    );
+
+    app.press("Search").unwrap();
+    app.wait_for("Search indexed replays").unwrap();
+    app.type_text("label:Replay search query", "map:Ocean and outcome:win").unwrap();
+    app.press("Run Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    app.wait_for("123456").unwrap();
+    app.wait_for("1 matches").unwrap();
+
+    app.clear("label:Replay search query").unwrap();
+    app.type_text("label:Replay search query", "(").unwrap();
+    app.press("Run Search").unwrap();
+    app.wait_for("Search unavailable").unwrap();
+}
+
+#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 

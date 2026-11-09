@@ -18,8 +18,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 /// A row indexed before ship names were stored carries an empty string, and
 /// one indexed against a build that could not name the ship carries the id
 /// back as text; neither is a name.
-fn stored_ship_name(hit: &MatchHit, ship_id: GameParamId) -> Option<&str> {
-    let stored = hit.self_ship_name.as_deref()?;
+fn stored_ship_name(stored: Option<&str>, ship_id: GameParamId) -> Option<&str> {
+    let stored = stored?;
     if stored.is_empty() || stored == ship_id.to_string() {
         return None;
     }
@@ -42,15 +42,24 @@ pub fn try_resolve_ship_name(ship_id: GameParamId, provider: Option<&GameMetadat
 /// The stored name is the fallback for the case the whole rule exists for: a
 /// match whose build's game data is no longer installed. A bracketed id is
 /// the last resort when neither can name the ship.
-pub fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
-    let ship_id = hit.self_ship_id?;
+/// The display name for search result fields without coupling their owner.
+pub fn ship_display_name_from_parts(
+    ship_id: Option<GameParamId>,
+    stored: Option<&str>,
+    live: Option<String>,
+) -> Option<String> {
+    let ship_id = ship_id?;
     if let Some(live) = live {
         return Some(live);
     }
-    if let Some(stored) = stored_ship_name(hit, ship_id) {
+    if let Some(stored) = stored_ship_name(stored, ship_id) {
         return Some(stored.to_owned());
     }
     Some(format!("[{ship_id}]"))
+}
+
+pub fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
+    ship_display_name_from_parts(hit.self_ship_id, hit.self_ship_name.as_deref(), live)
 }
 
 #[cfg(test)]
