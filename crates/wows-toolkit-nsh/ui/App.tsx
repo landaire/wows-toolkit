@@ -240,9 +240,9 @@ function selectSearchSort(column: string) {
   void runSearch(true, rollback);
 }
 
-function openIndexedReplay(path: string) {
+function openReplayPath(path: string) {
   if (!path) {
-    showNotice("This indexed replay has no file path.");
+    showNotice("This replay has no file path.");
     return;
   }
   if (replayOpenPath() === path) {
@@ -251,6 +251,21 @@ function openIndexedReplay(path: string) {
     replayOpenPath.set(path);
   }
   selectTab("replay-inspector");
+}
+
+function openDroppedReplay(uris: string[]) {
+  for (const uri of uris) {
+    try {
+      const url = new URL(uri);
+      if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith(".wowsreplay")) {
+        openReplayPath(decodeURIComponent(url.pathname));
+        return;
+      }
+    } catch {
+      continue;
+    }
+  }
+  showNotice("Drop a World of Warships replay file.");
 }
 
 function searchColumnHeader(label: string, column: string, width: number) {
@@ -661,7 +676,7 @@ function SearchView() {
                         <View
                           role="row"
                           accessibilityLabel={`Open replay ${result().replayPath}`}
-                          onPress={() => openIndexedReplay(result().replayPath)}
+                          onPress={() => openReplayPath(result().replayPath)}
                           hoverStyle={{ backgroundColor: colors.accent }}
                           activeStyle={{ opacity: 0.72 }}
                           style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
@@ -1054,7 +1069,7 @@ function Notice() {
 
 function App() {
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View onFileDrop={({ uris }) => openDroppedReplay(uris)} style={{ flex: 1, backgroundColor: colors.background }}>
       <TabStrip/>
       <View style={{ flex: 1 }}><Content/></View>
       <View style={{ height: 26, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card }}>

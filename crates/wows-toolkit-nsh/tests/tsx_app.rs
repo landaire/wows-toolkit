@@ -135,6 +135,23 @@ fn replay_inspector_opens_and_displays_metadata() {
 }
 
 #[test]
+fn dropping_a_replay_opens_it_in_the_inspector() {
+    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
+    let replay = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FILE);
+    let uri = url::Url::from_file_path(replay).expect("the replay path converts to a file URL").to_string();
+    let mut app = app();
+    app.set_environment("desktop", |environment| {
+        environment.os = nsh_core::platform::Os::Linux;
+        environment.idiom = nsh_core::platform::Idiom::Desktop;
+    })
+    .unwrap();
+
+    app.drop_files("Replay Inspector", vec![uri]).unwrap();
+    app.wait_for("PVEBattle").unwrap();
+    app.wait_for("Players (15)").unwrap();
+}
+
+#[test]
 fn replay_directory_lists_readable_files_and_reports_failures() {
     const FIRST: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
     const SECOND: &str = "20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay";
