@@ -217,6 +217,80 @@ fn settings_use_the_shared_database_and_nsh_default_theme() {
 }
 
 #[test]
+fn statistics_aggregate_the_shared_session_database() {
+    struct Battle {
+        sort_key: &'static str,
+        game_time: &'static str,
+        damage: i64,
+        base_xp: i64,
+        frags: i64,
+        is_win: bool,
+        is_loss: bool,
+    }
+
+    let mut app = app();
+    app.set_viewport(Size::new(Points(500.0), Points(700.0))).expect("the compact viewport is applied");
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            wows_toolkit_config::queries::clear_session_stats(&pool).await.expect("old test statistics are cleared");
+            for battle in [
+                Battle {
+                    sort_key: "a",
+                    game_time: "2026-01-01T00:00:00Z",
+                    damage: 1_000,
+                    base_xp: 500,
+                    frags: 1,
+                    is_win: true,
+                    is_loss: false,
+                },
+                Battle {
+                    sort_key: "b",
+                    game_time: "2026-01-02T00:00:00Z",
+                    damage: 2_000,
+                    base_xp: 1_000,
+                    frags: 2,
+                    is_win: false,
+                    is_loss: true,
+                },
+            ] {
+                wows_toolkit_config::queries::add_session_stat(
+                    &pool,
+                    &wows_toolkit_config::queries::SessionStatRow {
+                        id: 0,
+                        sort_key: battle.sort_key.to_owned(),
+                        ship_name: "Test Ship".to_owned(),
+                        ship_id: 42,
+                        player_id: 7,
+                        game_time: battle.game_time.to_owned(),
+                        match_group: "pvp".to_owned(),
+                        damage: battle.damage,
+                        spotting_damage: 0,
+                        frags: battle.frags,
+                        raw_xp: battle.base_xp,
+                        base_xp: battle.base_xp,
+                        is_win: battle.is_win,
+                        is_loss: battle.is_loss,
+                        is_draw: false,
+                        is_div: false,
+                        achievements: "[]".to_owned(),
+                    },
+                )
+                .await
+                .expect("a test statistic is recorded");
+            }
+        },
+    );
+
+    app.press("Stats").unwrap();
+    app.wait_for("Recorded battles from the shared session database").unwrap();
+    app.wait_for("Test Ship").unwrap();
+    app.wait_for("50.0%").unwrap();
+    app.wait_for("1500").unwrap();
+    app.wait_for("750").unwrap();
+}
+
+#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 
