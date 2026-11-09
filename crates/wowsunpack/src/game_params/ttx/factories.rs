@@ -2931,6 +2931,7 @@ mod tests {
         };
         SecondaryComponentStats {
             max_dist: Some(Meters::from(7600.0)),
+            sigma_count: None,
             // 4 mounts total: 2 x 150mm groups + 2 x 105mm groups.
             guns: vec![
                 SecondaryGun { hardpoint: "HP_GGS_1".to_string(), stats: gun_150.clone() },
@@ -3586,6 +3587,7 @@ mod tests {
         };
         SecondaryComponentStats {
             max_dist: Some(Meters::from(7600.0)),
+            sigma_count: None,
             guns: vec![SecondaryGun { hardpoint: "HP_GGS_1".to_string(), stats: gun_150 }],
         }
     }

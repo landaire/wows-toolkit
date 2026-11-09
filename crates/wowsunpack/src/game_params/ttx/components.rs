@@ -307,6 +307,10 @@ pub struct SecondaryComponentStats {
     /// Raw component-level `maxDist` field (base secondary range, meters; the
     /// factory divides by KM_TO_M to get km).
     pub max_dist: Option<Meters>,
+    /// Raw component-level `sigmaCount`: how many standard deviations of the
+    /// shell distribution fit within the dispersion ellipse.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sigma_count: Option<f32>,
     /// Secondary guns (`HP_GGS_*`) on this component.
     pub guns: Vec<SecondaryGun>,
 }

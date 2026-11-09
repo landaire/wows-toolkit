@@ -46,6 +46,15 @@ fn secondary_dispersion_with_and_without_modifiers() {
     }
 }
 
+/// Montana against Yamato at 12 km differs in sigma as well as ellipse size.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn montana_main_battery_at_12_km() {
+    let output =
+        GAME.dispersion_at_range(&args("Montana", 12.0, DispersionBattery::MainBattery)).expect("dispersion resolves");
+    insta::assert_yaml_snapshot!(output);
+}
+
 /// Bismarck carries two secondary calibers; the conclusion names the one it reads.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]

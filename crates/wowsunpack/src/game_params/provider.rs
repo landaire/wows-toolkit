@@ -2105,6 +2105,7 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
                         // maxDist is stored in KM downstream (PreprocessedATBA.py:30);
                         // keep the raw meters value here and divide at the factory.
                         max_dist: read_float(&atba_data, keys::MAX_DIST).map(Meters::from),
+                        sigma_count: read_float(&atba_data, keys::SIGMA_COUNT),
                         guns,
                     },
                 );

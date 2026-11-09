@@ -15,7 +15,7 @@ ship:
     - AL Bismarck
 battery: secondary
 range_km: 6
-conclusion: "At 6 km, a 20% longer secondary battery (150 mm) range (7.6 km to 9.12 km with Long-Range Secondary Battery Shells) shrinks vertical dispersion from 260.4 m to 241.2 m; horizontal is unchanged at 291 m. Manual Secondary Battery Aiming narrows both: horizontal 291 m to 261.9 m, vertical 260.4 m to 234.3 m."
+conclusion: "At 6 km, a 20% longer secondary battery (150 mm) range (7.6 km to 9.12 km with Long-Range Secondary Battery Shells) shrinks vertical dispersion from 260.4 m to 241.2 m; horizontal is unchanged at 291 m. With sigma 1, half of the shells land within 46% of the ellipse (133.7 m by 119.7 m) and 54.2% within its inner half; a higher sigma packs more shells toward the aim point. Manual Secondary Battery Aiming narrows both: horizontal 291 m to 261.9 m, vertical 260.4 m to 234.3 m."
 guns:
   - mount: 150 mm
     min_radius: 1
@@ -37,6 +37,11 @@ builds:
   - build: base
     kind: base
     max_range_km: 7.6
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -44,16 +49,33 @@ builds:
             horizontal_m: 291
             vertical_m: 260.4
             vertical_ratio: 0.895
+            half_of_shells_within:
+              horizontal_m: 133.7
+              vertical_m: 119.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 256
+              vertical_m: 229
       - mount: 105 mm
         at_range:
           ellipse:
             horizontal_m: 291
             vertical_m: 260.4
             vertical_ratio: 0.895
+            half_of_shells_within:
+              horizontal_m: 133.7
+              vertical_m: 119.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 256
+              vertical_m: 229
   - build: Secondary Battery Modification 1
     kind: range_and_accuracy
     max_range_km: 9.12
     max_range_change_pct: 20
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -63,6 +85,12 @@ builds:
             vertical_ratio: 0.829
             horizontal_change_pct: -20
             vertical_change_pct: -25.9
+            half_of_shells_within:
+              horizontal_m: 107
+              vertical_m: 88.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 204.8
+              vertical_m: 169.7
       - mount: 105 mm
         at_range:
           ellipse:
@@ -71,10 +99,21 @@ builds:
             vertical_ratio: 0.829
             horizontal_change_pct: -20
             vertical_change_pct: -25.9
+            half_of_shells_within:
+              horizontal_m: 107
+              vertical_m: 88.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 204.8
+              vertical_m: 169.7
   - build: Long-Range Secondary Battery Shells
     kind: range
     max_range_km: 9.12
     max_range_change_pct: 20
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -84,6 +123,12 @@ builds:
             vertical_ratio: 0.829
             horizontal_change_pct: 0
             vertical_change_pct: -7.4
+            half_of_shells_within:
+              horizontal_m: 133.7
+              vertical_m: 110.9
+            ninety_pct_of_shells_within:
+              horizontal_m: 256
+              vertical_m: 212.2
       - mount: 105 mm
         at_range:
           ellipse:
@@ -92,10 +137,21 @@ builds:
             vertical_ratio: 0.829
             horizontal_change_pct: 0
             vertical_change_pct: -7.4
+            half_of_shells_within:
+              horizontal_m: 133.7
+              vertical_m: 110.9
+            ninety_pct_of_shells_within:
+              horizontal_m: 256
+              vertical_m: 212.2
   - build: Aiming Systems Modification 1
     kind: range_and_accuracy
     max_range_km: 7.98
     max_range_change_pct: 5
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -105,6 +161,12 @@ builds:
             vertical_ratio: 0.876
             horizontal_change_pct: -5
             vertical_change_pct: -7
+            half_of_shells_within:
+              horizontal_m: 127
+              vertical_m: 111.3
+            ninety_pct_of_shells_within:
+              horizontal_m: 243.2
+              vertical_m: 213
       - mount: 105 mm
         at_range:
           ellipse:
@@ -113,10 +175,21 @@ builds:
             vertical_ratio: 0.876
             horizontal_change_pct: -5
             vertical_change_pct: -7
+            half_of_shells_within:
+              horizontal_m: 127
+              vertical_m: 111.3
+            ninety_pct_of_shells_within:
+              horizontal_m: 243.2
+              vertical_m: 213
   - build: Manual Secondary Battery Aiming
     kind: accuracy
     max_range_km: 7.6
     max_range_change_pct: 0
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -126,6 +199,12 @@ builds:
             vertical_ratio: 0.895
             horizontal_change_pct: -10
             vertical_change_pct: -10
+            half_of_shells_within:
+              horizontal_m: 120.4
+              vertical_m: 107.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 230.4
+              vertical_m: 206.1
       - mount: 105 mm
         at_range:
           ellipse:
@@ -134,11 +213,22 @@ builds:
             vertical_ratio: 0.895
             horizontal_change_pct: -10
             vertical_change_pct: -10
+            half_of_shells_within:
+              horizontal_m: 120.4
+              vertical_m: 107.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 230.4
+              vertical_m: 206.1
   - build: Manual Secondary Battery Aiming
     kind: accuracy
     condition: "at the priority target within secondary range, after sustained fire"
     max_range_km: 7.6
     max_range_change_pct: 0
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -148,6 +238,12 @@ builds:
             vertical_ratio: 0.895
             horizontal_change_pct: -55
             vertical_change_pct: -55
+            half_of_shells_within:
+              horizontal_m: 60.2
+              vertical_m: 53.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 115.2
+              vertical_m: 103.1
       - mount: 105 mm
         at_range:
           ellipse:
@@ -156,10 +252,21 @@ builds:
             vertical_ratio: 0.895
             horizontal_change_pct: -55
             vertical_change_pct: -55
+            half_of_shells_within:
+              horizontal_m: 60.2
+              vertical_m: 53.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 115.2
+              vertical_m: 103.1
   - build: Secondary Battery Modification 1 + Long-Range Secondary Battery Shells
     kind: range_and_accuracy
     max_range_km: 10.94
     max_range_change_pct: 44
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -169,6 +276,12 @@ builds:
             vertical_ratio: 0.74
             horizontal_change_pct: -20
             vertical_change_pct: -33.9
+            half_of_shells_within:
+              horizontal_m: 107
+              vertical_m: 79.1
+            ninety_pct_of_shells_within:
+              horizontal_m: 204.8
+              vertical_m: 151.4
       - mount: 105 mm
         at_range:
           ellipse:
@@ -177,10 +290,21 @@ builds:
             vertical_ratio: 0.74
             horizontal_change_pct: -20
             vertical_change_pct: -33.9
+            half_of_shells_within:
+              horizontal_m: 107
+              vertical_m: 79.1
+            ninety_pct_of_shells_within:
+              horizontal_m: 204.8
+              vertical_m: 151.4
   - build: Secondary Battery Modification 1 + Long-Range Secondary Battery Shells + Manual Secondary Battery Aiming
     kind: range_and_accuracy
     max_range_km: 10.94
     max_range_change_pct: 44
+    shells:
+      sigma_count: 1
+      half_of_shells_radius_fraction: 0.46
+      ninety_pct_of_shells_radius_fraction: 0.88
+      inner_half_share_pct: 54.2
     mounts:
       - mount: 150 mm
         at_range:
@@ -190,6 +314,12 @@ builds:
             vertical_ratio: 0.74
             horizontal_change_pct: -28
             vertical_change_pct: -40.5
+            half_of_shells_within:
+              horizontal_m: 96.3
+              vertical_m: 71.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 184.3
+              vertical_m: 136.3
       - mount: 105 mm
         at_range:
           ellipse:
@@ -198,6 +328,13 @@ builds:
             vertical_ratio: 0.74
             horizontal_change_pct: -28
             vertical_change_pct: -40.5
+            half_of_shells_within:
+              horizontal_m: 96.3
+              vertical_m: 71.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 184.3
+              vertical_m: 136.3
 notes:
   - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread."
   - "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled."

@@ -13,7 +13,7 @@ ship:
   status: released
 battery: main_battery
 range_km: 10
-conclusion: "At 10 km, a 32% longer main battery range (14.2 km to 18.74 km with Spotting Aircraft + Mk8 mod. 2) shrinks vertical dispersion from 55.2 m to 51.7 m; horizontal is unchanged at 102 m. Aiming Systems Modification 1 narrows both: horizontal 102 m to 94.9 m, vertical 55.2 m to 51.3 m."
+conclusion: "At 10 km, a 32% longer main battery range (14.2 km to 18.74 km with Spotting Aircraft + Mk8 mod. 2) shrinks vertical dispersion from 55.2 m to 51.7 m; horizontal is unchanged at 102 m. With sigma 2, half of the shells land within 32.6% of the ellipse (33.2 m by 18 m) and 70.5% within its inner half; a higher sigma packs more shells toward the aim point. Aiming Systems Modification 1 narrows both: horizontal 102 m to 94.9 m, vertical 55.2 m to 51.3 m."
 guns:
   - mount: main battery
     min_radius: 1.1
@@ -27,6 +27,11 @@ builds:
   - build: base
     kind: base
     max_range_km: 14.2
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -34,10 +39,21 @@ builds:
             horizontal_m: 102
             vertical_m: 55.2
             vertical_ratio: 0.541
+            half_of_shells_within:
+              horizontal_m: 33.2
+              vertical_m: 18
+            ninety_pct_of_shells_within:
+              horizontal_m: 76.4
+              vertical_m: 41.3
   - build: Spotting Aircraft
     kind: range
     max_range_km: 17.04
     max_range_change_pct: 20
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -47,10 +63,21 @@ builds:
             vertical_ratio: 0.517
             horizontal_change_pct: 0
             vertical_change_pct: -4.3
+            half_of_shells_within:
+              horizontal_m: 33.2
+              vertical_m: 17.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 76.4
+              vertical_m: 39.5
   - build: Mk8 mod. 2
     kind: range
     max_range_km: 15.62
     max_range_change_pct: 10
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -60,10 +87,21 @@ builds:
             vertical_ratio: 0.528
             horizontal_change_pct: 0
             vertical_change_pct: -2.4
+            half_of_shells_within:
+              horizontal_m: 33.2
+              vertical_m: 17.5
+            ninety_pct_of_shells_within:
+              horizontal_m: 76.4
+              vertical_m: 40.3
   - build: Aiming Systems Modification 1
     kind: accuracy
     max_range_km: 14.2
     max_range_change_pct: 0
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -73,11 +111,22 @@ builds:
             vertical_ratio: 0.541
             horizontal_change_pct: -7
             vertical_change_pct: -7
+            half_of_shells_within:
+              horizontal_m: 30.9
+              vertical_m: 16.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 71.1
+              vertical_m: 38.4
   - build: Outnumbered
     kind: accuracy
     condition: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
     max_range_km: 14.2
     max_range_change_pct: 0
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -87,10 +136,21 @@ builds:
             vertical_ratio: 0.541
             horizontal_change_pct: -10
             vertical_change_pct: -10
+            half_of_shells_within:
+              horizontal_m: 29.9
+              vertical_m: 16.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 68.8
+              vertical_m: 37.2
   - build: Spotting Aircraft + Mk8 mod. 2
     kind: range
     max_range_km: 18.74
     max_range_change_pct: 32
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -100,10 +160,21 @@ builds:
             vertical_ratio: 0.507
             horizontal_change_pct: 0
             vertical_change_pct: -6.3
+            half_of_shells_within:
+              horizontal_m: 33.2
+              vertical_m: 16.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 76.4
+              vertical_m: 38.7
   - build: Spotting Aircraft + Mk8 mod. 2 + Aiming Systems Modification 1
     kind: range_and_accuracy
     max_range_km: 18.74
     max_range_change_pct: 32
+    shells:
+      sigma_count: 2
+      half_of_shells_radius_fraction: 0.326
+      ninety_pct_of_shells_radius_fraction: 0.749
+      inner_half_share_pct: 70.5
     mounts:
       - mount: main battery
         at_range:
@@ -113,6 +184,13 @@ builds:
             vertical_ratio: 0.507
             horizontal_change_pct: -7
             vertical_change_pct: -12.9
+            half_of_shells_within:
+              horizontal_m: 30.9
+              vertical_m: 15.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 71.1
+              vertical_m: 36
 notes:
   - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread."
   - "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured."

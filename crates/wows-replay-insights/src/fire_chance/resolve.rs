@@ -544,6 +544,7 @@ mod tests {
             hull.to_owned(),
             wowsunpack::game_params::ttx::components::SecondaryComponentStats {
                 max_dist: None,
+                sigma_count: None,
                 guns: vec![wowsunpack::game_params::ttx::components::SecondaryGun {
                     hardpoint: "HP_GGS_1".to_owned(),
                     stats: gun_with_ammo(ammo),

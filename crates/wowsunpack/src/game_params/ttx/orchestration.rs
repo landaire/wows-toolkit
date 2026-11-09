@@ -1229,6 +1229,7 @@ mod tests {
             hull_name.to_string(),
             SecondaryComponentStats {
                 max_dist: Some(Meters::from(7600.0)),
+                sigma_count: None,
                 guns: [g150(), g150(), g105(), g105()]
                     .into_iter()
                     .enumerate()

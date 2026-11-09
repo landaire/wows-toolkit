@@ -22,6 +22,7 @@ use wowsunpack::game_params::ttx::constants::clamped_dispersion_coeff;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
 use wowsunpack::game_params::ttx::orchestration::artillery_dispersion;
+use wowsunpack::game_params::ttx::orchestration::artillery_sigma;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::builds::Item;
@@ -100,6 +101,100 @@ impl VerticalRatio {
     }
 }
 
+/// `sigmaCount` of a battery: higher draws more shells toward the aim point.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct SigmaCount(f32);
+
+impl SigmaCount {
+    pub fn new(value: f32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+
+    /// Share of shells landing inside the ellipse scaled by `fraction`, from
+    /// 0 to 1. Each shell takes a point on the ellipse edge scaled by r, a
+    /// sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it
+    /// falls outside [-1, 1], so P(|r| <= t) = erf(t x sigmaCount / sqrt 2)
+    /// + (1 - erf(sigmaCount / sqrt 2)) x t.
+    pub fn share_within(self, fraction: RadiusFraction) -> f64 {
+        let sigma = f64::from(self.0);
+        let t = f64::from(fraction.0).clamp(0.0, 1.0);
+        let within = |x: f64| erf(x * sigma / std::f64::consts::SQRT_2);
+
+        within(t) + (1.0 - within(1.0)) * t
+    }
+
+    /// The radius fraction inside which `share` (0 to 1) of the shells land.
+    pub fn fraction_holding(self, share: f64) -> RadiusFraction {
+        /// Halvings of [0, 1]; enough for f32 precision.
+        const STEPS: u32 = 40;
+
+        let (mut low, mut high) = (0.0_f32, 1.0_f32);
+        for _ in 0..STEPS {
+            let mid = (low + high) / 2.0;
+            if self.share_within(RadiusFraction(mid)) < share {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+
+        RadiusFraction((low + high) / 2.0)
+    }
+}
+
+/// A fraction of the ellipse semi-axes, 0 at the aim point and 1 on the edge.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct RadiusFraction(f32);
+
+impl RadiusFraction {
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
+/// How shells spread inside the ellipse under one sigmaCount.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShellSpread {
+    pub sigma_count: SigmaCount,
+
+    /// Half of the shells land inside the ellipse scaled by this fraction.
+    pub half_of_shells_radius_fraction: RadiusFraction,
+
+    /// 90% of the shells land inside the ellipse scaled by this fraction.
+    pub ninety_pct_of_shells_radius_fraction: RadiusFraction,
+
+    /// Share of shells inside the ellipse scaled by one half.
+    pub inner_half_share_pct: Percent,
+}
+
+impl ShellSpread {
+    fn from_sigma(sigma_count: SigmaCount) -> Self {
+        Self {
+            sigma_count: SigmaCount(round_to(sigma_count.0, 1000.0)),
+            half_of_shells_radius_fraction: RadiusFraction(round_to(sigma_count.fraction_holding(0.5).0, 1000.0)),
+            ninety_pct_of_shells_radius_fraction: RadiusFraction(round_to(sigma_count.fraction_holding(0.9).0, 1000.0)),
+            inner_half_share_pct: Percent::new(round_to(
+                (sigma_count.share_within(RadiusFraction(0.5)) * 100.0) as f32,
+                10.0,
+            )),
+        }
+    }
+}
+
+/// Semi-axes of an ellipse inside the dispersion ellipse that holds a share
+/// of the shells.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InnerEllipse {
+    pub horizontal_m: Meters,
+    pub vertical_m: Meters,
+}
+
 /// Raw dispersion fields of one gun, as GameParams states them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GunCurve {
@@ -136,6 +231,13 @@ pub struct Ellipse {
     pub horizontal_change_pct: Option<Percent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vertical_change_pct: Option<Percent>,
+
+    /// The inner ellipses holding half and 90% of the shells, absent
+    /// without a sigmaCount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub half_of_shells_within: Option<InnerEllipse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ninety_pct_of_shells_within: Option<InnerEllipse>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -169,6 +271,10 @@ pub struct DispersionRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_range_change_pct: Option<Percent>,
 
+    /// Absent when game data gives the battery no sigmaCount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shells: Option<ShellSpread>,
+
     pub mounts: Vec<MountDispersion>,
 }
 
@@ -201,6 +307,9 @@ enum Source {
 
     /// A consumable's `artilleryDistCoeff`, e.g. Spotting Aircraft.
     RangeConsumable(RangeCoefficient),
+
+    /// The ship's special ability, switched on.
+    SpecialAbility,
 }
 
 /// Main battery range multiplier of a consumable: its `artilleryDistCoeff`,
@@ -216,6 +325,7 @@ impl RangeCoefficient {
 struct MountProfile {
     mount: String,
     profile: ArtilleryDispersion,
+    sigma: Option<SigmaCount>,
 }
 
 struct Candidate {
@@ -260,6 +370,9 @@ struct Battery<'a> {
     /// Secondary mount groups and the base secondary range.
     secondaries: Vec<SecondaryMountCurve>,
     secondary_base_range: Option<Km>,
+
+    /// The secondary component's sigmaCount; no modifier changes it.
+    secondary_sigma: Option<SigmaCount>,
 }
 
 impl Battery<'_> {
@@ -278,7 +391,9 @@ impl Battery<'_> {
                 let profile =
                     ArtilleryDispersion { max_range: Km::new(profile.max_range.value() * range.0), ..profile };
 
-                Some(vec![MountProfile { mount: "main battery".to_owned(), profile }])
+                let sigma = artillery_sigma(&self.ship.param, selection, bundle).map(SigmaCount);
+
+                Some(vec![MountProfile { mount: "main battery".to_owned(), profile, sigma }])
             }
             DispersionBattery::Secondary => {
                 let base = self.secondary_base_range?;
@@ -290,6 +405,7 @@ impl Battery<'_> {
                     .map(|mount| MountProfile {
                         mount: mount.label.clone(),
                         profile: ArtilleryDispersion { curve: mount.curve, max_range, ideal_radius_coef },
+                        sigma: self.secondary_sigma,
                     })
                     .collect();
 
@@ -306,6 +422,7 @@ impl GameData {
         const FORMULA_NOTE: &str = "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion.";
         const MAIN_RANGE_NOTE: &str = "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured.";
         const SECONDARY_NOTE: &str = "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled.";
+        const SIGMA_NOTE: &str = "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread.";
         const TAPER_NOTE: &str = "Below the gun's taperDist, 4 to 5 km for most guns, the game narrows horizontal dispersion further toward the muzzle; values at these distances do not apply it and overstate dispersion.";
         /// Distances below this may fall under a gun's taperDist.
         const TAPER_REACH_KM: f32 = 5.0;
@@ -340,7 +457,7 @@ impl GameData {
 
         let conclusion = conclusion(ship, kind, range, &rows);
         let guns = base.iter().map(|mount| gun_curve(&mount.mount, &mount.profile.curve)).collect();
-        let mut notes = vec![FORMULA_NOTE];
+        let mut notes = vec![FORMULA_NOTE, SIGMA_NOTE];
         notes.push(match kind {
             DispersionBattery::MainBattery => MAIN_RANGE_NOTE,
             DispersionBattery::Secondary => SECONDARY_NOTE,
@@ -375,6 +492,7 @@ impl GameData {
             selection: selection.clone(),
             secondaries: Vec::new(),
             secondary_base_range: None,
+            secondary_sigma: None,
         };
         if kind == DispersionBattery::MainBattery {
             return Ok(battery);
@@ -389,6 +507,7 @@ impl GameData {
             return Ok(battery);
         };
         battery.secondary_base_range = atba.max_dist.map(|meters| Km::new(meters.value() / 1000.0));
+        battery.secondary_sigma = atba.sigma_count.map(SigmaCount);
 
         // The card groups and labels the mounts; the labels do not depend on the build.
         let card = self
@@ -422,7 +541,7 @@ impl GameData {
     ) -> Result<Candidates, QueryError> {
         let candidate = |label: String, source: Source, profiles: Option<Vec<MountProfile>>| {
             let profiles = profiles?;
-            let kind = change_kind(&base[0].profile, &profiles[0].profile)?;
+            let kind = change_kind(&base[0], &profiles[0])?;
             Some(Candidate { label, source, kind, condition: None, profiles })
         };
         let mut lasting = Vec::new();
@@ -466,7 +585,7 @@ impl GameData {
             let (Some(active_profiles), Some(idle_profiles)) = (active_profiles, idle_profiles) else {
                 continue;
             };
-            if change_kind(&idle_profiles[0].profile, &active_profiles[0].profile).is_none() {
+            if change_kind(&idle_profiles[0], &active_profiles[0]).is_none() {
                 continue;
             }
 
@@ -481,6 +600,32 @@ impl GameData {
                 found.condition = condition;
                 conditional.push(found);
             }
+        }
+
+        // A special ability that switches to another fire mode changes the guns, not their spread.
+        match self.active_ability(battery.ship) {
+            Ok(ability) if ability.switched.is_none() => {
+                let active = Planner::new(self, battery.ship).with_ability(ability.modifiers, ability.burst);
+                let outcome = active.stock()?;
+                let profiles = battery.profiles(&outcome.bundle, &battery.selection, RangeCoefficient::NONE);
+                if let Some(mut found) = profiles.and_then(|profiles| {
+                    let kind = change_kind(&base[0], &profiles[0])?;
+                    Some(Candidate {
+                        label: ability.names.join(", "),
+                        source: Source::SpecialAbility,
+                        kind,
+                        condition: None,
+                        profiles,
+                    })
+                }) {
+                    found.condition = Some("while the special ability is active".to_owned());
+                    conditional.push(found);
+                }
+            }
+            Ok(_) | Err(QueryError::NoSpecialAbility { .. }) => {
+                // No ability, or one whose fire mode the base guns do not describe.
+            }
+            Err(error) => return Err(error),
         }
 
         lasting.sort_by(candidate_order);
@@ -548,13 +693,17 @@ fn secondary_accuracy(bundle: &ModifierBundle, ship: &Ship) -> f32 {
 }
 
 /// How `candidate` differs from `base`: `None` when it neither lengthens the
-/// range nor tightens accuracy.
-fn change_kind(base: &ArtilleryDispersion, candidate: &ArtilleryDispersion) -> Option<RowKind> {
+/// range nor tightens accuracy. A higher sigmaCount counts as tighter.
+fn change_kind(base: &MountProfile, candidate: &MountProfile) -> Option<RowKind> {
     /// Relative change below which two ranges or coefficients are equal.
     const TOLERANCE: f32 = 1e-4;
 
-    let longer = candidate.max_range.value() > base.max_range.value() * (1.0 + TOLERANCE);
-    let tighter = candidate.ideal_radius_coef < base.ideal_radius_coef * (1.0 - TOLERANCE);
+    let longer = candidate.profile.max_range.value() > base.profile.max_range.value() * (1.0 + TOLERANCE);
+    let sharper = matches!(
+        (base.sigma, candidate.sigma),
+        (Some(base), Some(candidate)) if candidate.0 > base.0 * (1.0 + TOLERANCE)
+    );
+    let tighter = sharper || candidate.profile.ideal_radius_coef < base.profile.ideal_radius_coef * (1.0 - TOLERANCE);
 
     match (longer, tighter) {
         (true, true) => Some(RowKind::RangeAndAccuracy),
@@ -621,6 +770,7 @@ fn pick<'c>(
         Source::Item(Item::Upgrade(index)) => Group::Upgrade(battery.game.upgrades[*index].slot),
         Source::FireControl(_) => Group::FireControl,
         Source::RangeConsumable(_) => Group::Consumable,
+        Source::SpecialAbility => unreachable!("conditional candidates are left out of builds"),
     };
 
     let mut chosen: Vec<&Candidate> = Vec::new();
@@ -660,6 +810,7 @@ fn combined_row(
             Source::Item(item) => items.push(*item),
             Source::FireControl(param) => ModuleKind::FireControl.set(&mut selection, param.clone()),
             Source::RangeConsumable(range) => coefficient = RangeCoefficient(coefficient.0 * range.0),
+            Source::SpecialAbility => unreachable!("conditional candidates are left out of builds"),
         }
     }
 
@@ -667,7 +818,7 @@ fn combined_row(
     let profiles = battery
         .profiles(&outcome.bundle, &selection, coefficient)
         .expect("the battery has profiles on every selection its candidates came from");
-    let kind = change_kind(&base[0].profile, &profiles[0].profile)
+    let kind = change_kind(&base[0], &profiles[0])
         .expect("a build of candidates that each lengthen range or tighten accuracy changes one of them");
     let label = chosen.iter().map(|candidate| candidate.label.as_str()).collect::<Vec<_>>().join(" + ");
 
@@ -682,6 +833,7 @@ fn row(
     range: Km,
 ) -> DispersionRow {
     let max_range = profiles[0].profile.max_range;
+    let sigma = profiles[0].sigma;
     let mounts = profiles
         .iter()
         .enumerate()
@@ -695,6 +847,8 @@ fn row(
                     horizontal_change_pct: base_axes
                         .map(|base| change(base.horizontal.value(), axes.horizontal.value())),
                     vertical_change_pct: base_axes.map(|base| change(base.vertical.value(), axes.vertical.value())),
+                    half_of_shells_within: sigma.map(|sigma| inner_ellipse(&axes, sigma.fraction_holding(0.5))),
+                    ninety_pct_of_shells_within: sigma.map(|sigma| inner_ellipse(&axes, sigma.fraction_holding(0.9))),
                 }),
                 None => Reach::BeyondMaxRange,
             };
@@ -708,8 +862,28 @@ fn row(
         condition: None,
         max_range_km: Km::new(round_to(max_range.value(), 100.0)),
         max_range_change_pct: base.map(|base| change(base[0].profile.max_range.value(), max_range.value())),
+        shells: sigma.map(ShellSpread::from_sigma),
         mounts,
     }
+}
+
+fn inner_ellipse(axes: &Axes, fraction: RadiusFraction) -> InnerEllipse {
+    InnerEllipse {
+        horizontal_m: Meters::new(round_to(axes.horizontal.value() * fraction.0, 10.0)),
+        vertical_m: Meters::new(round_to(axes.vertical.value() * fraction.0, 10.0)),
+    }
+}
+
+/// The error function, Abramowitz and Stegun 7.1.26 (absolute error below
+/// 1.5e-7).
+fn erf(x: f64) -> f64 {
+    let sign = x.signum();
+    let x = x.abs();
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let poly =
+        t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+
+    sign * (1.0 - poly * (-x * x).exp())
 }
 
 /// The ellipse at `range`, `None` past the max range.
@@ -843,6 +1017,17 @@ fn conclusion(ship: &Ship, kind: DispersionBattery, range: Km, rows: &[Dispersio
         ),
     };
 
+    if let (Some(shells), Some(half)) = (&base.shells, base_ellipse.half_of_shells_within.as_ref()) {
+        text.push_str(&format!(
+            " With sigma {}, half of the shells land within {}% of the ellipse ({} m by {} m) and {}% within its inner half; a higher sigma packs more shells toward the aim point.",
+            shells.sigma_count.0,
+            round_to(shells.half_of_shells_radius_fraction.0 * 100.0, 10.0),
+            format_m(half.horizontal_m),
+            format_m(half.vertical_m),
+            round_to(shells.inner_half_share_pct.value(), 10.0),
+        ));
+    }
+
     if let Some((row, ellipse)) = accurate {
         text.push_str(&format!(
             " {} narrows both: horizontal {} m to {} m, vertical {} m to {} m.",
@@ -912,16 +1097,48 @@ mod tests {
         assert_eq!(axes_at(&short, Km::new(21.0)), None);
     }
 
+    fn mount(max_range_km: f32, ideal_radius_coef: f32, sigma: f32) -> MountProfile {
+        MountProfile {
+            mount: "main battery".to_owned(),
+            profile: ArtilleryDispersion { curve: curve(), max_range: Km::new(max_range_km), ideal_radius_coef },
+            sigma: Some(SigmaCount(sigma)),
+        }
+    }
+
     #[test]
     fn change_kind_tells_range_from_accuracy() {
-        let base = ArtilleryDispersion { curve: curve(), max_range: Km::new(20.0), ideal_radius_coef: 1.0 };
-        let longer = ArtilleryDispersion { max_range: Km::new(23.2), ..base };
-        let tighter = ArtilleryDispersion { ideal_radius_coef: 0.93, ..base };
-        let both = ArtilleryDispersion { max_range: Km::new(23.2), ideal_radius_coef: 0.93, ..base };
+        let base = mount(20.0, 1.0, 2.0);
 
-        assert_eq!(change_kind(&base, &base), None);
-        assert_eq!(change_kind(&base, &longer), Some(RowKind::Range));
-        assert_eq!(change_kind(&base, &tighter), Some(RowKind::Accuracy));
-        assert_eq!(change_kind(&base, &both), Some(RowKind::RangeAndAccuracy));
+        assert_eq!(change_kind(&base, &mount(20.0, 1.0, 2.0)), None);
+        assert_eq!(change_kind(&base, &mount(23.2, 1.0, 2.0)), Some(RowKind::Range));
+        assert_eq!(change_kind(&base, &mount(20.0, 0.93, 2.0)), Some(RowKind::Accuracy));
+        assert_eq!(change_kind(&base, &mount(20.0, 1.0, 2.1)), Some(RowKind::Accuracy));
+        assert_eq!(change_kind(&base, &mount(23.2, 0.93, 2.0)), Some(RowKind::RangeAndAccuracy));
+    }
+
+    #[test]
+    fn shell_share_follows_the_clamped_normal() {
+        let sigma = SigmaCount(2.0);
+        let share = |t: f32| sigma.share_within(RadiusFraction(t));
+
+        assert!(share(0.0).abs() < 1e-9);
+        assert!((share(1.0) - 1.0).abs() < 1e-6);
+        // erf(0.5 x 2 / sqrt 2) = 0.682689; the 4.55% redrawn uniformly add half of themselves.
+        assert!((share(0.5) - (0.682_689 + 0.045_500 * 0.5)).abs() < 1e-5, "got {}", share(0.5));
+        // sigma 1: erf(0.353553) = 0.382925 plus half of 1 - erf(0.707107) = 0.317311.
+        assert!((SigmaCount(1.0).share_within(RadiusFraction(0.5)) - (0.382_925 + 0.317_311 * 0.5)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn radius_fraction_inverts_the_share() {
+        for sigma in [1.0, 1.9, 2.0, 2.1, 2.8] {
+            let sigma = SigmaCount(sigma);
+            for share in [0.5, 0.9] {
+                let fraction = sigma.fraction_holding(share);
+                assert!((sigma.share_within(fraction) - share).abs() < 1e-5);
+            }
+        }
+        // Higher sigma holds half of the shells closer to the aim point.
+        assert!(SigmaCount(2.1).fraction_holding(0.5).0 < SigmaCount(1.9).fraction_holding(0.5).0);
     }
 }
