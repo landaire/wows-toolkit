@@ -63,6 +63,24 @@ pub async fn set_setting_raw(pool: &SqlitePool, key: &str, json: &str) -> Result
         .await?;
     Ok(())
 }
+/// Write several pre-serialized settings as one transaction.
+///
+/// Serializing before this call ensures an invalid value cannot leave an
+/// earlier setting committed.
+pub async fn set_settings_raw(pool: &SqlitePool, values: &[(String, String)]) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    for (key, json) in values {
+        sqlx::query(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+        )
+        .bind(key)
+        .bind(json)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await
+}
 
 /// Removes a setting, if it is there.
 pub async fn delete_setting(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Error> {

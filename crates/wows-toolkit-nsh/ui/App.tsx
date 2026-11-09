@@ -1,7 +1,7 @@
-import { keymap, mount, signal, Storage, Text, View, windowSize } from "nsh";
+import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
-import { Command, Dialog, Menu, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Toolkit } from "wows-toolkit/native";
+import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
+import { ReplayInspector as NativeReplayInspector, Toolkit, type SettingsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
 
@@ -12,6 +12,11 @@ const tacticsOpen = signal(false);
 const paletteOpen = signal(false);
 const paletteQuery = signal("");
 const notice = signal<string | null>(null);
+const settings = signal<SettingsState | null>(null);
+const settingsBaseline = signal<SettingsState | null>(null);
+const settingsLoading = signal(true);
+const settingsSaving = signal(false);
+const settingsError = signal<string | null>(null);
 const STORAGE_TAB = "application.active-tab";
 
 Window.setTitle(startup.title);
@@ -23,6 +28,76 @@ function selectTab(id: string) {
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
 }
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function loadSettings() {
+  settingsLoading.set(true);
+  settingsError.set(null);
+  try {
+    const loaded = await Toolkit.loadSettings();
+    settings.set(loaded);
+    settingsBaseline.set({ ...loaded });
+  } catch (error) {
+    settingsError.set(`Settings could not be loaded: ${errorMessage(error)}`);
+  } finally {
+    settingsLoading.set(false);
+  }
+}
+
+function updateSetting<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
+  const current = settings();
+  if (current) settings.set({ ...current, [key]: value });
+}
+
+async function saveSettings() {
+  const current = settings();
+  const baseline = settingsBaseline();
+  if (!current || !baseline || settingsSaving()) return;
+  const editable: (keyof SettingsState)[] = [
+    "wowsDir",
+    "locale",
+    "checkForUpdates",
+    "enableLogging",
+    "debugMode",
+    "autoLoadLatestReplay",
+    "outputDir",
+    "autoDumpGameData",
+    "gameDataCacheDir",
+    "dataSharing",
+    "proxyUrl",
+    "collabDisplayName",
+    "disableAutoOpenSessionWindows",
+  ];
+  const changed = editable.filter((key) => current[key] !== baseline[key]);
+  if (changed.length === 0) {
+    showNotice("No settings changes.");
+    return;
+  }
+  settingsSaving.set(true);
+  settingsError.set(null);
+  try {
+    const committed = await Toolkit.saveSettings(current, changed);
+    settings.set(committed);
+    settingsBaseline.set({ ...committed });
+    showNotice("Settings saved.");
+    try {
+      const refreshed = await Toolkit.loadSettings();
+      settings.set(refreshed);
+      settingsBaseline.set({ ...refreshed });
+    } catch (error) {
+      settingsError.set(`Settings were saved but could not be refreshed: ${errorMessage(error)}`);
+    }
+  } catch (error) {
+    settingsError.set(`Settings could not be saved: ${errorMessage(error)}`);
+  } finally {
+    settingsSaving.set(false);
+  }
+}
+
+void loadSettings();
 
 function showNotice(message: string) {
   notice.set(message);
@@ -166,6 +241,232 @@ const descriptions: Record<string, string> = {
   "settings": "Configure game paths, replay loading, updates, sharing, collaboration, language, theme, and diagnostics.",
 };
 
+const inputStyle = {
+  minHeight: 34,
+  paddingHorizontal: 9,
+  borderWidth: 1,
+  borderColor: colors.input,
+  borderRadius: controlRadius(),
+  backgroundColor: colors.background,
+  color: colors.foreground,
+};
+
+function SettingsField(props: {
+  label: string;
+  description: string;
+  value: string;
+  placeholder?: string;
+  masked?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View style={{ gap: 5 }}>
+      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
+      <Input
+        accessibilityLabel={props.label}
+        value={props.value}
+        placeholder={props.placeholder}
+        masked={props.masked}
+        onChange={({ value }) => props.onChange(value)}
+        style={inputStyle}
+      />
+      <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
+    </View>
+  );
+}
+
+function SettingsToggle(props: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <Checkbox
+      accessibilityLabel={props.label}
+      checked={props.checked}
+      class="group flex-row items-start gap-3"
+      indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
+      indicator={<Text class="text-[11px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      onChange={({ checked }) => props.onChange(checked)}
+    >
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
+        <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
+      </View>
+    </Checkbox>
+  );
+}
+
+function SettingsSection(props: { title: string; children: JSX.Element }) {
+  return (
+    <Surface style={{ padding: 16, gap: 14 }}>
+      <Text style={{ fontSize: 16, fontWeight: "600", color: colors.cardForeground }}>{props.title}</Text>
+      {props.children}
+    </Surface>
+  );
+}
+
+function SharingOption(props: { value: SettingsState["dataSharing"]; label: string; description: string }) {
+  const selected = () => settings()?.dataSharing === props.value;
+  return (
+    <Radio
+      accessibilityLabel={props.label}
+      checked={selected()}
+      class="group flex-row items-start gap-3"
+      onChange={() => updateSetting("dataSharing", props.value)}
+    >
+      <View class="mt-0.5 w-[18px] h-[18px] rounded-full border border-border items-center justify-center">
+        <View class="w-[10px] h-[10px] rounded-full group-checked:bg-primary"/>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
+        <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
+      </View>
+    </Radio>
+  );
+}
+
+function SettingsView() {
+  const current = () => settings();
+  return (
+    <View disabled={settingsLoading() || settingsSaving()} style={{ flex: 1, minHeight: 0 }}>
+      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Settings</Text>
+          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Shared with the egui and GPUI applications</Text>
+        </View>
+        <Button label="Reload" variant="ghost" disabled={settingsLoading() || settingsSaving()} onPress={() => void loadSettings()}/>
+        <Button label={settingsSaving() ? "Saving..." : "Save Settings"} variant="primary" disabled={!current() || settingsLoading() || settingsSaving()} onPress={() => void saveSettings()}/>
+      </View>
+      <If when={settingsLoading() && !current()}>
+        <EmptyState title="Loading settings" description="Opening the shared WoWs Toolkit settings database."/>
+      </If>
+      <If when={!settingsLoading() && !current()}>
+        <EmptyState title="Settings unavailable" description={settingsError() ?? "The settings database could not be opened."} action={<Button label="Try Again" onPress={() => void loadSettings()}/>}/>
+      </If>
+      <If when={current()}>
+        <Scroll style={{ flex: 1 }}>
+          <View style={{ width: "100%", maxWidth: 980, alignSelf: "center", padding: 18, gap: 14 }}>
+            <If when={settingsError()}>
+              <Surface style={{ padding: 12, borderColor: colors.destructive }}>
+                <Text style={{ fontSize: 12, color: colors.destructive }}>{settingsError()}</Text>
+              </Surface>
+            </If>
+            <SettingsSection title="Appearance and language">
+              <View style={{ gap: 13 }}>
+                <View style={{ gap: 3 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>Theme</Text>
+                  <Text style={{ fontSize: 13, color: colors.foreground }}>NSH default</Text>
+                  <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>Uses NSH system tokens and follows the desktop appearance.</Text>
+                </View>
+                <SettingsField
+                  label="Language code"
+                  description="Leave empty to use the system language. A language change applies after restart."
+                  value={current()!.locale}
+                  placeholder={startup.locale}
+                  onChange={(value) => updateSetting("locale", value)}
+                />
+              </View>
+            </SettingsSection>
+            <SettingsSection title="Game and files">
+              <View style={{ gap: 14 }}>
+                <SettingsField
+                  label="World of Warships directory"
+                  description="Installation directory used to load game data."
+                  value={current()!.wowsDir}
+                  placeholder="/path/to/World_of_Warships"
+                  onChange={(value) => updateSetting("wowsDir", value)}
+                />
+                <SettingsField
+                  label="Resource unpacker output directory"
+                  description="Extracted game files are written here."
+                  value={current()!.outputDir}
+                  placeholder="/path/to/output"
+                  onChange={(value) => updateSetting("outputDir", value)}
+                />
+                <SettingsField
+                  label="Game data cache directory"
+                  description="Leave empty to use the application data directory."
+                  value={current()!.gameDataCacheDir}
+                  placeholder={current()!.storageDir}
+                  onChange={(value) => updateSetting("gameDataCacheDir", value)}
+                />
+                <Text style={{ fontSize: 11, color: colors.mutedForeground }}>Application data: {current()!.storageDir || "Unavailable"}</Text>
+              </View>
+            </SettingsSection>
+            <SettingsSection title="Replay and diagnostics">
+              <View style={{ gap: 14 }}>
+                <SettingsToggle
+                  label="Automatically load the latest replay"
+                  description="Open the newest replay when replay monitoring starts."
+                  checked={current()!.autoLoadLatestReplay}
+                  onChange={(checked) => updateSetting("autoLoadLatestReplay", checked)}
+                />
+                <SettingsToggle
+                  label="Cache game data automatically"
+                  description="Keep data required to open replays after a game update."
+                  checked={current()!.autoDumpGameData}
+                  onChange={(checked) => updateSetting("autoDumpGameData", checked)}
+                />
+                <SettingsToggle
+                  label="Check for updates at startup"
+                  description="Query the release service when the application starts."
+                  checked={current()!.checkForUpdates}
+                  onChange={(checked) => updateSetting("checkForUpdates", checked)}
+                />
+                <SettingsToggle
+                  label="Write diagnostic logs"
+                  description="Write a rotated log file for diagnostics."
+                  checked={current()!.enableLogging}
+                  onChange={(checked) => updateSetting("enableLogging", checked)}
+                />
+                <SettingsToggle
+                  label="Debug replay details"
+                  description="Show replay data intended for diagnostic work."
+                  checked={current()!.debugMode}
+                  onChange={(checked) => updateSetting("debugMode", checked)}
+                />
+              </View>
+            </SettingsSection>
+            <SettingsSection title="Data sharing">
+              <RadioGroup accessibilityLabel="Data sharing mode" class="gap-12">
+                <SharingOption value="off" label="Off" description="Nothing is sent."/>
+                <SharingOption value="build_data" label="Ship builds" description="Per-player ship builds are sent after a battle."/>
+                <SharingOption value="replays" label="Replays" description="The replay file is sent once results are available."/>
+              </RadioGroup>
+            </SettingsSection>
+            <SettingsSection title="Network and collaboration">
+              <View style={{ gap: 14 }}>
+                <SettingsField
+                  label="Proxy URL"
+                  description="Optional HTTP proxy. A host and port without a scheme uses http."
+                  value={current()!.proxyUrl}
+                  placeholder="proxy.example:8080"
+                  masked
+                  onChange={(value) => updateSetting("proxyUrl", value)}
+                />
+                <SettingsField
+                  label="Collaboration display name"
+                  description="Name shown to other participants in a collaboration session."
+                  value={current()!.collabDisplayName}
+                  onChange={(value) => updateSetting("collabDisplayName", value)}
+                />
+                <SettingsToggle
+                  label="Do not open shared windows automatically"
+                  description="Leave session windows closed until you choose to open them."
+                  checked={current()!.disableAutoOpenSessionWindows}
+                  onChange={(checked) => updateSetting("disableAutoOpenSessionWindows", checked)}
+                />
+              </View>
+            </SettingsSection>
+          </View>
+        </Scroll>
+      </If>
+    </View>
+  );
+}
+
 function Content() {
   const tab = () => startup.tabs.find((candidate) => candidate.id === activeTab()) ?? startup.tabs[0];
   return (
@@ -173,7 +474,10 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
         <NativeReplayInspector/>
       </View>
-      <If when={tab().id !== "replay-inspector"}>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
+        <SettingsView/>
+      </View>
+      <If when={tab().id !== "replay-inspector" && tab().id !== "settings"}>
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>

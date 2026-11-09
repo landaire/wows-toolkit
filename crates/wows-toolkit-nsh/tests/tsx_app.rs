@@ -1,3 +1,6 @@
+use std::ops::{Deref, DerefMut};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use nsh_core::{Points, Size};
 
 struct TestDirectory(std::path::PathBuf);
@@ -16,13 +19,47 @@ impl Drop for TestDirectory {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+struct TestApp {
+    app: nsh_testing::Headless,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Deref for TestApp {
+    type Target = nsh_testing::Headless;
+
+    fn deref(&self) -> &Self::Target {
+        &self.app
+    }
+}
+
+impl DerefMut for TestApp {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.app
+    }
+}
+
+static TEST_APP_LOCK: Mutex<()> = Mutex::new(());
+
+static TEST_STORAGE: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+fn configure_test_storage() {
+    let path = TEST_STORAGE.get_or_init(|| {
+        let path = std::env::temp_dir().join(format!("wows-toolkit-nsh-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir(&path).expect("the test settings directory is created");
+        path
+    });
+    wows_toolkit_config::storage_override::set(path.clone());
+}
 
 fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
 
 #[cfg(feature = "buck")]
-fn app() -> nsh_testing::Headless {
+fn app() -> TestApp {
+    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    configure_test_storage();
     let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
     let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
     let config = nsh_engine::EngineConfig {
@@ -31,15 +68,17 @@ fn app() -> nsh_testing::Headless {
     };
     let mut app = nsh_testing::Headless::start(config).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app
+    TestApp { app, _guard: guard }
 }
 
 #[cfg(not(feature = "buck"))]
-fn app() -> nsh_testing::Headless {
+fn app() -> TestApp {
+    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    configure_test_storage();
     let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app
+    TestApp { app, _guard: guard }
 }
 
 #[test]
@@ -157,6 +196,27 @@ fn replay_directory_lists_readable_files_and_reports_failures() {
 }
 
 #[test]
+fn settings_use_the_shared_database_and_nsh_default_theme() {
+    let mut app = app();
+
+    app.press_key("mod+,").unwrap();
+    app.wait_for("NSH default").unwrap();
+    app.wait_for("Save Settings").unwrap();
+    app.clear("label:Collaboration display name").unwrap();
+    app.type_text("label:Collaboration display name", "NSH Tester").unwrap();
+    app.press("Save Settings").unwrap();
+    app.wait_for("Settings saved.").unwrap();
+
+    app.clear("label:Collaboration display name").unwrap();
+    assert_eq!(app.screen().input_text("label:Collaboration display name").unwrap(), Some(""));
+    app.press("Reload").unwrap();
+    app.wait_until("the saved collaboration name returns", std::time::Duration::from_secs(5), |screen| {
+        screen.input_text("label:Collaboration display name").ok().flatten() == Some("NSH Tester")
+    })
+    .unwrap();
+}
+
+#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 
@@ -164,10 +224,8 @@ fn top_level_navigation_and_application_menu_work() {
     app.press_key("mod+k").unwrap();
     app.wait_for("Command Palette").unwrap();
     app.press("Go to Settings").unwrap();
-    app.wait_for(
-        "Configure game paths, replay loading, updates, sharing, collaboration, language, theme, and diagnostics.",
-    )
-    .unwrap();
+    app.wait_for("NSH default").unwrap();
+    app.wait_for("Shared with the egui and GPUI applications").unwrap();
 
     app.press("label:Open application menu").unwrap();
     app.wait_for("Tactics Board").unwrap();
