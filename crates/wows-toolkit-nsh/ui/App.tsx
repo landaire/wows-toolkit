@@ -1,7 +1,7 @@
 import { keymap, mount, signal, Storage, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { Dialog, Menu, Toolbar } from "nsh/base";
-import { Toolkit } from "wows-toolkit/native";
+import { ReplayInspector as NativeReplayInspector, Toolkit } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
 
@@ -160,11 +160,14 @@ const descriptions: Record<string, string> = {
 function Content() {
   const tab = () => startup.tabs.find((candidate) => candidate.id === activeTab()) ?? startup.tabs[0];
   return (
-    <EmptyState
-      title={tab().label}
-      description={descriptions[tab().id] ?? tab().description}
-      action={tab().id === "replay-inspector" ? <Button variant="primary" label={startup.text.openReplay} onPress={() => showNotice(startup.text.openReplay)}/> : undefined}
-    />
+    <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
+        <NativeReplayInspector/>
+      </View>
+      <If when={tab().id !== "replay-inspector"}>
+        <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
+      </If>
+    </View>
   );
 }
 

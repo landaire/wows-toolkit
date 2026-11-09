@@ -17,6 +17,7 @@ genrule(
 
 NSH_DEPS = [
     "//crates/wt-translations:wt_translations",
+    "//crates/wows-replays:wows_replays",
     "//third-party/rust:base64",
     "//third-party/rust:env_logger",
     "//third-party/rust:log",

@@ -19084,6 +19084,7 @@ dependencies = [
  "sys-locale",
  "tiny-skia 0.12.0",
  "tokio",
+ "wows_replays",
  "wt-translations",
 ]
 

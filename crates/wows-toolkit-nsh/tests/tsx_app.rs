@@ -26,6 +26,32 @@ fn app() -> nsh_testing::Headless {
 }
 
 #[test]
+fn replay_inspector_opens_and_displays_metadata() {
+    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
+
+    let mut app = app();
+    let replay = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FILE);
+    app.on_pick_paths(vec![replay]).unwrap();
+
+    app.press("Open Replay File...").unwrap();
+    assert_eq!(app.screen().file_requests().len(), 1, "the replay button must show one file dialog");
+    app.wait_for(FILE).unwrap();
+    app.wait_for("Players (15)").unwrap();
+    app.wait_for("Battle").unwrap();
+    app.wait_for("PVEBattle").unwrap();
+
+    app.press("Settings").unwrap();
+    app.press("Replay Inspector").unwrap();
+    app.wait_for(FILE).unwrap();
+    app.wait_for("Players (15)").unwrap();
+
+    let invalid = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    app.on_pick_paths(vec![invalid]).unwrap();
+    app.press("Open Replay File...").unwrap();
+    app.wait_for("text:/^could not parse replay /").unwrap();
+}
+
+#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 
