@@ -112,10 +112,17 @@ struct ReplaySort {
 }
 
 #[derive(Debug, Clone, PartialEq, Props)]
-pub struct ReplayInspectorProps {}
+pub struct ReplayInspectorProps {
+    /// A replay path selected outside the inspector.
+    #[prop(default)]
+    pub open_path: Prop<Option<SharedString>>,
+    /// Changes on every external open request, including repeated paths.
+    #[prop(default)]
+    pub open_request_id: Prop<u32>,
+}
 
 #[component]
-pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
+pub fn ReplayInspector(props: ReplayInspectorProps) -> impl IntoElement {
     let document = signal(None::<Arc<ReplayDocument>>);
     let directory = signal(None::<Arc<ReplayDirectory>>);
     let error = signal(None::<String>);
@@ -124,7 +131,36 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
     let exporting = signal(false);
     let compact = signal(false);
     let show_raw_metadata = signal(false);
+    let load_generation = signal(0_u64);
 
+    effect(move || {
+        let _request_id = props.open_request_id.get();
+        let Some(path) = props.open_path.get().map(|path| PathBuf::from(path.as_ref())) else {
+            return;
+        };
+        let generation = load_generation.get_untracked().wrapping_add(1);
+        load_generation.set(generation);
+        picking.set(true);
+        error.set(None);
+        status.set(None);
+        spawn(async move {
+            let loaded = blocking(move || parse_replay(&path))
+                .await
+                .map_err(|task_error| format!("replay parser task failed: {task_error}"))
+                .and_then(|result| result);
+            if load_generation.get_untracked() != generation {
+                return;
+            }
+            match loaded {
+                Ok(replay) => {
+                    directory.set(None);
+                    document.set(Some(Arc::new(replay)));
+                }
+                Err(message) => error.set(Some(message)),
+            }
+            picking.set(false);
+        });
+    });
     view()
         .app_class(|| Some("flex-1 min-h-0 p-3 gap-3".into()))
         .child(
@@ -183,11 +219,17 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                             if picking.get_untracked() || exporting.get_untracked() {
                                 return;
                             }
+                            let generation = load_generation.get_untracked().wrapping_add(1);
+                            load_generation.set(generation);
                             picking.set(true);
                             error.set(None);
                             status.set(None);
                             spawn(async move {
-                                match open_replay_directory().await {
+                                let opened = open_replay_directory().await;
+                                if load_generation.get_untracked() != generation {
+                                    return;
+                                }
+                                match opened {
                                     Ok(Some(listing)) => {
                                         document.set(listing.documents.first().cloned());
                                         if listing.failed > 0 {
@@ -231,11 +273,17 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                             if picking.get_untracked() || exporting.get_untracked() {
                                 return;
                             }
+                            let generation = load_generation.get_untracked().wrapping_add(1);
+                            load_generation.set(generation);
                             picking.set(true);
                             error.set(None);
                             status.set(None);
                             spawn(async move {
-                                match open_replay().await {
+                                let opened = open_replay().await;
+                                if load_generation.get_untracked() != generation {
+                                    return;
+                                }
+                                match opened {
                                     Ok(Some(replay)) => {
                                         directory.set(None);
                                         document.set(Some(Arc::new(replay)));

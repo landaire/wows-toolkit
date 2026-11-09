@@ -368,7 +368,13 @@ fn player_tracker_reads_and_filters_indexed_players() {
 
 #[test]
 fn search_queries_the_shared_replay_index() {
+    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
+    const OTHER_FILE: &str = "20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay";
     let mut app = app();
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays");
+    let replay = fixtures.join(FILE);
+    let other_replay = fixtures.join(OTHER_FILE);
+    let indexed_replay = replay.clone();
     tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
         async {
             use std::path::{Path, PathBuf};
@@ -439,7 +445,7 @@ fn search_queries_the_shared_replay_index() {
                 &ReplayRecord {
                     arena_id,
                     source_id: source,
-                    replay_path: PathBuf::from("/tmp/search-test.wowsreplay"),
+                    replay_path: indexed_replay,
                     file_mtime: Some(timestamp.as_second()),
                     outcome: MatchOutcome::Win,
                     self_account_id: Some(AccountId(99_010)),
@@ -465,6 +471,16 @@ fn search_queries_the_shared_replay_index() {
     app.wait_for("123456").unwrap();
     app.wait_for("1 matches").unwrap();
 
+    app.press(&format!("label:Open replay {}", replay.display())).unwrap();
+    app.wait_for("PVEBattle").unwrap();
+    app.wait_for("Players (15)").unwrap();
+    app.on_pick_paths(vec![other_replay]).unwrap();
+    app.press("Open Replay File...").unwrap();
+    app.wait_for("Players (24)").unwrap();
+    app.press("Search").unwrap();
+    app.press(&format!("label:Open replay {}", replay.display())).unwrap();
+    app.wait_for("Players (15)").unwrap();
+    app.press("Search").unwrap();
     app.clear("label:Replay search query").unwrap();
     app.type_text("label:Replay search query", "(").unwrap();
     app.press("Run Search").unwrap();

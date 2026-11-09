@@ -32,6 +32,8 @@ const searchError = signal<string | null>(null);
 const searchHasRun = signal(false);
 const searchSortColumn = signal("date");
 const searchSortDescending = signal(true);
+const replayOpenPath = signal<string | null>(null);
+const replayOpenRequestId = signal(0);
 let settingsRequested = false;
 let statisticsRequested = false;
 let playerTrackerRequested = false;
@@ -236,6 +238,19 @@ function selectSearchSort(column: string) {
     searchSortDescending.set(true);
   }
   void runSearch(true, rollback);
+}
+
+function openIndexedReplay(path: string) {
+  if (!path) {
+    showNotice("This indexed replay has no file path.");
+    return;
+  }
+  if (replayOpenPath() === path) {
+    replayOpenRequestId.set(replayOpenRequestId() + 1);
+  } else {
+    replayOpenPath.set(path);
+  }
+  selectTab("replay-inspector");
 }
 
 function searchColumnHeader(label: string, column: string, width: number) {
@@ -643,7 +658,14 @@ function SearchView() {
                     </View>
                     <Each of={current()!.results}>
                       {(result) => (
-                        <View role="row" accessibilityLabel={result().replayPath} style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                        <View
+                          role="row"
+                          accessibilityLabel={`Open replay ${result().replayPath}`}
+                          onPress={() => openIndexedReplay(result().replayPath)}
+                          hoverStyle={{ backgroundColor: colors.accent }}
+                          activeStyle={{ opacity: 0.72 }}
+                          style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
+                        >
                           <Text role="cell" style={{ width: 180, fontSize: 11.5, color: colors.cardForeground }}>{result().timestamp}</Text>
                           <Text role="cell" style={{ width: 150, fontSize: 12, color: colors.cardForeground }}>{result().map}</Text>
                           <View role="cell" style={{ width: 150 }}>
@@ -900,7 +922,7 @@ function Content() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
-        <NativeReplayInspector/>
+        <NativeReplayInspector openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "statistics" ? "flex" : "none" }}>
         <StatisticsView/>
