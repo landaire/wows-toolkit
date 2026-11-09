@@ -104,11 +104,12 @@ Builds default to debug. The `release` configuration modifier builds release:
 ```bash
 buck2 build //:wows_toolkit_egui
 buck2 build //:wows_toolkit_egui?release
+buck2 run //:wows_toolkit_nsh  # Linux only
 ```
 
 `-m release` does the same for every target on the command line, which is the form queries take (`buck2 aquery -m release ...`).
 
-Aliases: `wows_toolkit_egui`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`, `wt_web_site`. `buck2 build root//:` builds all of them.
+Aliases: `wows_toolkit_egui`, `wows_toolkit_gpui`, `wows_toolkit_nsh` (Linux only), `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`, `wt_web_site`. `buck2 build root//:` builds all of them.
 
 The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). The desktop app aliases name their front end, so `//:wows_toolkit_egui` builds `wows_toolkit`. `build-support/release-tools.json` holds the CLI tool mapping and `scripts/package-tools.*` checks the finished archive against it.
 

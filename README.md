@@ -124,9 +124,10 @@ powershell -ExecutionPolicy Bypass -File bootstrap.ps1  # Windows, from an eleva
 
 bin/buck2 build //:wows_toolkit_egui
 bin/buck2 build //:wows_toolkit_egui?release
+bin/buck2 run //:wows_toolkit_nsh  # Linux only
 ```
 
-The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit_egui` and `wows_toolkit_gpui` build the two desktop apps, and `buck2 build root//:` builds everything.
+The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit_egui` and `wows_toolkit_gpui` build the cross-platform desktop apps. `wows_toolkit_nsh` builds the Linux-only NSH app. `buck2 build root//:` builds everything.
 
 See [DEVELOPING.md](DEVELOPING.md#buck) for the hermeticity check, dependency updates, fixups, and troubleshooting.
 
