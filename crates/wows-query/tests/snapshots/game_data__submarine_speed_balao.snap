@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 3032
+assertion_line: 3183
 expression: speed
 ---
 surface:
@@ -28,7 +28,7 @@ surface:
           - Sierra Mike signal
         note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
 periscope_depth:
-  stat: top speed at periscope depth
+  stat: "top speed at periscope depth, just below the surface; not the underwater speed"
   unit: kn
   builds:
     base: 30
@@ -52,7 +52,7 @@ periscope_depth:
           - Sierra Mike signal
         note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
 submerged:
-  stat: top speed submerged
+  stat: "submerged speed: top speed fully underwater, at maximum depth"
   unit: kn
   builds:
     base: 26.01

@@ -692,6 +692,12 @@ fn ap_shell_traits_find_improved_angles_and_short_fuses() {
         .expect("ships list");
     let short_rows = shell_trait_rows(&short);
     assert!(short_rows.iter().any(|row| row.starts_with("T10 Minotaur ")), "{short_rows:#?}");
+    // A 0.025 s cruiser fuse is slightly short, not short.
+    assert!(short_rows.iter().all(|row| !row.contains("fuse 0.025 s")), "{short_rows:#?}");
+
+    let slightly_short = game()
+        .call_tool("ap_shell_traits", json!({ "trait": "slightly_short_fuse", "min_tier": 8, "max_tier": 10 }))
+        .expect("ships list");
 
     insta::assert_yaml_snapshot!(json!({
         "standards": improved["standards"],
@@ -706,6 +712,10 @@ fn ap_shell_traits_find_improved_angles_and_short_fuses() {
             "qualifying": short["qualifying"],
             "omitted": short["omitted"],
             "ships": short_rows,
+        },
+        "slightly_short_fuse": {
+            "qualifying": slightly_short["qualifying"],
+            "omitted": slightly_short["omitted"],
         },
     }));
 }
@@ -1204,6 +1214,41 @@ fn unique_upgrades_and_the_ships_they_fit() {
 
     let colombo = game().ship_upgrades(&ship("C. Colombo")).expect("C. Colombo exists");
     insta::assert_yaml_snapshot!(colombo.unique_upgrades);
+}
+
+/// Each ship's unique upgrade as ship_upgrades reports it, by the names
+/// players use.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn unique_upgrades_are_found_for_their_ships() {
+    let reports: Vec<serde_json::Value> =
+        ["Minotaur", "G. Kurfürst", "GK", "Des Moines", "Kléber", "Kleber", "Harugumo"]
+            .into_iter()
+            .map(|name| {
+                let upgrades = game().call_tool("ship_upgrades", json!({ "ship": name })).expect("ship exists");
+                json!({
+                    "name": name,
+                    "ship": upgrades["ship"]["name"],
+                    "index": upgrades["ship"]["index"],
+                    "unique_upgrades": upgrades["unique_upgrades"],
+                })
+            })
+            .collect();
+    insta::assert_yaml_snapshot!(reports);
+
+    // Nations as players write them reach the GameParams spelling.
+    for nation in ["UK", "United Kingdom", "British", "United_Kingdom"] {
+        let unique = game().unique_upgrades(&UniqueUpgradesArgs {
+            class: Some(ShipClass::Cruiser),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            nation: Some(nation.to_owned()),
+        });
+        assert!(
+            unique.upgrades.iter().any(|upgrade| upgrade.param == "PCM051_Special_Mod_I_Minotaur"),
+            "{nation}: {unique:?}"
+        );
+    }
 }
 
 /// Incomparable, C. Colombo with its unique upgrade and Togasa, in testing,

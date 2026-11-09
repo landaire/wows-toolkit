@@ -686,15 +686,58 @@ impl ShipFilter {
             && (self.include_replicas || ship.replica_of.as_ref().is_none_or(|of| !self.lists_original(of)))
             && self.tiers.is_none_or(|range| range.contains(ship.tier))
             && self.class.is_none_or(|class| class == ship.class)
-            && self.nation.as_deref().is_none_or(|nation| ship.param.nation().eq_ignore_ascii_case(nation))
+            && self.nation.as_deref().is_none_or(|nation| nation_matches(nation, ship.param.nation()))
     }
 
     /// Whether `of`, the original of a replica, passes the nation filter, so
     /// lists name the replica with it. A replica shares its original's tier
     /// and class, so nation is the only filter that can split them.
     fn lists_original(&self, of: &ReplicaOf) -> bool {
-        self.nation.as_deref().is_none_or(|nation| of.nation.eq_ignore_ascii_case(nation))
+        self.nation.as_deref().is_none_or(|nation| nation_matches(nation, &of.nation))
     }
+}
+
+/// Player names of nations besides the GameParams ones, e.g. "UK" for
+/// "United_Kingdom", as search keys: lower case, letters and digits only.
+const NATION_ALIASES: &[(&str, &str)] = &[
+    ("uk", "United_Kingdom"),
+    ("unitedkingdom", "United_Kingdom"),
+    ("britain", "United_Kingdom"),
+    ("greatbritain", "United_Kingdom"),
+    ("british", "United_Kingdom"),
+    ("royalnavy", "United_Kingdom"),
+    ("rn", "United_Kingdom"),
+    ("us", "USA"),
+    ("usn", "USA"),
+    ("america", "USA"),
+    ("american", "USA"),
+    ("unitedstates", "USA"),
+    ("ussr", "Russia"),
+    ("soviet", "Russia"),
+    ("sovietunion", "Russia"),
+    ("russian", "Russia"),
+    ("german", "Germany"),
+    ("kms", "Germany"),
+    ("japanese", "Japan"),
+    ("ijn", "Japan"),
+    ("french", "France"),
+    ("italian", "Italy"),
+    ("spanish", "Spain"),
+    ("dutch", "Netherlands"),
+    ("panasian", "Pan_Asia"),
+    ("panamerican", "Pan_America"),
+    ("european", "Europe"),
+];
+
+/// Whether `wanted`, a nation as a player or model writes it, names
+/// `actual`, a GameParams nation: "united kingdom", "UK" and "British" all
+/// name "United_Kingdom".
+pub(crate) fn nation_matches(wanted: &str, actual: &str) -> bool {
+    let key = |name: &str| name.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_lowercase();
+    let wanted = key(wanted);
+    let actual = key(actual);
+
+    wanted == actual || NATION_ALIASES.iter().any(|(alias, nation)| *alias == wanted && key(nation) == actual)
 }
 
 impl GameData {
@@ -1053,6 +1096,17 @@ pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn nations_match_as_players_write_them() {
+        for wanted in ["United_Kingdom", "united kingdom", "UK", "British", "Royal Navy"] {
+            assert!(nation_matches(wanted, "United_Kingdom"), "{wanted}");
+        }
+        assert!(nation_matches("Pan Asia", "Pan_Asia"));
+        assert!(nation_matches("USSR", "Russia"));
+        assert!(!nation_matches("UK", "USA"));
+        assert!(!nation_matches("Germany", "Japan"));
+    }
 
     #[test]
     fn matchmaking_range_is_clamped() {

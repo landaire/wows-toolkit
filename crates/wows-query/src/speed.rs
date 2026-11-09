@@ -63,12 +63,20 @@ impl GameData {
             periscope_depth: speed_plan(
                 planner,
                 &flagged,
-                StatPlan::new("top speed at periscope depth".to_owned(), Better::Higher, &periscope),
+                StatPlan::new(
+                    "top speed at periscope depth, just below the surface; not the underwater speed".to_owned(),
+                    Better::Higher,
+                    &periscope,
+                ),
             )?,
             submerged: speed_plan(
                 planner,
                 &flagged,
-                StatPlan::new("top speed submerged".to_owned(), Better::Higher, &submerged),
+                StatPlan::new(
+                    "submerged speed: top speed fully underwater, at maximum depth".to_owned(),
+                    Better::Higher,
+                    &submerged,
+                ),
             )?,
         })
     }

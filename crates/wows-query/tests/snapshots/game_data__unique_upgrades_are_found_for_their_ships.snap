@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1237
+expression: reports
+---
+- name: Minotaur
+  ship: Minotaur
+  index: PBSC110
+  unique_upgrades:
+    - "Aerosol Smoke Curtain System (slot 5) is a unique upgrade: it fits only Minotaur and mounts in place of a regular upgrade of that slot (Torpedo Lookout System, Concealment System Modification 1, Steering Gears Modification 2, Ship Consumable Modification 1). Best-fit builds take it where it improves a stat and list it as \"Aerosol Smoke Curtain System (unique upgrade)\"."
+- name: G. Kurfürst
+  ship: G. Kurfürst
+  index: PGSB110
+  unique_upgrades:
+    - "Improved Ammunition Hoists (slot 6) is a unique upgrade: it fits only G. Kurfürst and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Improved Ammunition Hoists (unique upgrade)\"."
+- name: GK
+  ship: G. Kurfürst
+  index: PGSB110
+  unique_upgrades:
+    - "Improved Ammunition Hoists (slot 6) is a unique upgrade: it fits only G. Kurfürst and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Improved Ammunition Hoists (unique upgrade)\"."
+- name: Des Moines
+  ship: Des Moines
+  index: PASC020
+  unique_upgrades:
+    - "Enhanced Propulsion Plant (slot 6) is a unique upgrade: it fits only Des Moines and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Enhanced Propulsion Plant (unique upgrade)\"."
+- name: Kléber
+  ship: Kléber
+  index: PFSD110
+  unique_upgrades:
+    - "Improved Camouflage Patterns (slot 6) is a unique upgrade: it fits only Kléber, Kléber CLR and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Torpedo Tubes Modification 2, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Improved Camouflage Patterns (unique upgrade)\"."
+- name: Kleber
+  ship: Kléber
+  index: PFSD110
+  unique_upgrades:
+    - "Improved Camouflage Patterns (slot 6) is a unique upgrade: it fits only Kléber, Kléber CLR and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Torpedo Tubes Modification 2, Gun Fire Control System Modification 2, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Improved Camouflage Patterns (unique upgrade)\"."
+- name: Harugumo
+  ship: Harugumo
+  index: PJSD210
+  unique_upgrades:
+    - "Additional Smoke Generators (slot 5) is a unique upgrade: it fits only Harugumo and mounts in place of a regular upgrade of that slot (Torpedo Lookout System, Concealment System Modification 1, Steering Gears Modification 2, Ship Consumable Modification 1). Best-fit builds take it where it improves a stat and list it as \"Additional Smoke Generators (unique upgrade)\"."

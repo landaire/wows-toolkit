@@ -1,7 +1,7 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 620
-expression: "json!({\n    \"standards\": improved[\"standards\"], \"fuse_threshold_caliber_ratio\":\n    improved[\"fuse_threshold_caliber_ratio\"], \"improved_ricochet\":\n    {\n        \"considered\": improved[\"considered\"], \"qualifying\":\n        improved[\"qualifying\"], \"ships\": improved_rows,\n    }, \"short_fuse\":\n    {\n        \"considered\": short[\"considered\"], \"qualifying\": short[\"qualifying\"],\n        \"omitted\": short[\"omitted\"], \"ships\": short_rows,\n    },\n})"
+assertion_line: 702
+expression: "json!({\n    \"standards\": improved[\"standards\"], \"fuse_threshold_caliber_ratio\":\n    improved[\"fuse_threshold_caliber_ratio\"], \"improved_ricochet\":\n    {\n        \"considered\": improved[\"considered\"], \"qualifying\":\n        improved[\"qualifying\"], \"ships\": improved_rows,\n    }, \"short_fuse\":\n    {\n        \"considered\": short[\"considered\"], \"qualifying\": short[\"qualifying\"],\n        \"omitted\": short[\"omitted\"], \"ships\": short_rows,\n    }, \"slightly_short_fuse\":\n    {\n        \"qualifying\": slightly_short[\"qualifying\"], \"omitted\":\n        slightly_short[\"omitted\"],\n    },\n})"
 ---
 standards:
   - class: destroyer
@@ -90,12 +90,12 @@ short_fuse:
       battleship: 115
       submarine: 1
   qualifying:
-    total: 75
+    total: 37
     by_class:
       destroyer: 1
-      cruiser: 64
+      cruiser: 26
       battleship: 10
-  omitted: 25
+  omitted: ~
   ships:
     - "T10 Druid (destroyer, United_Kingdom, premium): 127 mm AP 58 lb Mk N2, fuse 0.005 s; destroyer standard 0.01 s"
     - "T10 Gibraltar (cruiser, United_Kingdom, premium): 234 mm AP 6 CRH, fuse 0.005 s; cruiser standard 0.033 s"
@@ -135,16 +135,9 @@ short_fuse:
     - "T8 Hawke (battleship, United_Kingdom): 406 mm AP Mk IIIa, fuse 0.015 s; battleship standard 0.033 s"
     - "T8 Monarch (battleship, United_Kingdom): 381 mm AP Mk XIIIa, fuse 0.015 s; battleship standard 0.033 s"
     - "T8 Prince of Wales (battleship, United_Kingdom, premium): 356 mm AP Mk VIIb, fuse 0.015 s; battleship standard 0.033 s"
-    - "T10 Incheon (cruiser, Pan_Asia, premium): 203 mm AP Mk21 mod. 1, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T10 Petropavlovsk (cruiser, Russia): 220 mm AP Model 1944, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T10 Sevastopol (cruiser, Russia, premium): 380 mm AP Model 1939, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T10 Stalingrad (cruiser, Russia, premium): 305 mm AP Model 1928, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T9 Riga (cruiser, Russia): 220 mm AP Model 1943, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T9 Tianjin (cruiser, Pan_Asia, premium): 220 mm AP Model 1944, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T8 P. Bagration (cruiser, Russia, premium): AP-32, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T8 Tallinn (cruiser, Russia): AP-33, fuse 0.022 s; cruiser standard 0.033 s"
-    - "T10 Almte. Irízar (cruiser, Pan_America, premium): 152 mm AP 6crh Mk IV, fuse 0.025 s; cruiser standard 0.033 s"
-    - "T10 Bremen (cruiser, Germany, premium): 150 mm P.Spr.Gr. L/3.7, fuse 0.025 s; cruiser standard 0.033 s"
-    - "T10 Brisbane (cruiser, Commonwealth, premium): 152 mm AP Mk V, fuse 0.025 s; cruiser standard 0.033 s"
-    - "T10 Pioneer (cruiser, Commonwealth, premium): 152 mm AP 6crh Mk IV, fuse 0.025 s; cruiser standard 0.033 s"
-    - "T10 San Martín (cruiser, Pan_America): 152 mm AP 130 lb Mk35, fuse 0.025 s; cruiser standard 0.033 s"
+slightly_short_fuse:
+  qualifying:
+    total: 38
+    by_class:
+      cruiser: 38
+  omitted: ~

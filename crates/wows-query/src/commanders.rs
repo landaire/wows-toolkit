@@ -51,6 +51,7 @@ use crate::names::search_key;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
 use crate::ships::ShipSummary;
+use crate::ships::nation_matches;
 use crate::special_abilities::Burst;
 use crate::stats::Card;
 use crate::stats::StatChange;
@@ -370,13 +371,7 @@ impl GameData {
         let mut commanders = Vec::new();
         for commander in &self.commanders {
             if let Some(nation) = args.nation.as_deref()
-                && !commander
-                    .crew
-                    .personality()
-                    .ships()
-                    .nations()
-                    .iter()
-                    .any(|served| served.eq_ignore_ascii_case(nation))
+                && !commander.crew.personality().ships().nations().iter().any(|served| nation_matches(nation, served))
             {
                 continue;
             }
