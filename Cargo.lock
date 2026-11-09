@@ -19082,8 +19082,10 @@ dependencies = [
  "rust-i18n 3.1.5",
  "serde_json",
  "sys-locale",
+ "tempfile",
  "tiny-skia 0.12.0",
  "tokio",
+ "wows-core",
  "wows_replays",
  "wt-translations",
 ]

@@ -62,6 +62,29 @@ fn replay_inspector_opens_and_displays_metadata() {
     app.wait_for(FILE).unwrap();
     app.wait_for("Players (15)").unwrap();
 
+    let export_directory = TestDirectory::new("replay-export");
+    let collision_selection = export_directory.0.join("narai");
+    let collision_path = collision_selection.with_extension("json");
+    std::fs::write(&collision_path, b"existing export").unwrap();
+    app.on_pick_save_path(Some(collision_selection)).unwrap();
+    app.press("Export Metadata...").unwrap();
+    app.wait_for("text:/^could not write replay metadata to /").unwrap();
+    assert_eq!(std::fs::read(&collision_path).unwrap(), b"existing export");
+
+    let selected_path = export_directory.0.join("narai-export");
+    let export_path = selected_path.with_extension("json");
+    app.on_pick_save_path(Some(selected_path)).unwrap();
+    app.press("Export Metadata...").unwrap();
+    app.wait_for("text:/^Replay metadata exported to /").unwrap();
+    let exported: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(export_path).expect("the metadata export is written"))
+            .expect("the metadata export is valid JSON");
+    assert_eq!(exported["fileName"], FILE);
+    assert_eq!(exported["mode"], "PVEBattle");
+    assert_eq!(exported["players"].as_array().map(Vec::len), Some(15));
+    assert!(exported.get("sourcePath").is_none());
+    assert!(exported["players"][0]["shipId"].as_u64().is_some());
+
     let invalid = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     app.on_pick_paths(vec![invalid]).unwrap();
     app.press("Open Replay File...").unwrap();

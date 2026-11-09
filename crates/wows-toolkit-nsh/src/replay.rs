@@ -1,15 +1,17 @@
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nsh_core::AccessibilityState;
-use nsh_core::file_dialog::{FileFilter, OpenDialog};
+use nsh_core::file_dialog::{FileFilter, OpenDialog, SaveDialog};
 use nsh_core::prelude::*;
+use wows_core::game_types::GameParamId;
 use wows_replays::ReplayFile;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReplayPlayer {
     name: String,
-    ship_id: String,
+    ship_id: GameParamId,
     relation: u32,
 }
 
@@ -46,7 +48,9 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
     let document = signal(None::<Arc<ReplayDocument>>);
     let directory = signal(None::<Arc<ReplayDirectory>>);
     let error = signal(None::<String>);
+    let status = signal(None::<String>);
     let picking = signal(false);
+    let exporting = signal(false);
 
     view()
         .app_class(|| Some("flex-1 min-h-0 p-3 gap-3".into()))
@@ -57,7 +61,7 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                     view()
                         .accessible(true)
                         .role(AccessibilityRole::Button)
-                        .disabled(move || picking.get())
+                        .disabled(move || document.get().is_none() || picking.get() || exporting.get())
                         .app_class(|| {
                             Some(
                                 "min-h-8 px-3 rounded-(--radius) border border-border bg-secondary \
@@ -66,11 +70,49 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                             )
                         })
                         .on_press(move |_: &()| {
-                            if picking.get_untracked() {
+                            if picking.get_untracked() || exporting.get_untracked() {
+                                return;
+                            }
+                            let Some(replay) = document.get_untracked() else {
+                                return;
+                            };
+                            exporting.set(true);
+                            error.set(None);
+                            status.set(None);
+                            spawn(async move {
+                                match export_replay_metadata(replay).await {
+                                    Ok(Some(path)) => {
+                                        status.set(Some(format!("Replay metadata exported to {}.", path.display())));
+                                    }
+                                    Ok(None) => {}
+                                    Err(message) => error.set(Some(message)),
+                                }
+                                exporting.set(false);
+                            });
+                        })
+                        .child(text(move || {
+                            if exporting.get() { "Exporting..." } else { "Export Metadata..." }
+                        })),
+                )
+                .child(
+                    view()
+                        .accessible(true)
+                        .role(AccessibilityRole::Button)
+                        .disabled(move || picking.get() || exporting.get())
+                        .app_class(|| {
+                            Some(
+                                "min-h-8 px-3 rounded-(--radius) border border-border bg-secondary \
+                                 text-secondary-foreground items-center justify-center hover:opacity-85 active:opacity-70"
+                                    .into(),
+                            )
+                        })
+                        .on_press(move |_: &()| {
+                            if picking.get_untracked() || exporting.get_untracked() {
                                 return;
                             }
                             picking.set(true);
                             error.set(None);
+                            status.set(None);
                             spawn(async move {
                                 match open_replay_directory().await {
                                     Ok(Some(listing)) => {
@@ -104,7 +146,7 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                     view()
                         .accessible(true)
                         .role(AccessibilityRole::Button)
-                        .disabled(move || picking.get())
+                        .disabled(move || picking.get() || exporting.get())
                         .app_class(|| {
                             Some(
                                 "min-h-8 px-3 rounded-(--radius) border border-border bg-primary \
@@ -113,11 +155,12 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                             )
                         })
                         .on_press(move |_: &()| {
-                            if picking.get_untracked() {
+                            if picking.get_untracked() || exporting.get_untracked() {
                                 return;
                             }
                             picking.set(true);
                             error.set(None);
+                            status.set(None);
                             spawn(async move {
                                 match open_replay().await {
                                     Ok(Some(replay)) => document.set(Some(Arc::new(replay))),
@@ -132,16 +175,36 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                         })),
                 ),
         )
-        .child(text(move || error.get().unwrap_or_default()).app_class(move || {
-            Some(
-                if error.get().is_some() && document.get().is_some() {
-                    "px-3 py-2 rounded-(--radius) border border-destructive text-sm text-destructive"
-                } else {
-                    "hidden"
-                }
-                .into(),
-            )
-        }))
+        .child(
+            text(move || error.get().unwrap_or_default())
+                .accessible(true)
+                .role(AccessibilityRole::Alert)
+                .app_class(move || {
+                    Some(
+                        if error.get().is_some() && document.get().is_some() {
+                            "px-3 py-2 rounded-(--radius) border border-destructive text-sm text-destructive"
+                        } else {
+                            "hidden"
+                        }
+                        .into(),
+                    )
+                }),
+        )
+        .child(
+            text(move || status.get().unwrap_or_default())
+                .accessible(true)
+                .role(AccessibilityRole::Alert)
+                .app_class(move || {
+                    Some(
+                        if status.get().is_some() {
+                            "px-3 py-2 rounded-(--radius) border border-primary bg-muted text-sm text-foreground"
+                        } else {
+                            "hidden"
+                        }
+                        .into(),
+                    )
+                }),
+        )
         .child(
             view()
                 .app_class(|| Some("flex-1 min-h-0 flex-row gap-3".into()))
@@ -283,7 +346,8 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
                         .app_class(|| Some("w-24 text-xs text-muted-foreground".into())),
                 )
                 .child(
-                    text(move || player.get().ship_id).app_class(|| Some("w-28 text-xs text-muted-foreground".into())),
+                    text(move || player.get().ship_id.to_string())
+                        .app_class(|| Some("w-28 text-xs text-muted-foreground".into())),
                 )
         },
     );
@@ -503,11 +567,7 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
     let players = meta
         .vehicles
         .iter()
-        .map(|vehicle| ReplayPlayer {
-            name: vehicle.name.clone(),
-            ship_id: vehicle.shipId.to_string(),
-            relation: vehicle.relation,
-        })
+        .map(|vehicle| ReplayPlayer { name: vehicle.name.clone(), ship_id: vehicle.shipId, relation: vehicle.relation })
         .collect();
 
     Ok(ReplayDocument {
@@ -526,4 +586,81 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
         teams_count: meta.teamsCount,
         players,
     })
+}
+
+async fn export_replay_metadata(document: Arc<ReplayDocument>) -> Result<Option<PathBuf>, String> {
+    let stem = document
+        .path
+        .file_stem()
+        .ok_or_else(|| format!("replay path has no file stem: {}", document.path.display()))?
+        .to_string_lossy();
+    let picked = pick_save_path(
+        SaveDialog::new()
+            .file_name(format!("{stem}.metadata.json"))
+            .filter(FileFilter::new("JSON", ["json"]))
+            .title("Export Replay Metadata")
+            .button_label("Export"),
+    )
+    .await
+    .map_err(|error| format!("could not show replay export dialog: {error}"))?;
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let overwrite_confirmed = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
+    let path = if overwrite_confirmed { path } else { path.with_extension("json") };
+
+    let players: Vec<_> = document
+        .players
+        .iter()
+        .map(|player| {
+            serde_json::json!({
+                "name": player.name,
+                "shipId": player.ship_id.raw(),
+                "relation": player.relation,
+                "relationLabel": relation_label(player.relation),
+            })
+        })
+        .collect();
+    let value = serde_json::json!({
+        "fileName": document.file_name,
+        "date": document.date,
+        "map": {
+            "displayName": document.map_name,
+            "key": document.map_key,
+        },
+        "mode": document.game_mode,
+        "scenario": document.scenario,
+        "player": {
+            "name": document.player_name,
+            "ship": document.player_ship,
+        },
+        "clientVersion": document.client_version,
+        "durationSeconds": document.duration_seconds,
+        "playersPerTeam": document.players_per_team,
+        "teamsCount": document.teams_count,
+        "players": players,
+    });
+    let bytes =
+        serde_json::to_vec_pretty(&value).map_err(|error| format!("could not serialize replay metadata: {error}"))?;
+    let write_path = path.clone();
+    blocking(move || write_atomic(&write_path, &bytes, overwrite_confirmed))
+        .await
+        .map_err(|error| format!("replay export task failed: {error}"))?
+        .map_err(|error| format!("could not write replay metadata to {}: {error}", path.display()))?;
+    Ok(Some(path))
+}
+
+fn write_atomic(path: &Path, bytes: &[u8], overwrite_confirmed: bool) -> std::io::Result<()> {
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    staged.write_all(bytes)?;
+    staged.as_file_mut().sync_all()?;
+    if overwrite_confirmed {
+        staged.persist(path).map(|_| ()).map_err(|error| error.error)
+    } else {
+        staged.persist_noclobber(path).map(|_| ()).map_err(|error| error.error)
+    }
 }
