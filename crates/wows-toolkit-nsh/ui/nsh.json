@@ -1,0 +1,23 @@
+{
+  "name": "WoWs Toolkit",
+  "id": "dev.landaire.wows-toolkit-nsh",
+  "version": "1.0.3",
+  "appearance": "system",
+  "capabilities": {
+    "openUrl": {
+      "schemes": ["https"]
+    },
+    "picker": true,
+    "clipboard": true,
+    "network": {
+      "http": [
+        {
+          "host": "api.github.com",
+          "methods": ["GET"],
+          "schemes": ["https"],
+          "pathPrefixes": ["/repos/landaire/wows-toolkit/releases"]
+        }
+      ]
+    }
+  }
+}

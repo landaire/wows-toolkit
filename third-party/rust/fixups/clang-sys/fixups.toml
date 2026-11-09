@@ -1,0 +1,4 @@
+# Discovers and links the libclang installation used by bindgen.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true

@@ -1,0 +1,12 @@
+[package]
+name = "wows-nsh-bundle"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[dependencies]
+nsh-base = "0.4.0"
+nsh-bundler = { workspace = true }
+wows-toolkit-nsh = { path = "../../crates/wows-toolkit-nsh" }

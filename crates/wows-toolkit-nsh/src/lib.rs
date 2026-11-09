@@ -1,11 +1,12 @@
-mod app;
-mod chart_tab;
-pub mod error;
 pub mod frames;
-pub mod replays;
-mod replays_tab;
-mod ui;
+mod native;
 
-pub use app::App;
-pub use app::Launch;
-pub use app::Tab;
+pub use native::{AppTab, ShellText, StartupState, Toolkit};
+
+use nsh_core::prelude::{Registry, native_module};
+
+/// The native services imported by the TSX application.
+#[native_module("wows-toolkit/native")]
+fn native_module(registry: &mut Registry) {
+    registry.module::<Toolkit>();
+}

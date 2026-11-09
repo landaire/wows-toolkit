@@ -226,21 +226,21 @@ def workspace_integration_tests(package, version, library, deps = [], test_deps 
             run_env = run_env,
         )
 
-def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
-    env = _cargo_env(crate, package, version)
+def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], env = {}):
+    cargo_env = _cargo_env(crate, package, version) | env
     if buildscript != None:
-        env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
+        cargo_env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
     rustc_flags = rustc_flags + _profile_rustc_flags()
 
     # See workspace_library: the cargo wrapper would cap lints to allow.
     native.rust_binary(
         name = name,
-        srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"]),
+        srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"]) + resources,
         crate = crate,
         crate_root = crate_root,
         edition = edition,
-        env = env,
+        env = cargo_env,
         features = features,
         rustc_flags = rustc_flags,
         resources = resources,

@@ -6,7 +6,6 @@ mod encode;
 #[cfg(target_os = "linux")]
 pub mod native;
 mod scene;
-pub mod tab;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

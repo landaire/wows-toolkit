@@ -1,0 +1,2 @@
+# The script only configures the disabled napi feature.
+buildscript.run = false

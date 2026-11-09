@@ -1,5 +1,7 @@
 load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_wasm_tools", "selected_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
+load("@prelude//toolchains:genrule.bzl", "system_genrule_toolchain")
+
 
 nix_cxx_toolchain(
     name = "nix_cxx_macos",
@@ -45,6 +47,11 @@ nix_wasm_tools(
     name = "wasm_tools",
     visibility = ["PUBLIC"],
 )
+system_genrule_toolchain(
+    name = "genrule",
+    visibility = ["PUBLIC"],
+)
+
 
 hermetic_rust_toolchain(
     name = "nix_rust_macos",

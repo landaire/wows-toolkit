@@ -1,0 +1,2 @@
+# Records the host target included by bindgen.
+buildscript.run = true

@@ -6,9 +6,17 @@ export_file(
     mode = "reference",
     visibility = [],
 )
+genrule(
+    name = "nsh_ui_bundle",
+    srcs = glob(["ui/**"]),
+    out = "bundle.js",
+    cmd = "$(exe //build-support/nsh-bundle:nsh_bundle) $SRCDIR/ui/App.tsx $OUT",
+    visibility = [],
+)
+
 
 NSH_DEPS = [
-    "//crates/wows-replays:wows_replays",
+    "//crates/wt-translations:wt_translations",
     "//third-party/rust:base64",
     "//third-party/rust:env_logger",
     "//third-party/rust:log",
@@ -16,7 +24,8 @@ NSH_DEPS = [
     "//third-party/rust:nsh-core",
     "//third-party/rust:png",
     "//third-party/rust:serde_json",
-    "//third-party/rust:thiserror",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:sys-locale",
     "//third-party/rust:tiny-skia",
     "//third-party/rust:tokio",
 ] + os_select(
@@ -29,7 +38,7 @@ workspace_library(
     name = "wows_toolkit_nsh",
     crate = "wows_toolkit_nsh",
     package = "wows-toolkit-nsh",
-    version = "0.0.0",
+    version = "1.0.3",
     env = {"CARGO_MANIFEST_DIR": "$(location :_cargo_manifest)/.."},
     deps = NSH_DEPS,
 )
@@ -38,18 +47,23 @@ workspace_binary(
     name = "nsh_bin",
     crate = "wows_toolkit_nsh",
     package = "wows-toolkit-nsh",
-    version = "0.0.0",
+    version = "1.0.3",
     crate_root = "src/main.rs",
+    env = {"NSH_BUNDLE_PATH": "$(location :nsh_ui_bundle)"},
+    features = ["buck"],
+    resources = [":nsh_ui_bundle"],
     deps = NSH_DEPS + [":wows_toolkit_nsh"],
 )
 
 workspace_integration_tests(
     package = "wows-toolkit-nsh",
-    version = "0.0.0",
+    version = "1.0.3",
     library = ":wows_toolkit_nsh",
     deps = NSH_DEPS,
+    features = ["buck"],
+    run_env = {"NSH_BUNDLE_PATH": "$(location :nsh_ui_bundle)"},
     test_deps = [
-        "//third-party/rust:nsh-engine",
         "//third-party/rust:nsh-testing",
+        "//third-party/rust:nsh-engine",
     ],
 )

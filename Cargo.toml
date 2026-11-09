@@ -31,6 +31,7 @@ members = [
     "crates/wows-query",
     "crates/wows-mcp",
     "build-support/buck/reindeer-features",
+    "build-support/nsh-bundle",
 ]
 # The generated third-party BUCK graph excludes vendored source trees.
 exclude = ["third-party/rust/vendor"]
@@ -119,6 +120,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 rust-i18n = "3.1.5"
 sys-locale = "0.3"
+nsh-bundler = "0.4.0"
 
 [patch.crates-io]
 # Relaxes gpui-fast-web's `=0.1.3` unicode-properties pin for epaint 0.37.

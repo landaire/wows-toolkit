@@ -1,0 +1,4 @@
+# Compiles the bundled QuickJS runtime and generates its Rust metadata.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true

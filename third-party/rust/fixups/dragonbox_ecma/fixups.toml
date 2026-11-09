@@ -1,0 +1,2 @@
+# Emits the rustc-version compatibility cfg.
+buildscript.run = true

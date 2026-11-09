@@ -1,0 +1,2 @@
+# Generates the CRC lookup tables included by the library.
+buildscript.run = true

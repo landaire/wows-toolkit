@@ -1,0 +1,14 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary")
+
+workspace_binary(
+    name = "nsh_bundle",
+    crate = "wows_nsh_bundle",
+    package = "wows-nsh-bundle",
+    version = "0.0.0",
+    crate_root = "src/main.rs",
+    deps = [
+        "//crates/wows-toolkit-nsh:wows_toolkit_nsh",
+        "//third-party/rust:nsh-base",
+        "//third-party/rust:nsh-bundler",
+    ],
+)

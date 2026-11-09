@@ -2,7 +2,18 @@
 use nsh_platform_linux as platform;
 
 #[cfg(target_os = "linux")]
-fn main() -> impl std::process::Termination {
+fn main() -> platform::gtk4::glib::ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("wows-toolkit-nsh: {error}");
+            platform::gtk4::glib::ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     const APP_ID: &str = "dev.landaire.wows-toolkit-nsh";
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -24,29 +35,53 @@ fn main() -> impl std::process::Termination {
         });
     }
 
-    platform::set_ui_sets(vec![nsh_base::registry()]);
+    platform::set_ui_sets(vec![nsh_base::registry(), wows_toolkit_nsh::registry()]);
     let components = platform::Components::default();
     wows_toolkit_nsh::frames::native::register(&components);
 
-    platform::run_app(
-        platform::AppSource::Rust(
-            platform::Root::of::<wows_toolkit_nsh::App>()
-                .tokens(nsh_base::Theme::default().into_tokens())
-                .app_id(APP_ID),
-        ),
+    let capabilities = bundle_capabilities()?;
+    let bundle = platform::Bundle::source(bundle_source()?)
+        .with_app_id(Some(APP_ID))
+        .with_capabilities_json(capabilities.as_deref())
+        .map_err(std::io::Error::other)?;
+    Ok(platform::run_app(
+        platform::AppSource::Bundle(bundle),
         platform::AppOptions {
-            title: "WoWs Toolkit (nsh spike)".to_owned(),
+            title: "WoWs Toolkit".to_owned(),
             app_id: APP_ID.to_owned(),
             size: (1400, 1000),
             fps: std::env::var_os("WTN_FPS").is_some(),
             components,
             ..Default::default()
         },
-    )
+    ))
+}
+
+#[cfg(all(target_os = "linux", feature = "buck"))]
+fn bundle_source() -> Result<String, Box<dyn std::error::Error>> {
+    Ok(include_str!(env!("NSH_BUNDLE_PATH")).to_owned())
+}
+
+#[cfg(all(target_os = "linux", not(feature = "buck")))]
+fn bundle_source() -> Result<String, Box<dyn std::error::Error>> {
+    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
+    let bundled = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into(), wows_toolkit_nsh::registry().into()],
+    })?;
+    Ok(bundled.code)
+}
+
+#[cfg(target_os = "linux")]
+fn bundle_capabilities() -> Result<Option<String>, serde_json::Error> {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../ui/nsh.json"))?;
+    Ok(manifest.get("capabilities").map(serde_json::Value::to_string))
 }
 
 #[cfg(not(target_os = "linux"))]
 fn main() -> std::process::ExitCode {
-    eprintln!("wows-toolkit-nsh is a spike for nsh's Linux GTK backend; it does nothing on this platform");
+    eprintln!("wows-toolkit-nsh requires nsh's Linux GTK backend");
     std::process::ExitCode::FAILURE
 }
