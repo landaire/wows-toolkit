@@ -1,6 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 3066
+assertion_line: 3446
 expression: stats.stats
 ---
 - "Hit Points: 50600"
@@ -120,3 +120,15 @@ expression: stats.stats
 - "Flooding duration: 40.0 s"
 - "Flooding damage per second, percent of maximum health: 0.25%"
 - "Damage of one flood over its whole duration: 5060"
+- "Short-range AA continuous damage per second, every short-range aura together, before hit chance, as the port card shows it: 88 hp/s"
+- "Medium-range AA continuous damage per second, every medium-range aura together, before hit chance, as the port card shows it: 417 hp/s"
+- "Long-range AA continuous damage per second, every long-range aura together, before hit chance, as the port card shows it: 105 hp/s"
+- "Reach of the short-range AA auras: 2.00 km"
+- "Reach of the medium-range AA auras: 4.00 km"
+- "Reach of the long-range AA auras: 5.80 km"
+- "Gun mounts feeding the short-range AA auras: 12"
+- "Gun mounts feeding the medium-range AA auras: 12"
+- "Gun mounts feeding the long-range AA auras, secondary and dual-purpose main battery guns included: 6"
+- "Flak bursts in one AA salvo, every flak aura together: 5"
+- "Damage of one flak burst: 1680"
+- "AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned on the way; a judgment to compare ships of one class and tier, not a game value: 7462"

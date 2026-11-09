@@ -1,12 +1,12 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1342
 expression: "json!({\n    \"ship\": chateaurenault.ship, \"index\": chateaurenault.index, \"standings\":\n    chateaurenault.standings.iter().map(beaten).collect::<Vec<_>>(),\n    \"torpedoes\":\n    chateaurenault.torpedoes.iter().map(|torpedo|\n    json!({\n        \"torpedo\": torpedo.torpedo, \"standings\":\n        torpedo.standings.iter().map(beaten).collect::<Vec<_>>()\n    })).collect::<Vec<_>>(),\n})"
 ---
 ship: "T10 Châteaurenault (destroyer, France, premium)"
 index: PFSD710
 standings:
   - "health 30300.00 HP (Higher is better): rank 4/40, better 3, worse 35, tied 1, outlier None, beaten 89.74%, ties half 91.03%"
+  - "damage_control_reload 40.00 s (Lower is better): rank 1/40, better 0, worse 0, tied 39, outlier None, beaten 0.00%, ties half 50.00%"
   - "main_battery_reload 2.76 s (Lower is better): rank 16/40, better 15, worse 23, tied 1, outlier None, beaten 58.97%, ties half 60.26%"
   - "main_battery_range 17.22 km (Higher is better): rank 17/40, better 16, worse 23, tied 0, outlier None, beaten 58.97%, ties half 58.97%"
   - "dpm_ap 322640.00 HP/min (Higher is better): rank 18/35, better 17, worse 17, tied 0, outlier None, beaten 50.00%, ties half 50.00%"
@@ -28,8 +28,9 @@ standings:
   - "torpedo_reload 76.50 s (Lower is better): rank 13/37, better 12, worse 20, tied 4, outlier None, beaten 55.56%, ties half 61.11%"
   - "torpedo_launch_from_bow 6.00 deg (Lower is better): rank 1/37, better 0, worse 36, tied 0, outlier Some(Better), beaten 100.00%, ties half 100.00%"
   - "broadside_tubes 6.00 tubes (Higher is better): rank 25/37, better 24, worse 7, tied 5, outlier None, beaten 19.44%, ties half 26.39%"
-  - "aa_damage 238.00 HP/s (Higher is better): rank 13/40, better 12, worse 27, tied 0, outlier None, beaten 69.23%, ties half 69.23%"
-  - "aa_range 3.80 km (Higher is better): rank 14/40, better 13, worse 23, tied 3, outlier None, beaten 58.97%, ties half 62.82%"
+  - "aa_rating 6393.00 hp (Higher is better): rank 21/40, better 20, worse 19, tied 0, outlier None, beaten 48.72%, ties half 48.72%"
+  - "aa_long_dps 85.00 HP/s (Higher is better): rank 17/32, better 16, worse 15, tied 0, outlier None, beaten 48.39%, ties half 48.39%"
+  - "aa_flak 12220.00 hp (Higher is better): rank 17/32, better 16, worse 15, tied 0, outlier None, beaten 48.39%, ties half 48.39%"
   - "concealment 6.34 km (Lower is better): rank 25/40, better 24, worse 15, tied 0, outlier None, beaten 38.46%, ties half 38.46%"
   - "air_concealment 3.01 km (Lower is better): rank 18/40, better 17, worse 21, tied 1, outlier None, beaten 53.85%, ties half 55.13%"
   - "speed 41.00 kn (Higher is better): rank 8/40, better 7, worse 31, tied 1, outlier None, beaten 79.49%, ties half 80.77%"

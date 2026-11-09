@@ -14,6 +14,7 @@ use pickled::Value;
 use pickled::value::Shared;
 #[cfg(feature = "vfs")]
 use tracing::debug;
+use wows_core::units::DamagePerSecond;
 
 use crate::Rc;
 #[cfg(feature = "vfs")]
@@ -24,6 +25,14 @@ use crate::error::GameDataError;
 use crate::game_params::convert::ValueDictExt;
 use crate::game_params::convert::base_params_dict;
 use crate::game_params::convert::game_params_to_pickle;
+use crate::game_params::ttx::anti_air::AntiAirAura;
+use crate::game_params::ttx::anti_air::AntiAirComponent;
+use crate::game_params::ttx::anti_air::AntiAirMount;
+use crate::game_params::ttx::anti_air::AuraBand;
+use crate::game_params::ttx::anti_air::FlakBurstCount;
+use crate::game_params::ttx::anti_air::FlakFields;
+use crate::game_params::ttx::anti_air::HitChance;
+use crate::game_params::ttx::anti_air::PrioritySectorPhase;
 use crate::game_params::ttx::components::LauncherDirection;
 use crate::game_params::ttx::components::LauncherDirectionGroup;
 use crate::game_params::ttx::components::LoaderCount;
@@ -1204,6 +1213,130 @@ fn read_alternative_fire(artillery: &pickled::Dict) -> Option<AlternativeFireMod
     })
 }
 
+/// The squadron auras and priority sector of an AA, secondary or main battery
+/// component, `None` when it has neither. An aura is a dict with a `type` of
+/// `near`, `medium` or `far` (`AirDefenseAuraType`); one aimed at missiles
+/// (`targetType` 1) is left out. An aura missing a field the client requires
+/// (`AirDefense.py:353-374`) is malformed and left out.
+fn read_anti_air(component: &pickled::Dict) -> Option<AntiAirComponent> {
+    /// `AirDefenseAuraTargetType.SQUADRON` (`m63fc2621.py:260`).
+    const SQUADRON: f32 = 0.0;
+
+    let count = |dict: &pickled::Dict, key: &str| {
+        read_float(dict, key).filter(|count| *count >= 0.0 && count.fract() == 0.0).map(|count| count as u32)
+    };
+    let mount = |hardpoint: &str| {
+        let gun = component.get(&pk(hardpoint))?.dict_or_object_dict()?;
+        let gun = gun.inner();
+
+        Some(AntiAirMount {
+            hardpoint: hardpoint.to_owned(),
+            gun: read_string(&gun, "name")?,
+            caliber: read_float(&gun, keys::BARREL_DIAMETER).map(|diameter| Meters::new(diameter).to_mm()),
+            barrels: count(&gun, keys::NUM_BARRELS),
+        })
+    };
+
+    let mut auras = Vec::new();
+    for (key, value) in component.iter() {
+        let Some(name) = key.string_ref().map(|name| name.inner().clone()) else {
+            continue;
+        };
+        let Some(aura) = value.dict_or_object_dict() else {
+            continue;
+        };
+        let aura = aura.inner();
+        let Some(band) = read_string(&aura, "type").as_deref().and_then(AuraBand::from_game_str) else {
+            continue;
+        };
+        if read_float(&aura, "targetType").is_some_and(|target| target != SQUADRON) {
+            continue;
+        }
+        let (Some(area_damage), Some(period), Some(hit_chance), Some(min_distance), Some(max_distance)) = (
+            read_float(&aura, "areaDamage"),
+            read_float(&aura, "areaDamagePeriod"),
+            read_float(&aura, "hitChance"),
+            read_float(&aura, "minDistance"),
+            read_float(&aura, "maxDistance"),
+        ) else {
+            continue;
+        };
+        let double = |key: &str| {
+            aura.get(&pk(key))
+                .and_then(|value| value.f64_ref().copied().or_else(|| value.i64_ref().map(|int| *int as f64)))
+        };
+        let Some(area_dps) = double("areaDamage")
+            .zip(double("areaDamagePeriod"))
+            .filter(|(_, period)| *period > 0.0)
+            .map(|(damage, period)| DamagePerSecond::new((damage / period).round() as f32))
+        else {
+            continue;
+        };
+
+        let flak = read_float(&aura, "bubbleDamage").filter(|damage| *damage > 0.0).and_then(|damage| {
+            Some(FlakFields {
+                damage_per_tick: Hp::from(damage),
+                inner: FlakBurstCount(count(&aura, "innerBubbleCount")?),
+                outer: FlakBurstCount(count(&aura, "outerBubbleCount")?),
+                radius: BigWorldDistance::from(read_float(&aura, "bubbleRadius")?),
+                inner_zone: BigWorldDistance::from(read_float(&aura, "innerBubbleZone")?),
+                half_outer_zone: BigWorldDistance::from(read_float(&aura, "halfOuterBubbleZone")?),
+                duration: Seconds::from(read_float(&aura, "bubbleDuration")?),
+            })
+        });
+        let mounts = aura
+            .get(&pk("guns"))
+            .map(read_string_sequence)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|hardpoint| mount(hardpoint))
+            .collect();
+
+        auras.push(AntiAirAura {
+            name,
+            band,
+            area_damage: Hp::from(area_damage),
+            area_damage_period: Seconds::from(period),
+            area_dps,
+            hit_chance: HitChance(hit_chance),
+            min_distance: Meters::new(min_distance),
+            max_distance: Meters::new(max_distance),
+            // The client's aura classes default `enableBarrage` to True
+            // (`AuraNear`, `AuraMedium`, `AuraFar`, `m65e88a3f.py:1017-1041`).
+            enable_barrage: aura.get(&pk("enableBarrage")).and_then(|value| value.bool_ref().copied()).unwrap_or(true),
+            flak,
+            mounts,
+        });
+    }
+    // By key, so the order does not depend on dict order.
+    auras.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let priority_sector_phases: Vec<PrioritySectorPhase> = component
+        .get(&pk("prioritySectorPhases"))
+        .map(read_sequence)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|phase| {
+            let phase = read_sequence(phase);
+            Some(PrioritySectorPhase {
+                duration: Seconds::from(read_number(phase.first()?)?),
+                start_damage: read_number(phase.get(2)?)?,
+                strength_from: read_number(phase.get(3)?)?,
+                strength_to: read_number(phase.get(4)?)?,
+            })
+        })
+        .collect();
+    if auras.is_empty() && priority_sector_phases.is_empty() {
+        return None;
+    }
+
+    Some(AntiAirComponent {
+        auras,
+        priority_sector_cooldown: read_float(component, "prioritySectorCooldown").map(Seconds::from),
+        priority_sector_phases,
+    })
+}
+
 /// Port price and research links from a ship's `ShipUpgradeInfo` dict.
 fn read_ship_research(upgrade_info: &pickled::Dict) -> super::types::ShipResearch {
     let mut next_ships: Vec<String> = upgrade_info
@@ -1922,6 +2055,26 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             && let Some(instructions) = read_combat_instructions(&specials_data.inner())
         {
             ttx_components.combat_instructions.insert(upgrade_name.clone(), instructions);
+        }
+
+        // AA auras sit on the AA, secondary and main battery components any
+        // upgrade lists (`Components/AirDefense.py:51-61`).
+        if let Some(listed) = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_or_object_dict()) {
+            let listed = listed.inner();
+            for key in [keys::COMP_AIR_DEFENSE, keys::COMP_ATBA, keys::COMP_ARTILLERY] {
+                for component in listed.get(&pk(key)).map(read_all_strings).unwrap_or_default() {
+                    if ttx_components.anti_air.contains_key(&component) {
+                        continue;
+                    }
+                    let Some(data) = ship_data.get(&pk(&component)).and_then(|v| v.dict_or_object_dict()) else {
+                        continue;
+                    };
+
+                    if let Some(anti_air) = read_anti_air(&data.inner()) {
+                        ttx_components.anti_air.insert(component, anti_air);
+                    }
+                }
+            }
         }
 
         // Torpedoes are a standalone _Torpedoes upgrade naming a torpedo component

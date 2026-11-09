@@ -200,6 +200,14 @@ pub enum QueryError {
     #[error("rank.limit must be from 1 to {max}, not {limit}")]
     RankLimitOutOfRange { limit: usize, max: usize },
 
+    #[error(
+        "rank.condition applies only to mobility.speed, underwater_mobility.periscope_speed and underwater_mobility.speed, not {stat}; ask again without condition"
+    )]
+    RankConditionNotSpeed { stat: String },
+
+    #[error("rank.condition ranks on the best build with the condition held; ask again without rank.build")]
+    RankConditionWithBuild,
+
     #[error("{reason}")]
     InvalidArguments { reason: &'static str },
 

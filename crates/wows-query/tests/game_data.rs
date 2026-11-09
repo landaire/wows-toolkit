@@ -20,6 +20,7 @@ use wows_query::armor_trace::AmmoTrace;
 use wows_query::armor_trace::ArmorTraceArgs;
 use wows_query::armor_trace::RayOutcome;
 use wows_query::armor_trace::TraceWeapon;
+use wows_query::battle_impact::BattleImpactArgs;
 use wows_query::citadel::CitadelProfileArgs;
 use wows_query::citadel::Turtleback;
 use wows_query::commanders::CommanderArgs;
@@ -45,6 +46,7 @@ use wows_query::ships::ShipOverviewArgs;
 use wows_query::ships::Tier;
 use wows_query::skills::CaptainSkillArgs;
 use wows_query::skills::SkillTreeArgs;
+use wows_query::stat_search::RankBuild;
 use wows_query::stat_search::RankLimit;
 use wows_query::stat_search::RankOrder;
 use wows_query::stat_search::StatNamesArgs;
@@ -1276,6 +1278,38 @@ fn unique_upgrades_and_the_ships_they_fit() {
     insta::assert_yaml_snapshot!(colombo.unique_upgrades);
 }
 
+/// Quoted numbers traced to the stat and build that give them: Shimakaze's
+/// HP with Survivability Expert, Des Moines' range with Gun Fire Control
+/// System Modification 2 and its best AP damage per minute, Yamato's stock
+/// rudder shift rounded to a decimal, and a number no build gives.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn explain_stat_value_finds_the_build_behind_a_number() {
+    let explain =
+        |arguments: serde_json::Value| game().call_tool("explain_stat_value", arguments).expect("the tool runs");
+
+    insta::assert_yaml_snapshot!(
+        "explain_stat_value_shimakaze_hp",
+        explain(json!({ "ship": "Shimakaze", "value": 21400, "unit": "hp" }))
+    );
+    insta::assert_yaml_snapshot!(
+        "explain_stat_value_des_moines_range",
+        explain(json!({ "ship": "Des Moines", "value": 18.36 }))
+    );
+    insta::assert_yaml_snapshot!(
+        "explain_stat_value_yamato_rudder",
+        explain(json!({ "ship": "Yamato", "value": 22.1, "stat": "rudder" }))
+    );
+    insta::assert_yaml_snapshot!(
+        "explain_stat_value_des_moines_dpm",
+        explain(json!({ "ship": "Des Moines", "value": 585744 }))
+    );
+    insta::assert_yaml_snapshot!(
+        "explain_stat_value_no_match",
+        explain(json!({ "ship": "Des Moines", "value": 77777, "unit": "hp" }))
+    );
+}
+
 /// Each ship's unique upgrade as ship_upgrades reports it, by the names
 /// players use.
 #[test]
@@ -1309,6 +1343,60 @@ fn unique_upgrades_are_found_for_their_ships() {
             "{nation}: {unique:?}"
         );
     }
+}
+
+/// Every tier 10 ship of each scored class by battle impact, with its
+/// component scores.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn battle_impact_tier_10_rankings() {
+    for class in [ShipClass::Cruiser, ShipClass::Battleship, ShipClass::Destroyer] {
+        let output = game()
+            .battle_impact(&BattleImpactArgs {
+                class: Some(class),
+                tier: Some(Tier(10)),
+                limit: Some(usize::MAX),
+                ..Default::default()
+            })
+            .expect("tier 10 ships score");
+        assert_eq!(output.ships.len(), output.ranked);
+        assert!(output.lowest.is_empty());
+        let lines: Vec<String> = output
+            .ships
+            .iter()
+            .map(|ship| {
+                let components = serde_json::to_value(&ship.components).expect("components serialize");
+                let scores: Vec<String> = components
+                    .as_object()
+                    .expect("components is a map")
+                    .iter()
+                    .map(|(name, component)| {
+                        format!("{name} {:.1}", component["score"].as_f64().expect("scores are numbers"))
+                    })
+                    .collect();
+                format!("{}. {} {}: {}", ship.rank, ship.ship, ship.score.value(), scores.join(", "))
+            })
+            .collect();
+        insta::assert_yaml_snapshot!(
+            format!("battle_impact_tier_10_{}", output.group.trim_start_matches("tier 10 ")),
+            json!({ "weights": output.weights, "ships": lines })
+        );
+    }
+}
+
+/// The battle_impact tool answer for one named ship outside the top.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn battle_impact_lists_a_named_ship() {
+    let args = json!({ "class": "battleship", "tier": 10, "ships": ["Conqueror"], "limit": 3 });
+    let output = game().call_tool("battle_impact", args).expect("tier 10 battleships score");
+    let ships = output["ships"].as_array().expect("ships listed");
+    let named = |ship: &serde_json::Value| ship["ship"].as_str().is_some_and(|name| name.contains("Conqueror"));
+    assert!(ships.iter().any(named), "{output:#}");
+    insta::assert_yaml_snapshot!(output);
+
+    let carriers = game().call_tool("battle_impact", json!({ "class": "carrier", "tier": 10 }));
+    assert!(carriers.is_err());
 }
 
 /// Incomparable, C. Colombo with its unique upgrade and Togasa, in testing,
@@ -1474,7 +1562,7 @@ fn comparison_output_stays_bounded() {
         }
         let output = game().call_tool("ship_comparison", args).expect("group compares");
         let chars = serde_json::to_string(&output).expect("output serializes").len();
-        let limit = if named.is_some() { 20_000 } else { 30_000 };
+        let limit = if named.is_some() { 25_000 } else { 30_000 };
         assert!(chars < limit, "tier 10 {class} named {named:?}: {chars} chars, over {limit}");
         sizes.push(format!("tier 10 {class} named {named:?}: {chars} chars, about {} tokens", chars * 2 / 7));
         if class == "destroyer" && named.is_none() {
@@ -2906,6 +2994,26 @@ fn armor_assessment_of_battleships() {
     let yamato = armor_assessment("Yamato");
     assert!(yamato.properties.turtleback.is_none());
     insta::assert_yaml_snapshot!("armor_assessment_yamato", yamato);
+
+    let kurfurst = armor_assessment("G. Kurfürst");
+    assert!(kurfurst.armor_verdict.is_some(), "{kurfurst:#?}");
+    insta::assert_yaml_snapshot!("armor_assessment_grosser_kurfurst", kurfurst);
+}
+
+/// Armor outliers read from the target's side: each leads with strength or
+/// weakness and says what the outcome means for the ship.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn comparison_armor_outliers_lead_with_strength_or_weakness() {
+    let output = game()
+        .call_tool("ship_comparison", json!({ "class": "battleship", "tier": 10, "ships": ["G. Kurfürst"] }))
+        .expect("tier 10 battleships compare");
+    let outliers = output["ships"][0]["outliers"].as_array().expect("G. Kurfürst has outliers");
+    for outlier in outliers {
+        let text = outlier.as_str().expect("outlier text");
+        assert!(text.starts_with("strength: ") || text.starts_with("weakness: "), "{text}");
+    }
+    insta::assert_yaml_snapshot!(outliers);
 }
 
 #[test]
@@ -3220,6 +3328,7 @@ fn armor_stats_are_labelled_nominal() {
                 qualifier: None,
                 limit: Some(RankLimit(3)),
                 build: None,
+                condition: None,
             }),
             min_tier: Some(Tier(10)),
             max_tier: Some(Tier(10)),
@@ -3251,6 +3360,7 @@ fn submarine_speed_per_depth() {
                 qualifier: None,
                 limit: Some(RankLimit(25)),
                 build: None,
+                condition: None,
             }),
             min_tier: Some(Tier(10)),
             max_tier: Some(Tier(10)),
@@ -3259,6 +3369,65 @@ fn submarine_speed_per_depth() {
         })
         .expect("search runs");
     insta::assert_yaml_snapshot!("submarine_submerged_speed_ranking", search.ranking.expect("a rank was asked for"));
+}
+
+/// Top speed with the conditions that raise it only part of a battle:
+/// Engine Boost, signals, conditional skills, special abilities and, with a
+/// commander, talents. Each is an alternative; the best-fit build is
+/// always on.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn conditional_speed_alternatives() {
+    for (ship, commander, snapshot) in [
+        ("Shimakaze", None, "conditional_speed_shimakaze"),
+        ("Kleber", None, "conditional_speed_kleber"),
+        ("Kleber", Some("Auboyneau"), "conditional_speed_kleber_auboyneau"),
+        ("Smolensk", None, "conditional_speed_smolensk"),
+        ("Yamato", None, "conditional_speed_yamato"),
+        ("Orzel", None, "conditional_speed_orzel"),
+        ("Halland", None, "conditional_speed_halland"),
+        ("Affondatore", None, "conditional_speed_affondatore"),
+    ] {
+        let stats = game()
+            .ship_stats(&ShipStatsArgs {
+                ship: ship.to_owned(),
+                commander: commander.map(str::to_owned),
+                ..Default::default()
+            })
+            .expect("ship exists");
+        let speed = stats.build_stats.expect("no loadout gives build_stats").speed;
+        insta::assert_yaml_snapshot!(snapshot, speed);
+    }
+}
+
+/// Tier 10 destroyers ranked by top speed with Engine Boost active; ships
+/// without one rank on their always-on best build.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn speed_ranking_with_engine_boost() {
+    let rank = |stat: &str, build: Option<RankBuild>| StatRank {
+        stat: stat.to_owned(),
+        order: RankOrder::Desc,
+        qualifier: None,
+        limit: Some(RankLimit(10)),
+        build,
+        condition: Some("Engine Boost".to_owned()),
+    };
+    let search = |rank: StatRank| {
+        game().stat_search(&StatSearchArgs {
+            rank: Some(rank),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            class: Some(ShipClass::Destroyer),
+            ..Default::default()
+        })
+    };
+
+    let ranking = search(rank("mobility.speed", None)).expect("search runs").ranking.expect("a rank was asked for");
+    insta::assert_yaml_snapshot!("destroyer_speed_ranking_with_engine_boost", ranking);
+
+    assert!(matches!(search(rank("visibility.sea_detection", None)), Err(QueryError::RankConditionNotSpeed { .. })));
+    assert!(matches!(search(rank("mobility.speed", Some(RankBuild::Base))), Err(QueryError::RankConditionWithBuild)));
 }
 
 #[test]
@@ -3665,4 +3834,60 @@ fn top_ten_aircraft_ordnance_by_fire_chance() {
         .collect();
 
     insta::assert_yaml_snapshot!(json!({ "stat": ranking["stat"], "ships": ships }));
+}
+
+/// AA bands, flak, priority sector and rating of an AA cruiser, a gun
+/// cruiser, a battleship and a torpedo destroyer, on their best-fit builds.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn anti_aircraft_on_the_best_builds() {
+    for name in ["Des Moines", "Yamato", "Shimakaze", "Worcester"] {
+        let stats =
+            game().ship_stats(&ShipStatsArgs { ship: name.to_owned(), ..Default::default() }).expect("ship exists");
+        let anti_aircraft = stats.build_stats.and_then(|builds| builds.anti_aircraft).expect("the ship has AA");
+        insta::assert_yaml_snapshot!(format!("anti_aircraft_{}", name.replace(' ', "_")), anti_aircraft);
+    }
+}
+
+/// Tier 10 ships of each class ranked by AA rating, strongest and weakest.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn tier_10_anti_aircraft_rating_by_class() {
+    let rank = |class: ShipClass, order: RankOrder, limit: usize| -> Vec<String> {
+        let search = game()
+            .stat_search(&StatSearchArgs {
+                rank: Some(StatRank {
+                    stat: "aa.rating".to_owned(),
+                    order,
+                    qualifier: None,
+                    limit: Some(RankLimit(limit)),
+                    build: None,
+                    condition: None,
+                }),
+                min_tier: Some(Tier(10)),
+                max_tier: Some(Tier(10)),
+                class: Some(class),
+                ..Default::default()
+            })
+            .expect("search runs");
+        let ranking = search.ranking.expect("a rank was asked for");
+
+        ranking
+            .ships
+            .iter()
+            .map(|ship| format!("{} {}: {} (base {})", ship.rank, ship.ship, ship.value, ship.base))
+            .collect()
+    };
+
+    let mut table: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (label, class) in [
+        ("destroyers", ShipClass::Destroyer),
+        ("cruisers", ShipClass::Cruiser),
+        ("battleships", ShipClass::Battleship),
+        ("aircraft carriers", ShipClass::AircraftCarrier),
+    ] {
+        table.insert(format!("{label} strongest"), rank(class, RankOrder::Desc, 10));
+        table.insert(format!("{label} weakest"), rank(class, RankOrder::Asc, 5));
+    }
+    insta::assert_yaml_snapshot!(table);
 }

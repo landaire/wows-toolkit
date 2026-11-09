@@ -34,6 +34,7 @@ use wowsunpack::game_params::ttx::StatKey;
 use wowsunpack::game_params::ttx::labels::TtxStat;
 use wowsunpack::game_params::ttx::labels::stat_display_label;
 use wowsunpack::game_params::ttx::model::AmmoCount;
+use wowsunpack::game_params::ttx::model::Knots;
 use wowsunpack::game_params::ttx::model::StatRow;
 use wowsunpack::game_params::ttx::model::StatValue;
 use wowsunpack::game_params::ttx::provenance::ShipStatsProvenance;
@@ -79,6 +80,8 @@ use crate::ships::ShipCounts;
 use crate::ships::ShipFilter;
 use crate::ships::Tier;
 use crate::ships::TierRange;
+use crate::speed::SpeedDepth;
+use crate::speed::names_condition;
 use crate::text::clean;
 use crate::upgrades::Upgrade;
 
@@ -202,6 +205,9 @@ pub struct StatRank {
 
     /// The build each ship is ranked on. Omit it to rank each ship on the build players run for the stat, the one that makes it better whatever the order: lower detection, reload, dispersion and flight time; higher damage, range and health. So "desc" on visibility.sea_detection lists the worst concealment as players build their ships. "base": stock hull and modules, no captain skills, no upgrades, for base values such as base detection. "lowest" or "highest": the build that lowers or raises the stat most, e.g. how bad a stat can get. A stat with no better direction ranks on the build that moves it furthest in the order.
     pub build: Option<RankBuild>,
+
+    /// For speed stats only (mobility.speed, underwater_mobility.periscope_speed, underwater_mobility.speed): rank each ship on its top speed while a condition holds, named as in the ship_stats speed alternatives, e.g. "Engine Boost", "Sierra Mike", "Swift in Silence", "Engine Boost and Sierra Mike". Ships without that condition rank on their always-on best build and their entries carry no condition. Omit it to rank on the always-on best build, without conditional skills, signals, consumables or special abilities. Leave build out with it.
+    pub condition: Option<String>,
 }
 
 /// The build each ranked ship is valued on.
@@ -485,6 +491,12 @@ pub struct RankedShip {
     /// where the ranked build starts the most, in total and per armament.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fires_by_armament: Option<FireBreakdown>,
+
+    /// With rank.condition: the speed alternative the value is on, e.g.
+    /// "with Engine Boost active". Absent when the ship lacks the condition
+    /// and is ranked on its always-on best build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
 
     /// The row the value comes from when the stat has several, e.g. "main
     /// battery 483 mm HE".
@@ -880,6 +892,16 @@ impl SearchStat {
     /// stats, except that every extra charge counts.
     fn is_consumable(self) -> bool {
         matches!(self, Self::Card(stat) if stat.field_key().starts_with("consumable."))
+    }
+
+    /// The depth of a top speed stat; `None` for other stats.
+    fn speed_depth(self) -> Option<SpeedDepth> {
+        match self {
+            Self::Card(TtxStat::Speed) => Some(SpeedDepth::Surface),
+            Self::Card(TtxStat::PeriscopeSpeed) => Some(SpeedDepth::Periscope),
+            Self::Card(TtxStat::SubmergedSpeed) => Some(SpeedDepth::Submerged),
+            _ => None,
+        }
     }
 
     /// The battery a shell stat describes, named with each value so main and
@@ -1293,8 +1315,8 @@ impl GameData {
         let mut lacking: Vec<&Ship> = Vec::new();
         for (ship, meets) in candidates {
             match self.rank_builds(ship, rank, &row_names) {
-                Ok(Some(RankedBuilds { builds, fires_by_armament })) => {
-                    entries.push(RankEntry { ship, builds, fires_by_armament, meets })
+                Ok(Some(RankedBuilds { builds, fires_by_armament, condition })) => {
+                    entries.push(RankEntry { ship, builds, fires_by_armament, condition, meets })
                 }
                 Ok(None) => lacking.push(ship),
                 Err(error) => undetermined.push(UndeterminedShip {
@@ -1338,7 +1360,7 @@ impl GameData {
         let ships: Vec<RankedShip> = entries
             .into_iter()
             .zip(placements)
-            .map(|(RankEntry { ship, builds, fires_by_armament, meets }, (position, tied))| {
+            .map(|(RankEntry { ship, builds, fires_by_armament, condition, meets }, (position, tied))| {
                 let value = rank.ranked(&builds);
                 let (build, tier_fillers) = match rank.build {
                     RankBuild::Base => (Vec::new(), Vec::new()),
@@ -1355,6 +1377,7 @@ impl GameData {
                     tied,
                     meets,
                     fires_by_armament,
+                    condition,
                     row: value.row.and_then(|row| row_names.label(self, ship, rank.stat, row)),
                 }
             })
@@ -1401,8 +1424,13 @@ impl GameData {
     /// Base and best-fit build value of the rank stat, `None` when the ship
     /// lacks it.
     fn rank_builds(&self, ship: &Ship, rank: &Rank, row_names: &RowNames) -> Result<Option<RankedBuilds>, QueryError> {
-        let plain =
-            |builds: Option<Builds<Amount>>| builds.map(|builds| RankedBuilds { builds, fires_by_armament: None });
+        if let Some(condition) = &rank.condition {
+            return self.conditional_speed_builds(ship, condition);
+        }
+
+        let plain = |builds: Option<Builds<Amount>>| {
+            builds.map(|builds| RankedBuilds { builds, fires_by_armament: None, condition: None })
+        };
         match rank.stat {
             SearchStat::Card(stat) => {
                 let planner = Planner::new(self, ship);
@@ -1507,7 +1535,7 @@ impl GameData {
                 let fires_by_armament =
                     coverage(ranked.selection).and_then(|coverage| fire_breakdown(&sources, coverage)).map(rounded);
 
-                Ok(Some(RankedBuilds { builds, fires_by_armament }))
+                Ok(Some(RankedBuilds { builds, fires_by_armament, condition: None }))
             }
             SearchStat::Armor { zone, bound } => {
                 let value = armor_value(&zone_spans(&plates(ship)), zone, bound);
@@ -1545,6 +1573,48 @@ impl GameData {
                 planned_builds(&planner, rank, &extract).map(plain)
             }
         }
+    }
+
+    /// Base and top speed with `condition` held, or the always-on best-fit
+    /// build when the ship lacks it. `None` when the ship lacks the speed.
+    fn conditional_speed_builds(
+        &self,
+        ship: &Ship,
+        condition: &RankCondition,
+    ) -> Result<Option<RankedBuilds>, QueryError> {
+        let planner = Planner::new(self, ship);
+        let Some(stat) = self.speed_build(&planner, condition.depth)? else {
+            return Ok(None);
+        };
+
+        let builds = stat.builds;
+        let amount = |value: Knots| Amount { value: value.value(), row: None };
+        let held =
+            builds.alternatives.into_iter().find(|alternative| names_condition(&alternative.label, &condition.name));
+        let (best, label) = match held {
+            Some(alternative) => (
+                BuildValue {
+                    value: amount(alternative.value),
+                    assumed: alternative.assumed,
+                    tier_fillers: alternative.tier_fillers,
+                },
+                Some(alternative.label),
+            ),
+            None => (
+                BuildValue {
+                    value: amount(builds.best.value),
+                    assumed: builds.best.assumed,
+                    tier_fillers: builds.best.tier_fillers,
+                },
+                None,
+            ),
+        };
+
+        Ok(Some(RankedBuilds {
+            builds: Builds { base: amount(builds.base), best, alternatives: Vec::new() },
+            fires_by_armament: None,
+            condition: label,
+        }))
     }
 }
 
@@ -2143,6 +2213,15 @@ struct Rank {
     build: RankBuild,
     basis: BuildBasis,
     limit: RankLimit,
+    condition: Option<RankCondition>,
+}
+
+/// A condition a speed ranking holds, with the depth of the speed.
+struct RankCondition {
+    depth: SpeedDepth,
+
+    /// As the request names it, matched against speed alternative labels.
+    name: String,
 }
 
 impl Rank {
@@ -2165,7 +2244,12 @@ impl Rank {
             BuildBasis::Order => ", as the order runs",
         };
 
-        format!("{}{rows} ({}), {order}, {build}{basis}", self.stat.name(), self.stat.unit().name())
+        let condition = match &self.condition {
+            Some(condition) => format!(", with {} held", condition.name),
+            None => String::new(),
+        };
+
+        format!("{}{rows} ({}), {order}, {build}{basis}{condition}", self.stat.name(), self.stat.unit().name())
     }
 
     fn rule(&self) -> String {
@@ -2187,7 +2271,15 @@ impl Rank {
             BuildBasis::Order => ORDER,
         };
 
-        format!("{rule}{basis}")
+        let condition = match &self.condition {
+            Some(condition) => format!(
+                " With the condition \"{}\": each ship that has it is ranked on its ship_stats speed alternative with it held, on top of that build; its entry names the alternative under condition. A ship without it is ranked on its always-on best build and its entry has no condition.",
+                condition.name
+            ),
+            None => String::new(),
+        };
+
+        format!("{rule}{basis}{condition}")
     }
 
     /// Which way the build moves the stat, and which row of a ship with
@@ -2215,6 +2307,7 @@ struct RankEntry<'a> {
     ship: &'a Ship,
     builds: Builds<Amount>,
     fires_by_armament: Option<FireBreakdown>,
+    condition: Option<String>,
     meets: Option<ConditionMatch>,
 }
 
@@ -2223,6 +2316,10 @@ struct RankEntry<'a> {
 struct RankedBuilds {
     builds: Builds<Amount>,
     fires_by_armament: Option<FireBreakdown>,
+
+    /// The speed alternative the best value is on, for a ranking with a
+    /// condition.
+    condition: Option<String>,
 }
 
 /// A stat value in its search `Unit`, for the build planner, with the row it
@@ -2293,8 +2390,20 @@ fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {
         Some(build) => (build, BuildBasis::Given),
         None => RankBuild::default_for(stat, rank.order),
     };
+    let condition = match &rank.condition {
+        Some(name) => {
+            let Some(depth) = stat.speed_depth() else {
+                return Err(QueryError::RankConditionNotSpeed { stat: stat.name() });
+            };
+            if rank.build.is_some() {
+                return Err(QueryError::RankConditionWithBuild);
+            }
+            Some(RankCondition { depth, name: name.clone() })
+        }
+        None => None,
+    };
 
-    Ok(Rank { stat, qualifier: rank.qualifier.clone(), order: rank.order, build, basis, limit })
+    Ok(Rank { stat, qualifier: rank.qualifier.clone(), order: rank.order, build, basis, limit, condition })
 }
 
 fn qualifying_counts(hits: &[(&Ship, ConditionMatch)]) -> QualifyingCounts {
@@ -2508,7 +2617,7 @@ pub(crate) fn skills_fit(points: &[SkillPointCost]) -> bool {
 
 /// Advances `indices` to the next combination of `count` items in
 /// lexicographic order; false when there is none.
-fn next_combination(indices: &mut [usize], count: usize) -> bool {
+pub(crate) fn next_combination(indices: &mut [usize], count: usize) -> bool {
     let size = indices.len();
     let Some(position) = (0..size).rev().find(|&position| indices[position] < count - size + position) else {
         return false;
@@ -2528,7 +2637,7 @@ fn shown(value: f32) -> f32 {
     ((f64::from(value) * 100.0).round_ties_even() / 100.0) as f32
 }
 
-fn format_value(value: f32, unit: Unit) -> String {
+pub(crate) fn format_value(value: f32, unit: Unit) -> String {
     // Only unlimited charges are infinite; see `card_values`.
     if value.is_infinite() {
         return "unlimited".to_owned();

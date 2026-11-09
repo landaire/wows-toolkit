@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1139
 expression: comparison
 ---
 group: tier 10 battleships
@@ -11,6 +10,8 @@ reference_range_km: 15
 factors:
   - "health (HP, higher is better): hit points"
   - "repair_party_heal (%, higher is better): share of maximum HP one Repair Party charge restores, stock"
+  - "repair_party_total_heal (HP, higher is better): HP every Repair Party charge restores together"
+  - "damage_control_reload (s, lower is better): Damage Control Party reload"
   - "main_battery_reload (s, lower is better): main battery reload"
   - "main_battery_range (km, higher is better): main battery firing range"
   - "dpm_ap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
@@ -37,15 +38,22 @@ factors:
   - "torpedo_reload (s, lower is better): torpedo tube reload"
   - "torpedo_launch_from_bow (deg, lower is better): smallest angle off the bow at which a torpedo launcher bears; 0 launches bow-on"
   - "broadside_tubes (tubes, higher is better): torpedo tubes that bear on one broadside at once"
-  - "aa_damage (HP/s, higher is better): continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted"
-  - "aa_range (km, higher is better): reach of the longest anti-aircraft aura, stock"
+  - "aa_rating (hp, higher is better): AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned; a judgment, see ship_stats anti_aircraft"
+  - "aa_long_dps (HP/s, higher is better): continuous damage per second of the long-range AA auras, before hit chance"
+  - "aa_flak (hp, higher is better): damage of one flak salvo if every burst hits: bursts times burst damage"
   - "concealment (km, lower is better): detectability by ships"
   - "air_concealment (km, lower is better): detectability by aircraft"
+  - "radar_range (km, higher is better): Surveillance Radar range"
+  - "radar_duration (s, higher is better): Surveillance Radar action time"
+  - "hydro_range (km, higher is better): Hydroacoustic Search range against ships"
+  - "torpedo_detection (km, higher is better): Hydroacoustic Search torpedo range"
+  - "smoke_lifetime (s, higher is better): time a smoke cloud lasts"
   - "speed (kn, higher is better): top speed"
   - "rudder_shift (s, lower is better): rudder shift time"
   - "turning_circle (m, lower is better): turning circle radius"
   - "bb_ap_citadel (%, lower is better): broadside AP hits of the most common battleship caliber of its matchmaking at 12 to 14 km that detonate in the citadel, from armor_assessment"
   - "bb_ap_overpenetration (%, higher is better): the same hits that overpenetrate, doing little damage"
+  - "cruiser_he_damaging (%, lower is better): broadside HE hits of the cruiser HE shooter of its matchmaking at 5 to 10 km that penetrate, from armor_assessment"
   - "bow_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest bow plate above the waterline"
   - "stern_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest stern plate above the waterline"
 torpedo_factors:
@@ -112,6 +120,16 @@ leaders:
       - Conqueror (United_Kingdom) 40%
     worst:
       - "Utah (USA, test) 14%"
+  repair_party_total_heal:
+    best:
+      - Conqueror (United_Kingdom) 99480 HP
+    worst:
+      - Schlieffen (Germany) 31962 HP
+  damage_control_reload:
+    best:
+      - Kremlin (Russia) 40 s
+    worst:
+      - "Utah (USA, test) 80 s"
   main_battery_reload:
     best:
       - "Irresistible (Commonwealth, premium) 10.56 s"
@@ -242,16 +260,21 @@ leaders:
       - Schlieffen (Germany) 8 tubes
     worst:
       - St. Vincent (United_Kingdom) 1 tubes
-  aa_damage:
+  aa_rating:
     best:
-      - "Utah (USA, test) 1260 HP/s"
+      - Thor (Europe) 19667 hp
     worst:
-      - "Tōgasa (Japan, test) 430 HP/s"
-  aa_range:
+      - "A. Vespucci (Italy, test) 7148 hp"
+  aa_long_dps:
     best:
-      - Kremlin (Russia) 6.6 km
+      - Thor (Europe) 528 HP/s
     worst:
-      - "A. Vespucci (Italy, test) 4.6 km"
+      - "R. Lauria (Italy, premium) 93 HP/s"
+  aa_flak:
+    best:
+      - Thor (Europe) 39992 hp
+    worst:
+      - "Cumberland (United_Kingdom, test) 12220 hp"
   concealment:
     best:
       - "Incomparable (United_Kingdom, premium) 10.6 km"
@@ -262,6 +285,31 @@ leaders:
       - "Aki (Japan, premium) 8.1 km"
     worst:
       - "Utah (USA, test) 9 km"
+  radar_range:
+    best:
+      - Thor (Europe) 10 km
+    worst:
+      - "Rhode Island (USA, premium) 9 km"
+  radar_duration:
+    best:
+      - "Rhode Island (USA, premium) 40 s"
+    worst:
+      - Thor (Europe) 25 s
+  hydro_range:
+    best:
+      - "G. Kurfürst (Germany, premium) 6 km"
+    worst:
+      - "Jiuhua (Pan_Asia, test) 3 km"
+  torpedo_detection:
+    best:
+      - "G. Kurfürst (Germany, premium) 4 km"
+    worst:
+      - "Jiuhua (Pan_Asia, test) 3 km"
+  smoke_lifetime:
+    best:
+      - "Sicilia (Italy, premium) 15 s"
+    worst:
+      - "A. Vespucci (Italy, test) 10 s"
   speed:
     best:
       - "Neptunus (Netherlands, test) 36 kn"
@@ -287,6 +335,11 @@ leaders:
       - St. Vincent (United_Kingdom) 49.7%
     worst:
       - Louisiana (USA) 23.2%
+  cruiser_he_damaging:
+    best:
+      - Louisiana (USA) 33.5%
+    worst:
+      - République (France) 92.2%
   bow_overmatch:
     best:
       - "Aki (Japan, premium) 5.74%"
@@ -344,6 +397,8 @@ ships:
     values:
       health: "70000 (rank 41/43, p5)"
       repair_party_heal: "40 (rank 1/42, p95)"
+      repair_party_total_heal: "56000 (rank 16/43, p64)"
+      damage_control_reload: "80 (rank 5/43, p0)"
       main_battery_reload: "24.64 (rank 15/43, p60)"
       main_battery_range: "20.38 (rank 41/43, p5)"
       dpm_ap: "306270 (rank 34/43, p21)"
@@ -367,31 +422,35 @@ ships:
       torpedo_reload: "81.6 (rank 3/6, p60)"
       torpedo_launch_from_bow: "31 (rank 3/6, p60)"
       broadside_tubes: "4 (rank 3/6, p20)"
-      aa_damage: "1008 (rank 7/43, p86)"
-      aa_range: "5.8 (rank 21/43, p17)"
+      aa_rating: "11153 (rank 22/43, p50)"
+      aa_long_dps: "153 (rank 34/43, p21)"
+      aa_flak: "14812 (rank 35/43, p19)"
       concealment: "10.6 (rank 1/43, p100)"
       air_concealment: "8.1 (rank 1/43, p2)"
+      hydro_range: "3 (rank 4/5, p0)"
+      torpedo_detection: "3 (rank 4/5, p0)"
       speed: "33 (rank 7/43, p81)"
       rudder_shift: "12.84 (rank 12/43, p74)"
       turning_circle: "1160 (rank 43/43, p0)"
       bb_ap_citadel: "7.2 (rank 33/43, p24)"
       bb_ap_overpenetration: "43.4 (rank 3/43, p95)"
+      cruiser_he_damaging: "61 (rank 25/43, p43)"
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 38/43, p0"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 34/43, p10"
     outliers:
-      - "health 70000 HP: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
-      - "repair_party_heal 40%: better than 95% of the 41 other tier 10 battleships (rank 1/42)"
-      - "main_battery_range 20.38 km: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
-      - "flight_time_ap 8.77 s: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
-      - "flight_time_he 8.77 s: worse than 95% of the 38 other tier 10 battleships (rank 37/39)"
-      - "secondary_range 10.08 km: worse than all 42 other tier 10 battleships (rank 43/43)"
-      - "concealment 10.6 km: better than all 42 other tier 10 battleships (rank 1/43)"
-      - "turning_circle 1160 m: worse than all 42 other tier 10 battleships (rank 43/43)"
-      - "bb_ap_overpenetration 43.4%: better than 95% of the 42 other tier 10 battleships (rank 3/43)"
-      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration, better than at least 90% of the 81 other tier 9-11 battleships: broadside 3.3% (rank 6/82)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, citadel, worse than at least 90% of the 81 other tier 9-11 battleships: angled 45 deg 7.7% (rank 76/82)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, overpenetration, better than at least 90% of the 81 other tier 9-11 battleships: broadside 43.4% (rank 6/82), angled 30 deg 39.9% (rank 5/82), angled 45 deg 37.3% (rank 5/82)"
-      - "vs battleship AP 457 mm (Georgia), 12-14 km, overpenetration, better than at least 90% of the 81 other tier 9-11 battleships: broadside 45% (rank 5/82), angled 30 deg 41.2% (rank 5/82), angled 45 deg 38.6% (rank 5/82)"
+      - "weakness: health 70000 HP, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
+      - "strength: repair_party_heal 40%, tied for the highest of the 42 tier 10 battleships (rank 1/42)"
+      - "weakness: main_battery_range 20.38 km, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
+      - "weakness: flight_time_ap 8.77 s, higher than 95% of the 42 other tier 10 battleships (rank 41/43)"
+      - "weakness: flight_time_he 8.77 s, higher than 95% of the 38 other tier 10 battleships (rank 37/39)"
+      - "weakness: secondary_range 10.08 km, the lowest of the 43 tier 10 battleships (rank 43/43)"
+      - "strength: concealment 10.6 km, the lowest of the 43 tier 10 battleships (rank 1/43)"
+      - "weakness: turning_circle 1160 m, the highest of the 43 tier 10 battleships (rank 43/43)"
+      - "strength: 43.4% of those battleship AP hits overpenetrate it, doing little damage (bb_ap_overpenetration), higher than 95% of the 42 other tier 10 battleships (rank 3/43)"
+      - "strength: Edinburgh's light cruiser AP 152 mm shells at 5-10 km overpenetrate it on 3.3% of broadside hits, higher than 91% of the 81 other tier 9-11 battleships (rank 6/82); an overpenetration is little damage taken."
+      - "strength: Minnesota's battleship AP 406 mm shells at 12-14 km overpenetrate it on 43.4% of broadside hits, higher than 94% of the 81 other tier 9-11 battleships (rank 6/82) and 39.9% of angled 30 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82) and 37.3% of angled 45 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82); an overpenetration is little damage taken."
+      - "weakness: Minnesota's battleship AP 406 mm shells at 12-14 km detonate in its citadel on 7.7% of angled 45 deg hits, higher than 93% of the 81 other tier 9-11 battleships (rank 76/82); a citadel hit is heavy damage taken."
+      - "strength: Georgia's battleship AP 457 mm shells at 12-14 km overpenetrate it on 45% of broadside hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82) and 41.2% of angled 30 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82) and 38.6% of angled 45 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82); an overpenetration is little damage taken."
     torpedoes:
       - torpedo: 533 mm Mk IXM
         values:
@@ -446,6 +505,16 @@ ships:
       - "Kites poorly: within 30 deg of the stern 2 of 6 main battery barrels bear and all bear from 30 deg off the stern."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 4 of 6 main battery barrels bear and all bear from 30 deg off the bow."
       - "Battleship AP mostly passes through it: battleship AP 406 mm (Minnesota) at 12-14 km, 43.4% of broadside hits overpenetrate, more than 94% of tier 9-11 battleships. Overpenetration-prone plating is a strength against battleships."
+    battle_impact:
+      score: 33.4
+      rank: 42
+      components:
+        firepower: 23.1
+        accuracy: 54.1
+        reach: 4.8
+        survivability: 29.8
+        mobility: 60.1
+        spotting: 82.4
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (2 charges, 80 s reload)"
@@ -457,6 +526,8 @@ ships:
     values:
       health: "89900 (rank 18/43, p55)"
       repair_party_heal: "14 (rank 14/42, p0)"
+      repair_party_total_heal: "50344 (rank 25/43, p38)"
+      damage_control_reload: "80 (rank 5/43, p0)"
       main_battery_reload: "32.56 (rank 41/43, p5)"
       main_battery_range: "19.94 (rank 42/43, p2)"
       dpm_ap: "380344 (rank 12/43, p74)"
@@ -475,30 +546,33 @@ ships:
       all_bear_from_stern: "36 (rank 30/43, p26)"
       secondary_dpm: "521875 (rank 7/43, p86)"
       secondary_range: "10.51 (rank 17/43, p2)"
-      aa_damage: "836 (rank 18/43, p55)"
-      aa_range: "4.6 (rank 42/43, p0)"
+      aa_rating: "8408 (rank 39/43, p10)"
+      aa_long_dps: "246 (rank 11/43, p76)"
+      aa_flak: "18515 (rank 23/43, p48)"
       concealment: "14.05 (rank 34/43, p17)"
       air_concealment: "8.1 (rank 1/43, p2)"
+      smoke_lifetime: "10 (rank 2/5, p0)"
       speed: "29.6 (rank 27/43, p33)"
       rudder_shift: "12.27 (rank 6/43, p83)"
       turning_circle: "960 (rank 27/43, p31)"
       bb_ap_citadel: "0 (rank 1/43, p81)"
       bb_ap_overpenetration: "27.2 (rank 36/43, p14)"
+      cruiser_he_damaging: "52.5 (rank 15/43, p64)"
       bow_overmatch: "5.74 (rank 1/43, p19)"
       stern_overmatch: "5.74 (rank 1/43, p26)"
     outliers:
-      - "main_battery_reload 32.56 s: worse than 95% of the 42 other tier 10 battleships (rank 41/43)"
-      - "main_battery_range 19.94 km: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
-      - "alpha_ap 206400 HP: better than 93% of the 42 other tier 10 battleships (rank 1/43)"
-      - "sigma 1.5 sigma: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
-      - "bow_barrels 100%: better than 93% of the 42 other tier 10 battleships (rank 1/43)"
-      - "all_bear_from_bow 23 deg: better than 93% of the 42 other tier 10 battleships (rank 2/43)"
-      - "aa_range 4.6 km: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
-      - "vs destroyer AP 127 mm (Benson), 5-10 km, overpenetration, worse than at least 90% of the 81 other tier 9-11 battleships: broadside 5.8% (rank 76/82), angled 30 deg 4% (rank 79/82)"
-      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration, worse than at least 90% of the 81 other tier 9-11 battleships: broadside 1.1% (rank 74/82)"
-      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, overpenetration, worse than at least 90% of the 81 other tier 9-11 battleships: broadside 13.7% (rank 81/82), angled 30 deg 9.3% (rank 81/82), angled 45 deg 10.1% (rank 75/82)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, overpenetration, worse than at least 90% of the 81 other tier 9-11 battleships: angled 30 deg 23.7% (rank 75/82), angled 45 deg 19.6% (rank 75/82)"
-      - "vs battleship AP 457 mm (Georgia), 12-14 km, overpenetration, worse than at least 90% of the 81 other tier 9-11 battleships: broadside 28.2% (rank 74/82)"
+      - "weakness: main_battery_reload 32.56 s, higher than 95% of the 42 other tier 10 battleships (rank 41/43)"
+      - "weakness: main_battery_range 19.94 km, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
+      - "strength: alpha_ap 206400 HP, tied for the highest of the 43 tier 10 battleships (rank 1/43)"
+      - "weakness: sigma 1.5 sigma, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
+      - "strength: bow_barrels 100%, tied for the highest of the 43 tier 10 battleships (rank 1/43)"
+      - "strength: all_bear_from_bow 23 deg, lower than 93% of the 42 other tier 10 battleships (rank 2/43)"
+      - "weakness: aa_rating 8408 hp, lower than 90% of the 42 other tier 10 battleships (rank 39/43)"
+      - "weakness: Benson's destroyer AP 127 mm shells at 5-10 km overpenetrate it on 5.8% of broadside hits, lower than 93% of the 81 other tier 9-11 battleships (rank 76/82) and 4% of angled 30 deg hits, lower than 96% of the 81 other tier 9-11 battleships (rank 79/82); an overpenetration is little damage taken."
+      - "weakness: Edinburgh's light cruiser AP 152 mm shells at 5-10 km overpenetrate it on 1.1% of broadside hits, lower than 90% of the 81 other tier 9-11 battleships (rank 74/82); an overpenetration is little damage taken."
+      - "weakness: Hindenburg's heavy cruiser AP 203 mm shells at 12-14 km overpenetrate it on 13.7% of broadside hits, lower than 99% of the 81 other tier 9-11 battleships (rank 81/82) and 9.3% of angled 30 deg hits, lower than 99% of the 81 other tier 9-11 battleships (rank 81/82) and 10.1% of angled 45 deg hits, lower than 91% of the 81 other tier 9-11 battleships (rank 75/82); an overpenetration is little damage taken."
+      - "weakness: Minnesota's battleship AP 406 mm shells at 12-14 km overpenetrate it on 23.7% of angled 30 deg hits, lower than 91% of the 81 other tier 9-11 battleships (rank 75/82) and 19.6% of angled 45 deg hits, lower than 91% of the 81 other tier 9-11 battleships (rank 75/82); an overpenetration is little damage taken."
+      - "weakness: Georgia's battleship AP 457 mm shells at 12-14 km overpenetrate it on 28.2% of broadside hits, lower than 90% of the 81 other tier 9-11 battleships (rank 74/82); an overpenetration is little damage taken."
     matchups:
       - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
         aspects:
@@ -538,6 +612,16 @@ ships:
     signals:
       - "Kites well: within 30 deg of the stern 8 of 16 main battery barrels bear and all bear from 36 deg off the stern."
       - "Bow-in suits it: within 30 deg of the bow 16 of 16 main battery barrels bear and all bear from 23 deg off the bow; only 5.74% of tier 8-11 battleships overmatch its 32 mm bow plating."
+    battle_impact:
+      score: 60.6
+      rank: 8
+      components:
+        firepower: 93.1
+        accuracy: 48.4
+        reach: 2.4
+        survivability: 59.4
+        mobility: 47.9
+        spotting: 40.2
     unique_upgrade: "Improved Rangefinders (unique upgrade), taken for: dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
@@ -549,6 +633,8 @@ ships:
     values:
       health: "68300 (rank 42/43, p2)"
       repair_party_heal: "14 (rank 14/42, p0)"
+      repair_party_total_heal: "38248 (rank 41/43, p5)"
+      damage_control_reload: "80 (rank 5/43, p0)"
       main_battery_reload: "20.24 (rank 5/43, p90)"
       main_battery_range: "25.21 (rank 21/43, p52)"
       dpm_ap: "413482 (rank 4/43, p93)"
@@ -572,8 +658,9 @@ ships:
       torpedo_reload: "102 (rank 5/6, p20)"
       torpedo_launch_from_bow: "41 (rank 5/6, p0)"
       broadside_tubes: "4 (rank 3/6, p20)"
-      aa_damage: "430 (rank 43/43, p0)"
-      aa_range: "5.8 (rank 21/43, p17)"
+      aa_rating: "8697 (rank 37/43, p14)"
+      aa_long_dps: "268 (rank 5/43, p90)"
+      aa_flak: "20367 (rank 21/43, p50)"
       concealment: "12.26 (rank 5/43, p90)"
       air_concealment: "8.1 (rank 1/43, p2)"
       speed: "29.5 (rank 30/43, p19)"
@@ -581,22 +668,24 @@ ships:
       turning_circle: "880 (rank 7/43, p86)"
       bb_ap_citadel: "0.8 (rank 15/43, p64)"
       bb_ap_overpenetration: "35.3 (rank 21/43, p52)"
+      cruiser_he_damaging: "75.3 (rank 38/43, p12)"
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 38/43, p0"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 34/43, p10"
     outliers:
-      - "health 68300 HP: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
-      - "main_battery_reload 20.24 s: better than 90% of the 42 other tier 10 battleships (rank 5/43)"
-      - "dpm_ap 413482 HP/min: better than 93% of the 42 other tier 10 battleships (rank 4/43)"
-      - "dpm_he 226779 HP/min: better than 97% of the 38 other tier 10 battleships (rank 2/39)"
-      - "dispersion 146 m: better than 98% of the 42 other tier 10 battleships (rank 2/43)"
-      - "bow_barrels 40%: worse than 98% of the 42 other tier 10 battleships (rank 42/43)"
-      - "stern_barrels 60%: better than 90% of the 42 other tier 10 battleships (rank 4/43)"
-      - "aa_damage 430 HP/s: worse than all 42 other tier 10 battleships (rank 43/43)"
-      - "concealment 12.26 km: better than 90% of the 42 other tier 10 battleships (rank 5/43)"
-      - "torpedo Type 93 mod. 3 flood_coefficient 4.06x: better than all 5 other torpedo options of tier 10 battleships (rank 1/6)"
-      - "torpedo Type 93 mod. 3 reaction_time 9 s: worse than all 5 other torpedo options of tier 10 battleships (rank 6/6)"
-      - "vs light cruiser AP 152 mm (Edinburgh), 5-10 km, overpenetration, better than at least 90% of the 82 other tier 9-11 battleships: broadside 3.4% (rank 5/83)"
-      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, citadel, worse than at least 90% of the 82 other tier 9-11 battleships: angled 45 deg 0.2% (rank 80/83)"
+      - "weakness: health 68300 HP, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
+      - "weakness: repair_party_total_heal 38248 HP, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
+      - "strength: main_battery_reload 20.24 s, lower than 90% of the 42 other tier 10 battleships (rank 5/43)"
+      - "strength: dpm_ap 413482 HP/min, higher than 93% of the 42 other tier 10 battleships (rank 4/43)"
+      - "strength: dpm_he 226779 HP/min, higher than 97% of the 38 other tier 10 battleships (rank 2/39)"
+      - "strength: dispersion 146 m, lower than 98% of the 42 other tier 10 battleships (rank 2/43)"
+      - "weakness: bow_barrels 40%, tied for the lowest of the 43 tier 10 battleships (rank 42/43)"
+      - "strength: stern_barrels 60%, higher than 90% of the 42 other tier 10 battleships (rank 4/43)"
+      - "strength: aa_long_dps 268 HP/s, higher than 90% of the 42 other tier 10 battleships (rank 5/43)"
+      - "strength: concealment 12.26 km, lower than 90% of the 42 other tier 10 battleships (rank 5/43)"
+      - "strength: torpedo Type 93 mod. 3 flood_coefficient 4.06x, the highest of the 6 torpedo options of tier 10 battleships (rank 1/6)"
+      - "weakness: torpedo Type 93 mod. 3 reaction_time 9 s, the highest of the 6 torpedo options of tier 10 battleships (rank 6/6)"
+      - "strength: Edinburgh's light cruiser AP 152 mm shells at 5-10 km overpenetrate it on 3.4% of broadside hits, higher than 94% of the 82 other tier 9-11 battleships (rank 5/83); an overpenetration is little damage taken."
+      - "weakness: Hindenburg's heavy cruiser AP 203 mm shells at 12-14 km detonate in its citadel on 0.2% of angled 45 deg hits, higher than 96% of the 82 other tier 9-11 battleships (rank 80/83); a citadel hit is heavy damage taken."
     torpedoes:
       - torpedo: Type 93 mod. 3
         values:
@@ -650,6 +739,16 @@ ships:
     signals:
       - "Kites with its guns (within 30 deg of the stern 9 of 15 main battery barrels bear and all bear from 40 deg off the stern), but most tier 8-11 battleships (87.7%) overmatch its 25 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 15 main battery barrels bear and all bear from 40 deg off the bow."
+    battle_impact:
+      score: 55.2
+      rank: 21
+      components:
+        firepower: 91.9
+        accuracy: 71.8
+        reach: 52.4
+        survivability: 19.6
+        mobility: 53
+        spotting: 61.6
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (4 charges, 80 s reload)"
@@ -660,9 +759,10 @@ head_to_head:
   - ships:
       - Incomparable
       - C. Colombo
-    compared: 28
+    compared: 32
     first_better:
       - repair_party_heal
+      - repair_party_total_heal
       - main_battery_reload
       - main_battery_range
       - turret_traverse
@@ -670,8 +770,7 @@ head_to_head:
       - sigma
       - fires_per_minute
       - all_bear_from_stern
-      - aa_damage
-      - aa_range
+      - aa_rating
       - concealment
       - speed
       - bb_ap_overpenetration
@@ -685,12 +784,16 @@ head_to_head:
       - all_bear_from_bow
       - secondary_dpm
       - secondary_range
+      - aa_long_dps
+      - aa_flak
       - rudder_shift
       - turning_circle
       - bb_ap_citadel
+      - cruiser_he_damaging
       - bow_overmatch
       - stern_overmatch
     tied:
+      - damage_control_reload
       - air_concealment
     first_largest_leads:
       - repair_party_heal 40 vs 14% (65% apart)
@@ -700,14 +803,15 @@ head_to_head:
       - bb_ap_citadel 0 vs 7.2% (100% apart)
       - bow_overmatch 5.74 vs 87.7% (93% apart)
       - stern_overmatch 5.74 vs 87.7% (93% apart)
-    verdict: "Mixed: Incomparable is better on 13 of 28 compared factors, C. Colombo on 14, 1 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Incomparable is better on 13 of 32 compared factors, C. Colombo on 17, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Incomparable
       - Tōgasa
-    compared: 36
+    compared: 40
     first_better:
       - health
       - repair_party_heal
+      - repair_party_total_heal
       - turret_traverse
       - sigma
       - bow_barrels
@@ -717,10 +821,11 @@ head_to_head:
       - torpedoes_per_minute
       - torpedo_reload
       - torpedo_launch_from_bow
-      - aa_damage
+      - aa_rating
       - concealment
       - speed
       - bb_ap_overpenetration
+      - cruiser_he_damaging
     second_better:
       - main_battery_reload
       - main_battery_range
@@ -735,40 +840,43 @@ head_to_head:
       - stern_barrels
       - secondary_range
       - torpedo_dpm
+      - aa_long_dps
+      - aa_flak
       - rudder_shift
       - turning_circle
       - bb_ap_citadel
     tied:
+      - damage_control_reload
       - broadside_tubes
-      - aa_range
       - air_concealment
       - bow_overmatch
       - stern_overmatch
     first_largest_leads:
       - repair_party_heal 40 vs 14% (65% apart)
-      - aa_damage 1008 vs 430 HP/s (57% apart)
       - bow_barrels 66.67 vs 40% (40% apart)
+      - repair_party_total_heal 56000 vs 38248 HP (32% apart)
     second_largest_leads:
       - bb_ap_citadel 0.8 vs 7.2% (89% apart)
       - dpm_he 226779 vs 108117 HP/min (52% apart)
       - stern_barrels 60 vs 33.33% (44% apart)
-    verdict: "Mixed: Incomparable is better on 15 of 36 compared factors, Tōgasa on 16, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Incomparable is better on 17 of 40 compared factors, Tōgasa on 18, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - C. Colombo
       - Tōgasa
-    compared: 28
+    compared: 32
     first_better:
       - health
+      - repair_party_total_heal
       - alpha_ap
       - flight_time_ap
       - bow_barrels
       - all_bear_from_bow
       - all_bear_from_stern
       - secondary_dpm
-      - aa_damage
       - speed
       - rudder_shift
       - bb_ap_citadel
+      - cruiser_he_damaging
       - bow_overmatch
       - stern_overmatch
     second_better:
@@ -780,12 +888,15 @@ head_to_head:
       - sigma
       - fires_per_minute
       - stern_barrels
-      - aa_range
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
       - concealment
       - turning_circle
       - bb_ap_overpenetration
     tied:
       - repair_party_heal
+      - damage_control_reload
       - secondary_range
       - air_concealment
     first_largest_leads:
@@ -796,11 +907,11 @@ head_to_head:
       - main_battery_reload 20.24 vs 32.56 s (38% apart)
       - bb_ap_overpenetration 35.3 vs 27.2% (23% apart)
       - dispersion 146 vs 186 m (22% apart)
-    verdict: "Mixed: C. Colombo is better on 13 of 28 compared factors, Tōgasa on 12, 3 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: C. Colombo is better on 14 of 32 compared factors, Tōgasa on 14, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
-  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others, each led by strength or weakness for the ship. Matchup outliers are from the ship's side as the target: a citadel hit is heavy damage taken, a penetration regular damage taken, an overpenetration little damage taken."
+  - "bb_ap_*, cruiser_he_damaging, *_overmatch and matchups apply to cruisers and battleships only, and these factors rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
-  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."
+  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. battle_impact is a weighted judgment from these factors, not win-rate data; its formula and weights are given by the battle_impact tool."

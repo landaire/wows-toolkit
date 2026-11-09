@@ -1,0 +1,164 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1396
+expression: output
+---
+group: tier 10 battleships
+ranked: 43
+formula: "factor share = share of the other ships of the group (of the same tier for bb_ap_citadel, cruiser_he_damaging and bow_overmatch) whose value the ship's beats, ties counting half. A ship without a factor others have (no radar, no torpedoes, no Repair Party) counts as worse than every ship with it and tied with the others without it. A family (gun_dpm, gun_alpha, flight_time) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. score = weighted mean of the components with the class weights below, 0 to 100. An armor value a ship lacks (no citadel plates or armor model) leaves the ship scored on its other factors."
+weights:
+  - "firepower 30%: gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x1, gun_alpha (best of alpha_ap, alpha_he, alpha_sap) x0.75, fires_per_minute x0.15"
+  - "accuracy 10%: dispersion x1, sigma x1, flight_time (best of flight_time_ap, flight_time_he, flight_time_sap) x1"
+  - "reach 10%: main_battery_range x1"
+  - "survivability 35%: health x1, repair_party_total_heal x1, damage_control_reload x0.25, bb_ap_citadel x0.75, bow_overmatch x0.5, cruiser_he_damaging x0.25"
+  - "mobility 10%: speed x1, rudder_shift x0.5, turning_circle x0.5"
+  - "spotting 5%: concealment x1, radar_range x0.5, hydro_range x0.5, torpedo_detection x0.5, smoke_lifetime x0.25"
+ships:
+  - rank: 1
+    ship: "T10 Montana (battleship, USA)"
+    score: 69.6
+    components:
+      firepower:
+        score: 84.7
+        top:
+          - dpm_ap 395796 HP/min (beats 87%)
+          - alpha_ap 174150 HP (beats 83%)
+      accuracy:
+        score: 40.5
+        top:
+          - sigma 1.9 (beats 54%)
+          - dispersion 187 m (beats 51%)
+      reach:
+        score: 72.6
+        top:
+          - main_battery_range 27.43 km (beats 73%)
+      survivability:
+        score: 72.4
+        top:
+          - repair_party_total_heal 71185 HP (beats 92%)
+          - health 96300 HP (beats 73%)
+      mobility:
+        score: 56.3
+        top:
+          - speed 30 kn (beats 50%)
+          - rudder_shift 12.43 s (beats 81%)
+      spotting:
+        score: 38.2
+        top:
+          - concealment 14 km (beats 26%)
+    weak_points:
+      - flight_time_ap 8.59 s (beats 17%)
+  - rank: 2
+    ship: "T10 Montana 2 (battleship, USA, test)"
+    score: 67.6
+    components:
+      firepower:
+        score: 84.7
+        top:
+          - dpm_ap 395796 HP/min (beats 87%)
+          - alpha_ap 174150 HP (beats 83%)
+      accuracy:
+        score: 40.5
+        top:
+          - sigma 1.9 (beats 54%)
+          - dispersion 187 m (beats 51%)
+      reach:
+        score: 72.6
+        top:
+          - main_battery_range 27.43 km (beats 73%)
+      survivability:
+        score: 72.4
+        top:
+          - repair_party_total_heal 71185 HP (beats 92%)
+          - health 96300 HP (beats 73%)
+      mobility:
+        score: 36
+        top:
+          - speed 30 kn (beats 50%)
+          - turning_circle 950 m (beats 44%)
+      spotting:
+        score: 38.2
+        top:
+          - concealment 14 km (beats 26%)
+    weak_points:
+      - flight_time_ap 8.59 s (beats 17%)
+      - rudder_shift 17.76 s (beats 0%)
+  - rank: 3
+    ship: "T10 Vermont (battleship, USA)"
+    score: 66.5
+    components:
+      firepower:
+        score: 78.4
+        top:
+          - dpm_ap 384801 HP/min (beats 80%)
+          - alpha_he 77400 HP (beats 91%)
+      accuracy:
+        score: 50.7
+        top:
+          - sigma 1.95 (beats 65%)
+          - dispersion 187 m (beats 51%)
+      reach:
+        score: 79.8
+        top:
+          - main_battery_range 28.42 km (beats 80%)
+      survivability:
+        score: 69.4
+        top:
+          - health 102800 HP (beats 87%)
+          - repair_party_total_heal 57568 HP (beats 75%)
+      mobility:
+        score: 28.6
+        top:
+          - turning_circle 850 m (beats 94%)
+          - rudder_shift 15.31 s (beats 13%)
+      spotting:
+        score: 56.4
+        top:
+          - concealment 12.59 km (beats 76%)
+    weak_points:
+      - speed 23 kn (beats 4%)
+      - rudder_shift 15.31 s (beats 13%)
+      - fires_per_minute 25.41 fires/min (beats 7%)
+  - rank: 6
+    ship: "T10 Conqueror (battleship, United_Kingdom)"
+    score: 65.9
+    components:
+      firepower:
+        score: 90
+        top:
+          - dpm_he 196364 HP/min (beats 95%)
+          - alpha_he 86400 HP (beats 97%)
+      accuracy:
+        score: 29.4
+        top:
+          - sigma 1.8 (beats 33%)
+          - flight_time_he 8.48 s (beats 28%)
+      reach:
+        score: 76.2
+        top:
+          - main_battery_range 28.13 km (beats 76%)
+      survivability:
+        score: 58
+        top:
+          - repair_party_total_heal 99480 HP (beats 100%)
+          - health 82900 HP (beats 42%)
+      mobility:
+        score: 50
+        top:
+          - rudder_shift 8.33 s (beats 98%)
+          - turning_circle 940 m (beats 52%)
+      spotting:
+        score: 59.8
+        top:
+          - concealment 12.3 km (beats 86%)
+lowest:
+  - "43. T10 Conte Verde (battleship, Italy, premium) 32.3"
+  - "42. T10 Incomparable (battleship, United_Kingdom, premium) 33.4"
+  - "41. T10 R. Lauria (battleship, Italy, premium) 34.5"
+  - "40. T10 Schlieffen (battleship, Germany) 34.9"
+  - "39. T10 Slava (battleship, Russia, premium) 37.1"
+notes:
+  - "A judgment from game data, not from win rates or player results: the weights are a stated opinion of what sways a battle. Read the components to see why a ship scores as it does."
+  - "Scores compare ships of one class and tier range only; a cruiser's score says nothing against a battleship's."
+  - "Values are those of ship_comparison: each on its best-fit build, consumables stock, damage as if every shell and torpedo hits. A consumable counts when any slot offers it, though a slot holds one choice."
+  - "Not counted: secondaries, anti-aircraft, special abilities (the F key), firing arcs, turret traverse and torpedo reaction time. Main battery reload counts through gun_dpm."

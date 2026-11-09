@@ -6,8 +6,11 @@ use std::sync::LazyLock;
 
 use wows_core::units::Km;
 use wows_query::GameData;
+use wows_query::dispersion::CompareGroup;
 use wows_query::dispersion::DispersionAtRangeArgs;
 use wows_query::dispersion::DispersionBattery;
+use wows_query::ships::ShipClass;
+use wows_query::ships::Tier;
 
 static GAME: LazyLock<GameData> = LazyLock::new(|| {
     let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
@@ -19,7 +22,14 @@ static GAME: LazyLock<GameData> = LazyLock::new(|| {
 });
 
 fn args(ship: &str, range_km: f32, battery: DispersionBattery) -> DispersionAtRangeArgs {
-    DispersionAtRangeArgs { ship: ship.to_owned(), range_km: Km::new(range_km), battery: Some(battery), modules: None }
+    DispersionAtRangeArgs {
+        ship: ship.to_owned(),
+        range_km: Km::new(range_km),
+        battery: Some(battery),
+        modules: None,
+        build: None,
+        compare: None,
+    }
 }
 
 #[test]
@@ -81,4 +91,35 @@ fn range_past_every_build_is_reported_as_out_of_reach() {
         .dispersion_at_range(&args("Des Moines", 25.0, DispersionBattery::MainBattery))
         .expect("dispersion resolves");
     insta::assert_yaml_snapshot!(output.conclusion);
+}
+
+fn tier_10_battleships() -> CompareGroup {
+    CompareGroup { class: ShipClass::Battleship, min_tier: Tier(10), max_tier: Tier(10) }
+}
+
+/// 24 km is slightly past Stalingrad's range with the range upgrade, so the
+/// ellipse is taken at its max range and ranked among tier 10 battleships.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn stalingrad_with_range_mod_against_tier_10_battleships_at_24_km() {
+    let output = GAME
+        .dispersion_at_range(&DispersionAtRangeArgs {
+            build: Some("range mod".to_owned()),
+            compare: Some(tier_10_battleships()),
+            ..args("Stalingrad", 24.0, DispersionBattery::MainBattery)
+        })
+        .expect("dispersion resolves");
+    insta::assert_yaml_snapshot!(output);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn yamato_against_tier_10_battleships_at_12_km() {
+    let output = GAME
+        .dispersion_at_range(&DispersionAtRangeArgs {
+            compare: Some(tier_10_battleships()),
+            ..args("Yamato", 12.0, DispersionBattery::MainBattery)
+        })
+        .expect("dispersion resolves");
+    insta::assert_yaml_snapshot!(output);
 }

@@ -277,6 +277,16 @@ pub(crate) enum Item {
     Upgrade(usize),
 }
 
+impl Item {
+    /// Index into the indexed skills; `None` for an upgrade.
+    fn skill_index(self) -> Option<usize> {
+        match self {
+            Self::Skill { index, .. } => Some(index),
+            Self::Upgrade(_) => None,
+        }
+    }
+}
+
 /// A ship's stat card and modifiers under one build.
 pub(crate) struct Outcome {
     pub(crate) stats: ShipStats,
@@ -488,6 +498,11 @@ impl<'a> Planner<'a> {
         self.ship
     }
 
+    /// The commander whose improved skills the builds take.
+    pub(crate) fn commander(&self) -> Option<&'a Commander> {
+        self.commander
+    }
+
     /// Module combinations that fit, stock first.
     pub(crate) fn selections(&self) -> impl Iterator<Item = &ShipUpgradeSelection> {
         self.selections.iter().map(|(selection, _)| selection)
@@ -516,6 +531,14 @@ impl<'a> Planner<'a> {
     /// Skills of [`Self::items`] with a trigger condition.
     pub(crate) fn triggered_items(&self) -> &[Item] {
         &self.triggered
+    }
+
+    /// The modifiers of the stock modules with `items`, without computing
+    /// a stat card.
+    pub(crate) fn modifiers_with(&self, items: &[Item]) -> Result<ModifierBundle, QueryError> {
+        let effects = self.game.effective_modifiers(self.ship, &self.loadout(items, None))?;
+
+        Ok(effects.build.modifiers.bundle().clone())
     }
 
     /// The outcome of the stock modules with `skill` alone, its trigger met.
@@ -570,6 +593,27 @@ impl<'a> Planner<'a> {
     /// The outcome of module combination `selection` with `items`.
     pub(crate) fn with_items_on(&self, selection: usize, items: &[Item]) -> Result<Rc<Outcome>, QueryError> {
         self.outcome(selection, items, None)
+    }
+
+    /// The outcome of `items` on module combination `selection`, with the
+    /// triggers of the skill `triggered` met.
+    pub(crate) fn with_items_triggered(
+        &self,
+        selection: usize,
+        items: &[Item],
+        triggered: Option<Item>,
+    ) -> Result<Rc<Outcome>, QueryError> {
+        self.outcome(selection, items, triggered.and_then(Item::skill_index))
+    }
+
+    /// The loadout [`Self::with_items_triggered`] applies.
+    pub(crate) fn loadout_of(&self, items: &[Item], triggered: Option<Item>) -> ResolvedLoadout {
+        self.loadout(items, triggered.and_then(Item::skill_index))
+    }
+
+    /// The slot of an upgrade; `None` for a skill.
+    pub(crate) fn upgrade_slot(&self, item: Item) -> Option<u8> {
+        self.upgrade(item).map(|upgrade| upgrade.slot)
     }
 
     /// The outcome of `items` on module combination `selection`, with the

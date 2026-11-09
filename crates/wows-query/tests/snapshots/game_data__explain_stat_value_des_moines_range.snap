@@ -1,0 +1,24 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "explain(json!({ \"ship\": \"Des Moines\", \"value\": 18.36 }))"
+---
+ship: "T10 Des Moines (cruiser, USA)"
+value: "18.36"
+rule: "A match is a stat of this ship whose value rounds to the number at its decimals, on the stock modules or another module combination, alone or with up to three captain skills (21 points, a skill on every cheaper tier) and upgrades (one per slot); conditional skills count with their trigger met only where marked active, and the ship's special ability only where named. Fewer assumptions rank first. Signals, camouflage and commander talents are not searched."
+matches:
+  - stat: artillery.range
+    label: Main Battery Firing Range
+    value: 18.36 km
+    base: 15.83 km
+    build:
+      - Gun Fire Control System Modification 2
+    because:
+      - Gun Fire Control System Modification 2 x1.16 (+2.533)
+  - stat: visibility.main_gun_range_detection
+    label: Detectability after firing a main gun shell
+    value: 18.36 km
+    base: 15.83 km
+    build:
+      - Gun Fire Control System Modification 2
+    because:
+      - Gun Fire Control System Modification 2 x1.16 (+2.533) via Main Battery Firing Range

@@ -67,6 +67,9 @@ const MATCH: Seconds = Seconds::new(1200.0);
 /// GameParams consumable type of the Main Battery Reload Booster.
 pub(crate) const MAIN_BATTERY_RELOAD_BOOSTER: &str = "artilleryBoosters";
 
+/// GameParams consumable type of Engine Boost and the other speed boosters.
+pub(crate) const SPEED_BOOSTER: &str = "speedBoosters";
+
 /// GameParams consumable type of the Repair Party.
 const REPAIR_PARTY: &str = "regenCrew";
 
@@ -605,7 +608,7 @@ pub(crate) fn main_battery_reload_factor(category: &AbilityCategory) -> Option<R
 
 /// Repair Party heal ceilings under `bundle` on `max_hp`. `None` for a
 /// consumable without a heal rate.
-fn repair_heal(category: &AbilityCategory, bundle: &ModifierBundle, max_hp: Hp) -> Option<RepairHeal> {
+pub(crate) fn repair_heal(category: &AbilityCategory, bundle: &ModifierBundle, max_hp: Hp) -> Option<RepairHeal> {
     let (stats, _) = effective_consumable(category, bundle);
     let fraction = stats.regeneration_hp_speed?;
     // The flat rate takes the same modifier as the fraction

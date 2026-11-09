@@ -7,11 +7,13 @@
 //! [`replay_worker::init`] there too.
 
 pub mod aircraft;
+pub mod anti_air;
 pub mod armament;
 pub mod armor;
 pub mod armor_assessment;
 mod armor_models;
 pub mod armor_trace;
+pub mod battle_impact;
 pub mod buffs;
 pub mod builds;
 pub mod citadel;
@@ -49,6 +51,7 @@ pub mod skills;
 pub mod special_abilities;
 pub mod speed;
 pub mod stat_search;
+pub mod stat_value;
 pub mod stats;
 pub mod tech_tree;
 pub mod tools;

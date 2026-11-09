@@ -10,6 +10,8 @@ use wows_core::units::Percent;
 use wows_core::units::TorpedoesPerMinute;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
+use wowsunpack::game_params::ttx::anti_air::AuraBand;
+use wowsunpack::game_params::ttx::anti_air::anti_air;
 use wowsunpack::game_params::ttx::constants::DispersionEllipse;
 use wowsunpack::game_params::ttx::labels::TtxStat;
 use wowsunpack::game_params::ttx::model::AmmoCount;
@@ -26,6 +28,7 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::Param;
 
+use crate::anti_air::AaRating;
 use crate::bearing::MountCoverage;
 use crate::fires::FireArmament;
 use crate::fires::FireInputs;
@@ -165,6 +168,32 @@ pub enum DerivedStat {
 
     /// Health one flood takes over its whole duration.
     FloodDamage,
+
+    /// Continuous damage per second of every aura of one AA band, as the
+    /// port card sums it: before hit chance.
+    AaShortDps,
+    AaMediumDps,
+    AaLongDps,
+
+    /// Reach of the farthest aura of one AA band.
+    AaShortRange,
+    AaMediumRange,
+    AaLongRange,
+
+    /// Gun mounts feeding the auras of one AA band.
+    AaShortMounts,
+    AaMediumMounts,
+    AaLongMounts,
+
+    /// Flak bursts of one salvo, every flak aura together.
+    AaFlakCount,
+
+    /// Damage of one flak burst.
+    AaFlakDamage,
+
+    /// Damage the AA deals to one plane flying straight in, see
+    /// [`crate::anti_air`].
+    AaRating,
 }
 
 impl DerivedStat {
@@ -207,6 +236,18 @@ impl DerivedStat {
         DerivedStat::FloodDuration,
         DerivedStat::FloodDamagePerSecond,
         DerivedStat::FloodDamage,
+        DerivedStat::AaShortDps,
+        DerivedStat::AaMediumDps,
+        DerivedStat::AaLongDps,
+        DerivedStat::AaShortRange,
+        DerivedStat::AaMediumRange,
+        DerivedStat::AaLongRange,
+        DerivedStat::AaShortMounts,
+        DerivedStat::AaMediumMounts,
+        DerivedStat::AaLongMounts,
+        DerivedStat::AaFlakCount,
+        DerivedStat::AaFlakDamage,
+        DerivedStat::AaRating,
     ];
 
     /// Dotted name in the namespace of `TtxStat::field_key`.
@@ -260,6 +301,18 @@ impl DerivedStat {
             Self::FloodDuration => "durability.flood_duration",
             Self::FloodDamagePerSecond => "durability.flood_damage_per_second",
             Self::FloodDamage => "durability.flood_damage",
+            Self::AaShortDps => "aa.short.dps",
+            Self::AaMediumDps => "aa.medium.dps",
+            Self::AaLongDps => "aa.long.dps",
+            Self::AaShortRange => "aa.short.range",
+            Self::AaMediumRange => "aa.medium.range",
+            Self::AaLongRange => "aa.long.range",
+            Self::AaShortMounts => "aa.mounts.short",
+            Self::AaMediumMounts => "aa.mounts.medium",
+            Self::AaLongMounts => "aa.mounts.long",
+            Self::AaFlakCount => "aa.flak.count",
+            Self::AaFlakDamage => "aa.flak.damage",
+            Self::AaRating => "aa.rating",
         }
     }
 
@@ -341,6 +394,28 @@ impl DerivedStat {
             Self::FloodDuration => "Flooding duration",
             Self::FloodDamagePerSecond => "Flooding damage per second, percent of maximum health",
             Self::FloodDamage => "Damage of one flood over its whole duration",
+            Self::AaShortDps => {
+                "Short-range AA continuous damage per second, every short-range aura together, before hit chance, as the port card shows it"
+            }
+            Self::AaMediumDps => {
+                "Medium-range AA continuous damage per second, every medium-range aura together, before hit chance, as the port card shows it"
+            }
+            Self::AaLongDps => {
+                "Long-range AA continuous damage per second, every long-range aura together, before hit chance, as the port card shows it"
+            }
+            Self::AaShortRange => "Reach of the short-range AA auras",
+            Self::AaMediumRange => "Reach of the medium-range AA auras",
+            Self::AaLongRange => "Reach of the long-range AA auras",
+            Self::AaShortMounts => "Gun mounts feeding the short-range AA auras",
+            Self::AaMediumMounts => "Gun mounts feeding the medium-range AA auras",
+            Self::AaLongMounts => {
+                "Gun mounts feeding the long-range AA auras, secondary and dual-purpose main battery guns included"
+            }
+            Self::AaFlakCount => "Flak bursts in one AA salvo, every flak aura together",
+            Self::AaFlakDamage => "Damage of one flak burst",
+            Self::AaRating => {
+                "AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned on the way; a judgment to compare ships of one class and tier, not a game value"
+            }
         }
     }
 
@@ -378,6 +453,10 @@ impl DerivedStat {
             | Self::FireChanceReduction
             | Self::FireDamagePerSecond
             | Self::FloodDamagePerSecond => Unit::Percent,
+            Self::AaShortDps | Self::AaMediumDps | Self::AaLongDps => Unit::HpPerSecond,
+            Self::AaShortRange | Self::AaMediumRange | Self::AaLongRange => Unit::Km,
+            Self::AaShortMounts | Self::AaMediumMounts | Self::AaLongMounts | Self::AaFlakCount => Unit::Count,
+            Self::AaFlakDamage | Self::AaRating => Unit::Hp,
         }
     }
 
@@ -388,7 +467,19 @@ impl DerivedStat {
             | Self::MainBatteryDamagePerMinute
             | Self::MainBatterySigma
             | Self::TorpedoTubes
-            | Self::FireChanceReduction => Some(Direction::Higher),
+            | Self::FireChanceReduction
+            | Self::AaShortDps
+            | Self::AaMediumDps
+            | Self::AaLongDps
+            | Self::AaShortRange
+            | Self::AaMediumRange
+            | Self::AaLongRange
+            | Self::AaFlakCount
+            | Self::AaFlakDamage
+            | Self::AaRating => Some(Direction::Higher),
+
+            // A mount count describes the battery; builds do not change it.
+            Self::AaShortMounts | Self::AaMediumMounts | Self::AaLongMounts => None,
             Self::MainBatteryDispersionAtStockRange
             | Self::MainBatteryVerticalDispersionAtStockRange
             | Self::SecondaryDispersionAtStockRange
@@ -493,6 +584,20 @@ impl DerivedStat {
             | Self::FireDamagePerSecond
             | Self::FloodDuration
             | Self::FloodDamagePerSecond => &[],
+
+            // The card lists no AA stat.
+            Self::AaShortDps
+            | Self::AaMediumDps
+            | Self::AaLongDps
+            | Self::AaShortRange
+            | Self::AaMediumRange
+            | Self::AaLongRange
+            | Self::AaShortMounts
+            | Self::AaMediumMounts
+            | Self::AaLongMounts
+            | Self::AaFlakCount
+            | Self::AaFlakDamage
+            | Self::AaRating => &[],
         }
     }
 
@@ -508,6 +613,10 @@ impl DerivedStat {
             Self::FloodDamagePerSecond => &["vulnerabilityFlood"],
             Self::FloodDamage => &["hlCritTimeCoeff", "floodTime", "vulnerabilityFlood"],
             Self::MainBatterySigma => &["GMSigmaCount"],
+            Self::AaShortDps | Self::AaMediumDps | Self::AaLongDps => &["AAAuraDamage", "AAAuraDamageAbsolute"],
+            Self::AaFlakCount => &["AAExtraBubbles"],
+            Self::AaFlakDamage => &["AABubbleDamage"],
+            Self::AaRating => &["AAAuraDamage", "AAAuraDamageAbsolute", "AABubbleDamage", "AAExtraBubbles"],
             Self::MainBatteryBarrels
             | Self::MainBatterySalvoDamage
             | Self::MainBatteryDamagePerMinute
@@ -537,7 +646,13 @@ impl DerivedStat {
             | Self::TorpedoDamagePerMinuteWithReloadBoosterAllLaunchers
             | Self::TorpedoDamagePerMinuteWithReloadBuff
             | Self::TorpedoDamagePerMinuteWithReloadBuffAllLaunchers
-            | Self::FireZones => &[],
+            | Self::FireZones
+            | Self::AaShortRange
+            | Self::AaMediumRange
+            | Self::AaLongRange
+            | Self::AaShortMounts
+            | Self::AaMediumMounts
+            | Self::AaLongMounts => &[],
         }
     }
 
@@ -645,6 +760,8 @@ pub enum DerivedValue {
     TorpedoesPerMinute(TorpedoesPerMinute),
     Percent(Percent),
     Ratio(f32),
+    DamagePerSecond(units::DamagePerSecond),
+    Km(Km),
 }
 
 impl DerivedValue {
@@ -659,6 +776,8 @@ impl DerivedValue {
             Self::TorpedoesPerMinute(rate) => rate.value(),
             Self::Percent(percent) => percent.value(),
             Self::Ratio(ratio) => ratio,
+            Self::DamagePerSecond(rate) => rate.value(),
+            Self::Km(km) => km.value(),
         }
     }
 }
@@ -675,6 +794,8 @@ impl fmt::Display for DerivedValue {
             Self::TorpedoesPerMinute(rate) => write!(f, "{:.2} torpedoes/min", rate.value()),
             Self::Percent(percent) => write!(f, "{:.2}%", percent.value()),
             Self::Ratio(ratio) => write!(f, "{ratio:.2}"),
+            Self::DamagePerSecond(rate) => write!(f, "{:.0} hp/s", rate.value()),
+            Self::Km(km) => write!(f, "{:.2} km", km.value()),
         }
     }
 }
@@ -949,6 +1070,7 @@ impl Derivation<'_> {
 
         rows.extend(self.torpedo_rate_rows());
         rows.extend(self.fire_and_flood_rows());
+        rows.extend(self.anti_air_rows());
 
         rows
     }
@@ -1079,6 +1201,55 @@ impl Derivation<'_> {
                 rows.push(row(DerivedStat::FloodDamage, DerivedValue::Hp(damage)));
             }
         }
+
+        rows
+    }
+
+    /// Damage, reach and mounts of each AA band, flak and the AA rating of
+    /// the selected modules with the build applied, without Defensive AA Fire.
+    fn anti_air_rows(&self) -> Vec<DerivedRow> {
+        let Some(defense) = anti_air(self.ship, self.selection, self.modifiers, None) else {
+            return Vec::new();
+        };
+        let row = |stat, value| DerivedRow { stat, qualifier: None, value, consumable: None };
+
+        let mut rows = Vec::new();
+        for (band, dps) in [
+            (AuraBand::Short, DerivedStat::AaShortDps),
+            (AuraBand::Medium, DerivedStat::AaMediumDps),
+            (AuraBand::Long, DerivedStat::AaLongDps),
+        ] {
+            if let Some(defense) = defense.band(band) {
+                rows.push(row(
+                    dps,
+                    DerivedValue::DamagePerSecond(units::DamagePerSecond::new(defense.dps().value().round())),
+                ));
+            }
+        }
+        for (band, range) in [
+            (AuraBand::Short, DerivedStat::AaShortRange),
+            (AuraBand::Medium, DerivedStat::AaMediumRange),
+            (AuraBand::Long, DerivedStat::AaLongRange),
+        ] {
+            if let Some(defense) = defense.band(band) {
+                rows.push(row(range, DerivedValue::Km(Km::from((defense.range().value() * 100.0).round() / 100.0))));
+            }
+        }
+        for (band, mounts) in [
+            (AuraBand::Short, DerivedStat::AaShortMounts),
+            (AuraBand::Medium, DerivedStat::AaMediumMounts),
+            (AuraBand::Long, DerivedStat::AaLongMounts),
+        ] {
+            if let Some(defense) = defense.band(band) {
+                rows.push(row(mounts, DerivedValue::Count(defense.mount_count().0)));
+            }
+        }
+        if let Some(flak) = &defense.flak {
+            rows.push(row(DerivedStat::AaFlakCount, DerivedValue::Count(flak.bursts().0)));
+            rows.push(row(DerivedStat::AaFlakDamage, DerivedValue::Hp(Hp::from(flak.damage().value().round()))));
+        }
+        let rating = AaRating::from_defense(&defense).total.value().round();
+        rows.push(row(DerivedStat::AaRating, DerivedValue::Hp(Hp::from(rating))));
 
         rows
     }

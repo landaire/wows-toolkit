@@ -1,0 +1,13 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "explain(json!({ \"ship\": \"Yamato\", \"value\": 22.1, \"stat\": \"rudder\" }))"
+---
+ship: "T10 Yamato (battleship, Japan) [replicas: ARP Yamato, Yamato Kai]"
+value: "22.1"
+rule: "A match is a stat of this ship whose value rounds to the number at its decimals, on the stock modules or another module combination, alone or with up to three captain skills (21 points, a skill on every cheaper tier) and upgrades (one per slot); conditional skills count with their trigger met only where marked active, and the ship's special ability only where named. Fewer assumptions rank first. Signals, camouflage and commander talents are not searched."
+matches:
+  - stat: mobility.rudder_time
+    label: Rudder Shift Time
+    value: 22.05 s
+    base: 22.05 s
+    build: []

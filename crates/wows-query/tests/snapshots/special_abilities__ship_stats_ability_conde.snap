@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/special_abilities.rs
-assertion_line: 87
 expression: stats
 ---
 ship:
@@ -1205,6 +1204,30 @@ build_stats:
               - Outnumbered
               - Sierra Mike signal
             note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Engine Boost active
+            value: 41.4
+            assumed:
+              - Engine Boost
+            note: "Only while Engine Boost is active. It adds 20% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+          - label: with Outnumbered active and Engine Boost active
+            value: 44.16
+            assumed:
+              - Outnumbered
+              - Engine Boost
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Engine Boost active and Sierra Mike signal
+            value: 43.13
+            assumed:
+              - Engine Boost
+              - Sierra Mike signal
+            note: "Only while Engine Boost is active. It adds 20% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+          - label: with Outnumbered active and Engine Boost active and Sierra Mike signal
+            value: 46.02
+            assumed:
+              - Outnumbered
+              - Engine Boost
+              - Sierra Mike signal
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
   fires_per_minute:
     total:
       stat: "fire starts per minute, all armament"
@@ -1597,6 +1620,136 @@ build_stats:
                 projectiles_per_minute: 24
               assumed: []
     note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. The headline is against one distant target at the bearing (degrees off the bow, clockwise) where the most fires start: the server gives each secondary mount its own target, and a gun fires at a target only when its mount turns to it outside its dead zones, so one target draws the mounts whose firing sectors cover its bearing, usually one side and the centerline. all_mounts_ceiling is every gun mount firing at once, which no single target sees. by_bearing gives the figure at standard bearings, starboard and its port mirror, on the base and best builds. salvo_fire_chance_pct = 1 - (1 - p)^n over the n bearing shells of one salvo. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."
+  anti_aircraft:
+    auras:
+      - band: medium-range
+        range: 3.8
+        hit_chance: 90
+        mounts:
+          - 8 x 57 mm twin
+        damage_per_second:
+          stat: medium-range AA damage per second
+          unit: hp/s
+          builds:
+            base: 343
+            best:
+              value: 493
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            alternatives:
+              - label: without AA Defense and ASW Expert
+                value: 394
+                assumed:
+                  - Auxiliary Armaments Modification 2
+              - label: without Auxiliary Armaments Modification 2
+                value: 429
+                assumed:
+                  - AA Defense and ASW Expert
+      - band: long-range
+        range: 6
+        hit_chance: 90
+        mounts:
+          - 8 x 127 mm twin
+        damage_per_second:
+          stat: long-range AA damage per second
+          unit: hp/s
+          builds:
+            base: 147
+            best:
+              value: 211
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            alternatives:
+              - label: without AA Defense and ASW Expert
+                value: 169
+                assumed:
+                  - Auxiliary Armaments Modification 2
+              - label: without Auxiliary Armaments Modification 2
+                value: 184
+                assumed:
+                  - AA Defense and ASW Expert
+    flak:
+      zone: 3.5 to 6 km
+      hit_chance: 90
+      bursts:
+        stat: flak bursts per salvo
+        unit: bursts
+        builds:
+          base: 6
+          best:
+            value: 8
+            assumed:
+              - Focus Fire Training
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without Focus Fire Training
+              value: 7
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 7
+              assumed:
+                - Focus Fire Training
+      damage_per_burst:
+        stat: flak burst damage
+        unit: hp
+        builds:
+          base: 1680
+          best:
+            value: 2415
+            assumed:
+              - AA Defense and ASW Expert
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without AA Defense and ASW Expert
+              value: 1932
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 2100
+              assumed:
+                - AA Defense and ASW Expert
+    priority_sector:
+      instant_damage: 3.5
+      damage_multiplier: 1.5
+      duration: 10
+      cooldown: 10
+    rating:
+      method: "Damage the AA deals to one plane flying straight in at 150 knots (2.69 m/s per knot on the game map) from the edge of the farthest aura to the ship: for each aura, seconds inside it times damage per second times hit chance, plus the flak bursts the client spawns on the way (bursts x hit chance every 2.02 s) times burst damage times 0.1, the share counted as hitting. A judgment to compare ships of one class and tier: players dodge flak and do not fly straight in. The priority sector is left out, and so is Defensive AA Fire except in the alternatives that name it."
+      rating:
+        stat: "AA rating, damage to one plane flying straight in"
+        unit: hp
+        builds:
+          base: 7563
+          best:
+            value: 12208
+            assumed:
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without AA Defense and ASW Expert
+              value: 9766
+              assumed:
+                - Focus Fire Training
+                - Auxiliary Armaments Modification 2
+            - label: without Focus Fire Training
+              value: 11540
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 10034
+              assumed:
+                - AA Defense and ASW Expert
+                - Focus Fire Training
+      breakdown:
+        - "medium-range: up to 9.19 s inside, 443.76 hp/s after hit chance, 4076 hp"
+        - "long-range: up to 14.65 s inside, 190.18 hp/s after hit chance, 2786 hp"
+        - "flak: 8 bursts of 2415 hp, 0.9 hit chance, 5346 hp"
+        - "total: 12208 hp"
 changes:
   - stat: Main Battery Reload Time
     from: 14.0 s

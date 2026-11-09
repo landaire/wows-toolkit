@@ -550,6 +550,11 @@ pub struct ShipTtxComponents {
     /// `A_Artillery`, for components that have one.
     #[cfg_attr(feature = "serde", serde(default))]
     pub alternative_fire: HashMap<String, AlternativeFireMode>,
+    /// Anti-aircraft auras per component name, e.g. `A_AirDefense`, `A_ATBA`
+    /// or `A_Artillery`, for every AA, secondary and main battery component
+    /// an upgrade lists that has an aura.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anti_air: HashMap<String, super::anti_air::AntiAirComponent>,
     /// Stock (base) upgrade selection per slot: the empty-`prev` upgrade in each
     /// `ShipUpgradeInfo` chain, captured during the same walk that fills the maps
     /// above (the raw `ShipUpgradeInfo` pickle is dropped after parsing).
@@ -572,6 +577,7 @@ impl ShipTtxComponents {
             && self.depth_charges.is_empty()
             && self.combat_instructions.is_empty()
             && self.alternative_fire.is_empty()
+            && self.anti_air.is_empty()
     }
 
     /// Combat Instructions of a `_Hull` upgrade, `None` when it has none.

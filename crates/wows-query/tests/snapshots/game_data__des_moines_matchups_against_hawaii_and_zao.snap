@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1386
 expression: comparison
 ---
 group: tier 10 cruisers
@@ -11,6 +10,8 @@ reference_range_km: 12
 factors:
   - "health (HP, higher is better): hit points"
   - "repair_party_heal (%, higher is better): share of maximum HP one Repair Party charge restores, stock"
+  - "repair_party_total_heal (HP, higher is better): HP every Repair Party charge restores together"
+  - "damage_control_reload (s, lower is better): Damage Control Party reload"
   - "main_battery_reload (s, lower is better): main battery reload"
   - "main_battery_range (km, higher is better): main battery firing range"
   - "dpm_ap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
@@ -37,15 +38,22 @@ factors:
   - "torpedo_reload (s, lower is better): torpedo tube reload"
   - "torpedo_launch_from_bow (deg, lower is better): smallest angle off the bow at which a torpedo launcher bears; 0 launches bow-on"
   - "broadside_tubes (tubes, higher is better): torpedo tubes that bear on one broadside at once"
-  - "aa_damage (HP/s, higher is better): continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted"
-  - "aa_range (km, higher is better): reach of the longest anti-aircraft aura, stock"
+  - "aa_rating (hp, higher is better): AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned; a judgment, see ship_stats anti_aircraft"
+  - "aa_long_dps (HP/s, higher is better): continuous damage per second of the long-range AA auras, before hit chance"
+  - "aa_flak (hp, higher is better): damage of one flak salvo if every burst hits: bursts times burst damage"
   - "concealment (km, lower is better): detectability by ships"
   - "air_concealment (km, lower is better): detectability by aircraft"
+  - "radar_range (km, higher is better): Surveillance Radar range"
+  - "radar_duration (s, higher is better): Surveillance Radar action time"
+  - "hydro_range (km, higher is better): Hydroacoustic Search range against ships"
+  - "torpedo_detection (km, higher is better): Hydroacoustic Search torpedo range"
+  - "smoke_lifetime (s, higher is better): time a smoke cloud lasts"
   - "speed (kn, higher is better): top speed"
   - "rudder_shift (s, lower is better): rudder shift time"
   - "turning_circle (m, lower is better): turning circle radius"
   - "bb_ap_citadel (%, lower is better): broadside AP hits of the most common battleship caliber of its matchmaking at 12 to 14 km that detonate in the citadel, from armor_assessment"
   - "bb_ap_overpenetration (%, higher is better): the same hits that overpenetrate, doing little damage"
+  - "cruiser_he_damaging (%, lower is better): broadside HE hits of the cruiser HE shooter of its matchmaking at 5 to 10 km that penetrate, from armor_assessment"
   - "bow_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest bow plate above the waterline"
   - "stern_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest stern plate above the waterline"
 torpedo_factors:
@@ -125,6 +133,16 @@ leaders:
       - "Almte. Irízar (Pan_America, light cruiser, premium) 40%"
     worst:
       - "Yari (Japan, heavy cruiser, test) 14%"
+  repair_party_total_heal:
+    best:
+      - "Sevastopol (Russia, large cruiser, premium) 80520 HP"
+    worst:
+      - "Kitakami (Japan, light cruiser, premium) 13860 HP"
+  damage_control_reload:
+    best:
+      - "Sevastopol (Russia, large cruiser, premium) 30 s"
+    worst:
+      - "Yari (Japan, heavy cruiser, test) 60 s"
   main_battery_reload:
     best:
       - "Jinan (Pan_Asia, light cruiser) 2.64 s"
@@ -255,16 +273,21 @@ leaders:
       - "Kitakami (Japan, light cruiser, premium) 20 tubes"
     worst:
       - "Ravenna (Italy, heavy cruiser, test) 3 tubes"
-  aa_damage:
+  aa_rating:
     best:
-      - "Komissar (Russia, heavy cruiser, premium) 903 HP/s"
+      - "Hawaii (USA, light cruiser, premium) 19145 hp"
     worst:
-      - "Kitakami (Japan, light cruiser, premium) 11 HP/s"
-  aa_range:
+      - "Kitakami (Japan, light cruiser, premium) 80 hp"
+  aa_long_dps:
     best:
-      - "A. Nevsky (Russia, heavy cruiser) 6.9 km"
+      - "Hawaii (USA, light cruiser, premium) 443 HP/s"
     worst:
-      - "Kitakami (Japan, light cruiser, premium) 2.5 km"
+      - "Svea (Europe, light cruiser, premium) 96 HP/s"
+  aa_flak:
+    best:
+      - "Hawaii (USA, light cruiser, premium) 32703 hp"
+    worst:
+      - "Fearmaw (United_Kingdom, light cruiser, test) 12075 hp"
   concealment:
     best:
       - "Kitakami (Japan, light cruiser, premium) 7.92 km"
@@ -275,6 +298,31 @@ leaders:
       - "Kitakami (Japan, light cruiser, premium) 4.02 km"
     worst:
       - "Ravenna (Italy, heavy cruiser, test) 8.93 km"
+  radar_range:
+    best:
+      - "A. Nevsky (Russia, heavy cruiser) 12 km"
+    worst:
+      - "Taejong (Pan_Asia, light cruiser, premium) 8.5 km"
+  radar_duration:
+    best:
+      - "Hawaii (USA, light cruiser, premium) 40 s"
+    worst:
+      - "Petrozavodsk (Russia, heavy cruiser, test) 15 s"
+  hydro_range:
+    best:
+      - "Bremen (Germany, light cruiser, premium) 6 km"
+    worst:
+      - "San Martín (Pan_America, light cruiser) 3 km"
+  torpedo_detection:
+    best:
+      - "Bremen (Germany, light cruiser, premium) 4 km"
+    worst:
+      - "San Martín (Pan_America, light cruiser) 3 km"
+  smoke_lifetime:
+    best:
+      - "Minotaur (United_Kingdom, light cruiser) 113 s"
+    worst:
+      - "Ravenna (Italy, heavy cruiser, test) 10 s"
   speed:
     best:
       - "Castilla (Spain, heavy cruiser) 37 kn"
@@ -300,6 +348,11 @@ leaders:
       - "Kitakami (Japan, light cruiser, premium) 89.7%"
     worst:
       - "Marseille (France, large cruiser) 38.5%"
+  cruiser_he_damaging:
+    best:
+      - "Sevastopol (Russia, large cruiser, premium) 48.3%"
+    worst:
+      - "Almte. Irízar (Pan_America, light cruiser, premium) 99.9%"
   bow_overmatch:
     best:
       - "Des Moines (USA, heavy cruiser) 67.21%"
@@ -358,6 +411,8 @@ ships:
     values:
       health: "55100 (rank 31/56, p45; heavy cruisers rank 16/23, p32)"
       repair_party_heal: "14 (rank 14/56, p0; heavy cruisers rank 4/23, p0)"
+      repair_party_total_heal: "23142 (rank 39/56, p31; heavy cruisers rank 17/23, p27)"
+      damage_control_reload: "60 (rank 4/56, p0; heavy cruisers rank 2/23, p0)"
       main_battery_reload: "4.84 (rank 14/56, p73; heavy cruisers rank 1/23, p91)"
       main_battery_range: "18.36 (rank 38/56, p31; heavy cruisers rank 21/23, p5)"
       dpm_ap: "585744 (rank 5/54, p91; heavy cruisers rank 1/23, p95)"
@@ -376,21 +431,27 @@ ships:
       all_bear_from_stern: "31 (rank 18/54, p53; heavy cruisers rank 12/23, p32)"
       secondary_dpm: "200000 (rank 34/41, p13; heavy cruisers rank 18/23, p14)"
       secondary_range: "10.51 (rank 10/41, p8; heavy cruisers rank 3/23, p0)"
-      aa_damage: "609 (rank 20/56, p65; heavy cruisers rank 9/23, p64)"
-      aa_range: "5.8 (rank 20/56, p38; heavy cruisers rank 10/23, p18)"
+      aa_rating: "11956 (rank 35/56, p38; heavy cruisers rank 11/23, p55)"
+      aa_long_dps: "151 (rank 41/55, p19; heavy cruisers rank 18/23, p9)"
+      aa_flak: "16905 (rank 39/55, p17; heavy cruisers rank 17/23, p9)"
       concealment: "10.89 (rank 28/56, p49; heavy cruisers rank 7/23, p68)"
       air_concealment: "6.4 (rank 13/56, p76; heavy cruisers rank 3/23, p86)"
+      radar_range: "10 (rank 9/19, p44; heavy cruisers rank 6/7, p17)"
+      radar_duration: "35 (rank 8/19, p56; heavy cruisers rank 2/7, p83)"
+      hydro_range: "5 (rank 5/41, p3; heavy cruisers rank 2/19, p0)"
+      torpedo_detection: "3.5 (rank 5/41, p3; heavy cruisers rank 2/19, p0)"
       speed: "33 (rank 37/56, p16; heavy cruisers rank 15/23, p23)"
       rudder_shift: "3.3 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Enhanced Propulsion Plant)"
       turning_circle: "770 (rank 20/56, p60; heavy cruisers rank 4/23, p82)"
       bb_ap_citadel: "5.8 (rank 28/56, p47; heavy cruisers rank 10/23, p55)"
       bb_ap_overpenetration: "58.9 (rank 17/56, p65; heavy cruisers rank 3/23, p77)"
+      cruiser_he_damaging: "86.3 (rank 30/56, p44; heavy cruisers rank 14/23, p32)"
       bow_overmatch: "weakness: 67.21% of the battleships it meets overmatch its bow (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
       stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; heavy cruisers rank 1/23, p91)"
     outliers:
-      - "dpm_ap 585744 HP/min: better than 91% of the 53 other tier 10 cruisers (rank 5/54)"
-      - "rudder_shift 3.3 s (with unique upgrade Enhanced Propulsion Plant): better than all 55 other tier 10 cruisers (rank 1/56)"
-      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging, worse than at least 90% of the 104 other tier 9-11 cruisers: angled 45 deg 37.1% (rank 99/105)"
+      - "strength: dpm_ap 585744 HP/min, higher than 91% of the 53 other tier 10 cruisers (rank 5/54)"
+      - "strength: rudder_shift 3.3 s (with unique upgrade Enhanced Propulsion Plant), the lowest of the 56 tier 10 cruisers (rank 1/56)"
+      - "weakness: Hindenburg's heavy cruiser AP 203 mm shells at 12-14 km detonate inside it (citadel or regular penetration) on 37.1% of angled 45 deg hits, higher than 94% of the 104 other tier 9-11 cruisers (rank 99/105); each such hit is regular or heavy damage taken."
     matchups:
       - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
         aspects:
@@ -430,6 +491,16 @@ ships:
     signals:
       - "Kites poorly: within 30 deg of the stern 3 of 9 main battery barrels bear and all bear from 31 deg off the stern."
       - "Bow-on it is exposed: most tier 8-11 battleships (67.21%) overmatch its 27 mm bow plating; within 30 deg of the bow 6 of 9 main battery barrels bear and all bear from 30 deg off the bow."
+    battle_impact:
+      score: 55.5
+      rank: 12
+      components:
+        firepower: 60.8
+        accuracy: 40.7
+        reach: 31.8
+        survivability: 48.8
+        mobility: 59
+        spotting: 62.1
     unique_upgrade: "Enhanced Propulsion Plant (unique upgrade), taken for: rudder_shift"
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
@@ -444,6 +515,8 @@ ships:
     values:
       health: "75600 (rank 3/56, p96; light cruisers rank 1/21, p100)"
       repair_party_heal: "14 (rank 14/56, p0; light cruisers rank 8/21, p0)"
+      repair_party_total_heal: "31752 (rank 15/56, p75; light cruisers rank 6/21, p75)"
+      damage_control_reload: "60 (rank 4/56, p0; light cruisers rank 1/21, p0)"
       main_battery_reload: "5.72 (rank 20/56, p62; light cruisers rank 16/21, p15)"
       main_battery_range: "18.27 (rank 42/56, p25; light cruisers rank 8/21, p65)"
       dpm_ap: "453147 (rank 16/54, p72; light cruisers rank 12/19, p39)"
@@ -458,23 +531,31 @@ ships:
       fires_per_minute: "28.96 (rank 29/55, p48; light cruisers rank 7/20, p68)"
       bow_barrels: "66.67 (rank 19/56, p44; light cruisers rank 9/21, p60)"
       stern_barrels: "66.67 (rank 11/56, p82; light cruisers rank 5/21, p80)"
-      aa_damage: "340 (rank 53/56, p5; light cruisers rank 18/21, p15)"
-      aa_range: "4 (rank 42/56, p7; light cruisers rank 7/21, p20)"
+      aa_rating: "19145 (rank 1/56, p100; light cruisers rank 1/21, p100)"
+      aa_long_dps: "443 (rank 1/55, p100; light cruisers rank 1/20, p100)"
+      aa_flak: "32703 (rank 1/55, p100; light cruisers rank 1/20, p100)"
       concealment: "12.18 (rank 41/56, p27; light cruisers rank 20/21, p5)"
       air_concealment: "7.69 (rank 37/56, p35; light cruisers rank 20/21, p5)"
+      radar_range: "8.5 (rank 17/19, p0; light cruisers rank 9/10, p0)"
+      radar_duration: "40 (rank 1/19, p67; light cruisers rank 1/10, p44)"
+      hydro_range: "5 (rank 5/41, p3; light cruisers rank 2/13, p8)"
+      torpedo_detection: "3.5 (rank 5/41, p3; light cruisers rank 2/13, p8)"
       speed: "33 (rank 37/56, p16; light cruisers rank 14/21, p20)"
       rudder_shift: "6.63 (rank 47/56, p16; light cruisers rank 21/21, p0)"
       turning_circle: "840 (rank 33/56, p29; light cruisers rank 19/21, p5)"
       bb_ap_citadel: "7.1 (rank 35/56, p36; light cruisers rank 16/21, p25)"
       bb_ap_overpenetration: "61.6 (rank 14/56, p76; light cruisers rank 13/21, p40)"
+      cruiser_he_damaging: "89.8 (rank 39/56, p31; light cruisers rank 11/21, p50)"
       bow_overmatch: "weakness: 67.21% of the battleships it meets overmatch its bow (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; light cruisers rank 1/21, p100)"
       stern_overmatch: "weakness: 67.21% of the battleships it meets overmatch its stern (a majority); still tied for the lowest share among tier 10 cruisers (rank 1/56, p89; light cruisers rank 1/21, p100)"
     outliers:
-      - "health 75600 HP: better than 96% of the 55 other tier 10 cruisers (rank 3/56)"
-      - "turret_traverse 3.4 s: better than 95% of the 55 other tier 10 cruisers (rank 1/56)"
-      - "aa_damage 340 HP/s: worse than 95% of the 55 other tier 10 cruisers (rank 53/56)"
-      - "vs heavy cruiser AP 203 mm (Hindenburg), 12-14 km, damaging, better than at least 90% of the 104 other tier 9-11 cruisers: broadside 0.9% (rank 1/105), angled 30 deg 3.6% (rank 1/105)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, citadel, better than at least 90% of the 104 other tier 9-11 cruisers: angled 45 deg 2% (rank 5/105)"
+      - "strength: health 75600 HP, higher than 96% of the 55 other tier 10 cruisers (rank 3/56)"
+      - "strength: turret_traverse 3.4 s, tied for the lowest of the 56 tier 10 cruisers (rank 1/56)"
+      - "strength: aa_rating 19145 hp, the highest of the 56 tier 10 cruisers (rank 1/56)"
+      - "strength: aa_long_dps 443 HP/s, the highest of the 55 tier 10 cruisers (rank 1/55)"
+      - "strength: aa_flak 32703 hp, the highest of the 55 tier 10 cruisers (rank 1/55)"
+      - "strength: Hindenburg's heavy cruiser AP 203 mm shells at 12-14 km detonate inside it (citadel or regular penetration) on 0.9% of broadside hits, the lowest of the 105 tier 9-11 cruisers (rank 1/105) and 3.6% of angled 30 deg hits, the lowest of the 105 tier 9-11 cruisers (rank 1/105); each such hit is regular or heavy damage taken."
+      - "strength: Minnesota's battleship AP 406 mm shells at 12-14 km detonate in its citadel on 2% of angled 45 deg hits, lower than 96% of the 104 other tier 9-11 cruisers (rank 5/105); a citadel hit is heavy damage taken."
     matchups:
       - shooter: "destroyer AP 127 mm (Benson), 5-10 km"
         aspects:
@@ -514,6 +595,16 @@ ships:
     signals:
       - "Kites with its guns (within 30 deg of the stern 16 of 24 main battery barrels bear and they never all bear toward the stern), but most tier 8-11 battleships (67.21%) overmatch its 27 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (67.21%) overmatch its 27 mm bow plating; within 30 deg of the bow 16 of 24 main battery barrels bear and they never all bear toward the bow."
+    battle_impact:
+      score: 59.5
+      rank: 3
+      components:
+        firepower: 77.2
+        accuracy: 45
+        reach: 25.5
+        survivability: 68.4
+        mobility: 25.7
+        spotting: 52.7
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
       - "Repair Party (3 charges, 80 s reload)"
@@ -529,6 +620,8 @@ ships:
     values:
       health: "49400 (rank 40/56, p27; heavy cruisers rank 21/23, p5)"
       repair_party_heal: "14 (rank 14/56, p0; heavy cruisers rank 4/23, p0)"
+      repair_party_total_heal: "20748 (rank 45/56, p18; heavy cruisers rank 21/23, p5)"
+      damage_control_reload: "60 (rank 4/56, p0; heavy cruisers rank 2/23, p0)"
       main_battery_reload: "12.06 (rank 36/56, p36; heavy cruisers rank 14/23, p41)"
       main_battery_range: "18.83 (rank 35/56, p38; heavy cruisers rank 18/23, p23)"
       dpm_ap: "338620 (rank 31/54, p43; heavy cruisers rank 13/23, p45)"
@@ -552,31 +645,35 @@ ships:
       torpedo_reload: "79.56 (rank 20/36, p46; heavy cruisers rank 11/16, p33)"
       torpedo_launch_from_bow: "50 (rank 35/36, p3; heavy cruisers rank 15/16, p7)"
       broadside_tubes: "10 (rank 3/36, p83; heavy cruisers rank 2/16, p93)"
-      aa_damage: "473 (rank 39/56, p31; heavy cruisers rank 17/23, p27)"
-      aa_range: "5.8 (rank 20/56, p38; heavy cruisers rank 10/23, p18)"
+      aa_rating: "10251 (rank 47/56, p16; heavy cruisers rank 21/23, p9)"
+      aa_long_dps: "217 (rank 22/55, p59; heavy cruisers rank 9/23, p59)"
+      aa_flak: "17710 (rank 36/55, p31; heavy cruisers rank 14/23, p32)"
       concealment: "9.9 (rank 16/56, p73; heavy cruisers rank 1/23, p100)"
       air_concealment: "6.04 (rank 11/56, p82; heavy cruisers rank 1/23, p100)"
+      hydro_range: "5 (rank 5/41, p3; heavy cruisers rank 2/19, p0)"
+      torpedo_detection: "3.5 (rank 5/41, p3; heavy cruisers rank 2/19, p0)"
       speed: "34.5 (rank 18/56, p62; heavy cruisers rank 9/23, p50)"
       rudder_shift: "3.68 (rank 3/56, p95; heavy cruisers rank 2/23, p91)"
       turning_circle: "840 (rank 33/56, p29; heavy cruisers rank 12/23, p32)"
       bb_ap_citadel: "3.6 (rank 14/56, p73; heavy cruisers rank 3/23, p86)"
       bb_ap_overpenetration: "59.5 (rank 15/56, p75; heavy cruisers rank 2/23, p95)"
+      cruiser_he_damaging: "93.7 (rank 46/56, p15; heavy cruisers rank 19/23, p18)"
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 8/56, p31; heavy cruisers rank 4/23, p18"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 8/56, p35; heavy cruisers rank 4/23, p23"
     outliers:
-      - "dispersion 91 m (with unique upgrade Improved Bridge): better than all 55 other tier 10 cruisers (rank 1/56)"
-      - "torpedo_dpm 185307 HP/min: better than all 35 other tier 10 cruisers (rank 1/36)"
-      - "torpedoes_per_minute 7.54 torpedoes/min: better than 97% of the 35 other tier 10 cruisers (rank 2/36)"
-      - "torpedo_launch_from_bow 50 deg: worse than 97% of the 35 other tier 10 cruisers (rank 35/36)"
-      - "rudder_shift 3.68 s: better than 95% of the 55 other tier 10 cruisers (rank 3/56)"
-      - "torpedo Type F3 damage_per_minute 185307 HP/min: better than all 38 other torpedo options of tier 10 cruisers (rank 1/39)"
-      - "torpedo Type 93 mod. 3 damage 27332 HP: better than 95% of the 38 other torpedo options of tier 10 cruisers (rank 1/39)"
-      - "torpedo Type 93 mod. 3 damage_at_max_range 27332 HP: better than 95% of the 38 other torpedo options of tier 10 cruisers (rank 1/39)"
-      - "torpedo Type 93 mod. 3 flood_coefficient 4.06x: better than 92% of the 38 other torpedo options of tier 10 cruisers (rank 2/39)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, citadel, better than at least 90% of the 104 other tier 9-11 cruisers: angled 30 deg 2.4% (rank 6/105), angled 45 deg 2.7% (rank 8/105)"
-      - "vs battleship AP 406 mm (Minnesota), 12-14 km, damaging, better than at least 90% of the 104 other tier 9-11 cruisers: angled 30 deg 4.8% (rank 6/105), angled 45 deg 5.7% (rank 5/105)"
-      - "vs battleship AP 457 mm (Georgia), 12-14 km, citadel, better than at least 90% of the 104 other tier 9-11 cruisers: angled 30 deg 2.5% (rank 9/105), angled 45 deg 2.6% (rank 5/105)"
-      - "vs battleship AP 457 mm (Georgia), 12-14 km, damaging, better than at least 90% of the 104 other tier 9-11 cruisers: angled 30 deg 3.7% (rank 6/105), angled 45 deg 4.2% (rank 3/105)"
+      - "strength: dispersion 91 m (with unique upgrade Improved Bridge), the lowest of the 56 tier 10 cruisers (rank 1/56)"
+      - "strength: torpedo_dpm 185307 HP/min, the highest of the 36 tier 10 cruisers (rank 1/36)"
+      - "strength: torpedoes_per_minute 7.54 torpedoes/min, higher than 97% of the 35 other tier 10 cruisers (rank 2/36)"
+      - "weakness: torpedo_launch_from_bow 50 deg, higher than 97% of the 35 other tier 10 cruisers (rank 35/36)"
+      - "strength: rudder_shift 3.68 s, lower than 95% of the 55 other tier 10 cruisers (rank 3/56)"
+      - "strength: torpedo Type F3 damage_per_minute 185307 HP/min, the highest of the 39 torpedo options of tier 10 cruisers (rank 1/39)"
+      - "strength: torpedo Type 93 mod. 3 damage 27332 HP, tied for the highest of the 39 torpedo options of tier 10 cruisers (rank 1/39)"
+      - "strength: torpedo Type 93 mod. 3 damage_at_max_range 27332 HP, tied for the highest of the 39 torpedo options of tier 10 cruisers (rank 1/39)"
+      - "strength: torpedo Type 93 mod. 3 flood_coefficient 4.06x, higher than 92% of the 38 other torpedo options of tier 10 cruisers (rank 2/39)"
+      - "strength: Minnesota's battleship AP 406 mm shells at 12-14 km detonate in its citadel on 2.4% of angled 30 deg hits, lower than 94% of the 104 other tier 9-11 cruisers (rank 6/105) and 2.7% of angled 45 deg hits, lower than 93% of the 104 other tier 9-11 cruisers (rank 8/105); a citadel hit is heavy damage taken."
+      - "strength: Minnesota's battleship AP 406 mm shells at 12-14 km detonate inside it (citadel or regular penetration) on 4.8% of angled 30 deg hits, lower than 95% of the 104 other tier 9-11 cruisers (rank 6/105) and 5.7% of angled 45 deg hits, lower than 96% of the 104 other tier 9-11 cruisers (rank 5/105); each such hit is regular or heavy damage taken."
+      - "strength: Georgia's battleship AP 457 mm shells at 12-14 km detonate in its citadel on 2.5% of angled 30 deg hits, lower than 92% of the 104 other tier 9-11 cruisers (rank 9/105) and 2.6% of angled 45 deg hits, lower than 95% of the 104 other tier 9-11 cruisers (rank 5/105); a citadel hit is heavy damage taken."
+      - "strength: Georgia's battleship AP 457 mm shells at 12-14 km detonate inside it (citadel or regular penetration) on 3.7% of angled 30 deg hits, lower than 95% of the 104 other tier 9-11 cruisers (rank 6/105) and 4.2% of angled 45 deg hits, lower than 98% of the 104 other tier 9-11 cruisers (rank 3/105); each such hit is regular or heavy damage taken."
     torpedoes:
       - torpedo: Type F3
         values:
@@ -648,6 +745,16 @@ ships:
       - "Kites with its guns (within 30 deg of the stern 6 of 12 main battery barrels bear and all bear from 34 deg off the stern), but most tier 8-11 battleships (87.7%) overmatch its 25 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 12 main battery barrels bear and all bear from 36 deg off the bow."
       - "Its torpedo launchers bear only from 50 deg off the bow, so a launch needs a wide turn toward broadside."
+    battle_impact:
+      score: 54.8
+      rank: 15
+      components:
+        firepower: 66.9
+        accuracy: 71.3
+        reach: 38.2
+        survivability: 38.2
+        mobility: 65.5
+        spotting: 52.9
     unique_upgrade: "Improved Bridge (unique upgrade), taken for: dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
@@ -659,21 +766,22 @@ head_to_head:
   - ships:
       - Des Moines
       - Hawaii
-    compared: 27
+    compared: 35
     first_better:
       - main_battery_reload
       - main_battery_range
       - dpm_ap
       - fires_per_minute
-      - aa_damage
-      - aa_range
       - concealment
       - air_concealment
+      - radar_range
       - rudder_shift
       - turning_circle
       - bb_ap_citadel
+      - cruiser_he_damaging
     second_better:
       - health
+      - repair_party_total_heal
       - dpm_he
       - alpha_ap
       - alpha_he
@@ -681,30 +789,38 @@ head_to_head:
       - flight_time_he
       - turret_traverse
       - stern_barrels
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
+      - radar_duration
       - bb_ap_overpenetration
     tied:
       - repair_party_heal
+      - damage_control_reload
       - dispersion
       - sigma
       - bow_barrels
+      - hydro_range
+      - torpedo_detection
       - speed
       - bow_overmatch
       - stern_overmatch
     first_largest_leads:
       - rudder_shift 3.3 vs 6.63 s (50% apart)
-      - aa_damage 609 vs 340 HP/s (44% apart)
-      - aa_range 5.8 vs 4 km (31% apart)
+      - dpm_ap 585744 vs 453147 HP/min (23% apart)
+      - bb_ap_citadel 5.8 vs 7.1% (18% apart)
     second_largest_leads:
       - turret_traverse 3.4 vs 22.68 s (85% apart)
+      - aa_long_dps 443 vs 151 HP/s (66% apart)
       - stern_barrels 66.67 vs 33.33% (50% apart)
-      - alpha_he 47520 vs 27720 HP (42% apart)
-    verdict: "Mixed: Des Moines is better on 11 of 27 compared factors, Hawaii on 9, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Des Moines is better on 11 of 35 compared factors, Hawaii on 14, 10 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Des Moines
       - Zaō
-    compared: 31
+    compared: 37
     first_better:
       - health
+      - repair_party_total_heal
       - main_battery_reload
       - dpm_ap
       - dpm_he
@@ -712,9 +828,10 @@ head_to_head:
       - bow_barrels
       - all_bear_from_bow
       - all_bear_from_stern
-      - aa_damage
+      - aa_rating
       - rudder_shift
       - turning_circle
+      - cruiser_he_damaging
       - bow_overmatch
       - stern_overmatch
     second_better:
@@ -726,6 +843,8 @@ head_to_head:
       - dispersion
       - stern_barrels
       - secondary_dpm
+      - aa_long_dps
+      - aa_flak
       - concealment
       - air_concealment
       - speed
@@ -733,10 +852,12 @@ head_to_head:
       - bb_ap_overpenetration
     tied:
       - repair_party_heal
+      - damage_control_reload
       - turret_traverse
       - sigma
       - secondary_range
-      - aa_range
+      - hydro_range
+      - torpedo_detection
     first_largest_leads:
       - main_battery_reload 4.84 vs 12.06 s (60% apart)
       - dpm_ap 585744 vs 338620 HP/min (42% apart)
@@ -745,13 +866,14 @@ head_to_head:
       - alpha_he 44880 vs 27720 HP (38% apart)
       - bb_ap_citadel 3.6 vs 5.8% (38% apart)
       - stern_barrels 50 vs 33.33% (33% apart)
-    verdict: "Mixed: Des Moines is better on 13 of 31 compared factors, Zaō on 13, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Des Moines is better on 15 of 37 compared factors, Zaō on 15, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Hawaii
       - Zaō
-    compared: 27
+    compared: 33
     first_better:
       - health
+      - repair_party_total_heal
       - main_battery_reload
       - dpm_ap
       - dpm_he
@@ -759,7 +881,11 @@ head_to_head:
       - turret_traverse
       - bow_barrels
       - stern_barrels
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
       - bb_ap_overpenetration
+      - cruiser_he_damaging
       - bow_overmatch
       - stern_overmatch
     second_better:
@@ -769,8 +895,6 @@ head_to_head:
       - flight_time_he
       - dispersion
       - fires_per_minute
-      - aa_damage
-      - aa_range
       - concealment
       - air_concealment
       - speed
@@ -778,22 +902,25 @@ head_to_head:
       - bb_ap_citadel
     tied:
       - repair_party_heal
+      - damage_control_reload
       - sigma
+      - hydro_range
+      - torpedo_detection
       - turning_circle
     first_largest_leads:
       - turret_traverse 3.4 vs 22.68 s (85% apart)
       - main_battery_reload 5.72 vs 12.06 s (53% apart)
-      - dpm_he 373846 vs 223358 HP/min (40% apart)
+      - aa_long_dps 443 vs 217 HP/s (51% apart)
     second_largest_leads:
       - bb_ap_citadel 3.6 vs 7.1% (49% apart)
       - rudder_shift 3.68 vs 6.63 s (44% apart)
-      - aa_range 5.8 vs 4 km (31% apart)
-    verdict: "Mixed: Hawaii is better on 11 of 27 compared factors, Zaō on 13, 3 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+      - air_concealment 6.04 vs 7.69 km (21% apart)
+    verdict: "Mixed: Hawaii is better on 16 of 33 compared factors, Zaō on 11, 6 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
-  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others, each led by strength or weakness for the ship. Matchup outliers are from the ship's side as the target: a citadel hit is heavy damage taken, a penetration regular damage taken, an overpenetration little damage taken."
+  - "bb_ap_*, cruiser_he_damaging, *_overmatch and matchups apply to cruisers and battleships only, and these factors rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
-  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."
+  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. battle_impact is a weighted judgment from these factors, not win-rate data; its formula and weights are given by the battle_impact tool."
   - "Cruisers are typed by their largest main battery caliber: light below 170 mm, heavy 170 to 260 mm, large above. Each cruiser value also ranks among the group's cruisers of its type, after the class rank, e.g. \"(rank 3/56, p96; heavy cruisers rank 9/24, p65)\": judge a cruiser against its own type."

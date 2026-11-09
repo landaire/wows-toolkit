@@ -1,0 +1,159 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output
+---
+ship:
+  name: Stalingrad
+  index: PRSC510
+  tier: 10
+  class: cruiser
+  nation: Russia
+  group: ultimate
+  category: premium
+  status: released
+battery: main_battery
+range_km: 24
+conclusion: "24 km is past Stalingrad's 23.61 km main battery range with Gun Fire Control System Modification 2; using 23.61 km. With Gun Fire Control System Modification 2 (23.61 km range), dispersion at 23.61 km is 246.3 m horizontal and 147.8 m vertical. Stalingrad's main battery reaches 20.35 km, short of 24 km. With Gun Fire Control System Modification 2 it reaches 23.61 km; close enough to take at 23.61 km, dispersion is 246.3 m horizontal and 147.8 m vertical. Among tier 10 battleships at 24 km (40 ranked, 2 out of reach), Stalingrad on Gun Fire Control System Modification 2 ranks 8 of 40 on horizontal dispersion, 10 on vertical and 1 on the radius holding half of the shells; the median is 256.8 m horizontal and 175.7 m vertical, the tightest horizontal is Conte Verde (198.6 m)."
+guns:
+  - mount: main battery
+    min_radius: 1.6
+    ideal_radius: 10
+    ideal_distance: 1000
+    radius_on_zero: 0.2
+    radius_on_delim: 0.5
+    radius_on_max: 0.6
+    delim: 0.5
+headline: Gun Fire Control System Modification 2
+builds:
+  - build: base
+    kind: base
+    max_range_km: 20.35
+    shells:
+      sigma_count: 2.65
+      half_of_shells_radius_fraction: 0.253
+      ninety_pct_of_shells_radius_fraction: 0.612
+      inner_half_share_pct: 81.9
+    mounts:
+      - mount: main battery
+        at_range: beyond_max_range
+  - build: Gun Fire Control System Modification 2
+    kind: range
+    max_range_km: 23.61
+    max_range_change_pct: 16
+    shells:
+      sigma_count: 2.65
+      half_of_shells_radius_fraction: 0.253
+      ninety_pct_of_shells_radius_fraction: 0.612
+      inner_half_share_pct: 81.9
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            evaluated_at_km: 23.61
+            horizontal_m: 246.3
+            vertical_m: 147.8
+            vertical_ratio: 0.6
+            half_of_shells_within:
+              horizontal_m: 62.4
+              vertical_m: 37.4
+            ninety_pct_of_shells_within:
+              horizontal_m: 150.7
+              vertical_m: 90.4
+  - build: Aiming Systems Modification 1
+    kind: accuracy
+    max_range_km: 20.35
+    max_range_change_pct: 0
+    shells:
+      sigma_count: 2.65
+      half_of_shells_radius_fraction: 0.253
+      ninety_pct_of_shells_radius_fraction: 0.612
+      inner_half_share_pct: 81.9
+    mounts:
+      - mount: main battery
+        at_range: beyond_max_range
+  - build: Outnumbered
+    kind: accuracy
+    condition: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+    max_range_km: 20.35
+    max_range_change_pct: 0
+    shells:
+      sigma_count: 2.65
+      half_of_shells_radius_fraction: 0.253
+      ninety_pct_of_shells_radius_fraction: 0.612
+      inner_half_share_pct: 81.9
+    mounts:
+      - mount: main battery
+        at_range: beyond_max_range
+  - build: Gun Fire Control System Modification 2 + Aiming Systems Modification 1
+    kind: range_and_accuracy
+    max_range_km: 23.61
+    max_range_change_pct: 16
+    shells:
+      sigma_count: 2.65
+      half_of_shells_radius_fraction: 0.253
+      ninety_pct_of_shells_radius_fraction: 0.612
+      inner_half_share_pct: 81.9
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            evaluated_at_km: 23.61
+            horizontal_m: 229.1
+            vertical_m: 137.4
+            vertical_ratio: 0.6
+            half_of_shells_within:
+              horizontal_m: 58
+              vertical_m: 34.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 140.1
+              vertical_m: 84.1
+group:
+  class: battleship
+  min_tier: 10
+  max_tier: 10
+  ship_build: Gun Fire Control System Modification 2
+  ships_ranked: 40
+  ships_out_of_reach: 2
+  out_of_reach:
+    - C. Colombo
+    - Kremlin
+  horizontal:
+    rank: 8
+    value_m: 246.3
+    median_m: 256.8
+    tightest:
+      ship: Conte Verde
+      build: Spotting Aircraft + Gun Fire Control System Modification 2
+      value_m: 198.6
+    widest:
+      ship: Sicilia
+      build: Spotting Aircraft + Gun Fire Control System Modification 2
+      value_m: 301.2
+  vertical:
+    rank: 10
+    value_m: 147.8
+    median_m: 175.7
+    tightest:
+      ship: Slava
+      build: base
+      value_m: 99.5
+    widest:
+      ship: Sibir
+      build: Gun Fire Control System Modification 2
+      value_m: 215
+  half_of_shells_horizontal:
+    rank: 1
+    value_m: 62.4
+    median_m: 90
+    tightest:
+      ship: Stalingrad
+      build: Gun Fire Control System Modification 2
+      value_m: 62.4
+    widest:
+      ship: Sicilia
+      build: Spotting Aircraft + Gun Fire Control System Modification 2
+      value_m: 114.9
+notes:
+  - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread."
+  - "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured."

@@ -35,7 +35,10 @@ use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::names::Interpretations;
 use crate::ships::Ship;
+use crate::ships::ShipClass;
+use crate::ships::ShipStatus;
 use crate::ships::ShipSummary;
+use crate::ships::Tier;
 
 /// Secondary accuracy against the priority target within secondary range.
 const PRIORITY_TARGET_ACCURACY: &str = "GSPriorityTargetIdealRadius";
@@ -58,6 +61,24 @@ pub struct DispersionAtRangeArgs {
 
     /// Modules to mount instead of stock, e.g. ["Hull B"]. Omit for stock.
     pub modules: Option<Vec<String>>,
+
+    /// The build asked about, which the conclusion leads with: "range mod",
+    /// "spotter", "accuracy mod", or an upgrade, captain skill, module or
+    /// consumable name as listed in builds.
+    pub build: Option<String>,
+
+    /// Ranks the ship among every released ship of a class and tier range at
+    /// the same distance, e.g. {"class": "battleship", "min_tier": 10, "max_tier": 10}.
+    pub compare: Option<CompareGroup>,
+}
+
+/// The ships to rank against.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CompareGroup {
+    pub class: ShipClass,
+    pub min_tier: Tier,
+    pub max_tier: Tier,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
@@ -221,6 +242,11 @@ pub enum RowKind {
 /// The ellipse of one mount at the requested distance.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Ellipse {
+    /// The distance the ellipse is taken at when range_km is slightly past
+    /// the build's max range; absent when it is taken at range_km.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluated_at_km: Option<Km>,
+
     pub horizontal_m: Meters,
     pub vertical_m: Meters,
     pub vertical_ratio: VerticalRatio,
@@ -293,8 +319,66 @@ pub struct DispersionAtRange {
     pub range_km: Km,
     pub conclusion: String,
     pub guns: Vec<GunCurve>,
+    /// The row of the build asked about.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headline: Option<String>,
+
     pub builds: Vec<DispersionRow>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupComparison>,
+
     pub notes: Vec<&'static str>,
+}
+
+/// The ship's standing among a class and tier range at one distance. Each
+/// ship is taken on the build with the shortest range that reaches the
+/// distance, or on its longest range build when the distance is slightly
+/// past it.
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupComparison {
+    pub class: ShipClass,
+    pub min_tier: Tier,
+    pub max_tier: Tier,
+
+    /// The ship's own build in the ranking.
+    pub ship_build: String,
+
+    /// Ships ranked, the named ship included.
+    pub ships_ranked: usize,
+
+    /// Ships whose range falls short of the distance on every build.
+    pub ships_out_of_reach: usize,
+
+    /// Up to ten of them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub out_of_reach: Vec<String>,
+
+    pub horizontal: Standing,
+    pub vertical: Standing,
+
+    /// Horizontal semi-axis of the inner ellipse holding half of the shells.
+    /// Absent when the battery has no sigmaCount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub half_of_shells_horizontal: Option<Standing>,
+}
+
+/// One measure across the group, smaller is tighter.
+#[derive(Debug, Clone, Serialize)]
+pub struct Standing {
+    /// 1 is the tightest.
+    pub rank: usize,
+    pub value_m: Meters,
+    pub median_m: Meters,
+    pub tightest: GroupShip,
+    pub widest: GroupShip,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupShip {
+    pub ship: String,
+    pub build: String,
+    pub value_m: Meters,
 }
 
 /// What lengthens range or tightens accuracy.
@@ -355,9 +439,89 @@ struct SecondaryMountCurve {
 /// Semi-axes and vertical ratio of one ellipse.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Axes {
+    /// The distance the ellipse is taken at.
+    at: Km,
     horizontal: Meters,
     vertical: Meters,
     ratio: VerticalRatio,
+}
+
+/// The rows of one ship, with the source of each single-candidate row by
+/// row index.
+struct ShipRows {
+    rows: Vec<DispersionRow>,
+    sources: Vec<(usize, Source)>,
+    guns: Vec<GunCurve>,
+}
+
+impl ShipRows {
+    /// The row `hint` names: "range mod", "spotter", "accuracy mod", "base",
+    /// or a build label.
+    fn resolve_build(&self, hint: &str) -> Result<usize, QueryError> {
+        const RANGE: &[&str] = &["range mod", "range module", "range upgrade", "range modification"];
+        const SPOTTER: &[&str] =
+            &["spotter", "spotter plane", "spotting aircraft", "spotting plane", "spotter aircraft"];
+        const ACCURACY: &[&str] =
+            &["accuracy mod", "accuracy module", "accuracy upgrade", "asm", "asm1", "aiming systems mod"];
+
+        let wanted = hint.trim().to_lowercase();
+        let lasting_source = |accepts: &dyn Fn(&Source, RowKind) -> bool| {
+            self.sources
+                .iter()
+                .find(|(index, source)| {
+                    self.rows[*index].condition.is_none() && accepts(source, self.rows[*index].kind)
+                })
+                .map(|(index, _)| *index)
+        };
+        let found = if wanted == "base" || wanted == "stock" {
+            Some(0)
+        } else if RANGE.contains(&wanted.as_str()) {
+            lasting_source(&|source, kind| {
+                matches!(source, Source::Item(Item::Upgrade(_)))
+                    && matches!(kind, RowKind::Range | RowKind::RangeAndAccuracy)
+            })
+        } else if SPOTTER.contains(&wanted.as_str()) {
+            lasting_source(&|source, _| matches!(source, Source::RangeConsumable(_)))
+        } else if ACCURACY.contains(&wanted.as_str()) {
+            lasting_source(&|source, kind| {
+                matches!(source, Source::Item(Item::Upgrade(_))) && kind == RowKind::Accuracy
+            })
+        } else {
+            let label = |index: usize| self.rows[index].build.to_lowercase();
+            let indices = 0..self.rows.len();
+            indices
+                .clone()
+                .find(|index| label(*index) == wanted)
+                .or_else(|| indices.clone().find(|index| label(*index).contains(&wanted)))
+                .or_else(|| indices.clone().skip(1).find(|index| wanted.contains(&label(*index))))
+        };
+
+        found.ok_or(QueryError::InvalidArguments {
+            reason: "build matches no row of builds; name a listed upgrade, skill, module or consumable, or \"range mod\", \"spotter\" or \"accuracy mod\"",
+        })
+    }
+}
+
+/// The values of one ship in a group comparison.
+struct GroupEntry {
+    build: String,
+    horizontal: f32,
+    vertical: f32,
+    half_of_shells: Option<f32>,
+}
+
+impl GroupEntry {
+    /// `None` when the row's first mount does not reach the distance.
+    fn from_row(row: &DispersionRow) -> Option<Self> {
+        let ellipse = first_ellipse(row)?;
+
+        Some(Self {
+            build: row.build.clone(),
+            horizontal: ellipse.horizontal_m.value(),
+            vertical: ellipse.vertical_m.value(),
+            half_of_shells: ellipse.half_of_shells_within.as_ref().map(|half| half.horizontal_m.value()),
+        })
+    }
 }
 
 /// The fixed inputs of one query.
@@ -438,25 +602,25 @@ impl GameData {
         self.check_hull_fit(ship, &modules)?;
         let kind = args.battery.unwrap_or_default();
 
-        let battery = self.dispersion_battery(ship, kind, &modules.selection)?;
-        let planner = Planner::new(self, ship);
-        let stock = planner.stock()?;
-        let Some(base) = battery.profiles(&stock.bundle, &battery.selection, RangeCoefficient::NONE) else {
+        let Some(computed) = self.dispersion_rows(ship, kind, &modules.selection, range)? else {
             return Err(QueryError::WeaponNotFound { ship: ship.name.clone(), weapon: kind.noun().to_owned() });
         };
+        let headline = match args.build.as_deref() {
+            Some(hint) => Some(computed.resolve_build(hint)?),
+            None => None,
+        };
+        let group = match &args.compare {
+            Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, headline)?),
+            None => None,
+        };
 
-        let candidates = self.dispersion_candidates(&battery, &planner, &stock.bundle, &base)?;
-        let mut rows = vec![row("base".to_owned(), RowKind::Base, &base, None, range)];
-        for candidate in candidates.lasting.iter().chain(&candidates.conditional) {
-            let mut candidate_row =
-                row(candidate.label.clone(), candidate.kind, &candidate.profiles, Some(&base), range);
-            candidate_row.condition = candidate.condition.clone();
-            rows.push(candidate_row);
+        let mut conclusion = conclusion(ship, kind, range, &computed.rows);
+        if let Some(index) = headline {
+            conclusion = format!("{} {conclusion}", headline_sentence(ship, kind, range, &computed.rows[index]));
         }
-        rows.extend(combined_rows(&battery, &planner, &candidates.lasting, &base, range)?);
-
-        let conclusion = conclusion(ship, kind, range, &rows);
-        let guns = base.iter().map(|mount| gun_curve(&mount.mount, &mount.profile.curve)).collect();
+        if let Some(group) = &group {
+            conclusion.push_str(&group_sentence(ship, range, group));
+        }
         let mut notes = vec![FORMULA_NOTE, SIGMA_NOTE];
         notes.push(match kind {
             DispersionBattery::MainBattery => MAIN_RANGE_NOTE,
@@ -473,9 +637,104 @@ impl GameData {
             battery: kind,
             range_km: range,
             conclusion,
-            guns,
-            builds: rows,
+            guns: computed.guns,
+            headline: headline.map(|index| computed.rows[index].build.clone()),
+            builds: computed.rows,
+            group,
             notes,
+        })
+    }
+
+    /// The base row, one row per range or accuracy source and the combined
+    /// builds. `None` when the ship lacks the battery or its dispersion data.
+    fn dispersion_rows(
+        &self,
+        ship: &Ship,
+        kind: DispersionBattery,
+        selection: &ShipUpgradeSelection,
+        range: Km,
+    ) -> Result<Option<ShipRows>, QueryError> {
+        let battery = self.dispersion_battery(ship, kind, selection)?;
+        let planner = Planner::new(self, ship);
+        let stock = planner.modifiers_with(&[])?;
+        let Some(base) = battery.profiles(&stock, &battery.selection, RangeCoefficient::NONE) else {
+            return Ok(None);
+        };
+
+        let candidates = self.dispersion_candidates(&battery, &planner, &stock, &base)?;
+        let mut rows = vec![row("base".to_owned(), RowKind::Base, &base, None, range)];
+        let mut sources = Vec::new();
+        for candidate in candidates.lasting.iter().chain(&candidates.conditional) {
+            let mut candidate_row =
+                row(candidate.label.clone(), candidate.kind, &candidate.profiles, Some(&base), range);
+            candidate_row.condition = candidate.condition.clone();
+            sources.push((rows.len(), candidate.source.clone()));
+            rows.push(candidate_row);
+        }
+        rows.extend(combined_rows(&battery, &planner, &candidates.lasting, &base, range)?);
+        let guns = base.iter().map(|mount| gun_curve(&mount.mount, &mount.profile.curve)).collect();
+
+        Ok(Some(ShipRows { rows, sources, guns }))
+    }
+
+    /// `ship`'s standing among the released ships of `compare` at `range`.
+    fn group_comparison(
+        &self,
+        ship: &Ship,
+        kind: DispersionBattery,
+        range: Km,
+        compare: &CompareGroup,
+        own: &ShipRows,
+        headline: Option<usize>,
+    ) -> Result<GroupComparison, QueryError> {
+        const OUT_OF_REACH_SHOWN: usize = 10;
+
+        if compare.min_tier.0 > compare.max_tier.0 {
+            return Err(QueryError::InvalidArguments { reason: "compare.min_tier must not exceed compare.max_tier" });
+        }
+        let own_row = match headline {
+            Some(index) => Some(&own.rows[index]),
+            None => ranked_row(&own.rows),
+        };
+        let Some(own_entry) = own_row.and_then(GroupEntry::from_row) else {
+            return Err(QueryError::InvalidArguments {
+                reason: "the ship cannot reach range_km on the build compared, so it has no rank",
+            });
+        };
+
+        let members = self.ships.iter().filter(|other| {
+            other.class == compare.class
+                && (compare.min_tier.0..=compare.max_tier.0).contains(&other.tier.0)
+                && other.is_regular()
+                && other.status() == ShipStatus::Released
+                && other.param.index() != ship.param.index()
+        });
+        let mut entries = vec![(ship.name.clone(), own_entry)];
+        let mut out_of_reach = Vec::new();
+        for other in members {
+            let Some(rows) = self.dispersion_rows(other, kind, &ShipUpgradeSelection::stock(&other.param), range)?
+            else {
+                continue;
+            };
+            match ranked_row(&rows.rows).and_then(GroupEntry::from_row) {
+                Some(entry) => entries.push((other.name.clone(), entry)),
+                None => out_of_reach.push(other.name.clone()),
+            }
+        }
+        out_of_reach.sort();
+
+        Ok(GroupComparison {
+            class: compare.class,
+            min_tier: compare.min_tier,
+            max_tier: compare.max_tier,
+            ship_build: entries[0].1.build.clone(),
+            ships_ranked: entries.len(),
+            ships_out_of_reach: out_of_reach.len(),
+            out_of_reach: out_of_reach.into_iter().take(OUT_OF_REACH_SHOWN).collect(),
+            horizontal: standing(&entries, |entry| Some(entry.horizontal))
+                .expect("the named ship has a horizontal value"),
+            vertical: standing(&entries, |entry| Some(entry.vertical)).expect("the named ship has a vertical value"),
+            half_of_shells_horizontal: standing(&entries, |entry| entry.half_of_shells),
         })
     }
 
@@ -547,8 +806,8 @@ impl GameData {
         let mut lasting = Vec::new();
 
         for &item in planner.items() {
-            let outcome = planner.with_items(&[item])?;
-            let profiles = battery.profiles(&outcome.bundle, &battery.selection, RangeCoefficient::NONE);
+            let bundle = planner.modifiers_with(&[item])?;
+            let profiles = battery.profiles(&bundle, &battery.selection, RangeCoefficient::NONE);
             lasting.extend(candidate(planner.label(item), Source::Item(item), profiles));
         }
 
@@ -579,9 +838,9 @@ impl GameData {
             let Some(active) = planner.with_skill_triggered(item)? else {
                 continue;
             };
-            let idle = planner.with_items(&[item])?;
+            let idle = planner.modifiers_with(&[item])?;
             let active_profiles = battery.profiles(&active.bundle, &battery.selection, RangeCoefficient::NONE);
-            let idle_profiles = battery.profiles(&idle.bundle, &battery.selection, RangeCoefficient::NONE);
+            let idle_profiles = battery.profiles(&idle, &battery.selection, RangeCoefficient::NONE);
             let (Some(active_profiles), Some(idle_profiles)) = (active_profiles, idle_profiles) else {
                 continue;
             };
@@ -814,9 +1073,9 @@ fn combined_row(
         }
     }
 
-    let outcome = planner.with_items(&items)?;
+    let bundle = planner.modifiers_with(&items)?;
     let profiles = battery
-        .profiles(&outcome.bundle, &selection, coefficient)
+        .profiles(&bundle, &selection, coefficient)
         .expect("the battery has profiles on every selection its candidates came from");
     let kind = change_kind(&base[0], &profiles[0])
         .expect("a build of candidates that each lengthen range or tighten accuracy changes one of them");
@@ -841,6 +1100,7 @@ fn row(
             let base_axes = base.and_then(|base| axes_at(&base[index].profile, range));
             let at_range = match axes_at(&mount.profile, range) {
                 Some(axes) => Reach::Ellipse(Ellipse {
+                    evaluated_at_km: (axes.at != range).then(|| Km::new(round_to(axes.at.value(), 100.0))),
                     horizontal_m: Meters::new(round_to(axes.horizontal.value(), 10.0)),
                     vertical_m: Meters::new(round_to(axes.vertical.value(), 10.0)),
                     vertical_ratio: VerticalRatio(round_to(axes.ratio.0, 1000.0)),
@@ -886,17 +1146,29 @@ fn erf(x: f64) -> f64 {
     sign * (1.0 - poly * (-x * x).exp())
 }
 
-/// The ellipse at `range`, `None` past the max range.
+/// The ellipse at `range`. A range slightly past the max range, by up to 5%
+/// of it or 1.5 km, whichever is larger, takes the ellipse at the max range:
+/// players round distances. `None` farther out.
 fn axes_at(profile: &ArtilleryDispersion, range: Km) -> Option<Axes> {
-    if range.value() > profile.max_range.value() {
-        return None;
-    }
+    /// Slack as a share of the max range, and its floor in km.
+    const SLACK_SHARE: f32 = 0.05;
+    const SLACK_FLOOR_KM: f32 = 1.5;
 
-    let ellipse = profile.ellipse_at(range);
+    let max_range = profile.max_range.value();
+    let at = if range.value() <= max_range {
+        range
+    } else if range.value() <= max_range + (max_range * SLACK_SHARE).max(SLACK_FLOOR_KM) {
+        profile.max_range
+    } else {
+        return None;
+    };
+
+    let ellipse = profile.ellipse_at(at);
     Some(Axes {
+        at,
         horizontal: ellipse.horizontal.to_meters(),
         vertical: ellipse.vertical.to_meters(),
-        ratio: VerticalRatio::at(&profile.curve, range, profile.max_range),
+        ratio: VerticalRatio::at(&profile.curve, at, profile.max_range),
     })
 }
 
@@ -954,13 +1226,19 @@ fn conclusion(ship: &Ship, kind: DispersionBattery, range: Km, rows: &[Dispersio
             format!("{}'s {subject} reaches {} km, short of {at} km.", ship.name, format_km(base.max_range_km.value()));
         let reaching = longest(&[RowKind::Range, RowKind::RangeAndAccuracy]);
         match reaching.map(|row| (row, first_ellipse(row))) {
-            Some((row, Some(ellipse))) => text.push_str(&format!(
-                " With {} it reaches {} km; at {at} km dispersion is {} m horizontal and {} m vertical.",
-                row.build,
-                format_km(row.max_range_km.value()),
-                format_m(ellipse.horizontal_m),
-                format_m(ellipse.vertical_m),
-            )),
+            Some((row, Some(ellipse))) => {
+                let used = ellipse.evaluated_at_km.map_or_else(
+                    || format!("at {at} km"),
+                    |used| format!("close enough to take at {} km", format_km(used.value())),
+                );
+                text.push_str(&format!(
+                    " With {} it reaches {} km; {used}, dispersion is {} m horizontal and {} m vertical.",
+                    row.build,
+                    format_km(row.max_range_km.value()),
+                    format_m(ellipse.horizontal_m),
+                    format_m(ellipse.vertical_m),
+                ));
+            }
             Some((row, None)) => text.push_str(&format!(
                 " No build reaches it: the longest, {}, reaches {} km.",
                 row.build,
@@ -1039,7 +1317,117 @@ fn conclusion(ship: &Ship, kind: DispersionBattery, range: Km, rows: &[Dispersio
         ));
     }
 
+    if let Some(used) = base_ellipse.evaluated_at_km {
+        text = format!(
+            "{at} km is past {}'s {} km {subject} range; base values use {} km. {text}",
+            ship.name,
+            format_km(base.max_range_km.value()),
+            format_km(used.value()),
+        );
+    }
+
     text
+}
+
+/// The build a ship is ranked on in a group: the shortest range build that
+/// reaches the distance, else the longest one whose range falls slightly
+/// short. Conditional and accuracy rows are left out.
+fn ranked_row(rows: &[DispersionRow]) -> Option<&DispersionRow> {
+    let usable =
+        || rows.iter().filter(|row| row.condition.is_none() && matches!(row.kind, RowKind::Base | RowKind::Range));
+    let by_range = |left: &&DispersionRow, right: &&DispersionRow| {
+        left.max_range_km.value().total_cmp(&right.max_range_km.value())
+    };
+
+    usable()
+        .filter(|row| first_ellipse(row).is_some_and(|ellipse| ellipse.evaluated_at_km.is_none()))
+        .min_by(by_range)
+        .or_else(|| usable().filter(|row| first_ellipse(row).is_some()).max_by(by_range))
+}
+
+/// Rank of the first entry (1 is the smallest value), the median and the
+/// extremes. `None` when the first entry has no value.
+fn standing(entries: &[(String, GroupEntry)], value: impl Fn(&GroupEntry) -> Option<f32>) -> Option<Standing> {
+    let own = value(&entries[0].1)?;
+    let mut valued: Vec<(&str, &str, f32)> = entries
+        .iter()
+        .filter_map(|(ship, entry)| value(entry).map(|value| (ship.as_str(), entry.build.as_str(), value)))
+        .collect();
+    valued.sort_by(|left, right| left.2.total_cmp(&right.2));
+
+    let middle = valued.len() / 2;
+    let median =
+        if valued.len().is_multiple_of(2) { (valued[middle - 1].2 + valued[middle].2) / 2.0 } else { valued[middle].2 };
+    let named = |(ship, build, value): (&str, &str, f32)| GroupShip {
+        ship: ship.to_owned(),
+        build: build.to_owned(),
+        value_m: Meters::new(round_to(value, 10.0)),
+    };
+
+    Some(Standing {
+        rank: 1 + valued.iter().filter(|(_, _, other)| *other < own).count(),
+        value_m: Meters::new(round_to(own, 10.0)),
+        median_m: Meters::new(round_to(median, 10.0)),
+        tightest: named(valued[0]),
+        widest: named(valued[valued.len() - 1]),
+    })
+}
+
+/// The lead sentence for the build asked about.
+fn headline_sentence(ship: &Ship, kind: DispersionBattery, range: Km, row: &DispersionRow) -> String {
+    let at = format_km(range.value());
+    let max = format_km(row.max_range_km.value());
+    let Some(ellipse) = first_ellipse(row) else {
+        return format!("With {}, {}'s {} reaches {max} km, short of {at} km.", row.build, ship.name, kind.noun());
+    };
+
+    let (clamp, used) = match ellipse.evaluated_at_km {
+        Some(used) => (
+            format!(
+                "{at} km is past {}'s {max} km {} range with {}; using {} km. ",
+                ship.name,
+                kind.noun(),
+                row.build,
+                format_km(used.value())
+            ),
+            format_km(used.value()),
+        ),
+        None => (String::new(), at),
+    };
+    format!(
+        "{clamp}With {} ({max} km range), dispersion at {used} km is {} m horizontal and {} m vertical.",
+        row.build,
+        format_m(ellipse.horizontal_m),
+        format_m(ellipse.vertical_m),
+    )
+}
+
+fn group_sentence(ship: &Ship, range: Km, group: &GroupComparison) -> String {
+    let tiers = if group.min_tier == group.max_tier {
+        format!("tier {}", group.min_tier.0)
+    } else {
+        format!("tier {}-{}", group.min_tier.0, group.max_tier.0)
+    };
+    let half = group
+        .half_of_shells_horizontal
+        .as_ref()
+        .map_or_else(String::new, |half| format!(" and {} on the radius holding half of the shells", half.rank));
+    format!(
+        " Among {tiers} {}s at {} km ({} ranked, {} out of reach), {} on {} ranks {} of {} on horizontal dispersion, {} on vertical{half}; the median is {} m horizontal and {} m vertical, the tightest horizontal is {} ({} m).",
+        group.class.label().replace('_', " "),
+        format_km(range.value()),
+        group.ships_ranked,
+        group.ships_out_of_reach,
+        ship.name,
+        group.ship_build,
+        group.horizontal.rank,
+        group.ships_ranked,
+        group.vertical.rank,
+        format_m(group.horizontal.median_m),
+        format_m(group.vertical.median_m),
+        group.horizontal.tightest.ship,
+        format_m(group.horizontal.tightest.value_m),
+    )
 }
 
 fn format_km(value: f32) -> String {
@@ -1094,7 +1482,10 @@ mod tests {
         let long_axes = axes_at(&long, distance).expect("12 km is in range");
         assert_eq!(short_axes.horizontal, long_axes.horizontal);
         assert!(long_axes.vertical.value() < short_axes.vertical.value());
-        assert_eq!(axes_at(&short, Km::new(21.0)), None);
+        // Within 1.5 km past max range the ellipse is taken at the max range.
+        let clamped = axes_at(&short, Km::new(21.0)).expect("21 km is within the slack");
+        assert_eq!(clamped.at, Km::new(20.0));
+        assert_eq!(axes_at(&short, Km::new(21.6)), None);
     }
 
     fn mount(max_range_km: f32, ideal_radius_coef: f32, sigma: f32) -> MountProfile {

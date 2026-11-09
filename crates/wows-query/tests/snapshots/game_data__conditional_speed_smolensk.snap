@@ -1,0 +1,29 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3399
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 35
+    best:
+      value: 35
+      assumed: []
+    alternatives:
+      - label: with Outnumbered active
+        value: 37.8
+        assumed:
+          - Outnumbered
+        note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+      - label: with Sierra Mike signal
+        value: 36.75
+        assumed:
+          - Sierra Mike signal
+      - label: with Outnumbered active and Sierra Mike signal
+        value: 39.69
+        assumed:
+          - Outnumbered
+          - Sierra Mike signal
+        note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."

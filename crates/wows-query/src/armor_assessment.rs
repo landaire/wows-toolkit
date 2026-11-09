@@ -110,6 +110,12 @@ pub struct ArmorAssessmentOutput {
 
     pub properties: ArmorProperties,
     pub comparison: Comparison,
+
+    /// One line weighing the armor's strengths against its weaknesses, for
+    /// ships with a citadel ranked among peers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub armor_verdict: Option<String>,
+
     pub verdict: String,
     pub assumptions: Vec<&'static str>,
 }
@@ -903,7 +909,7 @@ impl GameData {
             above_waterline_face: geometry.as_ref().and_then(|geometry| geometry.shape.above_waterline.clone()),
             fuse_arming: fuse_arming(&set, &traces, |material| names.of(material)),
         };
-        let verdict = verdict(ship, &set, &bands, &properties, &comparison);
+        let Verdict { armor_verdict, text: verdict } = verdict(ship, &set, &bands, &properties, &comparison);
 
         Ok(ArmorAssessmentOutput {
             interpretations,
@@ -915,6 +921,7 @@ impl GameData {
             bands,
             properties,
             comparison,
+            armor_verdict,
             verdict,
             assumptions: vec![
                 "Shooter groups are the most common caliber of destroyer AP, light cruiser AP (155 mm and less), heavy cruiser AP, battleship AP (two calibers), cruiser HE and SAP among released ships of the shooter tiers, each counted by its largest main battery shell of that ammo; the ship whose shell is the median of that caliber by penetration fires for the group, a tech tree ship before its copies.",
@@ -1616,19 +1623,84 @@ fn comparison(
     }
 }
 
+/// The armor's one-line verdict and the sentences behind it.
+struct Verdict {
+    armor_verdict: Option<String>,
+    text: String,
+}
+
+/// Where a rate puts the ship among its peers, from its side as the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Judgment {
+    Strength,
+    Typical,
+    Weakness,
+}
+
+impl Judgment {
+    /// Share of the peers, in percent, on one side of a rate for it to count
+    /// as a strength or a weakness.
+    const CLEAR_SHARE: f32 = 75.0;
+
+    /// For a rate of damage taken: a strength when most peers take it more
+    /// often, a weakness when most take it less often.
+    fn of_damage_taken(rank: Rank) -> Self {
+        if rank.higher_pct.value() >= Self::CLEAR_SHARE {
+            Self::Strength
+        } else if rank.lower_pct.value() >= Self::CLEAR_SHARE {
+            Self::Weakness
+        } else {
+            Self::Typical
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Strength => "strength",
+            Self::Typical => "typical",
+            Self::Weakness => "weakness",
+        }
+    }
+
+    /// The judgment most of `judgments` share; typical when they split.
+    fn overall(judgments: &[Self]) -> Option<Self> {
+        if judgments.is_empty() {
+            return None;
+        }
+        let count = |judgment: Self| judgments.iter().filter(|other| **other == judgment).count();
+        let (strengths, weaknesses) = (count(Self::Strength), count(Self::Weakness));
+
+        Some(if strengths > weaknesses && strengths * 2 >= judgments.len() {
+            Self::Strength
+        } else if weaknesses > strengths && weaknesses * 2 >= judgments.len() {
+            Self::Weakness
+        } else {
+            Self::Typical
+        })
+    }
+}
+
 fn verdict(
     ship: &Ship,
     set: &ShooterSet,
     bands: &[BandReport],
     properties: &ArmorProperties,
     comparison: &Comparison,
-) -> String {
+) -> Verdict {
     let peers =
         format!("tier {}-{} {}", comparison.tiers.min.0, comparison.tiers.max.0, class_plural(comparison.class));
     let compared = |rank: Option<Rank>| match rank {
         Some(rank) => format!(" ({})", relative(rank, &peers)),
         None => String::new(),
     };
+    // A rate of damage taken, led by what it means for the ship.
+    let judged = |text: String, rank: Option<Rank>| match rank {
+        Some(rank) => format!("{}: {text}{}", Judgment::of_damage_taken(rank).label(), compared(Some(rank))),
+        None => text,
+    };
+    let mut citadel_judgments: Vec<Judgment> = Vec::new();
+    let mut damaging_judgments: Vec<Judgment> = Vec::new();
+    let mut judged_against: Vec<String> = Vec::new();
     let shooters = || set.shooters.iter().enumerate().map(|(index, shooter)| (ShooterIndex(index), shooter));
     let mut sentences = Vec::new();
     if let Some(note) = citadel_metrics(ship.class) {
@@ -1658,17 +1730,40 @@ fn verdict(
                 continue;
             };
             let citadel_rank = |result: &AspectResult| result.ranks.and_then(|ranks| ranks.citadel);
+            let damaging_rank = broadside.ranks.and_then(|ranks| ranks.damaging);
+            let damaging = broadside.rates.citadel_pct.value() + broadside.rates.penetration_pct.value();
+            citadel_judgments.extend(citadel_rank(broadside).map(Judgment::of_damage_taken));
+            damaging_judgments.extend(damaging_rank.map(Judgment::of_damage_taken));
+            judged_against.push(shooter.report.group.clone());
             sentences.push(format!(
-                "{} ({}) at {}: citadels on {}% of {} hits{} and {}% {}{}.",
-                capitalize_first(&shooter.report.group),
+                "Against {} ({}) at {}: {}; {}; {}.",
+                shooter.report.group,
                 shooter.name,
                 span(&group.ranges_km),
-                broadside.rates.citadel_pct.value(),
-                Aspect::Broadside.label(),
-                compared(citadel_rank(broadside)),
-                angled.rates.citadel_pct.value(),
-                Aspect::Angled30.label(),
-                compared(citadel_rank(angled)),
+                judged(
+                    format!(
+                        "{}% of {} hits detonate in its citadel, heavy damage taken",
+                        broadside.rates.citadel_pct.value(),
+                        Aspect::Broadside.label()
+                    ),
+                    citadel_rank(broadside),
+                ),
+                judged(
+                    format!(
+                        "{}% of {} hits detonate in its citadel",
+                        angled.rates.citadel_pct.value(),
+                        Aspect::Angled30.label()
+                    ),
+                    citadel_rank(angled),
+                ),
+                judged(
+                    format!(
+                        "{}% of {} hits detonate inside it, in the citadel or as a regular penetration, each regular or heavy damage taken",
+                        round1(damaging),
+                        Aspect::Broadside.label()
+                    ),
+                    damaging_rank,
+                ),
             ));
         }
     } else {
@@ -1684,12 +1779,14 @@ fn verdict(
             };
             let damaging = broadside.rates.citadel_pct.value() + broadside.rates.penetration_pct.value();
             sentences.push(format!(
-                "{} ({}) at {}: {}% of broadside hits detonate inside the ship{}; {}% overpenetrate.",
-                capitalize_first(&shooter.report.group),
+                "Against {} ({}) at {}: {}; {}% overpenetrate it, little damage taken.",
+                shooter.report.group,
                 shooter.name,
                 span(&group.ranges_km),
-                round1(damaging),
-                compared(broadside.ranks.and_then(|ranks| ranks.damaging)),
+                judged(
+                    format!("{}% of broadside hits detonate inside it, each damage taken", round1(damaging)),
+                    broadside.ranks.and_then(|ranks| ranks.damaging),
+                ),
                 broadside.rates.overpenetration_pct.map_or(0.0, Percent::value),
             ));
         }
@@ -1758,7 +1855,37 @@ fn verdict(
         None => sentences.push(format!("{} has no citadel plates.", ship.name)),
     }
 
-    sentences.join(" ")
+    let armor_verdict = armor_verdict(&citadel_judgments, &damaging_judgments, &judged_against, &peers);
+
+    Verdict { armor_verdict, text: sentences.join(" ") }
+}
+
+/// "Armor verdict against battleship AP 406 mm and 457 mm, compared with
+/// tier 9-11 battleships: its citadel is very hard to hit, but it takes
+/// regular penetration damage often."
+fn armor_verdict(citadel: &[Judgment], damaging: &[Judgment], against: &[String], peers: &str) -> Option<String> {
+    let citadel = Judgment::overall(citadel)?;
+    let damaging = Judgment::overall(damaging)?;
+    let citadel_clause = match citadel {
+        Judgment::Strength => "its citadel is very hard to hit",
+        Judgment::Typical => "its citadel is about as hard to hit as theirs",
+        Judgment::Weakness => "its citadel is easy to hit",
+    };
+    let damaging_clause = match damaging {
+        Judgment::Strength => "it takes penetration damage less often than most of them",
+        Judgment::Typical => "it takes penetration damage about as often as they do",
+        Judgment::Weakness => "it takes regular penetration damage often",
+    };
+    let opposed = matches!(
+        (citadel, damaging),
+        (Judgment::Strength, Judgment::Weakness) | (Judgment::Weakness, Judgment::Strength)
+    );
+    let joint = if opposed { "but" } else { "and" };
+
+    Some(format!(
+        "Armor verdict against {}, compared with {peers}: {citadel_clause}, {joint} {damaging_clause}.",
+        against.join(" and ")
+    ))
 }
 
 /// For a class without a citadel, why citadel metrics do not apply to it.

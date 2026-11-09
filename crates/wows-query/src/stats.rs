@@ -27,6 +27,7 @@ use wowsunpack::game_params::ttx::render_attributions;
 use wowsunpack::game_params::ttx::render_stat_rows;
 use wowsunpack::game_params::ttx::special_abilities::BurstShots;
 
+use crate::anti_air::AntiAircraftBuilds;
 use crate::builds::Better;
 use crate::builds::BuildStat;
 use crate::builds::Outcome;
@@ -159,6 +160,10 @@ pub struct WeaponBuilds {
     /// Theoretical fire starts per minute of every armament.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fires_per_minute: Option<FireRates>,
+
+    /// Damage of each AA aura band, flak, priority sector and the AA rating.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anti_aircraft: Option<AntiAircraftBuilds>,
 }
 
 /// Burst timing on the best-fit build. The client scales the interval and
@@ -355,6 +360,7 @@ impl GameData {
             fires_per_minute: self.fire_rates(&planner)?,
             speed: self.speed_builds(&planner)?,
             rates: self.rates(&planner)?,
+            anti_aircraft: self.anti_aircraft_builds(&planner)?,
         })
     }
 
@@ -415,7 +421,7 @@ pub(crate) fn extended_horizontal_dispersion(planner: &Planner<'_>, outcome: &Ou
 }
 
 /// "Label (qualifier)", with a projectile qualifier by its English name.
-fn stat_label(label: &str, qualifier: Option<&str>, game: &GameData) -> String {
+pub(crate) fn stat_label(label: &str, qualifier: Option<&str>, game: &GameData) -> String {
     match qualifier {
         Some(qualifier) => format!("{} ({})", clean(label), game.qualifier_name(qualifier)),
         None => clean(label),

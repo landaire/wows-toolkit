@@ -1,0 +1,29 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3399
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 27
+    best:
+      value: 27
+      assumed: []
+    alternatives:
+      - label: with Brisk active
+        value: 29.7
+        assumed:
+          - Brisk
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Sierra Mike signal
+        value: 28.35
+        assumed:
+          - Sierra Mike signal
+      - label: with Brisk active and Sierra Mike signal
+        value: 31.19
+        assumed:
+          - Brisk
+          - Sierra Mike signal
+        note: "Increases your ship's speed while she remains undetected."

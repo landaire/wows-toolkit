@@ -1,0 +1,241 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output
+---
+ship:
+  name: Yamato
+  index: PJSB018
+  tier: 10
+  class: battleship
+  nation: Japan
+  group: upgradeable
+  category: tech_tree
+  status: released
+  replicas:
+    - ARP Yamato
+    - Yamato Kai
+battery: main_battery
+range_km: 12
+conclusion: "At 12 km, a 39.2% longer main battery range (26.63 km to 37.07 km with Spotting Aircraft + Gun Fire Control System Modification 2) shrinks vertical dispersion from 95.5 m to 78.2 m; horizontal is unchanged at 170.4 m. With sigma 2.1, half of the shells land within 31.3% of the ellipse (53.3 m by 29.9 m) and 72.4% within its inner half; a higher sigma packs more shells toward the aim point. Aiming Systems Modification 1 narrows both: horizontal 170.4 m to 158.5 m, vertical 95.5 m to 88.8 m. Among tier 10 battleships at 12 km (41 ranked, 0 out of reach), Yamato on base ranks 19 of 41 on horizontal dispersion, 37 on vertical and 14 on the radius holding half of the shells; the median is 170.4 m horizontal and 88.8 m vertical, the tightest horizontal is Conte Verde (115.8 m)."
+guns:
+  - mount: main battery
+    min_radius: 2.8
+    ideal_radius: 10
+    ideal_distance: 1000
+    radius_on_zero: 0.2
+    radius_on_delim: 0.6
+    radius_on_max: 0.8
+    delim: 0.5
+builds:
+  - build: base
+    kind: base
+    max_range_km: 26.63
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 170.4
+            vertical_m: 95.5
+            vertical_ratio: 0.56
+            half_of_shells_within:
+              horizontal_m: 53.3
+              vertical_m: 29.9
+            ninety_pct_of_shells_within:
+              horizontal_m: 124.1
+              vertical_m: 69.6
+  - build: Spotting Aircraft
+    kind: range
+    max_range_km: 31.96
+    max_range_change_pct: 20
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 170.4
+            vertical_m: 85.3
+            vertical_ratio: 0.5
+            horizontal_change_pct: 0
+            vertical_change_pct: -10.7
+            half_of_shells_within:
+              horizontal_m: 53.3
+              vertical_m: 26.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 124.1
+              vertical_m: 62.1
+  - build: Gun Fire Control System Modification 2
+    kind: range
+    max_range_km: 30.89
+    max_range_change_pct: 16
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 170.4
+            vertical_m: 87
+            vertical_ratio: 0.511
+            horizontal_change_pct: 0
+            vertical_change_pct: -8.9
+            half_of_shells_within:
+              horizontal_m: 53.3
+              vertical_m: 27.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 124.1
+              vertical_m: 63.4
+  - build: Aiming Systems Modification 1
+    kind: accuracy
+    max_range_km: 26.63
+    max_range_change_pct: 0
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 158.5
+            vertical_m: 88.8
+            vertical_ratio: 0.56
+            horizontal_change_pct: -7
+            vertical_change_pct: -7
+            half_of_shells_within:
+              horizontal_m: 49.6
+              vertical_m: 27.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 115.5
+              vertical_m: 64.7
+  - build: Main Battery Director System (unique upgrade)
+    kind: accuracy
+    max_range_km: 26.63
+    max_range_change_pct: 0
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 158.5
+            vertical_m: 88.8
+            vertical_ratio: 0.56
+            horizontal_change_pct: -7
+            vertical_change_pct: -7
+            half_of_shells_within:
+              horizontal_m: 49.6
+              vertical_m: 27.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 115.5
+              vertical_m: 64.7
+  - build: Spotting Aircraft + Gun Fire Control System Modification 2
+    kind: range
+    max_range_km: 37.07
+    max_range_change_pct: 39.2
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 170.4
+            vertical_m: 78.2
+            vertical_ratio: 0.459
+            horizontal_change_pct: 0
+            vertical_change_pct: -18.1
+            half_of_shells_within:
+              horizontal_m: 53.3
+              vertical_m: 24.5
+            ninety_pct_of_shells_within:
+              horizontal_m: 124.1
+              vertical_m: 57
+  - build: Spotting Aircraft + Gun Fire Control System Modification 2 + Aiming Systems Modification 1
+    kind: range_and_accuracy
+    max_range_km: 37.07
+    max_range_change_pct: 39.2
+    shells:
+      sigma_count: 2.1
+      half_of_shells_radius_fraction: 0.313
+      ninety_pct_of_shells_radius_fraction: 0.729
+      inner_half_share_pct: 72.4
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 158.5
+            vertical_m: 72.7
+            vertical_ratio: 0.459
+            horizontal_change_pct: -7
+            vertical_change_pct: -23.8
+            half_of_shells_within:
+              horizontal_m: 49.6
+              vertical_m: 22.8
+            ninety_pct_of_shells_within:
+              horizontal_m: 115.5
+              vertical_m: 53
+group:
+  class: battleship
+  min_tier: 10
+  max_tier: 10
+  ship_build: base
+  ships_ranked: 41
+  ships_out_of_reach: 0
+  horizontal:
+    rank: 19
+    value_m: 170.4
+    median_m: 170.4
+    tightest:
+      ship: Conte Verde
+      build: base
+      value_m: 115.8
+    widest:
+      ship: Sicilia
+      build: base
+      value_m: 183.6
+  vertical:
+    rank: 37
+    value_m: 95.5
+    median_m: 88.8
+    tightest:
+      ship: Slava
+      build: base
+      value_m: 50
+    widest:
+      ship: Bungo
+      build: base
+      value_m: 99.5
+  half_of_shells_horizontal:
+    rank: 14
+    value_m: 53.3
+    median_m: 55.9
+    tightest:
+      ship: Conte Verde
+      build: base
+      value_m: 37
+    widest:
+      ship: C. Colombo
+      build: base
+      value_m: 72.6
+notes:
+  - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread."
+  - "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured."

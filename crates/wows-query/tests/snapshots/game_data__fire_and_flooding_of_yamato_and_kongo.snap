@@ -1,5 +1,6 @@
 ---
 source: crates/wows-query/tests/game_data.rs
+assertion_line: 3527
 expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),\nfire_lines(\"Yamato\", &[\"Fire Prevention Expert\", \"Basics of Survivability\"],\n&[\"Damage Control System Modification 1\",\n\"Damage Control System Modification 2\"],),]"
 ---
 - ship: Yamato
@@ -15,6 +16,7 @@ expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),
     - "Flooding duration: 40.0 s"
     - "Flooding damage per second, percent of maximum health: 0.50%"
     - "Damage of one flood over its whole duration: 19440"
+    - "Damage of one flak burst: 1610"
   changes: []
 - ship: Kongo
   lines:
@@ -29,6 +31,7 @@ expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),
     - "Flooding duration: 40.0 s"
     - "Flooding damage per second, percent of maximum health: 0.50%"
     - "Damage of one flood over its whole duration: 9900"
+    - "Damage of one flak burst: 1190"
   changes: []
 - ship: Yamato
   lines:
@@ -43,6 +46,7 @@ expression: "[fire_lines(\"Yamato\", &[], &[]), fire_lines(\"Kongo\", &[], &[]),
     - "Flooding duration: 28.9 s"
     - "Flooding damage per second, percent of maximum health: 0.50%"
     - "Damage of one flood over its whole duration: 14045"
+    - "Damage of one flak burst: 1610"
   changes:
     - stat: Fire chance reduction against shells hitting the ship
       from: 49.95%

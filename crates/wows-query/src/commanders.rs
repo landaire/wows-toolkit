@@ -838,17 +838,8 @@ impl GameData {
         for talent in commander.random_battle_talents().filter(|talent| talent.allowed_classes().contains(&species)) {
             let key = talent.translation_key(&commander.index);
             let name = self.talent_name(&key);
-            // A talent without level blocks acts the same on every
-            // activation, so one activation shows it.
             let levels = activation_levels(talent).map_or(1, |levels| levels.get() as u32);
-            let mut counts: Vec<u32> = (1..=levels).collect();
-            if let Some(limit) = talent.max_activations()
-                && limit > levels
-            {
-                counts.push(limit);
-            }
-
-            for count in counts {
+            for count in activation_counts(talent) {
                 let modifiers = talent_modifiers(talent, count, species, self);
                 if modifiers.is_empty() {
                     continue;
@@ -951,6 +942,21 @@ pub(crate) fn talent_modifiers(
     }
 
     modifiers
+}
+
+/// The numbers of activations whose effects differ: one per level block, or
+/// one for a talent without level blocks, which acts the same on every
+/// activation, then the most a battle allows when that is more.
+pub(crate) fn activation_counts(talent: &CrewTalent) -> Vec<u32> {
+    let levels = activation_levels(talent).map_or(1, |levels| levels.get() as u32);
+    let mut counts: Vec<u32> = (1..=levels).collect();
+    if let Some(limit) = talent.max_activations()
+        && limit > levels
+    {
+        counts.push(limit);
+    }
+
+    counts
 }
 
 /// Activations whose effects differ: one per level block, at most the

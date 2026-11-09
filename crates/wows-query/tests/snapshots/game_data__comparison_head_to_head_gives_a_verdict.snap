@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 618
 expression: pairs
 ---
 - group: tier 8-10 battleships
@@ -8,9 +7,10 @@ expression: pairs
     - ships:
         - Yamato
         - Amagi
-      compared: 31
+      compared: 35
       first_better:
         - health
+        - repair_party_total_heal
         - main_battery_reload
         - main_battery_range
         - dpm_ap
@@ -27,8 +27,11 @@ expression: pairs
         - all_bear_from_stern
         - secondary_dpm
         - secondary_range
-        - aa_damage
+        - aa_rating
+        - aa_long_dps
+        - aa_flak
         - bb_ap_overpenetration
+        - cruiser_he_damaging
       second_better:
         - turret_traverse
         - stern_barrels
@@ -41,25 +44,26 @@ expression: pairs
         - stern_overmatch
       tied:
         - repair_party_heal
-        - aa_range
+        - damage_control_reload
         - air_concealment
       first_largest_leads:
+        - aa_flak 17034 vs 10143 hp (40% apart)
         - bow_barrels 66.67 vs 40% (40% apart)
-        - main_battery_range 30.89 vs 19.88 km (36% apart)
-        - health 97200 vs 66300 HP (32% apart)
+        - aa_long_dps 194 vs 121 HP/s (38% apart)
       second_largest_leads:
         - bb_ap_citadel 3 vs 9.6% (69% apart)
         - bow_overmatch 3.05 vs 5.74% (47% apart)
         - stern_overmatch 3.05 vs 5.74% (47% apart)
-      verdict: "On paper Yamato is better: it leads on 19 of 31 compared factors, by the most on bow_barrels, main_battery_range, health. Yamato is better on 19 of 31 compared factors, Amagi on 9, 3 tied."
+      verdict: "On paper Yamato is better: it leads on 23 of 35 compared factors, by the most on aa_flak, bow_barrels, aa_long_dps. Yamato is better on 23 of 35 compared factors, Amagi on 9, 3 tied."
 - group: tier 10 cruisers
   head_to_head:
     - ships:
         - Des Moines
         - Zaō
-      compared: 31
+      compared: 37
       first_better:
         - health
+        - repair_party_total_heal
         - main_battery_reload
         - dpm_ap
         - dpm_he
@@ -67,9 +71,10 @@ expression: pairs
         - bow_barrels
         - all_bear_from_bow
         - all_bear_from_stern
-        - aa_damage
+        - aa_rating
         - rudder_shift
         - turning_circle
+        - cruiser_he_damaging
         - bow_overmatch
         - stern_overmatch
       second_better:
@@ -81,6 +86,8 @@ expression: pairs
         - dispersion
         - stern_barrels
         - secondary_dpm
+        - aa_long_dps
+        - aa_flak
         - concealment
         - air_concealment
         - speed
@@ -88,10 +95,12 @@ expression: pairs
         - bb_ap_overpenetration
       tied:
         - repair_party_heal
+        - damage_control_reload
         - turret_traverse
         - sigma
         - secondary_range
-        - aa_range
+        - hydro_range
+        - torpedo_detection
       first_largest_leads:
         - main_battery_reload 4.84 vs 12.06 s (60% apart)
         - dpm_ap 585744 vs 338620 HP/min (42% apart)
@@ -100,4 +109,4 @@ expression: pairs
         - alpha_he 44880 vs 27720 HP (38% apart)
         - bb_ap_citadel 3.6 vs 5.8% (38% apart)
         - stern_barrels 50 vs 33.33% (33% apart)
-      verdict: "Mixed: Des Moines is better on 13 of 31 compared factors, Zaō on 13, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+      verdict: "Mixed: Des Moines is better on 15 of 37 compared factors, Zaō on 15, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."

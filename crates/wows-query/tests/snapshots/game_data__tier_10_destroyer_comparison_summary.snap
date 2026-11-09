@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1270
 expression: output
 ---
 group: tier 10 destroyers
@@ -11,6 +10,8 @@ reference_range_km: 10
 factors:
   - "health (HP, higher is better): hit points"
   - "repair_party_heal (%, higher is better): share of maximum HP one Repair Party charge restores, stock"
+  - "repair_party_total_heal (HP, higher is better): HP every Repair Party charge restores together"
+  - "damage_control_reload (s, lower is better): Damage Control Party reload"
   - "main_battery_reload (s, lower is better): main battery reload"
   - "main_battery_range (km, higher is better): main battery firing range"
   - "dpm_ap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
@@ -37,10 +38,16 @@ factors:
   - "torpedo_reload (s, lower is better): torpedo tube reload"
   - "torpedo_launch_from_bow (deg, lower is better): smallest angle off the bow at which a torpedo launcher bears; 0 launches bow-on"
   - "broadside_tubes (tubes, higher is better): torpedo tubes that bear on one broadside at once"
-  - "aa_damage (HP/s, higher is better): continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted"
-  - "aa_range (km, higher is better): reach of the longest anti-aircraft aura, stock"
+  - "aa_rating (hp, higher is better): AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned; a judgment, see ship_stats anti_aircraft"
+  - "aa_long_dps (HP/s, higher is better): continuous damage per second of the long-range AA auras, before hit chance"
+  - "aa_flak (hp, higher is better): damage of one flak salvo if every burst hits: bursts times burst damage"
   - "concealment (km, lower is better): detectability by ships"
   - "air_concealment (km, lower is better): detectability by aircraft"
+  - "radar_range (km, higher is better): Surveillance Radar range"
+  - "radar_duration (s, higher is better): Surveillance Radar action time"
+  - "hydro_range (km, higher is better): Hydroacoustic Search range against ships"
+  - "torpedo_detection (km, higher is better): Hydroacoustic Search torpedo range"
+  - "smoke_lifetime (s, higher is better): time a smoke cloud lasts"
   - "speed (kn, higher is better): top speed"
   - "rudder_shift (s, lower is better): rudder shift time"
   - "turning_circle (m, lower is better): turning circle radius"
@@ -113,6 +120,24 @@ leaders:
       - "Kléber TE (France, test) 10%"
       - "Druid (United_Kingdom, premium) 10%"
       - Daring (United_Kingdom) 10%
+  repair_party_total_heal:
+    best:
+      - "Lüshun (Pan_Asia, premium) 21600 HP"
+      - "Peredovoy (Russia, test) 18360 HP"
+      - "Hull (USA, premium) 17040 HP"
+    worst:
+      - Daring (United_Kingdom) 4860 HP
+      - "Kléber TE (France, test) 5080 HP"
+      - "Druid (United_Kingdom, premium) 5760 HP"
+  damage_control_reload:
+    best:
+      - 20 de Julio (Pan_America) 40 s
+      - A. Regolo (Italy) 40 s
+      - "A. da Barbiano (Italy, premium) 40 s"
+    worst:
+      - "Södermanland (Europe, test) 40 s"
+      - "Peredovoy (Russia, test) 40 s"
+      - "Lübeck (Germany, test) 40 s"
   main_battery_reload:
     best:
       - "F. Sherman (USA, premium) 1.25 s"
@@ -339,24 +364,33 @@ leaders:
       - "Hull (USA, premium) 2 tubes"
       - "F. Sherman (USA, premium) 2 tubes"
       - "Tromp (Netherlands, premium) 3 tubes"
-  aa_damage:
+  aa_rating:
     best:
-      - "Ragnar (Europe, premium) 669 HP/s"
-      - Elbing (Germany) 392 HP/s
-      - "Lübeck (Germany, test) 392 HP/s"
+      - 20 de Julio (Pan_America) 13351 hp
+      - Halland (Europe) 13066 hp
+      - "Småland (Europe, premium) 13066 hp"
     worst:
-      - "Somers (USA, premium) 32 HP/s"
-      - 20 de Julio (Pan_America) 63 HP/s
-      - "Hull (USA, premium) 77 HP/s"
-  aa_range:
+      - "Somers (USA, premium) 220 hp"
+      - "Peredovoy (Russia, test) 1761 hp"
+      - A. Regolo (Italy) 2121 hp
+  aa_long_dps:
     best:
-      - Burrows (USA) 4 km
-      - Elbing (Germany) 4 km
-      - "F. Sherman (USA, premium) 4 km"
+      - 20 de Julio (Pan_America) 288 HP/s
+      - "A. da Barbiano (Italy, premium) 262 HP/s"
+      - Halland (Europe) 182 HP/s
     worst:
-      - "A. da Barbiano (Italy, premium) 2 km"
-      - "Somers (USA, premium) 2.4 km"
-      - Shimakaze (Japan) 2.5 km
+      - "Ragnar (Europe, premium) 49 HP/s"
+      - "Lübeck (Germany, test) 51 HP/s"
+      - Burrows (USA) 53 HP/s
+  aa_flak:
+    best:
+      - 20 de Julio (Pan_America) 27495 hp
+      - "Hull (USA, premium) 20737 hp"
+      - Halland (Europe) 19996 hp
+    worst:
+      - "Lübeck (Germany, test) 6038 hp"
+      - "La Pampa (Pan_America, premium) 8147 hp"
+      - Shimakaze (Japan) 8517 hp
   concealment:
     best:
       - Shimakaze (Japan) 5.59 km
@@ -375,6 +409,51 @@ leaders:
       - "Kléber TE (France, test) 4.36 km"
       - "Lübeck (Germany, test) 4.06 km"
       - Elbing (Germany) 4.06 km
+  radar_range:
+    best:
+      - Gdańsk (Europe) 9 km
+      - "Ragnar (Europe, premium) 7.5 km"
+      - "Småland (Europe, premium) 7.5 km"
+    worst:
+      - Yueyang (Pan_Asia) 7.5 km
+      - "Småland (Europe, premium) 7.5 km"
+      - "Ragnar (Europe, premium) 7.5 km"
+  radar_duration:
+    best:
+      - "Ragnar (Europe, premium) 30 s"
+      - Yueyang (Pan_Asia) 25 s
+      - "Småland (Europe, premium) 20 s"
+    worst:
+      - Gdańsk (Europe) 10 s
+      - "Småland (Europe, premium) 20 s"
+      - Yueyang (Pan_Asia) 25 s
+  hydro_range:
+    best:
+      - "Kléber TE (France, test) 7 km"
+      - "G. Hoffmann (Germany, premium) 6 km"
+      - "Z-42 (Germany, premium) 6 km"
+    worst:
+      - "Druid (United_Kingdom, premium) 3 km"
+      - Daring (United_Kingdom) 3 km
+      - "Vampire II (Commonwealth, premium) 5 km"
+  torpedo_detection:
+    best:
+      - "G. Hoffmann (Germany, premium) 4 km"
+      - "Z-42 (Germany, premium) 4 km"
+      - Z-52 (Germany) 4 km
+    worst:
+      - "Druid (United_Kingdom, premium) 3 km"
+      - Daring (United_Kingdom) 3 km
+      - "Vampire II (Commonwealth, premium) 3.5 km"
+  smoke_lifetime:
+    best:
+      - "F. Sherman (USA, premium) 130 s"
+      - Gearing (USA) 130 s
+      - "Somers (USA, premium) 130 s"
+    worst:
+      - "Kléber TE (France, test) 5 s"
+      - "Laffey (USA, premium) 5 s"
+      - Burrows (USA) 5 s
   speed:
     best:
       - Kléber (France) 44 kn
@@ -476,9 +555,9 @@ torpedo_leaders:
       - "F. Sherman (USA, premium) Mk17 38464 HP/min"
       - "Marceau (France, premium) 550 mm 23DT 49158 HP/min"
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
-  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others, each led by strength or weakness for the ship. Matchup outliers are from the ship's side as the target: a citadel hit is heavy damage taken, a penetration regular damage taken, an overpenetration little damage taken."
+  - "bb_ap_*, cruiser_he_damaging, *_overmatch and matchups apply to cruisers and battleships only, and these factors rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
-  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."
+  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. battle_impact is a weighted judgment from these factors, not win-rate data; its formula and weights are given by the battle_impact tool."

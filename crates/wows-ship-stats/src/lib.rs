@@ -2,6 +2,7 @@
 //! and modules applied, the stats derived from it, and the unit and better
 //! direction of each.
 
+pub mod anti_air;
 pub mod bearing;
 pub mod build;
 pub mod derived;
@@ -12,6 +13,7 @@ pub mod resistance;
 pub mod stat;
 pub mod torpedoes;
 
+pub use anti_air::AaRating;
 pub use bearing::Bearing;
 pub use bearing::MountCoverage;
 pub use bearing::PerBearing;

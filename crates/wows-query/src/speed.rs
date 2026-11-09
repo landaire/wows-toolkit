@@ -4,11 +4,25 @@
 //! `speedCoefBattery` on the surface and at periscope depth, and by
 //! `speedCoefUW` below periscope depth (`getShipSpeedCoef`,
 //! ModifiersApply.py:531-546). Captain skills and upgrades come from the
-//! build planner; signal flags carrying one of these modifiers are listed as
-//! alternatives, as the port lets any ship mount them.
+//! build planner. What holds only part of a battle is listed as an
+//! alternative, never in the best-fit build: signal flags carrying one of
+//! these modifiers (the port lets any ship mount them), the ship's special
+//! ability, the commander's talents and speed boost consumables such as
+//! Engine Boost.
+//!
+//! A speed boost adds to that coefficient instead of multiplying it:
+//! `Engine.getBoosterSpeedCoef` is the additive identity 0.0 without a boost
+//! and `(boostCoeff + boostCoeffForsage) * engineForsageCoef` with one
+//! (Components/__init__.py:326, CommonConsumables/Logic/Ship.py:56).
+//! Replays agree: the server top speed of a Marceau with Sierra Mike rises
+//! by 1.25 / 1.05 when its +20% Engine Boost starts, not by 1.2.
+
+use std::iter;
 
 use serde::Serialize;
 use wowsunpack::game_params::ttx::model::Knots;
+use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
+use wowsunpack::game_params::types::CrewSkillModifier;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::builds::Better;
@@ -18,6 +32,9 @@ use crate::builds::Outcome;
 use crate::builds::Planner;
 use crate::builds::StatPlan;
 use crate::builds::round;
+use crate::commanders::activation_counts;
+use crate::commanders::talent_modifiers;
+use crate::consumables::SPEED_BOOSTER;
 use crate::data::GameData;
 use crate::error::QueryError;
 use crate::loadout::AbilityModifiers;
@@ -37,60 +54,234 @@ pub struct SpeedBuilds {
     pub submerged: Option<BuildStat<Knots>>,
 }
 
+/// A depth with a top speed of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpeedDepth {
+    Surface,
+    Periscope,
+    Submerged,
+}
+
+impl SpeedDepth {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Surface => "top speed on the surface",
+            Self::Periscope => "top speed at periscope depth, just below the surface; not the underwater speed",
+            Self::Submerged => "submerged speed: top speed fully underwater, at maximum depth",
+        }
+    }
+
+    /// Top speed on the stat card of `outcome`.
+    fn speed(self, outcome: &Outcome) -> Option<Knots> {
+        match self {
+            Self::Surface => outcome.stats.mobility.as_ref()?.speed,
+            Self::Periscope => outcome.stats.underwater_mobility.as_ref()?.periscope_speed,
+            Self::Submerged => outcome.stats.underwater_mobility.as_ref()?.speed,
+        }
+    }
+
+    /// `getShipSpeedCoef` at this depth, the coefficient the card speed
+    /// carries.
+    fn coefficient(self, bundle: &ModifierBundle) -> f32 {
+        let depth = match self {
+            Self::Surface | Self::Periscope => bundle.coef("speedCoefBattery"),
+            Self::Submerged => bundle.coef("speedCoefUW"),
+        };
+
+        bundle.coef("speedCoef") * depth
+    }
+}
+
+/// Share of the hull's top speed a speed boost consumable adds while
+/// active, its `logic.boostCoeff`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BoostCoefficient(f32);
+
+/// A consumable of the ship that raises top speed while active.
+struct SpeedBooster {
+    name: String,
+    boost: BoostCoefficient,
+}
+
+impl SpeedBooster {
+    /// Top speed at `depth` on `outcome` with the booster active. Its
+    /// `availableBuoyancyStates` are empty, so it works at every depth.
+    fn speed(&self, depth: SpeedDepth, outcome: &Outcome) -> Option<Knots> {
+        let speed = depth.speed(outcome)?;
+        let bundle = &outcome.bundle;
+        let coefficient = depth.coefficient(bundle);
+        let added = (self.boost.0 + bundle.bonus("boostCoeffForsage")) * bundle.coef("engineForsageCoef");
+
+        Some(Knots::from(speed.value() * (coefficient + added) / coefficient))
+    }
+
+    fn note(&self) -> String {
+        format!(
+            "Only while {} is active. It adds {}% of the hull's top speed; other speed bonuses add to it instead of multiplying it.",
+            self.name,
+            round(self.boost.0 * 100.0)
+        )
+    }
+}
+
+/// Modifiers switched on while a condition holds, with the builds that
+/// carry them.
+struct Switched<'a> {
+    planner: Planner<'a>,
+
+    /// The condition in a label, e.g. "Sierra Mike signal".
+    phrase: String,
+
+    /// The condition in `assumed`.
+    assumed: String,
+
+    note: Option<String>,
+}
+
+/// The conditions of one ship that may raise its top speed.
+struct Conditions<'a> {
+    switched: Vec<Switched<'a>>,
+    boosters: Vec<SpeedBooster>,
+}
+
+/// One condition held: modifiers switched on, a speed booster active, or
+/// both.
+#[derive(Clone, Copy)]
+struct Held<'c, 'a> {
+    switched: Option<&'c Switched<'a>>,
+    booster: Option<&'c SpeedBooster>,
+}
+
+impl Held<'_, '_> {
+    /// e.g. "Engine Boost active and Sierra Mike signal".
+    fn phrase(self) -> String {
+        let booster = self.booster.map(|booster| format!("{} active", booster.name));
+        let switched = self.switched.map(|switched| switched.phrase.clone());
+        let phrases: Vec<String> = booster.into_iter().chain(switched).collect();
+
+        phrases.join(" and ")
+    }
+
+    fn assumed(self) -> Vec<String> {
+        let booster = self.booster.map(|booster| booster.name.clone());
+        let switched = self.switched.map(|switched| switched.assumed.clone());
+
+        booster.into_iter().chain(switched).collect()
+    }
+
+    fn note(self) -> Option<String> {
+        let booster = self.booster.map(SpeedBooster::note);
+        let switched = self.switched.and_then(|switched| switched.note.clone());
+        let notes: Vec<String> = booster.into_iter().chain(switched).collect();
+
+        (!notes.is_empty()).then(|| notes.join(" "))
+    }
+}
+
 impl GameData {
     pub(crate) fn speed_builds(&self, planner: &Planner<'_>) -> Result<SpeedBuilds, QueryError> {
-        let flagged: Vec<Flagged<'_>> = self
+        let conditions = self.speed_conditions(planner)?;
+
+        Ok(SpeedBuilds {
+            surface: speed_plan(planner, &conditions, SpeedDepth::Surface)?,
+            periscope_depth: speed_plan(planner, &conditions, SpeedDepth::Periscope)?,
+            submerged: speed_plan(planner, &conditions, SpeedDepth::Submerged)?,
+        })
+    }
+
+    /// The builds of the top speed at `depth`, as in [`Self::speed_builds`].
+    pub(crate) fn speed_build(
+        &self,
+        planner: &Planner<'_>,
+        depth: SpeedDepth,
+    ) -> Result<Option<BuildStat<Knots>>, QueryError> {
+        let conditions = self.speed_conditions(planner)?;
+
+        speed_plan(planner, &conditions, depth)
+    }
+
+    fn speed_conditions<'a>(&self, planner: &Planner<'a>) -> Result<Conditions<'a>, QueryError> {
+        let switch_on = |ability: AbilityModifiers| {
+            let mut abilities = planner.abilities().to_vec();
+            abilities.push(ability);
+            planner.with_abilities_on(abilities)
+        };
+
+        let mut switched: Vec<Switched<'a>> = self
             .speed_signals()
             .into_iter()
             .map(|signal| {
-                let mut abilities = planner.abilities().to_vec();
-                abilities.push(signal.clone());
-                Flagged { planner: planner.with_abilities_on(abilities), signal }
+                let phrase = format!("{} signal", signal.label);
+                Switched { planner: switch_on(signal), assumed: phrase.clone(), phrase, note: None }
             })
             .collect();
-        let knots = |value: Option<Knots>| value.map(|value| Knots::from(round(value.value())));
 
-        let surface = |outcome: &Outcome| knots(outcome.stats.mobility.as_ref()?.speed);
-        let periscope = |outcome: &Outcome| knots(outcome.stats.underwater_mobility.as_ref()?.periscope_speed);
-        let submerged = |outcome: &Outcome| knots(outcome.stats.underwater_mobility.as_ref()?.speed);
+        if !planner.has_ability() {
+            match self.active_ability(planner.ship()) {
+                Ok(ability) if ability.switched.is_none() && ability.modifiers.iter().any(changes_speed) => {
+                    let names = ability.names.join(", ");
+                    let mut abilities = planner.abilities().to_vec();
+                    abilities.extend(ability.modifiers);
+                    switched.push(Switched {
+                        planner: planner.with_abilities_on(abilities),
+                        phrase: format!("{names} active"),
+                        assumed: names.clone(),
+                        note: Some(format!("Only while {names} is active.")),
+                    });
+                }
+                Ok(_) | Err(QueryError::NoSpecialAbility { .. }) => {
+                    // No ability, one that leaves speed alone, or another fire mode.
+                }
+                Err(error) => return Err(error),
+            }
+        }
 
-        Ok(SpeedBuilds {
-            surface: speed_plan(
-                planner,
-                &flagged,
-                StatPlan::new("top speed on the surface".to_owned(), Better::Higher, &surface),
-            )?,
-            periscope_depth: speed_plan(
-                planner,
-                &flagged,
-                StatPlan::new(
-                    "top speed at periscope depth, just below the surface; not the underwater speed".to_owned(),
-                    Better::Higher,
-                    &periscope,
-                ),
-            )?,
-            submerged: speed_plan(
-                planner,
-                &flagged,
-                StatPlan::new(
-                    "submerged speed: top speed fully underwater, at maximum depth".to_owned(),
-                    Better::Higher,
-                    &submerged,
-                ),
-            )?,
-        })
+        if let Some(commander) = planner.commander() {
+            let species = planner.ship().class.species();
+            for talent in commander.random_battle_talents().filter(|talent| talent.allowed_classes().contains(&species))
+            {
+                let key = talent.translation_key(&commander.index);
+                let name = self.talent_name(&key);
+                let counts = activation_counts(talent);
+                let multiple = counts.len() > 1 || talent.max_activations().is_some_and(|limit| limit > 1);
+                for count in counts {
+                    let modifiers = talent_modifiers(talent, count, species, self);
+                    if !modifiers.iter().any(is_speed_modifier) {
+                        continue;
+                    }
+
+                    let (phrase, assumed) = if multiple {
+                        let activations =
+                            if count == 1 { "1 activation".to_owned() } else { format!("{count} activations") };
+                        (format!("{name} talent active after {activations}"), format!("{name} talent ({activations})"))
+                    } else {
+                        (format!("{name} talent active"), format!("{name} talent"))
+                    };
+                    let condition = self.talent_condition(&key, talent);
+                    let activation = multiple.then(|| self.activation_condition(&key, talent, count)).flatten();
+                    let notes: Vec<String> = condition.into_iter().chain(activation).collect();
+                    let ability = AbilityModifiers { source: name.clone(), label: name.clone(), modifiers };
+                    switched.push(Switched {
+                        planner: switch_on(ability),
+                        phrase,
+                        assumed,
+                        note: (!notes.is_empty()).then(|| notes.join(" ")),
+                    });
+                }
+            }
+        }
+
+        Ok(Conditions { switched, boosters: self.speed_boosters(planner) })
     }
 
     /// Signal flags whose modifiers change top speed.
     fn speed_signals(&self) -> Vec<AbilityModifiers> {
-        const SPEED_MODIFIERS: [&str; 3] = ["speedCoef", "speedCoefBattery", "speedCoefUW"];
-
         self.provider()
             .params()
             .iter()
             .filter_map(|param| {
                 let exterior = param.exterior().filter(|exterior| !exterior.hidden())?;
-                if !exterior.modifiers().iter().any(|modifier| SPEED_MODIFIERS.contains(&modifier.name())) {
+                if !exterior.modifiers().iter().any(is_speed_modifier) {
                     return None;
                 }
                 // Exteriors are named by param name, e.g. IDS_PCEF005_SM_SIGNALFLAG.
@@ -103,59 +294,149 @@ impl GameData {
             })
             .collect()
     }
+
+    /// Speed boost consumables of the planner's ship, one per name.
+    fn speed_boosters(&self, planner: &Planner<'_>) -> Vec<SpeedBooster> {
+        let ship = planner.ship();
+        let slots = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()).unwrap_or_default();
+        let mut found: Vec<SpeedBooster> = Vec::new();
+
+        for (ability, variant) in slots.iter().flatten() {
+            let Some(param) = self.provider().game_param_by_name(ability) else {
+                continue;
+            };
+            let Some(category) = param.ability().and_then(|ability| ability.get_category(variant)) else {
+                continue;
+            };
+            if category.consumable_type_raw() != SPEED_BOOSTER {
+                continue;
+            }
+            let Some(&boost) = category.effect_fields().get("boostCoeff").filter(|boost| **boost > 0.0) else {
+                continue;
+            };
+
+            let name = self.consumable_name(ability, category);
+            if !found.iter().any(|known| known.name == name) {
+                found.push(SpeedBooster { name, boost: BoostCoefficient(boost) });
+            }
+        }
+
+        found
+    }
 }
 
-/// The builds with one signal flag mounted.
-struct Flagged<'a> {
-    planner: Planner<'a>,
-    signal: AbilityModifiers,
+/// Whether `label`, the label of a speed build alternative, names the
+/// conditions `query` names. Case, "with", "active" and "signal" do not
+/// matter, nor the order of conditions joined by "and".
+pub(crate) fn names_condition(label: &str, query: &str) -> bool {
+    fn conditions(text: &str) -> Vec<String> {
+        let lower = text.to_lowercase();
+        let words: Vec<&str> = lower
+            .split_whitespace()
+            .enumerate()
+            .filter(|(index, word)| !(*index == 0 && *word == "with") && !matches!(*word, "active" | "signal"))
+            .map(|(_, word)| word)
+            .collect();
+        let mut conditions: Vec<String> =
+            words.join(" ").split(" and ").map(|condition| condition.trim().to_owned()).collect();
+        conditions.sort_unstable();
+
+        conditions
+    }
+
+    conditions(label) == conditions(query)
 }
 
-/// The builds of one speed, with each signal flag that raises the best-fit
-/// value as an alternative, alone and together with each conditional skill
-/// that raises it further. `None` when the ship lacks the speed.
+/// The builds of the top speed at `depth`, with each condition that raises
+/// the best-fit value as an alternative, alone and together with each
+/// conditional skill that raises it further. Speed boosters count alone and
+/// with each set of switched modifiers. `None` when the ship lacks the
+/// speed.
 fn speed_plan(
     planner: &Planner<'_>,
-    flagged: &[Flagged<'_>],
-    plan: StatPlan<'_, Knots>,
+    conditions: &Conditions<'_>,
+    depth: SpeedDepth,
 ) -> Result<Option<BuildStat<Knots>>, QueryError> {
-    let Some(mut stat) = planner.plan(&plan)? else {
+    let knots = |value: Knots| Knots::from(round(value.value()));
+    let card = |outcome: &Outcome| depth.speed(outcome).map(knots);
+    let Some(mut stat) = planner.plan(&StatPlan::new(depth.label().to_owned(), Better::Higher, &card))? else {
         return Ok(None);
     };
 
-    for Flagged { planner, signal } in flagged {
-        let Some(with_signal) = planner.plan(&plan)? else {
+    let switched = conditions.switched.iter().map(|switched| Held { switched: Some(switched), booster: None });
+    let boosted = conditions.boosters.iter().flat_map(|booster| {
+        iter::once(Held { switched: None, booster: Some(booster) }).chain(
+            conditions.switched.iter().map(move |switched| Held { switched: Some(switched), booster: Some(booster) }),
+        )
+    });
+    for held in switched.chain(boosted) {
+        let planner = held.switched.map_or(planner, |switched| &switched.planner);
+        let speed = |outcome: &Outcome| {
+            let speed = match held.booster {
+                Some(booster) => booster.speed(depth, outcome),
+                None => depth.speed(outcome),
+            };
+            speed.map(knots)
+        };
+        let Some(with_condition) = planner.plan(&StatPlan::new(depth.label().to_owned(), Better::Higher, &speed))?
+        else {
             continue;
         };
-        let best = with_signal.builds.best;
-        if !plan.better.improves(best.value.value(), stat.builds.best.value.value()) {
+        let best = with_condition.builds.best;
+        if !Better::Higher.improves(best.value.value(), stat.builds.best.value.value()) {
             continue;
         }
 
-        let flag = format!("{} signal", signal.label);
-        let combined: Vec<BuildAlternative<Knots>> = with_signal
+        let phrase = held.phrase();
+        let condition = held.assumed();
+        let combined: Vec<BuildAlternative<Knots>> = with_condition
             .builds
             .alternatives
             .into_iter()
-            .filter(|alternative| plan.better.improves(alternative.value.value(), best.value.value()))
+            .filter(|alternative| Better::Higher.improves(alternative.value.value(), best.value.value()))
             .map(|mut alternative| {
-                alternative.label = format!("{} and {flag}", alternative.label);
-                alternative.assumed.push(flag.clone());
+                alternative.label = format!("{} and {phrase}", alternative.label);
+                alternative.assumed.extend(condition.iter().cloned());
                 alternative
             })
             .collect();
 
         let mut assumed = best.assumed;
-        assumed.push(flag.clone());
+        assumed.extend(condition);
         stat.builds.alternatives.push(BuildAlternative {
-            label: format!("with {flag}"),
+            label: format!("with {phrase}"),
             value: best.value,
             assumed,
             tier_fillers: best.tier_fillers,
-            note: None,
+            note: held.note(),
         });
         stat.builds.alternatives.extend(combined);
     }
 
     Ok(Some(stat))
+}
+
+fn is_speed_modifier(modifier: &CrewSkillModifier) -> bool {
+    const SPEED_MODIFIERS: [&str; 3] = ["speedCoef", "speedCoefBattery", "speedCoefUW"];
+
+    SPEED_MODIFIERS.contains(&modifier.name())
+}
+
+fn changes_speed(ability: &AbilityModifiers) -> bool {
+    ability.modifiers.iter().any(is_speed_modifier)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn condition_names_ignore_case_order_and_filler_words() {
+        let label = "with Swift in Silence active and Engine Boost active and Sierra Mike signal";
+
+        assert!(names_condition(label, "sierra mike and engine boost and swift in silence"));
+        assert!(names_condition("with Engine Boost active", "Engine Boost"));
+        assert!(!names_condition(label, "Engine Boost"));
+        assert!(!names_condition("with Engine Boost active and Sierra Mike signal", "Engine Boost"));
+    }
 }

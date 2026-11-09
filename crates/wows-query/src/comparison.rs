@@ -1,8 +1,8 @@
 //! Ships of one class and tier range compared on the factors that decide
 //! their strength, each ranked within the group, with labels for clear
 //! outliers: per armament, per torpedo option and, for cruisers and
-//! battleships, against the shooters of their matchmaking. No composite
-//! score: the factors trade against each other differently by play style.
+//! battleships, against the shooters of their matchmaking. The one composite
+//! score is the battle_impact judgment, whose weights are stated with it.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -13,8 +13,10 @@ use serde::Serialize;
 use serde::ser::SerializeMap;
 use wows_core::units::Degrees;
 use wows_core::units::Km;
+use wows_core::units::Meters;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
+use wows_ship_stats::AaRating;
 use wows_ship_stats::Bearing;
 use wows_ship_stats::bearing::mount_bears;
 use wows_ship_stats::mount_salvo;
@@ -23,9 +25,12 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::ttx::anti_air::AuraBand;
+use wowsunpack::game_params::ttx::anti_air::anti_air;
 use wowsunpack::game_params::ttx::constants::BW_KNOTS_TO_MPS;
 use wowsunpack::game_params::ttx::constants::BW_TO_BALLISTIC;
 use wowsunpack::game_params::ttx::constants::KM_TO_M;
+use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::model::ShellStats;
 use wowsunpack::game_params::ttx::model::TorpedoStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
@@ -44,6 +49,8 @@ use crate::armor_assessment::ShooterRole;
 use crate::armor_assessment::class_plural;
 use crate::armor_assessment::parallel_map;
 use crate::armor_trace::largest_shell;
+use crate::battle_impact::ImpactSummary;
+use crate::battle_impact::summaries;
 use crate::builds::Better;
 use crate::builds::Charges;
 use crate::builds::Outcome;
@@ -52,9 +59,9 @@ use crate::builds::StatAmount;
 use crate::builds::StatPlan;
 use crate::consumables::Capacity;
 use crate::consumables::consumable_stats;
+use crate::consumables::repair_heal;
 use crate::data::GameData;
 use crate::error::QueryError;
-use crate::error::RawParamsError;
 use crate::names::Interpretations;
 use crate::shells::Ammo;
 use crate::shells::Battery;
@@ -245,6 +252,10 @@ pub struct ComparedShip {
     #[serde(skip)]
     pub index: String,
 
+    /// Not in the tool output.
+    #[serde(skip)]
+    pub tier: Tier,
+
     /// Premium replicas of this ship, left out of the ranks.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub replicas: Vec<String>,
@@ -273,6 +284,11 @@ pub struct ComparedShip {
     /// Play style the factors point to, with the numbers behind it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<String>,
+
+    /// The battle_impact score and its components; absent for carriers and
+    /// submarines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battle_impact: Option<ImpactSummary>,
 
     /// The ship's unique upgrade and the factors whose best-fit build takes it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -354,6 +370,7 @@ pub struct FactorStanding {
     pub unit: &'static str,
     pub better: FactorDirection,
     pub rank: GroupRank,
+    pub scope: RankScope,
 
     /// Rank among the cruisers of the same type in the group (the same tier
     /// too for per-tier factors). `None` outside cruiser groups, for torpedo
@@ -367,6 +384,27 @@ pub struct FactorStanding {
 pub enum FactorDirection {
     Lower,
     Higher,
+}
+
+/// The ships a factor ranks among.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RankScope {
+    /// Every ship of the group, or every torpedo option of the group.
+    Group,
+
+    /// The ships of the group of the ship's own tier.
+    Tier,
+}
+
+/// Which ships of a group get full entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Listing {
+    /// The ships named, or every ship when none is named.
+    Named,
+
+    /// Every ship of the group.
+    Every,
 }
 
 /// Where a value ranks among the values of its group, its own included: the
@@ -451,21 +489,31 @@ impl GroupRank {
         format!("{}; {typed}", self.position_text(scope))
     }
 
-    /// "worse than 95% of the 40 other tier 10 destroyers (rank 41/41)" when
-    /// the value is an outlier.
-    fn outlier_line(&self, scope: &str) -> Option<String> {
+    /// For an outlier, "strength" or "weakness" and where the value stands:
+    /// "the lowest of the 43 tier 10 cruisers (rank 1/43)" or "higher than
+    /// 96% of the 81 other tier 9-11 battleships (rank 79/82)". `better` is
+    /// the direction the value was ranked in.
+    fn outlier_line(&self, scope: &str, better: Better) -> Option<(&'static str, String)> {
+        let outlier = self.outlier?;
         let others = self.others();
-        let (word, beyond) = match self.outlier? {
-            Outlier::Worse => ("worse", self.better),
-            Outlier::Better => ("better", self.worse),
+        let (verdict, beyond) = match outlier {
+            Outlier::Better => ("strength", self.worse),
+            Outlier::Worse => ("weakness", self.better),
         };
-        let than = if beyond == others {
-            format!("all {others} other {scope}")
+        let low = matches!((outlier, better), (Outlier::Better, Better::Lower) | (Outlier::Worse, Better::Higher));
+        let (extreme, comparative) = if low { ("lowest", "lower") } else { ("highest", "higher") };
+        let standing = if beyond == others {
+            format!("the {extreme} of the {} {scope}", self.count)
+        } else if beyond + self.tied == others {
+            format!("tied for the {extreme} of the {} {scope}", self.count)
         } else {
-            format!("{}% of the {others} other {scope}", (beyond as f32 * 100.0 / others as f32).round())
+            format!(
+                "{comparative} than {}% of the {others} other {scope}",
+                (beyond as f32 * 100.0 / others as f32).round()
+            )
         };
 
-        Some(format!("{word} than {than} (rank {}/{})", self.position, self.count))
+        Some((verdict, format!("{standing} (rank {}/{})", self.position, self.count)))
     }
 
     /// Values ranked besides this one.
@@ -571,13 +619,13 @@ impl Meta {
         format!("{} ({}, {better} is better): {}", self.key, self.unit, self.description)
     }
 
-    fn standing(&self, value: f32, rank: GroupRank, type_rank: Option<GroupRank>) -> FactorStanding {
+    fn standing(&self, value: f32, rank: GroupRank, scope: RankScope, type_rank: Option<GroupRank>) -> FactorStanding {
         let better = match self.better {
             Better::Lower => FactorDirection::Lower,
             Better::Higher => FactorDirection::Higher,
         };
 
-        FactorStanding { factor: self.key, value, unit: self.unit, better, rank, type_rank }
+        FactorStanding { factor: self.key, value, unit: self.unit, better, rank, scope, type_rank }
     }
 
     /// `value` with its unit, e.g. "2.1 km" or "35%".
@@ -595,6 +643,8 @@ impl Meta {
 enum Factor {
     Health,
     RepairPartyHeal,
+    RepairPartyTotalHeal,
+    DamageControlReload,
     MainBatteryReload,
     MainBatteryRange,
     DamagePerMinute(AmmoKind),
@@ -615,22 +665,36 @@ enum Factor {
     TorpedoReload,
     TorpedoLaunchFromBow,
     BroadsideTubes,
-    AntiAircraftDamage,
-    AntiAircraftRange,
+    AntiAircraftRating,
+    AntiAircraftLongDps,
+    AntiAircraftFlak,
     Concealment,
     AirConcealment,
+    RadarRange,
+    RadarDuration,
+    HydroRange,
+    TorpedoDetection,
+    SmokeLifetime,
     Speed,
     RudderShift,
     TurningCircle,
     BattleshipApCitadel,
     BattleshipApOverpenetration,
+    CruiserHeDamaging,
     BowOvermatch,
     SternOvermatch,
 }
 
 impl Factor {
     fn all() -> Vec<Self> {
-        let mut factors = vec![Self::Health, Self::RepairPartyHeal, Self::MainBatteryReload, Self::MainBatteryRange];
+        let mut factors = vec![
+            Self::Health,
+            Self::RepairPartyHeal,
+            Self::RepairPartyTotalHeal,
+            Self::DamageControlReload,
+            Self::MainBatteryReload,
+            Self::MainBatteryRange,
+        ];
         factors.extend(AmmoKind::ALL.map(Self::DamagePerMinute));
         factors.extend(AmmoKind::ALL.map(Self::Alpha));
         factors.extend(AmmoKind::ALL.map(Self::FlightTime));
@@ -650,15 +714,22 @@ impl Factor {
             Self::TorpedoReload,
             Self::TorpedoLaunchFromBow,
             Self::BroadsideTubes,
-            Self::AntiAircraftDamage,
-            Self::AntiAircraftRange,
+            Self::AntiAircraftRating,
+            Self::AntiAircraftLongDps,
+            Self::AntiAircraftFlak,
             Self::Concealment,
             Self::AirConcealment,
+            Self::RadarRange,
+            Self::RadarDuration,
+            Self::HydroRange,
+            Self::TorpedoDetection,
+            Self::SmokeLifetime,
             Self::Speed,
             Self::RudderShift,
             Self::TurningCircle,
             Self::BattleshipApCitadel,
             Self::BattleshipApOverpenetration,
+            Self::CruiserHeDamaging,
             Self::BowOvermatch,
             Self::SternOvermatch,
         ]);
@@ -675,6 +746,10 @@ impl Factor {
                 Better::Higher,
                 "share of maximum HP one Repair Party charge restores, stock",
             ),
+            Self::RepairPartyTotalHeal => {
+                ("repair_party_total_heal", "HP", Better::Higher, "HP every Repair Party charge restores together")
+            }
+            Self::DamageControlReload => ("damage_control_reload", "s", Better::Lower, "Damage Control Party reload"),
             Self::MainBatteryReload => ("main_battery_reload", "s", Better::Lower, "main battery reload"),
             Self::MainBatteryRange => ("main_battery_range", "km", Better::Higher, "main battery firing range"),
             Self::DamagePerMinute(ammo) => (
@@ -766,17 +841,31 @@ impl Factor {
             Self::BroadsideTubes => {
                 ("broadside_tubes", "tubes", Better::Higher, "torpedo tubes that bear on one broadside at once")
             }
-            Self::AntiAircraftDamage => (
-                "aa_damage",
+            Self::AntiAircraftRating => (
+                "aa_rating",
+                "hp",
+                Better::Higher,
+                "AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned; a judgment, see ship_stats anti_aircraft",
+            ),
+            Self::AntiAircraftLongDps => (
+                "aa_long_dps",
                 "HP/s",
                 Better::Higher,
-                "continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted",
+                "continuous damage per second of the long-range AA auras, before hit chance",
             ),
-            Self::AntiAircraftRange => {
-                ("aa_range", "km", Better::Higher, "reach of the longest anti-aircraft aura, stock")
-            }
+            Self::AntiAircraftFlak => (
+                "aa_flak",
+                "hp",
+                Better::Higher,
+                "damage of one flak salvo if every burst hits: bursts times burst damage",
+            ),
             Self::Concealment => ("concealment", "km", Better::Lower, "detectability by ships"),
             Self::AirConcealment => ("air_concealment", "km", Better::Lower, "detectability by aircraft"),
+            Self::RadarRange => ("radar_range", "km", Better::Higher, "Surveillance Radar range"),
+            Self::RadarDuration => ("radar_duration", "s", Better::Higher, "Surveillance Radar action time"),
+            Self::HydroRange => ("hydro_range", "km", Better::Higher, "Hydroacoustic Search range against ships"),
+            Self::TorpedoDetection => ("torpedo_detection", "km", Better::Higher, "Hydroacoustic Search torpedo range"),
+            Self::SmokeLifetime => ("smoke_lifetime", "s", Better::Higher, "time a smoke cloud lasts"),
             Self::Speed => ("speed", "kn", Better::Higher, "top speed"),
             Self::RudderShift => ("rudder_shift", "s", Better::Lower, "rudder shift time"),
             Self::TurningCircle => ("turning_circle", "m", Better::Lower, "turning circle radius"),
@@ -789,6 +878,12 @@ impl Factor {
             Self::BattleshipApOverpenetration => {
                 ("bb_ap_overpenetration", "%", Better::Higher, "the same hits that overpenetrate, doing little damage")
             }
+            Self::CruiserHeDamaging => (
+                "cruiser_he_damaging",
+                "%",
+                Better::Lower,
+                "broadside HE hits of the cruiser HE shooter of its matchmaking at 5 to 10 km that penetrate, from armor_assessment",
+            ),
             Self::BowOvermatch => (
                 "bow_overmatch",
                 "%",
@@ -824,12 +919,60 @@ impl Factor {
         }
     }
 
+    /// What an armor factor's value means for the ship, as its outlier line
+    /// states it.
+    fn outlier_statement(self, value: f32) -> Option<String> {
+        let share = number(value);
+        match self {
+            Self::BattleshipApCitadel => Some(format!(
+                "{share}% of broadside AP hits from the most common battleship caliber it meets, at 12 to 14 km, detonate in its citadel, a citadel hit being heavy damage taken"
+            )),
+            Self::BattleshipApOverpenetration => {
+                Some(format!("{share}% of those battleship AP hits overpenetrate it, doing little damage"))
+            }
+            Self::CruiserHeDamaging => Some(format!(
+                "{share}% of broadside cruiser HE hits at 5 to 10 km penetrate it, each regular damage taken"
+            )),
+            Self::BowOvermatch => Some(format!(
+                "{share}% of the battleships it meets overmatch its bow, so their AP penetrates the bow at any angle"
+            )),
+            Self::SternOvermatch => Some(format!(
+                "{share}% of the battleships it meets overmatch its stern, so their AP penetrates the stern at any angle"
+            )),
+            _ => None,
+        }
+    }
+
     /// Ranked only among ships of one tier: these are measured against the
     /// ships of each tier's matchmaking.
     fn per_tier(self) -> bool {
         matches!(
             self,
-            Self::BattleshipApCitadel | Self::BattleshipApOverpenetration | Self::BowOvermatch | Self::SternOvermatch
+            Self::BattleshipApCitadel
+                | Self::BattleshipApOverpenetration
+                | Self::CruiserHeDamaging
+                | Self::BowOvermatch
+                | Self::SternOvermatch
+        )
+    }
+
+    fn scope(self) -> RankScope {
+        if self.per_tier() { RankScope::Tier } else { RankScope::Group }
+    }
+
+    /// A stock consumable value. Its leaders are left out of the tool answer
+    /// when ships are named, to keep the answer short.
+    fn is_consumable(self) -> bool {
+        matches!(
+            self,
+            Self::RepairPartyHeal
+                | Self::RepairPartyTotalHeal
+                | Self::DamageControlReload
+                | Self::RadarRange
+                | Self::RadarDuration
+                | Self::HydroRange
+                | Self::TorpedoDetection
+                | Self::SmokeLifetime
         )
     }
 
@@ -838,11 +981,14 @@ impl Factor {
     fn rounded(self, value: f32) -> f32 {
         match self {
             Self::Health
+            | Self::RepairPartyTotalHeal
             | Self::Alpha(_)
             | Self::DamagePerMinute(_)
             | Self::SecondaryDamagePerMinute
             | Self::TorpedoDamagePerMinute
-            | Self::AntiAircraftDamage
+            | Self::AntiAircraftRating
+            | Self::AntiAircraftLongDps
+            | Self::AntiAircraftFlak
             | Self::Dispersion
             | Self::TurningCircle => value.round(),
             _ => round2(value),
@@ -1123,13 +1269,22 @@ impl GameData {
     /// The ships of one class and tier range with each factor of strength
     /// and its rank in the group.
     pub fn ship_comparison(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
+        self.compare_group(args, Listing::Named)
+    }
+
+    /// [`GameData::ship_comparison`] with the entries `listing` selects.
+    pub(crate) fn compare_group(
+        &self,
+        args: &ShipComparisonArgs,
+        listing: Listing,
+    ) -> Result<ShipComparisonOutput, QueryError> {
         const NOTES: &[&str] = &[
-            "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock.",
+            "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot.",
             "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with.",
-            "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others.",
-            "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel.",
+            "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others, each led by strength or weakness for the ship. Matchup outliers are from the ship's side as the target: a citadel hit is heavy damage taken, a penetration regular damage taken, an overpenetration little damage taken.",
+            "bb_ap_*, cruiser_he_damaging, *_overmatch and matchups apply to cruisers and battleships only, and these factors rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel.",
             REACTION_TIME_NOTE,
-            "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style.",
+            "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. battle_impact is a weighted judgment from these factors, not win-rate data; its formula and weights are given by the battle_impact tool.",
         ];
         const CRUISER_TYPE_NOTE: &str = "Cruisers are typed by their largest main battery caliber: light below 170 mm, heavy 170 to 260 mm, large above. Each cruiser value also ranks among the group's cruisers of its type, after the class rank, e.g. \"(rank 3/56, p96; heavy cruisers rank 9/24, p65)\": judge a cruiser against its own type.";
 
@@ -1196,17 +1351,9 @@ impl GameData {
             return Err(QueryError::InvalidArguments { reason: "reference_range_km must be more than 0" });
         }
 
-        // Anti-aircraft auras are read from raw GameParams, which need a
-        // cache directory.
-        let anti_aircraft = match self.raw_params() {
-            Ok(_) => true,
-            Err(QueryError::RawParams { source }) if matches!(*source, RawParamsError::NoCacheDir) => false,
-            Err(error) => return Err(error),
-        };
-        let mut scores: Vec<ShipScores> =
-            parallel_map(&group, |ship| self.ship_scores(ship, reference_range, anti_aircraft))
-                .into_iter()
-                .collect::<Result<_, _>>()?;
+        let mut scores: Vec<ShipScores> = parallel_map(&group, |ship| self.ship_scores(ship, reference_range))
+            .into_iter()
+            .collect::<Result<_, _>>()?;
         if matches!(class, ShipClass::Cruiser | ShipClass::Battleship) {
             self.add_protection(class, &group, &mut scores)?;
         }
@@ -1312,8 +1459,7 @@ impl GameData {
             }
             pairs
         };
-        let ships = listed
-            .into_iter()
+        let mut entries: Vec<ComparedShip> = (0..group.len())
             .map(|index| {
                 let ship = group[index];
                 let score = &scores[index];
@@ -1336,8 +1482,12 @@ impl GameData {
                     let rank = GroupRank::new(value, meta.better, peers);
                     let unique = score.unique_for(*factor).map(|name| format!(" ({})", unique_marker(name)));
                     let unique = unique.unwrap_or_default();
-                    if let Some(outlier) = rank.outlier_line(&scope) {
-                        outliers.push(format!("{} {}{unique}: {outlier}", meta.key, meta.with_unit(value)));
+                    if let Some((verdict, standing)) = rank.outlier_line(&scope, meta.better) {
+                        let statement = match factor.outlier_statement(value) {
+                            Some(statement) => format!("{statement} ({}{unique})", meta.key),
+                            None => format!("{} {}{unique}", meta.key, meta.with_unit(value)),
+                        };
+                        outliers.push(format!("{verdict}: {statement}, {standing}"));
                     }
                     let own_type = cruiser_types[index].filter(|_| mixed_types);
                     let type_rank = own_type.map(|cruiser| {
@@ -1354,7 +1504,7 @@ impl GameData {
                     let typed = own_type.zip(type_rank.as_ref());
                     let text = factor_text(*factor, value, &rank, &scope, typed);
                     values.push((meta.key, format!("{text}{unique}")));
-                    standings.push(meta.standing(value, rank, type_rank));
+                    standings.push(meta.standing(value, rank, factor.scope(), type_rank));
                 }
 
                 let torpedoes = score
@@ -1371,16 +1521,16 @@ impl GameData {
                             let rank = GroupRank::new(value, meta.better, torpedo_pool(*factor));
                             let unique = torpedo.unique_for(*factor).map(|name| format!(" ({})", unique_marker(name)));
                             let unique = unique.unwrap_or_default();
-                            if let Some(outlier) = rank.outlier_line(&torpedo_scope) {
+                            if let Some((verdict, standing)) = rank.outlier_line(&torpedo_scope, meta.better) {
                                 outliers.push(format!(
-                                    "torpedo {} {} {}{unique}: {outlier}",
+                                    "{verdict}: torpedo {} {} {}{unique}, {standing}",
                                     torpedo.name,
                                     meta.key,
                                     meta.with_unit(value)
                                 ));
                             }
                             values.push((meta.key, format!("{}{unique}", rank.ranked(&number(value), &torpedo_scope))));
-                            standings.push(meta.standing(value, rank, None));
+                            standings.push(meta.standing(value, rank, RankScope::Group, None));
                         }
 
                         TorpedoOption {
@@ -1412,6 +1562,7 @@ impl GameData {
                     category: ship.category,
                     cruiser_type: cruiser_types[index],
                     index: ship.param.index().to_owned(),
+                    tier: ship.tier,
                     replicas: ship.replicas.clone(),
                     values: FactorValues(values),
                     standings,
@@ -1419,12 +1570,24 @@ impl GameData {
                     torpedoes,
                     matchups,
                     signals: signals(ship, score),
+                    battle_impact: None,
                     unique_upgrade,
                     consumables: score.consumables.clone(),
                     special_abilities: score.special_abilities.clone(),
                 }
             })
             .collect();
+        let impacts = summaries(class, &entries);
+        for (entry, impact) in entries.iter_mut().zip(impacts) {
+            entry.battle_impact = impact;
+        }
+        let ships = match listing {
+            Listing::Every => entries,
+            Listing::Named => {
+                let mut entries: Vec<Option<ComparedShip>> = entries.into_iter().map(Some).collect();
+                listed.iter().filter_map(|index| entries[*index].take()).collect()
+            }
+        };
 
         Ok(ShipComparisonOutput {
             interpretations,
@@ -1442,11 +1605,6 @@ impl GameData {
             head_to_head,
             notes: {
                 let mut notes = NOTES.to_vec();
-                if !anti_aircraft {
-                    notes.push(
-                        "Anti-aircraft is not compared: the server has no cache directory to read raw GameParams into.",
-                    );
-                }
                 if mixed_types {
                     notes.push(CRUISER_TYPE_NOTE);
                 }
@@ -1458,14 +1616,21 @@ impl GameData {
     /// [`GameData::ship_comparison`] as the ship_comparison tool returns it:
     /// without ships named, the group summary alone, which keeps a whole
     /// class and tier within a small model's context; with ships named,
-    /// their entries and the leaders without the list of ship names, and
-    /// without the torpedo sections when no named ship carries torpedoes.
+    /// their entries and the leaders, without the leaders of consumable
+    /// factors, the list of ship names, and the torpedo sections when no
+    /// named ship carries torpedoes.
     pub fn ship_comparison_summary(&self, args: &ShipComparisonArgs) -> Result<ShipComparisonOutput, QueryError> {
         let mut output = self.ship_comparison(args)?;
         if args.ships.as_ref().is_none_or(Vec::is_empty) {
             output.ships.clear();
         } else {
             output.ship_names.clear();
+            let consumables: Vec<&str> = Factor::all()
+                .into_iter()
+                .filter(|factor| factor.is_consumable())
+                .map(|factor| factor.meta().key)
+                .collect();
+            output.leaders.0.retain(|(key, _)| !consumables.contains(key));
             if output.ships.iter().all(|ship| ship.torpedoes.is_empty()) {
                 output.torpedo_factors.clear();
                 output.torpedo_leaders = FactorLeaderTable::default();
@@ -1493,7 +1658,7 @@ impl GameData {
     }
 
     /// Every factor of one ship but protection, on its best-fit builds.
-    fn ship_scores(&self, ship: &Ship, reference_range: Km, anti_aircraft: bool) -> Result<ShipScores, QueryError> {
+    fn ship_scores(&self, ship: &Ship, reference_range: Km) -> Result<ShipScores, QueryError> {
         let planner = Planner::new(self, ship);
         let stock = self.effective_modifiers(ship, &self.stock_loadout())?;
         let stock_bundle = stock.build.modifiers.bundle();
@@ -1597,6 +1762,23 @@ impl GameData {
             let best = &fires.total.builds.best;
             record(Factor::FiresPerMinute, best.value.fires_per_minute.value(), &best.assumed);
         }
+        let defense =
+            |outcome: &Outcome| anti_air(&ship.param, planner.selection(outcome.selection), &outcome.bundle, None);
+        let anti_aircraft: [(Factor, CardValue<'_>); 3] = [
+            (Factor::AntiAircraftRating, &|outcome| Some(AaRating::from_defense(&defense(outcome)?).total.value())),
+            (Factor::AntiAircraftLongDps, &|outcome| Some(defense(outcome)?.band(AuraBand::Long)?.dps().value())),
+            (Factor::AntiAircraftFlak, &|outcome| {
+                let flak = defense(outcome)?.flak?;
+                Some(flak.auras.iter().map(|aura| aura.bursts.0 as f32 * aura.damage.value()).sum())
+            }),
+        ];
+        for (factor, extract) in anti_aircraft {
+            let rounded = |outcome: &Outcome| extract(outcome).map(|value| Amount(value.round()));
+            let plan = StatPlan::new(factor.meta().key.to_owned(), factor.meta().better, &rounded);
+            if let Some(builds) = planner.best(&plan)? {
+                record(factor, builds.best.value.0, &builds.best.assumed);
+            }
+        }
 
         if let Some(range) = values.get(&Factor::MainBatteryRange).copied()
             && range >= reference_range.value()
@@ -1634,13 +1816,8 @@ impl GameData {
             values.insert(Factor::BroadsideTubes, arcs.broadside as f32);
         }
 
-        if anti_aircraft && let Some((damage, range)) = self.anti_aircraft(ship, &planner)? {
-            values.insert(Factor::AntiAircraftDamage, damage.round());
-            values.insert(Factor::AntiAircraftRange, round2(range.value()));
-        }
-        if let Some(heal) = self.repair_party_heal(ship, stock_bundle) {
-            values.insert(Factor::RepairPartyHeal, heal);
-        }
+        let health = values.get(&Factor::Health).copied().map(Hp::from);
+        values.extend(self.consumable_values(ship, stock_bundle, health));
         if matches!(ship.class, ShipClass::Cruiser | ShipClass::Battleship) {
             scores.bow_plate = self.zone_plate(ship, "Bow")?;
             scores.stern_plate = self.zone_plate(ship, "Stern")?;
@@ -1818,54 +1995,6 @@ impl GameData {
         Ok(solve_for_range(&params, range.to_meters()).map(|impact| impact.time_to_target.value()))
     }
 
-    /// Continuous anti-aircraft damage per second and the reach of the
-    /// longest aura of the anti-aircraft and secondary components, stock,
-    /// on the hull with the most damage.
-    fn anti_aircraft(&self, ship: &Ship, planner: &Planner<'_>) -> Result<Option<(f32, Km)>, QueryError> {
-        let Some(vehicle) = ship.param.vehicle() else {
-            return Ok(None);
-        };
-        let hulls: Vec<&str> = planner.selections().filter_map(|selection| selection.hull.as_deref()).collect();
-        if hulls.is_empty() {
-            return Ok(None);
-        }
-        let Some(raw) = self.raw_entry(ship.param.name())? else {
-            return Ok(None);
-        };
-
-        let mut best: Option<(f32, Km)> = None;
-        for hull in hulls {
-            let Some(config) = vehicle.hull_upgrade(hull) else {
-                continue;
-            };
-            let mut damage = 0.0;
-            let mut reach: f32 = 0.0;
-            for component in [ComponentType::AirDefense, ComponentType::Atba] {
-                let Some(fields) = config.component_names.get(&component).and_then(|name| raw.get(name)?.as_object())
-                else {
-                    continue;
-                };
-                for aura in fields.values() {
-                    let number =
-                        |key: &str| aura.get(key).and_then(serde_json::Value::as_f64).map(|value| value as f32);
-                    let (Some(area), Some(period)) = (number("areaDamage"), number("areaDamagePeriod")) else {
-                        continue;
-                    };
-                    if area <= 0.0 || period <= 0.0 {
-                        continue;
-                    }
-                    damage += area / period;
-                    reach = reach.max(number("maxDistance").unwrap_or(0.0) / KM_TO_M);
-                }
-            }
-            if damage > 0.0 && best.is_none_or(|(best, _)| damage > best) {
-                best = Some((damage, Km::new(reach)));
-            }
-        }
-
-        Ok(best)
-    }
-
     /// Thinnest plate of `zone` above the waterline; `None` without one.
     fn zone_plate(&self, ship: &Ship, zone: &str) -> Result<Option<Millimeters>, QueryError> {
         match zone_thickness(self, ship, zone) {
@@ -1909,6 +2038,9 @@ impl GameData {
                         score.values.insert(Factor::BattleshipApOverpenetration, overpenetration.value.value());
                     }
                 }
+                if let Some(he) = matchups.as_ref().and_then(cruiser_he_broadside) {
+                    score.values.insert(Factor::CruiserHeDamaging, he.damaging.value.value());
+                }
                 score.matchups = matchups;
             }
         }
@@ -1939,20 +2071,71 @@ impl GameData {
             .collect()
     }
 
-    /// Percent of maximum HP one stock Repair Party charge restores.
-    fn repair_party_heal(&self, ship: &Ship, bundle: &ModifierBundle) -> Option<f32> {
-        let slots = ship.param.vehicle()?.abilities()?;
+    /// Stock consumable factors, each the best over every option of every
+    /// slot. `health` is the maximum HP the Repair Party total is a share of.
+    fn consumable_values(&self, ship: &Ship, bundle: &ModifierBundle, health: Option<Hp>) -> HashMap<Factor, f32> {
+        let mut values: HashMap<Factor, f32> = HashMap::new();
+        let Some(slots) = ship.param.vehicle().and_then(|vehicle| vehicle.abilities()) else {
+            return values;
+        };
 
-        slots.iter().flatten().find_map(|(ability, variant)| {
-            let param = self.provider().game_param_by_name(ability)?;
-            let category = param.ability()?.get_category(variant)?;
-            if category.consumable_type_raw() != "regenCrew" {
-                return None;
+        let mut keep = |factor: Factor, value: f32| {
+            let value = factor.rounded(value);
+            let kept = values.entry(factor).or_insert(value);
+            if factor.meta().better.improves(value, *kept) {
+                *kept = value;
             }
+        };
 
+        for (ability, variant) in slots.iter().flatten() {
+            let Some(param) = self.provider().game_param_by_name(ability) else {
+                continue;
+            };
+            let Some(category) = param.ability().and_then(|ability| ability.get_category(variant)) else {
+                continue;
+            };
             let stats = consumable_stats(self.consumable_name(ability, category), category, bundle);
-            Some(round2(stats.heal_percent_per_s?.value() * stats.action_time_s?.value()))
-        })
+            let km = |meters: Option<Meters>| meters.map(|meters| meters.to_km().value());
+            match stats.kind.as_str() {
+                "rls" => {
+                    if let Some(range) = km(stats.ship_detection_m) {
+                        keep(Factor::RadarRange, range);
+                    }
+                    if let Some(time) = stats.action_time_s {
+                        keep(Factor::RadarDuration, time.value());
+                    }
+                }
+                "sonar" => {
+                    if let Some(range) = km(stats.ship_detection_m) {
+                        keep(Factor::HydroRange, range);
+                    }
+                    if let Some(range) = km(stats.torpedo_detection_m) {
+                        keep(Factor::TorpedoDetection, range);
+                    }
+                }
+                "smokeGenerator" => {
+                    if let Some(time) = stats.smoke_lifetime_s {
+                        keep(Factor::SmokeLifetime, time.value());
+                    }
+                }
+                "crashCrew" => keep(Factor::DamageControlReload, stats.reload_s.value()),
+                "regenCrew" => {
+                    if let (Some(rate), Some(time)) = (stats.heal_percent_per_s, stats.action_time_s) {
+                        keep(Factor::RepairPartyHeal, rate.value() * time.value());
+                    }
+                    let total = health
+                        .and_then(|health| repair_heal(category, bundle, health)?.per_battle)
+                        .map(|heal| heal.hp.value());
+                    if let Some(total) = total {
+                        keep(Factor::RepairPartyTotalHeal, total);
+                    }
+                }
+                // Other consumables are not compared.
+                _ => {}
+            }
+        }
+
+        values
     }
 
     /// "Repair Party (4 charges, 80 s reload)" per stock consumable slot.
@@ -2080,6 +2263,15 @@ fn battleship_broadside(matchups: &ShipMatchups) -> Option<&Matchup> {
     })
 }
 
+/// Broadside rates against cruiser HE at the close band it fights at.
+fn cruiser_he_broadside(matchups: &ShipMatchups) -> Option<&Matchup> {
+    matchups.matchups.iter().find(|matchup| {
+        matchup.role == ShooterRole::CruiserHe
+            && matchup.band == fighting_band(ShooterRole::CruiserHe)
+            && matchup.aspect == Aspect::Broadside
+    })
+}
+
 /// The band a shooter group mostly fights at: battleships and heavy
 /// cruisers at moderate range, the rest close.
 fn fighting_band(role: ShooterRole) -> RangeBand {
@@ -2137,46 +2329,44 @@ fn matchup_lines(
         let label = format!("{shooter} ({}), {}", first.shooter_ship, span(&first.ranges));
 
         let mut aspects = Vec::new();
-        // One line per metric and direction: the aspects share the peer
-        // group, so it is named once.
-        let mut flagged: BTreeMap<(&'static str, &'static str), (usize, Vec<String>)> = BTreeMap::new();
+        // One line per verdict and outcome: the aspects share the shooter and
+        // peer group, so they are named once.
+        let mut flagged: BTreeMap<(&'static str, MatchupOutcome), Vec<String>> = BTreeMap::new();
         for matchup in &at_band {
             let rates = [
-                ("citadel", Better::Lower, matchup.citadel.as_ref()),
-                ("damaging", Better::Lower, Some(&matchup.damaging)),
-                ("overpenetration", Better::Higher, matchup.overpenetration.as_ref()),
+                (MatchupOutcome::Citadel, matchup.citadel.as_ref()),
+                (MatchupOutcome::Damaging, Some(&matchup.damaging)),
+                (MatchupOutcome::Overpenetration, matchup.overpenetration.as_ref()),
             ];
             let mut parts = Vec::new();
-            for (metric, better, measured) in rates {
+            for (outcome, measured) in rates {
                 let Some(Measured { value, peers: values }) = measured else {
                     continue;
                 };
                 let value = value.value();
+                let better = outcome.better();
                 let rank = GroupRank::new(value, better, values.iter().copied().chain([value]));
-                parts.push(format!("{metric} {}", rank.ranked(&format!("{}%", number(value)), &peers)));
-                if let Some(outlier) = rank.outlier {
-                    let word = match outlier {
-                        Outlier::Better => "better",
-                        Outlier::Worse => "worse",
-                    };
-                    let (others, cases) = flagged.entry((metric, word)).or_default();
-                    *others = rank.others();
-                    cases.push(format!(
-                        "{} {}% (rank {}/{})",
-                        matchup.aspect.label(),
+                parts.push(format!("{} {}", outcome.key(), rank.ranked(&format!("{}%", number(value)), &peers)));
+                if let Some((verdict, standing)) = rank.outlier_line(&peers, better) {
+                    flagged.entry((verdict, outcome)).or_default().push(format!(
+                        "{}% of {} hits, {standing}",
                         number(value),
-                        rank.position,
-                        rank.count
+                        matchup.aspect.label()
                     ));
                 }
             }
             aspects.push((aspect_key(matchup.aspect), parts.join(", ")));
         }
-        for ((metric, word), (others, cases)) in flagged {
+        // HE and SAP never overpenetrate; their damaging hits are penetrations.
+        let penetrates_only = first.overpenetration.is_none();
+        for ((verdict, outcome), cases) in flagged {
             outliers.push(format!(
-                "vs {label}, {metric}, {word} than at least {}% of the {others} other {peers}: {}",
-                number(OUTLIER_SHARE * 100.0),
-                cases.join(", ")
+                "{verdict}: {}'s {shooter} shells at {} {} on {}; {}.",
+                first.shooter_ship,
+                span(&first.ranges),
+                outcome.result(penetrates_only),
+                cases.join(" and "),
+                outcome.meaning(penetrates_only),
             ));
         }
 
@@ -2186,6 +2376,55 @@ fn matchup_lines(
     }
 
     lines
+}
+
+/// An outcome of a shell hit that matchups rate, from the target's side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MatchupOutcome {
+    Citadel,
+
+    /// Citadel and penetration hits together.
+    Damaging,
+
+    Overpenetration,
+}
+
+impl MatchupOutcome {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Citadel => "citadel",
+            Self::Damaging => "damaging",
+            Self::Overpenetration => "overpenetration",
+        }
+    }
+
+    /// Which way the rate is better for the target.
+    fn better(self) -> Better {
+        match self {
+            Self::Citadel | Self::Damaging => Better::Lower,
+            Self::Overpenetration => Better::Higher,
+        }
+    }
+
+    /// What the shells do, e.g. "detonate in its citadel".
+    fn result(self, penetrates_only: bool) -> &'static str {
+        match self {
+            Self::Citadel => "detonate in its citadel",
+            Self::Damaging if penetrates_only => "penetrate it",
+            Self::Damaging => "detonate inside it (citadel or regular penetration)",
+            Self::Overpenetration => "overpenetrate it",
+        }
+    }
+
+    /// What the outcome means for the target.
+    fn meaning(self, penetrates_only: bool) -> &'static str {
+        match self {
+            Self::Citadel => "a citadel hit is heavy damage taken",
+            Self::Damaging if penetrates_only => "each such hit is regular damage taken",
+            Self::Damaging => "each such hit is regular or heavy damage taken",
+            Self::Overpenetration => "an overpenetration is little damage taken",
+        }
+    }
 }
 
 fn aspect_key(aspect: Aspect) -> &'static str {
@@ -2476,8 +2715,14 @@ fn span(ranges: &[Km]) -> String {
     }
 }
 
+/// The key of every ship factor, as standings name them.
+#[cfg(test)]
+pub(crate) fn factor_keys() -> Vec<&'static str> {
+    Factor::all().into_iter().map(|factor| factor.meta().key).collect()
+}
+
 /// Up to two decimals, without trailing zeros.
-fn number(value: f32) -> String {
+pub(crate) fn number(value: f32) -> String {
     let text = format!("{:.2}", (f64::from(value) * 100.0).round() / 100.0);
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }

@@ -13,7 +13,7 @@ ship:
   status: released
 battery: secondary
 range_km: 10
-conclusion: "Hannover's secondary battery reaches 8.3 km, short of 10 km. With Secondary Battery Modification 1 + Long-Range Secondary Battery Shells it reaches 11.95 km; at 10 km dispersion is 372 m horizontal and 341.6 m vertical."
+conclusion: "Hannover's secondary battery reaches 8.3 km, short of 10 km. With Secondary Battery Modification 1 + Long-Range Secondary Battery Shells it reaches 11.95 km; at 10 km, dispersion is 372 m horizontal and 341.6 m vertical."
 guns:
   - mount: 128 mm
     min_radius: 1
@@ -46,7 +46,18 @@ builds:
       inner_half_share_pct: 54.2
     mounts:
       - mount: 128 mm
-        at_range: beyond_max_range
+        at_range:
+          ellipse:
+            evaluated_at_km: 9.96
+            horizontal_m: 370.6
+            vertical_m: 370.6
+            vertical_ratio: 1
+            half_of_shells_within:
+              horizontal_m: 170.3
+              vertical_m: 170.3
+            ninety_pct_of_shells_within:
+              horizontal_m: 326
+              vertical_m: 326
   - build: Long-Range Secondary Battery Shells
     kind: range
     max_range_km: 9.96
@@ -58,7 +69,18 @@ builds:
       inner_half_share_pct: 54.2
     mounts:
       - mount: 128 mm
-        at_range: beyond_max_range
+        at_range:
+          ellipse:
+            evaluated_at_km: 9.96
+            horizontal_m: 463.3
+            vertical_m: 463.3
+            vertical_ratio: 1
+            half_of_shells_within:
+              horizontal_m: 212.9
+              vertical_m: 212.9
+            ninety_pct_of_shells_within:
+              horizontal_m: 407.5
+              vertical_m: 407.5
   - build: Aiming Systems Modification 1
     kind: range_and_accuracy
     max_range_km: 8.72
@@ -70,7 +92,18 @@ builds:
       inner_half_share_pct: 54.2
     mounts:
       - mount: 128 mm
-        at_range: beyond_max_range
+        at_range:
+          ellipse:
+            evaluated_at_km: 8.72
+            horizontal_m: 388.6
+            vertical_m: 388.6
+            vertical_ratio: 1
+            half_of_shells_within:
+              horizontal_m: 178.6
+              vertical_m: 178.6
+            ninety_pct_of_shells_within:
+              horizontal_m: 341.8
+              vertical_m: 341.8
   - build: Manual Secondary Battery Aiming
     kind: accuracy
     max_range_km: 8.3
@@ -95,7 +128,18 @@ builds:
       inner_half_share_pct: 54.2
     mounts:
       - mount: 128 mm
-        at_range: beyond_max_range
+        at_range:
+          ellipse:
+            evaluated_at_km: 9.3
+            horizontal_m: 434.4
+            vertical_m: 434.4
+            vertical_ratio: 1
+            half_of_shells_within:
+              horizontal_m: 199.6
+              vertical_m: 199.6
+            ninety_pct_of_shells_within:
+              horizontal_m: 382.1
+              vertical_m: 382.1
   - build: Manual Secondary Battery Aiming
     kind: accuracy
     condition: "at the priority target within secondary range, after sustained fire"

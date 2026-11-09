@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1161
 expression: comparison
 ---
 group: tier 10 destroyers
@@ -11,6 +10,8 @@ reference_range_km: 10
 factors:
   - "health (HP, higher is better): hit points"
   - "repair_party_heal (%, higher is better): share of maximum HP one Repair Party charge restores, stock"
+  - "repair_party_total_heal (HP, higher is better): HP every Repair Party charge restores together"
+  - "damage_control_reload (s, lower is better): Damage Control Party reload"
   - "main_battery_reload (s, lower is better): main battery reload"
   - "main_battery_range (km, higher is better): main battery firing range"
   - "dpm_ap (HP/min, higher is better): main battery damage per minute of this ammo against one target at the bearing where the most of it bears, every shell hitting"
@@ -37,10 +38,16 @@ factors:
   - "torpedo_reload (s, lower is better): torpedo tube reload"
   - "torpedo_launch_from_bow (deg, lower is better): smallest angle off the bow at which a torpedo launcher bears; 0 launches bow-on"
   - "broadside_tubes (tubes, higher is better): torpedo tubes that bear on one broadside at once"
-  - "aa_damage (HP/s, higher is better): continuous anti-aircraft damage per second of every aura, stock, before hit chance; flak bursts not counted"
-  - "aa_range (km, higher is better): reach of the longest anti-aircraft aura, stock"
+  - "aa_rating (hp, higher is better): AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned; a judgment, see ship_stats anti_aircraft"
+  - "aa_long_dps (HP/s, higher is better): continuous damage per second of the long-range AA auras, before hit chance"
+  - "aa_flak (hp, higher is better): damage of one flak salvo if every burst hits: bursts times burst damage"
   - "concealment (km, lower is better): detectability by ships"
   - "air_concealment (km, lower is better): detectability by aircraft"
+  - "radar_range (km, higher is better): Surveillance Radar range"
+  - "radar_duration (s, higher is better): Surveillance Radar action time"
+  - "hydro_range (km, higher is better): Hydroacoustic Search range against ships"
+  - "torpedo_detection (km, higher is better): Hydroacoustic Search torpedo range"
+  - "smoke_lifetime (s, higher is better): time a smoke cloud lasts"
   - "speed (kn, higher is better): top speed"
   - "rudder_shift (s, lower is better): rudder shift time"
   - "turning_circle (m, lower is better): turning circle radius"
@@ -105,6 +112,16 @@ leaders:
       - "Laffey (USA, premium) 30%"
     worst:
       - "Kléber TE (France, test) 10%"
+  repair_party_total_heal:
+    best:
+      - "Lüshun (Pan_Asia, premium) 21600 HP"
+    worst:
+      - Daring (United_Kingdom) 4860 HP
+  damage_control_reload:
+    best:
+      - 20 de Julio (Pan_America) 40 s
+    worst:
+      - "Södermanland (Europe, test) 40 s"
   main_battery_reload:
     best:
       - "F. Sherman (USA, premium) 1.25 s"
@@ -235,16 +252,21 @@ leaders:
       - "La Pampa (Pan_America, premium) 15 tubes"
     worst:
       - "Hull (USA, premium) 2 tubes"
-  aa_damage:
+  aa_rating:
     best:
-      - "Ragnar (Europe, premium) 669 HP/s"
+      - 20 de Julio (Pan_America) 13351 hp
     worst:
-      - "Somers (USA, premium) 32 HP/s"
-  aa_range:
+      - "Somers (USA, premium) 220 hp"
+  aa_long_dps:
     best:
-      - Burrows (USA) 4 km
+      - 20 de Julio (Pan_America) 288 HP/s
     worst:
-      - "A. da Barbiano (Italy, premium) 2 km"
+      - "Ragnar (Europe, premium) 49 HP/s"
+  aa_flak:
+    best:
+      - 20 de Julio (Pan_America) 27495 hp
+    worst:
+      - "Lübeck (Germany, test) 6038 hp"
   concealment:
     best:
       - Shimakaze (Japan) 5.59 km
@@ -255,6 +277,31 @@ leaders:
       - 20 de Julio (Pan_America) 2.36 km
     worst:
       - "Kléber TE (France, test) 4.36 km"
+  radar_range:
+    best:
+      - Gdańsk (Europe) 9 km
+    worst:
+      - Yueyang (Pan_Asia) 7.5 km
+  radar_duration:
+    best:
+      - "Ragnar (Europe, premium) 30 s"
+    worst:
+      - Gdańsk (Europe) 10 s
+  hydro_range:
+    best:
+      - "Kléber TE (France, test) 7 km"
+    worst:
+      - "Druid (United_Kingdom, premium) 3 km"
+  torpedo_detection:
+    best:
+      - "G. Hoffmann (Germany, premium) 4 km"
+    worst:
+      - "Druid (United_Kingdom, premium) 3 km"
+  smoke_lifetime:
+    best:
+      - "F. Sherman (USA, premium) 130 s"
+    worst:
+      - "Kléber TE (France, test) 5 s"
   speed:
     best:
       - Kléber (France) 44 kn
@@ -316,6 +363,7 @@ ships:
     category: premium
     values:
       health: "30300 (rank 4/40, p90)"
+      damage_control_reload: "40 (rank 1/40, p0)"
       main_battery_reload: "2.76 (rank 16/40, p59)"
       main_battery_range: "17.22 (rank 17/40, p59)"
       dpm_ap: "322640 (rank 18/35, p50)"
@@ -337,20 +385,21 @@ ships:
       torpedo_reload: "76.5 (rank 13/37, p56)"
       torpedo_launch_from_bow: "6 (rank 1/37, p100)"
       broadside_tubes: "6 (rank 25/37, p19)"
-      aa_damage: "238 (rank 13/40, p69)"
-      aa_range: "3.8 (rank 14/40, p59)"
+      aa_rating: "6393 (rank 21/40, p49)"
+      aa_long_dps: "85 (rank 17/32, p48)"
+      aa_flak: "12220 (rank 17/32, p48)"
       concealment: "6.34 (rank 25/40, p38)"
       air_concealment: "3.01 (rank 18/40, p54)"
       speed: "41 (rank 8/40, p79)"
       rudder_shift: "2.06 (rank 9/40, p72)"
       turning_circle: "770 (rank 33/40, p13)"
     outliers:
-      - "all_bear_from_bow 42 deg: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
-      - "all_bear_from_stern 45 deg: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
-      - "torpedo_launch_from_bow 6 deg: better than all 36 other tier 10 destroyers (rank 1/37)"
-      - "torpedo 550 mm range 20 km: better than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
-      - "torpedo 550 mm damage_at_max_range 9767 HP: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
-      - "torpedo 550 mm flood_coefficient 2.15x: worse than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
+      - "weakness: all_bear_from_bow 42 deg, higher than 92% of the 39 other tier 10 destroyers (rank 37/40)"
+      - "weakness: all_bear_from_stern 45 deg, higher than 92% of the 39 other tier 10 destroyers (rank 37/40)"
+      - "strength: torpedo_launch_from_bow 6 deg, the lowest of the 37 tier 10 destroyers (rank 1/37)"
+      - "strength: torpedo 550 mm range 20 km, higher than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
+      - "weakness: torpedo 550 mm damage_at_max_range 9767 HP, the lowest of the 43 torpedo options of tier 10 destroyers (rank 43/43)"
+      - "weakness: torpedo 550 mm flood_coefficient 2.15x, lower than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
     torpedoes:
       - torpedo: 550 mm
         values:
@@ -369,6 +418,16 @@ ships:
     signals:
       - "Kites well: within 30 deg of the stern 4 of 6 main battery barrels bear and all bear from 45 deg off the stern."
       - "Its torpedo launchers bear from 6 deg off the bow, so it can launch while nearly bow-on."
+    battle_impact:
+      score: 47.4
+      rank: 27
+      components:
+        firepower: 46.7
+        accuracy: 45
+        reach: 59
+        survivability: 61.4
+        mobility: 59.6
+        spotting: 37.1
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Engine Boost (3 charges, 90 s reload)"
@@ -380,6 +439,7 @@ ships:
       - AL Shimakaze
     values:
       health: "21400 (rank 38/40, p5)"
+      damage_control_reload: "40 (rank 1/40, p0)"
       main_battery_reload: "4.8 (rank 34/40, p15)"
       main_battery_range: "15.83 (rank 30/40, p26)"
       dpm_ap: "177425 (rank 35/35, p0)"
@@ -401,34 +461,36 @@ ships:
       torpedo_reload: "88.42 (rank 23/37, p39) (with unique upgrade Torpedo Quick Reload System)"
       torpedo_launch_from_bow: "56 (rank 26/37, p25)"
       broadside_tubes: "15 (rank 1/37, p97)"
-      aa_damage: "98 (rank 33/40, p18)"
-      aa_range: "2.5 (rank 37/40, p5)"
+      aa_rating: "3988 (rank 32/40, p21)"
+      aa_long_dps: "62 (rank 25/32, p23)"
+      aa_flak: "8517 (rank 30/32, p6)"
       concealment: "5.59 (rank 1/40, p100)"
       air_concealment: "2.74 (rank 6/40, p79)"
+      smoke_lifetime: "97 (rank 5/27, p50)"
       speed: "39 (rank 13/40, p69)"
       rudder_shift: "1.43 (rank 1/40, p100)"
       turning_circle: "690 (rank 16/40, p59)"
     outliers:
-      - "health 21400 HP: worse than 95% of the 39 other tier 10 destroyers (rank 38/40)"
-      - "dpm_ap 177425 HP/min: worse than all 34 other tier 10 destroyers (rank 35/35)"
-      - "turret_traverse 17.23 s: worse than all 39 other tier 10 destroyers (rank 40/40)"
-      - "fires_per_minute 7.5 fires/min: worse than 94% of the 36 other tier 10 destroyers (rank 35/37)"
-      - "torpedo_dpm 217472 HP/min (with unique upgrade Torpedo Quick Reload System): better than all 36 other tier 10 destroyers (rank 1/37)"
-      - "torpedoes_per_minute 10.18 torpedoes/min (with unique upgrade Torpedo Quick Reload System): better than all 36 other tier 10 destroyers (rank 1/37)"
-      - "broadside_tubes 15 tubes: better than 97% of the 36 other tier 10 destroyers (rank 1/37)"
-      - "aa_range 2.5 km: worse than 92% of the 39 other tier 10 destroyers (rank 37/40)"
-      - "concealment 5.59 km: better than all 39 other tier 10 destroyers (rank 1/40)"
-      - "rudder_shift 1.43 s: better than all 39 other tier 10 destroyers (rank 1/40)"
-      - "torpedo Type 93 range 20.01 km: better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
-      - "torpedo Type 93 detectability 2.5 km: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
-      - "torpedo Type 93 reaction_time 13.62 s: worse than all 42 other torpedo options of tier 10 destroyers (rank 43/43)"
-      - "torpedo Type 93 damage_per_minute 186370 HP/min (with unique upgrade Torpedo Quick Reload System): better than 95% of the 42 other torpedo options of tier 10 destroyers (rank 3/43)"
-      - "torpedo Type 93 mod. 3 damage 23767 HP: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
-      - "torpedo Type 93 mod. 3 damage_at_max_range 23767 HP: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
-      - "torpedo Type 93 mod. 3 flood_coefficient 4.06x: better than 93% of the 42 other torpedo options of tier 10 destroyers (rank 1/43)"
-      - "torpedo Type 93 mod. 3 reaction_time 8.57 s: worse than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
-      - "torpedo Type 93 mod. 3 damage_per_minute 207117 HP/min (with unique upgrade Torpedo Quick Reload System): better than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
-      - "torpedo Type F3 damage_per_minute 217472 HP/min (with unique upgrade Torpedo Quick Reload System): better than all 42 other torpedo options of tier 10 destroyers (rank 1/43)"
+      - "weakness: health 21400 HP, lower than 95% of the 39 other tier 10 destroyers (rank 38/40)"
+      - "weakness: dpm_ap 177425 HP/min, the lowest of the 35 tier 10 destroyers (rank 35/35)"
+      - "weakness: turret_traverse 17.23 s, the highest of the 40 tier 10 destroyers (rank 40/40)"
+      - "weakness: fires_per_minute 7.5 fires/min, lower than 94% of the 36 other tier 10 destroyers (rank 35/37)"
+      - "strength: torpedo_dpm 217472 HP/min (with unique upgrade Torpedo Quick Reload System), the highest of the 37 tier 10 destroyers (rank 1/37)"
+      - "strength: torpedoes_per_minute 10.18 torpedoes/min (with unique upgrade Torpedo Quick Reload System), the highest of the 37 tier 10 destroyers (rank 1/37)"
+      - "strength: broadside_tubes 15 tubes, tied for the highest of the 37 tier 10 destroyers (rank 1/37)"
+      - "weakness: aa_flak 8517 hp, lower than 94% of the 31 other tier 10 destroyers (rank 30/32)"
+      - "strength: concealment 5.59 km, the lowest of the 40 tier 10 destroyers (rank 1/40)"
+      - "strength: rudder_shift 1.43 s, the lowest of the 40 tier 10 destroyers (rank 1/40)"
+      - "strength: torpedo Type 93 range 20.01 km, the highest of the 43 torpedo options of tier 10 destroyers (rank 1/43)"
+      - "weakness: torpedo Type 93 detectability 2.5 km, the highest of the 43 torpedo options of tier 10 destroyers (rank 43/43)"
+      - "weakness: torpedo Type 93 reaction_time 13.62 s, the highest of the 43 torpedo options of tier 10 destroyers (rank 43/43)"
+      - "strength: torpedo Type 93 damage_per_minute 186370 HP/min (with unique upgrade Torpedo Quick Reload System), higher than 95% of the 42 other torpedo options of tier 10 destroyers (rank 3/43)"
+      - "strength: torpedo Type 93 mod. 3 damage 23767 HP, tied for the highest of the 43 torpedo options of tier 10 destroyers (rank 1/43)"
+      - "strength: torpedo Type 93 mod. 3 damage_at_max_range 23767 HP, tied for the highest of the 43 torpedo options of tier 10 destroyers (rank 1/43)"
+      - "strength: torpedo Type 93 mod. 3 flood_coefficient 4.06x, tied for the highest of the 43 torpedo options of tier 10 destroyers (rank 1/43)"
+      - "weakness: torpedo Type 93 mod. 3 reaction_time 8.57 s, higher than 90% of the 42 other torpedo options of tier 10 destroyers (rank 39/43)"
+      - "strength: torpedo Type 93 mod. 3 damage_per_minute 207117 HP/min (with unique upgrade Torpedo Quick Reload System), higher than 98% of the 42 other torpedo options of tier 10 destroyers (rank 2/43)"
+      - "strength: torpedo Type F3 damage_per_minute 217472 HP/min (with unique upgrade Torpedo Quick Reload System), the highest of the 43 torpedo options of tier 10 destroyers (rank 1/43)"
     torpedoes:
       - torpedo: Type 93
         values:
@@ -476,6 +538,16 @@ ships:
     signals:
       - "Kites well: within 30 deg of the stern 4 of 6 main battery barrels bear and all bear from 30 deg off the stern."
       - "Its torpedo launchers bear only from 56 deg off the bow, so a launch needs a wide turn toward broadside."
+    battle_impact:
+      score: 54.3
+      rank: 14
+      components:
+        firepower: 53.4
+        accuracy: 42
+        reach: 25.6
+        survivability: 23.2
+        mobility: 75.8
+        spotting: 68
     unique_upgrade: "Torpedo Quick Reload System (unique upgrade), taken for: torpedo_reload, torpedo_dpm, torpedoes_per_minute"
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
@@ -488,6 +560,8 @@ ships:
     values:
       health: "22700 (rank 32/40, p15)"
       repair_party_heal: "14 (rank 7/16, p20)"
+      repair_party_total_heal: "9534 (rank 9/16, p40)"
+      damage_control_reload: "40 (rank 1/40, p0)"
       main_battery_reload: "1.42 (rank 2/40, p95)"
       main_battery_range: "15.94 (rank 28/40, p31)"
       dpm_ap: "381227 (rank 6/35, p85)"
@@ -509,22 +583,28 @@ ships:
       torpedo_reload: "76.5 (rank 13/37, p56)"
       torpedo_launch_from_bow: "63 (rank 35/37, p6)"
       broadside_tubes: "8 (rank 20/37, p36)"
-      aa_damage: "347 (rank 5/40, p85)"
-      aa_range: "4 (rank 1/40, p69)"
+      aa_rating: "13066 (rank 2/40, p95)"
+      aa_long_dps: "182 (rank 3/32, p90)"
+      aa_flak: "19996 (rank 3/32, p90)"
       concealment: "6.15 (rank 16/40, p62)"
       air_concealment: "2.81 (rank 11/40, p74)"
+      radar_range: "7.5 (rank 2/4, p0)"
+      radar_duration: "20 (rank 3/4, p33)"
       speed: "35 (rank 27/40, p18)"
       rudder_shift: "2.06 (rank 9/40, p72)"
       turning_circle: "660 (rank 9/40, p74)"
     outliers:
-      - "main_battery_reload 1.42 s: better than 95% of the 39 other tier 10 destroyers (rank 2/40)"
-      - "dpm_he 295525 HP/min: better than 94% of the 36 other tier 10 destroyers (rank 3/37)"
-      - "alpha_ap 9030 HP: worse than 91% of the 34 other tier 10 destroyers (rank 32/35)"
-      - "fires_per_minute 15.2 fires/min: better than 92% of the 36 other tier 10 destroyers (rank 4/37)"
-      - "torpedo_launch_from_bow 63 deg: worse than 94% of the 36 other tier 10 destroyers (rank 35/37)"
-      - "torpedo Torped M1943 mod 1 damage 10700 HP: worse than 95% of the 42 other torpedo options of tier 10 destroyers (rank 41/43)"
-      - "torpedo Torped M1943 mod 1 damage_at_max_range 10700 HP: worse than 93% of the 42 other torpedo options of tier 10 destroyers (rank 40/43)"
-      - "torpedo Torped M1943 mod 1 flood_coefficient 1.73x: worse than 95% of the 42 other torpedo options of tier 10 destroyers (rank 41/43)"
+      - "strength: main_battery_reload 1.42 s, lower than 95% of the 39 other tier 10 destroyers (rank 2/40)"
+      - "strength: dpm_he 295525 HP/min, higher than 94% of the 36 other tier 10 destroyers (rank 3/37)"
+      - "weakness: alpha_ap 9030 HP, tied for the lowest of the 35 tier 10 destroyers (rank 32/35)"
+      - "strength: fires_per_minute 15.2 fires/min, higher than 92% of the 36 other tier 10 destroyers (rank 4/37)"
+      - "weakness: torpedo_launch_from_bow 63 deg, higher than 94% of the 36 other tier 10 destroyers (rank 35/37)"
+      - "strength: aa_rating 13066 hp, higher than 95% of the 39 other tier 10 destroyers (rank 2/40)"
+      - "strength: aa_long_dps 182 HP/s, higher than 90% of the 31 other tier 10 destroyers (rank 3/32)"
+      - "strength: aa_flak 19996 hp, higher than 90% of the 31 other tier 10 destroyers (rank 3/32)"
+      - "weakness: torpedo Torped M1943 mod 1 damage 10700 HP, tied for the lowest of the 43 torpedo options of tier 10 destroyers (rank 41/43)"
+      - "weakness: torpedo Torped M1943 mod 1 damage_at_max_range 10700 HP, lower than 93% of the 42 other torpedo options of tier 10 destroyers (rank 40/43)"
+      - "weakness: torpedo Torped M1943 mod 1 flood_coefficient 1.73x, tied for the lowest of the 43 torpedo options of tier 10 destroyers (rank 41/43)"
     torpedoes:
       - torpedo: Torped M1943 mod 1
         values:
@@ -542,6 +622,16 @@ ships:
     signals:
       - "Kites well: within 30 deg of the stern 4 of 4 main battery barrels bear and all bear from 28 deg off the stern."
       - "Its torpedo launchers bear only from 63 deg off the bow, so a launch needs a wide turn toward broadside."
+    battle_impact:
+      score: 53.6
+      rank: 17
+      components:
+        firepower: 56.6
+        accuracy: 39.6
+        reach: 30.8
+        survivability: 45.2
+        mobility: 56
+        spotting: 59.1
     consumables:
       - "Damage Control Party (unlimited charges, 40 s reload)"
       - "Engine Boost (4 charges, 100 s reload)"
@@ -551,7 +641,7 @@ head_to_head:
   - ships:
       - Châteaurenault
       - Shimakaze
-    compared: 29
+    compared: 31
     first_better:
       - health
       - main_battery_reload
@@ -564,8 +654,9 @@ head_to_head:
       - fires_per_minute
       - torpedo_reload
       - torpedo_launch_from_bow
-      - aa_damage
-      - aa_range
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
       - speed
     second_better:
       - dpm_he
@@ -580,23 +671,24 @@ head_to_head:
       - rudder_shift
       - turning_circle
     tied:
+      - damage_control_reload
       - dispersion
       - sigma
       - bow_barrels
       - stern_barrels
     first_largest_leads:
       - torpedo_launch_from_bow 6 vs 56 deg (89% apart)
-      - aa_damage 238 vs 98 HP/s (59% apart)
       - turret_traverse 7.56 vs 17.23 s (56% apart)
+      - dpm_ap 322640 vs 177425 HP/min (45% apart)
     second_largest_leads:
       - broadside_tubes 15 vs 6 tubes (60% apart)
       - torpedo_dpm 217472 vs 91922 HP/min (58% apart)
       - torpedoes_per_minute 10.18 vs 4.71 torpedoes/min (54% apart)
-    verdict: "Mixed: Châteaurenault is better on 14 of 29 compared factors, Shimakaze on 11, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Châteaurenault is better on 15 of 31 compared factors, Shimakaze on 11, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Châteaurenault
       - Småland
-    compared: 29
+    compared: 31
     first_better:
       - health
       - main_battery_range
@@ -619,12 +711,14 @@ head_to_head:
       - all_bear_from_stern
       - torpedoes_per_minute
       - broadside_tubes
-      - aa_damage
-      - aa_range
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
       - concealment
       - air_concealment
       - turning_circle
     tied:
+      - damage_control_reload
       - dispersion
       - sigma
       - torpedo_reload
@@ -634,14 +728,14 @@ head_to_head:
       - alpha_ap 14835 vs 9030 HP (39% apart)
       - torpedo_dpm 91922 vs 67137 HP/min (27% apart)
     second_largest_leads:
+      - aa_long_dps 182 vs 85 HP/s (53% apart)
+      - aa_rating 13066 vs 6393 hp (51% apart)
       - main_battery_reload 1.42 vs 2.76 s (49% apart)
-      - fires_per_minute 15.2 vs 7.83 fires/min (48% apart)
-      - dpm_he 295525 vs 156590 HP/min (47% apart)
-    verdict: "Mixed: Châteaurenault is better on 9 of 29 compared factors, Småland on 16, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Châteaurenault is better on 9 of 31 compared factors, Småland on 17, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Shimakaze
       - Småland
-    compared: 29
+    compared: 31
     first_better:
       - alpha_ap
       - alpha_he
@@ -668,10 +762,12 @@ head_to_head:
       - all_bear_from_bow
       - all_bear_from_stern
       - torpedo_reload
-      - aa_damage
-      - aa_range
+      - aa_rating
+      - aa_long_dps
+      - aa_flak
       - turning_circle
     tied:
+      - damage_control_reload
       - dispersion
       - sigma
     first_largest_leads:
@@ -679,14 +775,14 @@ head_to_head:
       - broadside_tubes 15 vs 8 tubes (47% apart)
       - alpha_he 12900 vs 7000 HP (46% apart)
     second_largest_leads:
-      - aa_damage 347 vs 98 HP/s (72% apart)
       - main_battery_reload 1.42 vs 4.8 s (70% apart)
+      - aa_rating 13066 vs 3988 hp (69% apart)
       - turret_traverse 5.44 vs 17.23 s (68% apart)
-    verdict: "Mixed: Shimakaze is better on 12 of 29 compared factors, Småland on 15, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Shimakaze is better on 12 of 31 compared factors, Småland on 16, 3 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
-  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables, repair_party_heal, anti-aircraft and torpedo flood_coefficient are stock."
+  - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
-  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others."
-  - "bb_ap_*, *_overmatch and matchups apply to cruisers and battleships only, and bb_ap_* and *_overmatch rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
+  - "outliers: values better or worse than at least 90% of the others, only where there are at least 4 others, each led by strength or weakness for the ship. Matchup outliers are from the ship's side as the target: a citadel hit is heavy damage taken, a penetration regular damage taken, an overpenetration little damage taken."
+  - "bb_ap_*, cruiser_he_damaging, *_overmatch and matchups apply to cruisers and battleships only, and these factors rank among ships of the same tier: they are measured against the ships of each tier's matchmaking. Destroyers have no citadel: no armor judgment is made for them. Nominal plate thickness is not a factor: protection depends on every plate in front of the citadel."
   - "Torpedo reaction_time = detectability / speed, with speed in knots x 2.69 m/s per knot (the client's BW_KNOTS_TO_MPS times 30 m per BigWorld unit)."
-  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. No composite score is given: the factors trade against each other by play style."
+  - "Damage rates assume every shell or torpedo hits; dispersion, sigma, range, flight time and concealment decide how much of it lands. battle_impact is a weighted judgment from these factors, not win-rate data; its formula and weights are given by the battle_impact tool."
