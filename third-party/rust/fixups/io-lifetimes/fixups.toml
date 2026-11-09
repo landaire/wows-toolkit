@@ -1,0 +1,2 @@
+# Emits platform capability cfg values.
+buildscript.run = true

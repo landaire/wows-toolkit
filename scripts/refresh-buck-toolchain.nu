@@ -27,6 +27,7 @@ let required = [
     "python3"
     "ranlib"
     "rustc"
+    "pkg-config"
     "rustdoc"
     "rustfmt"
     "strip"
@@ -55,6 +56,7 @@ for tool in $required {
     $"cc = ($toolchain_root)/bin/clang"
     $"cxx = ($toolchain_root)/bin/clang++"
     $"nasm = ($toolchain_root)/bin/nasm"
+    $"pkg_config = ($toolchain_root)/bin/pkg-config"
     $"python = ($toolchain_root)/bin/python3"
     # The prelude has no rustfmt support, so toolchains//:rustfmt carries it
     # and scripts/lint.nu runs the path bxl/lint.bxl reports.

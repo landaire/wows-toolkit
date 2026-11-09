@@ -125,10 +125,10 @@ def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDIT
     )
     return run_name
 
-def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], incoming_transition = None, target_compatible_with = []):
-    env = _cargo_env(crate, package, version)
+def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], incoming_transition = None, target_compatible_with = [], env = {}):
+    cargo_env = _cargo_env(crate, package, version) | env
     if buildscript != None:
-        env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
+        cargo_env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
 
     kwargs = {}
@@ -147,7 +147,7 @@ def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION,
         crate = crate,
         crate_root = "src/lib.rs",
         edition = edition,
-        env = env,
+        env = cargo_env,
         features = features,
         rustc_flags = rustc_flags,
         resources = resources,

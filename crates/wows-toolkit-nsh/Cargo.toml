@@ -1,7 +1,3 @@
-# Standalone workspace (excluded from the root): needs GTK 4 dev files and
-# only builds on Linux, so root `cargo build/check/clippy` never sees it.
-[workspace]
-
 [package]
 name = "wows-toolkit-nsh"
 version = "0.0.0"
@@ -30,11 +26,3 @@ nsh-platform-linux = { version = "0.4.0", default-features = false }
 [dev-dependencies]
 nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = "0.4.0"
-
-# The root workspace's profiles, which the earlier measurements used.
-[profile.release]
-opt-level = 3
-lto = "thin"
-
-[profile.dev.package."*"]
-opt-level = 2

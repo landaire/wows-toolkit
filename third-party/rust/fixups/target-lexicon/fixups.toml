@@ -1,0 +1,2 @@
+# Generates the host target constants used by system-deps.
+buildscript.run = true

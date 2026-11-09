@@ -79,6 +79,8 @@
             # libdbus-sys) pkg-config-probes dbus-1 at build. Buck vendors
             # libdbus's C sources; the cargo/crane path needs the dev package.
             pkgs.dbus
+            # nsh's Linux backend links GTK 4 and its platform libraries.
+            pkgs.gtk4
           ];
       };
 
@@ -102,6 +104,18 @@
     in
       with pkgs; {
         packages = let
+          gtkToolchainLibraries = map lib.getLib [
+            cairo
+            gdk-pixbuf
+            glib
+            graphene
+            gtk4
+            harfbuzz
+            pango
+            vulkan-loader
+          ];
+          gtkToolchainInputs = lib.closePropagation (gtkToolchainLibraries ++ [gtk4.dev]);
+
           # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan) plus
           # libdbus for the keyring Secret Service backend.
           guiRuntimeLibs = lib.optionals stdenv.hostPlatform.isLinux [
@@ -167,6 +181,7 @@
               coreutils
               libiconv
               python3
+              pkg-config-unwrapped
               # Unpacking the downloaded crate archives. GNU tar spawns its
               # decompressor as a separate process, so each one is needed too.
               gnutar
@@ -178,7 +193,7 @@
               # wt-web's site: wasm-bindgen and wasm-opt.
               wasmBindgenCli
               binaryen
-            ];
+            ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux gtkToolchainInputs;
             # The wrapper's hardening flags (e.g. -fzero-call-used-regs) are
             # invalid for wasm32, so C compiled for wt-web uses the unwrapped
             # clang. The target prefix in the name selects wasm32 by default.
@@ -258,6 +273,7 @@
               libxkbcommon
               libGL
               fontconfig
+              gtk4
 
               # keyring Secret Service backend (wgc-auth): dbus-1.pc + libdbus
               dbus

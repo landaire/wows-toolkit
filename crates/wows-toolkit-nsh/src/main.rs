@@ -39,8 +39,6 @@ fn main() -> impl std::process::Termination {
             app_id: APP_ID.to_owned(),
             size: (1400, 1000),
             fps: std::env::var_os("WTN_FPS").is_some(),
-            // The app paints a dark background; dark theme tokens keep text legible.
-            appearance: platform::Appearance::Dark,
             components,
             ..Default::default()
         },

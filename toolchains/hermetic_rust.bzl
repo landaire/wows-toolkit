@@ -96,6 +96,12 @@ def native_buildscript_env():
     if fxc != None:
         env["GPUI_FXC_PATH"] = fxc
 
+    pkg_config = read_root_config("hermetic_tools", "pkg_config")
+    if pkg_config != None:
+        root = _toolchain_root()
+        env["PKG_CONFIG"] = pkg_config
+        env["PKG_CONFIG_PATH"] = root + "/lib/pkgconfig:" + root + "/share/pkgconfig"
+
     # MSVC needs its header and library search paths passed explicitly; the Nix
     # toolchains encode theirs in the compiler wrapper.
     for var, key in [("INCLUDE", "include"), ("LIB", "lib")]:

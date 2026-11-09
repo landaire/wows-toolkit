@@ -88,7 +88,7 @@ The inventory puts this framework-neutral code inside the GPUI crate at about 15
 
 ## Spike results
 
-`crates/wows-toolkit-nsh` is excluded from the root workspace and has its own lock file, because it needs GTK 4 development files and builds only on Linux. It is a pure-Rust binary on nsh 0.4.0. `cargo tree -i rquickjs` finds no QuickJS. It has three tabs.
+`crates/wows-toolkit-nsh` is a Linux-only pure-Rust binary on nsh 0.4.0. Run it with `buck2 run //:wows_toolkit_nsh`. The Buck toolchain supplies GTK 4 and its development metadata. The app follows the system appearance and draws its shell with nsh's default theme tokens. `cargo tree -i rquickjs` finds no QuickJS. It has three tabs.
 
 - **Replays:**
   - An nsh-base `data_table` over the headers of the 29 fixture replays, repeated to 5,000 rows.

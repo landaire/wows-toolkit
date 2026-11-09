@@ -1,0 +1,2 @@
+# Emits compiler capability cfg values used by its build-time API.
+buildscript.run = true

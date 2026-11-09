@@ -1,0 +1,4 @@
+# Links Pangocairo through the GTK toolchain's pkg-config metadata.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true

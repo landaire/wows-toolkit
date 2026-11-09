@@ -1,0 +1,55 @@
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_integration_tests", "workspace_library")
+
+export_file(
+    name = "_cargo_manifest",
+    src = "Cargo.toml",
+    mode = "reference",
+    visibility = [],
+)
+
+NSH_DEPS = [
+    "//crates/wows-replays:wows_replays",
+    "//third-party/rust:base64",
+    "//third-party/rust:env_logger",
+    "//third-party/rust:log",
+    "//third-party/rust:nsh-base",
+    "//third-party/rust:nsh-core",
+    "//third-party/rust:png",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tiny-skia",
+    "//third-party/rust:tokio",
+] + os_select(
+    macos = [],
+    linux = ["//third-party/rust:nsh-platform-linux"],
+    windows = [],
+)
+
+workspace_library(
+    name = "wows_toolkit_nsh",
+    crate = "wows_toolkit_nsh",
+    package = "wows-toolkit-nsh",
+    version = "0.0.0",
+    env = {"CARGO_MANIFEST_DIR": "$(location :_cargo_manifest)/.."},
+    deps = NSH_DEPS,
+)
+
+workspace_binary(
+    name = "nsh_bin",
+    crate = "wows_toolkit_nsh",
+    package = "wows-toolkit-nsh",
+    version = "0.0.0",
+    crate_root = "src/main.rs",
+    deps = NSH_DEPS + [":wows_toolkit_nsh"],
+)
+
+workspace_integration_tests(
+    package = "wows-toolkit-nsh",
+    version = "0.0.0",
+    library = ":wows_toolkit_nsh",
+    deps = NSH_DEPS,
+    test_deps = [
+        "//third-party/rust:nsh-engine",
+        "//third-party/rust:nsh-testing",
+    ],
+)

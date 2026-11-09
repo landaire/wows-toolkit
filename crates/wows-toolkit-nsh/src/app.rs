@@ -53,7 +53,7 @@ pub fn App() -> impl IntoElement {
 
     view()
         .flex_1()
-        .bg(rgb(0x101820))
+        .app_class("bg-background text-foreground")
         .child(view().flex_row().gap(px(8.0)).p(px(8.0)).children(
             Tab::ALL.map(|choice| ui::button(choice.label(), move || tab.get() == choice, move || tab.set(choice))),
         ))

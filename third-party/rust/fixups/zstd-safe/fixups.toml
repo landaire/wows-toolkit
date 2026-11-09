@@ -1,0 +1,2 @@
+# Propagates the selected zstd-sys configuration.
+buildscript.run = true

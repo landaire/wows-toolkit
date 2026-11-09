@@ -1,0 +1,4 @@
+# Compiles the bundled Zstandard sources and propagates their native link data.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true
