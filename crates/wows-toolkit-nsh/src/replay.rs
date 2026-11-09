@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use nsh_base::{
     DataTable, DataTableApi, DataTableClasses, DataTableColumn, DataTableRows, DataTableSelection, DataTableSort,
-    DataTableSortDirection, data_table,
+    DataTableSortDirection, data_table, tab, tabs,
 };
 use nsh_core::AccessibilityState;
 use nsh_core::file_dialog::{FileFilter, OpenDialog, SaveDialog};
@@ -33,6 +33,7 @@ struct ReplayDocument {
     player_ship: String,
     client_version: String,
     client_version_key: Option<ClientVersionKey>,
+    raw_metadata: SharedString,
     duration_seconds: u32,
     players_per_team: u32,
     teams_count: u32,
@@ -122,6 +123,7 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
     let picking = signal(false);
     let exporting = signal(false);
     let compact = signal(false);
+    let show_raw_metadata = signal(false);
 
     view()
         .app_class(|| Some("flex-1 min-h-0 p-3 gap-3".into()))
@@ -297,7 +299,7 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                     scroll()
                         .app_class(|| Some("flex-1 min-h-0".into()))
                         .child(empty_view(document, error))
-                        .child(replay_view(document, compact)),
+                        .child(replay_view(document, compact, show_raw_metadata)),
                 ),
         )
 }
@@ -588,7 +590,11 @@ fn empty_view(document: Signal<Option<Arc<ReplayDocument>>>, error: Signal<Optio
         .into_element()
 }
 
-fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>, compact: Signal<bool>) -> AnyElement {
+fn replay_view(
+    document: Signal<Option<Arc<ReplayDocument>>>,
+    compact: Signal<bool>,
+    show_raw_metadata: Signal<bool>,
+) -> AnyElement {
     let players = each(
         move || document.with(|value| value.as_ref().map_or_else(Vec::new, |value| value.players.clone())),
         |player| player.name.clone(),
@@ -638,8 +644,25 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>, compact: Signal<bo
                 ),
         )
         .child(
+            tabs()
+                .app_class(|| Some("flex-row items-center gap-1".into()))
+                .child(replay_detail_tab("Overview", false, show_raw_metadata))
+                .child(replay_detail_tab("Raw metadata", true, show_raw_metadata)),
+        )
+        .child(
             view()
-                .app_class(move || Some(if compact.get() { "gap-3" } else { "flex-1 min-h-0 flex-row gap-3" }.into()))
+                .app_class(move || {
+                    Some(
+                        if show_raw_metadata.get() {
+                            "hidden"
+                        } else if compact.get() {
+                            "gap-3"
+                        } else {
+                            "flex-1 min-h-0 flex-row gap-3"
+                        }
+                        .into(),
+                    )
+                })
                 .child(
                     view()
                         .app_class(move || {
@@ -747,7 +770,47 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>, compact: Signal<bo
                         .child(scroll().app_class(|| Some("flex-1 min-h-0".into())).child(players)),
                 ),
         )
+        .child(
+            scroll()
+                .app_class(move || {
+                    Some(
+                        if show_raw_metadata.get() {
+                            "flex-1 min-h-56 rounded-(--radius) border border-border bg-card"
+                        } else {
+                            "hidden"
+                        }
+                        .into(),
+                    )
+                })
+                .child(
+                    text(move || {
+                        document.with(|value| {
+                            value.as_ref().map_or_else(SharedString::default, |value| value.raw_metadata.clone())
+                        })
+                    })
+                    .font_family("monospace")
+                    .app_class(|| Some("p-3 text-xs text-card-foreground".into())),
+                ),
+        )
         .into_element()
+}
+
+fn replay_detail_tab(label: &'static str, raw: bool, show_raw_metadata: Signal<bool>) -> impl IntoElement {
+    tab()
+        .selected(move || show_raw_metadata.get() == raw)
+        .app_class(move || {
+            Some(
+                if show_raw_metadata.get() == raw {
+                    "min-h-7 px-3 rounded-(--radius) bg-primary text-xs text-primary-foreground active:opacity-70"
+                } else {
+                    "min-h-7 px-3 rounded-(--radius) bg-secondary text-xs text-secondary-foreground hover:bg-muted \
+                     active:opacity-70"
+                }
+                .into(),
+            )
+        })
+        .on_press(move |_: &()| show_raw_metadata.set(raw))
+        .child(text(label))
 }
 
 fn metadata_row(label: &'static str, value: impl Fn() -> String + 'static) -> impl IntoElement {
@@ -852,6 +915,7 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
         .into_owned();
     let replay = ReplayFile::meta_only_from_file(path)
         .map_err(|error| format!("could not parse replay {}: {error}", path.display()))?;
+    let raw_metadata = SharedString::from(replay.raw_meta);
     let meta = replay.meta;
     let game_mode =
         meta.gameType.clone().or_else(|| meta.matchGroup.clone()).unwrap_or_else(|| format!("Mode {}", meta.gameMode));
@@ -876,6 +940,7 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
         player_ship: meta.playerVehicle,
         client_version: meta.clientVersionFromXml,
         client_version_key,
+        raw_metadata,
         duration_seconds: meta.duration,
         players_per_team: meta.playersPerTeam,
         teams_count: meta.teamsCount,

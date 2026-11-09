@@ -61,6 +61,10 @@ fn replay_inspector_opens_and_displays_metadata() {
     app.press("Replay Inspector").unwrap();
     app.wait_for(FILE).unwrap();
     app.wait_for("Players (15)").unwrap();
+    app.press("Raw metadata").unwrap();
+    app.wait_for("text:/clientVersionFromXml/").unwrap();
+    app.press("Overview").unwrap();
+    app.wait_for("Battle").unwrap();
 
     let export_directory = TestDirectory::new("replay-export");
     let collision_selection = export_directory.0.join("narai");
