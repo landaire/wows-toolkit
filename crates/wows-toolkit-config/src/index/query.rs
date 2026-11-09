@@ -1039,6 +1039,88 @@ pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result
         })
         .collect()
 }
+/// A bounded, filtered page of players met in indexed battles.
+///
+/// Perspective accounts are excluded in SQL so a limit cannot remove valid
+/// rows after the query returns.
+pub async fn distinct_players_page(
+    pool: &SqlitePool,
+    filter: &MatchFilter,
+    needle: &str,
+    limit: std::num::NonZeroU32,
+) -> Result<super::rows::PlayerFacetPage, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "WITH player_facets AS (\
+         SELECT v.account_id, \
+                (SELECT v2.player_name FROM indexed_vehicle v2 JOIN indexed_match m2 ON m2.arena_id = v2.arena_id \
+                   WHERE v2.account_id = v.account_id ORDER BY m2.timestamp DESC LIMIT 1) AS latest_name, \
+                (SELECT v3.clan FROM indexed_vehicle v3 JOIN indexed_match m3 ON m3.arena_id = v3.arena_id \
+                   WHERE v3.account_id = v.account_id ORDER BY m3.timestamp DESC LIMIT 1) AS clan, \
+                COUNT(DISTINCT v.arena_id) AS match_count \
+         FROM indexed_vehicle v WHERE v.account_id <> 0",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
+        let mut sep = qb.separated(", ");
+        for source in sources {
+            sep.push_bind(source.0);
+        }
+        qb.push("))");
+    }
+    if filter.date_from.is_some() || filter.date_to.is_some() {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM indexed_match WHERE 1=1");
+        if let Some(from) = filter.date_from {
+            qb.push(" AND timestamp >= ").push_bind(from.as_second());
+        }
+        if let Some(to) = filter.date_to {
+            qb.push(" AND timestamp <= ").push_bind(to.as_second());
+        }
+        qb.push(")");
+    }
+    qb.push(
+        " AND v.account_id NOT IN (\
+         SELECT self_account_id FROM replay_record r WHERE self_account_id IS NOT NULL",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND r.source_id IN (");
+        let mut sep = qb.separated(", ");
+        for source in sources {
+            sep.push_bind(source.0);
+        }
+        qb.push(")");
+    }
+    qb.push(
+        ") GROUP BY v.account_id) \
+         SELECT account_id, latest_name, clan, match_count, COUNT(*) OVER() AS total_count \
+         FROM player_facets",
+    );
+    let needle = needle.trim();
+    if !needle.is_empty() {
+        qb.push(" WHERE INSTR(LOWER(COALESCE(latest_name, '')), LOWER(")
+            .push_bind(needle.to_owned())
+            .push(")) > 0 OR INSTR(LOWER(COALESCE(clan, '')), LOWER(")
+            .push_bind(needle.to_owned())
+            .push(")) > 0 OR INSTR(CAST(account_id AS TEXT), ")
+            .push_bind(needle.to_owned())
+            .push(") > 0");
+    }
+    qb.push(" ORDER BY match_count DESC, latest_name, account_id LIMIT ").push_bind(i64::from(limit.get()));
+
+    let rows = qb.build().fetch_all(pool).await?;
+    let total_count = rows.first().map(|row| row.try_get("total_count")).transpose()?.unwrap_or(0);
+    let players = rows
+        .iter()
+        .map(|row| {
+            Ok(PlayerFacet {
+                account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+                latest_name: row.try_get::<Option<String>, _>("latest_name")?.unwrap_or_default(),
+                clan: row.try_get::<Option<String>, _>("clan")?.unwrap_or_default(),
+                match_count: row.try_get("match_count")?,
+            })
+        })
+        .collect::<Result<Vec<_>, IndexError>>()?;
+    Ok(super::rows::PlayerFacetPage { players, total_count })
+}
 
 /// The accounts among `names` the index has ever seen, keyed by the name
 /// matched, lower-cased.

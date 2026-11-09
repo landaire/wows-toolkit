@@ -23,6 +23,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:base64",
     "//third-party/rust:env_logger",
     "//third-party/rust:log",
+    "//third-party/rust:jiff",
     "//third-party/rust:nsh-base",
     "//third-party/rust:nsh-core",
     "//third-party/rust:png",

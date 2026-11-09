@@ -291,6 +291,82 @@ fn statistics_aggregate_the_shared_session_database() {
 }
 
 #[test]
+fn player_tracker_reads_and_filters_indexed_players() {
+    let mut app = app();
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            use wows_core::game_types::{AccountId, ArenaId, GameParamId};
+            use wows_toolkit_config::index::rows::{IndexedVehicleRow, ObjectiveMatch, VehicleRelation};
+
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            sqlx::query("DELETE FROM replay_record").execute(&pool).await.expect("old replay records are cleared");
+            sqlx::query("DELETE FROM indexed_vehicle").execute(&pool).await.expect("old indexed players are cleared");
+            sqlx::query("DELETE FROM indexed_match").execute(&pool).await.expect("old indexed matches are cleared");
+            let arena_id = ArenaId::new(982_001);
+            wows_toolkit_config::index::query::upsert_match(
+                &pool,
+                &ObjectiveMatch {
+                    arena_id,
+                    timestamp: jiff::Timestamp::now(),
+                    map: "Ocean".into(),
+                    game_mode: "Domination".into(),
+                    game_mode_id: None,
+                    game_type: "pvp".into(),
+                    match_group: "pvp".into(),
+                    version_build: Some(1234),
+                },
+            )
+            .await
+            .expect("the indexed match is written");
+            let player = |account_id: i64, name: &str, clan: &str| IndexedVehicleRow {
+                arena_id,
+                account_id: AccountId(account_id),
+                player_name: name.into(),
+                clan: clan.into(),
+                realm: Some("na".into()),
+                ship_id: GameParamId::from(900u64 + account_id as u64),
+                ship_index: "PJSD018".into(),
+                ship_name: "Harugumo".into(),
+                nation: "japan".into(),
+                species: "Destroyer".into(),
+                tier: 10,
+                relation: VehicleRelation::Enemy,
+                division_id: None,
+                survived: Some(true),
+                damage: Some(50_000),
+                kills: Some(1),
+                spotting: Some(10_000),
+                potential: Some(500_000),
+                received: Some(5_000),
+                pr: Some(1500.0),
+                is_test_ship: false,
+                disconnected: Some(false),
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
+            };
+            wows_toolkit_config::index::query::upsert_vehicles(
+                &pool,
+                &[player(99_001, "TrackedCaptain", "TEST"), player(99_002, "OtherOpponent", "NAVY")],
+            )
+            .await
+            .expect("the indexed players are written");
+        },
+    );
+
+    app.press("Player Tracker").unwrap();
+    app.wait_for("TrackedCaptain").unwrap();
+    app.wait_for("OtherOpponent").unwrap();
+    app.wait_for("Showing 2 of 2 players").unwrap();
+    app.type_text("label:Filter tracked players", "Other").unwrap();
+    app.wait_for_gone("TrackedCaptain", std::time::Duration::from_secs(5)).unwrap();
+    app.wait_for("OtherOpponent").unwrap();
+    app.wait_for("Showing 1 of 1 players").unwrap();
+    app.clear("label:Filter tracked players").unwrap();
+    app.type_text("label:Filter tracked players", "%").unwrap();
+    app.wait_for("No matching players").unwrap();
+}
+
+#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 

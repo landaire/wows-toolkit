@@ -332,6 +332,12 @@ pub struct PlayerFacet {
     pub clan: String,
     pub match_count: i64,
 }
+/// One bounded page of player facets and its full filtered size.
+#[derive(Debug, Clone)]
+pub struct PlayerFacetPage {
+    pub players: Vec<PlayerFacet>,
+    pub total_count: i64,
+}
 
 /// A distinct ship the user has played (for palette/Search facets).
 #[derive(Debug, Clone)]

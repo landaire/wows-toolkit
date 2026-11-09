@@ -13,6 +13,7 @@ buck = []
 base64 = "0.22"
 env_logger = "0.11"
 log = "0.4"
+jiff = { workspace = true }
 nsh-base = "0.4.0"
 nsh-core = "0.4.0"
 nsh-bundler = "0.4.0"
