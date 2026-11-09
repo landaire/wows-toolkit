@@ -2,6 +2,10 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use nsh_base::{
+    DataTable, DataTableApi, DataTableClasses, DataTableColumn, DataTableRows, DataTableSelection, DataTableSort,
+    DataTableSortDirection, data_table,
+};
 use nsh_core::AccessibilityState;
 use nsh_core::file_dialog::{FileFilter, OpenDialog, SaveDialog};
 use nsh_core::prelude::*;
@@ -20,6 +24,7 @@ struct ReplayDocument {
     path: PathBuf,
     file_name: String,
     date: String,
+    date_iso: Option<String>,
     map_name: String,
     map_key: String,
     game_mode: String,
@@ -27,6 +32,7 @@ struct ReplayDocument {
     player_name: String,
     player_ship: String,
     client_version: String,
+    client_version_key: Option<ClientVersionKey>,
     duration_seconds: u32,
     players_per_team: u32,
     teams_count: u32,
@@ -40,6 +46,70 @@ struct ReplayDirectory {
     failed: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ClientVersionKey(Vec<u32>);
+
+#[derive(Clone, PartialEq)]
+struct ReplayOrder(Arc<Vec<Arc<ReplayDocument>>>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayColumn {
+    File,
+    Date,
+    Ship,
+    Map,
+    Mode,
+    Player,
+    Version,
+}
+
+impl ReplayColumn {
+    const ALL: [ReplayColumn; 7] = [
+        ReplayColumn::File,
+        ReplayColumn::Date,
+        ReplayColumn::Ship,
+        ReplayColumn::Map,
+        ReplayColumn::Mode,
+        ReplayColumn::Player,
+        ReplayColumn::Version,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            ReplayColumn::File => "file",
+            ReplayColumn::Date => "date",
+            ReplayColumn::Ship => "ship",
+            ReplayColumn::Map => "map",
+            ReplayColumn::Mode => "mode",
+            ReplayColumn::Player => "player",
+            ReplayColumn::Version => "version",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            ReplayColumn::File => "Replay",
+            ReplayColumn::Date => "Date",
+            ReplayColumn::Ship => "Ship",
+            ReplayColumn::Map => "Map",
+            ReplayColumn::Mode => "Mode",
+            ReplayColumn::Player => "Player",
+            ReplayColumn::Version => "Version",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplaySortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReplaySort {
+    column: ReplayColumn,
+    direction: ReplaySortDirection,
+}
+
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ReplayInspectorProps {}
 
@@ -51,6 +121,7 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
     let status = signal(None::<String>);
     let picking = signal(false);
     let exporting = signal(false);
+    let compact = signal(false);
 
     view()
         .app_class(|| Some("flex-1 min-h-0 p-3 gap-3".into()))
@@ -163,7 +234,10 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
                             status.set(None);
                             spawn(async move {
                                 match open_replay().await {
-                                    Ok(Some(replay)) => document.set(Some(Arc::new(replay))),
+                                    Ok(Some(replay)) => {
+                                        directory.set(None);
+                                        document.set(Some(Arc::new(replay)));
+                                    }
                                     Ok(None) => {}
                                     Err(message) => error.set(Some(message)),
                                 }
@@ -207,13 +281,23 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
         )
         .child(
             view()
-                .app_class(|| Some("flex-1 min-h-0 flex-row gap-3".into()))
-                .child(directory_browser(directory, document))
+                .on_layout(move |bounds: &Bounds<Points>| compact.set(bounds.size.width.0 < 1280.0))
+                .app_class(move || {
+                    Some(
+                        if compact.get() {
+                            "flex-1 min-h-0 gap-3"
+                        } else {
+                            "flex-1 min-h-0 flex-row gap-3"
+                        }
+                        .into(),
+                    )
+                })
+                .child(directory_browser(directory, document, compact))
                 .child(
-                    view()
+                    scroll()
                         .app_class(|| Some("flex-1 min-h-0".into()))
                         .child(empty_view(document, error))
-                        .child(replay_view(document)),
+                        .child(replay_view(document, compact)),
                 ),
         )
 }
@@ -221,70 +305,98 @@ pub fn ReplayInspector(_: ReplayInspectorProps) -> impl IntoElement {
 fn directory_browser(
     directory: Signal<Option<Arc<ReplayDirectory>>>,
     document: Signal<Option<Arc<ReplayDocument>>>,
+    compact: Signal<bool>,
 ) -> AnyElement {
-    let rows = each(
-        move || directory.with(|value| value.as_ref().map_or_else(Vec::new, |value| value.documents.clone())),
-        |replay| replay.path.clone(),
-        move |replay, _| {
-            view()
-                .accessible(true)
-                .role(AccessibilityRole::Button)
-                .accessibility_state(move || AccessibilityState {
-                    selected: replay.with(|replay| {
-                        document.with(|current| {
-                            current.as_ref().is_some_and(|current| current.path == replay.path)
-                        })
-                    }),
-                    ..AccessibilityState::default()
-                })
-                .app_class(move || {
-                    Some(
-                        if replay.with(|replay| {
-                            document.with(|current| {
-                                current.as_ref().is_some_and(|current| current.path == replay.path)
-                            })
-                        }) {
-                            "min-h-12 px-2 py-1 gap-0.5 border-b border-border bg-accent hover:bg-accent active:opacity-70"
-                        } else {
-                            "min-h-12 px-2 py-1 gap-0.5 border-b border-border hover:bg-muted active:opacity-70"
-                        }
-                        .into(),
-                    )
-                })
-                .on_press(move |_: &()| document.set(Some(replay.get())))
-                .child(
-                    text(move || replay.get().file_name.clone()).app_class(move || {
+    let sort = signal(Some(ReplaySort { column: ReplayColumn::Date, direction: ReplaySortDirection::Descending }));
+    let order =
+        computed(move || ReplayOrder(Arc::new(directory.with(|value| ordered_replays(value.as_deref(), sort.get())))));
+    let table_ref = component_ref::<DataTable>();
+    let focus_ref = table_ref;
+    let sort_buttons = ReplayColumn::ALL.map(|column| {
+        view()
+            .accessible(true)
+            .role(AccessibilityRole::Button)
+            .label(move || format!("Sort by {}", replay_sort_label(column, sort.get())))
+            .accessibility_state(move || AccessibilityState {
+                selected: sort.get().is_some_and(|current| current.column == column),
+                ..AccessibilityState::default()
+            })
+            .app_class(move || {
+                Some(
+                    if sort.get().is_some_and(|current| current.column == column) {
+                        "min-h-7 px-2 rounded-(--radius) bg-primary text-xs text-primary-foreground active:opacity-70"
+                    } else {
+                        "min-h-7 px-2 rounded-(--radius) bg-secondary text-xs text-secondary-foreground \
+                         hover:bg-muted active:opacity-70"
+                    }
+                    .into(),
+                )
+            })
+            .on_press(move |_: &()| sort.set(Some(next_replay_sort(sort.get_untracked(), column))))
+            .child(text(move || replay_sort_label(column, sort.get())))
+    });
+    let controls = scroll().horizontal().scrollbar(false).child(
+        view()
+            .app_class(|| Some("flex-row items-center gap-1".into()))
+            .child(
+                view()
+                    .accessible(true)
+                    .role(AccessibilityRole::Button)
+                    .label("Browse replay rows")
+                    .app_class(|| {
                         Some(
-                            if replay.with(|replay| {
-                                document.with(|current| {
-                                    current.as_ref().is_some_and(|current| current.path == replay.path)
-                                })
-                            }) {
-                                "text-xs text-accent-foreground"
-                            } else {
-                                "text-xs text-card-foreground"
-                            }
-                            .into(),
+                            "min-h-7 px-2 rounded-(--radius) border border-border bg-secondary text-xs \
+                             text-secondary-foreground hover:bg-muted active:opacity-70"
+                                .into(),
                         )
-                    }),
-                )
-                .child(
-                    text(move || {
-                        let replay = replay.get();
-                        format!("{} - {}", replay.map_name, replay.date)
                     })
-                    .app_class(|| Some("text-xs text-muted-foreground".into())),
-                )
-        },
+                    .on_press(move |_: &()| {
+                        if let Some(api) = focus_ref.api::<DataTableApi>() {
+                            api.focus();
+                        }
+                    })
+                    .child(text("Browse rows")),
+            )
+            .children(sort_buttons),
     );
+    let data_order = order;
+    let selection_order = order;
+    let changed_order = order;
+    let table = data_table()
+        .flex_1()
+        .columns(replay_columns())
+        .data(move || data_order.with(|order| replay_rows(&order.0)))
+        .sort(move || sort.get().map(to_table_sort))
+        .selection(move || {
+            let row = document.with(|current| {
+                let current = current.as_ref()?;
+                selection_order.with(|order| order.0.iter().position(|candidate| candidate.path == current.path))
+            });
+            let mut selection = DataTableSelection::default();
+            selection.row = row.map(|row| row as u32);
+            Some(selection)
+        })
+        .column_selectable(false)
+        .stripe(true)
+        .component_ref(&table_ref)
+        .classes(replay_table_classes())
+        .accessibility_label("Replay directory")
+        .on_selection_change(move |selection: &Option<DataTableSelection>| {
+            let selected = selection
+                .and_then(|selection| selection.row)
+                .and_then(|row| changed_order.with_untracked(|order| order.0.get(row as usize).cloned()));
+            document.set(selected);
+        });
 
     view()
         .app_class(move || {
             Some(
-                if directory.get().is_some() {
-                    "w-80 min-h-0 p-3 rounded-(--radius) border border-border bg-card"
-                } else {
+                if directory.get().is_none() {
                     "hidden"
+                } else if compact.get() {
+                    "h-56 min-h-48 w-full p-3 rounded-(--radius) border border-border bg-card"
+                } else {
+                    "w-1/2 min-h-0 p-3 rounded-(--radius) border border-border bg-card"
                 }
                 .into(),
             )
@@ -310,8 +422,151 @@ fn directory_browser(
             })
             .app_class(|| Some("mb-2 text-xs text-muted-foreground".into())),
         )
-        .child(scroll().app_class(|| Some("flex-1 min-h-0".into())).child(rows))
+        .child(controls)
+        .child(table)
         .into_element()
+}
+
+fn next_replay_sort(current: Option<ReplaySort>, column: ReplayColumn) -> ReplaySort {
+    let direction = match current {
+        Some(current) if current.column == column && current.direction == ReplaySortDirection::Ascending => {
+            ReplaySortDirection::Descending
+        }
+        _ => ReplaySortDirection::Ascending,
+    };
+    ReplaySort { column, direction }
+}
+
+fn replay_sort_label(column: ReplayColumn, current: Option<ReplaySort>) -> String {
+    match current {
+        Some(current) if current.column == column => {
+            let direction = match current.direction {
+                ReplaySortDirection::Ascending => "ascending",
+                ReplaySortDirection::Descending => "descending",
+            };
+            format!("{} {direction}", column.title())
+        }
+        _ => column.title().to_owned(),
+    }
+}
+
+fn replay_columns() -> Vec<DataTableColumn> {
+    ReplayColumn::ALL
+        .into_iter()
+        .map(|column| {
+            let mut definition = DataTableColumn::default();
+            definition.key = column.key().into();
+            definition.title = Some(column.title().into());
+            definition.resizable = Some(true);
+            definition.width = Some(px(match column {
+                ReplayColumn::File => 250.0,
+                ReplayColumn::Date => 160.0,
+                ReplayColumn::Ship => 150.0,
+                ReplayColumn::Map => 140.0,
+                ReplayColumn::Mode => 120.0,
+                ReplayColumn::Player => 140.0,
+                ReplayColumn::Version => 110.0,
+            }));
+            definition
+        })
+        .collect()
+}
+
+fn ordered_replays(directory: Option<&ReplayDirectory>, sort: Option<ReplaySort>) -> Vec<Arc<ReplayDocument>> {
+    let Some(directory) = directory else {
+        return Vec::new();
+    };
+    let mut documents = directory.documents.clone();
+    if let Some(sort) = sort {
+        documents.sort_by(|left, right| compare_replays(left, right, sort));
+    }
+    documents
+}
+
+fn replay_table_classes() -> DataTableClasses {
+    let mut classes = DataTableClasses::default();
+    classes.root = Some("border border-border rounded-(--radius) bg-card".into());
+    classes.header = Some("bg-muted".into());
+    classes.header_cell = Some("px-2 border-b border-border text-xs font-semibold text-muted-foreground".into());
+    classes.header_cell_sorted = Some("bg-accent text-accent-foreground".into());
+    classes.sort_indicator = Some("text-muted-foreground".into());
+    classes.sort_ascending = Some("opacity-30 selected:opacity-100 selected:text-accent-foreground".into());
+    classes.sort_descending = Some("opacity-30 selected:opacity-100 selected:text-accent-foreground".into());
+    classes.row = Some("border-b border-border text-card-foreground".into());
+    classes.row_odd = Some("bg-secondary".into());
+    classes.row_hover = Some("bg-muted".into());
+    classes.row_selected = Some("bg-accent text-accent-foreground".into());
+    classes.cell = Some("px-2 text-xs".into());
+    classes
+}
+
+fn compare_replays(left: &ReplayDocument, right: &ReplayDocument, sort: ReplaySort) -> std::cmp::Ordering {
+    let ordering = if sort.column == ReplayColumn::Date {
+        compare_optional_key(left.date_iso.as_ref(), right.date_iso.as_ref(), &left.date, &right.date, sort.direction)
+    } else if sort.column == ReplayColumn::Version {
+        compare_optional_key(
+            left.client_version_key.as_ref(),
+            right.client_version_key.as_ref(),
+            &left.client_version,
+            &right.client_version,
+            sort.direction,
+        )
+    } else {
+        directed_order(replay_field(left, sort.column), replay_field(right, sort.column), sort.direction)
+    };
+    ordering.then_with(|| left.path.cmp(&right.path))
+}
+
+fn compare_optional_key<T: Ord>(
+    left: Option<&T>,
+    right: Option<&T>,
+    left_fallback: &str,
+    right_fallback: &str,
+    direction: ReplaySortDirection,
+) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => directed_order(left, right, direction),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => directed_order(left_fallback, right_fallback, direction),
+    }
+}
+
+fn directed_order<T: Ord + ?Sized>(left: &T, right: &T, direction: ReplaySortDirection) -> std::cmp::Ordering {
+    match direction {
+        ReplaySortDirection::Ascending => left.cmp(right),
+        ReplaySortDirection::Descending => right.cmp(left),
+    }
+}
+
+fn replay_rows(documents: &[Arc<ReplayDocument>]) -> DataTableRows {
+    let mut rows = DataTableRows::new(documents.len());
+    for column in ReplayColumn::ALL {
+        rows = rows.texts(column.key(), documents.iter().map(|document| replay_field(document, column)));
+    }
+    rows
+}
+
+fn replay_field(document: &ReplayDocument, column: ReplayColumn) -> &str {
+    match column {
+        ReplayColumn::File => &document.file_name,
+        ReplayColumn::Date => document.date_iso.as_deref().unwrap_or(&document.date),
+        ReplayColumn::Ship => &document.player_ship,
+        ReplayColumn::Map => &document.map_name,
+        ReplayColumn::Mode => &document.game_mode,
+        ReplayColumn::Player => &document.player_name,
+        ReplayColumn::Version => &document.client_version,
+    }
+}
+
+fn to_table_sort(sort: ReplaySort) -> DataTableSort {
+    let mut table_sort = DataTableSort::default();
+    table_sort.key = sort.column.key().into();
+    table_sort.direction = match sort.direction {
+        ReplaySortDirection::Ascending => DataTableSortDirection::Ascending,
+        ReplaySortDirection::Descending => DataTableSortDirection::Descending,
+    };
+    table_sort
 }
 
 fn empty_view(document: Signal<Option<Arc<ReplayDocument>>>, error: Signal<Option<String>>) -> AnyElement {
@@ -333,7 +588,7 @@ fn empty_view(document: Signal<Option<Arc<ReplayDocument>>>, error: Signal<Optio
         .into_element()
 }
 
-fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
+fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>, compact: Signal<bool>) -> AnyElement {
     let players = each(
         move || document.with(|value| value.as_ref().map_or_else(Vec::new, |value| value.players.clone())),
         |player| player.name.clone(),
@@ -353,7 +608,18 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
     );
 
     view()
-        .app_class(move || Some(if document.get().is_some() { "flex-1 gap-3" } else { "hidden" }.into()))
+        .app_class(move || {
+            Some(
+                if document.get().is_none() {
+                    "hidden"
+                } else if compact.get() {
+                    "gap-3"
+                } else {
+                    "h-full gap-3"
+                }
+                .into(),
+            )
+        })
         .child(
             view()
                 .child(
@@ -373,10 +639,19 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
         )
         .child(
             view()
-                .app_class(|| Some("flex-1 min-h-0 flex-row gap-3".into()))
+                .app_class(move || Some(if compact.get() { "gap-3" } else { "flex-1 min-h-0 flex-row gap-3" }.into()))
                 .child(
                     view()
-                        .app_class(|| Some("w-2/5 p-3 rounded-(--radius) border border-border bg-card".into()))
+                        .app_class(move || {
+                            Some(
+                                if compact.get() {
+                                    "w-full p-3 rounded-(--radius) border border-border bg-card"
+                                } else {
+                                    "w-2/5 p-3 rounded-(--radius) border border-border bg-card"
+                                }
+                                .into(),
+                            )
+                        })
                         .child(
                             text("Battle").app_class(|| Some("mb-2 text-sm font-semibold text-card-foreground".into())),
                         )
@@ -431,7 +706,16 @@ fn replay_view(document: Signal<Option<Arc<ReplayDocument>>>) -> AnyElement {
                 )
                 .child(
                     view()
-                        .app_class(|| Some("flex-1 min-h-0 p-3 rounded-(--radius) border border-border bg-card".into()))
+                        .app_class(move || {
+                            Some(
+                                if compact.get() {
+                                    "h-72 min-h-56 p-3 rounded-(--radius) border border-border bg-card"
+                                } else {
+                                    "flex-1 min-h-0 p-3 rounded-(--radius) border border-border bg-card"
+                                }
+                                .into(),
+                            )
+                        })
                         .child(
                             text(move || {
                                 document.with(|value| {
@@ -540,7 +824,7 @@ fn scan_replay_directory(path: PathBuf) -> Result<ReplayDirectory, String> {
     }
     replay_paths.sort_by(|left, right| right.cmp(left));
 
-    let documents = replay_paths
+    let mut documents: Vec<_> = replay_paths
         .into_iter()
         .filter_map(|replay_path| match parse_replay(&replay_path) {
             Ok(document) => Some(Arc::new(document)),
@@ -550,6 +834,13 @@ fn scan_replay_directory(path: PathBuf) -> Result<ReplayDirectory, String> {
             }
         })
         .collect();
+    documents.sort_by(|left, right| {
+        compare_replays(
+            left,
+            right,
+            ReplaySort { column: ReplayColumn::Date, direction: ReplaySortDirection::Descending },
+        )
+    });
     Ok(ReplayDirectory { path, documents, failed })
 }
 
@@ -569,11 +860,14 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
         .iter()
         .map(|vehicle| ReplayPlayer { name: vehicle.name.clone(), ship_id: vehicle.shipId, relation: vehicle.relation })
         .collect();
+    let date_iso = iso_date(&meta.dateTime);
+    let client_version_key = client_version_key(&meta.clientVersionFromXml);
 
     Ok(ReplayDocument {
         path: path.to_path_buf(),
         file_name,
         date: meta.dateTime,
+        date_iso,
         map_name: meta.mapDisplayName,
         map_key: meta.mapName,
         game_mode,
@@ -581,11 +875,26 @@ fn parse_replay(path: &Path) -> Result<ReplayDocument, String> {
         player_name: meta.playerName,
         player_ship: meta.playerVehicle,
         client_version: meta.clientVersionFromXml,
+        client_version_key,
         duration_seconds: meta.duration,
         players_per_team: meta.playersPerTeam,
         teams_count: meta.teamsCount,
         players,
     })
+}
+
+fn client_version_key(raw: &str) -> Option<ClientVersionKey> {
+    let parts = raw.split(',').map(|part| part.trim().parse::<u32>()).collect::<Result<Vec<_>, _>>().ok()?;
+    (!parts.is_empty()).then_some(ClientVersionKey(parts))
+}
+
+fn iso_date(raw: &str) -> Option<String> {
+    let (date, time) = raw.split_once(' ')?;
+    let mut parts = date.split('.');
+    let (Some(day), Some(month), Some(year), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    Some(format!("{year}-{month}-{day} {time}"))
 }
 
 async fn export_replay_metadata(document: Arc<ReplayDocument>) -> Result<Option<PathBuf>, String> {
@@ -662,5 +971,19 @@ fn write_atomic(path: &Path, bytes: &[u8], overwrite_confirmed: bool) -> std::io
         staged.persist(path).map(|_| ()).map_err(|error| error.error)
     } else {
         staged.persist_noclobber(path).map(|_| ()).map_err(|error| error.error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_version_sort_uses_numeric_components() {
+        let older = client_version_key("13, 9, 0, 100").unwrap();
+        let newer = client_version_key("13, 11, 0, 1").unwrap();
+
+        assert_eq!(directed_order(&older, &newer, ReplaySortDirection::Ascending), std::cmp::Ordering::Less);
+        assert!(client_version_key("not a version").is_none());
     }
 }

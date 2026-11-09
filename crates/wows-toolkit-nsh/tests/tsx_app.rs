@@ -122,6 +122,28 @@ fn replay_directory_lists_readable_files_and_reports_failures() {
 
     app.press(SECOND).unwrap();
     app.wait_for("PFSD210-Marceau").unwrap();
+    assert_eq!(app.screen().count(SECOND), Ok(2), "the selected replay must also appear in the inspector heading");
+
+    app.press_key("up").unwrap();
+    assert_eq!(app.screen().count(FIRST), Ok(2), "keyboard selection must update the inspector");
+
+    app.press("label:Sort by Replay").unwrap();
+    assert_eq!(app.screen().count(FIRST), Ok(2), "sorting must preserve replay identity");
+
+    app.press("label:Browse replay rows").unwrap();
+    app.press_key("up").unwrap();
+    assert_eq!(app.screen().count(SECOND), Ok(2), "keyboard selection must follow the sorted row order");
+
+    app.set_viewport(Size::new(Points(500.0), Points(700.0))).expect("the compact replay viewport is applied");
+    app.wait_for("Players (24)").unwrap();
+
+    app.on_pick_paths(vec![fixtures.join(FIRST)]).unwrap();
+    app.press("Open Replay File...").unwrap();
+    app.wait_for_gone(
+        &format!("wows-toolkit-nsh-replay-browser-{}", std::process::id()),
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap();
 
     let all_invalid = TestDirectory::new("replay-browser-all-invalid");
     std::fs::write(all_invalid.0.join("invalid.wowsreplay"), b"not a replay").expect("the invalid replay is written");
