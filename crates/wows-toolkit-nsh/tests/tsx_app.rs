@@ -112,7 +112,9 @@ fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 
     app.wait_for("Replay Inspector").unwrap();
-    app.press("Settings").unwrap();
+    app.press_key("mod+k").unwrap();
+    app.wait_for("Command Palette").unwrap();
+    app.press("Go to Settings").unwrap();
     app.wait_for(
         "Configure game paths, replay loading, updates, sharing, collaboration, language, theme, and diagnostics.",
     )
@@ -134,4 +136,25 @@ fn top_level_navigation_and_application_menu_work() {
     app.wait_for("Select a map to start a tactics board.").unwrap();
     app.press("Close").unwrap();
     app.wait_for_gone("Select a map to start a tactics board.", std::time::Duration::from_secs(5)).unwrap();
+}
+
+#[test]
+fn command_palette_supports_keyboard_navigation_and_compact_viewports() {
+    let mut app = app();
+    app.set_viewport(Size::new(Points(500.0), Points(360.0))).expect("the compact viewport is applied");
+
+    app.press_key("mod+k").unwrap();
+    app.type_text("label:Command palette", "About").unwrap();
+    app.press_key("down").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("Tools for World of Warships replays, game data, statistics, rendering, and collaboration.").unwrap();
+    app.press("Close").unwrap();
+
+    app.press_key("mod+k").unwrap();
+    app.type_text("label:Command palette", "nomatch").unwrap();
+    app.wait_for("No matching commands.").unwrap();
+    app.press_key("escape").unwrap();
+    app.wait_for("Go to Replay Inspector").unwrap();
+    app.press_key("escape").unwrap();
+    app.wait_for_gone("Command Palette", std::time::Duration::from_secs(5)).unwrap();
 }

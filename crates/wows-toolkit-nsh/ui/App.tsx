@@ -1,6 +1,6 @@
-import { keymap, mount, signal, Storage, Text, View } from "nsh";
+import { keymap, mount, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
-import { Dialog, Menu, Toolbar } from "nsh/base";
+import { Command, Dialog, Menu, Toolbar } from "nsh/base";
 import { ReplayInspector as NativeReplayInspector, Toolkit } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
@@ -9,6 +9,8 @@ const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
 const aboutOpen = signal(false);
 const tacticsOpen = signal(false);
+const paletteOpen = signal(false);
+const paletteQuery = signal("");
 const notice = signal<string | null>(null);
 const STORAGE_TAB = "application.active-tab";
 
@@ -27,6 +29,11 @@ function showNotice(message: string) {
   setTimeout(() => {
     if (notice() === message) notice.set(null);
   }, 4000);
+}
+
+function openPalette() {
+  paletteQuery.set("");
+  paletteOpen.set(true);
 }
 
 type Release = {
@@ -78,6 +85,7 @@ keymap.bind({
   "mod+6": () => selectTab(startup.tabs[5].id),
   "mod+7": () => selectTab(startup.tabs[6].id),
   "mod+,": () => selectTab("settings"),
+  "mod+k": openPalette,
 });
 
 function ApplicationMenu() {
@@ -99,6 +107,7 @@ function ApplicationMenu() {
         }
       >
         <Surface style={{ minWidth: 220, padding: 5, backgroundColor: colors.popover }}>
+          <MenuRow label="Command Palette" note={keymap.label("mod+k")} onSelect={openPalette}/>
           <MenuRow label={startup.text.tacticsBoard} onSelect={() => tacticsOpen.set(true)}/>
           <MenuRow label={startup.text.checkUpdates} onSelect={() => void checkForUpdates()}/>
           <MenuRow label={`${startup.text.about} WoWs Toolkit`} onSelect={() => aboutOpen.set(true)}/>
@@ -203,6 +212,73 @@ function TacticsDialog() {
   );
 }
 
+const commandItems = [
+  ...startup.tabs.map((tab, index) => ({
+    id: `tab:${tab.id}`,
+    label: `Go to ${tab.label}`,
+    keywords: [tab.id, tab.description],
+    group: "Navigate",
+    shortcut: index < 7 ? `mod+${index + 1}` : tab.id === "settings" ? "mod+," : undefined,
+  })),
+  { id: "action:tactics", label: startup.text.tacticsBoard, keywords: ["map", "plan"], group: "Actions" },
+  { id: "action:updates", label: startup.text.checkUpdates, keywords: ["release", "version"], group: "Actions" },
+  { id: "action:about", label: `${startup.text.about} WoWs Toolkit`, keywords: ["version"], group: "Actions" },
+];
+
+function executeCommand(id: string) {
+  paletteOpen.set(false);
+  if (id.startsWith("tab:")) {
+    selectTab(id.slice(4));
+  } else if (id === "action:tactics") {
+    tacticsOpen.set(true);
+  } else if (id === "action:updates") {
+    void checkForUpdates();
+  } else if (id === "action:about") {
+    aboutOpen.set(true);
+  }
+}
+
+function CommandPalette() {
+  return (
+    <Dialog open={paletteOpen()} onOpenChange={({ open }) => paletteOpen.set(open)}>
+      <Surface style={{ width: "100%", maxWidth: 640, maxHeight: Math.max(160, windowSize().height - 32), overflow: "hidden", backgroundColor: colors.popover }}>
+        <Command
+          items={commandItems}
+          autoFocus
+          query={paletteQuery()}
+          placeholder="Type a command..."
+          accessibilityLabel="Command palette"
+          onSelect={({ id }) => executeCommand(id)}
+          onQueryChange={({ query }) => paletteQuery.set(query)}
+          onCancel={() => paletteOpen.set(false)}
+          header={
+            <Text style={{ paddingHorizontal: 14, paddingTop: 12, fontSize: 13, fontWeight: "600", color: colors.popoverForeground }}>
+              Command Palette
+            </Text>
+          }
+          empty={
+            <Text style={{ padding: 18, textAlign: "center", fontSize: 13, color: colors.mutedForeground }}>
+              No matching commands.
+            </Text>
+          }
+          footer={
+            <Text style={{ padding: 10, fontSize: 11.5, color: colors.mutedForeground }}>
+              Enter to run. Escape clears, then closes.
+            </Text>
+          }
+          searchBarStyle={{ minHeight: 46, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}
+          searchStyle={{ fontSize: 14, color: colors.popoverForeground, placeholderColor: colors.mutedForeground }}
+          listStyle={{ maxHeight: Math.min(420, Math.max(0, windowSize().height - 180)), padding: 6 }}
+          itemClass="text-popover-foreground hover:bg-accent focus:bg-accent focus:text-accent-foreground"
+          itemStyle={{ minHeight: 34, paddingHorizontal: 10, borderRadius: controlRadius(), fontSize: 13 }}
+          groupStyle={{ paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "600", color: colors.mutedForeground }}
+          separatorStyle={{ height: 1, marginVertical: 4, backgroundColor: colors.border }}
+        />
+      </Surface>
+    </Dialog>
+  );
+}
+
 function Notice() {
   return (
     <If when={notice()}>
@@ -225,6 +301,7 @@ function App() {
       <Notice/>
       <AboutDialog/>
       <TacticsDialog/>
+      <CommandPalette/>
     </View>
   );
 }
