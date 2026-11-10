@@ -4,6 +4,7 @@ import { Checkbox, Dialog } from "nsh/base";
 import { GameData, type GameDataSnapshot } from "wows-toolkit/native";
 import { Button, centeredDialog, Surface } from "./components";
 import { t } from "./i18n";
+import { CheckMark } from "./icons";
 import { colors } from "./theme";
 
 const snapshot = signal<GameDataSnapshot | null>(null);
@@ -136,7 +137,7 @@ export function GameDataCacheSection() {
         checked={cache()?.autoDump ?? false}
         class="group flex-row items-start gap-3"
         indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-        indicator={<Text class="text-[11px] text-primary-foreground">{cache()?.autoDump ? "x" : ""}</Text>}
+        indicator={<CheckMark checked={cache()?.autoDump ?? false}/>}
         onChange={({ checked }) => void run(() => GameData.setAutoDump(checked))}
       >
         <View style={{ flex: 1, gap: 2 }}>
@@ -234,7 +235,7 @@ function MissingBuildsDialog() {
               disabled={!row().eligible}
               class="group flex-row items-start gap-3"
               indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-              indicator={<Text class="text-[11px] text-primary-foreground">{ticked().includes(row().build) ? "x" : ""}</Text>}
+              indicator={<CheckMark checked={ticked().includes(row().build)}/>}
               onChange={({ checked }) => toggleBuild(row().build, checked)}
             >
               <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>

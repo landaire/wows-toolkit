@@ -3,6 +3,7 @@ import { Scroll, signal, Text, View } from "nsh";
 import { Select } from "nsh/base";
 import { Armor } from "wows-toolkit/native";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, controlRadius } from "../theme";
 import { PenSearch } from "./analysis";
 import { armor, type CamoGroup, type CamoView, call, type DisplayView, type HullView, type PartView, type ZoneView } from "./state";
@@ -36,7 +37,7 @@ function Chevron(props: { rowKey: string; label: string }) {
       hoverStyle={{ backgroundColor: colors.accent }}
       style={{ width: 16, height: 18, alignItems: "center", justifyContent: "center", borderRadius: 3 }}
     >
-      <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{openRows().includes(props.rowKey) ? "v" : ">"}</Text>
+      <Icon name={openRows().includes(props.rowKey) ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
     </View>
   );
 }
@@ -165,7 +166,7 @@ function TrajectoryPanel() {
             {(ship, index) => (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ flex: 1, fontSize: 12, color: colors.cardForeground }}>{ship().label}</Text>
-                <IconButton id={`armor-trajectory-remove-${index()}`} glyph="x" label="Remove ship" onPress={() => call(Armor.removePenShip(index()))}/>
+                <IconButton id={`armor-trajectory-remove-${index()}`} icon="x" label="Remove ship" onPress={() => call(Armor.removePenShip(index()))}/>
               </View>
             )}
           </Each>
@@ -538,7 +539,7 @@ function RailSection(props: { section: Section; title: string; body: () => JSX.E
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ minHeight: 30, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8 }}
       >
-        <Text style={{ width: 12, fontSize: 10, color: colors.mutedForeground }}>{open() ? "v" : ">"}</Text>
+        <Icon name={open() ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
         <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.title}</Text>
       </View>
       <If when={open()}>
@@ -569,7 +570,7 @@ export function OptionsRail() {
       <View style={{ paddingHorizontal: 8, paddingTop: 6, paddingBottom: 6, gap: 2 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.foreground }}>{t("ui.armor.options")}</Text>
-          <IconButton id="armor-options-collapse" glyph=">" label={t("ui.armor.collapse_options")} onPress={() => call(Armor.setOptionsOpen(false))}/>
+          <IconButton id="armor-options-collapse" icon="panel-right-close" label={t("ui.armor.collapse_options")} onPress={() => call(Armor.setOptionsOpen(false))}/>
         </View>
         <If when={target() !== ""}>
           <Text style={{ fontSize: 12, color: (view()?.panes.length ?? 0) > 1 ? colors.primary : colors.mutedForeground }}>{target()}</Text>
@@ -596,7 +597,7 @@ export function OptionsRail() {
 export function OptionsEdge() {
   return (
     <View style={{ width: 26, alignItems: "center", paddingTop: 6, borderLeftWidth: 1, borderLeftColor: colors.border, backgroundColor: colors.surface }}>
-      <IconButton id="armor-options-expand" glyph="<" label={t("ui.armor.expand_options")} onPress={() => call(Armor.setOptionsOpen(true))}/>
+      <IconButton id="armor-options-expand" icon="panel-right-open" label={t("ui.armor.expand_options")} onPress={() => call(Armor.setOptionsOpen(true))}/>
     </View>
   );
 }

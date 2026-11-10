@@ -6,6 +6,7 @@ import { Button, MenuRow, Surface } from "../components";
 import { Frame } from "../frame";
 import * as toast from "../shell/toast";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, controlRadius } from "../theme";
 import { armor, call, errorText, type ExportResult, hover, type HoverView, type PaneView } from "./state";
 import { IconButton, Swatch } from "./widgets";
@@ -35,7 +36,11 @@ function CheckItem(props: { label: string; checked: boolean; disabled?: boolean;
       hoverStyle={{ backgroundColor: colors.accent }}
       style={{ height: 28, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 8, opacity: props.disabled ? 0.45 : 1 }}
     >
-      <Text style={{ width: 12, fontSize: 12, color: colors.popoverForeground }}>{props.checked ? "x" : ""}</Text>
+      <View style={{ width: 12 }}>
+        <If when={props.checked}>
+          <Icon name="check" size={12} color={colors.popoverForeground}/>
+        </If>
+      </View>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
     </MenuItem>
   );
@@ -215,7 +220,7 @@ function Pane(props: { pane: PaneView; several: boolean }) {
         <ExportConfirm pane={pane()}/>
       </If>
       <View style={{ position: "absolute", top: 4, right: 4 }}>
-        <IconButton id={`armor-viewport-pane-close-${pane().number}`} glyph="x" label={t("ui.armor.close_pane")} onPress={() => call(Armor.closePane(pane().id))}/>
+        <IconButton id={`armor-viewport-pane-close-${pane().number}`} icon="x" label={t("ui.armor.close_pane")} onPress={() => call(Armor.closePane(pane().id))}/>
       </View>
     </View>
   );
@@ -280,7 +285,7 @@ export function Legend() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <IconButton
             id="armor-legend-collapse"
-            glyph={legend()?.collapsed ? ">" : "v"}
+            icon={legend()?.collapsed ? "chevron-right" : "chevron-down"}
             label={t("ui.armor.legend_collapse")}
             onPress={() => call(Armor.setLegendCollapsed(!legend()!.collapsed))}
           />
@@ -296,7 +301,7 @@ export function Legend() {
           >
             <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.armor.armor_thickness_title")}</Text>
           </View>
-          <IconButton id="armor-legend-close" glyph="x" label={t("ui.armor.legend_hide")} onPress={() => call(Armor.setLegendVisible(false))}/>
+          <IconButton id="armor-legend-close" icon="x" label={t("ui.armor.legend_hide")} onPress={() => call(Armor.setLegendVisible(false))}/>
         </View>
         <If when={!legend()?.collapsed}>
           <Each of={legend()?.entries ?? []} key="index">

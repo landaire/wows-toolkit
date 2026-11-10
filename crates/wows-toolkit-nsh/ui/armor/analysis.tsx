@@ -74,7 +74,7 @@ function ShipBlock(props: { ship: PenShipView; index: number }) {
           on={props.ship.firing}
           onPress={() => call(Armor.setFiringShip(props.ship.paramIndex))}
         />
-        <IconButton id={`armor-pen-remove-${props.index}`} glyph="x" label={t("ui.armor.pen.remove")} onPress={() => call(Armor.removePenShip(props.index))}/>
+        <IconButton id={`armor-pen-remove-${props.index}`} icon="x" label={t("ui.armor.pen.remove")} onPress={() => call(Armor.removePenShip(props.index))}/>
       </View>
       <If when={props.ship.noShells}>
         <Hint text={props.ship.noShells ?? ""}/>
@@ -111,7 +111,7 @@ function ArcRow(props: { arc: ArcView; index: number }) {
           <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.cardForeground }}>{arc().heading}</Text>
           <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{arc().summary}</Text>
         </View>
-        <IconButton id={`armor-arc-delete-${props.index}`} glyph="x" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
+        <IconButton id={`armor-arc-delete-${props.index}`} icon="x" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
         <ToolButton
@@ -132,6 +132,7 @@ function ArcRow(props: { arc: ArcView; index: number }) {
         <ToolButton
           id={`armor-arc-range-down-${props.index}`}
           label="-"
+          icon="minus"
           tooltip={t("ui.armor.arc_range_tooltip")}
           disabled={!arc().canStepDown}
           onPress={() => call(Armor.setArcRange(props.index, Math.max(0, arc().range - 0.5)))}
@@ -140,6 +141,7 @@ function ArcRow(props: { arc: ArcView; index: number }) {
         <ToolButton
           id={`armor-arc-range-up-${props.index}`}
           label="+"
+          icon="plus"
           tooltip={t("ui.armor.arc_range_tooltip")}
           disabled={!arc().canStepUp}
           onPress={() => call(Armor.setArcRange(props.index, Math.min(30, arc().range + 0.5)))}
@@ -314,7 +316,7 @@ export function PenCheckPanel() {
           checked={pen()?.ifhe ?? false}
           onChange={(on) => call(Armor.setIfhe(on))}
         />
-        <IconButton id="armor-pen-close" glyph="x" label={t("ui.armor.close_pen_check")} onPress={() => call(Armor.setPenCheckOpen(false))}/>
+        <IconButton id="armor-pen-close" icon="x" label={t("ui.armor.close_pen_check")} onPress={() => call(Armor.setPenCheckOpen(false))}/>
       </View>
       <Scroll style={{ flex: 1 }}>
         <View style={{ gap: 10, paddingHorizontal: 8, paddingBottom: 12 }}>

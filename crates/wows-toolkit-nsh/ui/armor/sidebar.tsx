@@ -4,6 +4,7 @@ import { Armor } from "wows-toolkit/native";
 import { MenuRow, Surface } from "../components";
 import { inputStyle } from "../shell/controls";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, controlRadius } from "../theme";
 import * as toast from "../shell/toast";
 import { armor, call, catalog, type CatalogShip, type CatalogView, errorText } from "./state";
@@ -35,7 +36,7 @@ function toggle(key: string) {
 }
 
 function Chevron(props: { open: boolean }) {
-  return <Text style={{ width: 12, fontSize: 10, color: colors.mutedForeground }}>{props.open ? "v" : ">"}</Text>;
+  return <Icon name={props.open ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>;
 }
 
 function ShipRow(props: { ship: CatalogShip }) {
@@ -195,7 +196,7 @@ export function ShipsSidebar() {
   return (
     <View testID="armor-sidebar" style={{ flex: 1, minWidth: 0, backgroundColor: colors.surface }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 6, paddingVertical: 6 }}>
-        <IconButton id="armor-ships-collapse" glyph="<" label={t("ui.armor.collapse_ships")} onPress={() => sidebarCollapsed.set(true)}/>
+        <IconButton id="armor-ships-collapse" icon="panel-left-close" label={t("ui.armor.collapse_ships")} onPress={() => sidebarCollapsed.set(true)}/>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.foreground }}>{t("ui.armor.ships")}</Text>
         <ToolButton
           id="armor-sidebar-compare"
@@ -224,7 +225,7 @@ export function ShipsSidebar() {
 export function ShipsEdge() {
   return (
     <View style={{ width: 26, alignItems: "center", paddingTop: 6, borderRightWidth: 1, borderRightColor: colors.border, backgroundColor: colors.surface }}>
-      <IconButton id="armor-ships-expand" glyph=">" label={t("ui.armor.expand_ships")} onPress={() => sidebarCollapsed.set(false)}/>
+      <IconButton id="armor-ships-expand" icon="panel-left-open" label={t("ui.armor.expand_ships")} onPress={() => sidebarCollapsed.set(false)}/>
     </View>
   );
 }

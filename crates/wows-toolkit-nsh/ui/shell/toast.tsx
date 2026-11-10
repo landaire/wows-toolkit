@@ -1,6 +1,7 @@
 import { signal, Text, View } from "nsh";
 import { colors, controlRadius, semantic } from "../theme";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 
 /** How a toast reads: what happened, and whether it went well. */
 export type ToastLevel = "ok" | "failed" | "info" | "warn";
@@ -114,7 +115,7 @@ export function ToastLayer() {
               hoverStyle={{ backgroundColor: colors.accent }}
               style={{ paddingHorizontal: 6, borderRadius: controlRadius() }}
             >
-              <Text style={{ fontSize: 12, color: colors.mutedForeground }}>x</Text>
+              <Icon name="x" size={12} color={colors.mutedForeground}/>
             </View>
           </View>
         )}
