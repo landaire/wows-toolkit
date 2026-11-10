@@ -15,12 +15,15 @@
 //! front end supplies: the task cannot know whether a repaint means an egui
 //! viewport or a GPUI entity.
 
+pub mod controller;
+pub mod link;
 pub mod peer;
 
 /// The wire protocol and its validation, re-exported so a caller needs one
 /// dependency rather than two.
 pub use wt_collab_protocol::drawing;
 pub use wt_collab_protocol::geometry;
+pub use wt_collab_protocol::ids;
 pub use wt_collab_protocol::protocol;
 pub use wt_collab_protocol::types;
 pub use wt_collab_protocol::validation;

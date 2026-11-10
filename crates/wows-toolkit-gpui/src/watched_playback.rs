@@ -24,7 +24,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
 
-use crate::collab::ReplayId;
+use wt_collab_client::ids::ReplayId;
 use crate::replay_inspector::GameDataCache;
 
 /// How often the frames the session has sent are looked for.
@@ -82,14 +82,14 @@ pub struct WatchedPlayback {
     _tick: Option<Task<()>>,
     focus_handle: FocusHandle,
     /// The session this is watching, for taking the sink out again.
-    collab: crate::collab::CollabLink,
+    collab: wt_collab_client::link::CollabLink,
 }
 
 impl WatchedPlayback {
     /// Opens a viewport on one of the session's windows and asks for its frames.
     pub fn new(
-        shared: crate::collab::SharedWindow,
-        collab: crate::collab::CollabLink,
+        shared: wt_collab_client::controller::SharedWindow,
+        collab: wt_collab_client::link::CollabLink,
         game_data: Option<GameDataCache>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -97,7 +97,7 @@ impl WatchedPlayback {
         // waiting, so a depth of a few frames is a cushion against a slow raster
         // and not a queue to be played out later.
         let (tx, frames) = std::sync::mpsc::sync_channel(4);
-        let replay_id = ReplayId::from_raw(shared.replay_id);
+        let replay_id = ReplayId::new(shared.replay_id);
         collab.watch_window(replay_id, tx);
 
         let art = shared.art_png.as_ref().and_then(|png| match image::load_from_memory(png) {

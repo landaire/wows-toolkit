@@ -253,10 +253,10 @@ pub struct ReplayRendererPanel {
     /// not sent again.
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
-    collab: crate::collab::CollabLink,
+    collab: wt_collab_client::link::CollabLink,
     /// What this playback is called in a session, so a peer can ask to watch
     /// this one rather than another window.
-    replay_id: crate::collab::ReplayId,
+    replay_id: wt_collab_client::ids::ReplayId,
     /// Whether the session has been told this playback is open. Said once, and
     /// again if a session starts after it was opened.
     shared: bool,
@@ -506,8 +506,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            replay_id: wt_collab_client::ids::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -646,8 +646,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            replay_id: wt_collab_client::ids::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -754,13 +754,13 @@ impl ReplayRendererPanel {
     }
 
     /// Hands a viewport being built its end of the session.
-    pub fn seed_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn seed_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
         self.follow_collab(cx);
     }
 
     /// Hands this viewport a session to talk to, or takes one away.
-    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         // What was drawn before stays on the map: a session starting under an
         // open viewport hears about it as though it had just been drawn, and one
         // ending leaves it where the reader can still see it.
@@ -878,7 +878,7 @@ impl ReplayRendererPanel {
                     let mut png = Vec::new();
                     art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok().map(|()| png)
                 });
-            link.announce_replay(crate::collab::SharedReplay {
+            link.announce_replay(wt_collab_client::link::SharedReplay {
                 replay_id,
                 replay_name,
                 map_label: wows_toolkit_viewmodel::tactics::naming::pretty_map_name(&space),
@@ -5860,7 +5860,7 @@ mod tests {
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
         crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_secs(5));
         crate::collab::push_ping_aged(&state, [20.0, 20.0], Duration::ZERO);
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -5882,7 +5882,7 @@ mod tests {
         // must not sit redrawing for nothing.
         window
             .update(cx, |panel, _window, cx| {
-                panel.set_collab(crate::collab::CollabLink::default(), cx);
+                panel.set_collab(wt_collab_client::link::CollabLink::default(), cx);
             })
             .expect("the window is open");
         crate::collab::push_ping_aged(&state, [30.0, 30.0], Duration::from_secs(5));
@@ -6048,7 +6048,7 @@ mod tests {
             }],
             ..Default::default()
         });
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6088,7 +6088,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6200,7 +6200,7 @@ mod tests {
             ids: vec![4242],
             owners: vec![7],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6280,7 +6280,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6362,7 +6362,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6424,7 +6424,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6482,7 +6482,7 @@ mod tests {
             ids: vec![11],
             owners: vec![3],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6751,7 +6751,7 @@ mod tests {
 
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
         crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         link.drop_stale_pings(Duration::from_secs_f32(super::PING_SECONDS));
         assert_eq!(state.lock().pings.len(), 1, "a fifth of a second into a one-second ripple");
