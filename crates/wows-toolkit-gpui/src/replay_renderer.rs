@@ -24,7 +24,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::armor_viewer::catalog::ShipEntry;
+use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use crate::minimap_preview::SharedPreviewRenderer;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -282,7 +282,7 @@ pub struct ReplayRendererPanel {
     ship_query: String,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
     /// Every ship the loaded build knows, built once when first asked for.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_catalog: Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>>,
     /// What the session held before each change this viewport made, newest
     /// last. Bounded: a session left open all evening must not grow a
     /// history of every stroke in it.
@@ -2330,12 +2330,12 @@ impl ReplayRendererPanel {
 
     /// Every ship the loaded build knows, built the first time one is
     /// looked up rather than when the viewport opens.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+    fn ships(&mut self) -> Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>> {
         if let Some(catalog) = &self.ship_catalog {
             return Some(std::rc::Rc::clone(catalog));
         }
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        let catalog = std::rc::Rc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider()));
         self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
         Some(catalog)
     }
@@ -4238,7 +4238,7 @@ fn ship_chooser(
         .children(matches.into_iter().map(|(species, ship)| {
             let owner = panel.clone();
             Button::new(gpui_kit::SharedString::from(format!("replay-renderer-ship-{}", ship.param_index)))
-                .label(format!("{} {}", crate::armor_viewer::catalog::tier_roman(ship.tier), ship.display_name))
+                .label(format!("{} {}", wows_toolkit_viewmodel::ship_catalog::tier_roman(ship.tier), ship.display_name))
                 .compact()
                 .on_click(move |_event, window, cx: &mut App| {
                     let ship = ship.clone();
@@ -6505,7 +6505,7 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                let ship = crate::armor_viewer::catalog::ShipEntry {
+                let ship = wows_toolkit_viewmodel::ship_catalog::ShipEntry {
                     param_index: "PRSC610".to_string(),
                     display_name: "Moskva".to_string(),
                     search_name: "moskva".to_string(),

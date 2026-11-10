@@ -124,7 +124,7 @@ enum BundleState {
 pub(crate) enum CatalogStatus<'a> {
     /// Not loaded yet; it arrives once the build's assets have been read.
     Pending,
-    Ready(&'a crate::armor_viewer::catalog::ShipCatalog),
+    Ready(&'a wows_toolkit_viewmodel::ship_catalog::ShipCatalog),
     Failed(&'a str),
 }
 
@@ -470,7 +470,7 @@ impl ArmorViewerPane {
     }
 
     /// The catalogue of ships this pane can open, once it has loaded.
-    pub(crate) fn catalog(&self) -> Option<&crate::armor_viewer::catalog::ShipCatalog> {
+    pub(crate) fn catalog(&self) -> Option<&wows_toolkit_viewmodel::ship_catalog::ShipCatalog> {
         match self.catalog_status() {
             CatalogStatus::Ready(catalog) => Some(catalog),
             CatalogStatus::Pending | CatalogStatus::Failed(_) => None,

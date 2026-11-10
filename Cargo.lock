@@ -19131,6 +19131,7 @@ dependencies = [
  "tokio",
  "tracing",
  "twitch_api",
+ "unidecode",
  "windows-registry 0.6.1",
  "wows-replay-insights",
  "wows-toolkit-config",
