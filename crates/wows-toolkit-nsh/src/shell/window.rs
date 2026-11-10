@@ -21,11 +21,22 @@ pub struct WindowSize {
     pub height: f32,
 }
 
-/// A window's size, and whether it fills the screen.
+/// Where a window's frame sits on the screen, in device pixels: the shared
+/// row's `outer_position_pixels`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowPosition {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// A window's size and place, and whether it fills the screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowGeometry {
     /// The size it has when neither maximized nor full screen.
     pub size: WindowSize,
+    /// `None` where the windowing system does not report it, which is GTK's
+    /// case on Wayland.
+    pub position: Option<WindowPosition>,
     pub maximized: bool,
     pub fullscreen: bool,
 }
@@ -75,13 +86,16 @@ pub fn remembered(kind: WindowKind) -> Option<WindowSettings> {
     wows_toolkit_config::load_window_settings(kind)
 }
 
-/// `geometry` as the shared row holds it, keeping the position `previous`
-/// recorded: GTK on Wayland neither reports nor sets a window's position, so
-/// the one another front end wrote is left for it.
+/// `geometry` as the shared row holds it. A position `geometry` lacks keeps
+/// the one `previous` recorded, so on Wayland, where GTK neither reports nor
+/// sets a window's position, the one another front end wrote is left for it.
 pub fn merged(previous: Option<WindowSettings>, geometry: WindowGeometry) -> WindowSettings {
     WindowSettings {
         inner_size_points: Some([geometry.size.width, geometry.size.height]),
-        outer_position_pixels: previous.and_then(|previous| previous.outer_position_pixels),
+        outer_position_pixels: geometry
+            .position
+            .map(|position| [position.x, position.y])
+            .or_else(|| previous.and_then(|previous| previous.outer_position_pixels)),
         fullscreen: geometry.fullscreen,
         maximized: geometry.maximized,
     }
@@ -114,8 +128,12 @@ mod tests {
             fullscreen: false,
             maximized: false,
         };
-        let geometry =
-            WindowGeometry { size: WindowSize { width: 1300.0, height: 900.0 }, maximized: true, fullscreen: false };
+        let geometry = WindowGeometry {
+            size: WindowSize { width: 1300.0, height: 900.0 },
+            position: None,
+            maximized: true,
+            fullscreen: false,
+        };
 
         let stored = merged(Some(previous), geometry);
 
@@ -123,6 +141,25 @@ mod tests {
         assert_eq!(stored.outer_position_pixels, Some([40.0, 50.0]));
         assert!(stored.maximized);
         assert!(!stored.fullscreen);
+    }
+
+    #[test]
+    fn a_reported_position_replaces_the_recorded_one() {
+        let previous = WindowSettings {
+            inner_size_points: Some([800.0, 600.0]),
+            outer_position_pixels: Some([40.0, 50.0]),
+            fullscreen: false,
+            maximized: false,
+        };
+        let geometry = WindowGeometry {
+            size: WindowSize { width: 800.0, height: 600.0 },
+            position: Some(WindowPosition { x: 300.0, y: -20.0 }),
+            maximized: false,
+            fullscreen: false,
+        };
+
+        assert_eq!(merged(Some(previous), geometry).outer_position_pixels, Some([300.0, -20.0]));
+        assert_eq!(merged(None, geometry).outer_position_pixels, Some([300.0, -20.0]));
     }
 
     #[test]

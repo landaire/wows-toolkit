@@ -10,7 +10,9 @@ workspace_binary(
     crate_root = "src/main.rs",
     env = {"NSH_BUNDLE_PATH": "$(location //crates/wows-toolkit-nsh:nsh_ui_bundle)"},
     deps = [
+        "//crates/wows-toolkit-armor:wows_toolkit_armor",
         "//crates/wows-toolkit-config:wows_toolkit_config",
+        "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
         "//crates/wows-toolkit-nsh:wows_toolkit_nsh",
         "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
         "//third-party/rust:log",

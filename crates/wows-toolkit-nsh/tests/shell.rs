@@ -330,6 +330,65 @@ fn debug_mode_toggles_for_the_session() {
 }
 
 #[test]
+fn each_running_job_has_a_spinner_beside_it() {
+    let guard = lock();
+    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/shell/status_strip.tsx");
+    let mut app = TestApp { app: nsh_testing::tsx(&entry, registries()).expect("the status strip starts"), _guard: guard };
+
+    app.wait_for("Start").unwrap();
+    app.press("Start").unwrap();
+    app.wait_for("text:Sampling 1 of 3").unwrap();
+    // The spinner beside the job is named for it.
+    app.wait_for("id:status-job-sample >> label:Sampling").unwrap();
+
+    app.press("Finish").unwrap();
+    app.wait_for_gone("id:status-job-sample", Duration::from_secs(5)).unwrap();
+}
+
+#[test]
+fn the_drop_scrim_says_what_the_hovered_files_will_do() {
+    let guard = lock();
+    answered();
+    let mut app = app(guard);
+    let replay = |name: &str| format!("file:///replays/{name}");
+
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("a.wowsreplay")] })).unwrap();
+    app.wait_for("Drop to load a.wowsreplay").unwrap();
+
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("a.wowsreplay"), replay("b.wowsreplay")] }))
+        .unwrap();
+    app.wait_for("Only one replay at a time, please").unwrap();
+
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("notes.txt")] })).unwrap();
+    app.wait_for("That is not a replay file").unwrap();
+
+    app.send_host_event("shell.hoveredFiles", serde_json::Value::Null).unwrap();
+    app.wait_for_gone("That is not a replay file", Duration::from_secs(5)).unwrap();
+
+    // A drop ends the drag, and a file list the shell read late for it does
+    // not bring the scrim back; the next drag's does.
+    app.set_environment("desktop", |environment| {
+        environment.os = nsh_core::platform::Os::Linux;
+        environment.idiom = nsh_core::platform::Idiom::Desktop;
+    })
+    .unwrap();
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("a.wowsreplay")] })).unwrap();
+    app.wait_for("Drop to load a.wowsreplay").unwrap();
+    let file = url::Url::from_file_path(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    app.drop_files("Replay Inspector", vec![file.to_string()]).unwrap();
+    app.wait_for_gone("Drop to load a.wowsreplay", Duration::from_secs(5)).unwrap();
+
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("a.wowsreplay")] })).unwrap();
+    assert!(
+        app.wait_for_within("Drop to load a.wowsreplay", Duration::from_millis(500)).is_err(),
+        "the late list for the dropped drag is not shown"
+    );
+    app.send_host_event("shell.hoveredFiles", serde_json::Value::Null).unwrap();
+    app.send_host_event("shell.hoveredFiles", serde_json::json!({ "uris": [replay("b.wowsreplay")] })).unwrap();
+    app.wait_for("Drop to load b.wowsreplay").unwrap();
+}
+
+#[test]
 fn the_last_runs_crash_is_reported_once() {
     let guard = lock();
     answered();

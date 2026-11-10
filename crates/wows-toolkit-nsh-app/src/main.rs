@@ -25,6 +25,15 @@ fn main() -> platform::gtk4::glib::ExitCode {
 fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     const APP_ID: &str = "dev.landaire.wows-toolkit-nsh";
 
+    let asked = match wows_toolkit_nsh::cli::parse() {
+        wows_toolkit_nsh::cli::Invocation::ListGpus => {
+            print!("{}", wows_toolkit_armor::viewport::device::describe_adapters());
+            return Ok(platform::gtk4::glib::ExitCode::SUCCESS);
+        }
+        wows_toolkit_nsh::cli::Invocation::Run(cli) => cli,
+    };
+    wows_toolkit_armor::viewport::device::choose_adapter(asked.adapter_choice());
+
     // Ring is installed because both rustls providers are in the graph, and
     // the first TLS client panics unless one is chosen.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -37,6 +46,18 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
             .unwrap_or(true);
     let _log_guard = wows_toolkit_nsh::shell::logging::init(to_file);
     wows_toolkit_viewmodel::logging::install_panic_hook();
+
+    // The mitigations are Windows policies: here the log records each as not
+    // supported, or as skipped when --no-hardening was given.
+    let report = wows_toolkit_hardening::apply_startup_mitigations(wows_toolkit_hardening::HardeningRequest {
+        hardening: asked.hardening(),
+        code_integrity: wows_toolkit_hardening::CodeIntegrityPreference::from_startup_read(
+            wows_toolkit_config::load_startup_setting(wows_toolkit_viewmodel::settings::keys::CODE_INTEGRITY),
+        ),
+    });
+    for (mitigation, outcome) in report.entries() {
+        log::info!("hardening: {mitigation} {outcome}");
+    }
 
     // Scripted runs: WTN_EXIT_AFTER_SECS bounds the run for measurements. The
     // quit runs on the GTK main loop; process::exit from another thread races

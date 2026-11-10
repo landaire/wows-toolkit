@@ -17,7 +17,9 @@ nsh-base = "0.4.0"
 # startup; without it the first TLS client panics.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde_json = "1.0"
+wows-toolkit-armor = { path = "../wows-toolkit-armor" }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
+wows-toolkit-hardening = { workspace = true }
 wows-toolkit-nsh = { path = "../wows-toolkit-nsh" }
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 
