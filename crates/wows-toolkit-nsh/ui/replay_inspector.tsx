@@ -22,7 +22,7 @@ import {
   type GameDataSnapshot,
   type ReplaySummary,
 } from "wows-toolkit/native";
-import { Button, errorMessage, MenuRow, Spinner, Surface } from "./components";
+import { Button, MenuRow, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting } from "./settings_store";
 import { debugMode } from "./shell/status";
@@ -90,10 +90,10 @@ export type RenderRequest = { path: string; alts: string[] };
 
 /**
  * What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays.
- * `popOut` moves a renderer into a window of its own.
+ * `popOut` moves the live renderer `renderer` into a window of its own and resolves once it is there.
  */
 export type ViewportSlots = {
-  renderer: (path: string, alts: string[], popOut: () => void) => JSX.Element;
+  renderer: (path: string, alts: string[], popOut: (renderer: number) => Promise<void>) => JSX.Element;
   watched: (replayId: string) => JSX.Element;
 };
 
@@ -1249,11 +1249,9 @@ function ReplayPanel(props: { ws: Workspace; id: string; onRender?: (request: Re
 }
 
 /** Moves a docked renderer into a window of its own; it stays docked when the window could not be opened. */
-function popOutViewport(ws: Workspace, id: string, path: string, alts: string[]) {
-  popOutRenderer(path, alts).then(
-    () => closeTab(ws, id),
-    (error) => console.warn(`replay renderer: the window could not be opened: ${errorMessage(error)}`),
-  );
+async function popOutViewport(ws: Workspace, id: string, path: string, renderer: number) {
+  await popOutRenderer(path, renderer);
+  closeTab(ws, id);
 }
 
 function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) => void; viewports?: ViewportSlots }) {
@@ -1273,7 +1271,7 @@ function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) 
           return (
             <View style={{ flex: 1, minHeight: 0 }}>
               {viewport.kind === "renderer"
-                ? props.viewports.renderer(viewport.path, viewport.alts, () => popOutViewport(ws, panel.id, viewport.path, viewport.alts))
+                ? props.viewports.renderer(viewport.path, viewport.alts, (renderer) => popOutViewport(ws, panel.id, viewport.path, renderer))
                 : props.viewports.watched(viewport.replayId)}
             </View>
           );

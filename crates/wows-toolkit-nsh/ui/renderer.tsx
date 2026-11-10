@@ -649,12 +649,19 @@ function MapArea(props: { port: Viewport }) {
   );
 }
 
-// Opens a viewport on `path` and follows it until the view goes away.
-function openViewport(path: string, alts: string[]) {
+/** What a viewport shows: a replay opened for it, or a live viewport handed over from another window. */
+export type ViewportSource =
+  | { kind: "replay"; path: string; alts: string[] }
+  | { kind: "live"; renderer: number };
+
+// Opens or takes up a viewport and follows it until the view goes away,
+// which closes it unless it was handed on.
+function openViewport(source: ViewportSource) {
   const view = signal<RendererView | null>(null);
   const failure = signal<string | null>(null);
   const notice = signal<string | null>(null);
   let alive = true;
+  let handedOff = false;
   let lastNotice = 0;
 
   const say = (message: string) => {
@@ -681,10 +688,13 @@ function openViewport(path: string, alts: string[]) {
     }
   };
 
-  void ReplayRenderer.open(path, alts).then(
+  const opening = source.kind === "replay"
+    ? ReplayRenderer.open(source.path, source.alts)
+    : (async () => ReplayRenderer.view(source.renderer))();
+  void opening.then(
     async (opened) => {
       if (!alive) {
-        ReplayRenderer.close(opened.id);
+        if (!handedOff) ReplayRenderer.close(opened.id);
         return;
       }
       adopt(opened);
@@ -698,23 +708,52 @@ function openViewport(path: string, alts: string[]) {
   cleanup(() => {
     alive = false;
     const opened = view();
-    if (opened) ReplayRenderer.close(opened.id);
+    if (opened && !handedOff) ReplayRenderer.close(opened.id);
   });
 
-  return { view, failure, notice, say, run };
+  // Leaves the viewport open past this view, for the window it moves to.
+  const handOff = () => {
+    handedOff = true;
+  };
+  // Takes the viewport back when the move failed; closed meanwhile, it is
+  // closed now.
+  const takeBack = () => {
+    handedOff = false;
+    const opened = view();
+    if (!alive && opened) ReplayRenderer.close(opened.id);
+  };
+
+  return { view, failure, notice, say, run, handOff, takeBack };
 }
 
 // A replay played back on its own minimap: the map, its overlays and the
-// transport. `popOut`, given while docked, opens it in a window of its own.
-export function ReplayRendererView(props: { path: string; alts?: string[]; popOut?: () => void }) {
-  const opened = openViewport(props.path, props.alts ?? []);
+// transport. `popOut`, given while docked, moves the live viewport into a
+// window of its own and resolves once it is there.
+export function ReplayRendererView(props: { source: ViewportSource; popOut?: (renderer: number) => Promise<void> }) {
+  const opened = openViewport(props.source);
   const labels = text();
+  // Set while a move is asked for and after it succeeds: one viewport goes
+  // to one window.
+  let moving = false;
+  const popOut = async () => {
+    const live = opened.view();
+    if (!live || !props.popOut || moving) return;
+    moving = true;
+    opened.handOff();
+    try {
+      await props.popOut(live.id);
+    } catch (error) {
+      moving = false;
+      opened.takeBack();
+      console.warn(`replay renderer: the window could not be opened: ${errorMessage(error)}`);
+    }
+  };
   const port: Viewport = {
     view: () => opened.view()!,
     run: opened.run,
     say: opened.say,
     get popOut() {
-      return props.popOut;
+      return props.popOut ? () => void popOut() : undefined;
     },
   };
 

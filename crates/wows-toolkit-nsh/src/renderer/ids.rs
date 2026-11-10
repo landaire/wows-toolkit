@@ -4,12 +4,15 @@ use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
+use serde::Deserialize;
+use serde::Serialize;
 use wows_toolkit_replay_data::playback::SPEEDS;
 
 use crate::js_newtype::js_newtype;
 
 /// One open viewport, hover preview or watched window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RendererId(u32);
 
 js_newtype!(RendererId, u32);

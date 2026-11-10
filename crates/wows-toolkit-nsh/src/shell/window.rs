@@ -8,6 +8,7 @@ use serde::Serialize;
 use wows_toolkit_config::WindowKind;
 use wows_toolkit_config::WindowSettings;
 
+use crate::renderer::RendererId;
 use crate::shell::error::WindowError;
 
 /// The launch parameter naming what a window other than the main one shows.
@@ -35,11 +36,13 @@ pub struct WindowGeometry {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WindowRequest {
     TacticsBoard,
+    /// A docked viewport moved into a window of its own: the window shows
+    /// the live viewport `renderer`, so playback carries on where it was.
     #[serde(rename_all = "camelCase")]
     ReplayRenderer {
+        /// The replay shown, which titles the window.
         path: PathBuf,
-        /// The other recordings of the same battle.
-        alts: Vec<PathBuf>,
+        renderer: RendererId,
     },
 }
 
@@ -124,19 +127,18 @@ mod tests {
 
     #[test]
     fn requests_read_as_the_shell_sends_them() {
-        let renderer: WindowRequest = serde_json::from_value(serde_json::json!({
+        let sent = serde_json::json!({
             "kind": "replayRenderer",
             "path": "/replays/a.wowsreplay",
-            "alts": ["/replays/b.wowsreplay"],
-        }))
-        .unwrap();
-        assert_eq!(
-            renderer,
-            WindowRequest::ReplayRenderer {
-                path: PathBuf::from("/replays/a.wowsreplay"),
-                alts: vec![PathBuf::from("/replays/b.wowsreplay")],
-            }
-        );
+            "renderer": 7,
+        });
+        let renderer: WindowRequest = serde_json::from_value(sent.clone()).unwrap();
+        let WindowRequest::ReplayRenderer { path, .. } = &renderer else {
+            panic!("a renderer request reads as one: {renderer:?}");
+        };
+        assert_eq!(path, &PathBuf::from("/replays/a.wowsreplay"));
+        // The desktop runner hands the request on to the window as its launch parameter.
+        assert_eq!(serde_json::to_value(&renderer).unwrap(), sent);
         assert_eq!(renderer.kind(), WindowKind::ReplayRenderer);
         assert_eq!(renderer.title(), "a");
 

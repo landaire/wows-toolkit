@@ -193,7 +193,7 @@ function Content() {
           openPath={replayOpenPath()}
           openRequestId={replayOpenRequestId()}
           viewports={{
-            renderer: (path, alts, popOut) => <ReplayRendererView path={path} alts={alts} popOut={popOut}/>,
+            renderer: (path, alts, popOut) => <ReplayRendererView source={{ kind: "replay", path, alts }} popOut={popOut}/>,
             watched: (replayId) => <WatchedPlaybackView replayId={replayId}/>,
           }}
           onRenderMany={(paths, target) => {

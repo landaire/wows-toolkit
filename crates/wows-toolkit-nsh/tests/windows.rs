@@ -9,16 +9,21 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use nsh_core::Points;
 use nsh_core::Size;
 
 /// What the app asked its host for: each window request, and each release.
+/// While `hold` is set, window requests stay unanswered in `held`.
 #[derive(Default)]
 struct HostRecord {
     windows: Mutex<Vec<serde_json::Value>>,
     released: Mutex<u32>,
+    hold: AtomicBool,
+    held: Mutex<Vec<nsh_engine::HostCall>>,
 }
 
 /// The bundle running as one window, with what it asked its host for.
@@ -102,7 +107,11 @@ fn start(window: Option<serde_json::Value>) -> TestWindow {
     let asked = Arc::clone(&record);
     host.handle("shell.openWindow", move |call| {
         asked.windows.lock().unwrap().push(call.data().clone());
-        call.resolve(serde_json::Value::Null);
+        if asked.hold.load(Ordering::SeqCst) {
+            asked.held.lock().unwrap().push(call);
+        } else {
+            call.resolve(serde_json::Value::Null);
+        }
     });
     let released = Arc::clone(&record);
     host.handle("window.released", move |_call| *released.released.lock().unwrap() += 1);
@@ -160,21 +169,53 @@ fn the_board_window_draws_the_board_and_lets_it_go_on_close() {
     window.wait_until("the release", |record| *record.released.lock().unwrap() == 1);
 }
 
-/// Launched as a renderer's window, the bundle draws that replay's viewport
-/// and lets it go when the window closes.
+/// A docked renderer popped out asks for a window on its live viewport,
+/// which outlives the docked view; the window takes it up as it was and
+/// closes it when the window closes.
 #[test]
-fn a_renderer_window_draws_its_replay_and_lets_it_go_on_close() {
+fn a_popped_out_renderer_moves_its_live_viewport_into_its_window() {
+    const SAMPLE_TITLE: &str = "Shimakaze - Fault Line";
+    const FAILED: &str = "This replay could not be played back";
+
     let dir = tempfile::tempdir().expect("a temporary directory");
     let broken = dir.path().join("broken.wowsreplay");
     std::fs::write(&broken, b"not a replay").expect("the file is written");
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
 
-    let mut window =
-        start(Some(serde_json::json!({ "kind": "replayRenderer", "path": broken.to_str().unwrap(), "alts": [] })));
+    let request = {
+        let mut main = start(None);
+        main.on_pick_paths(vec![broken.clone()]).unwrap();
+        main.press("label:Open").unwrap();
+        main.press("Open Replay File...").unwrap();
+        main.wait_for(SAMPLE_TITLE).unwrap();
+        main.press("label:Actions").unwrap();
+        main.press("Render Replay").unwrap();
+        main.wait_for(FAILED).unwrap();
 
-    window.wait_for("This replay could not be played back").unwrap();
+        // A second press while the window is being opened asks for no second window.
+        main.record.hold.store(true, Ordering::SeqCst);
+        main.press("label:Open in its own window").unwrap();
+        main.wait_until("the window request", |record| !record.held.lock().unwrap().is_empty());
+        main.press("label:Open in its own window").unwrap();
+        main.settle();
+        assert_eq!(main.record.windows.lock().unwrap().len(), 1, "one viewport goes to one window");
+        for call in main.record.held.lock().unwrap().drain(..) {
+            call.resolve(serde_json::Value::Null);
+        }
+        main.wait_for_gone(FAILED, Duration::from_secs(5)).unwrap();
+        main.record.windows.lock().unwrap()[0].clone()
+    };
+    assert_eq!(request["kind"], "replayRenderer");
+    assert_eq!(request["path"], broken.to_str().unwrap());
+    let renderer = || serde_json::from_value(request["renderer"].clone()).expect("the request names a viewport");
+    assert!(wows_toolkit_nsh::ReplayRenderer::view(renderer()).is_ok(), "the docked view leaves the viewport open");
+
+    let mut window = start(Some(request.clone()));
+    window.wait_for(FAILED).unwrap();
     assert!(!window.screen().matches("Replay Inspector").unwrap(), "the main window's tabs are not drawn");
 
     window.send_host_event("window.closing", serde_json::Value::Null).unwrap();
-    window.wait_for_gone("This replay could not be played back", Duration::from_secs(5)).unwrap();
+    window.wait_for_gone(FAILED, Duration::from_secs(5)).unwrap();
     window.wait_until("the release", |record| *record.released.lock().unwrap() == 1);
+    assert!(wows_toolkit_nsh::ReplayRenderer::view(renderer()).is_err(), "the window closes the viewport");
 }

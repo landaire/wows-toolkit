@@ -25,6 +25,7 @@ use nsh_platform_linux as platform;
 use platform::gtk4 as gtk;
 use wows_toolkit_config::WindowKind;
 
+use crate::renderer::ReplayRenderer;
 use crate::shell::DEFAULT_ZOOM;
 use crate::shell::ZoomFactor;
 use crate::shell::window::WINDOW_PARAM;
@@ -141,8 +142,13 @@ fn open_secondary(desktop: &Desktop, request: WindowRequest) {
     // Read by the app as it starts, which `show` does.
     view.host().set_params(params);
     release_before_closing(&window, &view);
-    if request == WindowRequest::TacticsBoard {
-        *desktop.tactics.borrow_mut() = Some(window.downgrade());
+    match request {
+        WindowRequest::TacticsBoard => *desktop.tactics.borrow_mut() = Some(window.downgrade()),
+        // The window owns the viewport handed to it, including when it closes
+        // before its app took the viewport up.
+        WindowRequest::ReplayRenderer { renderer, .. } => {
+            window.connect_destroy(move |_| ReplayRenderer::close(renderer));
+        }
     }
     show(&window, view, desktop, kind);
 }

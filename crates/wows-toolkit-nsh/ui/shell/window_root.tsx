@@ -35,7 +35,7 @@ function WindowRoot(props: { request: WindowRequest }) {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <If when={!closing()}>
-        {request.kind === "tacticsBoard" ? <TacticsBoard/> : <ReplayRendererView path={request.path} alts={request.alts}/>}
+        {request.kind === "tacticsBoard" ? <TacticsBoard/> : <ReplayRendererView source={{ kind: "live", renderer: request.renderer }}/>}
       </If>
       <toast.ToastLayer/>
       <WarningDialog/>
