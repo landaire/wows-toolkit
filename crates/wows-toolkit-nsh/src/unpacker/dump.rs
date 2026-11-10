@@ -110,7 +110,7 @@ fn write_game_params(
     // from the shared cache when this build was decoded before.
     if format.is_minimal() {
         let params = wows_toolkit_replay_data::load::load_game_params(&source.vfs, source.build.0)
-            .map_err(|source_error| UnpackerError::DecodeParams { build: source.build.0, source: source_error })?;
+            .map_err(|source_error| UnpackerError::DecodeParams { build: source.build, source: source_error })?;
         game_params::write_value(&params, path, format)?;
         return Ok(());
     }
@@ -158,8 +158,8 @@ async fn pick_save(file_name: &str, filter: &str, extension: &str, title: &str, 
 
     match picked {
         Ok(path) => path,
-        Err(error) => {
-            tab.set_status(UnpackerError::Dialog { reason: error.to_string() }.to_string());
+        Err(reason) => {
+            tab.set_status(UnpackerError::Dialog { reason }.to_string());
             None
         }
     }

@@ -17,6 +17,12 @@ use super::error::UnpackerError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BuildNumber(pub u32);
 
+impl BuildNumber {
+    pub fn parse(text: &str) -> Result<Self, std::num::ParseIntError> {
+        text.parse().map(Self)
+    }
+}
+
 impl std::fmt::Display for BuildNumber {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -28,9 +34,9 @@ impl std::fmt::Display for BuildNumber {
 pub struct UnpackerSettings {
     /// The World of Warships install, absent until the user sets one.
     pub wows_dir: Option<PathBuf>,
-    /// Where extractions write; empty until the user picks one, which is
+    /// Where extractions write, absent until the user picks one, which is
     /// what keeps Extract disabled.
-    pub output_dir: String,
+    pub output_dir: Option<PathBuf>,
 }
 
 /// Reads the install and extraction directories. An unset or empty value
@@ -42,13 +48,17 @@ pub fn read_settings() -> Result<UnpackerSettings, UnpackerError> {
         .map(PathBuf::from);
     let output_dir = wows_toolkit_config::load_startup_setting::<String>(keys::OUTPUT_DIR)
         .map_err(|source| UnpackerError::ReadSetting { key: keys::OUTPUT_DIR, source })?
-        .unwrap_or_default();
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from);
 
     Ok(UnpackerSettings { wows_dir, output_dir })
 }
 
 /// Saves the extraction directory, shared with the other front ends.
-pub fn save_output_dir(output_dir: &str) -> Result<(), UnpackerError> {
+pub fn save_output_dir(output_dir: Option<&Path>) -> Result<(), UnpackerError> {
+    // The other front ends store an empty string for an unset directory.
+    let value = output_dir.map_or_else(String::new, |dir| dir.to_string_lossy().into_owned());
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -56,7 +66,7 @@ pub fn save_output_dir(output_dir: &str) -> Result<(), UnpackerError> {
 
     runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| UnpackerError::OpenDatabase { source })?;
-        wows_toolkit_config::queries::set_setting(&pool, keys::OUTPUT_DIR, &output_dir)
+        wows_toolkit_config::queries::set_setting(&pool, keys::OUTPUT_DIR, &value)
             .await
             .map_err(|source| UnpackerError::SaveSetting { key: keys::OUTPUT_DIR, source })
     })
@@ -79,7 +89,7 @@ pub fn list_builds(wows_dir: &Path) -> Result<Vec<BuildNumber>, UnpackerError> {
 /// app's package pane shows them.
 pub fn load_package_vfs(wows_dir: &Path, build: BuildNumber) -> Result<VfsPath, UnpackerError> {
     wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build.0, wowsunpack::game_data::AssetsBin::Overlay)
-        .map_err(|report| UnpackerError::LoadBuild { build: build.0, reason: report.to_string() })
+        .map_err(|report| UnpackerError::LoadBuild { build, source: report.into() })
 }
 
 #[cfg(test)]

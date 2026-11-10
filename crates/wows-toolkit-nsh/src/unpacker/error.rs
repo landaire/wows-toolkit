@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
+use wows_toolkit_viewmodel::unpacker::assets_bin::AssetsBinError;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractError;
 use wows_toolkit_viewmodel::unpacker::game_params::GameParamsDumpError;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerError;
+
+use super::load::BuildNumber;
 
 /// Why an Unpacker action could not finish.
 #[derive(Debug, thiserror::Error)]
@@ -35,15 +38,26 @@ pub enum UnpackerError {
         #[source]
         source: wowsunpack::error::GameDataError,
     },
-    #[error("could not load build {build}: {reason}")]
-    LoadBuild { build: u32, reason: String },
+    #[error("could not load build {build}: {source}")]
+    LoadBuild {
+        build: BuildNumber,
+        /// The `rootcause` report `wowsunpack` returns, boxed: this crate
+        /// does not depend on `rootcause`.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error(transparent)]
+    AssetsBin(#[from] AssetsBinError),
     #[error("the background task stopped before it finished")]
     Task {
         #[source]
         source: tokio::task::JoinError,
     },
+    /// nsh reports a dialog failure as text only.
     #[error("could not show the file dialog: {reason}")]
     Dialog { reason: String },
+    #[error("the search query {query:?} could not be compiled")]
+    SearchQuery { query: String },
     #[error(transparent)]
     Viewer(#[from] ViewerError),
     #[error(transparent)]
@@ -52,7 +66,7 @@ pub enum UnpackerError {
     GameParams(#[from] GameParamsDumpError),
     #[error("could not decode the parameters of build {build}")]
     DecodeParams {
-        build: u32,
+        build: BuildNumber,
         #[source]
         source: wows_toolkit_replay_data::error::ReplayLoadError,
     },

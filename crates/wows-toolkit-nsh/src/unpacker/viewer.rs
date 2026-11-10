@@ -8,6 +8,7 @@ use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 use wows_toolkit_viewmodel::unpacker::viewer::highlight_language;
 
 use super::Tab;
+use super::listing::extension;
 use super::ui::caption;
 use super::ui::class;
 use super::ui::status;
@@ -20,11 +21,10 @@ pub struct ViewerDocument {
 
 /// The MIME type an image's `data:` URI names, by extension.
 fn image_mime(title: &str) -> &'static str {
-    let extension = title.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "svg" => "image/svg+xml",
+    match extension(title).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("svg") => "image/svg+xml",
         _ => "application/octet-stream",
     }
 }
@@ -39,6 +39,7 @@ pub fn viewer_view(document: &ViewerDocument, tab: Tab) -> AnyElement {
             .app_class(class("flex-1 min-h-0"))
             .accessibility_label(document.title.clone())
             .value(SharedString::from(text.clone()))
+            // A language the editor does not highlight shows as plain text.
             .language(SharedString::from(highlight_language(extension).unwrap_or("text")))
             .read_only(true)
             .line_numbers(true)
@@ -56,12 +57,13 @@ pub fn viewer_view(document: &ViewerDocument, tab: Tab) -> AnyElement {
 fn image_view(title: &str, bytes: &[u8], tab: Tab) -> AnyElement {
     let source = format!("data:{};base64,{}", image_mime(title), base64::engine::general_purpose::STANDARD.encode(bytes));
     let failure = signal(None::<String>);
-    let size = signal(None::<(f32, f32)>);
+    let size = signal(None::<Size<DevicePixels>>);
 
     view()
         .app_class(class("flex-1 min-h-0"))
         .child(when(
             move || failure.with(Option::is_some),
+            // Built only once a failure is set, so the reason is present.
             move || status(tab.text_with("ui.unpacker.image_decode_failed", &[("reason", &failure.get().unwrap_or_default())])),
         ))
         .child(when(
@@ -73,12 +75,10 @@ fn image_view(title: &str, bytes: &[u8], tab: Tab) -> AnyElement {
                         image(source)
                             .label(tab.text("ui.unpacker.view_contents"))
                             .style_with(move |style| match size.get() {
-                                Some((width, height)) => style.w(px(width)).h(px(height)),
+                                Some(size) => style.w(px(size.width.0 as f32)).h(px(size.height.0 as f32)),
                                 None => style,
                             })
-                            .on_load(move |loaded: &Size<DevicePixels>| {
-                                size.set(Some((loaded.width.0 as f32, loaded.height.0 as f32)));
-                            })
+                            .on_load(move |loaded: &Size<DevicePixels>| size.set(Some(*loaded)))
                             .on_error(move |reason: &str| failure.set(Some(reason.to_owned()))),
                     ),
                 )

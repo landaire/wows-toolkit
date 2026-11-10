@@ -20,6 +20,7 @@ use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 use wowsunpack::vfs::VfsPath;
 
 use super::Tab;
+use super::error::UnpackerError;
 use super::listing::BrowserSource;
 use super::listing::Glyph;
 use super::listing::PaneState;
@@ -98,8 +99,8 @@ impl BrowserPane {
         self.state.set(PaneState::Loading);
     }
 
-    pub fn set_failed(&self, reason: String) {
-        self.state.set(PaneState::Failed(reason));
+    pub fn set_failed(&self, error: Shared<UnpackerError>) {
+        self.state.set(PaneState::Failed(error));
     }
 
     /// Adopts a walked VFS. The selection and the filter are cleared with
@@ -161,7 +162,8 @@ pub fn browser_view(pane: BrowserPane, tab: Tab) -> AnyElement {
                 BrowserSource::Pkg => tab.text("ui.replay.loading"),
                 BrowserSource::AssetsBin => tab.text("ui.unpacker.loading_assets"),
             },
-            PaneState::Failed(reason) => tab.text_with("ui.unpacker.load_failed", &[("error", reason)]),
+            PaneState::Failed(error) => tab.text_with("ui.unpacker.load_failed", &[("error", &**error)]),
+            // The status line is hidden while the listing shows.
             PaneState::Ready(_) => String::new(),
         })
     };
@@ -328,6 +330,8 @@ fn listing_row(pane: BrowserPane, tab: Tab, at: Position) -> AnyElement {
             })
         })
     });
+    // A row past the end, while the list catches up with a shorter listing,
+    // shows blank.
     let field = move |read: fn(&RowData) -> String| move || data.with(|row| row.as_ref().map(read).unwrap_or_default());
     let is_dir = move || data.with(|row| row.as_ref().is_some_and(|row| row.is_dir));
     let path = move || data.with_untracked(|row| row.as_ref().map(|row| row.path.clone()));
@@ -381,6 +385,7 @@ fn listing_row(pane: BrowserPane, tab: Tab, at: Position) -> AnyElement {
         )
         .child(text(field(|row| row.label.clone())).app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")))
         .child(
+            // A directory has no size to show.
             text(field(|row| row.size.map(byte_size).unwrap_or_default()))
                 .app_class(class("w-24 text-xs text-muted-foreground")),
         )

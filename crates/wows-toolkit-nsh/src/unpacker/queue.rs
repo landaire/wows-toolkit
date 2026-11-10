@@ -1,7 +1,7 @@
 //! The extraction queue: its contents, the destination, and the run that
 //! writes them out, as the GPUI queue panel shows them.
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -22,6 +22,7 @@ use wowsunpack::vfs::VfsPath;
 
 use super::Tab;
 use super::error::UnpackerError;
+use super::listing::Shared;
 use super::load::save_output_dir;
 use super::ui::ButtonStyle;
 use super::ui::button;
@@ -49,7 +50,7 @@ pub enum ExtractState {
     /// Expanding the queue's directories; the file count is not known yet.
     Counting,
     Running(ExtractProgress),
-    Failed(String),
+    Failed(Shared<UnpackerError>),
     /// Finished or cancelled, with what actually reached disk.
     Done(ExtractOutcome),
 }
@@ -66,7 +67,7 @@ pub struct QueueState {
     pub queued: Signal<Queued>,
     pub extract: Signal<ExtractState>,
     /// The saved destination, shared with the other front ends.
-    pub output_dir: Signal<String>,
+    pub output_dir: Signal<Option<PathBuf>>,
     /// The destination as typed, saved on Enter or blur so a half-typed
     /// path never reaches the database.
     pub output_dir_input: Signal<String>,
@@ -81,7 +82,7 @@ impl QueueState {
         Self {
             queued: signal(Queued::default()),
             extract: signal(ExtractState::Idle),
-            output_dir: signal(String::new()),
+            output_dir: signal(None),
             output_dir_input: signal(String::new()),
             prototypes: signal(PrototypeOutput::Raw),
             stop_flag: stored(Arc::new(AtomicBool::new(false))),
@@ -124,19 +125,21 @@ impl QueueState {
     }
 
     /// Adopts the saved destination and seeds the field with it.
-    pub fn set_output_dir(&self, output_dir: String) {
-        self.output_dir_input.set(output_dir.clone());
+    pub fn set_output_dir(&self, output_dir: Option<PathBuf>) {
+        // No destination: the field is blank.
+        let text = output_dir.as_deref().map(|dir| dir.display().to_string()).unwrap_or_default();
+        self.output_dir_input.set(text);
         self.output_dir.set(output_dir);
     }
 
-    fn store_output_dir(&self, output_dir: String, tab: Tab) {
-        if self.output_dir.get_untracked() == output_dir {
+    fn store_output_dir(&self, output_dir: Option<PathBuf>, tab: Tab) {
+        if self.output_dir.with_untracked(|saved| *saved == output_dir) {
             return;
         }
 
         self.output_dir.set(output_dir.clone());
         spawn(async move {
-            let saved = blocking(move || save_output_dir(&output_dir))
+            let saved = blocking(move || save_output_dir(output_dir.as_deref()))
                 .await
                 .map_err(|source| UnpackerError::Task { source })
                 .and_then(|saved| saved);
@@ -154,7 +157,9 @@ impl QueueState {
                 "ui.unpacker.extracting",
                 &[("done", &progress.written), ("total", &progress.total)],
             )),
-            ExtractState::Failed(reason) => Some(tab.text_with("ui.unpacker.extract_failed", &[("reason", reason)])),
+            ExtractState::Failed(error) => {
+                Some(tab.text_with("ui.unpacker.extract_failed", &[("reason", &**error)]))
+            }
             ExtractState::Done(ExtractOutcome::Completed { written }) => {
                 Some(tab.text_with("ui.unpacker.extracted", &[("count", written)]))
             }
@@ -169,12 +174,14 @@ impl QueueState {
     fn start(&self) {
         let busy = self.extract.with_untracked(ExtractState::is_busy);
         let empty = self.queued.with_untracked(|queued| queued.0.is_empty());
-        let output_dir = self.output_dir.get_untracked();
-        if busy || empty || output_dir.is_empty() {
+        if busy || empty {
             return;
         }
+        let Some(output_dir) = self.output_dir.get_untracked() else {
+            return;
+        };
 
-        let output_dir = extract_root(Path::new(&output_dir));
+        let output_dir = extract_root(&output_dir);
         let queued = self.queued.with_untracked(|queued| queued.0.entries().to_vec());
         let prototypes = self.prototypes.get_untracked();
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -213,7 +220,7 @@ impl QueueState {
                 .and_then(|outcome| outcome.map_err(UnpackerError::from));
             extract.set(match outcome {
                 Ok(outcome) => ExtractState::Done(outcome),
-                Err(error) => ExtractState::Failed(error.to_string()),
+                Err(error) => ExtractState::Failed(Shared::new(error)),
             });
         });
     }
@@ -229,13 +236,13 @@ impl QueueState {
             match picked {
                 Ok(Some(mut paths)) => {
                     if let Some(path) = paths.pop() {
-                        let path = path.display().to_string();
-                        queue.output_dir_input.set(path.clone());
-                        queue.store_output_dir(path, tab);
+                        queue.output_dir_input.set(path.display().to_string());
+                        queue.store_output_dir(Some(path), tab);
                     }
                 }
+                // Cancelled: the destination stays as it was.
                 Ok(None) => {}
-                Err(error) => tab.set_status(UnpackerError::Dialog { reason: error.to_string() }.to_string()),
+                Err(reason) => tab.set_status(UnpackerError::Dialog { reason }.to_string()),
             }
         });
     }
@@ -258,8 +265,11 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
                         tab.text("ui.unpacker.output_dir_hint"),
                         tab.text("ui.unpacker.extraction_output"),
                     )
-                    .on_submit(move |value: &str| queue.store_output_dir(value.trim().to_owned(), tab))
-                    .on_blur(move || queue.store_output_dir(queue.output_dir_input.get_untracked().trim().to_owned(), tab))
+                    .on_submit(move |value: &str| queue.store_output_dir(parse_output_dir(value), tab))
+                    .on_blur(move || {
+                        let output_dir = queue.output_dir_input.with_untracked(|value| parse_output_dir(value));
+                        queue.store_output_dir(output_dir, tab);
+                    })
                     .app_class(class(
                         "flex-1 min-w-0 min-h-7 px-2 rounded-(--radius) border border-input bg-background text-xs \
                          text-foreground",
@@ -317,7 +327,7 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
         1 => tab.text("ui.unpacker.extract_one"),
         count => tab.text_with("ui.unpacker.extract_many", &[("count", &count)]),
     };
-    let no_destination = move || queue.output_dir.with(String::is_empty);
+    let no_destination = move || queue.output_dir.with(Option::is_none);
 
     let run = view()
         .app_class(class("gap-1 px-2 py-2 border-t border-border"))
@@ -345,6 +355,7 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
         .child(
             view()
                 .app_class(class("h-4"))
+                // Idle: the line is blank but keeps its place.
                 .child(caption(move || queue.status(tab).unwrap_or_default()).accessible(true).role(AccessibilityRole::Alert)),
         )
         // Both slots are always there, empty while nothing is being
@@ -387,6 +398,8 @@ fn queue_row(queue: QueueState, tab: Tab, at: Position) -> AnyElement {
     let entry = computed(move || queue.queued.with(|queued| queued.0.entries().get(at.index()).cloned()));
     let label = move || {
         entry.with(|entry| {
+            // A row past the end, while the list catches up with a shorter
+            // queue, shows blank.
             entry.as_ref().map(|entry| format!("res/{}", entry.as_str().trim_start_matches('/'))).unwrap_or_default()
         })
     };
@@ -405,4 +418,11 @@ fn queue_row(queue: QueueState, tab: Tab, at: Position) -> AnyElement {
                 }),
         )
         .into_element()
+}
+
+/// The directory a typed destination names; a blank field names none.
+fn parse_output_dir(text: &str) -> Option<PathBuf> {
+    let text = text.trim();
+
+    (!text.is_empty()).then(|| PathBuf::from(text))
 }

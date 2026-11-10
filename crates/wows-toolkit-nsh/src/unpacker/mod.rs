@@ -46,6 +46,7 @@ use self::browser::browser_view;
 use self::dump::DumpSource;
 use self::error::UnpackerError;
 use self::listing::BrowserSource;
+use self::listing::Shared;
 use self::listing::Walked;
 use self::load::BuildNumber;
 use self::load::UnpackerSettings;
@@ -65,10 +66,10 @@ use self::viewer::viewer_view;
 const QUEUE_PANEL: &str = "queue";
 
 /// How wide the queue dock opens beside the listing.
-const QUEUE_DOCK_WIDTH: f32 = 320.0;
+const QUEUE_DOCK_WIDTH: Points = px(320.0);
 
 /// How tall the search dock opens below the listing.
-const SEARCH_DOCK_HEIGHT: f32 = 260.0;
+const SEARCH_DOCK_HEIGHT: Points = px(260.0);
 
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct UnpackerProps {
@@ -83,7 +84,7 @@ pub struct UnpackerProps {
 /// A panel opened from a listing or a search.
 #[derive(Clone)]
 struct OpenedPanel {
-    id: String,
+    id: PanelId,
     title: String,
     content: OpenedContent,
 }
@@ -92,6 +93,16 @@ struct OpenedPanel {
 enum OpenedContent {
     Viewer(Rc<ViewerDocument>),
     Search(SearchRun),
+}
+
+/// Which build-load request a result answers, so a stale one is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoadGeneration(u64);
+
+impl LoadGeneration {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
 }
 
 /// The tab's state and what acts on it. `Copy`: handles only, so every
@@ -105,8 +116,7 @@ pub struct Tab {
     builds: Signal<Vec<BuildNumber>>,
     selected_build: Signal<Option<BuildNumber>>,
     loaded_source: Stored<Option<(PathBuf, BuildNumber)>>,
-    /// Bumped per build-load request so a stale result is dropped.
-    load_generation: Stored<u64>,
+    load_generation: Stored<LoadGeneration>,
     /// The loaded build's package VFS, for the GameParams export.
     dump_source: Signal<Option<DumpSource>>,
     /// What the last export or failed action did, beside the export menu.
@@ -121,14 +131,14 @@ pub struct Tab {
 }
 
 impl Tab {
-    fn new(locale: &str) -> Self {
+    fn new(locale: Option<&str>) -> Self {
         Self {
             text: stored(Text::new(locale)),
             wows_dir: stored(None),
             builds: signal(Vec::new()),
             selected_build: signal(None),
             loaded_source: stored(None),
-            load_generation: stored(0),
+            load_generation: stored(LoadGeneration(0)),
             dump_source: signal_with(None, SignalEquals::Never),
             status: signal(None),
             pkg: BrowserPane::new(BrowserSource::Pkg),
@@ -153,6 +163,8 @@ impl Tab {
         self.status.set(Some(status));
     }
 
+    /// Empty until an action reports: the caption beside the export menu
+    /// shows nothing.
     pub fn status_text(&self) -> String {
         self.status.get().unwrap_or_default()
     }
@@ -244,8 +256,9 @@ impl Tab {
             let builds = match listed {
                 Ok(builds) => builds,
                 Err(error) => {
-                    tab.pkg.set_failed(error.to_string());
-                    tab.assets.set_failed(error.to_string());
+                    let error = Shared::new(error);
+                    tab.pkg.set_failed(Shared::clone(&error));
+                    tab.assets.set_failed(error);
                     Vec::new()
                 }
             };
@@ -277,7 +290,7 @@ impl Tab {
         self.loaded_source.replace(Some((dir.clone(), build)));
 
         let generation = self.load_generation.with(|generation| {
-            *generation = generation.wrapping_add(1);
+            *generation = generation.next();
             *generation
         });
         self.dump_source.set(None);
@@ -305,35 +318,36 @@ impl Tab {
                     vfs
                 }
                 Err(error) => {
-                    tab.pkg.set_failed(error.to_string());
-                    tab.assets.set_failed(error.to_string());
+                    let error = Shared::new(error);
+                    tab.pkg.set_failed(Shared::clone(&error));
+                    tab.assets.set_failed(error);
                     return;
                 }
             };
 
             let opened = blocking(move || assets_bin::open(&package_vfs).map(Walked::walk))
                 .await
-                .map_err(|source| UnpackerError::Task { source });
+                .map_err(|source| UnpackerError::Task { source })
+                .and_then(|opened| opened.map_err(UnpackerError::from));
             if tab.load_generation.get() != generation {
                 return;
             }
 
             match opened {
-                Ok(Ok(walked)) => tab.assets.set_ready(walked),
-                Ok(Err(error)) => tab.assets.set_failed(error.to_string()),
-                Err(error) => tab.assets.set_failed(error.to_string()),
+                Ok(walked) => tab.assets.set_ready(walked),
+                Err(error) => tab.assets.set_failed(Shared::new(error)),
             }
         });
     }
 
-    fn add_panel(&self, title: String, content: OpenedContent, placement: DockPlacement, size: Option<f32>) {
+    fn add_panel(&self, title: String, content: OpenedContent, placement: DockPlacement, size: Option<Points>) {
         let id = self.next_panel.with(|next| {
             *next += 1;
-            format!("opened-{next}")
+            PanelId::from(format!("opened-{next}"))
         });
         self.opened.with(|opened| opened.push(OpenedPanel { id: id.clone(), title, content }));
         self.with_dock(|dock| {
-            dock.add_panel(PanelId::from(id.clone()), Some(placement), size.map(px));
+            dock.add_panel(id, Some(placement), size);
             if placement != DockPlacement::Center {
                 dock.set_dock_open(placement, true);
             }
@@ -381,12 +395,12 @@ impl Tab {
         };
         let path_filter = pane.path_filter.get_untracked().trim().to_owned();
 
-        match SearchRun::start(pane.source, query.clone(), path_filter, files) {
-            Some(run) => {
+        match SearchRun::start(pane.source, query, path_filter, files) {
+            Ok(run) => {
                 let title = run.title(*self);
                 self.add_panel(title, OpenedContent::Search(run), DockPlacement::Bottom, Some(SEARCH_DOCK_HEIGHT));
             }
-            None => self.set_status(format!("the search query {query:?} could not be compiled")),
+            Err(error) => self.set_status(error.to_string()),
         }
     }
 
@@ -398,7 +412,7 @@ impl Tab {
 
     fn panel_removed(&self, id: &PanelId) {
         self.opened.with(|opened| {
-            let Some(at) = opened.iter().position(|panel| panel.id == id.as_str()) else {
+            let Some(at) = opened.iter().position(|panel| panel.id == *id) else {
                 return;
             };
             let panel = opened.remove(at);
@@ -411,24 +425,26 @@ impl Tab {
         });
     }
 
-    fn opened_panel(&self, id: &str) -> Option<OpenedPanel> {
-        self.opened.with(|opened| opened.iter().find(|panel| panel.id == id).cloned())
+    fn opened_panel(&self, id: &PanelId) -> Option<OpenedPanel> {
+        self.opened.with(|opened| opened.iter().find(|panel| panel.id == *id).cloned())
     }
 
-    fn panel_title(&self, id: &str) -> String {
-        match id {
+    fn panel_title(&self, id: &PanelId) -> String {
+        match id.as_str() {
             QUEUE_PANEL => self.text("ui.unpacker.extraction_queue"),
-            _ if id == BrowserSource::Pkg.panel_id() => self.text(BrowserSource::Pkg.title_key()),
-            _ if id == BrowserSource::AssetsBin.panel_id() => self.text(BrowserSource::AssetsBin.title_key()),
+            key if key == BrowserSource::Pkg.panel_id() => self.text(BrowserSource::Pkg.title_key()),
+            key if key == BrowserSource::AssetsBin.panel_id() => self.text(BrowserSource::AssetsBin.title_key()),
+            // A layout naming a panel this session never opened: its tab
+            // has no title to show.
             _ => self.opened_panel(id).map(|panel| panel.title).unwrap_or_default(),
         }
     }
 
-    fn render_panel(&self, id: &str) -> AnyElement {
-        match id {
+    fn render_panel(&self, id: &PanelId) -> AnyElement {
+        match id.as_str() {
             QUEUE_PANEL => queue_view(self.queue, *self),
-            _ if id == BrowserSource::Pkg.panel_id() => browser_view(self.pkg, *self),
-            _ if id == BrowserSource::AssetsBin.panel_id() => browser_view(self.assets, *self),
+            key if key == BrowserSource::Pkg.panel_id() => browser_view(self.pkg, *self),
+            key if key == BrowserSource::AssetsBin.panel_id() => browser_view(self.assets, *self),
             _ => match self.opened_panel(id).map(|panel| panel.content) {
                 Some(OpenedContent::Viewer(document)) => viewer_view(&document, *self),
                 Some(OpenedContent::Search(run)) => search_view(run, *self),
@@ -441,7 +457,7 @@ impl Tab {
 
     fn render_tab(&self, dock_tab: &DockTab) -> AnyElement {
         let tab = *self;
-        let title = self.panel_title(dock_tab.panel.as_str());
+        let title = self.panel_title(&dock_tab.panel);
         let panel = dock_tab.panel.clone();
         let close = dock_tab.closable.then(|| {
             button("x", ButtonStyle::Ghost)
@@ -484,11 +500,13 @@ impl Tab {
         })
     }
 
+    /// Selects the build a selector item names. Every item is a build this
+    /// tab listed, so only a cleared selection names none.
     fn select_build_value(&self, value: &Option<SharedString>) {
-        let Some(build) = value.as_ref().and_then(|value| value.parse::<u32>().ok()) else {
+        let Some(build) = value.as_deref().and_then(|value| BuildNumber::parse(value).ok()) else {
             return;
         };
-        self.select_build(BuildNumber(build));
+        self.select_build(build);
     }
 }
 
@@ -505,7 +523,7 @@ fn placement_name(placement: DockPlacement) -> &'static str {
 /// showing, and the queue in the right dock.
 fn initial_layout() -> DockAreaLayout {
     let mut queue = DockRegion::new(DockLayout::tabs().panel(QUEUE_PANEL));
-    queue.size = Some(px(QUEUE_DOCK_WIDTH));
+    queue.size = Some(QUEUE_DOCK_WIDTH);
 
     DockAreaLayout::new(
         DockLayout::tabs()
@@ -530,8 +548,8 @@ fn fixed_panels() -> Vec<DockPanelOptions> {
 
 #[component]
 pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
-    let locale = props.locale.get_untracked().map_or_else(|| "en".to_owned(), |locale| locale.to_string());
-    let tab = Tab::new(&locale);
+    let locale = props.locale.get_untracked();
+    let tab = Tab::new(locale.as_deref());
 
     effect(move || {
         if props.active.get() {
@@ -582,7 +600,7 @@ pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
         .group_class("flex-1 min-h-0 bg-background")
         .dock_class("bg-background border-border")
         .handle_class("bg-border")
-        .render_panel(move |panel: &DockPanel| tab.render_panel(panel.id.as_str()))
+        .render_panel(move |panel: &DockPanel| tab.render_panel(&panel.id))
         .render_tab(move |dock_tab: &DockTab| tab.render_tab(dock_tab))
         .render_dock(move |info: &DockInfo| tab.render_dock(info))
         .on_layout_change(move |next: &DockAreaLayout| tab.layout.set(next.clone()))
