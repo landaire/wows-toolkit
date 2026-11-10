@@ -11,9 +11,12 @@ pub mod error;
 pub mod http;
 pub mod links;
 pub mod load;
+pub mod minimap;
 pub mod model;
 pub mod personal_rating;
+pub mod playback;
 pub mod profiling;
+pub mod render_defaults;
 pub mod replay_index;
 pub mod shareable;
 #[cfg(any(test, feature = "test-support"))]

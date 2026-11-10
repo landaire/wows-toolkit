@@ -9,6 +9,7 @@ buildscript = workspace_buildscript(
 )
 
 REPLAY_DATA_COMMON_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
@@ -16,10 +17,13 @@ REPLAY_DATA_COMMON_DEPS = [
     "//crates/wowsunpack:wowsunpack",
     "//third-party/rust:escaper",
     "//third-party/rust:gettext",
+    "//third-party/rust:image",
     "//third-party/rust:jiff",
     "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
     "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",
+    "//third-party/rust:tempfile",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
@@ -68,6 +72,5 @@ workspace_test(
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
     test_deps = [
         "//third-party/rust:filetime",
-        "//third-party/rust:tempfile",
     ],
 )
