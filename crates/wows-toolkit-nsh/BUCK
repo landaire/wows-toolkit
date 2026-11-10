@@ -10,7 +10,7 @@ genrule(
     name = "nsh_ui_bundle",
     srcs = glob(["ui/**"]),
     out = "bundle.js",
-    cmd = "$(exe //build-support/nsh-bundle:nsh_bundle) $SRCDIR/ui/App.tsx $OUT",
+    cmd = "$(exe //build-support/nsh-bundle:nsh_bundle) $SRCDIR/ui/main.tsx $OUT",
     visibility = ["//crates/wows-toolkit-nsh-app/..."],
 )
 

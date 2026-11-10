@@ -3,6 +3,7 @@
 
 mod error;
 pub mod logging;
+pub(crate) mod look;
 mod services;
 pub(crate) mod settings;
 mod theme;

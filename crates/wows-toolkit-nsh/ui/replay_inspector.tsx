@@ -23,11 +23,12 @@ import {
   type GameDataSnapshot,
   type ReplaySummary,
 } from "wows-toolkit/native";
-import { Button, MenuRow, Surface } from "./components";
+import { Button, errorMessage, MenuRow, Surface } from "./components";
 import { t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting } from "./settings_store";
 import { debugMode } from "./shell/status";
 import * as toast from "./shell/toast";
+import { popOutRenderer } from "./shell/windows";
 import { colors, controlRadius, semantic } from "./theme";
 
 type Grouping = "date" | "ship" | "none";
@@ -87,9 +88,12 @@ type Workspace = {
 
 export type RenderRequest = { path: string; alts: string[] };
 
-/** What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays. */
+/**
+ * What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays.
+ * `popOut` moves a renderer into a window of its own.
+ */
 export type ViewportSlots = {
-  renderer: (path: string, alts: string[]) => JSX.Element;
+  renderer: (path: string, alts: string[], popOut: () => void) => JSX.Element;
   watched: (replayId: string) => JSX.Element;
 };
 
@@ -1151,6 +1155,14 @@ function ReplayPanel(props: { ws: Workspace; id: string; onRender?: (request: Re
   );
 }
 
+/** Moves a docked renderer into a window of its own; it stays docked when the window could not be opened. */
+function popOutViewport(ws: Workspace, id: string, path: string, alts: string[]) {
+  popOutRenderer(path, alts).then(
+    () => closeTab(ws, id),
+    (error) => console.warn(`replay renderer: the window could not be opened: ${errorMessage(error)}`),
+  );
+}
+
 function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) => void; viewports?: ViewportSlots }) {
   const ws = props.ws;
   return (
@@ -1167,7 +1179,9 @@ function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) 
         if (viewport && props.viewports) {
           return (
             <View style={{ flex: 1, minHeight: 0 }}>
-              {viewport.kind === "renderer" ? props.viewports.renderer(viewport.path, viewport.alts) : props.viewports.watched(viewport.replayId)}
+              {viewport.kind === "renderer"
+                ? props.viewports.renderer(viewport.path, viewport.alts, () => popOutViewport(ws, panel.id, viewport.path, viewport.alts))
+                : props.viewports.watched(viewport.replayId)}
             </View>
           );
         }

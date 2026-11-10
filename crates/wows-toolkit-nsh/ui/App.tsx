@@ -23,7 +23,7 @@ import { activateStats, openDirectoryStats, StatsView } from "./stats";
 import { activatePlayerTracker, PlayerTrackerView, setPlayerTrackerShown } from "./player_tracker";
 import { bindSearchRowActions, bindSearchTab, searchFor, SearchView } from "./search";
 import { bindPalette, CommandPalette, openPalette } from "./palette";
-import { openTacticsBoard, TacticsBoard } from "./tactics";
+import { openTacticsWindow } from "./shell/windows";
 import { UnpackerView } from "./unpacker";
 import { BatchRenderStatus, followForcedWindows, MinimapPreview, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
 import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
@@ -163,7 +163,7 @@ bindPalette({
     },
     setTheme: ({ theme }) => setTheme(theme),
     viewArmor: ({ paramIndex, displayName }) => viewArmorShip(paramIndex, displayName),
-    tacticsBoard: openTacticsBoard,
+    tacticsBoard: openTacticsWindow,
     checkUpdates: () => void checkForUpdate("byHand"),
     about: openAbout,
   },
@@ -180,7 +180,7 @@ function Content() {
           openPath={replayOpenPath()}
           openRequestId={replayOpenRequestId()}
           viewports={{
-            renderer: (path, alts) => <ReplayRendererView path={path} alts={alts}/>,
+            renderer: (path, alts, popOut) => <ReplayRendererView path={path} alts={alts} popOut={popOut}/>,
             watched: (replayId) => <WatchedPlaybackView replayId={replayId}/>,
           }}
           onRenderMany={(paths, target) => {
@@ -189,7 +189,7 @@ function Content() {
             });
           }}
           previewSlot={(path) => <MinimapPreview path={path}/>}
-          sessionControl={() => <SessionButton onOpenTacticsBoard={openTacticsBoard} onWatchSharedWindow={(window) => watchWindow(window.replayId)}/>}
+          sessionControl={() => <SessionButton onOpenTacticsBoard={openTacticsWindow} onWatchSharedWindow={(window) => watchWindow(window.replayId)}/>}
           onDirectoryStats={(path) => {
             selectTab("statistics");
             void openDirectoryStats(path);
@@ -237,7 +237,7 @@ function App() {
         active={activeTab()}
         attention={(id) => id === "settings" && wowsDirInvalid()}
         onSelect={selectTab}
-        menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsBoard}/>}
+        menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsWindow}/>}
       />
       <View style={{ flex: 1, minHeight: 0 }}><Content/></View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}>
@@ -254,7 +254,6 @@ function App() {
       <UpdateDialog/>
       <CrashDialog/>
       <FirstRunDialog/>
-      <TacticsBoard title={startup.text.tacticsBoard}/>
       <CommandPalette/>
     </View>
   );

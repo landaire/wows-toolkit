@@ -765,9 +765,10 @@ fn top_level_navigation_and_application_menu_work() {
 
     app.press("label:Open application menu").unwrap();
     app.press("Tactics Board").unwrap();
-    app.wait_for("label:Ranges").unwrap();
-    app.press("Close").unwrap();
-    app.wait_for_gone("label:Ranges", std::time::Duration::from_secs(5)).unwrap();
+    // The board opens in a window of its own, which only the desktop runner
+    // makes; without it the request fails and says so.
+    app.wait_for("The tactics board window could not be opened").unwrap();
+    assert!(!app.screen().matches("label:Ranges").unwrap(), "the board is not drawn in the main window");
 }
 
 #[test]

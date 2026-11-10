@@ -1,16 +1,15 @@
 import type { JSX } from "nsh";
-import { Image, keymap, Scroll, signal, Text, View } from "nsh";
-import { Button as BaseButton, Checkbox, Combobox, Dialog, Input, Popover, Tooltip } from "nsh/base";
+import { cleanup, Image, keymap, Scroll, signal, Text, View } from "nsh";
+import { Button as BaseButton, Checkbox, Combobox, Input, Popover, Tooltip } from "nsh/base";
 import { Menu } from "nsh/desktop";
 import { Tactics, type RangeName, type TacticsView, type ToolName } from "wows-toolkit/native";
-import { Button, Surface } from "./components";
+import { Surface } from "./components";
 import { Frame } from "./frame";
 import { t } from "./i18n";
 import { colors, controlRadius } from "./theme";
 
 const SURFACE = "tactics-board";
 
-const boardOpen = signal(false);
 const board = signal<TacticsView | null>(null);
 const boardError = signal<string | null>(null);
 const notice = signal<string | null>(null);
@@ -100,8 +99,7 @@ async function follow() {
   }
 }
 
-export function openTacticsBoard() {
-  boardOpen.set(true);
+function openBoard() {
   boardError.set(null);
   void Tactics.open()
     .then((view) => {
@@ -109,11 +107,6 @@ export function openTacticsBoard() {
       void follow();
     })
     .catch((error) => boardError.set(t("ui.tactics.open_failed", { error: errorMessage(error) })));
-}
-
-function closeTacticsBoard() {
-  Tactics.close();
-  boardOpen.set(false);
 }
 
 function Divider() {
@@ -617,38 +610,25 @@ function BoardKeys() {
   return <View/>;
 }
 
-export function TacticsBoard(props: { title: string }) {
+/** The board, filling the window it was opened in; it closes with the view. */
+export function TacticsBoard() {
+  openBoard();
+  cleanup(() => Tactics.close());
   return (
-    <Dialog
-      open={boardOpen()}
-      closeOnEscape={false}
-      animation="fade"
-      onOpenChange={({ open }) => {
-        if (!open) closeTacticsBoard();
-      }}
-      style={{ flex: 1, backgroundColor: colors.background }}
-    >
-      <View style={{ flex: 1, minHeight: 0 }}>
-        <BoardKeys/>
-        <View style={{ minHeight: 40, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card }}>
-          <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.foreground }}>
-            {board()?.map ? `${props.title}: ${board()!.map!.title}` : props.title}
-          </Text>
-          <Button label={t("ui.armor.export.close_button")} variant="ghost" onPress={closeTacticsBoard}/>
-        </View>
-        <If when={boardError()}>
-          <Text style={{ padding: 12, fontSize: 13, color: colors.destructive }}>{boardError()}</Text>
-        </If>
-        <If when={board()} else={<Text style={{ padding: 18, fontSize: 13, color: colors.mutedForeground }}>{t("ui.tactics.opening")}</Text>}>
-          <Toolbar view={board()!}/>
-          <MapArea view={board()!}/>
-        </If>
-        <If when={notice()}>
-          <Surface style={{ position: "absolute", right: 16, bottom: 16, minWidth: 260, maxWidth: 420, padding: 12, backgroundColor: colors.popover }}>
-            <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{notice()}</Text>
-          </Surface>
-        </If>
-      </View>
-    </Dialog>
+    <View style={{ flex: 1, minHeight: 0, backgroundColor: colors.background }}>
+      <BoardKeys/>
+      <If when={boardError()}>
+        <Text style={{ padding: 12, fontSize: 13, color: colors.destructive }}>{boardError()}</Text>
+      </If>
+      <If when={board()} else={<Text style={{ padding: 18, fontSize: 13, color: colors.mutedForeground }}>{t("ui.tactics.opening")}</Text>}>
+        <Toolbar view={board()!}/>
+        <MapArea view={board()!}/>
+      </If>
+      <If when={notice()}>
+        <Surface style={{ position: "absolute", right: 16, bottom: 16, minWidth: 260, maxWidth: 420, padding: 12, backgroundColor: colors.popover }}>
+          <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{notice()}</Text>
+        </Surface>
+      </If>
+    </View>
   );
 }
