@@ -20,8 +20,12 @@ function ensureWatching() {
     return;
   }
   watching = true;
-  void GameData.watch((next) => snapshot.set(next)).catch((error) => actionError.set(errorMessage(error)));
-  void GameData.start().then((next) => snapshot.set(next)).catch((error) => actionError.set(errorMessage(error)));
+  void GameData.start()
+    .then((next) => {
+      snapshot.set(next);
+      return GameData.watch((changed) => snapshot.set(changed));
+    })
+    .catch((error) => actionError.set(errorMessage(error)));
 }
 
 /// Runs one service call, putting its failure on the section's error line.
@@ -48,7 +52,7 @@ function formatBytes(bytes: number): string {
 
 function statusText(state: GameDataSnapshot | null): string {
   if (!state) {
-    return "Game data: starting";
+    return actionError() ? `Game data unavailable: ${actionError()}` : "Game data: starting";
   }
   switch (state.phase) {
     case "notConfigured":
@@ -306,8 +310,8 @@ export function ReplayDirectoriesSection() {
       </If>
       <Each of={directories()} key={(entry) => entry.path}>
         {(entry) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1, gap: 1 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            <View style={{ flexGrow: 1, flexBasis: 320, minWidth: 240, gap: 1 }}>
               <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>
                 {entry().pinned ? `${entry().label} [Pinned]` : entry().label}
               </Text>

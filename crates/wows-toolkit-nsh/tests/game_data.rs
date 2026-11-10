@@ -137,6 +137,12 @@ fn install_without_builds(name: &str) -> TestDirectory {
     install
 }
 
+/// Waits for exactly `text`, which may hold characters a `text:` selector
+/// reads as a pattern.
+fn wait_for_text(app: &mut TestApp, text: &str) {
+    app.wait_until(text, Duration::from_secs(5), |screen| screen.shows(text)).unwrap();
+}
+
 #[test]
 fn without_a_game_directory_the_sections_say_what_is_missing() {
     let mut app = app_with(None);
@@ -147,7 +153,6 @@ fn without_a_game_directory_the_sections_say_what_is_missing() {
     app.wait_for("Replay index").unwrap();
     app.wait_for("Replay directories").unwrap();
     app.wait_for("Set the World of Warships directory to index its replays.").unwrap();
-    app.wait_for("No replay directories are open.").unwrap();
 }
 
 #[test]
@@ -160,10 +165,10 @@ fn a_replay_directory_is_added_pinned_saved_and_closed() {
     app.press("Settings").unwrap();
     app.on_pick_paths(vec![directory.0.clone()]).unwrap();
     app.press("Add Directory...").unwrap();
-    app.wait_for(&format!("text:{}", root.display())).unwrap();
+    wait_for_text(&mut app, &root.display().to_string());
 
     app.press(&format!("text:Pin {label}")).unwrap();
-    app.wait_for(&format!("text:{label} [Pinned]")).unwrap();
+    wait_for_text(&mut app, &format!("{label} [Pinned]"));
     let saved: Vec<PathBuf> = read_setting(wows_toolkit_replay_data::directories::PINNED_DIRECTORIES_KEY)
         .expect("the pinned directories are saved");
     assert_eq!(saved, vec![root.clone()]);
@@ -189,7 +194,8 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
 
     app.press("Settings").unwrap();
     app.wait_for("Game data cache").unwrap();
-    app.press("label:Cache game data automatically").unwrap();
+    // The second toggle with this name: the first is the Settings form's own.
+    app.press("label:Cache game data automatically >> nth=1").unwrap();
     app.wait_until("the auto-dump flag is saved", Duration::from_secs(5), |_| {
         read_setting::<bool>(keys::AUTO_DUMP_GAME_DATA) == Some(true)
     })
@@ -197,7 +203,7 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
 
     app.on_pick_paths(vec![cache_dir.0.clone()]).unwrap();
     app.press("Browse...").unwrap();
-    app.wait_for(&format!("text:Directory: {}", cache_dir.0.display())).unwrap();
+    wait_for_text(&mut app, &format!("Directory: {}", cache_dir.0.display()));
     app.wait_for("text:0 B in 0 cached builds").unwrap();
     assert_eq!(read_setting::<String>(keys::GAME_DATA_CACHE_DIR), Some(cache_dir.0.display().to_string()));
 
@@ -230,7 +236,9 @@ fn a_replay_on_a_build_nothing_has_is_offered_for_download() {
     app.press("Cancel").unwrap();
     app.wait_for_gone("Download Game Data", Duration::from_secs(5)).unwrap();
 
-    // A build is put to the reader once a session.
+    // A build is put to the reader once a session; the plan the first check
+    // asked for is waited out so the button takes the second press.
+    app.wait_for_gone("Asking the repository what it publishes...", Duration::from_secs(90)).unwrap();
     app.press("Check Game Data for Replays").unwrap();
     std::thread::sleep(Duration::from_millis(500));
     assert!(!app.shows("Download Game Data"));

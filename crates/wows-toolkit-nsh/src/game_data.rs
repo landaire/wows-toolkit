@@ -668,7 +668,9 @@ fn cache_job_finished(outcome: CacheOutcome) {
 /// Measures the cache when nothing has, on a thread of its own.
 fn measure_cache_if_wanted() {
     let Ok((base, _, _)) = cache_target() else { return };
-    let Some(generation) = update(|state| state.cache.wants_measure()) else { return };
+    // Claimed without telling the watchers: nothing they show changed yet,
+    // and a notice here would wake `GameData.watch`, which measures again.
+    let Some(generation) = state().cache.wants_measure() else { return };
 
     spawn("game-data-cache-measure", move || {
         let stats = cache::measure(&base);
