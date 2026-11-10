@@ -418,14 +418,17 @@ function TrackerToolbar() {
           </Each>
         </Surface>
       </Menu>
-      <View style={{ width: 240 }}>
-        <Input
-          accessibilityLabel={text().playerFilter}
-          value={filterDraft()}
-          placeholder={text().filterHint}
-          onChange={({ value }) => typeFilter(value)}
-          style={inputStyle}
-        />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Icon name="search" size={14} color={colors.mutedForeground}/>
+        <View style={{ width: 240 }}>
+          <Input
+            accessibilityLabel={text().playerFilter}
+            value={filterDraft()}
+            placeholder={text().filterHint}
+            onChange={({ value }) => typeFilter(value)}
+            style={inputStyle}
+          />
+        </View>
       </View>
       <View style={{ flex: 1 }}/>
       <View tooltip={<Hint text={text().populate}/>}>
@@ -658,9 +661,10 @@ function TwitchChip(props: { row: RosterRowView; tracker: PlayerTrackerProps }) 
       accessibilityLabel={`Twitch ${props.row.name}`}
       onPress={onPress}
       tooltip={<Hint text={props.row.twitchHover}/>}
-      style={{ width: 22, height: 18, borderRadius: 4, backgroundColor: "#9146ff", alignItems: "center", justifyContent: "center" }}
+      hoverStyle={{ backgroundColor: colors.accent }}
+      style={{ width: 22, height: 18, borderRadius: 4, alignItems: "center", justifyContent: "center" }}
     >
-      <Text style={{ fontSize: 10, fontWeight: "700", color: "#ffffff" }}>TV</Text>
+      <Icon name="twitch" size={14} color="#9146ff"/>
     </View>
   );
   return (
