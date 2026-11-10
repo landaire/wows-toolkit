@@ -7,7 +7,7 @@
 //! click and a camera ray into an approach, a ray cast into plate hits, and
 //! the result into lines and markers the viewport can draw.
 
-use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
+use crate::load_ship::ArmorTriangleTooltip;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec3;
@@ -150,7 +150,7 @@ pub fn build_hits(
 }
 
 /// Runs a shell through the plates a cast crossed.
-pub(crate) fn simulate(
+pub fn simulate(
     params: &ShellParams,
     impact: &ImpactResult,
     hits: &[TrajectoryHit],

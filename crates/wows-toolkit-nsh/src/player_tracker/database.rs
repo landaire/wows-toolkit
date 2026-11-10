@@ -20,7 +20,6 @@ use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked::Pending;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::tracked::ViewModes;
-use wows_toolkit_viewmodel::settings::keys;
 
 use super::error::TrackerError;
 
@@ -120,16 +119,6 @@ pub async fn save_note(pool: &SqlitePool, account: AccountId, player: TrackedPla
 
 pub async fn clear_tracked(pool: &SqlitePool) -> Result<(), TrackerError> {
     wows_toolkit_config::tracker::clear_tracker(pool).await.map_err(TrackerError::Clear)
-}
-
-/// The WoWs directory as the settings hold it; empty when unset.
-pub async fn wows_dir(pool: &SqlitePool) -> Result<String, TrackerError> {
-    let stored = wows_toolkit_config::queries::try_get_setting::<String>(pool, keys::WOWS_DIR)
-        .await
-        .map_err(|source| TrackerError::ReadSetting { key: keys::WOWS_DIR, source })?;
-
-    // An unset directory is the empty string the settings tab writes for it.
-    Ok(stored.unwrap_or_default())
 }
 
 /// Which of `names` the index has met, keyed by lower-cased name.

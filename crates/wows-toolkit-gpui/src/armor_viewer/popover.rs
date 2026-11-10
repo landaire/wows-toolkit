@@ -48,29 +48,30 @@ use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Species;
 
-use crate::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
-use super::load_ship::ArmorZone;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::PlateKey;
-use super::load_ship::ZonePart;
+use wows_toolkit_armor::load_ship::ArmorZone;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
-use super::viewport_view::CameraRingSettings;
-use super::viewport_view::PerspectiveSettings;
-use super::viewport_view::TrajectoryState;
+use wows_toolkit_armor::scene::ArmorScene;
+use wows_toolkit_armor::scene::CameraRingSettings;
+use wows_toolkit_armor::scene::PerspectiveSettings;
+use wows_toolkit_armor::scene::TrajectoryState;
 use super::viewport_view::ViewportView;
-use super::visibility::SidebarHighlightKey;
-use super::visibility::TriState;
-use super::visibility::hull_group_all_on;
-use super::visibility::hull_group_any_on;
-use super::visibility::part_any_plate_hidden;
-use super::visibility::part_on;
-use super::visibility::plate_explicitly_hidden;
-use super::visibility::zone_all_on;
-use super::visibility::zone_any_on;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
+use wows_toolkit_armor::visibility::TriState;
+use wows_toolkit_armor::visibility::hull_group_all_on;
+use wows_toolkit_armor::visibility::hull_group_any_on;
+use wows_toolkit_armor::visibility::part_any_plate_hidden;
+use wows_toolkit_armor::visibility::part_on;
+use wows_toolkit_armor::visibility::plate_explicitly_hidden;
+use wows_toolkit_armor::visibility::zone_all_on;
+use wows_toolkit_armor::visibility::zone_any_on;
 use crate::armor_viewer::analysis;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use wowsunpack::game_params::types::Km;
@@ -121,47 +122,39 @@ pub(super) struct PenCheckButton {
 /// the menu opens.
 pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportView>, cx: &App) -> PopupMenu {
     let view = entity.read(cx);
-    let has_armor = view.has_armor();
-    let show_hidden = view.show_hidden_only();
-    let gaps_shown = view.gaps().shown;
-    let splash = view.splash_state();
-    let trajectory_shown = view.trajectory_state().shown;
+    let has_armor = view.scene().has_armor();
+    let show_hidden = view.scene().show_hidden_only();
+    let gaps_shown = view.scene().gaps().shown;
+    let splash = view.scene().splash_state();
+    let trajectory_shown = view.scene().trajectory_state().shown;
     let pane = view.pane();
 
-    let toggle = |label: String,
-                  checked: bool,
-                  enabled: bool,
-                  apply: fn(&mut ViewportView, bool, &mut Context<ViewportView>)| {
+    let toggle = |label: String, checked: bool, enabled: bool, apply: fn(&mut ArmorScene, bool)| {
         let entity = entity.clone();
         PopupMenuItem::new(label).checked(checked).disabled(!enabled).on_click(move |_event, _window, cx| {
-            entity.update(cx, |view, cx| apply(view, !checked, cx));
+            entity.update(cx, |view, cx| view.update_scene(cx, |scene| apply(scene, !checked)));
         })
     };
     menu = menu
-        .item(toggle(
-            t!("ui.armor.show_hidden").into_owned(),
-            show_hidden,
-            has_armor,
-            ViewportView::set_show_hidden_only,
-        ))
-        .item(toggle(t!("ui.armor.gaps").into_owned(), gaps_shown, has_armor, ViewportView::set_show_gaps))
+        .item(toggle(t!("ui.armor.show_hidden").into_owned(), show_hidden, has_armor, ArmorScene::set_show_hidden_only))
+        .item(toggle(t!("ui.armor.gaps").into_owned(), gaps_shown, has_armor, ArmorScene::set_show_gaps))
         .item(toggle(
             t!("ui.armor.splash_mode").into_owned(),
             splash.shown,
             splash.has_data,
-            ViewportView::set_splash_mode,
+            ArmorScene::set_splash_mode,
         ))
         .item(toggle(
             t!("ui.armor.splash_boxes").into_owned(),
             splash.boxes_shown,
             splash.has_data,
-            ViewportView::set_show_splash_boxes,
+            ArmorScene::set_show_splash_boxes,
         ))
         .item(toggle(
             t!("ui.armor.trajectory").into_owned(),
             trajectory_shown,
             has_armor,
-            ViewportView::set_trajectory_mode,
+            ArmorScene::set_trajectory_mode,
         ));
 
     if let Some(pane) = pane {
@@ -196,8 +189,8 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
 ///
 /// A mode rather than an addition, so it reads as selected while it is on.
 fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let showing = view.show_hidden_only();
-    let has_armor = view.has_armor();
+    let showing = view.scene().show_hidden_only();
+    let has_armor = view.scene().has_armor();
     let entity = entity.clone();
 
     crate::ui::selectable(
@@ -211,7 +204,7 @@ fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
+                entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_show_hidden_only(!showing)));
             }),
     )
 }
@@ -247,7 +240,7 @@ fn render_camera_rings_section(
                 .on_click(move |checked, _window, cx| {
                     let shown = *checked;
                     let next = CameraRingSettings { shown, ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                    entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_camera_rings(next.clone())));
                 })
         });
 
@@ -276,7 +269,7 @@ fn render_camera_rings_section(
                 .disabled(!on)
                 .on_click(move |_event, _window, cx: &mut App| {
                     let next = CameraRingSettings { mode: Some(mode.clone()), ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                    entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_camera_rings(next.clone())));
                 }),
         )
     })));
@@ -294,7 +287,7 @@ fn render_camera_rings_section(
                 .on_click(move |checked, _window, cx| {
                     let zoom_path = *checked;
                     let next = CameraRingSettings { zoom_path, ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                    entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_camera_rings(next.clone())));
                 })
         })
         .when(rings.zoom_path, |this| {
@@ -342,7 +335,8 @@ fn render_perspective_rows(
                 .checked(on)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    toggled.update(cx, |view, cx| view.set_perspective_enabled(checked, cx));
+                    toggled
+                        .update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_perspective_enabled(checked)));
                 }),
         )
         .when(on, |this| {
@@ -391,7 +385,7 @@ fn look_mode_button(
         id,
         selected,
         Button::new(id).label(label).compact().selected(selected).on_click(move |_event, _window, cx: &mut App| {
-            entity.update(cx, |view, cx| view.set_perspective_look_mode(mode, cx));
+            entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_perspective_look_mode(mode)));
         }),
     )
     .into_any_element()
@@ -416,7 +410,7 @@ fn zoom_path_checkbox(
         .on_click(move |checked, _window, cx| {
             let mut next = rings.clone();
             apply(&mut next, *checked);
-            entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+            entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_camera_rings(next.clone())));
         })
         .into_any_element()
 }
@@ -458,7 +452,7 @@ fn render_trajectory_section(
                 .disabled(!on)
                 .on_click(move |checked, _window, cx| {
                     let next = *checked;
-                    entity.update(cx, |view, cx| view.set_continue_on_ricochet(next, cx));
+                    entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_continue_on_ricochet(next)));
                 })
         })
         .child({
@@ -469,7 +463,7 @@ fn render_trajectory_section(
                 // Nothing cast is nothing to clear.
                 .disabled(state.count == 0)
                 .on_click(move |_event, _window, cx: &mut App| {
-                    entity.update(cx, |view, cx| view.clear_trajectories(cx));
+                    entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.clear_trajectories()));
                 })
         })
         .into_any_element()
@@ -478,8 +472,8 @@ fn render_trajectory_section(
 /// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
 fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let gaps = view.gaps();
-    let has_armor = view.has_armor();
+    let gaps = view.scene().gaps();
+    let has_armor = view.scene().has_armor();
     let entity = entity.clone();
 
     let label =
@@ -499,7 +493,7 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.gaps_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_gaps(!gaps.shown, cx));
+                entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_show_gaps(!gaps.shown)));
             }),
     )
 }
@@ -508,8 +502,8 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
 /// been cast: while the mode is on a click casts rather than hides a plate,
 /// and the count is what says whether the last click landed.
 fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let state = view.trajectory_state();
-    let has_armor = view.has_armor();
+    let state = view.scene().trajectory_state();
+    let has_armor = view.scene().has_armor();
     let entity = entity.clone();
 
     let label = if state.shown {
@@ -530,7 +524,7 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
+                entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_trajectory_mode(!state.shown)));
             }),
     )
 }
@@ -637,8 +631,8 @@ pub(super) fn render_trajectory_panel(
     cx: &App,
 ) -> AnyElement {
     let viewport_view = viewport.read(cx);
-    let state = viewport_view.trajectory_state();
-    let range = viewport_view.cast_range();
+    let state = viewport_view.scene().trajectory_state();
+    let range = viewport_view.scene().cast_range();
     let slider = viewport_view.display_sliders.cast_range.clone();
     v_flex()
         .gap_2()
@@ -691,7 +685,7 @@ pub(super) fn render_trajectory_panel(
 /// Refused on a hull that ships no splash file, and on one where the chosen
 /// attacker carries nothing that bursts; the tooltip says which.
 fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let state = view.splash_state();
+    let state = view.scene().splash_state();
     let entity = entity.clone();
 
     let label = if state.shown {
@@ -716,7 +710,7 @@ fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
             .disabled(!state.has_data)
             .tooltip(tooltip)
             .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_splash_mode(!state.shown, cx));
+                entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_splash_mode(!state.shown)));
             }),
     )
 }
@@ -724,7 +718,7 @@ fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
 /// Rail toggle for the splash-box outlines, which stand on their own: they
 /// are worth seeing while placing a burst and after it.
 fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let state = view.splash_state();
+    let state = view.scene().splash_state();
     let entity = entity.clone();
 
     crate::ui::selectable(
@@ -738,7 +732,9 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
             .disabled(!state.has_data)
             .tooltip(t!("ui.armor.splash_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
+                entity.update(cx, |view, cx| {
+                    view.update_scene(cx, |scene| scene.set_show_splash_boxes(!state.boxes_shown))
+                });
             }),
     )
 }
@@ -783,7 +779,7 @@ fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>)
 /// "Export Ship Model" tab button (`tab.rs:1696-1709`), which is likewise
 /// gated on a ship being loaded.
 fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let has_armor = view.current_armor.is_some();
+    let has_armor = view.scene().has_armor();
     let click_entity = entity.clone();
 
     Button::new("armor-export-trigger")
@@ -805,13 +801,13 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
         let view = entity.read(cx);
         (
-            view.current_armor.clone(),
-            view.part_visibility.clone(),
-            view.plate_visibility.clone(),
+            view.scene().current_armor().cloned(),
+            view.scene().part_visibility().clone(),
+            view.scene().plate_visibility().clone(),
             view.expanded_zones.clone(),
             view.expanded_parts.clone(),
             view.popover_scroll.clone(),
-            view.display_settings.show_zero_mm,
+            view.scene().display_settings().show_zero_mm,
         )
     };
 
@@ -838,12 +834,12 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
         .items_center()
         .child(Button::new("armor-vis-all").label(t!("ui.armor.all_btn").to_string()).compact().on_click(
             move |_, _window, cx| {
-                all_entity.update(cx, |view, cx| view.set_all_parts_visible(cx));
+                all_entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_all_parts_visible()));
             },
         ))
         .child(Button::new("armor-vis-none").label(t!("ui.armor.none_btn").to_string()).compact().on_click(
             move |_, _window, cx| {
-                none_entity.update(cx, |view, cx| view.set_all_parts_hidden(cx));
+                none_entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_all_parts_hidden()));
             },
         ))
         .when(has_plate_overrides, |row| {
@@ -852,7 +848,8 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
                     .label(t!("ui.armor.reset_plates").to_string())
                     .compact()
                     .on_click(move |_, _window, cx| {
-                        reset_entity.update(cx, |view, cx| view.reset_plate_overrides(cx));
+                        reset_entity
+                            .update(cx, |view, cx| view.update_scene(cx, |scene| scene.reset_plate_overrides()));
                     }),
             )
         });
@@ -917,16 +914,17 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
         selected_modules,
     ) = {
         let view = entity.read(cx);
+        let selection = view.scene().hull_selection();
         (
-            view.current_armor.clone(),
-            view.hull_visibility.clone(),
-            view.display_settings.hull_opaque,
+            view.scene().current_armor().cloned(),
+            view.scene().hull_visibility().clone(),
+            view.scene().display_settings().hull_opaque,
             view.expanded_hull_groups.clone(),
-            view.selected_camo,
+            view.scene().selected_camo(),
             view.expanded_camo_groups.clone(),
-            view.selected_hull.clone(),
-            view.hull_lod,
-            view.selected_modules.clone(),
+            selection.hull,
+            selection.lod,
+            selection.modules,
         )
     };
 
@@ -956,10 +954,12 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
             move |_, _window, cx| {
                 let names = all_names_for_all.clone();
                 all_entity.update(cx, |view, cx| {
-                    view.mutate_hull_visibility(cx, |hull_visibility| {
-                        for name in names {
-                            hull_visibility.insert(name, true);
-                        }
+                    view.update_scene(cx, |scene| {
+                        scene.mutate_hull_visibility(|hull_visibility| {
+                            for name in names {
+                                hull_visibility.insert(name, true);
+                            }
+                        })
                     })
                 });
             },
@@ -968,10 +968,12 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
             move |_, _window, cx| {
                 let names = all_names.clone();
                 none_entity.update(cx, |view, cx| {
-                    view.mutate_hull_visibility(cx, |hull_visibility| {
-                        for name in names {
-                            hull_visibility.insert(name, false);
-                        }
+                    view.update_scene(cx, |scene| {
+                        scene.mutate_hull_visibility(|hull_visibility| {
+                            for name in names {
+                                hull_visibility.insert(name, false);
+                            }
+                        })
                     })
                 });
             },
@@ -982,7 +984,7 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
                 .checked(hull_opaque)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+                    opaque_entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_hull_opaque(checked)));
                 }),
         );
 
@@ -1269,10 +1271,12 @@ fn render_hull_group_row(
         let checked = *checked;
         let names = toggle_names.clone();
         toggle_entity.update(cx, |view, cx| {
-            view.mutate_hull_visibility(cx, |hull_visibility| {
-                for name in names {
-                    hull_visibility.insert(name, checked);
-                }
+            view.update_scene(cx, |scene| {
+                scene.mutate_hull_visibility(|hull_visibility| {
+                    for name in names {
+                        hull_visibility.insert(name, checked);
+                    }
+                })
             })
         });
     });
@@ -1322,8 +1326,10 @@ fn render_hull_mesh_row(
             let checked = *checked;
             let name = toggle_name.clone();
             toggle_entity.update(cx, |view, cx| {
-                view.mutate_hull_visibility(cx, |hull_visibility| {
-                    hull_visibility.insert(name, checked);
+                view.update_scene(cx, |scene| {
+                    scene.mutate_hull_visibility(|hull_visibility| {
+                        hull_visibility.insert(name, checked);
+                    })
                 })
             });
         })
@@ -1363,7 +1369,7 @@ fn render_hull_mesh_row(
 /// Taken as a snapshot because the content builder runs while the popover is
 /// open and must not hold a borrow of the view it came from.
 struct DisplayPopoverSnapshot {
-    display: super::upload::DisplaySettings,
+    display: wows_toolkit_armor::upload::DisplaySettings,
     lighting: LightingSettings,
     waterline_slider: Entity<SliderState>,
     marker_slider: Entity<SliderState>,
@@ -1409,7 +1415,7 @@ pub(crate) fn render_display_popover_content(
     // button, so the guard the other two sections already had belongs here.
     // The egui app draws none of the three without a loaded hull
     // (`ui/tab.rs`'s `if let Some(armor) = pane.loaded_armor.take()`).
-    if !entity.read(cx).has_armor() {
+    if !entity.read(cx).scene().has_armor() {
         return div()
             .text_sm()
             .text_color(crate::theme::text_dim())
@@ -1422,20 +1428,20 @@ pub(crate) fn render_display_popover_content(
     let snapshot = {
         let view = entity.read(cx);
         DisplayPopoverSnapshot {
-            display: view.display_settings,
-            lighting: view.lighting(),
+            display: view.scene().display_settings(),
+            lighting: view.scene().lighting().clone(),
             waterline_slider: view.display_sliders.waterline_opacity.clone(),
             armor_slider: view.display_sliders.armor_opacity.clone(),
             roll_slider: view.display_sliders.model_roll_deg.clone(),
-            roll_deg: view.model_roll_deg(),
-            camera_rings: view.camera_rings(),
-            camera_modes: view.camera_modes(),
+            roll_deg: view.scene().model_roll_deg(),
+            camera_rings: view.scene().camera_rings().clone(),
+            camera_modes: view.scene().camera_modes(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
             camera_height_slider: view.display_sliders.camera_height.clone(),
-            perspective: view.perspective(),
+            perspective: view.scene().perspective(),
             perspective_fov_slider: view.display_sliders.perspective_fov.clone(),
             marker_slider: view.display_sliders.marker_opacity.clone(),
-            has_markers: view.hits_drawn() > 0,
+            has_markers: view.scene().hits_drawn() > 0,
             flat_slider: view.lighting_sliders.flat_intensity.clone(),
             flat_color: view.lighting_colors.flat.clone(),
             key_color: view.lighting_colors.key.clone(),
@@ -1507,8 +1513,9 @@ pub(crate) fn render_display_popover_content(
                 .checked(display.show_plate_edges)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    edges_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_plate_edges = checked));
+                    edges_entity.update(cx, |view, cx| {
+                        view.update_scene(cx, |scene| scene.mutate_display_settings(|d| d.show_plate_edges = checked))
+                    });
                 }),
         )
         .child(
@@ -1517,8 +1524,9 @@ pub(crate) fn render_display_popover_content(
                 .checked(display.show_waterline)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    waterline_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_waterline = checked));
+                    waterline_entity.update(cx, |view, cx| {
+                        view.update_scene(cx, |scene| scene.mutate_display_settings(|d| d.show_waterline = checked))
+                    });
                 }),
         );
 
@@ -1538,8 +1546,9 @@ pub(crate) fn render_display_popover_content(
                 .checked(display.show_zero_mm)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    zero_mm_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
+                    zero_mm_entity.update(cx, |view, cx| {
+                        view.update_scene(cx, |scene| scene.mutate_display_settings(|d| d.show_zero_mm = checked))
+                    });
                 }),
         )
         .child(
@@ -1548,8 +1557,9 @@ pub(crate) fn render_display_popover_content(
                 .checked(display.show_ship_center)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    ship_center_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_ship_center = checked));
+                    ship_center_entity.update(cx, |view, cx| {
+                        view.update_scene(cx, |scene| scene.mutate_display_settings(|d| d.show_ship_center = checked))
+                    });
                 }),
         )
         .child(labeled_slider_row(
@@ -1587,7 +1597,9 @@ pub(crate) fn render_display_popover_content(
                 .checked(lighting.enabled)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
-                    lighting_enabled_entity.update(cx, |view, cx| view.mutate_lighting(cx, |l| l.enabled = checked));
+                    lighting_enabled_entity.update(cx, |view, cx| {
+                        view.update_scene(cx, |scene| scene.mutate_lighting(|l| l.enabled = checked))
+                    });
                 }),
         )
         .child(
@@ -1760,7 +1772,9 @@ fn render_zone_row(
     let toggle_zone_name = zone.name.clone();
     let checkbox = tri_checkbox(format!("armor-vis-zone-{}", zone.name), state, warn, move |checked, window, cx| {
         let solo = window.modifiers().secondary(cx);
-        toggle_entity.update(cx, |view, cx| view.toggle_zone(toggle_zone_name.clone(), *checked, solo, cx));
+        toggle_entity.update(cx, |view, cx| {
+            view.update_scene(cx, |scene| scene.toggle_zone(toggle_zone_name.clone(), *checked, solo))
+        });
     });
 
     let expand_entity = entity.clone();
@@ -1851,14 +1865,10 @@ fn render_part_row(
             TriState::from_all_any(checked, checked),
             warn,
             move |checked, _window, cx| {
+                let (zone, part, plates, checked) =
+                    (toggle_zone_name.clone(), toggle_part_name.clone(), toggle_plates.clone(), *checked);
                 toggle_entity.update(cx, |view, cx| {
-                    view.toggle_part(
-                        toggle_zone_name.clone(),
-                        toggle_part_name.clone(),
-                        toggle_plates.clone(),
-                        *checked,
-                        cx,
-                    )
+                    view.update_scene(cx, |scene| scene.toggle_part(zone, part, plates, checked))
                 });
             },
         );
@@ -1878,15 +1888,10 @@ fn render_part_row(
         state,
         warn,
         move |checked, _window, cx| {
-            toggle_entity.update(cx, |view, cx| {
-                view.toggle_part(
-                    toggle_zone_name.clone(),
-                    toggle_part_name.clone(),
-                    toggle_plates.clone(),
-                    *checked,
-                    cx,
-                )
-            });
+            let (zone, part, plates, checked) =
+                (toggle_zone_name.clone(), toggle_part_name.clone(), toggle_plates.clone(), *checked);
+            toggle_entity
+                .update(cx, |view, cx| view.update_scene(cx, |scene| scene.toggle_part(zone, part, plates, checked)));
         },
     );
 
@@ -1959,7 +1964,7 @@ fn render_plate_row(
         warn,
         move |_checked, _window, cx| {
             let key = toggle_key.clone();
-            toggle_entity.update(cx, |view, cx| view.toggle_plate(key, cx));
+            toggle_entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.toggle_plate(key)));
         },
     );
 
@@ -2020,9 +2025,10 @@ fn hoverable_row(
     let enter_key = key.clone();
     div().id(id).child(content).on_hover(move |hovered, _window, cx| {
         if *hovered {
-            enter_entity.update(cx, |view, cx| view.set_sidebar_hover(enter_key.clone(), cx));
+            enter_entity
+                .update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_sidebar_hover(enter_key.clone())));
         } else {
-            leave_entity.update(cx, |view, cx| view.clear_sidebar_hover_if(&key, cx));
+            leave_entity.update(cx, |view, cx| view.update_scene(cx, |scene| scene.clear_sidebar_hover_if(&key)));
         }
     })
 }

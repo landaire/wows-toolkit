@@ -54,8 +54,8 @@ use wows_toolkit_viewmodel::armor::incoming::group_incoming;
 use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use super::pane::ArmorViewerPane;
-use super::viewport_view::ArcSummary;
-use super::viewport_view::Isolate;
+use wows_toolkit_armor::scene::ArcSummary;
+use wows_toolkit_armor::scene::Isolate;
 use super::viewport_view::ViewportView;
 
 /// The panel's own width, and the range it can be dragged over. Wide enough
@@ -293,7 +293,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .p_2()
         .child(header)
         .child(against)
-        .when(!(view.options_open() && view.active_viewport(cx).read(cx).trajectory_state().shown), |panel| {
+        .when(!(view.options_open() && view.active_viewport(cx).read(cx).scene().trajectory_state().shown), |panel| {
             panel.child(render_ship_search(view, pane, cx))
         })
         .child(div().id("armor-pen-ships").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
@@ -383,11 +383,11 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
                 .text_color(crate::theme::text_dim())
                 .child(t!("ui.armor.realtime.tracked", salvos = salvos.len(), shells = shells).to_string()),
         )
-        .children((verdicts.sim_unchecked() > 0).then(|| {
+        .children((verdicts.scene().sim_unchecked() > 0).then(|| {
             div()
                 .text_xs()
                 .text_color(crate::theme::text_dim())
-                .child(t!("ui.armor.realtime.sim_unchecked", count = verdicts.sim_unchecked()).to_string())
+                .child(t!("ui.armor.realtime.sim_unchecked", count = verdicts.scene().sim_unchecked()).to_string())
         }))
         .child(
             div()
@@ -716,7 +716,7 @@ fn hit_label(hit: &HitType) -> String {
 fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
     let viewport = view.active_viewport(cx);
     let shown = viewport.read(cx);
-    let arcs = shown.arcs();
+    let arcs = shown.scene().arcs();
     if arcs.is_empty() {
         return div().into_any_element();
     }
@@ -740,7 +740,9 @@ fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
                         .compact()
                         .tooltip(t!("ui.armor.arc_isolate_plates_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
-                            viewport.update(cx, |view, cx| view.isolate_all_arcs(Isolate::Plates, cx));
+                            viewport.update(cx, |view, cx| {
+                                view.update_scene(cx, |scene| scene.isolate_all_arcs(Isolate::Plates))
+                            });
                         })
                 })
                 .child({
@@ -750,7 +752,9 @@ fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
                         .compact()
                         .tooltip(t!("ui.armor.arc_isolate_zones_tooltip").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
-                            viewport.update(cx, |view, cx| view.isolate_all_arcs(Isolate::Zones, cx));
+                            viewport.update(cx, |view, cx| {
+                                view.update_scene(cx, |scene| scene.isolate_all_arcs(Isolate::Zones))
+                            });
                         })
                 }),
         )
@@ -823,7 +827,8 @@ fn arc_block(shown: &ViewportView, viewport: &Entity<ViewportView>, index: usize
                         .compact()
                         .tooltip(t!("ui.armor.arc_delete").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
-                            viewport.update(cx, |view, cx| view.remove_trajectory(index, cx));
+                            viewport
+                                .update(cx, |view, cx| view.update_scene(cx, |scene| scene.remove_trajectory(index)));
                         })
                 }),
         )
@@ -841,7 +846,9 @@ fn arc_block(shown: &ViewportView, viewport: &Entity<ViewportView>, index: usize
                             .compact()
                             .selected(on)
                             .on_click(move |_event, _window, cx: &mut App| {
-                                viewport.update(cx, |view, cx| view.isolate_arc(index, Isolate::Plates, !on, cx));
+                                viewport.update(cx, |view, cx| {
+                                    view.update_scene(cx, |scene| scene.isolate_arc(index, Isolate::Plates, !on))
+                                });
                             }),
                     )
                 })
@@ -858,7 +865,9 @@ fn arc_block(shown: &ViewportView, viewport: &Entity<ViewportView>, index: usize
                             .compact()
                             .selected(on)
                             .on_click(move |_event, _window, cx: &mut App| {
-                                viewport.update(cx, |view, cx| view.isolate_arc(index, Isolate::Zones, !on, cx));
+                                viewport.update(cx, |view, cx| {
+                                    view.update_scene(cx, |scene| scene.isolate_arc(index, Isolate::Zones, !on))
+                                });
                             }),
                     )
                 }),
@@ -895,7 +904,9 @@ fn arc_range_step(
         .tooltip(t!("ui.armor.arc_range_tooltip").to_string())
         .disabled((stepped - range.value()).abs() < f32::EPSILON)
         .on_click(move |_event, _window, cx: &mut App| {
-            viewport.update(cx, |view, cx| view.set_trajectory_range(index, Km::new(stepped), cx));
+            viewport.update(cx, |view, cx| {
+                view.update_scene(cx, |scene| scene.set_trajectory_range(index, Km::new(stepped)))
+            });
         })
 }
 

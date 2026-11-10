@@ -1,15 +1,11 @@
-//! Owned wgpu device for the armor viewport plus the CPU-readback bridge into a
-//! gpui_kit `RenderImage`.
+//! Owned wgpu device for the armor viewport.
 //!
-//! gpui_kit renders the app through its own backend (DirectX on Windows); this
-//! module stands up a separate, standalone wgpu-29 device the viewport renders
-//! into offscreen. The resolved pixels are read back on the CPU and handed to
-//! gpui_kit as a `RenderImage` for display via `img()`.
+//! The UI toolkit renders the app through its own backend; this module stands
+//! up a separate, standalone wgpu device the viewport renders into offscreen.
+//! The resolved pixels are read back on the CPU and handed to the toolkit as
+//! an image.
 
 use std::sync::Arc;
-
-use gpui_kit::RenderImage;
-use image::Frame;
 
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::renderer::GpuPipeline;
@@ -29,9 +25,9 @@ pub struct GpuContext {
 
 /// Which adapter the armor viewport draws on.
 ///
-/// gpui chooses the one the window is drawn through and offers no say in it, but
-/// this device is the viewport's own, so the command line steers it: the egui
-/// app's `--gpu-adapter` and `--cpu-renderer` mean this here.
+/// The UI toolkit chooses the device the window is drawn through, but this
+/// device is the viewport's own, so the command line steers it: the egui app's
+/// `--gpu-adapter` and `--cpu-renderer` mean this here.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum AdapterChoice {
     /// Whatever wgpu calls the fastest, which is a graphics card where there is
@@ -142,20 +138,6 @@ fn pick_adapter(instance: &wgpu::Instance, choice: &AdapterChoice) -> Option<wgp
     }
 }
 
-/// Convert a tightly-packed sRGB RGBA8 readback (`width * height * 4`) from
-/// `Viewport3D::render_offscreen_rgba` into a gpui_kit `RenderImage`.
-///
-/// gpui_kit stores images as BGRA, so the R and B bytes are swapped in place before
-/// the buffer is wrapped in an `image::Frame`.
-pub fn readback_to_render_image(width: u32, height: u32, mut rgba: Vec<u8>) -> Arc<RenderImage> {
-    for px in rgba.as_chunks_mut::<4>().0 {
-        px.swap(0, 2);
-    }
-    let buffer =
-        image::RgbaImage::from_raw(width, height, rgba).expect("readback buffer length equals width * height * 4");
-    Arc::new(RenderImage::new(vec![Frame::new(buffer)]))
-}
-
 /// Build a unit cube centered at the origin with one flat color on every vertex.
 /// Normals are placeholders (the cube renders unlit); winding is irrelevant since
 /// the pipeline is double-sided.
@@ -200,33 +182,9 @@ pub fn render_test_cube_rgba(
     viewport.render_offscreen_rgba(&ctx.device, &ctx.queue, pipeline, size)
 }
 
-/// Render the test cube and wrap the readback as a gpui_kit image for display.
-pub fn render_test_cube_image(
-    ctx: &GpuContext,
-    pipeline: &GpuPipeline,
-    size: (u32, u32),
-    color: [f32; 4],
-) -> Option<Arc<RenderImage>> {
-    let (w, h, rgba) = render_test_cube_rgba(ctx, pipeline, size, color)?;
-    Some(readback_to_render_image(w, h, rgba))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `readback_to_render_image` swaps R and B in place so the RGBA readback
-    /// becomes BGRA (gpui's `RenderImage` pixel layout); alpha is untouched.
-    #[test]
-    fn readback_to_render_image_swaps_r_and_b_to_bgra() {
-        let rgba = vec![10u8, 20, 30, 40];
-        let image = readback_to_render_image(1, 1, rgba.clone());
-        let swapped = image.as_bytes(0).expect("single-frame image has frame 0");
-        assert_eq!(swapped[0], rgba[2]);
-        assert_eq!(swapped[1], rgba[1]);
-        assert_eq!(swapped[2], rgba[0]);
-        assert_eq!(swapped[3], rgba[3]);
-    }
 
     /// The risk gate: an owned wgpu device renders a green cube offscreen, the
     /// pixels read back, and the center pixel is the mesh color (not the clear

@@ -40,7 +40,7 @@ const CENTER_ARM_FRACTION: f32 = 0.05;
 /// A hit whose victim was not being watched at that moment carries no pose,
 /// and [`hull_impact::hull_impact`] refuses it rather than guessing where it
 /// landed, so it is left unmarked instead of marked in the wrong place.
-pub(crate) fn build_markers(
+pub fn build_markers(
     hits: &[PreExtractedHit],
     model_center: Vec3,
     bounds: Option<(Vec3, Vec3)>,
@@ -63,7 +63,7 @@ pub(crate) fn build_markers(
 /// Where the game measures a ship from, which is not where the hull's middle
 /// looks to be: the egui viewer draws the same three axes for the same reason
 /// (`armor_viewer/ui/tab.rs`'s `show_ship_center`).
-pub(crate) fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
+pub fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
     let (min, max) = bounds;
     let extent = max - min;
     let arm = (extent.x.max(extent.y).max(extent.z) * CENTER_ARM_FRACTION).max(CENTER_ARM_FLOOR);

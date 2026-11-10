@@ -19,6 +19,7 @@ use wows_toolkit_viewmodel::stats::chart_model::ChartModel;
 use wows_toolkit_viewmodel::stats::chart_model::ChartSettings;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
+use super::art::GameArt;
 use super::chart::Chart;
 use super::chart::ChartSnapshot;
 use super::chart::surface_id;
@@ -156,7 +157,7 @@ impl Scope {
     }
 
     pub(crate) fn snapshot(&self) -> StatsSnapshot {
-        snapshot(&self.games, &self.filters, self.last_count, self.personal_rating.as_deref())
+        snapshot(&self.games, &self.filters, self.last_count, self.personal_rating.as_deref(), GameArt::current().as_ref())
     }
 
     pub(crate) fn chart_snapshots(&self) -> Vec<ChartSnapshot> {
@@ -231,10 +232,17 @@ pub(crate) fn restore(
     charts: Option<Vec<ChartSettings>>,
     saved_layout: Option<&DockAreaState>,
 ) -> Result<Restored, LayoutError> {
+    let charts = charts.map(with_ids);
+    for settings in charts.iter().flatten() {
+        if let Some(id) = settings.id {
+            layout::check_chart_id(id)?;
+        }
+    }
+
     let Some(state) = saved_layout else {
         let charts = match charts {
             None => vec![ChartSettings { id: Some(ChartId(0)), ..ChartSettings::default() }],
-            Some(saved) => with_ids(saved),
+            Some(saved) => saved,
         };
         let ids: Vec<ChartId> = charts.iter().filter_map(|chart| chart.id).collect();
         return Ok(Restored { layout: layout::default_layout(&ids), charts });
@@ -242,7 +250,7 @@ pub(crate) fn restore(
 
     let mut restored_layout = layout::from_state(state)?;
     let placed = layout::charts(&restored_layout)?;
-    let saved = charts.map(with_ids).unwrap_or_default();
+    let saved = charts.unwrap_or_default();
 
     let mut restored: Vec<ChartSettings> = placed
         .iter()

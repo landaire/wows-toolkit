@@ -95,7 +95,7 @@ impl Vertex {
 
 /// Opaque handle to a mesh uploaded to the GPU.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MeshId(pub(crate) u64);
+pub struct MeshId(pub u64);
 
 /// Result of a picking (hover) query.
 #[derive(Clone, Debug)]
@@ -225,7 +225,7 @@ impl LightingSettings {
 /// Uniform data sent to the vertex/fragment shader.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct Uniforms {
+pub struct Uniforms {
     pub mvp: [[f32; 4]; 4],
     pub model_view: [[f32; 4]; 4],
     /// xyz = view-space light direction (toward light); w = lit flag (0 or 1).

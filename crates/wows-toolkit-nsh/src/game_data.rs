@@ -247,6 +247,12 @@ pub fn replays_dir() -> Option<PathBuf> {
     wows_dir().map(|dir| wows_toolkit_replay_data::load::resolve_replays_dir(&dir))
 }
 
+/// The proxy setting as stored; empty means the system's.
+pub fn proxy_url() -> String {
+    ensure_started();
+    state().binding.as_ref().map(|binding| binding.settings.proxy_url.clone()).unwrap_or_default()
+}
+
 /// The personal-rating expected values, once they have been loaded.
 pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
     state().personal_rating.clone()

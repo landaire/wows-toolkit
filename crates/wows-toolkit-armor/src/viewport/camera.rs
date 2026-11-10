@@ -279,7 +279,7 @@ impl ArcballCamera {
 /// Our layout: `m[col][row]`, nalgebra stores column-major internally
 /// but its `new()` constructor takes arguments in **row-major** order,
 /// and `from_columns` takes column slices.
-pub(crate) fn mat4_to_na(m: [[f32; 4]; 4]) -> Matrix4<f32> {
+pub fn mat4_to_na(m: [[f32; 4]; 4]) -> Matrix4<f32> {
     Matrix4::from_columns(&[
         Vector4::new(m[0][0], m[0][1], m[0][2], m[0][3]),
         Vector4::new(m[1][0], m[1][1], m[1][2], m[1][3]),
@@ -289,7 +289,7 @@ pub(crate) fn mat4_to_na(m: [[f32; 4]; 4]) -> Matrix4<f32> {
 }
 
 /// Convert a `Matrix4<f32>` back to our column-major `[[f32; 4]; 4]`.
-pub(crate) fn na_to_mat4(m: Matrix4<f32>) -> [[f32; 4]; 4] {
+pub fn na_to_mat4(m: Matrix4<f32>) -> [[f32; 4]; 4] {
     let c0 = m.column(0);
     let c1 = m.column(1);
     let c2 = m.column(2);
@@ -365,7 +365,7 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
 }
 
 /// Multiply two 4x4 matrices (column-major layout: m[col][row]).
-pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+pub fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     na_to_mat4(mat4_to_na(a) * mat4_to_na(b))
 }
 

@@ -1,0 +1,26 @@
+[package]
+name = "wows-toolkit-armor"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+nalgebra = "0.34"
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0"
+tracing = "0.1"
+wgpu = { workspace = true }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
+wows-toolkit-config = { path = "../wows-toolkit-config" }
+wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv", "models"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -6,15 +6,20 @@
 //! module keeps each view's state, saves the session's settings in the rows
 //! the other apps use, and draws the charts on frame surfaces.
 
+mod art;
 mod chart;
+mod directory;
 mod layout;
 mod scope;
 mod snapshot;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use nsh_base::dock::DockAreaLayout;
 use nsh_core::prelude::*;
@@ -32,6 +37,9 @@ pub use snapshot::FilterState;
 pub use snapshot::StatsSnapshot;
 
 use chart::Chart;
+use directory::DirectoryId;
+use directory::DirectoryRead;
+pub use directory::DirectoryStatus;
 use chart::ChartImageError;
 use chart::ChartPalette;
 use layout::LayoutError;
@@ -97,6 +105,9 @@ pub struct StatsText {
     pub copy_image_failed: String,
     pub reset_view: String,
     pub nothing_to_plot: String,
+    pub open_directory_stats: String,
+    pub open_directory_stats_tooltip: String,
+    pub directory_reload: String,
 }
 
 /// A view's figures and charts, and whether saving the change failed.
@@ -154,6 +165,10 @@ pub enum StatsError {
     ShipId { value: String },
     #[error("the session's games are kept; a directory view has nothing to clear")]
     NotClearable,
+    #[error("game data is not loaded; set the World of Warships directory in Settings")]
+    GameDataUnavailable,
+    #[error("the directory is still being read")]
+    StillReading,
     #[error("{color} is not a CSS colour")]
     Color { color: String },
     #[error("the stats task did not finish: {reason}")]
@@ -164,14 +179,16 @@ pub enum StatsError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ScopeKey {
     Session,
+    Directory(DirectoryId),
 }
 
 impl ScopeKey {
     fn parse(scope: &str) -> Result<Self, StatsError> {
-        match scope {
-            "session" => Ok(Self::Session),
-            _ => Err(StatsError::UnknownScope { scope: scope.to_owned() }),
+        if scope == "session" {
+            return Ok(Self::Session);
         }
+
+        DirectoryId::parse(scope).map(Self::Directory).ok_or_else(|| StatsError::UnknownScope { scope: scope.to_owned() })
     }
 }
 
@@ -179,9 +196,79 @@ impl ScopeKey {
 #[derive(Default)]
 struct Scopes {
     by_key: HashMap<ScopeKey, Scope>,
+    directories: HashMap<DirectoryId, DirectoryRead>,
+    next_directory: u32,
+}
+
+/// Runs `work` on directory view `id` and its read.
+fn with_directory<T>(
+    id: DirectoryId,
+    work: impl FnOnce(&mut Scope, &mut DirectoryRead) -> Result<T, StatsError>,
+) -> Result<T, StatsError> {
+    let mut scopes = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let scopes = &mut *scopes;
+    let unknown = || StatsError::UnknownScope { scope: id.scope_name() };
+    let read = scopes.directories.get_mut(&id).ok_or_else(unknown)?;
+    let scope = scopes.by_key.get_mut(&ScopeKey::Directory(id)).ok_or_else(unknown)?;
+    work(scope, read)
+}
+
+/// A directory view as it opens.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct DirectoryOpened {
+    pub scope: String,
+    pub layout: DockAreaLayout,
+    pub status: DirectoryStatus,
+}
+
+/// Opens a stats view over `root`, or returns the one already open for it.
+fn open_directory(root: PathBuf) -> Result<DirectoryOpened, StatsError> {
+    let game_data = crate::game_data::cache().ok_or(StatsError::GameDataUnavailable)?;
+    let root = wows_toolkit_replay_data::directories::canonical_root(root);
+
+    let (id, fresh) = {
+        let mut scopes = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match scopes.directories.iter().find(|(_, read)| *read.root() == root).map(|(id, _)| *id) {
+            Some(id) => (id, false),
+            None => {
+                let id = DirectoryId(scopes.next_directory);
+                scopes.next_directory += 1;
+                scopes.directories.insert(id, DirectoryRead::new(root));
+                scopes.by_key.insert(ScopeKey::Directory(id), directory::new_scope(id));
+                (id, true)
+            }
+        }
+    };
+    if fresh {
+        directory::start(id, game_data);
+    }
+
+    let (status, charts) = with_directory(id, |scope, read| {
+        let charts = scope.chart_snapshots().iter().map(|chart| ChartId(chart.id as usize)).collect::<Vec<_>>();
+        Ok((read.status(scope_view(scope, None)), charts))
+    })?;
+    Ok(DirectoryOpened { scope: id.scope_name(), layout: layout::default_layout(&charts), status })
 }
 
 static SCOPES: LazyLock<Mutex<Scopes>> = LazyLock::new(Mutex::default);
+
+/// Held across reading the session's state and writing it, so the rows
+/// always end with the latest state: a write that waited reads what the one
+/// before it already changed.
+static WRITES: Mutex<()> = Mutex::new(());
+
+/// Bumped by every clear, so a refresh that read the rows before it does not
+/// put the cleared games back.
+static SESSION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Bumped by every layout save, so one that waited behind a newer one is
+/// dropped.
+static LAYOUT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn hold_writes() -> std::sync::MutexGuard<'static, ()> {
+    WRITES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Runs `work` on the scope `scope` names.
 fn with_scope<T>(scope: &str, work: impl FnOnce(&mut Scope) -> Result<T, StatsError>) -> Result<T, StatsError> {
@@ -210,21 +297,17 @@ where
     blocking(work).await.map_err(|error| StatsError::Task { reason: error.to_string() })?
 }
 
-/// The expected-values table the ratings are computed against, from the
-/// cache the other front ends share.
+/// The expected-values table the ratings are computed against, as the game
+/// data service keeps it refreshed. `None` until it has loaded; the tab reads
+/// it again each time it is shown.
 fn personal_rating_table() -> Option<Arc<PersonalRatingData>> {
-    match wows_toolkit_viewmodel::personal_rating::load_cached() {
-        Ok(table) => Some(Arc::new(table)),
-        Err(error) => {
-            log::info!("stats: no personal rating table: {error}");
-            None
-        }
-    }
+    crate::game_data::personal_rating()
 }
 
 /// Writes the session's charts if `scope` is the session; the error, if
 /// any, is reported beside the change rather than undoing it.
 fn persist_charts(scope: &str) -> Option<String> {
+    let _writes = hold_writes();
     let charts = with_scope(scope, |opened| Ok(opened.persists().then(|| opened.chart_settings()))).ok().flatten()?;
     scope::with_database(async |pool| scope::save_charts(pool, &charts).await).err().map(|error| error.to_string())
 }
@@ -264,11 +347,14 @@ impl Stats {
     /// Reads the recorded games again, keeping the filters and charts.
     pub async fn refresh_session() -> Result<ScopeView, StatsError> {
         off_thread(|| {
+            let generation = SESSION_GENERATION.load(Ordering::Acquire);
             let games = scope::with_database(async |pool| scope::load_games(pool).await)?;
             let table = personal_rating_table();
             with_scope("session", |session| {
                 session.set_personal_rating(table);
-                session.set_games(games);
+                if SESSION_GENERATION.load(Ordering::Acquire) == generation {
+                    session.set_games(games);
+                }
                 Ok(scope_view(session, None))
             })
         })
@@ -278,15 +364,18 @@ impl Stats {
     /// Applies the filter bar, saving it for the session.
     pub async fn set_filters(scope: String, filters: FilterState) -> Result<ScopeView, StatsError> {
         off_thread(move || {
-            let (persists, applied) = with_scope(&scope, |opened| {
+            let persists = with_scope(&scope, |opened| {
                 opened.remember_count(&filters);
                 opened.set_filters(Scope::filters_from(&filters));
-                Ok((opened.persists(), opened.filters().clone()))
+                Ok(opened.persists())
             })?;
-            let save_error = persists
-                .then(|| scope::with_database(async |pool| scope::save_filters(pool, &applied).await).err())
-                .flatten()
-                .map(|error| error.to_string());
+            let save_error = if persists {
+                let _writes = hold_writes();
+                let latest = with_scope(&scope, |opened| Ok(opened.filters().clone()))?;
+                scope::with_database(async |pool| scope::save_filters(pool, &latest).await).err().map(|error| error.to_string())
+            } else {
+                None
+            };
             with_scope(&scope, |opened| Ok(scope_view(opened, save_error)))
         })
         .await
@@ -298,6 +387,7 @@ impl Stats {
             // The rows go before the view forgets them: a failure would
             // otherwise show an empty session that comes back at the next
             // load.
+            SESSION_GENERATION.fetch_add(1, Ordering::AcqRel);
             scope::with_database(async |pool| scope::clear_games(pool).await)?;
             with_scope("session", |session| {
                 session.set_games(Vec::new());
@@ -312,6 +402,7 @@ impl Stats {
         let ship = ship_id(&ship)?;
         off_thread(move || {
             let stored = i64::try_from(ship.raw()).map_err(|_| StatsError::ShipId { value: ship.raw().to_string() })?;
+            SESSION_GENERATION.fetch_add(1, Ordering::AcqRel);
             scope::with_database(async |pool| scope::clear_ship(pool, stored).await)?;
             with_scope("session", |session| {
                 let games = session.games().iter().filter(|game| game.ship_id != ship).cloned().collect();
@@ -462,8 +553,13 @@ impl Stats {
 
     /// Saves the dock arrangement the session view reports.
     pub async fn save_layout(layout: DockAreaLayout) -> Result<(), StatsError> {
+        let generation = LAYOUT_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
         off_thread(move || {
             let state = layout::to_state(&layout)?;
+            let _writes = hold_writes();
+            if LAYOUT_GENERATION.load(Ordering::Acquire) != generation {
+                return Ok(());
+            }
             scope::with_database(async |pool| scope::save_layout(pool, &state).await)?;
             Ok(())
         })
@@ -473,8 +569,10 @@ impl Stats {
     /// Saves the open charts and the arrangement shown, replacing a saved
     /// pair that could not be restored.
     pub async fn keep_current_layout(layout: DockAreaLayout) -> Result<(), StatsError> {
+        LAYOUT_GENERATION.fetch_add(1, Ordering::AcqRel);
         off_thread(move || {
             let state = layout::to_state(&layout)?;
+            let _writes = hold_writes();
             let charts = with_scope("session", |session| Ok(session.chart_settings()))?;
             scope::with_database(async |pool| {
                 scope::save_charts(pool, &charts).await?;
@@ -485,20 +583,53 @@ impl Stats {
         .await
     }
 
-    /// `layout` with chart `chart` in the right dock, opened.
-    pub fn layout_with_chart(layout: DockAreaLayout, chart: u32) -> DockAreaLayout {
-        match usize::try_from(chart) {
-            Ok(id) => layout::with_chart(layout, ChartId(id)),
-            Err(_) => layout,
-        }
+    /// Asks for a directory and opens a stats view over every replay in it.
+    /// `None` when the dialog is dismissed.
+    pub async fn pick_directory() -> Result<Option<DirectoryOpened>, StatsError> {
+        let picked = pick_paths(nsh_core::file_dialog::OpenDialog::folders().title(text("ui.stats.open_directory_stats")).button_label("Open"))
+            .await
+            .map_err(|error| StatsError::Task { reason: error.to_string() })?;
+        let Some(root) = picked.and_then(|mut paths| paths.pop()) else { return Ok(None) };
+
+        off_thread(move || open_directory(root).map(Some)).await
     }
 
-    /// `layout` without chart `chart`.
-    pub fn layout_without_chart(layout: DockAreaLayout, chart: u32) -> DockAreaLayout {
-        match usize::try_from(chart) {
-            Ok(id) => layout::without_chart(layout, ChartId(id)),
-            Err(_) => layout,
+    /// Opens a stats view over every replay in `path`, as a replay listing's
+    /// Directory Stats button does.
+    pub async fn open_directory(path: String) -> Result<DirectoryOpened, StatsError> {
+        off_thread(move || open_directory(PathBuf::from(path))).await
+    }
+
+    /// Resolves once the directory view has moved past `revision`.
+    pub async fn directory_status(scope: String, revision: u32) -> Result<DirectoryStatus, StatsError> {
+        let id = DirectoryId::parse(&scope).ok_or_else(|| StatsError::UnknownScope { scope: scope.clone() })?;
+        let mut revisions = with_directory(id, |_, read| Ok(read.revisions()))?;
+        revisions.wait_for(|current| *current != revision).await.map_err(|_| StatsError::UnknownScope { scope })?;
+
+        with_directory(id, |scope, read| Ok(read.status(scope_view(scope, None))))
+    }
+
+    /// Reads the directory again, picking up replays added or removed since.
+    pub fn reload_directory(scope: String) -> Result<(), StatsError> {
+        let id = DirectoryId::parse(&scope).ok_or_else(|| StatsError::UnknownScope { scope: scope.clone() })?;
+        let game_data = crate::game_data::cache().ok_or(StatsError::GameDataUnavailable)?;
+        if !with_directory(id, |_, read| Ok(read.is_finished()))? {
+            return Err(StatsError::StillReading);
         }
+
+        directory::start(id, game_data);
+        Ok(())
+    }
+
+    /// Closes a directory view, which stops its read.
+    pub fn close_directory(scope: String) -> Result<(), StatsError> {
+        let id = DirectoryId::parse(&scope).ok_or_else(|| StatsError::UnknownScope { scope: scope.clone() })?;
+        let mut scopes = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(read) = scopes.directories.remove(&id) {
+            read.stop();
+        }
+        scopes.by_key.remove(&ScopeKey::Directory(id));
+        Ok(())
     }
 
     /// `text` folded the way ship names are for search.
@@ -508,6 +639,11 @@ impl Stats {
 }
 
 fn open_session() -> Result<SessionView, StatsError> {
+    // A session already open lets go of its charts first: their surfaces are
+    // the ones the new charts draw on.
+    let previous = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).by_key.remove(&ScopeKey::Session);
+    drop(previous);
+
     let stored = scope::with_database(async |pool| scope::load(pool).await)?;
     let table = personal_rating_table();
 
@@ -603,5 +739,8 @@ fn stats_text() -> StatsText {
         copy_image_failed: text("ui.stats.copy_image_failed"),
         reset_view: text("ui.stats.reset_view"),
         nothing_to_plot: text("ui.stats.nothing_to_plot"),
+        open_directory_stats: text("ui.stats.open_directory_stats"),
+        open_directory_stats_tooltip: text("ui.stats.open_directory_stats_tooltip"),
+        directory_reload: text("ui.stats.directory_reload"),
     }
 }

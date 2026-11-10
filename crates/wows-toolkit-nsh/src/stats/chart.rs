@@ -211,18 +211,10 @@ impl Chart {
         };
         let palette = *PALETTE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        let (width, height, mut pixels) = self.read(|model| {
-            let series = model.series();
-            let bars = model.bars();
-            if series.is_empty() && bars.is_empty() {
-                return Err(ChartImageError::Empty);
-            }
-            let x_label = model.x_label();
-            let y_label = model.value_label();
-            let plot = Plot { series: &series, bars: &bars, x_label: &x_label, y_label: &y_label, show_values: model.show_values(), view: model.view() };
-            plot_image::render(&plot, palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale)
-                .ok_or(ChartImageError::Empty)
-        })?;
+        let snapshot = self.read(PlotSnapshot::of).ok_or(ChartImageError::Empty)?;
+        let (width, height, mut pixels) = snapshot
+            .render(palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale)
+            .ok_or(ChartImageError::Empty)?;
         plot_image::unpremultiply(&mut pixels);
 
         let mut encoded = Vec::new();
@@ -279,7 +271,7 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
     let filters = model.effective_filters();
 
     ChartSnapshot {
-        id: u32::try_from(model.id().0).unwrap_or(u32::MAX),
+        id: u32::try_from(model.id().0).expect("chart ids are checked to fit when a chart is restored"),
         surface: surface.to_owned(),
         title: model.tab_title(),
         value_label: model.value_label(),
@@ -322,6 +314,49 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
     }
 }
 
+/// What one frame of a chart plots, copied out of its model so the frame is
+/// drawn without holding it.
+struct PlotSnapshot {
+    series: Vec<wows_toolkit_viewmodel::stats::chart::ChartSeries>,
+    bars: Vec<wows_toolkit_viewmodel::stats::chart::ChartBar>,
+    x_label: String,
+    y_label: String,
+    show_values: bool,
+    view: wows_toolkit_viewmodel::stats::plot::PlotView,
+}
+
+impl PlotSnapshot {
+    /// `None` when the chart has nothing to plot.
+    fn of(model: &ChartModel) -> Option<Self> {
+        let series = model.series();
+        let bars = model.bars();
+        if series.is_empty() && bars.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            series,
+            bars,
+            x_label: model.x_label(),
+            y_label: model.value_label(),
+            show_values: model.show_values(),
+            view: model.view(),
+        })
+    }
+
+    fn render(&self, colors: Colors, background: PlotColor, width: u32, height: u32, scale: f32) -> Option<(u32, u32, Vec<u8>)> {
+        let plot = Plot {
+            series: &self.series,
+            bars: &self.bars,
+            x_label: &self.x_label,
+            y_label: &self.y_label,
+            show_values: self.show_values,
+            view: self.view,
+        };
+        plot_image::render(&plot, colors, background, width, height, scale)
+    }
+}
+
 enum Message {
     Input(SurfaceInput),
     Redraw,
@@ -345,12 +380,18 @@ struct Producer {
 impl Producer {
     fn run(mut self, messages: &mpsc::Receiver<Message>) {
         let mut last_pointer: Option<PlotPoint> = None;
-        while let Ok(message) = messages.recv() {
-            let redraw = match message {
-                Message::Stop => return,
-                Message::Redraw => true,
-                Message::Input(input) => self.input(input, &mut last_pointer),
-            };
+        while let Ok(first) = messages.recv() {
+            // Everything already queued is applied before one draw: every
+            // redraw reads the same latest model, and a stop is honored at
+            // once rather than behind a backlog of obsolete frames.
+            let mut redraw = false;
+            for message in std::iter::once(first).chain(std::iter::from_fn(|| messages.try_recv().ok())) {
+                redraw |= match message {
+                    Message::Stop => return,
+                    Message::Redraw => true,
+                    Message::Input(input) => self.input(input, &mut last_pointer),
+                };
+            }
             if redraw {
                 self.draw();
             }
@@ -447,23 +488,17 @@ impl Producer {
         }
 
         let palette = *PALETTE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let rendered = {
+        let snapshot = {
             let model = self.model.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             // A view reset by a mode or statistic change says so.
             let moved = !model.view().is_default();
             self.moved.send_if_modified(|current| std::mem::replace(current, moved) != moved);
-
-            let series = model.series();
-            let bars = model.bars();
-            if series.is_empty() && bars.is_empty() {
-                None
-            } else {
-                let x_label = model.x_label();
-                let y_label = model.value_label();
-                let plot = Plot { series: &series, bars: &bars, x_label: &x_label, y_label: &y_label, show_values: model.show_values(), view: model.view() };
-                plot_image::render(&plot, palette.colors, palette.background, size.width, size.height, scale)
-            }
+            PlotSnapshot::of(&model)
         };
+        // Rasterized after the model is let go, so a slow frame never holds
+        // up the calls that change the chart.
+        let rendered =
+            snapshot.and_then(|snapshot| snapshot.render(palette.colors, palette.background, size.width, size.height, scale));
 
         let Some((width, height, pixels)) = rendered else {
             self.surface.clear();
@@ -533,7 +568,7 @@ mod tests {
         surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: 2.0 });
         let first = wait_for_frame(&surface, None);
         assert_eq!(first.size, PixelSize { width: 640, height: 400 });
-        assert!(first.pixels.chunks_exact(4).any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
+        assert!(first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
 
         let mut moved = chart.view_moved();
         let modifiers = Modifiers::default();

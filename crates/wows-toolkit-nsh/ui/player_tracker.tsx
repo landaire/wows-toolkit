@@ -1,5 +1,5 @@
 import type { JSX } from "nsh";
-import { Clipboard, colorScheme, List, openUrl, Scroll, signal, Text, View } from "nsh";
+import { Clipboard, colorScheme, Image, List, openUrl, Scroll, signal, Text, View } from "nsh";
 import { AlertDialog, Checkbox, DockArea, Input, Menu, Popover, Tooltip } from "nsh/base";
 import {
   PlayerTracker,
@@ -11,9 +11,12 @@ import {
   type PlayerColumn,
   type PlayerRowView,
   type PlayersTable,
+  type RatingBand,
   type RosterRowView,
   type Scope,
+  type ScopeCellsView,
   type Severity,
+  type StatsMark,
   type TeamView,
   type Tint,
   type TrackerControls,
@@ -47,6 +50,10 @@ const editingNote = signal<string | null>(null);
 const noteDraft = signal("");
 let opened = false;
 let liveRevision = -1;
+let liveReading = false;
+let liveAgain = false;
+let tabShown = false;
+let currentMatchActive = false;
 let filterTimer: number | undefined;
 
 /** How often the Current Match section asks whether the battle changed. */
@@ -60,9 +67,21 @@ export function activatePlayerTracker(locale: string) {
   if (!opened) {
     opened = true;
     void open(locale);
-    setInterval(() => void pollLive(), LIVE_POLL_MS);
+    setInterval(pollLive, LIVE_POLL_MS);
   }
   void PlayerTracker.syncLive().catch((error) => failure.set(errorMessage(error)));
+}
+
+/** Records whether the tracker's tab is the one on screen. */
+export function setPlayerTrackerShown(shown: boolean) {
+  tabShown = shown;
+  syncCurrentMatchShown();
+}
+
+/** The battle's stats lookup is sent only while the Current Match section
+ * is on screen, as the GPUI tracker sends it. */
+function syncCurrentMatchShown() {
+  PlayerTracker.setCurrentMatchShown(tabShown && currentMatchActive);
 }
 
 async function open(locale: string) {
@@ -121,19 +140,32 @@ async function reloadClans() {
   }
 }
 
+/** Reads the Current Match section one read at a time. A request made while
+ * a read runs, or a revision that moved under it, reads again once it lands,
+ * so an older answer never replaces a newer one. */
 async function reloadLive() {
+  if (liveReading) {
+    liveAgain = true;
+    return;
+  }
+  liveReading = true;
   try {
-    live.set(await PlayerTracker.liveView());
-  } catch (error) {
-    failure.set(errorMessage(error));
+    do {
+      liveAgain = false;
+      liveRevision = PlayerTracker.liveRevision();
+      try {
+        live.set(await PlayerTracker.liveView());
+      } catch (error) {
+        failure.set(errorMessage(error));
+      }
+    } while (liveAgain || PlayerTracker.liveRevision() !== liveRevision);
+  } finally {
+    liveReading = false;
   }
 }
 
-async function pollLive() {
-  const revision = PlayerTracker.liveRevision();
-  if (revision === liveRevision) return;
-  liveRevision = revision;
-  await reloadLive();
+function pollLive() {
+  if (PlayerTracker.liveRevision() !== liveRevision) void reloadLive();
 }
 
 /** Applies a control change, then redraws what it affects. */
@@ -441,7 +473,7 @@ function PlayerRow(props: { row: () => PlayerRowView; index: () => number; track
   const open = () => expandedPlayers()[row().accountId] === true;
   const tone = () => severityColor(row().severity);
   return (
-    <View style={{ backgroundColor: props.index() % 2 === 1 ? colors.muted : "transparent" }}>
+    <View testID={`player-row-${props.index()}`} style={{ backgroundColor: props.index() % 2 === 1 ? colors.muted : "transparent" }}>
       <View role="row" accessibilityLabel={row().name} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
         <View style={{ width: PLAYER_WIDTHS.name, flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Chip label={open() ? "v" : ">"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().name}`} onPress={() => togglePlayer(row().accountId)}/>
@@ -640,16 +672,100 @@ function RosterMenu(props: { row: RosterRowView; tracker: PlayerTrackerProps }) 
   );
 }
 
+/** A band's text colour on the current appearance. */
+function bandText(band: RatingBand): string {
+  return colorScheme() === "dark" ? band.darkText : band.lightText;
+}
+
+/** The GPUI tracker's chip and row tints, as hex alpha over a band's hue. */
+const CHIP_TINT = "38";
+const ROW_TINT = "14";
+const STAT_WIDTH = 64;
+
+function markGlyph(mark: StatsMark): string {
+  switch (mark) {
+    case "hidden": return "x";
+    case "unavailable": return "!";
+    case "unknown": return "i";
+  }
+}
+
+/** The four figures one scope contributes to a roster row. */
+function ScopeCells(props: { cells: ScopeCellsView }) {
+  const cells = () => props.cells;
+  const figure = (text: string, color?: string) => (
+    <Text style={{ width: STAT_WIDTH, fontSize: 11.5, color: color ?? colors.mutedForeground }}>{text}</Text>
+  );
+  return (
+    <View style={{ flexDirection: "row", gap: 8 }}>
+      <If when={cells().mark}>
+        <View accessibilityLabel={cells().markHover!} tooltip={<Hint text={cells().markHover!}/>} style={{ width: STAT_WIDTH }}>
+          <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{markGlyph(cells().mark!)}</Text>
+        </View>
+      </If>
+      <If when={!cells().mark}>
+        <View
+          accessibilityLabel={cells().winRateHover}
+          tooltip={cells().winRateHover ? <Hint text={cells().winRateHover!}/> : undefined}
+          style={{ width: STAT_WIDTH }}
+        >
+          <Text style={{ fontSize: 11.5, color: cells().winRateBand ? bandText(cells().winRateBand!) : colors.mutedForeground }}>{cells().winRate}</Text>
+        </View>
+      </If>
+      <If when={cells().personalRatingBand}>
+        <View accessibilityLabel={cells().personalRatingHover} tooltip={<Hint text={cells().personalRatingHover}/>} style={{ width: STAT_WIDTH, flexDirection: "row" }}>
+          <View style={{ paddingHorizontal: 4, borderRadius: 3, backgroundColor: `${cells().personalRatingBand!.hue}${CHIP_TINT}` }}>
+            <Text style={{ fontSize: 11.5, color: bandText(cells().personalRatingBand!) }}>{cells().personalRating}</Text>
+          </View>
+        </View>
+      </If>
+      <If when={!cells().personalRatingBand}>
+        {figure(cells().personalRating)}
+      </If>
+      {figure(cells().avgDamage)}
+      {figure(cells().battles)}
+    </View>
+  );
+}
+
+function TeamHeading(props: { team: TeamView }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.foreground }}>{props.team.title}</Text>
+      <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{props.team.players}</Text>
+      <If when={props.team.averageWinRate}>
+        <Text style={{ fontSize: 11.5, color: bandText(props.team.averageWinRate!.band) }}>{props.team.averageWinRate!.text}</Text>
+      </If>
+      <If when={props.team.averageRating}>
+        <Text style={{ fontSize: 11.5, color: bandText(props.team.averageRating!.band) }}>{props.team.averageRating!.text}</Text>
+      </If>
+    </View>
+  );
+}
+
+/** The row's ship class icon from the battle's build, tinted like its name
+ * and turned upright. A fixed slot either way, so the names stay aligned. */
+function ClassIcon(props: { row: RosterRowView }) {
+  return (
+    <View style={{ width: 16, height: 16 }} tooltip={props.row.className ? <Hint text={props.row.className}/> : undefined}>
+      <If when={props.row.classIcon}>
+        <Image
+          src={props.row.classIcon!}
+          accessibilityLabel={props.row.className ?? ""}
+          style={{ width: 16, height: 16, objectFit: "contain", tintColor: tintColor(props.row.tint), transform: [{ rotate: "90deg" }] }}
+        />
+      </If>
+    </View>
+  );
+}
+
 function TeamColumn(props: { team: TeamView; view: LiveView; tracker: PlayerTrackerProps }) {
   const text = () => labels()!;
-  const statWidth = 64;
   return (
     <View style={{ flex: 1, minWidth: 0 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.foreground }}>{props.team.title}</Text>
-        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{props.team.players}</Text>
-      </View>
+      <TeamHeading team={props.team}/>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        <View style={{ width: 16 }}/>
         <View style={{ width: 16 }}/>
         <View style={{ width: 24 }}/>
         <Text style={{ flex: 1, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{text().playerColumn}</Text>
@@ -657,10 +773,10 @@ function TeamColumn(props: { team: TeamView; view: LiveView; tracker: PlayerTrac
         <Each of={props.view.scopeHeadings}>
           {(scope) => (
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <Text style={{ width: statWidth, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().winRate}</Text>
-              <Text style={{ width: statWidth, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().personalRating}</Text>
-              <Text style={{ width: statWidth, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().avgDamage}</Text>
-              <Text style={{ width: statWidth, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().battles}</Text>
+              <Text style={{ width: STAT_WIDTH, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().winRate}</Text>
+              <Text style={{ width: STAT_WIDTH, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().personalRating}</Text>
+              <Text style={{ width: STAT_WIDTH, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().avgDamage}</Text>
+              <Text style={{ width: STAT_WIDTH, fontSize: 11.5, fontWeight: "700", color: colors.foreground }}>{scope().battles}</Text>
             </View>
           )}
         </Each>
@@ -669,22 +785,20 @@ function TeamColumn(props: { team: TeamView; view: LiveView; tracker: PlayerTrac
       </View>
       <Each of={props.team.rows}>
         {(row) => (
-          <View role="row" accessibilityLabel={row().name} style={{ minHeight: 26, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
+          <View
+            role="row"
+            accessibilityLabel={row().name}
+            style={{ minHeight: 26, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, backgroundColor: row().band ? `${row().band!.hue}${ROW_TINT}` : "transparent" }}
+          >
+            <ClassIcon row={row()}/>
             <View style={{ width: 16 }} tooltip={row().note ? <Hint text={row().note!}/> : undefined}>
               <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{row().note ? "*" : ""}</Text>
             </View>
             <TwitchChip row={row()} tracker={props.tracker}/>
             <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: tintColor(row().tint) }}>{row().name}</Text>
             <Text numberOfLines={1} style={{ width: 130, fontSize: 11.5, color: colors.mutedForeground }}>{row().ship}</Text>
-            <Each of={props.view.scopeHeadings}>
-              {() => (
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  <View style={{ width: statWidth }}/>
-                  <View style={{ width: statWidth }}/>
-                  <View style={{ width: statWidth }}/>
-                  <View style={{ width: statWidth }}/>
-                </View>
-              )}
+            <Each of={row().scopes}>
+              {(cells) => <ScopeCells cells={cells()}/>}
             </Each>
             <View accessibilityLabel={row().metHover} style={{ width: 80 }} tooltip={<Hint text={row().metHover}/>}>
               <Text style={{ fontSize: 11.5, color: severityColor(row().metSeverity) ?? colors.mutedForeground }}>{row().met}</Text>
@@ -772,6 +886,10 @@ function Sections(props: { tracker: PlayerTrackerProps }) {
       defaultLayout={{ center: { type: "split", axis: "horizontal", children: [{ type: "tabs", panels: PANELS, activeIndex: 0 }] } }}
       panels={PANELS.map((id) => ({ id, closable: false }))}
       onPanelActiveChange={({ panel, active }) => {
+        if (panel === "current-match") {
+          currentMatchActive = active;
+          syncCurrentMatchShown();
+        }
         if (panel !== "clans") return;
         clansShown.set(active);
         if (active) void reloadClans();

@@ -47,8 +47,8 @@ pub struct Cli {
 
 impl Cli {
     /// Which adapter the armor viewport's own device should take.
-    pub fn adapter_choice(&self) -> crate::viewport::device::AdapterChoice {
-        use crate::viewport::device::AdapterChoice;
+    pub fn adapter_choice(&self) -> wows_toolkit_armor::viewport::device::AdapterChoice {
+        use wows_toolkit_armor::viewport::device::AdapterChoice;
 
         if self.cpu_renderer {
             return AdapterChoice::Cpu;
@@ -241,7 +241,7 @@ mod tests {
     /// device this port picks: the armor viewport's own.
     #[test]
     fn the_renderer_flags_that_mean_something_are_taken() {
-        use crate::viewport::device::AdapterChoice;
+        use wows_toolkit_armor::viewport::device::AdapterChoice;
 
         let bare = Cli::try_parse_from(["wows-toolkit-gpui"]).expect("a bare launch");
         assert_eq!(bare.adapter_choice(), AdapterChoice::Fastest);

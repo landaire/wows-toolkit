@@ -90,6 +90,35 @@ impl RealtimeArmorFeed {
     }
 }
 
+/// Who was firing at one ship, and with what.
+///
+/// Read off the battle rather than off the hits, because the filter has to be
+/// able to offer an attacker before any of their shells have landed.
+#[derive(Clone, Debug, Default)]
+pub struct IncomingContext {
+    /// Every enemy of the ship being looked at, named as the log lists them.
+    /// The keys are also what counts as incoming fire.
+    pub attackers: std::collections::BTreeMap<wows_replays::types::EntityId, String>,
+    /// Every hit that ship takes over the whole battle, which is what the log
+    /// lists: it is a reading of the battle rather than of where playback is.
+    pub taken: Vec<PreExtractedHit>,
+    /// That ship's health over the battle, as the strip beside the log draws
+    /// it. `None` for a ship nothing recorded the health of.
+    pub health: Option<wows_toolkit_viewmodel::armor::health_strip::HealthStrip>,
+    /// Where playback stood when the viewer was asked for, so the strip marks it
+    /// straight away rather than waiting for playback to move.
+    pub at: Option<wows_replays::types::GameClock>,
+    /// The main battery shells of every ship in the battle, so secondaries can
+    /// be told apart from them. Empty is not knowledge that none are main
+    /// battery, and the filter reads it that way.
+    pub main_battery: std::collections::HashSet<wows_replays::types::GameParamId>,
+    /// The shell each landed salvo was fired with, so the viewer can send that
+    /// shell through the hull itself and say whether it agrees with the server.
+    /// A salvo whose shell this build cannot name is left out rather than
+    /// simulated with a stand-in.
+    pub shells: std::collections::HashMap<wows_replays::types::GameParamId, wowsunpack::game_params::types::ShellInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

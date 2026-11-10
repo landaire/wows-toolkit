@@ -19,11 +19,15 @@
 //!   the UV entry so the GPU tiles it directly.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use wowsunpack::export::camo_textures::CamoSchemeId;
+use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 
 use super::upload_hull::mfm_stem;
+use crate::load_ship::LoadedShipArmor;
 
 /// Hermite smoothstep from 0 at `e0` to 1 at `e1`. Ports `common.rs:625-628`.
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -132,20 +136,20 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 /// A struct rather than a `(u32, u32, Vec<u8>)`, because a width and a height
 /// are the same type and nothing but the field name says which is which.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RgbaTexture {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
+pub struct RgbaTexture {
+    pub width: u32,
+    pub height: u32,
     /// Four bytes per pixel, row-major.
-    pub(crate) pixels: Vec<u8>,
+    pub pixels: Vec<u8>,
 }
 
 /// Textures keyed by the hull part they cover.
 ///
 /// The stock albedo is keyed by `.mfm` path and the composited camo by part
 /// stem, which is why the key is a plain `String` on both sides.
-pub(crate) type TexturesByPart = HashMap<String, RgbaTexture>;
+pub type TexturesByPart = HashMap<String, RgbaTexture>;
 
-pub(crate) fn build_active_camo(
+pub fn build_active_camo(
     textures: &SchemeTextures,
     uv_transforms: &HashMap<String, UvTransform>,
     use_color_scheme: bool,
@@ -255,16 +259,180 @@ pub(crate) fn build_active_camo(
     (out_textures, uvs)
 }
 
+/// Resolves a selected camo scheme across a full reload (Task 8c) by name.
+/// `CamoSchemeId` is a raw index into a per-load `camo_scheme_infos` list
+/// (see that type's own doc: "never persisted") -- a reload rebuilds the list
+/// from scratch, so `old_id` can end up pointing at an entirely different
+/// scheme in `new_infos`, or at nothing at all. Looks up `old_id`'s
+/// `display_name` in `old_infos`, then finds the entry with that same
+/// `display_name` in `new_infos` and returns its (new) id. Returns `None` if
+/// `old_id` has no entry in `old_infos`, or if no entry in `new_infos` shares
+/// its name -- the camo did not survive the reload (for example, a hull
+/// upgrade dropped a ship-specific scheme).
+pub fn remap_camo_selection(
+    old_infos: &[CamoSchemeInfo],
+    new_infos: &[CamoSchemeInfo],
+    old_id: CamoSchemeId,
+) -> Option<CamoSchemeId> {
+    let name = &old_infos.iter().find(|i| i.id == old_id)?.display_name;
+    new_infos.iter().find(|i| &i.display_name == name).map(|i| i.id)
+}
+
+/// [`decode_active_camo`] against a cache, run inline by a caller that is
+/// re-uploading the hull in the same pass.
+pub fn recompute_active_camo(
+    selected_camo: Option<CamoSchemeId>,
+    camo_texture_cache: &mut CamoTextureCache,
+    armor: &LoadedShipArmor,
+) -> (CamoTextures, HashMap<String, UvTransform>) {
+    let Some(id) = selected_camo else { return (HashMap::new(), HashMap::new()) };
+    let cached = camo_texture_cache.get(id);
+    let decode = decode_active_camo(id, cached, armor);
+    if let Some(textures) = decode.decoded {
+        camo_texture_cache.insert(id, textures);
+    }
+    (decode.textures, decode.uvs)
+}
+
+/// How many schemes' decoded textures are kept. One scheme is several
+/// full-size textures, so a reader stepping through a ship's camo list would
+/// otherwise hold every one of them until the ship changes.
+const CAMO_TEXTURE_CACHE_SIZE: usize = 3;
+
+/// Decoded scheme textures, most recently used last.
+///
+/// Shared by `Arc`: a hit hands the decoder the same textures rather than a
+/// copy of every one of them, which is what reselecting a scheme used to cost.
+#[derive(Default)]
+pub struct CamoTextureCache {
+    entries: Vec<(CamoSchemeId, Arc<SchemeTextures>)>,
+}
+
+impl CamoTextureCache {
+    pub fn get(&mut self, id: CamoSchemeId) -> Option<Arc<SchemeTextures>> {
+        let at = self.entries.iter().position(|(held, _)| *held == id)?;
+        let entry = self.entries.remove(at);
+        let textures = Arc::clone(&entry.1);
+        self.entries.push(entry);
+        Some(textures)
+    }
+
+    pub fn insert(&mut self, id: CamoSchemeId, textures: Arc<SchemeTextures>) {
+        self.entries.retain(|(held, _)| *held != id);
+        self.entries.push((id, textures));
+        while self.entries.len() > CAMO_TEXTURE_CACHE_SIZE {
+            self.entries.remove(0);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+/// Per-hull-part composited camo textures, keyed as
+/// [`crate::upload_hull::upload_hull_meshes`] expects.
+pub type CamoTextures = TexturesByPart;
+
+/// One scheme's decoded and composited textures.
+pub struct CamoDecode {
+    /// The scheme's own textures, when this run decoded them; a run that was
+    /// handed them from the cache leaves this `None`, since the caller
+    /// already holds them.
+    pub decoded: Option<Arc<SchemeTextures>>,
+    /// Empty means "render base albedo only", which is what stock looks
+    /// like.
+    pub textures: CamoTextures,
+    pub uvs: HashMap<String, UvTransform>,
+}
+
+/// Decodes `id`'s textures (unless `cached` already holds them) and
+/// composites them against `armor`'s hull textures. A decode failure, or an
+/// id with no matching `camo_scheme_infos` entry, is logged via
+/// `tracing::warn!` and treated as stock rather than left half-applied.
+///
+/// Takes no `&mut` state, so it can run on a background thread
+/// (a camo selection) as well as inline
+/// ([`recompute_active_camo`], which the reload path uses because it is
+/// already re-uploading the hull in the same pass).
+pub fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
+    let (textures, decoded) = match cached {
+        Some(t) => (t, None),
+        None => match armor.camo_source.decode(id) {
+            Ok(t) => {
+                if t.is_empty() {
+                    tracing::warn!("camo scheme {id:?} decoded to zero textures for this ship; rendering as stock");
+                }
+                let t = Arc::new(t);
+                (Arc::clone(&t), Some(t))
+            }
+            Err(e) => {
+                tracing::warn!("failed to decode camo scheme {id:?}: {e}");
+                return CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
+            }
+        },
+    };
+    let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
+    let (uv, use_color_scheme) = match info {
+        Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
+        None => {
+            tracing::warn!(
+                "camo scheme {id:?} decoded successfully but has no matching entry in camo_scheme_infos; falling back to identity UVs and no color scheme"
+            );
+            (HashMap::default(), false)
+        }
+    };
+    let (built, uvs) = build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
+    CamoDecode { decoded, textures: built, uvs }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
+    use wowsunpack::export::camo_textures::CamoSchemeId;
+    use wowsunpack::export::camo_textures::CamoSchemeInfo;
     use wowsunpack::export::camouflage::UvTransform;
+    use wowsunpack::export::gltf_export::CamoOrigin;
 
     use super::RgbaTexture;
     use super::bilinear_rgba;
     use super::build_active_camo;
+    use super::remap_camo_selection;
     use super::smoothstep;
+
+    fn scheme(id: usize, display_name: &str, origin: CamoOrigin) -> CamoSchemeInfo {
+        CamoSchemeInfo {
+            id: CamoSchemeId(id),
+            display_name: display_name.to_string(),
+            raw_name: display_name.to_string(),
+            origin,
+            use_color_scheme: false,
+            uv_transforms: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn remap_camo_selection_follows_name_across_shuffled_ids() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific), scheme(1, "Camo B", CamoOrigin::Universal)];
+        // A reload rebuilt the list in another order, so "Camo A" moved from id 0 to id 1.
+        let new = vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), Some(CamoSchemeId(1)));
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_name_gone_from_new_list() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new = vec![scheme(0, "Camo B", CamoOrigin::Universal)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), None);
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_old_id_unknown() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(5)), None);
+    }
 
     /// A single-pixel PNG (repeated as the whole image) so `image::
     /// load_from_memory` has real bytes to decode.

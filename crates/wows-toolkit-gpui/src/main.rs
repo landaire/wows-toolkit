@@ -47,7 +47,6 @@ mod ui;
 mod unpacker;
 mod update;
 mod upload;
-mod viewport;
 mod watched_playback;
 mod window_shell;
 
@@ -81,7 +80,7 @@ fn main() {
     }
     if let cli::Invocation::ListGpus = &invocation {
         let title = format!("{} display adapters", wows_toolkit_config::APP_NAME);
-        cli::report_startup_message(&title, &viewport::device::describe_adapters(), false);
+        cli::report_startup_message(&title, &wows_toolkit_armor::viewport::device::describe_adapters(), false);
         std::process::exit(0);
     }
     let asked = match &invocation {
@@ -90,7 +89,7 @@ fn main() {
         // asked of it.
         _ => cli::Cli::default(),
     };
-    viewport::device::choose_adapter(asked.adapter_choice());
+    wows_toolkit_armor::viewport::device::choose_adapter(asked.adapter_choice());
 
     // `ring` and `aws_lc_rs` are both enabled in the dependency graph (octocrab
     // pulls hyper-rustls with its defaults), so rustls cannot pick a provider by

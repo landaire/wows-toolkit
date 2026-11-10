@@ -300,7 +300,7 @@ pub struct ShowArmorRequested {
     pub display_name: String,
     pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     /// Who was firing at that ship, for the incoming-fire log.
-    pub incoming: Box<crate::replay_renderer::IncomingContext>,
+    pub incoming: Box<wows_toolkit_armor::realtime::IncomingContext>,
 }
 
 impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}

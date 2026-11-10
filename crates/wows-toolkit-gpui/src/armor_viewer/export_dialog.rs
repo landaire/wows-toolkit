@@ -389,7 +389,7 @@ fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index:
 
     let Some(param) = assets.metadata().game_param_by_index(param_index) else { return Vec::new() };
     let Some(vehicle) = param.vehicle() else { return Vec::new() };
-    super::load_ship::build_hull_upgrade_names(vehicle)
+    wows_toolkit_armor::load_ship::build_hull_upgrade_names(vehicle)
 }
 
 /// Fills `dialog` with the export choices, reading them off `state`.

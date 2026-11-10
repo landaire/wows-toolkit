@@ -123,14 +123,14 @@ const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// Skip an armor triangle whose thickness rounds to (effectively) 0mm, unless
 /// `show_zero_mm` is on. Matches the egui app's own `0.05` epsilon.
-pub(crate) fn is_zero_mm(thickness_mm: f32) -> bool {
+pub fn is_zero_mm(thickness_mm: f32) -> bool {
     thickness_mm.abs() < 0.05
 }
 
 /// Derives a triangle's [`PlateKey`] (zone, material_name, thickness rounded
 /// to tenths of mm). Matches the egui app's own inline key derivation at
 /// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
-pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
+pub fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
     PlateKey {
         zone: info.zone.clone(),
         material_name: info.material.name().to_owned(),
@@ -146,7 +146,7 @@ pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
 /// maps use opposite boolean senses). Shared by the main mesh loop, plate
 /// boundary edges, and the hover/sidebar highlights (`picking_ui.rs`) so all
 /// of them treat a hidden part/plate identically.
-pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, show_zero_mm: bool) -> bool {
+pub fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, show_zero_mm: bool) -> bool {
     if !show_zero_mm && is_zero_mm(info.thickness_mm) {
         return false;
     }
@@ -714,7 +714,7 @@ mod tests {
             .next()
             .expect("expected at least one battleship in the real catalog");
 
-        let armor = crate::armor_viewer::load_ship::load_ship_armor_by_param(
+        let armor = crate::load_ship::load_ship_armor_by_param(
             &ship_assets,
             &ship.param_index,
             &ship.display_name,

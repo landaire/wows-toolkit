@@ -91,7 +91,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .gap_2()
         .p_2()
         .child(tools)
-        .when(viewport.read(cx).trajectory_state().shown, |panel| {
+        .when(viewport.read(cx).scene().trajectory_state().shown, |panel| {
             panel.child(popover::render_trajectory_panel(view, pane, &viewport, cx))
         })
         .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.armor_options").as_ref(), cx, |cx| {

@@ -26,6 +26,9 @@ bytemuck = "1"
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
+# The armor viewport, ship armor load and analysis overlays, shared with the
+# NSH app.
+wows-toolkit-armor = { path = "../wows-toolkit-armor" }
 # The collaborative session mesh, shared with the egui app so both front ends
 # run one implementation.
 wt-collab-client = { workspace = true }

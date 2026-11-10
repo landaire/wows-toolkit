@@ -2,6 +2,7 @@
 // parsed at startup, as in the other front ends.
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
+pub mod armor;
 pub mod clipboard;
 pub mod collab;
 pub mod frames;
@@ -57,6 +58,7 @@ fn native_module(registry: &mut Registry) {
     registry.module::<ReplayRenderer>();
     registry.module::<tactics::Tactics>();
     registry.module::<ReplaySearch>().module::<Palette>().class::<QueryBar>().class::<ShipSearch>();
+    registry.module::<armor::Armor>();
     registry.register::<ReplayInspector>();
     registry.register::<Unpacker>();
 }

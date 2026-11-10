@@ -16,6 +16,8 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+# The stats service speaks CBOR.
+ciborium = { workspace = true }
 escaper = "0.1.1"
 gettext = { workspace = true }
 # The minimap previews and playback exports rasterise and encode through the
@@ -30,6 +32,8 @@ thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt"] }
 tempfile = "3"
 tracing = { workspace = true }
+# Finding every replay below a directory for its stats view.
+walkdir = { workspace = true }
 wows-battle-world = { path = "../wows-battle-world", default-features = false }
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb", "fire-sections"] }

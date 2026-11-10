@@ -390,6 +390,62 @@ pub struct ClansTable {
     pub needs_load: bool,
 }
 
+/// A personal-rating band's colours, each `#rrggbb`.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct RatingBand {
+    /// Laid faintly under a chip or a row.
+    pub hue: String,
+    /// The text colour on a dark theme.
+    pub dark_text: String,
+    /// The text colour on a light theme.
+    pub light_text: String,
+}
+
+/// A figure coloured by the band it falls in.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct BandedText {
+    pub text: String,
+    pub band: RatingBand,
+}
+
+/// Why a roster row has no figures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub enum StatsMark {
+    /// The player hid their statistics.
+    Hidden,
+    /// The service had nothing for them.
+    #[default]
+    Unavailable,
+    /// Nothing was asked, or no answer came.
+    Unknown,
+}
+
+/// The four figures one scope contributes to a roster row. A figure the
+/// service did not give is `-`, and empty while the lookup is still running.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct ScopeCellsView {
+    /// Shown in place of the win rate when the row has no figures.
+    #[prop(skip_none)]
+    pub mark: Option<StatsMark>,
+    #[prop(skip_none)]
+    pub mark_hover: Option<String>,
+    pub win_rate: String,
+    #[prop(skip_none)]
+    pub win_rate_band: Option<RatingBand>,
+    /// Both scopes' rates, so one cell compares them.
+    #[prop(skip_none)]
+    pub win_rate_hover: Option<String>,
+    pub personal_rating: String,
+    #[prop(skip_none)]
+    pub personal_rating_band: Option<RatingBand>,
+    pub personal_rating_hover: String,
+    pub avg_damage: String,
+    pub battles: String,
+}
+
 /// One entry of the live roster.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
@@ -397,7 +453,19 @@ pub struct RosterRowView {
     /// The name with the clan tag the scan found, if any.
     pub name: String,
     pub tint: Tint,
+    /// The ship class icon from the battle's build, as an SVG `data:` URL.
+    /// The view tints it like the name and turns it upright.
+    #[prop(skip_none)]
+    pub class_icon: Option<String>,
+    /// The ship class's name, the icon's hover.
+    #[prop(skip_none)]
+    pub class_name: Option<String>,
     pub ship: String,
+    /// The band of the scope the row leads with, laid faintly under it.
+    #[prop(skip_none)]
+    pub band: Option<RatingBand>,
+    /// One group of figures per visible scope, left to right.
+    pub scopes: Vec<ScopeCellsView>,
     /// How often this player was met, empty when never.
     pub met: String,
     pub met_severity: Severity,
@@ -422,6 +490,11 @@ pub struct RosterRowView {
 pub struct TeamView {
     pub title: String,
     pub players: String,
+    /// The team's average win rate over the scope the rows lead with.
+    #[prop(skip_none)]
+    pub average_win_rate: Option<BandedText>,
+    #[prop(skip_none)]
+    pub average_rating: Option<BandedText>,
     pub rows: Vec<RosterRowView>,
 }
 

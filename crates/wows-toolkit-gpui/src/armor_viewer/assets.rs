@@ -47,16 +47,7 @@ use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.
 pub(crate) const CLASS_ICON_TINT: u32 = 0xffffff;
 
-/// Reasons the Armor Viewer's ship data failed to load. Wraps `ShipAssets`'
-/// `rootcause::Report` errors (the same convention `ReplayLoadError` in
-/// `replay_inspector::load` uses for its own `anyhow`/`Report`-returning
-/// dependencies) rather than surfacing the raw report type across the
-/// background-task boundary.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum ArmorAssetsError {
-    #[error("failed to load ship assets: {0}")]
-    ShipAssets(String),
-}
+use wows_toolkit_armor::assets::ArmorAssetsError;
 
 /// One loaded build's Armor Viewer data: the shared ship-export assets, the
 /// pre-built ship catalog for the sidebar/tree, and the nation-flag/class-icon
@@ -79,13 +70,7 @@ fn load_armor_assets(
     metadata: &Arc<GameMetadataProvider>,
     svg_renderer: &SvgRenderer,
 ) -> Result<ArmorAssetsBundle, ArmorAssetsError> {
-    // The overlay already holds the blob; reading it again would hold 174 MiB
-    // of it twice.
-    let assets = match assets_bin_bytes {
-        Some(bytes) => ShipAssets::from_parts(vfs, Arc::clone(metadata), Arc::clone(bytes)),
-        None => ShipAssets::from_vfs_with_metadata(vfs, Arc::clone(metadata))
-            .map_err(|report| ArmorAssetsError::ShipAssets(format!("{report:?}")))?,
-    };
+    let assets = wows_toolkit_armor::assets::load_ship_assets(vfs, assets_bin_bytes, metadata)?;
 
     let catalog = ShipCatalog::build(metadata);
 

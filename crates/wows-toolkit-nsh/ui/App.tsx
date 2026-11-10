@@ -21,12 +21,13 @@ import { GameDataStatus } from "./game_data";
 import { SessionButton } from "./collab";
 import { LauncherView } from "./launcher";
 import { activateStats, StatsView } from "./stats";
-import { activatePlayerTracker, PlayerTrackerView } from "./player_tracker";
+import { activatePlayerTracker, PlayerTrackerView, setPlayerTrackerShown } from "./player_tracker";
 import { bindSearchRowActions, bindSearchTab, searchFor, SearchView } from "./search";
 import { bindPalette, CommandPalette, openPalette } from "./palette";
 import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { UnpackerView } from "./unpacker";
 import { BatchRenderStatus, followForcedWindows, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
+import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -61,9 +62,12 @@ void loadAppSettings().then((loaded) => {
 function selectTab(id: string) {
   if (id === "statistics") activateStats();
   if (id === "player-tracker") activatePlayerTracker(startup.locale);
+  setPlayerTrackerShown(id === "player-tracker");
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
 }
+
+onArmorReveal(() => selectTab("armor-viewer"));
 
 function openReplayPath(path: string) {
   if (replayOpenPath() === path) {
@@ -125,6 +129,7 @@ bindSearchRowActions({
 bindPalette({
   tabs: startup.tabs,
   activeTab: () => activeTab(),
+  armorShips: armorShipList,
   shellLabels: {
     tacticsBoard: startup.text.tacticsBoard,
     checkUpdates: startup.text.checkUpdates,
@@ -154,13 +159,14 @@ bindPalette({
       });
     },
     setTheme: ({ theme }) => setTheme(theme),
+    viewArmor: ({ paramIndex, displayName }) => viewArmorShip(paramIndex, displayName),
     tacticsBoard: openTacticsBoard,
     checkUpdates: () => void checkForUpdate("byHand"),
     about: openAbout,
   },
 });
 
-const SHOWN_TABS = ["replay-inspector", "launcher", "statistics", "player-tracker", "search", "unpacker", "settings"];
+const SHOWN_TABS = ["replay-inspector", "launcher", "statistics", "player-tracker", "search", "unpacker", "armor-viewer", "settings"];
 
 function Content() {
   const tab = () => startup.tabs.find((candidate) => candidate.id === activeTab()) ?? startup.tabs[0];
@@ -183,6 +189,9 @@ function Content() {
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "unpacker" ? "flex" : "none" }}>
         <UnpackerView active={tab().id === "unpacker"} locale={startup.locale}/>
+      </View>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "armor-viewer" ? "flex" : "none" }}>
+        <ArmorView shown={tab().id === "armor-viewer"}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>

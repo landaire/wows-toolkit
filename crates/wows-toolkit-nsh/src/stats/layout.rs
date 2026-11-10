@@ -37,6 +37,14 @@ pub enum LayoutError {
     UnknownPanel { panel: String },
     #[error("the layout repeats chart {id}")]
     RepeatedChart { id: usize },
+    #[error("chart {id} has an id too large to show")]
+    ChartIdTooLarge { id: usize },
+}
+
+/// Refuses a chart id the view cannot address: the TSX view numbers charts
+/// with 32 bits.
+pub(crate) fn check_chart_id(id: ChartId) -> Result<ChartId, LayoutError> {
+    u32::try_from(id.0).map(|_| id).map_err(|_| LayoutError::ChartIdTooLarge { id: id.0 })
 }
 
 /// One panel of the Stats tab.
@@ -97,7 +105,8 @@ impl StatsPanel {
 /// The layout a tab opens with: Overview and Ships share the center, and
 /// each chart sits in the right dock.
 pub(crate) fn default_layout(charts: &[ChartId]) -> DockAreaLayout {
-    let center = DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key());
+    let center =
+        DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key()).active_index(0);
     let mut layout = DockAreaLayout::new(DockLayout::h_split().child(center, None));
     for id in charts {
         layout = with_chart(layout, *id);
@@ -139,29 +148,6 @@ pub(crate) fn with_chart(mut layout: DockAreaLayout, id: ChartId) -> DockAreaLay
     layout
 }
 
-/// `layout` without chart `id`, its emptied containers folded away.
-pub(crate) fn without_chart(mut layout: DockAreaLayout, id: ChartId) -> DockAreaLayout {
-    let key = StatsPanel::Chart(id).key();
-    let mut pending: Vec<&mut DockNode> = vec![&mut layout.center];
-    for region in [&mut layout.left, &mut layout.right, &mut layout.bottom].into_iter().flatten() {
-        pending.push(&mut region.layout);
-    }
-    while let Some(node) = pending.pop() {
-        match node {
-            DockNode::Tabs { panels, active_index, .. } => {
-                let Some(at) = panels.iter().position(|panel| *panel == key) else { continue };
-                panels.remove(at);
-                if *active_index >= at && *active_index > 0 {
-                    *active_index -= 1;
-                }
-            }
-            DockNode::Split { children, .. } => pending.extend(children.iter_mut()),
-        }
-    }
-
-    layout.normalized()
-}
-
 /// Every panel the layout places, center first, then the left, right and
 /// bottom docks.
 pub(crate) fn panels(layout: &DockAreaLayout) -> Vec<PanelId> {
@@ -190,6 +176,7 @@ pub(crate) fn charts(layout: &DockAreaLayout) -> Result<Vec<ChartId>, LayoutErro
             return Err(LayoutError::UnknownPanel { panel: key.as_str().to_owned() });
         };
         let StatsPanel::Chart(id) = panel else { continue };
+        let id = check_chart_id(id)?;
         if charts.contains(&id) {
             return Err(LayoutError::RepeatedChart { id: id.0 });
         }
@@ -252,16 +239,6 @@ mod tests {
         let right = layout.right.as_ref().expect("the charts have a dock");
         assert_eq!(right.size, Some(px(500.0)));
         assert_eq!(charts(&layout).expect("the charts are known"), [ChartId(0), ChartId(3)]);
-    }
-
-    #[test]
-    fn closing_a_chart_leaves_the_other_panels() {
-        let layout = default_layout(&[ChartId(0), ChartId(1)]);
-
-        let layout = without_chart(layout, ChartId(0));
-
-        assert_eq!(charts(&layout).expect("charts"), [ChartId(1)]);
-        assert!(panels(&layout).contains(&StatsPanel::Overview.key()));
     }
 
     #[test]

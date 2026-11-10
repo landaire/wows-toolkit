@@ -18925,6 +18925,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-armor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "image",
+ "nalgebra",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
+ "wgpu 30.0.1",
+ "wows-replay-insights",
+ "wows-toolkit-config",
+ "wows-toolkit-viewmodel",
+ "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows-toolkit-config"
 version = "0.1.0"
 dependencies = [
@@ -18995,6 +19016,7 @@ dependencies = [
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
+ "wows-toolkit-armor",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-launcher",
@@ -19072,6 +19094,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "unidecode",
  "url",
  "wgc-auth",
  "wgc-catalog",
@@ -19080,6 +19103,7 @@ dependencies = [
  "wows-core",
  "wows-data-mgr",
  "wows-replay-insights",
+ "wows-toolkit-armor",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-launcher",
@@ -19096,6 +19120,7 @@ dependencies = [
 name = "wows-toolkit-replay-data"
 version = "0.1.0"
 dependencies = [
+ "ciborium",
  "escaper",
  "filetime",
  "gettext",
@@ -19109,6 +19134,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "walkdir",
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
