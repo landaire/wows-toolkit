@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod collab;
 pub mod frames;
 pub mod game_data;
+mod js_newtype;
 mod launcher;
 mod native;
 mod player_tracker;
