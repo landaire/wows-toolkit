@@ -38,6 +38,10 @@ export type StatsModel = {
   setCurrent: (layout: DockAreaLayout) => void;
   dock: () => DockAreaApi | undefined;
   setDock: (api: DockAreaApi) => void;
+  /// Numbers each request that publishes a whole view, or one chart (by
+  /// id), so a reply overtaken by a newer one is dropped.
+  begin: (chart?: number) => number;
+  isLatest: (request: number, chart?: number) => boolean;
 };
 
 export function createStatsModel(scope: string, persists: boolean): StatsModel {
@@ -47,6 +51,8 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
   const layout = signal<DockAreaLayout | null>(null);
   let current: DockAreaLayout | null = null;
   let dock: DockAreaApi | undefined;
+  const latest = new Map<number | undefined, number>();
+  let requests = 0;
   const watched = new Set<number>();
 
   const watchView = async (id: number) => {
@@ -92,6 +98,12 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
     setCurrent: (next) => { current = next; },
     dock: () => dock,
     setDock: (api) => { dock = api; },
+    begin: (chart) => {
+      requests += 1;
+      latest.set(chart, requests);
+      return requests;
+    },
+    isLatest: (request, chart) => latest.get(chart) === request,
   };
   return model;
 }
@@ -220,17 +232,20 @@ function showNotice(message: string) {
 }
 
 async function run(model: StatsModel, action: () => Promise<ScopeView>) {
+  const request = model.begin();
   try {
-    model.setView(await action());
+    const view = await action();
+    if (model.isLatest(request)) model.setView(view);
   } catch (error) {
     model.setSaveError(errorMessage(error));
   }
 }
 
-async function runChart(model: StatsModel, action: () => Promise<{ chart: ChartSnapshot; saveError?: string | null }>) {
+async function runChart(model: StatsModel, chart: number, action: () => Promise<{ chart: ChartSnapshot; saveError?: string | null }>) {
+  const request = model.begin(chart);
   try {
     const update = await action();
-    model.setChart(update.chart);
+    if (model.isLatest(request, chart)) model.setChart(update.chart);
     if (update.saveError) model.setSaveError(update.saveError);
   } catch (error) {
     model.setSaveError(errorMessage(error));
@@ -972,7 +987,7 @@ function ChartPanel(props: { model: StatsModel; id: number }) {
     return key ? current.ships.filter((ship) => ship.searchKey.includes(key)) : current.ships;
   };
   const scope = props.model.scope;
-  const update = (action: () => Promise<{ chart: ChartSnapshot; saveError?: string | null }>) => void runChart(props.model, action);
+  const update = (action: () => Promise<{ chart: ChartSnapshot; saveError?: string | null }>) => void runChart(props.model, props.id, action);
   const divisions = ["all", "solo", "division"] as const;
 
   return (

@@ -18,6 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use nsh_base::dock::DockAreaLayout;
 use nsh_core::prelude::*;
@@ -251,6 +253,23 @@ fn open_directory(root: PathBuf) -> Result<DirectoryOpened, StatsError> {
 
 static SCOPES: LazyLock<Mutex<Scopes>> = LazyLock::new(Mutex::default);
 
+/// Held across reading the session's state and writing it, so the rows
+/// always end with the latest state: a write that waited reads what the one
+/// before it already changed.
+static WRITES: Mutex<()> = Mutex::new(());
+
+/// Bumped by every clear, so a refresh that read the rows before it does not
+/// put the cleared games back.
+static SESSION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Bumped by every layout save, so one that waited behind a newer one is
+/// dropped.
+static LAYOUT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn hold_writes() -> std::sync::MutexGuard<'static, ()> {
+    WRITES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Runs `work` on the scope `scope` names.
 fn with_scope<T>(scope: &str, work: impl FnOnce(&mut Scope) -> Result<T, StatsError>) -> Result<T, StatsError> {
     let key = ScopeKey::parse(scope)?;
@@ -288,6 +307,7 @@ fn personal_rating_table() -> Option<Arc<PersonalRatingData>> {
 /// Writes the session's charts if `scope` is the session; the error, if
 /// any, is reported beside the change rather than undoing it.
 fn persist_charts(scope: &str) -> Option<String> {
+    let _writes = hold_writes();
     let charts = with_scope(scope, |opened| Ok(opened.persists().then(|| opened.chart_settings()))).ok().flatten()?;
     scope::with_database(async |pool| scope::save_charts(pool, &charts).await).err().map(|error| error.to_string())
 }
@@ -327,11 +347,14 @@ impl Stats {
     /// Reads the recorded games again, keeping the filters and charts.
     pub async fn refresh_session() -> Result<ScopeView, StatsError> {
         off_thread(|| {
+            let generation = SESSION_GENERATION.load(Ordering::Acquire);
             let games = scope::with_database(async |pool| scope::load_games(pool).await)?;
             let table = personal_rating_table();
             with_scope("session", |session| {
                 session.set_personal_rating(table);
-                session.set_games(games);
+                if SESSION_GENERATION.load(Ordering::Acquire) == generation {
+                    session.set_games(games);
+                }
                 Ok(scope_view(session, None))
             })
         })
@@ -341,15 +364,18 @@ impl Stats {
     /// Applies the filter bar, saving it for the session.
     pub async fn set_filters(scope: String, filters: FilterState) -> Result<ScopeView, StatsError> {
         off_thread(move || {
-            let (persists, applied) = with_scope(&scope, |opened| {
+            let persists = with_scope(&scope, |opened| {
                 opened.remember_count(&filters);
                 opened.set_filters(Scope::filters_from(&filters));
-                Ok((opened.persists(), opened.filters().clone()))
+                Ok(opened.persists())
             })?;
-            let save_error = persists
-                .then(|| scope::with_database(async |pool| scope::save_filters(pool, &applied).await).err())
-                .flatten()
-                .map(|error| error.to_string());
+            let save_error = if persists {
+                let _writes = hold_writes();
+                let latest = with_scope(&scope, |opened| Ok(opened.filters().clone()))?;
+                scope::with_database(async |pool| scope::save_filters(pool, &latest).await).err().map(|error| error.to_string())
+            } else {
+                None
+            };
             with_scope(&scope, |opened| Ok(scope_view(opened, save_error)))
         })
         .await
@@ -361,6 +387,7 @@ impl Stats {
             // The rows go before the view forgets them: a failure would
             // otherwise show an empty session that comes back at the next
             // load.
+            SESSION_GENERATION.fetch_add(1, Ordering::AcqRel);
             scope::with_database(async |pool| scope::clear_games(pool).await)?;
             with_scope("session", |session| {
                 session.set_games(Vec::new());
@@ -375,6 +402,7 @@ impl Stats {
         let ship = ship_id(&ship)?;
         off_thread(move || {
             let stored = i64::try_from(ship.raw()).map_err(|_| StatsError::ShipId { value: ship.raw().to_string() })?;
+            SESSION_GENERATION.fetch_add(1, Ordering::AcqRel);
             scope::with_database(async |pool| scope::clear_ship(pool, stored).await)?;
             with_scope("session", |session| {
                 let games = session.games().iter().filter(|game| game.ship_id != ship).cloned().collect();
@@ -525,8 +553,13 @@ impl Stats {
 
     /// Saves the dock arrangement the session view reports.
     pub async fn save_layout(layout: DockAreaLayout) -> Result<(), StatsError> {
+        let generation = LAYOUT_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
         off_thread(move || {
             let state = layout::to_state(&layout)?;
+            let _writes = hold_writes();
+            if LAYOUT_GENERATION.load(Ordering::Acquire) != generation {
+                return Ok(());
+            }
             scope::with_database(async |pool| scope::save_layout(pool, &state).await)?;
             Ok(())
         })
@@ -536,8 +569,10 @@ impl Stats {
     /// Saves the open charts and the arrangement shown, replacing a saved
     /// pair that could not be restored.
     pub async fn keep_current_layout(layout: DockAreaLayout) -> Result<(), StatsError> {
+        LAYOUT_GENERATION.fetch_add(1, Ordering::AcqRel);
         off_thread(move || {
             let state = layout::to_state(&layout)?;
+            let _writes = hold_writes();
             let charts = with_scope("session", |session| Ok(session.chart_settings()))?;
             scope::with_database(async |pool| {
                 scope::save_charts(pool, &charts).await?;
@@ -604,6 +639,11 @@ impl Stats {
 }
 
 fn open_session() -> Result<SessionView, StatsError> {
+    // A session already open lets go of its charts first: their surfaces are
+    // the ones the new charts draw on.
+    let previous = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).by_key.remove(&ScopeKey::Session);
+    drop(previous);
+
     let stored = scope::with_database(async |pool| scope::load(pool).await)?;
     let table = personal_rating_table();
 

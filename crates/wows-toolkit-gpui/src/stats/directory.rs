@@ -129,7 +129,11 @@ impl StatsView {
         let game_data = scope.game_data.clone();
         let spawned = std::thread::Builder::new()
             .name("directory-stats".to_owned())
-            .spawn(move || read_directory(&root, &game_data, &mut |update| to_flow(tx.unbounded_send(update))));
+            .spawn(move || {
+                // The read stops once the view drops its receiver.
+                let never = std::sync::atomic::AtomicBool::new(false);
+                read_directory(&root, &game_data, &never, &mut |update| to_flow(tx.unbounded_send(update)))
+            });
         if let Err(err) = spawned {
             tracing::warn!("directory stats: no thread to read on: {err}");
             scope.read = ReadState::Finished;

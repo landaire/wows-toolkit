@@ -51,7 +51,9 @@ struct BuildGroup {
 }
 
 /// Reads every replay at or below `root` into a game, reporting each result
-/// to `report`. Stops once `report` breaks.
+/// to `report`. Stops once `report` breaks or `cancel` is set; the walk and
+/// the workers check `cancel` themselves, so a cancelled read stops without
+/// waiting for another report.
 ///
 /// Replays are read one build at a time, in ascending build order, so a
 /// directory spanning many builds loads their game data one after another
@@ -60,15 +62,16 @@ struct BuildGroup {
 pub fn read_directory(
     root: &Path,
     game_data: &GameDataCache,
+    cancel: &AtomicBool,
     report: &mut dyn FnMut(DirectoryStatsUpdate) -> ControlFlow<()>,
 ) {
-    let paths = replays_beneath(root);
+    let Some(paths) = replays_beneath(root, cancel) else { return };
     let total = paths.len();
     let workers = worker_count();
 
     let mut versions: Vec<Option<Version>> = vec![None; total];
     let mut scanned = 0;
-    let scan = for_each_path(&paths, workers, read_header_version, |index, version| {
+    let scan = for_each_path(&paths, workers, cancel, read_header_version, |index, version| {
         scanned += 1;
         // A header read that panicked leaves the slot empty, which counts the
         // file unreadable.
@@ -114,6 +117,7 @@ pub fn read_directory(
         let flow = for_each_path(
             &group.paths,
             workers,
+            cancel,
             |path| read_game(path, game_data),
             |_index, read| {
                 progress.done += 1;
@@ -143,11 +147,12 @@ pub fn read_directory(
 
 /// Every replay at or below `root`, matching the egui app's directory stats:
 /// symlinks are not followed, and the live recording is left out because it
-/// has no results yet.
-pub fn replays_beneath(root: &Path) -> Vec<PathBuf> {
+/// has no results yet. `None` once `cancel` is set during the walk.
+pub fn replays_beneath(root: &Path, cancel: &AtomicBool) -> Option<Vec<PathBuf>> {
     let mut paths: Vec<PathBuf> = walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
+        .take_while(|_| !cancel.load(Ordering::Relaxed))
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_file())
         .map(walkdir::DirEntry::into_path)
@@ -156,8 +161,12 @@ pub fn replays_beneath(root: &Path) -> Vec<PathBuf> {
                 && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
         })
         .collect();
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
     paths.sort();
-    paths
+    Some(paths)
 }
 
 /// Half the cores, at most four: a full parse holds a battle's packet stream
@@ -174,6 +183,7 @@ fn worker_count() -> NonZeroUsize {
 fn for_each_path<T: Send>(
     paths: &[PathBuf],
     workers: NonZeroUsize,
+    cancel: &AtomicBool,
     work: impl Fn(&Path) -> T + Sync,
     mut on_result: impl FnMut(usize, Option<T>) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
@@ -187,7 +197,7 @@ fn for_each_path<T: Send>(
             let tx = tx.clone();
             let (next, abort, work) = (&next, &abort, &work);
             scope.spawn(move || {
-                while !abort.load(Ordering::Relaxed) {
+                while !abort.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(path) = paths.get(index) else { break };
 
@@ -207,7 +217,7 @@ fn for_each_path<T: Send>(
         drop(tx);
 
         while let Ok((index, result)) = rx.recv() {
-            if on_result(index, result).is_break() {
+            if cancel.load(Ordering::Relaxed) || on_result(index, result).is_break() {
                 abort.store(true, Ordering::Relaxed);
                 return ControlFlow::Break(());
             }
@@ -262,7 +272,7 @@ mod tests {
 
     fn read(root: &Path) -> Vec<DirectoryStatsUpdate> {
         let mut updates = Vec::new();
-        read_directory(root, &test_cache(), &mut |update| {
+        read_directory(root, &test_cache(), &AtomicBool::new(false), &mut |update| {
             updates.push(update);
             ControlFlow::Continue(())
         });
@@ -317,11 +327,26 @@ mod tests {
         }
 
         let mut calls = 0;
-        read_directory(dir.path(), &test_cache(), &mut |_| {
+        read_directory(dir.path(), &test_cache(), &AtomicBool::new(false), &mut |_| {
             calls += 1;
             ControlFlow::Break(())
         });
 
         assert_eq!(calls, 1);
+    }
+
+    /// A read cancelled before it starts reports nothing.
+    #[test]
+    fn a_cancelled_read_stops_before_reporting() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        std::fs::write(dir.path().join("0.wowsreplay"), b"not a replay").expect("written");
+
+        let mut calls = 0;
+        read_directory(dir.path(), &test_cache(), &AtomicBool::new(true), &mut |_| {
+            calls += 1;
+            ControlFlow::Continue(())
+        });
+
+        assert_eq!(calls, 0);
     }
 }

@@ -37,6 +37,14 @@ pub enum LayoutError {
     UnknownPanel { panel: String },
     #[error("the layout repeats chart {id}")]
     RepeatedChart { id: usize },
+    #[error("chart {id} has an id too large to show")]
+    ChartIdTooLarge { id: usize },
+}
+
+/// Refuses a chart id the view cannot address: the TSX view numbers charts
+/// with 32 bits.
+pub(crate) fn check_chart_id(id: ChartId) -> Result<ChartId, LayoutError> {
+    u32::try_from(id.0).map(|_| id).map_err(|_| LayoutError::ChartIdTooLarge { id: id.0 })
 }
 
 /// One panel of the Stats tab.
@@ -168,6 +176,7 @@ pub(crate) fn charts(layout: &DockAreaLayout) -> Result<Vec<ChartId>, LayoutErro
             return Err(LayoutError::UnknownPanel { panel: key.as_str().to_owned() });
         };
         let StatsPanel::Chart(id) = panel else { continue };
+        let id = check_chart_id(id)?;
         if charts.contains(&id) {
             return Err(LayoutError::RepeatedChart { id: id.0 });
         }

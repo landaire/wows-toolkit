@@ -213,7 +213,7 @@ pub(crate) fn start(id: DirectoryId, game_data: GameDataCache) {
     let spawned = std::thread::Builder::new().name(format!("directory-stats-{}", id.0)).spawn(move || {
         let mut pending = Vec::new();
         let mut last_fold = Instant::now();
-        read_directory(&root, &game_data, &mut |update| {
+        read_directory(&root, &game_data, &cancel, &mut |update| {
             if cancel.load(Ordering::Relaxed) {
                 return ControlFlow::Break(());
             }

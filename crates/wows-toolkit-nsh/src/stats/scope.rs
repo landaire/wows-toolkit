@@ -232,10 +232,17 @@ pub(crate) fn restore(
     charts: Option<Vec<ChartSettings>>,
     saved_layout: Option<&DockAreaState>,
 ) -> Result<Restored, LayoutError> {
+    let charts = charts.map(with_ids);
+    for settings in charts.iter().flatten() {
+        if let Some(id) = settings.id {
+            layout::check_chart_id(id)?;
+        }
+    }
+
     let Some(state) = saved_layout else {
         let charts = match charts {
             None => vec![ChartSettings { id: Some(ChartId(0)), ..ChartSettings::default() }],
-            Some(saved) => with_ids(saved),
+            Some(saved) => saved,
         };
         let ids: Vec<ChartId> = charts.iter().filter_map(|chart| chart.id).collect();
         return Ok(Restored { layout: layout::default_layout(&ids), charts });
@@ -243,7 +250,7 @@ pub(crate) fn restore(
 
     let mut restored_layout = layout::from_state(state)?;
     let placed = layout::charts(&restored_layout)?;
-    let saved = charts.map(with_ids).unwrap_or_default();
+    let saved = charts.unwrap_or_default();
 
     let mut restored: Vec<ChartSettings> = placed
         .iter()
