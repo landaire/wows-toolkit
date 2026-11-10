@@ -45,6 +45,21 @@ pub struct TwitchStatus {
 /// whose number is no longer current stops at its next wake.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// One run of the poll, numbered from [`GENERATION`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PollGeneration(u64);
+
+impl PollGeneration {
+    /// Takes the next number, which stops every earlier poll.
+    fn next() -> Self {
+        Self(GENERATION.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+
+    fn is_current(self) -> bool {
+        GENERATION.load(Ordering::SeqCst) == self.0
+    }
+}
+
 /// The Twitch credential and the poll it drives.
 #[module]
 pub struct Twitch;
@@ -61,8 +76,11 @@ impl Twitch {
 
         let token: Token = pasted.trim().parse()?;
         let who = token.username().to_owned();
-        let encoded = serde_json::to_string(&token)
-            .map_err(|source| SettingsError::Value { key: twitch_keys::TOKEN, expected: "credential", source })?;
+        let encoded = serde_json::to_string(&token).map_err(|source| SettingsError::Value {
+            key: twitch_keys::TOKEN,
+            expected: "credential",
+            source,
+        })?;
         background(async move {
             let pool = crate::shell::settings::open().await?;
             wows_toolkit_config::queries::set_setting_raw(&pool, twitch_keys::TOKEN, &encoded)
@@ -78,14 +96,15 @@ impl Twitch {
     /// Stops the running poll and starts one under the stored credential and
     /// channel. Resolves once Twitch has answered for the credential.
     pub async fn restart() -> Result<TwitchStatus, SettingsError> {
-        let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = PollGeneration::next();
         background(start(generation)).await.map_err(SettingsError::Task)?
     }
 }
 
-async fn start(generation: u64) -> Result<TwitchStatus, SettingsError> {
+async fn start(generation: PollGeneration) -> Result<TwitchStatus, SettingsError> {
     let pool = crate::shell::settings::open().await?;
-    let settings = crate::shell::settings::load_from(&pool).await?;
+    let proxy_url = crate::shell::settings::manual_proxy(&pool).await?;
+    let channel = crate::shell::settings::twitch_channel(&pool).await?;
     // The other front ends store the credential as an `Option`, so a cleared
     // one is the row `null`.
     let token = wows_toolkit_config::queries::try_get_setting::<Option<Token>>(&pool, twitch_keys::TOKEN)
@@ -99,7 +118,7 @@ async fn start(generation: u64) -> Result<TwitchStatus, SettingsError> {
     let who = Some(token.username().to_owned());
     let client = match wows_toolkit_viewmodel::http::client(
         USER_AGENT,
-        &settings.proxy_url,
+        proxy_url.as_deref().unwrap_or_default(),
         reqwest::redirect::Policy::default(),
     ) {
         Ok(client) => client,
@@ -108,7 +127,7 @@ async fn start(generation: u64) -> Result<TwitchStatus, SettingsError> {
             return Ok(TwitchStatus { state: TwitchState::Refused, who });
         }
     };
-    let session = match Session::open(&token, &settings.twitch_channel, client).await {
+    let session = match Session::open(&token, channel.as_deref().unwrap_or_default(), client).await {
         Ok(session) => session,
         Err(err) => {
             tracing::warn!("twitch: the stored credential is not usable: {err}");
@@ -117,7 +136,7 @@ async fn start(generation: u64) -> Result<TwitchStatus, SettingsError> {
     };
 
     tokio::spawn(async move {
-        while GENERATION.load(Ordering::SeqCst) == generation {
+        while generation.is_current() {
             match session.poll_once(&pool, jiff::Timestamp::now()).await {
                 Ok(seen) => tracing::debug!("twitch: recorded {seen} chat observation(s)"),
                 // A poll that fails says nothing about the next one: the

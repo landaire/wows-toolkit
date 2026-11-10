@@ -56,11 +56,14 @@ pub struct Toolkit;
 impl Toolkit {
     /// Returns the state required to construct the application shell.
     pub fn startup(locale: Option<String>) -> StartupState {
+        // An unreadable settings row falls back to the system's language, as
+        // a first launch does.
         let persisted = locale.or_else(|| {
             wows_toolkit_config::load_startup_setting::<Option<String>>(keys::LOCALE).ok().flatten().flatten()
         });
         let locale = selected_locale(persisted);
         let backend = wt_translations::TranslationsBackend::load();
+        // The English text stands in for a key the locale lacks.
         let text = |key: &str, fallback: &str| backend.translate(&locale, key).unwrap_or(fallback).to_owned();
         StartupState {
             title: "WoWs Toolkit".to_owned(),

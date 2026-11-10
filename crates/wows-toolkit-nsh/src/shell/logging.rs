@@ -26,6 +26,7 @@ fn targets() -> tracing_subscriber::filter::Targets {
 /// carried over. The returned guard flushes the file when dropped and is held
 /// for the life of the process.
 pub fn init(to_file: bool) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    // An unset or unparsable RUST_LOG shows info and above, the usual console level.
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let console = tracing_subscriber::fmt::Layer::new().with_target(true).with_filter(env_filter);

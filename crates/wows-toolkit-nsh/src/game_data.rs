@@ -22,13 +22,16 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
-use nsh_core::file_dialog::OpenDialog;
-use nsh_core::prelude::*;
 use notify::EventKind;
 use notify::Watcher as _;
 use notify::event::ModifyKind;
+use nsh_core::file_dialog::OpenDialog;
+use nsh_core::prelude::*;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::download_repo::RemoteAvailability;
+use wows_toolkit_config::index::query as index_query;
+use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_config::queries::SettingError;
 use wows_toolkit_replay_data::cache;
 use wows_toolkit_replay_data::cache::CacheJob;
 use wows_toolkit_replay_data::cache::CacheOutcome;
@@ -44,8 +47,6 @@ use wows_toolkit_replay_data::replay_index;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
-use wows_toolkit_config::index::query as index_query;
-use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
@@ -67,7 +68,7 @@ pub enum GameDataState {
     },
     Ready(Arc<LoadedGameData>),
     Failed {
-        reason: String,
+        error: PreloadError,
     },
 }
 
@@ -78,13 +79,84 @@ pub enum GameDataError {
     NotConfigured,
     #[error("the settings database could not be read, so no game data is bound")]
     Unbound,
+    /// [`GameDataError::Unbound`] as a cache job or index pass reports it, in
+    /// the reader's language.
+    #[error("{}", rust_i18n::t!("ui.game_data.settings_unreadable"))]
+    SettingsUnreadable,
     #[error(transparent)]
     Load(#[from] ReplayLoadError),
     #[error(transparent)]
     Preload(#[from] PreloadError),
-    #[error("the settings database could not be read: {reason}")]
-    Settings { reason: String },
+    #[error("could not start a runtime")]
+    Runtime(#[source] std::io::Error),
+    #[error("could not open the settings database")]
+    OpenDatabase(#[source] sqlx::Error),
+    #[error("could not read setting {key:?}")]
+    ReadSetting {
+        key: &'static str,
+        #[source]
+        source: SettingError,
+    },
+    #[error("could not save setting {key:?}")]
+    SaveSetting {
+        key: &'static str,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("the pinned replay directories could not be read")]
+    ReadPinned(#[source] SettingError),
+    #[error("the pinned replay directories could not be saved")]
+    SavePinned(#[source] sqlx::Error),
+    #[error("the replay index could not be read or written")]
+    Index(#[source] IndexError),
+    #[error("there is no storage directory for the game data cache")]
+    NoStorageDirectory,
+    #[error("another game data cache job is running")]
+    CacheBusy,
+    #[error("{path} could not be created")]
+    CreateDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// nsh reports a failed dialog or file manager hand-off only as text.
+    #[error("{}", rust_i18n::t!("ui.game_data.dialog_failed", error = reason))]
+    Dialog { reason: String },
+    #[error("{reason}")]
+    OpenPath { reason: String },
+    #[error("{}", rust_i18n::t!("ui.game_data.not_a_directory", path = path.display().to_string()))]
+    NotADirectory { path: PathBuf },
+    #[error("{}", rust_i18n::t!("ui.game_data.directory_not_open", path = path.display().to_string()))]
+    DirectoryNotOpen { path: PathBuf },
+    #[error(transparent)]
+    CloseDirectory(#[from] CloseRefusal),
+    #[error("the game data task did not complete")]
+    Task(#[source] tokio::task::JoinError),
 }
+
+/// A failed `GameData` request as the interface shows it: the error and its
+/// causes on one line.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", crate::shell::sentence(error))]
+pub struct GameDataRequestError {
+    error: GameDataError,
+}
+
+impl From<GameDataError> for GameDataRequestError {
+    fn from(error: GameDataError) -> Self {
+        Self { error }
+    }
+}
+
+/// Which binding of the settings a piece of background work was started for.
+/// Each rebind takes the next one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BindingGeneration(u64);
+
+/// How many changes the service's state has seen. Compared, never read for
+/// its value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameDataRevision(u64);
 
 /// The settings the service is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,8 +164,11 @@ struct BoundSettings {
     wows_dir: Option<PathBuf>,
     locale: String,
     auto_dump: bool,
+    /// The stored row; empty selects the default location, which is how
+    /// `cache::base` and the other front ends read it.
     cache_dir: String,
-    proxy_url: String,
+    /// `None` is no manual proxy.
+    proxy_url: Option<String>,
     repo_commit: Option<String>,
 }
 
@@ -110,12 +185,12 @@ struct Binding {
     cache: GameDataCache,
     /// Bumped on each rebind, so a preload that finishes after a newer one
     /// started does not overwrite its status.
-    generation: u64,
+    generation: BindingGeneration,
 }
 
 /// The watch on the game's replay directory, and the binding it was made for.
 struct ReplayWatch {
-    generation: u64,
+    generation: BindingGeneration,
     /// `None` when the binding names no directory or it could not be watched.
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -142,9 +217,17 @@ struct IndexOutcome {
 struct MissingBuild {
     build: u32,
     /// `major.minor.patch`, the hint the repository resolves other servers'
-    /// builds by. `None` when the replay's version did not parse that far.
-    version: Option<String>,
+    /// builds by.
+    version: String,
     replays: u32,
+}
+
+/// Where the cache jobs read and write, and what they ask the repository
+/// through.
+struct CacheTarget {
+    base: PathBuf,
+    proxy_url: Option<String>,
+    repo_tip: Option<String>,
 }
 
 #[derive(Default)]
@@ -158,7 +241,7 @@ struct OfferState {
 }
 
 struct State {
-    revision: u64,
+    revision: GameDataRevision,
     started: bool,
     binding: Option<Binding>,
     status: GameDataState,
@@ -175,12 +258,12 @@ struct State {
 
 struct Service {
     state: Mutex<State>,
-    changed: tokio::sync::watch::Sender<u64>,
+    changed: tokio::sync::watch::Sender<GameDataRevision>,
 }
 
 static SERVICE: LazyLock<Service> = LazyLock::new(|| Service {
     state: Mutex::new(State {
-        revision: 0,
+        revision: GameDataRevision::default(),
         started: false,
         binding: None,
         status: GameDataState::NotConfigured,
@@ -194,7 +277,7 @@ static SERVICE: LazyLock<Service> = LazyLock::new(|| Service {
         offered_builds: BTreeSet::new(),
         offer: OfferState::default(),
     }),
-    changed: tokio::sync::watch::channel(0).0,
+    changed: tokio::sync::watch::channel(GameDataRevision::default()).0,
 });
 
 fn state() -> MutexGuard<'static, State> {
@@ -206,7 +289,7 @@ fn update<R>(change: impl FnOnce(&mut State) -> R) -> R {
     let (result, revision) = {
         let mut state = state();
         let result = change(&mut state);
-        state.revision += 1;
+        state.revision.0 += 1;
         (result, state.revision)
     };
     SERVICE.changed.send_replace(revision);
@@ -247,10 +330,10 @@ pub fn replays_dir() -> Option<PathBuf> {
     wows_dir().map(|dir| wows_toolkit_replay_data::load::resolve_replays_dir(&dir))
 }
 
-/// The proxy setting as stored; empty means the system's.
-pub fn proxy_url() -> String {
+/// The manual proxy setting, `None` when there is none.
+pub fn proxy_url() -> Option<String> {
     ensure_started();
-    state().binding.as_ref().map(|binding| binding.settings.proxy_url.clone()).unwrap_or_default()
+    state().binding.as_ref()?.settings.proxy_url.clone()
 }
 
 /// The personal-rating expected values, once they have been loaded.
@@ -259,7 +342,7 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
 }
 
 /// Changes whenever the game data's state does.
-pub fn changes() -> tokio::sync::watch::Receiver<u64> {
+pub fn changes() -> tokio::sync::watch::Receiver<GameDataRevision> {
     SERVICE.changed.subscribe()
 }
 
@@ -284,7 +367,7 @@ pub fn parse_replay(path: &Path) -> Result<ParsedReplay, GameDataError> {
 /// directory, the language, the cache directory, the auto-dump flag and the
 /// proxy. Blocking.
 pub fn reload_settings() -> Result<(), GameDataError> {
-    rebind().map_err(|reason| GameDataError::Settings { reason })
+    rebind()
 }
 
 /// Starts an index pass over the game's replay directory. `false` when the
@@ -302,22 +385,22 @@ fn ensure_started() {
         return;
     }
     LazyLock::force(&SESSION_START);
-    if let Err(reason) = rebind() {
-        log::warn!("game data: the settings could not be read: {reason}");
+    if let Err(error) = rebind() {
+        log::warn!("game data: the settings could not be read: {}", crate::shell::chain(&error));
     }
 }
 
 /// Reads the settings and rebinds whatever they changed.
-fn rebind() -> Result<(), String> {
+fn rebind() -> Result<(), GameDataError> {
     let read = read_settings();
     let settings = match read {
         Ok(settings) => settings,
-        Err(reason) => {
+        Err(error) => {
             update(|state| {
                 state.started = true;
-                state.settings_error = Some(reason.clone());
+                state.settings_error = Some(crate::shell::sentence(&error));
             });
-            return Err(reason);
+            return Err(error);
         }
     };
 
@@ -334,7 +417,9 @@ fn rebind() -> Result<(), String> {
                 None
             }
             current => {
-                let generation = current.as_ref().map_or(0, |binding| binding.generation + 1);
+                let generation = current
+                    .as_ref()
+                    .map_or(BindingGeneration(0), |binding| BindingGeneration(binding.generation.0 + 1));
                 let cache = match &settings.wows_dir {
                     Some(dir) => GameDataCache::new(dir.clone()),
                     None => GameDataCache::without_install(),
@@ -374,14 +459,14 @@ fn rebind() -> Result<(), String> {
 /// Loads the installed build and folds the outcome into the status, then runs
 /// the work that waits for it: pruning the per-build caches nothing opens and
 /// the index pass a stale index asks for.
-fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: u64) {
+fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: BindingGeneration) {
     let outcome = wows_toolkit_replay_data::load::preload_current_build(&wows_dir, &cache);
     let current = update(|state| {
         let current = state.binding.as_ref().is_some_and(|binding| binding.generation == generation);
         if current {
             state.status = match &outcome {
                 Ok(loaded) => GameDataState::Ready(Arc::clone(loaded)),
-                Err(error) => GameDataState::Failed { reason: error.to_string() },
+                Err(error) => GameDataState::Failed { error: error.clone() },
             };
         }
         current
@@ -399,12 +484,12 @@ fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: u64) {
     let stale = with_database(|runtime, pool| {
         runtime
             .block_on(wows_toolkit_config::index::query::has_stale_replay_records(pool, &root))
-            .map_err(|error| error.to_string())
+            .map_err(GameDataError::Index)
     });
     match stale {
         Ok(true) => queue_index(root, IndexMode::FillGaps),
         Ok(false) => {}
-        Err(reason) => log::warn!("replay index revision could not be checked: {reason}"),
+        Err(error) => log::warn!("replay index revision could not be checked: {}", crate::shell::chain(&error)),
     }
 }
 
@@ -421,29 +506,39 @@ fn startup_work() {
     }
 
     let pinned = with_database(|runtime, pool| {
-        runtime.block_on(wows_toolkit_replay_data::directories::load_pinned(pool)).map_err(|error| error.to_string())
+        runtime.block_on(wows_toolkit_replay_data::directories::load_pinned(pool)).map_err(GameDataError::ReadPinned)
     });
     update(|state| match pinned {
         Ok(pinned) => {
+            // No row is a reader who never pinned a directory.
             for root in pinned.unwrap_or_default() {
                 state.directories.open(root, true);
             }
         }
-        Err(reason) => {
-            state.directories_error = Some(rust_i18n::t!("ui.game_data.pinned_read_failed", reason = reason).into_owned())
+        Err(error) => {
+            let reason = crate::shell::sentence(&error);
+            state.directories_error =
+                Some(rust_i18n::t!("ui.game_data.pinned_read_failed", reason = reason).into_owned());
         }
     });
 
-    let rating = job_runtime().ok().and_then(|runtime| {
-        runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(USER_AGENT, &proxy))
-    });
+    let rating = match job_runtime() {
+        Ok(runtime) => runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(
+            USER_AGENT,
+            proxy.as_deref().unwrap_or_default(),
+        )),
+        Err(error) => {
+            log::warn!("personal rating: {}", crate::shell::chain(&error));
+            None
+        }
+    };
     update(|state| state.personal_rating = rating.map(Arc::new));
 }
 
 /// Watches the game's replay directory for binding `generation`, replacing
 /// the watch an older binding made. A battle that lands there queues a pass,
 /// which is what contributes it.
-fn watch_replays(wows_dir: Option<&Path>, generation: u64) {
+fn watch_replays(wows_dir: Option<&Path>, generation: BindingGeneration) {
     let watcher = wows_dir.and_then(|dir| {
         let replays = wows_toolkit_replay_data::load::resolve_replays_dir(dir);
         let root = replays.clone();
@@ -516,22 +611,22 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
             let progress = replay_index::build_index(runtime, pool, &root, &cache, &cancel, mode, |step| {
                 update(|state| state.index.progress = Some(step));
             })
-            .map_err(|error| error.to_string())?;
+            .map_err(GameDataError::Index)?;
             let landed = match before {
                 Some(before) => landed_in_pass(before, || indexed_paths(runtime, pool, &root), *SESSION_START),
                 None => Vec::new(),
             };
             let sharing = sharing_mode(runtime, pool);
-            Ok((progress, landed, sharing))
+            Ok(IndexPass { progress, landed, sharing })
         }),
-        None => Err(rust_i18n::t!("ui.game_data.settings_unreadable").into_owned()),
+        None => Err(GameDataError::SettingsUnreadable),
     };
 
     let next = update(|state| {
         state.index.cancel = None;
         state.index.progress = None;
         state.index.outcome = Some(match &built {
-            Ok((progress, _, _)) if progress.skipped > 0 => IndexOutcome {
+            Ok(IndexPass { progress, .. }) if progress.skipped > 0 => IndexOutcome {
                 text: rust_i18n::t!(
                     "ui.settings.index.built_with_skipped",
                     indexed = progress.indexed,
@@ -541,13 +636,13 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
                 .into_owned(),
                 failed: progress.failed > 0,
             },
-            Ok((progress, _, _)) => IndexOutcome {
+            Ok(IndexPass { progress, .. }) => IndexOutcome {
                 text: rust_i18n::t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
                     .into_owned(),
                 failed: progress.failed > 0,
             },
-            Err(reason) => IndexOutcome {
-                text: rust_i18n::t!("ui.game_data.index_failed", reason = reason.as_str()).into_owned(),
+            Err(error) => IndexOutcome {
+                text: rust_i18n::t!("ui.game_data.index_failed", reason = crate::shell::sentence(error)).into_owned(),
                 failed: true,
             },
         });
@@ -557,12 +652,21 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
         }
         (!state.index.queued.is_empty()).then(|| state.index.queued.remove(0))
     });
-    if let Ok((_, landed, Some(sharing))) = built {
+    if let Ok(IndexPass { landed, sharing: Some(sharing), .. }) = built {
         contribute_landed(landed, sharing, |path| spawn("replay-contribute", move || contribute_one(path)));
     }
     if let Some((root, mode)) = next {
         queue_index(root, mode);
     }
+}
+
+/// What one index pass did.
+struct IndexPass {
+    progress: IndexProgress,
+    /// Battles the pass found that were played while the toolkit ran.
+    landed: Vec<PathBuf>,
+    /// `None` when the setting could not be read.
+    sharing: Option<DataSharingMode>,
 }
 
 /// When this process started: a replay written since is a battle played while
@@ -583,10 +687,11 @@ fn indexed_paths(
 
 /// The data-sharing setting, `None` when it cannot be read.
 fn sharing_mode(runtime: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool) -> Option<DataSharingMode> {
-    let read = runtime.block_on(crate::shell::settings::load_from(pool)).and_then(|settings| {
-        crate::shell::settings::parse_sharing(&settings.data_sharing)
-    });
-    read.map_err(|error| log::warn!("sharing: the data-sharing setting could not be read: {error}")).ok()
+    let read = runtime.block_on(crate::shell::settings::sharing_mode(pool));
+    read.map_err(|error| {
+        log::warn!("sharing: the data-sharing setting could not be read: {}", crate::shell::chain(&error));
+    })
+    .ok()
 }
 
 /// The replays a pass newly indexed that were written since `since`. Nothing
@@ -612,9 +717,7 @@ fn newly_landed(before: &HashSet<String>, after: &HashSet<String>, since: System
     after
         .difference(before)
         .map(PathBuf::from)
-        .filter(|path| {
-            std::fs::metadata(path).and_then(|meta| meta.modified()).is_ok_and(|modified| modified >= since)
-        })
+        .filter(|path| std::fs::metadata(path).and_then(|meta| meta.modified()).is_ok_and(|modified| modified >= since))
         .collect()
 }
 
@@ -637,8 +740,8 @@ fn contribute_one(path: PathBuf) {
     };
     let runtime = match job_runtime() {
         Ok(runtime) => runtime,
-        Err(reason) => {
-            log::warn!("sharing: {reason}");
+        Err(error) => {
+            log::warn!("sharing: {}", crate::shell::chain(&error));
             return;
         }
     };
@@ -647,73 +750,70 @@ fn contribute_one(path: PathBuf) {
         Ok(Outcome::Sent) => log::info!("sharing: {named} was contributed"),
         Ok(Outcome::Failed(reason)) => log::warn!("sharing: {named} was not contributed: {reason}"),
         Ok(other) => log::debug!("sharing: nothing sent for {named}: {other:?}"),
-        Err(error) => log::warn!("sharing: {named} was not contributed: {error}"),
+        Err(error) => log::warn!("sharing: {named} was not contributed: {}", crate::shell::chain(&error)),
     }
 }
 
 /// Reads the settings the service binds to from the shared database.
-fn read_settings() -> Result<BoundSettings, String> {
+fn read_settings() -> Result<BoundSettings, GameDataError> {
     with_database(|runtime, pool| {
         runtime.block_on(async {
-            let wows_dir: String = optional(pool, keys::WOWS_DIR).await?.unwrap_or_default();
+            let wows_dir: Option<String> = optional(pool, keys::WOWS_DIR).await?;
             let locale: Option<String> = optional::<Option<String>>(pool, keys::LOCALE).await?.flatten();
+            // Off is the stored default too: a dump is gigabytes.
             let auto_dump: bool = optional(pool, keys::AUTO_DUMP_GAME_DATA).await?.unwrap_or(false);
+            // No row is the default location, which the stored empty string
+            // also names.
             let cache_dir: String = optional(pool, keys::GAME_DATA_CACHE_DIR).await?.unwrap_or_default();
             let proxy_url: Option<String> = optional::<Option<String>>(pool, keys::PROXY_URL).await?.flatten();
             let repo_commit: Option<String> =
                 optional::<Option<String>>(pool, keys::GAME_DATA_REPO_COMMIT).await?.flatten();
 
             Ok(BoundSettings {
-                wows_dir: (!wows_dir.trim().is_empty()).then(|| PathBuf::from(wows_dir.trim())),
+                wows_dir: wows_dir.as_deref().map(str::trim).filter(|dir| !dir.is_empty()).map(PathBuf::from),
                 // Game text is read in the chosen language, then the system's;
                 // the catalog lookup itself falls back to English.
                 locale: locale
                     .filter(|locale| !locale.is_empty())
                     .or_else(sys_locale::get_locale)
                     .unwrap_or_else(|| "en".to_owned()),
-                // Off is the stored default too: a dump is gigabytes.
                 auto_dump,
                 cache_dir,
-                proxy_url: proxy_url.unwrap_or_default(),
+                proxy_url: proxy_url.filter(|proxy| !proxy.is_empty()),
                 repo_commit,
             })
         })
     })
 }
 
-async fn optional<T>(pool: &sqlx::SqlitePool, key: &str) -> Result<Option<T>, String>
+async fn optional<T>(pool: &sqlx::SqlitePool, key: &'static str) -> Result<Option<T>, GameDataError>
 where
     T: serde::de::DeserializeOwned,
 {
     wows_toolkit_config::queries::try_get_setting(pool, key)
         .await
-        .map_err(|error| format!("could not read setting {key:?}: {error}"))
+        .map_err(|source| GameDataError::ReadSetting { key, source })
 }
 
 /// Saves one setting. Blocking.
-fn save_setting<T: serde::Serialize>(key: &str, value: &T) -> Result<(), String> {
+fn save_setting<T: serde::Serialize>(key: &'static str, value: &T) -> Result<(), GameDataError> {
     with_database(|runtime, pool| {
         runtime
             .block_on(wows_toolkit_config::queries::set_setting(pool, key, value))
-            .map_err(|error| format!("could not save setting {key:?}: {error}"))
+            .map_err(|source| GameDataError::SaveSetting { key, source })
     })
 }
 
-fn job_runtime() -> Result<tokio::runtime::Runtime, String> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("could not start a runtime: {error}"))
+fn job_runtime() -> Result<tokio::runtime::Runtime, GameDataError> {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(GameDataError::Runtime)
 }
 
 /// Runs `work` against the shared settings database on a runtime of its own.
 fn with_database<T>(
-    work: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool) -> Result<T, String>,
-) -> Result<T, String> {
+    work: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool) -> Result<T, GameDataError>,
+) -> Result<T, GameDataError> {
     let runtime = job_runtime()?;
-    let pool = runtime
-        .block_on(wows_toolkit_config::open_db())
-        .map_err(|error| format!("could not open the settings database: {error}"))?;
+    let pool = runtime.block_on(wows_toolkit_config::open_db()).map_err(GameDataError::OpenDatabase)?;
     let result = work(&runtime, &pool);
     runtime.block_on(pool.close());
 
@@ -726,26 +826,29 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// The cache directory and proxy the cache jobs run against.
-fn cache_target() -> Result<(PathBuf, String, Option<String>), String> {
+/// Where the cache jobs run.
+fn cache_target() -> Result<CacheTarget, GameDataError> {
     ensure_started();
     let state = state();
-    let binding =
-        state.binding.as_ref().ok_or_else(|| rust_i18n::t!("ui.game_data.settings_unreadable").into_owned())?;
-    let base = cache::base(&binding.settings.cache_dir)
-        .ok_or_else(|| "there is no storage directory for the game data cache".to_owned())?;
+    let binding = state.binding.as_ref().ok_or(GameDataError::SettingsUnreadable)?;
+    let base = cache::base(&binding.settings.cache_dir).ok_or(GameDataError::NoStorageDirectory)?;
 
-    Ok((base, binding.settings.proxy_url.clone(), binding.settings.repo_commit.clone()))
+    Ok(CacheTarget {
+        base,
+        proxy_url: binding.settings.proxy_url.clone(),
+        repo_tip: binding.settings.repo_commit.clone(),
+    })
 }
 
 /// Runs one cache job on a thread of its own, reporting progress into the
 /// state. Refused while another job runs.
-fn run_cache_job<F, Fut>(job: CacheJob, work: F) -> Result<(), String>
+fn run_cache_job<F, Fut, E>(job: CacheJob, work: F) -> Result<(), GameDataError>
 where
     F: FnOnce(reqwest::Client, PathBuf, Option<String>, Box<dyn Fn(cache::Progress) + Send>) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<CacheOutcome, String>>,
+    Fut: Future<Output = Result<CacheOutcome, E>>,
+    E: std::fmt::Display,
 {
-    let (base, proxy, tip) = cache_target()?;
+    let CacheTarget { base, proxy_url, repo_tip } = cache_target()?;
     let started = update(|state| {
         if state.cache.busy() {
             return false;
@@ -755,21 +858,25 @@ where
         true
     });
     if !started {
-        return Err("another game data cache job is running".to_owned());
+        return Err(GameDataError::CacheBusy);
     }
 
     spawn("game-data-cache", move || {
-        let outcome = match (
-            wows_toolkit_viewmodel::http::client(USER_AGENT, &proxy, reqwest::redirect::Policy::default()),
-            job_runtime(),
-        ) {
+        let client = wows_toolkit_viewmodel::http::client(
+            USER_AGENT,
+            proxy_url.as_deref().unwrap_or_default(),
+            reqwest::redirect::Policy::default(),
+        );
+        let outcome = match (client, job_runtime()) {
             (Ok(client), Ok(runtime)) => {
                 let report: Box<dyn Fn(cache::Progress) + Send> =
                     Box::new(|step| update(|state| state.cache.progress = Some(step)));
-                runtime.block_on(work(client, base, tip, report)).unwrap_or_else(CacheOutcome::Failed)
+                runtime
+                    .block_on(work(client, base, repo_tip, report))
+                    .unwrap_or_else(|error| CacheOutcome::Failed(error.to_string()))
             }
             (Err(error), _) => CacheOutcome::Failed(error.to_string()),
-            (_, Err(reason)) => CacheOutcome::Failed(reason),
+            (_, Err(error)) => CacheOutcome::Failed(crate::shell::sentence(&error)),
         };
         cache_job_finished(outcome);
     });
@@ -850,15 +957,15 @@ fn cache_job_finished(outcome: CacheOutcome) {
                 binding.settings.repo_commit = Some(tip.clone());
             }
         });
-        if let Err(reason) = save_setting(keys::GAME_DATA_REPO_COMMIT, &Some(tip)) {
-            log::warn!("{reason}");
+        if let Err(error) = save_setting(keys::GAME_DATA_REPO_COMMIT, &Some(tip)) {
+            log::warn!("{}", crate::shell::chain(&error));
         }
     }
 }
 
 /// Measures the cache when nothing has, on a thread of its own.
 fn measure_cache_if_wanted() {
-    let Ok((base, _, _)) = cache_target() else { return };
+    let Ok(CacheTarget { base, .. }) = cache_target() else { return };
     // Claimed without telling the watchers: nothing they show changed yet,
     // and a notice here would wake `GameData.watch`, which measures again.
     let Some(generation) = state().cache.wants_measure() else { return };
@@ -887,7 +994,7 @@ fn find_missing_builds() -> Result<Vec<MissingBuild>, GameDataError> {
             if cache.can_read_build(build, Some(&hint)) {
                 continue;
             }
-            missing.entry(build).or_insert(MissingBuild { build, version: Some(hint), replays: 0 }).replays += 1;
+            missing.entry(build).or_insert(MissingBuild { build, version: hint, replays: 0 }).replays += 1;
         }
     }
 
@@ -964,6 +1071,26 @@ pub struct CacheBuild {
     pub version: String,
 }
 
+/// A cache job, as the status line names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum CacheJobKind {
+    Checking,
+    Validating,
+    Downloading,
+    Planning,
+}
+
+impl From<CacheJob> for CacheJobKind {
+    fn from(job: CacheJob) -> Self {
+        match job {
+            CacheJob::Checking => Self::Checking,
+            CacheJob::Validating => Self::Validating,
+            CacheJob::Downloading => Self::Downloading,
+            CacheJob::Planning => Self::Planning,
+        }
+    }
+}
+
 /// The game-data cache, as the Settings section shows it.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
@@ -975,8 +1102,7 @@ pub struct CacheSnapshot {
     pub auto_dump: bool,
     pub size_bytes: Option<u64>,
     pub build_count: Option<u64>,
-    /// The job running: "checking", "validating", "downloading" or "planning".
-    pub job: Option<String>,
+    pub job: Option<CacheJobKind>,
     pub progress_done: Option<u64>,
     pub progress_total: Option<u64>,
     pub updates: Vec<CacheBuild>,
@@ -999,7 +1125,7 @@ pub struct DirectoryEntry {
 #[non_exhaustive]
 pub struct MissingBuildRow {
     pub build: u32,
-    pub version: Option<String>,
+    pub version: String,
     pub replays: u32,
     pub availability: String,
     /// Whether the repository publishes something for it, which is what lets
@@ -1036,27 +1162,48 @@ pub struct GameDataSnapshot {
     pub offer: MissingBuildOffer,
 }
 
+/// The load's part of the snapshot.
+struct StatusView {
+    phase: GameDataPhase,
+    version: Option<String>,
+    build: Option<u32>,
+    reason: Option<String>,
+}
+
 fn snapshot() -> GameDataSnapshot {
     let state = state();
-    let (phase, version, build, reason) = match &state.status {
-        GameDataState::NotConfigured => (GameDataPhase::NotConfigured, None, None, state.settings_error.clone()),
-        GameDataState::Loading { version } => (GameDataPhase::Loading, version.clone(), None, None),
-        GameDataState::Ready(loaded) => {
-            (GameDataPhase::Ready, loaded.version().map(|version| version.to_path()), Some(loaded.build()), None)
+    let status = match &state.status {
+        GameDataState::NotConfigured => StatusView {
+            phase: GameDataPhase::NotConfigured,
+            version: None,
+            build: None,
+            reason: state.settings_error.clone(),
+        },
+        GameDataState::Loading { version } => {
+            StatusView { phase: GameDataPhase::Loading, version: version.clone(), build: None, reason: None }
         }
-        GameDataState::Failed { reason } => (GameDataPhase::Failed, None, None, Some(reason.clone())),
+        GameDataState::Ready(loaded) => StatusView {
+            phase: GameDataPhase::Ready,
+            version: loaded.version().map(|version| version.to_path()),
+            build: Some(loaded.build()),
+            reason: None,
+        },
+        GameDataState::Failed { error } => {
+            StatusView { phase: GameDataPhase::Failed, version: None, build: None, reason: Some(error.to_string()) }
+        }
     };
     let settings = state.binding.as_ref().map(|binding| &binding.settings);
+    // No pass running reads as zero progress, which the view hides.
     let progress = state.index.progress.unwrap_or_default();
     let cache_builds = |builds: &[BuildUpdateStatus]| {
         builds.iter().map(|build| CacheBuild { build: build.build, version: build.version.clone() }).collect()
     };
 
     GameDataSnapshot {
-        phase,
-        version,
-        build,
-        reason,
+        phase: status.phase,
+        version: status.version,
+        build: status.build,
+        reason: status.reason,
         wows_dir: settings.and_then(|settings| settings.wows_dir.as_ref()).map(|dir| dir.display().to_string()),
         index: IndexSnapshot {
             running: state.index.cancel.is_some(),
@@ -1072,19 +1219,13 @@ fn snapshot() -> GameDataSnapshot {
             directory: settings
                 .and_then(|settings| cache::base(&settings.cache_dir))
                 .map(|dir| dir.display().to_string()),
+            // Unbound reads as the default location, which is where an unset
+            // row puts the cache.
             directory_setting: settings.map(|settings| settings.cache_dir.clone()).unwrap_or_default(),
             auto_dump: settings.is_some_and(|settings| settings.auto_dump),
             size_bytes: state.cache.stats.map(|stats| stats.total_bytes),
             build_count: state.cache.stats.map(|stats| stats.version_count as u64),
-            job: state.cache.running.map(|job| {
-                match job {
-                    CacheJob::Checking => "checking",
-                    CacheJob::Validating => "validating",
-                    CacheJob::Downloading => "downloading",
-                    CacheJob::Planning => "planning",
-                }
-                .to_owned()
-            }),
+            job: state.cache.running.map(CacheJobKind::from),
             progress_done: state.cache.progress.map(|step| step.done),
             progress_total: state.cache.progress.map(|step| step.total),
             updates: cache_builds(&state.cache.updates),
@@ -1132,19 +1273,21 @@ fn snapshot() -> GameDataSnapshot {
 }
 
 /// Saves the pinned directories. Blocking.
-fn save_pinned() -> Result<(), String> {
+fn save_pinned() -> Result<(), GameDataError> {
     let pinned = state().directories.pinned_roots();
     with_database(|runtime, pool| {
         runtime
             .block_on(wows_toolkit_replay_data::directories::save_pinned(pool, &pinned))
-            .map_err(|error| format!("Pinned replay directories could not be saved: {error}"))
+            .map_err(GameDataError::SavePinned)
     })
 }
 
 async fn run_blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    blocking(work).await.map_err(|error| format!("game data task failed: {error}"))?
+    work: impl FnOnce() -> Result<T, GameDataError> + Send + 'static,
+) -> Result<T, GameDataRequestError> {
+    let done = blocking(work).await.map_err(GameDataError::Task)?;
+
+    Ok(done?)
 }
 
 /// Game data services exposed to the TSX interface.
@@ -1154,7 +1297,7 @@ pub struct GameData;
 #[module]
 impl GameData {
     /// Binds to the settings, once per process, and returns the state.
-    pub async fn start() -> Result<GameDataSnapshot, String> {
+    pub async fn start() -> Result<GameDataSnapshot, GameDataRequestError> {
         run_blocking(|| {
             ensure_started();
             measure_cache_if_wanted();
@@ -1166,7 +1309,7 @@ impl GameData {
     /// Reads the settings again and rebinds what they changed. Called after
     /// the WoWs directory, the language, the cache directory, the auto-dump
     /// flag or the proxy is saved.
-    pub async fn reload() -> Result<GameDataSnapshot, String> {
+    pub async fn reload() -> Result<GameDataSnapshot, GameDataRequestError> {
         run_blocking(|| {
             rebind()?;
             measure_cache_if_wanted();
@@ -1177,24 +1320,24 @@ impl GameData {
 
     /// Calls `on_change` with the state now and after every change, for as
     /// long as the interface runs.
-    pub async fn watch(on_change: Callback<GameDataSnapshot>) -> Result<(), String> {
+    pub async fn watch(on_change: Callback<GameDataSnapshot>) {
         let mut changes = SERVICE.changed.subscribe();
         loop {
             measure_cache_if_wanted();
             // Awaited rather than posted: a callback whose engine is gone
             // fails here, which ends the feed.
             if on_change.call_async(snapshot()).await.is_err() {
-                return Ok(());
+                return;
             }
             if changes.changed().await.is_err() {
-                return Ok(());
+                return;
             }
         }
     }
 
     /// Indexes the game's replay directory. `false` when no WoWs directory is
     /// set.
-    pub async fn index_replays(mode: ReplayIndexMode) -> Result<bool, String> {
+    pub async fn index_replays(mode: ReplayIndexMode) -> Result<bool, GameDataRequestError> {
         run_blocking(move || Ok(start_indexing(mode.into()))).await
     }
 
@@ -1206,7 +1349,7 @@ impl GameData {
     }
 
     /// Asks the repository which cached builds have newer data.
-    pub async fn check_cache_updates() -> Result<(), String> {
+    pub async fn check_cache_updates() -> Result<(), GameDataRequestError> {
         run_blocking(|| {
             run_cache_job(CacheJob::Checking, |client, base, tip, _report| async move {
                 cache::check_for_updates(&client, &base, tip.as_deref()).await
@@ -1216,7 +1359,7 @@ impl GameData {
     }
 
     /// Checks every cached object against the repository and its own hash.
-    pub async fn validate_cache() -> Result<(), String> {
+    pub async fn validate_cache() -> Result<(), GameDataRequestError> {
         run_blocking(|| {
             run_cache_job(CacheJob::Validating, |client, base, _tip, report| async move {
                 cache::validate(&client, &base, report).await
@@ -1226,7 +1369,7 @@ impl GameData {
     }
 
     /// Fetches every build the last check found stale.
-    pub async fn update_cache_builds() -> Result<(), String> {
+    pub async fn update_cache_builds() -> Result<(), GameDataRequestError> {
         run_blocking(|| {
             let builds = state().cache.updates.clone();
             download_builds(builds)
@@ -1235,7 +1378,7 @@ impl GameData {
     }
 
     /// Fetches every build the last validation found damaged.
-    pub async fn repair_cache_builds() -> Result<(), String> {
+    pub async fn repair_cache_builds() -> Result<(), GameDataRequestError> {
         run_blocking(|| {
             let builds = state().cache.repair.clone();
             download_builds(builds)
@@ -1244,9 +1387,9 @@ impl GameData {
     }
 
     /// Removes every cached build but the newest.
-    pub async fn delete_old_cache_builds() -> Result<u32, String> {
+    pub async fn delete_old_cache_builds() -> Result<u32, GameDataRequestError> {
         run_blocking(|| {
-            let (base, _, _) = cache_target()?;
+            let CacheTarget { base, .. } = cache_target()?;
             let deleted = wows_data_mgr::dump::delete_old_versions(&base);
             if deleted > 0 {
                 update(|state| {
@@ -1261,15 +1404,17 @@ impl GameData {
     }
 
     /// Shows the cache directory in the file manager.
-    pub async fn open_cache_folder() -> Result<(), String> {
-        let (base, _, _) = run_blocking(cache_target).await?;
-        std::fs::create_dir_all(&base).map_err(|error| format!("{}: {error}", base.display()))?;
-        open_path(base).await
+    pub async fn open_cache_folder() -> Result<(), GameDataRequestError> {
+        let CacheTarget { base, .. } = run_blocking(cache_target).await?;
+        std::fs::create_dir_all(&base)
+            .map_err(|source| GameDataError::CreateDirectory { path: base.clone(), source })?;
+
+        Ok(open_path(base).await.map_err(|reason| GameDataError::OpenPath { reason })?)
     }
 
     /// Saves whether a build loaded from the install is also written to the
     /// cache, and rebinds.
-    pub async fn set_auto_dump(enabled: bool) -> Result<GameDataSnapshot, String> {
+    pub async fn set_auto_dump(enabled: bool) -> Result<GameDataSnapshot, GameDataRequestError> {
         run_blocking(move || {
             save_setting(keys::AUTO_DUMP_GAME_DATA, &enabled)?;
             rebind()?;
@@ -1280,13 +1425,11 @@ impl GameData {
 
     /// Asks for a cache directory and saves it. `None` when the dialog was
     /// cancelled.
-    pub async fn pick_cache_directory() -> Result<Option<GameDataSnapshot>, String> {
+    pub async fn pick_cache_directory() -> Result<Option<GameDataSnapshot>, GameDataRequestError> {
         let dialog = OpenDialog::folders()
             .title(rust_i18n::t!("ui.game_data.cache_directory_title").into_owned())
             .button_label(rust_i18n::t!("ui.game_data.select").into_owned());
-        let picked = pick_paths(dialog).await.map_err(|error| {
-            rust_i18n::t!("ui.game_data.dialog_failed", error = error.to_string()).into_owned()
-        })?;
+        let picked = pick_paths(dialog).await.map_err(|reason| GameDataError::Dialog { reason })?;
         let Some(directory) = picked.and_then(|mut paths| paths.pop()) else { return Ok(None) };
 
         run_blocking(move || {
@@ -1301,9 +1444,9 @@ impl GameData {
     /// Lists the builds the replays on this machine need and nothing here
     /// has, and asks the repository what it publishes for each. Builds already
     /// offered this session are left out.
-    pub async fn check_missing_builds() -> Result<MissingBuildOffer, String> {
+    pub async fn check_missing_builds() -> Result<MissingBuildOffer, GameDataRequestError> {
         run_blocking(|| {
-            let missing = find_missing_builds().map_err(|error| error.to_string())?;
+            let missing = find_missing_builds()?;
             let missing: Vec<MissingBuild> = {
                 let state = state();
                 missing.into_iter().filter(|build| !state.offered_builds.contains(&build.build)).collect()
@@ -1314,17 +1457,17 @@ impl GameData {
             }
 
             let requests: Vec<(u32, Option<String>)> =
-                missing.iter().map(|build| (build.build, build.version.clone())).collect();
+                missing.iter().map(|build| (build.build, Some(build.version.clone()))).collect();
             update(|state| {
                 state.offer = OfferState { planning: true, builds: missing, open: true, ..OfferState::default() };
             });
             let planned = run_cache_job(CacheJob::Planning, move |client, base, _tip, _report| async move {
                 cache::plan(&client, &base, &requests).await
             });
-            if let Err(reason) = planned {
+            if let Err(error) = planned {
                 update(|state| {
                     state.offer.planning = false;
-                    state.offer.failure = Some(reason);
+                    state.offer.failure = Some(crate::shell::sentence(&error));
                 });
             }
             Ok(snapshot().offer)
@@ -1335,7 +1478,7 @@ impl GameData {
     /// Downloads the offered builds named in `builds` and closes the offer.
     /// Every offered build is answered for, ticked or not, so a later check
     /// does not offer it again.
-    pub async fn download_missing_builds(builds: Vec<u32>) -> Result<(), String> {
+    pub async fn download_missing_builds(builds: Vec<u32>) -> Result<(), GameDataRequestError> {
         run_blocking(move || {
             let wanted: Vec<BuildUpdateStatus> = update(|state| {
                 let offer = std::mem::take(&mut state.offer);
@@ -1345,10 +1488,7 @@ impl GameData {
                     .into_iter()
                     .filter(|missing| builds.contains(&missing.build))
                     .filter(|missing| eligible(offer.availability.get(&missing.build)))
-                    .map(|missing| BuildUpdateStatus {
-                        build: missing.build,
-                        version: missing.version.unwrap_or_default(),
-                    })
+                    .map(|missing| BuildUpdateStatus { build: missing.build, version: missing.version })
                     .collect()
             });
             if wanted.is_empty() {
@@ -1368,36 +1508,33 @@ impl GameData {
     }
 
     /// Opens a replay directory and queues an index pass over it.
-    pub async fn open_directory(path: String, pinned: bool) -> Result<(), String> {
+    pub async fn open_directory(path: String, pinned: bool) -> Result<(), GameDataRequestError> {
         run_blocking(move || open_registered_directory(PathBuf::from(path), pinned)).await
     }
 
     /// Asks for a replay directory and opens it. `false` when the dialog was
     /// cancelled.
-    pub async fn pick_directory() -> Result<bool, String> {
+    pub async fn pick_directory() -> Result<bool, GameDataRequestError> {
         let dialog = OpenDialog::folders()
             .title(rust_i18n::t!("ui.game_data.open_directory_title").into_owned())
             .button_label(rust_i18n::t!("ui.game_data.open").into_owned());
-        let picked = pick_paths(dialog).await.map_err(|error| {
-            rust_i18n::t!("ui.game_data.dialog_failed", error = error.to_string()).into_owned()
-        })?;
+        let picked = pick_paths(dialog).await.map_err(|reason| GameDataError::Dialog { reason })?;
         let Some(directory) = picked.and_then(|mut paths| paths.pop()) else { return Ok(false) };
 
         run_blocking(move || open_registered_directory(directory, false).map(|()| true)).await
     }
 
     /// Closes a replay directory. A pinned one stays open.
-    pub fn close_directory(path: String) -> Result<(), String> {
-        update(|state| state.directories.close(Path::new(&path))).map_err(|refusal| match refusal {
-            CloseRefusal::Pinned { .. } | CloseRefusal::NotOpen { .. } => refusal.to_string(),
-        })
+    pub fn close_directory(path: String) -> Result<(), GameDataRequestError> {
+        update(|state| state.directories.close(Path::new(&path))).map_err(|refusal| GameDataError::from(refusal).into())
     }
 
     /// Pins or unpins a replay directory and saves the pinned set.
-    pub async fn pin_directory(path: String, pinned: bool) -> Result<(), String> {
+    pub async fn pin_directory(path: String, pinned: bool) -> Result<(), GameDataRequestError> {
         run_blocking(move || {
-            if !update(|state| state.directories.set_pinned(Path::new(&path), pinned)) {
-                return Err(rust_i18n::t!("ui.game_data.directory_not_open", path = path.as_str()).into_owned());
+            let path = PathBuf::from(path);
+            if !update(|state| state.directories.set_pinned(&path, pinned)) {
+                return Err(GameDataError::DirectoryNotOpen { path });
             }
             save_pinned()
         })
@@ -1405,16 +1542,14 @@ impl GameData {
     }
 
     /// Shows a replay directory in the file manager.
-    pub async fn reveal_directory(path: String) -> Result<(), String> {
-        open_path(PathBuf::from(path)).await
+    pub async fn reveal_directory(path: String) -> Result<(), GameDataRequestError> {
+        Ok(open_path(PathBuf::from(path)).await.map_err(|reason| GameDataError::OpenPath { reason })?)
     }
 }
 
-fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), String> {
+fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), GameDataError> {
     if !root.is_dir() {
-        return Err(
-            rust_i18n::t!("ui.game_data.not_a_directory", path = root.display().to_string()).into_owned(),
-        );
+        return Err(GameDataError::NotADirectory { path: root });
     }
     let root = update(|state| {
         let opened = state.directories.open(root, pinned);
@@ -1434,7 +1569,7 @@ fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), String> 
     Ok(())
 }
 
-fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), String> {
+fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), GameDataError> {
     if builds.is_empty() {
         return Ok(());
     }
@@ -1549,7 +1684,10 @@ mod tests {
 
         let live = dir.path().join("temp.wowsreplay");
         std::fs::write(&live, b"replay").expect("the live recording is written");
-        assert!(heard.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the live recording has not landed");
+        assert!(
+            heard.recv_timeout(std::time::Duration::from_millis(300)).is_err(),
+            "the live recording has not landed"
+        );
 
         std::fs::rename(&live, dir.path().join("20260101_000000_PASB001-Battle_01_solomon_islands.wowsreplay"))
             .expect("the battle is renamed into place");

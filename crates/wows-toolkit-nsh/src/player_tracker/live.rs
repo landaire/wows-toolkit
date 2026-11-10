@@ -472,7 +472,7 @@ fn fetch(lookup: HeldLookup) {
     let proxy_url = crate::game_data::proxy_url();
     let fetched = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime
-            .block_on(live_match::fetch_stats(crate::game_data::USER_AGENT, &lookup.state, &proxy_url))
+            .block_on(live_match::fetch_stats(crate::game_data::USER_AGENT, &lookup.state, proxy_url.as_deref().unwrap_or_default()))
             .map_err(LiveDataError::Stats),
         Err(err) => Err(LiveDataError::Runtime(err)),
     };

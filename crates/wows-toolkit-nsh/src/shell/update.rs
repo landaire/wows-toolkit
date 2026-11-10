@@ -33,8 +33,12 @@ impl ReleaseOffer {
 }
 
 /// Asks `url` for the newest release past `running`, through `proxy_url`.
-pub async fn check(url: &str, running: &str, proxy_url: &str) -> Result<Option<ReleaseOffer>, UpdateError> {
-    let client = wows_toolkit_viewmodel::http::client(USER_AGENT, proxy_url, reqwest::redirect::Policy::default())?;
+pub async fn check(url: &str, running: &str, proxy_url: Option<&str>) -> Result<Option<ReleaseOffer>, UpdateError> {
+    let client = wows_toolkit_viewmodel::http::client(
+        USER_AGENT,
+        proxy_url.unwrap_or_default(),
+        reqwest::redirect::Policy::default(),
+    )?;
     let found = wows_toolkit_viewmodel::update::check_release(&client, url, running).await?;
 
     Ok(found.map(ReleaseOffer::from_release))
@@ -43,9 +47,9 @@ pub async fn check(url: &str, running: &str, proxy_url: &str) -> Result<Option<R
 /// Asks the toolkit's release feed whether this build is the newest.
 pub async fn check_published() -> Result<Option<ReleaseOffer>, UpdateError> {
     let pool = crate::shell::settings::open().await?;
-    let settings = crate::shell::settings::load_from(&pool).await?;
+    let proxy_url = crate::shell::settings::manual_proxy(&pool).await?;
 
-    check(RELEASES_URL, env!("CARGO_PKG_VERSION"), &settings.proxy_url).await
+    check(RELEASES_URL, env!("CARGO_PKG_VERSION"), proxy_url.as_deref()).await
 }
 
 #[cfg(test)]
@@ -92,7 +96,7 @@ mod tests {
     #[test]
     fn a_newer_release_is_offered_with_its_notes() {
         let (url, server) = serve_once("200 OK", RELEASES);
-        let offer = runtime().block_on(check(&url, "1.0.0", "")).expect("the check completes").expect("an offer");
+        let offer = runtime().block_on(check(&url, "1.0.0", None)).expect("the check completes").expect("an offer");
         server.join().expect("the test server");
 
         assert_eq!(offer.tag, "v99.0.0");
@@ -103,7 +107,7 @@ mod tests {
     #[test]
     fn the_newest_build_is_offered_nothing() {
         let (url, server) = serve_once("200 OK", RELEASES);
-        let offer = runtime().block_on(check(&url, "99.0.0", "")).expect("the check completes");
+        let offer = runtime().block_on(check(&url, "99.0.0", None)).expect("the check completes");
         server.join().expect("the test server");
 
         assert!(offer.is_none());
@@ -112,7 +116,7 @@ mod tests {
     #[test]
     fn a_refused_check_is_an_error() {
         let (url, server) = serve_once("403 Forbidden", RELEASES);
-        assert!(runtime().block_on(check(&url, "1.0.0", "")).is_err());
+        assert!(runtime().block_on(check(&url, "1.0.0", None)).is_err());
         server.join().expect("the test server");
     }
 }

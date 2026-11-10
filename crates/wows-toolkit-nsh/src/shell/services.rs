@@ -169,7 +169,9 @@ impl Shell {
         };
 
         let copied = LogCopy {
+            // The newest log is a file in the log directory, so it has a name.
             file: path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
+            // Saturates: no log file reaches four terabytes.
             kilobytes: u32::try_from(contents.len() / 1024).unwrap_or(u32::MAX),
         };
         nsh_core::prelude::set_clipboard(contents);
@@ -183,7 +185,8 @@ impl Shell {
     pub async fn open_data_directory() -> Result<(), ShellError> {
         let dir = wows_toolkit_config::storage_dir().ok_or(ShellError::NoStorageDirectory)?;
         blocking(move || {
-            std::fs::create_dir_all(&dir).map_err(|source| ShellError::CreateDirectory { path: dir.clone(), source })?;
+            std::fs::create_dir_all(&dir)
+                .map_err(|source| ShellError::CreateDirectory { path: dir.clone(), source })?;
             open_in_file_manager(&dir)
         })
         .await
@@ -226,7 +229,7 @@ fn open_in_file_manager(dir: &Path) -> Result<(), ShellError> {
         return Ok(());
     }
 
-    Err(failed(std::io::Error::other(format!("xdg-open exited with {status}"))))
+    Err(ShellError::OpenerFailed { path: PathBuf::from(dir), status })
 }
 
 #[cfg(test)]
