@@ -118,10 +118,12 @@ pub(crate) fn with_chart(mut layout: DockAreaLayout, id: ChartId) -> DockAreaLay
         let mut region = DockRegion::new(DockLayout::tabs().panel(key));
         region.size = Some(px(CHART_DOCK_WIDTH));
         region.open = Some(true);
+        region.collapsible = Some(false);
         return layout.with_dock(DockPlacement::Right, region);
     };
 
     region.open = Some(true);
+    region.collapsible = Some(false);
     let mut pending = vec![&mut region.layout];
     while let Some(node) = pending.pop() {
         match node {
@@ -187,12 +189,17 @@ pub(crate) fn from_state(state: &DockAreaState) -> Result<DockAreaLayout, Layout
             PanelId::new(leaf.panel_name.clone())
         }
     };
-    let layout = DockAreaLayout::from_state(state, &mut builder);
+    let mut layout = DockAreaLayout::from_state(state, &mut builder);
     if let Some(panel) = unknown {
         return Err(LayoutError::UnknownPanel { panel });
     }
 
     charts(&layout)?;
+    // GPUI clamps the chart dock's width rather than closing it on a drag.
+    if let Some(right) = layout.right.as_mut() {
+        right.collapsible = Some(false);
+    }
+
     Ok(layout)
 }
 
@@ -230,6 +237,7 @@ mod tests {
         let right = layout.right.as_ref().expect("the charts have a dock");
         assert_eq!(right.size, Some(px(500.0)));
         assert_eq!(charts(&layout).expect("the charts are known"), [ChartId(0), ChartId(3)]);
+        assert_eq!(right.collapsible, Some(false), "a drag does not close the chart dock");
     }
 
     #[test]
@@ -268,6 +276,7 @@ mod tests {
 
         assert_eq!(charts(&layout).expect("charts"), [ChartId(4)]);
         assert_eq!(layout.right.as_ref().and_then(|right| right.size), Some(px(420.0)));
+        assert_eq!(layout.right.as_ref().and_then(|right| right.collapsible), Some(false));
         let written = to_state(&layout).expect("the layout writes");
         let reread = from_state(&written).expect("and reads back");
         assert_eq!(panels(&reread), panels(&layout));

@@ -334,14 +334,24 @@ fn stats_chart_dock_collapses_to_a_rail_and_expands() {
     seed_stats();
     open_stats(&mut app);
     app.wait_for("label:Settings: Damage").unwrap();
+    app.press("label:Settings: Damage").unwrap();
+    app.press("Bar").unwrap();
+    app.wait_for("label:Settings: Avg Damage").unwrap();
+    app.press("Ships").unwrap();
+    app.press("label:Yamato 2W/0L (100%)").unwrap();
+    app.wait_for("Spotting Damage").unwrap();
 
+    // The chart dock is not collapsible, so a drag cannot close it; the
+    // button closes it all the same.
     app.press("label:Collapse Panel").unwrap();
-    app.wait_for_gone("label:Settings: Damage", std::time::Duration::from_secs(5)).unwrap();
+    app.wait_for_gone("label:Settings: Avg Damage", std::time::Duration::from_secs(5)).unwrap();
     wait_for_setting(&mut app, "stats_charts_dock_layout", |value| value.contains(r#""open":false"#));
 
     app.press("label:Expand Panel").unwrap();
-    app.wait_for("label:Settings: Damage").unwrap();
+    app.wait_for("label:Settings: Avg Damage").unwrap();
     assert!(!app.shows("label:Expand Panel"), "the rail goes once the dock is open");
+    assert!(app.shows("Spotting Damage"), "the expanded ship row stays expanded");
+    wait_for_setting(&mut app, "stats_charts_dock_layout", |value| value.contains(r#""open":true"#));
 }
 
 #[test]

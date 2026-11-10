@@ -281,7 +281,8 @@ function setFilters(model: StatsModel, change: Partial<FilterState>) {
   void run(model, () => Stats.setFilters(model.scope, { ...current, ...change }));
 }
 
-function layoutChanged(model: StatsModel, layout: DockAreaLayout) {
+function layoutChanged(model: StatsModel, reported: DockAreaLayout) {
+  const layout = pinChartDock(reported);
   model.setCurrent(layout);
   if (!model.persists) return;
   clearTimeout(layoutTimer);
@@ -292,6 +293,26 @@ function layoutChanged(model: StatsModel, layout: DockAreaLayout) {
       (error) => layoutError.set({ message: `Chart layout could not be saved: ${errorMessage(error)}`, save: true }),
     );
   }, LAYOUT_SAVE_DELAY_MS);
+}
+
+/// `layout` with its chart dock not collapsible: GPUI clamps that dock's
+/// width on a drag rather than closing it. This covers the dock `addPanel`
+/// makes for a first chart, which opens collapsible.
+function pinChartDock(layout: DockAreaLayout): DockAreaLayout {
+  const right = layout.right;
+  if (!right || right.collapsible === false) return layout;
+  return { ...layout, right: { ...right, collapsible: false } };
+}
+
+/// Opens or closes the dock on `side` through the layout, since the area
+/// refuses to close a dock that is not collapsible.
+function setDockOpen(model: StatsModel, side: DockSide, open: boolean) {
+  const current = model.current();
+  const region = current?.[side];
+  if (!current || !region) return;
+  const next: DockAreaLayout = { ...current };
+  next[side] = { ...region, open };
+  layoutChanged(model, next);
 }
 
 async function addChart(model: StatsModel, stat: string) {
@@ -449,7 +470,10 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
           <DockArea
             class="flex-1"
             ref={(api: DockAreaApi) => model.setDock(api)}
-            defaultLayout={opened()}
+            // Controlled, so the collapse button can close the chart dock,
+            // which is not collapsible; panels keep their state across a
+            // new layout, as they are keyed by panel.
+            layout={model.current() ?? opened()}
             onLayoutChange={({ layout }) => layoutChanged(model, layout)}
             onPanelRemove={({ panel }) => {
               // The arrangement to save is the last one known without the
@@ -534,7 +558,7 @@ function ExpandRail(props: { model: StatsModel; side: DockSide }) {
         <DockToggle
           label={t("ui.buttons.expand_panel")}
           icon={dockIcon(props.side, false)}
-          onPress={() => props.model.dock()?.setDockOpen(props.side, true)}
+          onPress={() => setDockOpen(props.model, props.side, true)}
         />
       </View>
     </If>
@@ -559,14 +583,19 @@ function chartId(panel: string): number | null {
 
 function PanelTab(props: { model: StatsModel; tab: DockTab }) {
   const id = () => chartId(props.tab.panel);
+  const chart = () => props.model.charts().find((entry) => entry.id === id());
   const title = () => {
     if (props.tab.panel === "overview") return text.overview;
     if (props.tab.panel === "ships") return text.ships;
-    return props.model.charts().find((chart) => chart.id === id())?.title ?? props.tab.panel;
+    return chart()?.title ?? props.tab.panel;
   };
+  const tint = () => (props.tab.active ? colors.foreground : colors.mutedForeground);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <Text style={{ fontSize: 12.5, color: props.tab.active ? colors.foreground : colors.mutedForeground }}>{title()}</Text>
+      <If when={chart()}>
+        <Icon name={chart()!.line ? "chart-line" : "chart-column"} size={13} color={tint()}/>
+      </If>
+      <Text style={{ fontSize: 12.5, color: tint() }}>{title()}</Text>
       <If when={id() !== null}>
         <View
           role="button"
@@ -584,7 +613,7 @@ function PanelTab(props: { model: StatsModel; tab: DockTab }) {
           icon={dockIcon(openDockOf(props.model.current(), props.tab.panel)!, true)}
           onPress={() => {
             const side = openDockOf(props.model.current(), props.tab.panel);
-            if (side) props.model.dock()?.setDockOpen(side, false);
+            if (side) setDockOpen(props.model, side, false);
           }}
         />
       </If>

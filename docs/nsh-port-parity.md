@@ -38,6 +38,7 @@ These follow from nsh 0.4.0 or from Linux; everything else matches.
 - **Window position**: GTK on Wayland can neither read nor set a window's position. Size, maximized and fullscreen are remembered.
 - **Updates**: GPUI installs updates only on Windows. The NSH app shows release notes and the release page, as GPUI does on Linux.
 - **Copy a replay file**: nsh's clipboard writes text and images only (`nsh-core-0.4.0/src/runtime/clipboard.rs`); file lists go through `arboard`.
+- **Stats chart dock width**: GPUI keeps the stats side at least 280 px wide and the chart dock at least 200 px. nsh docks take one fixed minimum of 100 px for every dock and split (`nsh-base-0.4.0/src/resizable/state.rs:13`, applied in `src/dock/dock_placement.rs:89-98`), and a dock region has no minimum of its own (`src/dock/value.rs:226-240`). As in GPUI, a drag cannot close the chart dock, because it is not collapsible.
 - **Tooltips in tests**: `nsh-testing` 0.4.0 does not show tooltips headless, so tooltip text is checked by reading the code, not by tests.
 
 ## Tests
