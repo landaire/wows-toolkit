@@ -2,7 +2,9 @@ import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "
 import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
 import { ReplayInspector as NativeReplayInspector, Shell, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
+import { SessionButton } from "./collab";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
+import { LauncherView } from "./launcher";
 import { colors, controlRadius } from "./theme";
 import { applyLocale } from "./i18n";
 import { loadAppSettings } from "./settings_store";
@@ -420,6 +422,7 @@ function TabStrip() {
         }}
       </Each>
       <View style={{ flex: 1 }}/>
+      <SessionButton onOpenTacticsBoard={() => tacticsOpen.set(true)}/>
       <ApplicationMenu/>
     </View>
   );
@@ -945,6 +948,9 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
         <NativeReplayInspector openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
       </View>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "launcher" ? "flex" : "none" }}>
+        <LauncherView visible={tab().id === "launcher"}/>
+      </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "statistics" ? "flex" : "none" }}>
         <StatisticsView/>
       </View>
@@ -957,7 +963,7 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
       </View>
-      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings"}>
+      <If when={tab().id !== "replay-inspector" && tab().id !== "launcher" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings"}>
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>

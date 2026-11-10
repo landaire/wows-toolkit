@@ -16,6 +16,13 @@ genrule(
 
 
 NSH_COMMON_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
+    "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wt-collab-client:wt_collab_client",
+    "//third-party/rust:humansize",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wt-translations:wt_translations",
     "//crates/wows-core:wows_core",
@@ -47,9 +54,15 @@ NSH_COMMON_DEPS = [
     windows = [],
 )
 
-NSH_DEPS = ["//crates/wows-toolkit-config:wows_toolkit_config"] + NSH_COMMON_DEPS
+NSH_DEPS = [
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+] + NSH_COMMON_DEPS
 
-NSH_TEST_DEPS = ["//crates/wows-toolkit-config:wows_toolkit_config_test_support"] + NSH_COMMON_DEPS
+NSH_TEST_DEPS = [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
+] + NSH_COMMON_DEPS
 
 workspace_library(
     name = "wows_toolkit_nsh",

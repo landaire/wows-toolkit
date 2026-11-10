@@ -2,11 +2,17 @@
 // parsed at startup, as in the other front ends.
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
+pub mod collab;
 pub mod frames;
+mod launcher;
 mod native;
 mod replay;
+pub mod runtime;
+mod settings_store;
 pub mod shell;
 
+pub use collab::Collab;
+pub use launcher::LauncherSession;
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
 pub use replay::{ReplayInspector, ReplayInspectorProps};
 
@@ -19,5 +25,7 @@ fn native_module(registry: &mut Registry) {
     registry.module::<shell::Shell>();
     registry.module::<shell::Settings>();
     registry.module::<shell::Twitch>();
+    registry.module::<Collab>();
+    registry.class::<LauncherSession>();
     registry.register::<ReplayInspector>();
 }
