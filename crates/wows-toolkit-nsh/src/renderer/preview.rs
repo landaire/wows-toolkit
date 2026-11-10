@@ -19,6 +19,7 @@ use image::RgbImage;
 use nsh_core::prelude::*;
 use rust_i18n::t;
 use tokio::sync::watch;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap;
 use wows_toolkit_replay_data::minimap::FRAME_INTERVAL;
 use wows_toolkit_replay_data::minimap::PreviewEdge;
@@ -34,7 +35,6 @@ use crate::frames::PixelSize;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
-use crate::renderer::RendererError;
 use crate::renderer::ids::RendererId;
 use crate::renderer::ids::Revision;
 use crate::renderer::raster;
@@ -59,9 +59,14 @@ pub struct PreviewView {
     pub surface: String,
     /// Changes whenever anything here does.
     pub revision: Revision,
+    /// Whether there is game data to read the replay with. Without it no
+    /// preview comes, and no space is held for one.
+    pub has_game_data: bool,
     /// Whether a preview is on its way: the dwell is counting down or a bake
     /// runs. The map's space is held for the whole of it.
     pub expecting: bool,
+    /// Whether the surface shows a map or a frame yet.
+    pub drawn: bool,
     /// Whether the bake has stopped feeding the preview, which is what a
     /// spinner over it says.
     pub stalled: bool,
@@ -73,6 +78,7 @@ pub struct PreviewView {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Progress {
     expecting: bool,
+    drawn: bool,
     stalled: bool,
     failure: Option<String>,
 }
@@ -81,6 +87,9 @@ struct Progress {
 pub struct Preview {
     id: RendererId,
     surface: Arc<Surface>,
+    /// Whether there was game data when the preview opened, and so whether a
+    /// thread plays it.
+    has_game_data: bool,
     progress: watch::Sender<(Revision, Progress)>,
     cancel: Arc<AtomicBool>,
 }
@@ -93,6 +102,8 @@ struct Baked {
     track: Option<PreviewFrames<Arc<RgbImage>>>,
     last_frame: Option<Instant>,
     done: bool,
+    /// Why the bake gave no preview, in the reader's language.
+    failure: Option<String>,
 }
 
 /// Which image a preview puts up.
@@ -112,19 +123,26 @@ struct Shown {
 }
 
 impl Preview {
-    /// Starts the preview of `path` on the surface named `name`.
+    /// Starts the preview of `path` on the surface named `name`. Without game
+    /// data nothing is waited for or read.
     pub fn open(id: RendererId, name: &str, path: PathBuf) -> Arc<Self> {
         let surface = frames::surface(&SurfaceId::new(name));
+        let game_data = crate::game_data::cache();
+        let has_game_data = game_data.is_some();
+        let progress = Progress { expecting: has_game_data, ..Progress::default() };
         let preview = Arc::new(Self {
             id,
             surface,
-            progress: watch::channel((Revision::default(), Progress { expecting: true, ..Progress::default() })).0,
+            has_game_data,
+            progress: watch::channel((Revision::default(), progress)).0,
             cancel: Arc::new(AtomicBool::new(false)),
         });
+        let Some(game_data) = game_data else { return preview };
+
         let playing = Arc::clone(&preview);
         std::thread::Builder::new()
             .name("minimap-preview".to_owned())
-            .spawn(move || playing.run(&path))
+            .spawn(move || playing.run(&path, game_data))
             .expect("the preview thread starts");
 
         preview
@@ -133,6 +151,14 @@ impl Preview {
     /// The pointer left: the bake stops and the surface is let go.
     pub fn close(&self) {
         self.cancel.store(true, Ordering::Relaxed);
+
+        // A view still waiting for a change is let go too.
+        self.progress.send_modify(|(revision, _)| *revision = revision.next());
+
+        // No thread runs to let the surface go.
+        if !self.has_game_data {
+            self.finish();
+        }
     }
 
     pub fn view(&self) -> PreviewView {
@@ -141,7 +167,9 @@ impl Preview {
             id: self.id,
             surface: self.surface.id().as_str().to_owned(),
             revision,
+            has_game_data: self.has_game_data,
             expecting: progress.expecting,
+            drawn: progress.drawn,
             stalled: progress.stalled,
             failure: progress.failure,
         }
@@ -169,7 +197,7 @@ impl Preview {
         self.cancel.load(Ordering::Relaxed)
     }
 
-    fn run(self: Arc<Self>, path: &Path) {
+    fn run(self: Arc<Self>, path: &Path, game_data: GameDataCache) {
         // The view's own input means nothing to a preview, but it is read so
         // it does not pile up while the pointer moves over the map.
         let mut input = self.surface.take_input();
@@ -190,7 +218,7 @@ impl Preview {
         // A view not yet sized is taken as one device pixel per point; the
         // frames are fitted to whatever size it then reports.
         let edge = PreviewEdge::for_scale_factor(self.surface.view_size().map_or(1.0, |view| view.scale.get()));
-        self.bake(path, edge, &baked);
+        self.bake(path, game_data, edge, &baked);
 
         let mut shown: Option<Shown> = None;
         let mut started: Option<Instant> = None;
@@ -212,13 +240,18 @@ impl Preview {
                         (Some(_), Some(last)) => last.elapsed() > STALLED_AFTER,
                         _ => true,
                     };
-                let progress = Progress { expecting: !baked.done || frame.is_some(), stalled, failure: None };
+                let progress = Progress {
+                    expecting: !baked.done || frame.is_some(),
+                    drawn: shown.is_some(),
+                    stalled,
+                    failure: baked.failure.clone(),
+                };
                 if baked.done && baked.track.is_none() && baked.map.is_none() {
+                    self.tell(progress);
                     break;
                 }
                 (frame, progress)
             };
-            self.tell(Progress { failure: self.progress.borrow().1.failure.clone(), ..progress });
 
             if let Some((still, image)) = frame
                 && let Some(view) = self.surface.view_size()
@@ -232,6 +265,7 @@ impl Preview {
                     Err(err) => log::warn!("minimap preview: a frame could not be built: {err}"),
                 }
             }
+            self.tell(Progress { drawn: shown.is_some(), ..progress });
             std::thread::sleep(FRAME_INTERVAL);
         }
 
@@ -261,16 +295,7 @@ impl Preview {
     /// Bakes the preview on its own thread. The map goes up first, from a
     /// build already open, while the bake may still be loading the one the
     /// replay was recorded on.
-    fn bake(self: &Arc<Self>, path: &Path, edge: PreviewEdge, baked: &Arc<Mutex<Baked>>) {
-        let Some(game_data) = crate::game_data::cache() else {
-            baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).done = true;
-            self.tell(Progress {
-                expecting: false,
-                stalled: false,
-                failure: Some(RendererError::NoGameData.to_string()),
-            });
-            return;
-        };
+    fn bake(self: &Arc<Self>, path: &Path, game_data: GameDataCache, edge: PreviewEdge, baked: &Arc<Mutex<Baked>>) {
         if let Ok(meta) = wows_replays::ReplayFile::meta_from_file(path)
             && let Some(map) = minimap::map_frame(&meta.mapName, &game_data, edge)
         {
@@ -307,16 +332,12 @@ impl Preview {
                     said(err)
                 }
             };
-            {
-                let mut baked = baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                baked.done = true;
-                // Looping only starts once the whole track is here.
-                if let Some(track) = baked.track.as_mut() {
-                    track.finish();
-                }
-            }
-            if let Some(failure) = failure {
-                preview.tell(Progress { expecting: false, stalled: false, failure: Some(failure) });
+            let mut baked = baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            baked.done = true;
+            baked.failure = failure;
+            // Looping only starts once the whole track is here.
+            if let Some(track) = baked.track.as_mut() {
+                track.finish();
             }
         });
     }

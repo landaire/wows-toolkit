@@ -939,7 +939,7 @@ function HoverPreview() {
   return (
     <If when={hovered()}>
       <Surface style={{ position: "absolute", left: left(), top: top(), padding: PREVIEW_MARGIN / 2, gap: 4, backgroundColor: colors.background, zIndex: 8 }}>
-        <View testID="search-preview" accessibilityLabel={`Preview ${hovered()!.row.replayPath}`} style={{ width: PREVIEW_SIZE, gap: 4 }}>
+        <View testID="search-preview" accessibilityLabel={t("ui.replay.renderer.preview_of", { path: hovered()!.row.replayPath })} style={{ width: PREVIEW_SIZE, gap: 4 }}>
           <Each of={[hovered()!.row.replayPath]}>
             {(path) => <MinimapPreview path={path()} size={PREVIEW_SIZE}/>}
           </Each>

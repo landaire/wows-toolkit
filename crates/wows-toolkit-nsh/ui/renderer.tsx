@@ -12,19 +12,21 @@ import {
   type TimelineView,
   type WatchedView,
 } from "wows-toolkit/native";
-import { Surface } from "./components";
+import { Spinner, Surface } from "./components";
 import { Frame } from "./frame";
-import { t } from "./i18n";
+import { currentLocale, t } from "./i18n";
 import { CheckMark, Icon, type IconName } from "./icons";
 import { beforeSoftwareEncode } from "./shell/notices";
 import { colors, controlRadius } from "./theme";
 
-let labels: RendererText | null = null;
+let labels: { locale: string; text: RendererText } | null = null;
 
-// The controls' labels, read once in the reader's language.
+// The controls' labels in the reader's language, read again after a
+// language change.
 function text(): RendererText {
-  if (!labels) labels = ReplayRenderer.text();
-  return labels;
+  const locale = currentLocale();
+  if (labels?.locale !== locale) labels = { locale, text: ReplayRenderer.text() };
+  return labels.text;
 }
 
 const SPECIES = ["DD", "CA", "BB", "CV", "SS"];
@@ -180,7 +182,6 @@ function Transport(props: { port: Viewport }) {
   const ready = () => view().status === "ready";
   const steerable = () => ready() && view().export == null;
   const run = props.port.run;
-  const labels = text();
   return (
     <View testID="renderer-transport" style={{ borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card }}>
       <If when={view().exportFailure}>
@@ -209,18 +210,18 @@ function Transport(props: { port: Viewport }) {
         </View>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8, paddingVertical: 5, flexWrap: "wrap" }}>
-        <ToolButton icon="skip-back" hint={labels.jumpToStart} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seek(id(), 0))}/>
-        <ToolButton icon="rewind" hint={labels.previousEvent} disabled={!steerable() || !view().hasPreviousEvent} onPress={() => run(() => ReplayRenderer.previousEvent(id()))}/>
-        <ToolButton icon="rotate-ccw" hint={labels.back10s} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekBy(id(), -10))}/>
+        <ToolButton icon="skip-back" hint={text().jumpToStart} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seek(id(), 0))}/>
+        <ToolButton icon="rewind" hint={text().previousEvent} disabled={!steerable() || !view().hasPreviousEvent} onPress={() => run(() => ReplayRenderer.previousEvent(id()))}/>
+        <ToolButton icon="rotate-ccw" hint={text().back10s} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekBy(id(), -10))}/>
         <ToolButton
           icon={view().playing ? "pause" : "play"}
-          hint={view().playing ? labels.pause : labels.play}
+          hint={view().playing ? text().pause : text().play}
           disabled={!steerable()}
           onPress={() => run(() => ReplayRenderer.togglePlaying(id()))}
         />
-        <ToolButton icon="rotate-cw" hint={labels.forward10s} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekBy(id(), 10))}/>
-        <ToolButton icon="fast-forward" hint={labels.nextEvent} disabled={!steerable() || !view().hasNextEvent} onPress={() => run(() => ReplayRenderer.nextEvent(id()))}/>
-        <ToolButton icon="skip-forward" hint={labels.jumpToEnd} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekEnd(id()))}/>
+        <ToolButton icon="rotate-cw" hint={text().forward10s} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekBy(id(), 10))}/>
+        <ToolButton icon="fast-forward" hint={text().nextEvent} disabled={!steerable() || !view().hasNextEvent} onPress={() => run(() => ReplayRenderer.nextEvent(id()))}/>
+        <ToolButton icon="skip-forward" hint={text().jumpToEnd} disabled={!steerable()} onPress={() => run(() => ReplayRenderer.seekEnd(id()))}/>
         <Text accessibilityLabel={t("ui.renderer.controls.clock")} style={{ width: 92, fontSize: 12, color: colors.mutedForeground }}>{view().clock}</Text>
         <View style={{ flex: 1, minWidth: 0 }}/>
         <Icon name="search" size={14} color={colors.mutedForeground}/>
@@ -237,18 +238,18 @@ function Transport(props: { port: Viewport }) {
           thumbClass="w-[12px] h-[12px] rounded-full bg-primary"
           onChange={({ value }) => run(() => ReplayRenderer.setZoom(id(), value as number))}
         />
-        <ToolButton label={labels.zoomReset} disabled={!ready() || view().wholeMap} onPress={() => run(() => ReplayRenderer.resetZoom(id()))}/>
+        <ToolButton label={text().zoomReset} disabled={!ready() || view().wholeMap} onPress={() => run(() => ReplayRenderer.resetZoom(id()))}/>
         <Divider/>
         <SpeedPicker port={props.port}/>
         <Divider/>
-        <ToolButton icon="download" hint={labels.exportVideo} disabled={!steerable()} onPress={() => exportVideo(props.port, false)}/>
+        <ToolButton icon="download" hint={text().exportVideo} disabled={!steerable()} onPress={() => exportVideo(props.port, false)}/>
         <ToolsPopover port={props.port}/>
         <SettingsPopover port={props.port}/>
         <TimelinePopover port={props.port}/>
         <If when={props.port.popOut}>
-          <ToolButton icon="square-arrow-out-up-right" hint={labels.popOut} onPress={() => props.port.popOut!()}/>
+          <ToolButton icon="square-arrow-out-up-right" hint={text().popOut} onPress={() => props.port.popOut!()}/>
         </If>
-        <ToolButton icon="clipboard" hint={labels.exportClipboard} disabled={!steerable()} onPress={() => exportVideo(props.port, true)}/>
+        <ToolButton icon="clipboard" hint={text().exportClipboard} disabled={!steerable()} onPress={() => exportVideo(props.port, true)}/>
       </View>
     </View>
   );
@@ -256,15 +257,14 @@ function Transport(props: { port: Viewport }) {
 
 function SpeedPicker(props: { port: Viewport }) {
   const view = () => props.port.view();
-  const labels = text();
   return (
-    <PopoverButton label={labels.speeds[view().speedIndex]} hint={labels.speed} disabled={view().status !== "ready"}>
+    <PopoverButton label={text().speeds[view().speedIndex]} hint={text().speed} disabled={view().status !== "ready"}>
       <View style={{ gap: 3 }}>
-        <Each of={labels.speeds}>
+        <Each of={text().speeds}>
           {(speed, index) => (
             <ToolButton
               label={speed()}
-              accessibilityLabel={`${labels.speed} ${speed()}`}
+              accessibilityLabel={`${text().speed} ${speed()}`}
               chosen={view().speedIndex === index()}
               onPress={() => props.port.run(() => ReplayRenderer.setSpeed(view().id, index()))}
             />
@@ -293,7 +293,6 @@ function exportVideo(port: Viewport, toClipboard: boolean) {
 function SettingsPopover(props: { port: Viewport }) {
   const settings = signal<SettingsView | null>(null);
   const id = () => props.port.view().id;
-  const labels = text();
   const apply = (command: () => SettingsView) => {
     try {
       settings.set(command());
@@ -304,7 +303,7 @@ function SettingsPopover(props: { port: Viewport }) {
   return (
     <PopoverButton
       icon="settings"
-      hint={labels.settings}
+      hint={text().settings}
       disabled={props.port.view().status !== "ready"}
       onOpen={() => apply(() => ReplayRenderer.settings(id()))}
     >
@@ -314,10 +313,10 @@ function SettingsPopover(props: { port: Viewport }) {
             <Each of={settings()!.layers}>
               {(layer) => <Toggle label={layer().label} checked={layer().on} onChange={(on) => apply(() => ReplayRenderer.setLayer(id(), layer().id, on))}/>}
             </Each>
-            <Text style={{ paddingTop: 8, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>{labels.exportSettings}</Text>
-            <Toggle label={labels.preferCpu} hint={labels.preferCpuHint} checked={settings()!.preferCpu} onChange={(on) => apply(() => ReplayRenderer.setPreferCpu(id(), on))}/>
-            <Toggle label={labels.includePreBattle} hint={labels.includePreBattleHint} checked={settings()!.includePreBattle} onChange={(on) => apply(() => ReplayRenderer.setIncludePreBattle(id(), on))}/>
-            <Label text={labels.codec}/>
+            <Text style={{ paddingTop: 8, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>{text().exportSettings}</Text>
+            <Toggle label={text().preferCpu} hint={text().preferCpuHint} checked={settings()!.preferCpu} onChange={(on) => apply(() => ReplayRenderer.setPreferCpu(id(), on))}/>
+            <Toggle label={text().includePreBattle} hint={text().includePreBattleHint} checked={settings()!.includePreBattle} onChange={(on) => apply(() => ReplayRenderer.setIncludePreBattle(id(), on))}/>
+            <Label text={text().codec}/>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
               <ToolButton label={settings()!.autoLabel} chosen={settings()!.codec == null} onPress={() => apply(() => ReplayRenderer.setCodec(id(), null))}/>
               <Each of={settings()!.codecs}>
@@ -327,7 +326,7 @@ function SettingsPopover(props: { port: Viewport }) {
               </Each>
             </View>
             <View style={{ paddingTop: 8 }}>
-              <ToolButton label={labels.saveDefaults} onPress={() => void ReplayRenderer.saveDefaults(id()).then((next) => props.port.run(() => next), (error) => props.port.say(errorMessage(error)))}/>
+              <ToolButton label={text().saveDefaults} onPress={() => void ReplayRenderer.saveDefaults(id()).then((next) => props.port.run(() => next), (error) => props.port.say(errorMessage(error)))}/>
             </View>
           </View>
         </Scroll>
@@ -361,7 +360,6 @@ function FollowTimeline(props: { port: Viewport; read: () => boolean; refresh: (
 function TimelinePopover(props: { port: Viewport }) {
   const timeline = signal<TimelineView | null>(null);
   const id = () => props.port.view().id;
-  const labels = text();
   const apply = (command: () => TimelineView) => {
     try {
       timeline.set(command());
@@ -371,20 +369,20 @@ function TimelinePopover(props: { port: Viewport }) {
   };
   const refresh = () => apply(() => ReplayRenderer.timeline(id()));
   return (
-    <PopoverButton icon="list" hint={labels.timeline}>
+    <PopoverButton icon="list" hint={text().timeline}>
       <FollowTimeline port={props.port} read={() => timeline()?.read ?? false} refresh={refresh}/>
       <If when={timeline()}>
         <View style={{ width: 360, gap: 6 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{labels.timeline}</Text>
-            <ToolButton label={labels.timelineCopy} hint={labels.timelineCopyHint} disabled={timeline()!.rows.length === 0} onPress={() => void Clipboard.writeText(timeline()!.copyText).then(() => props.port.say(labels.timelineCopied))}/>
+            <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{text().timeline}</Text>
+            <ToolButton label={text().timelineCopy} hint={text().timelineCopyHint} disabled={timeline()!.rows.length === 0} onPress={() => void Clipboard.writeText(timeline()!.copyText).then(() => props.port.say(text().timelineCopied))}/>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <ToolButton label={labels.timelineAll} onPress={() => apply(() => ReplayRenderer.setTimelineKinds(id(), true))}/>
-            <ToolButton label={labels.timelineNone} onPress={() => apply(() => ReplayRenderer.setTimelineKinds(id(), false))}/>
+            <ToolButton label={text().timelineAll} onPress={() => apply(() => ReplayRenderer.setTimelineKinds(id(), true))}/>
+            <ToolButton label={text().timelineNone} onPress={() => apply(() => ReplayRenderer.setTimelineKinds(id(), false))}/>
             <Input
-              accessibilityLabel={labels.timelineSearch}
-              placeholder={labels.timelineSearch}
+              accessibilityLabel={text().timelineSearch}
+              placeholder={text().timelineSearch}
               value={timeline()!.search}
               onChange={({ value }) => apply(() => ReplayRenderer.setTimelineSearch(id(), value))}
               style={{ flex: 1, minHeight: 26, paddingHorizontal: 8, borderWidth: 1, borderColor: colors.input, borderRadius: controlRadius(), backgroundColor: colors.background, color: colors.foreground, fontSize: 12.5 }}
@@ -400,14 +398,14 @@ function TimelinePopover(props: { port: Viewport }) {
             when={timeline()!.read}
             else={
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 }}>
-                <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={labels.timelineReading}/></View>
-                <Label text={labels.timelineReading}/>
+                <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={text().timelineReading}/></View>
+                <Label text={text().timelineReading}/>
               </View>
             }
           >
             <If
               when={timeline()!.rows.length > 0}
-              else={<Label text={timeline()!.anyEvents ? labels.timelineNoMatches : labels.timelineNoEvents}/>}
+              else={<Label text={timeline()!.anyEvents ? text().timelineNoMatches : text().timelineNoEvents}/>}
             >
               <Scroll style={{ maxHeight: 400 }}>
                 <View style={{ gap: 1 }}>
@@ -435,20 +433,40 @@ function TimelinePopover(props: { port: Viewport }) {
   );
 }
 
+// The tactics board's icon for each drawing tool; the selector, which takes
+// up no tool, shows the pointer. A ship is taken up from the species buttons,
+// never from this row.
+function toolIcon(tool: RendererTool | null | undefined): IconName {
+  switch (tool) {
+    case "arrow": return "move-up-right";
+    case "freehand": return "paintbrush";
+    case "eraser": return "eraser";
+    case "line": return "slash";
+    case "circle": return "circle";
+    case "rectangle": return "square";
+    case "triangle": return "triangle";
+    case "measurement": return "ruler";
+    case "ship":
+    case null:
+    case undefined:
+      return "mouse-pointer";
+  }
+}
+
 function ToolsPopover(props: { port: Viewport }) {
   const view = () => props.port.view();
   const id = () => view().id;
   const run = props.port.run;
-  const labels = text();
   const chosenTool = (tool: RendererTool | null | undefined) => (tool ?? null) === (view().tool ?? null) && view().tool !== "ship";
   return (
-    <PopoverButton icon="notebook-pen" hint={labels.annotations} disabled={!view().inSession}>
+    <PopoverButton icon="notebook-pen" hint={text().annotations} disabled={!view().inSession}>
       <View style={{ width: 250, gap: 8 }}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
-          <Each of={labels.tools}>
+          <Each of={text().tools}>
             {(tool) => (
               <ToolButton
-                label={tool().label}
+                icon={toolIcon(tool().tool)}
+                accessibilityLabel={tool().label}
                 hint={tool().chord ? `${tool().label} (${tool().chord})` : tool().label}
                 chosen={chosenTool(tool().tool)}
                 onPress={() => run(() => ReplayRenderer.setTool(id(), tool().tool ?? null))}
@@ -458,10 +476,10 @@ function ToolsPopover(props: { port: Viewport }) {
         </View>
         <If when={view().pickedShip}>
           <View style={{ gap: 4 }}>
-            <Label text={view().pickedShip!.name ?? labels.noShip}/>
+            <Label text={view().pickedShip!.name ?? text().noShip}/>
             <Input
-              accessibilityLabel={labels.shipHint}
-              placeholder={labels.shipHint}
+              accessibilityLabel={text().shipHint}
+              placeholder={text().shipHint}
               value={view().shipQuery}
               onChange={({ value }) => run(() => ReplayRenderer.searchShips(id(), value))}
               style={{ minHeight: 26, paddingHorizontal: 8, borderWidth: 1, borderColor: colors.input, borderRadius: controlRadius(), backgroundColor: colors.background, color: colors.foreground, fontSize: 12.5 }}
@@ -490,12 +508,12 @@ function ToolsPopover(props: { port: Viewport }) {
           )}
         </Each>
         <View style={{ height: 1, backgroundColor: colors.border }}/>
-        <ToolButton label={labels.undo} disabled={!view().canUndo} onPress={() => run(() => ReplayRenderer.undo(id()))}/>
+        <ToolButton label={text().undo} disabled={!view().canUndo} onPress={() => run(() => ReplayRenderer.undo(id()))}/>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <View style={{ flex: 1 }}><Label text={labels.nib}/></View>
-          <ToolButton label="-" accessibilityLabel={labels.thinner} hint={labels.thinner} disabled={!view().canThin} onPress={() => run(() => ReplayRenderer.stepNib(id(), -1))}/>
-          <Text accessibilityLabel={labels.nib} style={{ width: 16, fontSize: 12, color: colors.popoverForeground }}>{view().nib.toFixed(0)}</Text>
-          <ToolButton label="+" accessibilityLabel={labels.thicker} hint={labels.thicker} disabled={!view().canThicken} onPress={() => run(() => ReplayRenderer.stepNib(id(), 1))}/>
+          <View style={{ flex: 1 }}><Label text={text().nib}/></View>
+          <ToolButton label="-" accessibilityLabel={text().thinner} hint={text().thinner} disabled={!view().canThin} onPress={() => run(() => ReplayRenderer.stepNib(id(), -1))}/>
+          <Text accessibilityLabel={text().nib} style={{ width: 16, fontSize: 12, color: colors.popoverForeground }}>{view().nib.toFixed(0)}</Text>
+          <ToolButton label="+" accessibilityLabel={text().thicker} hint={text().thicker} disabled={!view().canThicken} onPress={() => run(() => ReplayRenderer.stepNib(id(), 1))}/>
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
           <Each of={INKS}>
@@ -515,7 +533,6 @@ function ToolsPopover(props: { port: Viewport }) {
 
 // What the keys do, in the corner while ctrl is held over the map.
 function ShortcutSheet() {
-  const labels = text();
   const row = (chord: string, label: string) => (
     <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
       <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{chord}</Text>
@@ -524,11 +541,11 @@ function ShortcutSheet() {
   );
   return (
     <Surface style={{ position: "absolute", right: 8, bottom: 8, minWidth: 230, padding: 8, gap: 4, backgroundColor: colors.popover }}>
-      <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{labels.shortcutsTitle}</Text>
-      <Label text={labels.shortcutsTools}/>
-      <Each of={labels.tools.filter((tool) => tool.chord)}>{(tool) => row(tool().chord!, tool().label)}</Each>
-      <Label text={labels.shortcutsActions}/>
-      <Each of={labels.actions}>{(action) => row(action().chord, action().label)}</Each>
+      <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{text().shortcutsTitle}</Text>
+      <Label text={text().shortcutsTools}/>
+      <Each of={text().tools.filter((tool) => tool.chord)}>{(tool) => row(tool().chord!, tool().label)}</Each>
+      <Label text={text().shortcutsActions}/>
+      <Each of={text().actions}>{(action) => row(action().chord, action().label)}</Each>
     </Surface>
   );
 }
@@ -542,7 +559,6 @@ function ShipMenu(props: { port: Viewport; menu: ShipMenuView; area: Size }) {
   const id = () => props.port.view().id;
   const player = () => props.menu.player;
   const run = props.port.run;
-  const labels = text();
   const height = signal(0);
   const left = () => Math.max(SHIP_MENU_MARGIN, Math.min(props.menu.x, props.area.width - SHIP_MENU_WIDTH - SHIP_MENU_MARGIN));
   const top = () => Math.max(SHIP_MENU_MARGIN, Math.min(props.menu.y, props.area.height - height() - SHIP_MENU_MARGIN));
@@ -557,24 +573,24 @@ function ShipMenu(props: { port: Viewport; menu: ShipMenuView; area: Size }) {
           <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12, fontWeight: "700", color: colors.popoverForeground }}>{player()}</Text>
           <ToolButton icon="x" accessibilityLabel={t("ui.renderer.context.close")} onPress={() => run(() => ReplayRenderer.closeShipMenu(id()))}/>
         </View>
-        <Toggle label={labels.showTrail} checked={props.menu.trail} onChange={(on) => run(() => ReplayRenderer.setTrail(id(), player(), on))}/>
+        <Toggle label={text().showTrail} checked={props.menu.trail} onChange={(on) => run(() => ReplayRenderer.setTrail(id(), player(), on))}/>
         <If when={props.menu.realtimeArmor}>
           <ToolButton
             label={props.menu.realtimeArmor!}
             onPress={() => run(() => ReplayRenderer.showArmor(id(), props.menu.entityId))}
           />
         </If>
-        <ToolButton label={labels.onlyTrail} onPress={() => run(() => ReplayRenderer.onlyTrail(id(), player()))}/>
-        <View style={{ paddingTop: 4 }}><Label text={labels.ranges}/></View>
+        <ToolButton label={text().onlyTrail} onPress={() => run(() => ReplayRenderer.onlyTrail(id(), player()))}/>
+        <View style={{ paddingTop: 4 }}><Label text={text().ranges}/></View>
         <Each of={props.menu.ranges}>
           {(range) => <Toggle label={range().label} checked={range().on} onChange={(on) => run(() => ReplayRenderer.setRange(id(), player(), range().range, on))}/>}
         </Each>
         <ToolButton
-          label={props.menu.allRangesOn ? labels.disableAll : labels.enableAll}
+          label={props.menu.allRangesOn ? text().disableAll : text().enableAll}
           onPress={() => run(() => ReplayRenderer.setEveryRange(id(), player(), !props.menu.allRangesOn))}
         />
-        <ToolButton label={labels.onlyRanges} onPress={() => run(() => ReplayRenderer.onlyRanges(id(), player()))}/>
-        <ToolButton label={labels.allRanges} onPress={() => run(() => ReplayRenderer.allRanges(id()))}/>
+        <ToolButton label={text().onlyRanges} onPress={() => run(() => ReplayRenderer.onlyRanges(id(), player()))}/>
+        <ToolButton label={text().allRanges} onPress={() => run(() => ReplayRenderer.allRanges(id()))}/>
       </Surface>
     </View>
   );
@@ -582,7 +598,6 @@ function ShipMenu(props: { port: Viewport; menu: ShipMenuView; area: Size }) {
 
 function MapArea(props: { port: Viewport }) {
   const view = () => props.port.view();
-  const labels = text();
   const area = signal<Size>({ width: 0, height: 0 });
   return (
     <View
@@ -599,13 +614,13 @@ function MapArea(props: { port: Viewport }) {
       </If>
       <If when={view().status === "baking"}>
         <View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 10 }}>
-          <View style={{ width: 120 }}><Progress value={0} indeterminate accessibilityLabel={labels.baking}/></View>
-          <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{labels.baking}</Text>
+          <View style={{ width: 120 }}><Progress value={0} indeterminate accessibilityLabel={text().baking}/></View>
+          <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{text().baking}</Text>
         </View>
       </If>
       <If when={view().status === "failed"}>
         <View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 6, padding: 24 }}>
-          <Text style={{ fontSize: 14, fontWeight: "600", color: colors.foreground }}>{labels.failed}</Text>
+          <Text style={{ fontSize: 14, fontWeight: "600", color: colors.foreground }}>{text().failed}</Text>
           <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{view().failure}</Text>
         </View>
       </If>
@@ -731,7 +746,6 @@ function openViewport(source: ViewportSource) {
 // window of its own and resolves once it is there.
 export function ReplayRendererView(props: { source: ViewportSource; popOut?: (renderer: number) => Promise<void> }) {
   const opened = openViewport(props.source);
-  const labels = text();
   // Set while a move is asked for and after it succeeds: one viewport goes
   // to one window.
   let moving = false;
@@ -758,11 +772,11 @@ export function ReplayRendererView(props: { source: ViewportSource; popOut?: (re
   };
 
   return (
-    <View accessibilityLabel="Replay renderer" style={{ flex: 1, minHeight: 0 }}>
+    <View accessibilityLabel={t("ui.replay.renderer.viewport")} style={{ flex: 1, minHeight: 0 }}>
       <If when={opened.failure()}>
         <Text style={{ padding: 12, fontSize: 13, color: colors.destructive }}>{opened.failure()}</Text>
       </If>
-      <If when={opened.view()} else={<Text style={{ padding: 18, fontSize: 13, color: colors.mutedForeground }}>{labels.baking}</Text>}>
+      <If when={opened.view()} else={<Text style={{ padding: 18, fontSize: 13, color: colors.mutedForeground }}>{text().baking}</Text>}>
         <MapArea port={port}/>
         <Transport port={port}/>
       </If>
@@ -793,29 +807,34 @@ export function MinimapPreview(props: { path: string; size?: number }) {
     ReplayRenderer.closePreview(opened.id);
   });
   const size = () => props.size ?? 384;
-  // The map's square stays when there is no map to draw, with the reason in
-  // it, so the popup keeps its size.
-  const failure = () => (preview()!.expecting ? null : preview()!.failure);
+  const view = () => preview()!;
+  // The map's square is held while a preview is coming, and keeps the reason
+  // when none came. Without game data there is nothing to hold it for.
+  const failure = () => (view().expecting ? null : view().failure);
+  const held = () => view().hasGameData && (view().expecting || failure() != null);
+  const waiting = () => view().expecting && (!view().drawn || view().stalled);
   return (
-    <View accessibilityLabel="Minimap preview" style={{ width: size(), height: size(), backgroundColor: "#06272e", borderRadius: 4, overflow: "hidden" }}>
-      <If
-        when={failure()}
-        else={
-          <>
-            <Frame surface={preview()!.surface} accessibilityLabel="Minimap preview map"/>
-            <If when={preview()!.stalled}>
-              <View style={{ position: "absolute", left: 0, right: 0, bottom: 8, alignItems: "center" }}>
-                <View style={{ width: 80 }}><Progress value={0} indeterminate accessibilityLabel="Preview loading"/></View>
-              </View>
-            </If>
-          </>
-        }
-      >
-        <View accessibilityLabel={failure()!} style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 8 }}>
-          <Text style={{ width: "100%", fontSize: 12, color: colors.mutedForeground }}>{failure()}</Text>
-        </View>
-      </If>
-    </View>
+    <If when={held()}>
+      <View accessibilityLabel={t("ui.replay.renderer.preview")} style={{ width: size(), height: size(), backgroundColor: "#06272e", borderRadius: 4, overflow: "hidden" }}>
+        <If
+          when={failure()}
+          else={
+            <>
+              <Frame surface={view().surface} accessibilityLabel={t("ui.replay.renderer.preview_map")}/>
+              <If when={waiting()}>
+                <View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+                  <Spinner label={t("ui.replay.renderer.preview_loading")} size={32}/>
+                </View>
+              </If>
+            </>
+          }
+        >
+          <View accessibilityLabel={failure()!} style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 8 }}>
+            <Text style={{ width: "100%", fontSize: 12, color: colors.mutedForeground }}>{failure()}</Text>
+          </View>
+        </If>
+      </View>
+    </If>
   );
 }
 
@@ -824,7 +843,6 @@ export function MinimapPreview(props: { path: string; size?: number }) {
 export function WatchedPlaybackView(props: { replayId: string }) {
   const watched = signal<WatchedView | null>(null);
   const failure = signal<string | null>(null);
-  const labels = text();
   let alive = true;
   try {
     const opened = ReplayRenderer.openWatched(props.replayId);
@@ -843,7 +861,7 @@ export function WatchedPlaybackView(props: { replayId: string }) {
     failure.set(errorMessage(error));
   }
   return (
-    <View accessibilityLabel="Watched playback" style={{ flex: 1, minHeight: 0 }}>
+    <View accessibilityLabel={t("ui.replay.renderer.watched")} style={{ flex: 1, minHeight: 0 }}>
       <If when={failure()}>
         <Text style={{ padding: 12, fontSize: 13, color: colors.destructive }}>{failure()}</Text>
       </If>
@@ -851,7 +869,7 @@ export function WatchedPlaybackView(props: { replayId: string }) {
         <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <If when={watched()!.clock}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Label text={labels.watching}/>
+              <Label text={text().watching}/>
               <Label text={watched()!.clock!}/>
               <If when={watched()!.through != null}>
                 <View style={{ flex: 1, minWidth: 0, height: 3, borderRadius: 2, backgroundColor: colors.border }}>
@@ -865,7 +883,7 @@ export function WatchedPlaybackView(props: { replayId: string }) {
           <Frame surface={watched()!.surface} accessibilityLabel={t("ui.renderer.controls.map")}/>
           <If when={!watched()!.drawn}>
             <View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{labels.waitingForFrames}</Text>
+              <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{text().waitingForFrames}</Text>
             </View>
           </If>
         </View>
