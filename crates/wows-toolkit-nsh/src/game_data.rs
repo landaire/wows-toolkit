@@ -987,7 +987,11 @@ impl GameData {
         let mut changes = SERVICE.changed.subscribe();
         loop {
             measure_cache_if_wanted();
-            on_change.post(snapshot());
+            // Awaited rather than posted: a callback whose engine is gone
+            // fails here, which ends the feed.
+            if on_change.call_async(snapshot()).await.is_err() {
+                return Ok(());
+            }
             if changes.changed().await.is_err() {
                 return Ok(());
             }
