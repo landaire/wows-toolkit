@@ -42,16 +42,6 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     let border = cx.theme().border;
     let accent = cx.theme().primary;
 
-    let collapse = {
-        let pane = pane.clone();
-        crate::ui::panel_collapse_button(
-            "armor-options-collapse",
-            crate::ui::PanelSide::Right,
-            t!("ui.armor.collapse_options").to_string(),
-            move |_event, _window, cx| pane.update(cx, |pane, cx| pane.toggle_options(cx)),
-        )
-    };
-
     // Which pane these act on. With a comparison split open it is named in
     // the accent its border is drawn in.
     let target = match (position.count > 1, viewport.read(cx).shown_ship_name()) {
@@ -76,13 +66,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .py_1()
         .border_b_1()
         .border_color(border)
-        .child(
-            h_flex()
-                .gap_1()
-                .items_center()
-                .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
-                .child(collapse),
-        )
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
         .children(target)
         .child(
             Input::new(&filter_input)
@@ -158,22 +142,6 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .child(header)
         .child(div().id("armor-options-body").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
         .into_any_element()
-}
-
-/// The control the collapsed rail leaves on the right edge, where the
-/// header's collapse button was.
-pub fn render_expand_rail(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
-    let pane = pane.clone();
-    crate::ui::panel_expand_rail(
-        "armor-options-expand",
-        crate::ui::PanelSide::Right,
-        t!("ui.armor.expand_options").to_string(),
-        move |_event, _window, cx| pane.update(cx, |pane, cx| pane.toggle_options(cx)),
-    )
-    .h_full()
-    .border_l_1()
-    .border_color(cx.theme().border)
-    .into_any_element()
 }
 
 /// One section, labelled as its popover button was. `body` is called only while

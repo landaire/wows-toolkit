@@ -22,10 +22,8 @@ use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
-use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
-use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -109,9 +107,6 @@ pub struct StatsShipsPanel {
     ship_search: Entity<InputState>,
     _ship_search_subscription: Subscription,
     scroll: ScrollHandle,
-    /// The tab's dock, for the header control that collapses a side dock this
-    /// panel was dragged into.
-    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
 }
 
@@ -119,7 +114,7 @@ impl EventEmitter<PanelEvent> for StatsShipsPanel {}
 impl EventEmitter<ShipsPanelEvent> for StatsShipsPanel {}
 
 impl StatsShipsPanel {
-    pub fn new(dock: WeakEntity<DockArea>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let ship_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.stats.search_ships").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |this, _state, event: &InputEvent, cx| {
@@ -141,7 +136,6 @@ impl StatsShipsPanel {
             ship_search,
             _ship_search_subscription: ship_search_subscription,
             scroll: ScrollHandle::new(),
-            dock,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -313,17 +307,6 @@ impl BasePanel for StatsShipsPanel {
 impl Panel for StatsShipsPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(t!("ui.stats.ships").into_owned())
-    }
-
-    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
-        let collapse = crate::ui::dock_collapse_button(
-            "stats-ships-collapse-dock",
-            &self.dock,
-            PanelId::from(cx.entity_id()),
-            cx,
-        )?;
-
-        Some(vec![collapse])
     }
 }
 
@@ -666,17 +649,12 @@ mod tests {
     const YAMATO: u64 = 1;
     const SHIMA: u64 = 2;
 
-    /// A panel outside any dock, which offers no collapse control.
-    fn undocked(window: &mut gpui_kit::Window, cx: &mut gpui_kit::Context<StatsShipsPanel>) -> StatsShipsPanel {
-        StatsShipsPanel::new(gpui_kit::WeakEntity::new_invalid(), window, cx)
-    }
-
     /// The header is the line the egui section shows, and the ships are
     /// ordered by when they were last played.
     #[gpui_kit::test]
     fn each_ship_carries_its_record_and_the_newest_leads(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
 
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -701,7 +679,7 @@ mod tests {
     #[gpui_kit::test]
     fn two_ships_sharing_a_name_stay_apart(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
 
         let games = [
             game("Mikasa", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
@@ -723,7 +701,7 @@ mod tests {
     #[gpui_kit::test]
     fn an_unrated_session_has_no_rating_row(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -741,7 +719,7 @@ mod tests {
     #[gpui_kit::test]
     fn clicking_a_header_opens_only_that_ship(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [
             game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
             game("Shima", SHIMA, "2026-02-13 16:00:00", 70_000, 1, true),
@@ -784,7 +762,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_copy_menu_writes_the_table_it_shows(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
@@ -807,7 +785,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_rating_table_arriving_late_still_rates_the_ships(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), undocked);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
         let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
         let rated_ship = crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
         let games = [game("Yamato", rated_ship, "2026-02-13 14:00:00", 100_000, 2, true)];

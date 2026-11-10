@@ -59,13 +59,6 @@ use crate::stats::directory::DirectoryStatsRequested;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 
-/// Identifies the message a batch render keeps on screen while it runs, so each
-/// step replaces the last rather than stacking.
-const BATCH_PROGRESS: &str = "replay-batch-render";
-
-/// The same, for the pass that contributes every listed battle.
-const CONTRIBUTE_PROGRESS: &str = "replay-contribute-all";
-
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.
 const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
@@ -201,6 +194,9 @@ pub struct ReplayInspectorView {
     /// The bulk contribution now running, if one is: a second pass over the same
     /// directory would send everything twice.
     contributing: Option<Task<()>>,
+    /// Keys the next batch render on the status bar, so two batches running at
+    /// once are each shown until each ends.
+    next_batch: crate::status_bar::RunNumber,
     /// The pending auto-export for each replay. A newer event for the same
     /// replay replaces, and so cancels, the older one, so a burst of writes
     /// is read once and an earlier read never overwrites a later one.
@@ -324,11 +320,33 @@ pub struct ArmorFollowed {
 impl EventEmitter<ArmorFollowed> for ReplayInspectorView {}
 
 impl ReplayInspectorView {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, entity: &Entity<Self>, cx: &App) -> Vec<crate::status_bar::PanelToggle> {
+        let listing = entity.downgrade();
+        let open = !self.replay_settings.listing_collapsed;
+        let mut toggles = vec![crate::status_bar::PanelToggle {
+            id: "replay-listing-toggle".into(),
+            name: t!("ui.replay.listing_caption").into_owned().into(),
+            side: crate::ui::PanelSide::Left,
+            open,
+            toggle: std::rc::Rc::new(move |_window, cx| {
+                let _ = listing.update(cx, |view, cx| {
+                    let collapsed = view.replay_settings.listing_collapsed;
+                    view.set_listing_collapsed(!collapsed, cx);
+                });
+            }),
+        }];
+        toggles.extend(crate::status_bar::PanelToggle::for_docks("replay-inspector-dock-toggle", &self.dock_area, cx));
+        toggles
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let browser = cx.new(ReplayBrowser::new);
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
-        let (dock_area, _) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
+        let (dock_area, skin) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
+        // The status bar shows and hides the docks.
+        skin.set_toggle_button_visible(false, cx);
         let dock_subscription = cx.subscribe_in(&dock_area, window, |this, dock, event, _window, cx| {
             if matches!(event, DockEvent::LayoutChanged) {
                 let has_content = !dock.read(cx).is_empty(DockPlacement::Center, cx);
@@ -366,6 +384,7 @@ impl ReplayInspectorView {
             constants_asked: std::collections::BTreeSet::new(),
             constants_mismatched: std::collections::BTreeSet::new(),
             contributing: None,
+            next_batch: crate::status_bar::RunNumber(0),
             auto_exports: HashMap::new(),
             _subscriptions: vec![subscription, dock_subscription],
         }
@@ -892,8 +911,11 @@ impl ReplayInspectorView {
     fn render_many(&mut self, paths: Vec<PathBuf>, target: BatchTarget, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else { return };
         let to_clipboard = matches!(target, BatchTarget::Clipboard);
+        let job = crate::status_bar::JobKind::BatchRender(self.next_batch);
+        self.next_batch = crate::status_bar::RunNumber(self.next_batch.0 + 1);
+        let owner = cx.entity_id();
 
-        cx.spawn_in(window, async move |_this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let out_dir = match target {
                 // Cancelled at the dialog.
                 BatchTarget::Directory => {
@@ -931,15 +953,17 @@ impl ReplayInspectorView {
             });
             let Ok(batch) = batch else { return };
 
-            // One message, rewritten as the batch walks the set: forty replays is
-            // minutes of work, and a line that never moves reads as a hang.
+            // One status bar entry, rewritten as the batch walks the set: forty
+            // replays is minutes of work, and a line that never moves reads as a
+            // hang.
             let watch = {
                 let mut cx = cx.clone();
                 async move {
                     while let Some(step) = futures::StreamExt::next(&mut steps).await {
-                        let told = cx.update(|window, cx| {
-                            crate::toast::progress(
-                                BATCH_PROGRESS,
+                        let told = cx.update(|_window, cx| {
+                            crate::status_bar::working(
+                                this.clone().into(),
+                                job,
                                 t!(
                                     "ui.replay.renderer.batch_progress",
                                     done = step.done + 1,
@@ -947,7 +971,7 @@ impl ReplayInspectorView {
                                     replay = step.replay
                                 )
                                 .into_owned(),
-                                window,
+                                None,
                                 cx,
                             );
                         });
@@ -961,7 +985,7 @@ impl ReplayInspectorView {
             let ((written, failed), ()) = futures::future::join(batch, watch).await;
 
             let _ = cx.update(|window, cx| {
-                crate::toast::resolved(BATCH_PROGRESS, window, cx);
+                crate::status_bar::finished(owner, job, cx);
                 let copied = if to_clipboard && !written.is_empty() { copy_rendered_files(&written) } else { Ok(()) };
                 let said = match (&copied, failed.is_empty(), to_clipboard) {
                     // The files were written either way, so the message says where
@@ -1023,15 +1047,17 @@ impl ReplayInspectorView {
         }
         let mode = self.data_sharing;
         let total = paths.len();
+        let owner = cx.entity_id();
 
         self.contributing = Some(cx.spawn_in(window, async move |this, cx| {
             let mut sent = 0usize;
             for (index, path) in paths.into_iter().enumerate() {
-                let told = cx.update(|window, cx| {
-                    crate::toast::progress(
-                        CONTRIBUTE_PROGRESS,
+                let told = cx.update(|_window, cx| {
+                    crate::status_bar::working(
+                        this.clone().into(),
+                        crate::status_bar::JobKind::Contribute,
                         t!("ui.replay.contributing", done = index + 1, total = total).into_owned(),
-                        window,
+                        None,
                         cx,
                     );
                 });
@@ -1084,7 +1110,7 @@ impl ReplayInspectorView {
             }
 
             let _ = cx.update(|window, cx| {
-                crate::toast::resolved(CONTRIBUTE_PROGRESS, window, cx);
+                crate::status_bar::finished(owner, crate::status_bar::JobKind::Contribute, cx);
                 crate::toast::ok(t!("ui.replay.contributed", sent = sent, total = total).into_owned(), window, cx);
             });
             let _ = this.update(cx, |this, _cx| this.contributing = None);
@@ -1800,16 +1826,10 @@ impl ReplayInspectorView {
     }
 }
 
-/// The listing's own header: the control that puts it away, its caption, the
-/// listing's options and open actions, which belong to the listing rather than
-/// to whichever replay is showing, and the session control.
-fn listing_header(
-    entity: Entity<ReplayInspectorView>,
-    view: &ReplayInspectorView,
-    session: AnyElement,
-    cx: &App,
-) -> impl IntoElement {
-    let collapse_entity = entity.clone();
+/// The listing's own header: its caption, and the listing's options and open
+/// actions, which belong to the listing rather than to whichever replay is
+/// showing. The status bar shows and hides the listing.
+fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorView, cx: &App) -> impl IntoElement {
     h_flex()
         .flex_none()
         .gap_1()
@@ -1818,14 +1838,6 @@ fn listing_header(
         .py_1()
         .border_b_1()
         .border_color(cx.theme().border)
-        .child(crate::ui::panel_collapse_button(
-            "replay-listing-collapse",
-            crate::ui::PanelSide::Left,
-            t!("ui.replay.collapse_listing").to_string(),
-            move |_event, _window, cx| {
-                collapse_entity.update(cx, |view, cx| view.set_listing_collapsed(true, cx));
-            },
-        ))
         .child(
             div()
                 .flex_1()
@@ -1835,27 +1847,8 @@ fn listing_header(
                 .font_weight(FontWeight::BOLD)
                 .child(t!("ui.replay.listing_caption").to_string()),
         )
-        .child(session)
         .child(listing_options_popover(entity.clone(), view.replay_settings.clone(), view.auto_load_latest_replay))
         .child(listing_open_menu(entity))
-}
-
-/// The control that brings the listing back, in the place the listing's own
-/// header keeps it while it is up, with the session control under it so a
-/// running session stays in sight.
-fn listing_rail(entity: Entity<ReplayInspectorView>, session: AnyElement) -> impl IntoElement {
-    crate::ui::panel_expand_rail(
-        "replay-listing-rail",
-        crate::ui::PanelSide::Left,
-        t!("ui.replay.expand_listing").to_string(),
-        move |_event, _window, cx| {
-            entity.update(cx, |view, cx| view.set_listing_collapsed(false, cx));
-        },
-    )
-    .flex()
-    .flex_col()
-    .gap_1()
-    .child(session)
 }
 
 /// The listing's open actions: one replay file, or a directory of replays
@@ -2047,7 +2040,6 @@ impl Render for ReplayInspectorView {
         }
         self.share_session_with_renderers(cx);
         cx.defer_in(window, Self::open_what_the_host_asked_for);
-        let session = crate::collab_popover::render(self, &entity);
         let chosen_directory = self.browser.read(cx).chosen_directory().map(std::path::Path::to_path_buf);
         let game_data_ready = matches!(self.game_data_status, GameDataStatus::Ready(_));
         // Only a directory workspace has anything to say above the listing:
@@ -2110,43 +2102,30 @@ impl Render for ReplayInspectorView {
                 // A plain flex row rather than `h_flex`, which centres its
                 // children: this is the body, and the listing beside the
                 // replays is a full-height column rather than a toolbar item.
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_1()
-                    .min_h(px(0.))
-                    // While the listing is away, the rail stands in for its
-                    // header: the control that brings it back, and the session.
-                    .child(if self.replay_settings.listing_collapsed {
-                        h_flex()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .items_start()
-                            .child(listing_rail(entity.clone(), session))
-                            .child(div().flex_1().min_w(px(0.)).h_full().child(dock_content))
-                            .into_any_element()
-                    } else {
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .child(
-                                h_resizable("replay-inspector-split")
-                                    .child(
-                                        resizable_panel()
-                                            .size(BROWSER_WIDTH)
-                                            .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
-                                            .flex_none()
-                                            .child(
-                                                v_flex()
-                                                    .size_full()
-                                                    .child(listing_header(entity.clone(), self, session, cx))
-                                                    .child(div().flex_1().min_h(px(0.)).child(self.browser.clone())),
-                                            ),
-                                    )
-                                    .child(resizable_panel().child(dock_content)),
-                            )
-                            .into_any_element()
-                    }),
+                div().flex().flex_row().flex_1().min_h(px(0.)).child(if self.replay_settings.listing_collapsed {
+                    div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
+                } else {
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(
+                            h_resizable("replay-inspector-split")
+                                .child(
+                                    resizable_panel()
+                                        .size(BROWSER_WIDTH)
+                                        .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
+                                        .flex_none()
+                                        .child(
+                                            v_flex()
+                                                .size_full()
+                                                .child(listing_header(entity.clone(), self, cx))
+                                                .child(div().flex_1().min_h(px(0.)).child(self.browser.clone())),
+                                        ),
+                                )
+                                .child(resizable_panel().child(dock_content)),
+                        )
+                        .into_any_element()
+                }),
             )
     }
 }
@@ -2241,25 +2220,16 @@ mod tests {
         (window, view)
     }
 
-    /// The session popover is built from inside this tab's own render, where
-    /// the tab's entity is leased. Reading that entity there panics with
-    /// "cannot read ... while it is already being updated", which takes the
-    /// whole tab down rather than just the popover -- so the listing header is
-    /// drawn here and every control on it checked, and again with the listing
-    /// put away, where the rail has to keep a running session in sight.
+    /// The listing's own controls draw in its header; rendering belongs to a
+    /// replay, so an opened one carries it in its own Actions menu rather
+    /// than the header carrying it for whichever replay happens to be showing.
     #[gpui_kit::test]
-    fn the_session_control_stays_beside_the_listing_open_or_put_away(cx: &mut TestAppContext) {
+    fn the_listing_header_carries_the_listing_controls(cx: &mut TestAppContext) {
         let (window, view) = open_view(cx);
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-
-            assert!(window.try_find("collab-session-toggle").is_some(), "the session control is in the listing header");
-            // Rendering belongs to a replay, so an opened one carries it in
-            // its own Actions menu rather than the header carrying it for
-            // whichever replay happens to be showing.
             assert!(window.try_find("replay-header-render").is_none(), "rendering is not a header control");
-            // The listing's own controls draw in its header beside it.
             assert!(window.try_find("replay-listing-options").is_some());
             assert!(window.try_find("replay-listing-open").is_some());
         })
@@ -2268,48 +2238,16 @@ mod tests {
         view.update(cx, |view, cx| view.set_listing_collapsed(true, cx));
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-
-            assert!(window.try_find("replay-listing-options").is_none(), "the listing header is away");
-            assert!(window.try_find("collab-session-toggle").is_some(), "the rail carries the session control");
+            assert!(window.try_find("replay-listing-options").is_none(), "the listing header is away with it");
         })
         .expect("the window is open");
     }
 
-    /// Opening the popover with no session offers a name and the two ways to
-    /// start one, and starts neither until a name is given: every peer reads
-    /// that name, so an unnamed session makes a roster nobody can follow.
+    /// The listing rendered at its content height, centred in an otherwise
+    /// empty tab, for as long as its row was an `h_flex` (which installs
+    /// `items_center`).
     #[gpui_kit::test]
-    fn the_session_popover_starts_nothing_without_a_display_name(cx: &mut TestAppContext) {
-        let (window, view) = open_view(cx);
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            window.click("collab-session-toggle", cx);
-            window.render_frame(cx);
-
-            assert!(window.try_find("collab-display-name").is_some(), "a name is asked for first");
-            assert!(window.try_find("collab-host").is_some());
-            assert!(window.try_find("collab-token").is_some());
-
-            window.click("collab-host", cx);
-            window.render_frame(cx);
-        })
-        .expect("the window is open");
-
-        view.update(cx, |view, _cx| {
-            assert!(!view.collab.is_active(), "nothing started without a name to start it under");
-        });
-    }
-
-    /// The height is the assertion that matters: the listing rendered at its
-    /// content height, centred in an otherwise empty tab, for as long as its
-    /// row was an `h_flex` (which installs `items_center`).
-    ///
-    /// The control that puts the listing away is in its own header, so it goes
-    /// with it; the rail that brings it back is up only while it is away, and
-    /// so holds no width open the rest of the time.
-    #[gpui_kit::test]
-    fn the_listing_is_put_away_from_its_header_and_brought_back_by_the_rail(cx: &mut TestAppContext) {
+    fn the_listing_runs_down_the_tab(cx: &mut TestAppContext) {
         let (window, _view) = open_view(cx);
 
         let listing = cx
@@ -2324,34 +2262,6 @@ mod tests {
             "the listing runs down the tab rather than sitting at its content height, got {:?}",
             listing.size.height
         );
-
-        // The header's control reaches the view as a `ReplayBrowserEvent`, so
-        // the effect has to be flushed before the state it sets is readable.
-        let up = cx
-            .update_window(window.into(), |_, window, cx| {
-                window.render_frame(cx);
-                assert!(window.try_find("replay-listing-rail").is_none(), "no rail while the listing is up");
-                let at = window.find("replay-listing-collapse").bounds();
-                window.click("replay-listing-collapse", cx);
-                at
-            })
-            .expect("the window is open");
-        cx.run_until_parked();
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            assert!(window.try_find("replay-browser-rows").is_none(), "its header took the listing off screen");
-
-            // The control must not move out from under the pointer that just
-            // clicked it: same button, same corner, whichever state it is in.
-            let away = window.find("replay-listing-rail").bounds();
-            assert_eq!(away.origin, up.origin, "the control moved when the listing went away");
-
-            window.click("replay-listing-rail", cx);
-            window.render_frame(cx);
-            assert!(window.try_find("replay-browser-rows").is_some(), "and the rail brought it back");
-        })
-        .expect("the window is open");
     }
 
     /// The boundary between the listing and the replays beside it drags.

@@ -6,14 +6,9 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
-use gpui_kit::component::dock::DockArea;
-use gpui_kit::component::dock::DockPlacement;
-use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::v_flex;
 use gpui_kit::*;
-use rust_i18n::t;
 
 pub fn toolbar(cx: &App) -> Div {
     h_flex()
@@ -137,19 +132,8 @@ pub enum PanelSide {
 }
 
 impl PanelSide {
-    /// The `DockArea` docks a panel may be collapsed from.
-    const DOCKS: [Self; 3] = [Self::Left, Self::Right, Self::Bottom];
-
-    fn dock_placement(self) -> DockPlacement {
-        match self {
-            Self::Left => DockPlacement::Left,
-            Self::Right => DockPlacement::Right,
-            Self::Bottom => DockPlacement::Bottom,
-        }
-    }
-
-    /// Element id fragment, so the rails of one area do not collide.
-    fn id_fragment(self) -> &'static str {
+    /// Element id fragment, so the toggles for one area's docks do not collide.
+    pub(crate) fn id_fragment(self) -> &'static str {
         match self {
             Self::Left => "left",
             Self::Right => "right",
@@ -197,79 +181,4 @@ pub fn panel_expand_rail(
         .px_2()
         .py_1()
         .child(Button::new(id).icon(icon).ghost().small().tooltip(tooltip).on_click(on_click))
-}
-
-/// `panel_collapse_button` for a panel held in a `DockArea`, for the panel's
-/// `toolbar_buttons`. `None` while `panel` is in the center, which has no
-/// dock to collapse.
-///
-/// The area's own tab-bar toggle is hidden where this is used
-/// (`DockSkin::set_toggle_button_visible(false)`), so every panel an area can
-/// hold offers this and the area is wrapped in `dock_with_expand_rails`.
-pub fn dock_collapse_button(
-    id: impl Into<ElementId>,
-    dock: &WeakEntity<DockArea>,
-    panel: PanelId,
-    cx: &App,
-) -> Option<Button> {
-    let area = dock.upgrade()?;
-    let area_state = area.read(cx);
-    let side = PanelSide::DOCKS.into_iter().find(|side| {
-        let placement = side.dock_placement();
-        area_state.is_dock_open(placement)
-            && area_state.layout(placement).is_some_and(|layout| layout.contains_panel(panel))
-    })?;
-
-    let placement = side.dock_placement();
-    let dock = dock.clone();
-    let tooltip = t!("ui.buttons.collapse_panel").into_owned();
-    Some(panel_collapse_button(id, side, tooltip, move |_event, window, cx| {
-        let _ = dock.update(cx, |area, cx| {
-            if area.is_dock_open(placement) {
-                area.toggle_dock(placement, window, cx);
-            }
-        });
-    }))
-}
-
-/// `content`, which renders `dock`, with an expand rail on the edge of each
-/// of `dock`'s collapsed docks. Element ids are `{id}-left`, `{id}-right` and
-/// `{id}-bottom`.
-pub fn dock_with_expand_rails(id: &str, dock: &Entity<DockArea>, content: impl IntoElement, cx: &App) -> Div {
-    let [left, right, bottom] = PanelSide::DOCKS.map(|side| dock_expand_rail(id, dock, side, cx));
-
-    v_flex()
-        .flex_1()
-        .min_h(px(0.))
-        .min_w(px(0.))
-        .child(
-            h_flex()
-                .flex_1()
-                .min_h(px(0.))
-                .items_start()
-                .children(left)
-                .child(div().h_full().flex_1().min_w(px(0.)).child(content))
-                .children(right),
-        )
-        .children(bottom)
-}
-
-/// `None` while the dock is open or holds nothing to show.
-fn dock_expand_rail(id: &str, dock: &Entity<DockArea>, side: PanelSide, cx: &App) -> Option<Div> {
-    let placement = side.dock_placement();
-    let area_state = dock.read(cx);
-    if area_state.is_dock_open(placement) || area_state.is_empty(placement, cx) {
-        return None;
-    }
-
-    let dock = dock.downgrade();
-    let id = SharedString::from(format!("{id}-{}", side.id_fragment()));
-    let tooltip = t!("ui.buttons.expand_panel").into_owned();
-    Some(panel_expand_rail(id, side, tooltip, move |_event, window, cx| {
-        let _ = dock.update(cx, |area, cx| {
-            if !area.is_dock_open(placement) {
-                area.toggle_dock(placement, window, cx);
-            }
-        });
-    }))
 }

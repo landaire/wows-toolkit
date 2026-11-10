@@ -21,10 +21,8 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
-use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
-use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -211,15 +209,12 @@ pub struct BrowserPanel {
     /// Owned here rather than keyed to the element, so the sidebar width a
     /// reader dragged to survives collapsing it.
     split_state: Entity<ResizableState>,
-    /// The tab's dock, for the header control that collapses a side dock this
-    /// pane was dragged into.
-    dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl BrowserPanel {
-    pub fn new(source: BrowserSource, dock: WeakEntity<DockArea>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(source: BrowserSource, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         let filter_state =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.filter_files").to_string()));
@@ -248,7 +243,6 @@ impl BrowserPanel {
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             sidebar_collapsed: false,
             split_state: cx.new(|_| ResizableState::default()),
-            dock,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -450,13 +444,6 @@ impl BasePanel for BrowserPanel {
 impl Panel for BrowserPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         SharedString::from(self.source.title())
-    }
-
-    fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
-        let id = SharedString::from(format!("unpacker-{}-collapse-dock", self.source.id_fragment()));
-        let collapse = crate::ui::dock_collapse_button(id, &self.dock, PanelId::from(cx.entity_id()), cx)?;
-
-        Some(vec![collapse])
     }
 }
 
@@ -878,9 +865,8 @@ mod tests {
         use wowsunpack::vfs::VfsPath;
 
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(800.), px(600.)), |window, cx| {
-            BrowserPanel::new(BrowserSource::Pkg, gpui_kit::WeakEntity::new_invalid(), window, cx)
-        });
+        let window =
+            cx.open_window(size(px(800.), px(600.)), |window, cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
 
         let root: VfsPath = MemoryFS::new().into();
         let deep = root.join("res/content/gameplay/a.xml").expect("a valid path");
@@ -928,7 +914,7 @@ mod tests {
     fn open_pane(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<BrowserPanel> {
         cx.update(gpui_kit::init);
         cx.open_window(size(px(900.), px(600.)), |window, cx| {
-            let mut pane = BrowserPanel::new(BrowserSource::Pkg, gpui_kit::WeakEntity::new_invalid(), window, cx);
+            let mut pane = BrowserPanel::new(BrowserSource::Pkg, window, cx);
             pane.set_vfs(fixture(), window, cx);
             pane
         })

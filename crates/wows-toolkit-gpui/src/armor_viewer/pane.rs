@@ -88,7 +88,6 @@ use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
-use super::sidebar::CollapseSidebar;
 use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
@@ -256,6 +255,35 @@ impl OptionSectionsOpen {
 }
 
 impl ArmorViewerPane {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, entity: &Entity<Self>) -> Vec<crate::status_bar::PanelToggle> {
+        let ships = entity.downgrade();
+        let options = entity.downgrade();
+        vec![
+            crate::status_bar::PanelToggle {
+                id: "armor-ships-toggle".into(),
+                name: t!("ui.armor.ships").into_owned().into(),
+                side: crate::ui::PanelSide::Left,
+                open: !self.sidebar_collapsed,
+                toggle: std::rc::Rc::new(move |_window, cx| {
+                    let _ = ships.update(cx, |pane, cx| {
+                        let collapsed = pane.sidebar_collapsed;
+                        pane.set_sidebar_collapsed(!collapsed, cx);
+                    });
+                }),
+            },
+            crate::status_bar::PanelToggle {
+                id: "armor-options-toggle".into(),
+                name: t!("ui.armor.options").into_owned().into(),
+                side: crate::ui::PanelSide::Right,
+                open: self.show_options,
+                toggle: std::rc::Rc::new(move |_window, cx| {
+                    let _ = options.update(cx, |pane, cx| pane.toggle_options(cx));
+                }),
+            },
+        ]
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         // Every viewport knows its pane, so its context menu can offer the
@@ -273,8 +301,6 @@ impl ArmorViewerPane {
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
         let common_settings_sub = cx.subscribe_in(&sidebar, window, Self::on_common_settings);
-        let collapse_sidebar_sub =
-            cx.subscribe(&sidebar, |this, _sidebar, _event: &CollapseSidebar, cx| this.set_sidebar_collapsed(true, cx));
         // `dock`'s own `cx.notify()` (add/close/activate pane) only
         // invalidates `ViewportDock`'s render; without this, the common-
         // settings toggle row below -- gated on `dock.panes().len() > 1` --
@@ -324,7 +350,6 @@ impl ArmorViewerPane {
                 options_filter_sub,
                 ship_selected_sub,
                 compare_split_sub,
-                collapse_sidebar_sub,
                 export_requested_sub,
                 common_settings_sub,
                 viewport_event_sub,
@@ -1315,16 +1340,13 @@ impl Render for ArmorViewerPane {
         // the first a middle one, whose close truncates the wrong entry and
         // rescales every other panel. One optional panel in the group, at the
         // end, is what keeps that state honest.
-        let options = if self.show_options {
-            div()
-                .flex_none()
-                .w(options_panel::PANEL_WIDTH)
-                .h_full()
-                .child(options_panel::render_panel(self, &cx.entity(), cx))
-                .into_any_element()
-        } else {
-            options_panel::render_expand_rail(&cx.entity(), cx)
-        };
+        let options = self.show_options.then(|| {
+            div().flex_none().w(options_panel::PANEL_WIDTH).h_full().child(options_panel::render_panel(
+                self,
+                &cx.entity(),
+                cx,
+            ))
+        });
 
         // A collapsed ships list takes its group with it: `ResizableState` is
         // positional, so the split without it is a separate group.
@@ -1345,26 +1367,8 @@ impl Render for ArmorViewerPane {
             // and a plain `ParentElement` child is not one of them.
             .when_some(analysis, |group, panel| group.child(panel));
 
-        let ships_rail = self.sidebar_collapsed.then(|| {
-            let pane = cx.entity();
-            crate::ui::panel_expand_rail(
-                "armor-ships-expand",
-                crate::ui::PanelSide::Left,
-                t!("ui.armor.expand_ships").to_string(),
-                move |_event, _window, cx| pane.update(cx, |pane, cx| pane.set_sidebar_collapsed(false, cx)),
-            )
-            .h_full()
-            .border_r_1()
-            .border_color(cx.theme().border)
-        });
-
         let content = v_flex().size_full().child(
-            h_flex()
-                .flex_1()
-                .min_h(px(0.))
-                .children(ships_rail)
-                .child(div().flex_1().min_w(px(0.)).h_full().child(split))
-                .child(options),
+            h_flex().flex_1().min_h(px(0.)).child(div().flex_1().min_w(px(0.)).h_full().child(split)).children(options),
         );
 
         // Legend floats over the whole pane (not just the viewport), gated

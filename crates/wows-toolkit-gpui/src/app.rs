@@ -74,15 +74,6 @@ fn check_for_update_from_menu(window: &mut Window, cx: &mut gpui_kit::App) {
     app.update(cx, |app, cx| app.check_for_update(Asked::ByHand, window, cx));
 }
 
-/// One running job on the status strip: what it is, and how far it has got.
-fn status_job(named: String, progress: Option<(u64, u64)>) -> AnyElement {
-    let counted = progress
-        .filter(|(_, total)| *total > 0)
-        .map(|(done, total)| t!("ui.app.status_of", done = done, total = total).into_owned());
-
-    h_flex().gap_1().items_center().child(Spinner::new().xsmall()).child(named).children(counted).into_any_element()
-}
-
 /// What the download offer says: a line per build, and what the whole selection
 /// would come to.
 ///
@@ -219,10 +210,6 @@ enum UpdateStatus {
     Checking(Asked),
     Installing,
 }
-
-/// Identifies the message the update download keeps on screen, so each step
-/// replaces the last rather than stacking.
-const UPDATE_PROGRESS: &str = "update-download";
 
 /// How far the download has got, in the reader's own terms.
 fn describe_download(step: crate::update::Downloaded) -> String {
@@ -877,7 +864,13 @@ impl App {
             return;
         }
         if asked == Asked::ByHand {
-            crate::toast::progress("update-check", t!("ui.messages.checking_app_updates").into_owned(), window, cx);
+            crate::status_bar::working(
+                cx.weak_entity().into(),
+                crate::status_bar::JobKind::UpdateCheck,
+                t!("ui.messages.checking_app_updates").into_owned(),
+                None,
+                cx,
+            );
         }
         if let UpdateStatus::Checking(ref mut pending) = self.update_status {
             if asked == Asked::ByHand {
@@ -892,7 +885,7 @@ impl App {
             let _ = this.update_in(cx, |this, window, cx| {
                 let UpdateStatus::Checking(asked) = this.update_status else { return };
                 this.update_status = UpdateStatus::Idle;
-                crate::toast::resolved("update-check", window, cx);
+                crate::status_bar::finished(cx.entity_id(), crate::status_bar::JobKind::UpdateCheck, cx);
                 match found {
                     Ok(Some(release)) => offer_update(release, cx.entity().downgrade(), window, cx),
                     Ok(None) if asked == Asked::ByHand => {
@@ -921,18 +914,28 @@ impl App {
             return;
         }
         self.update_status = UpdateStatus::Installing;
-        crate::toast::progress(UPDATE_PROGRESS, t!("ui.messages.update_starting").into_owned(), window, cx);
+        crate::status_bar::working(
+            cx.weak_entity().into(),
+            crate::status_bar::JobKind::UpdateDownload,
+            t!("ui.messages.update_starting").into_owned(),
+            None,
+            cx,
+        );
         let (reports, mut progress) = futures::channel::mpsc::unbounded();
         let installing = crate::update::install(asset_url, self.proxy_url(), reports, cx);
         cx.spawn_in(window, async move |this, cx| {
             let listen = async {
                 while let Some(step) = futures::StreamExt::next(&mut progress).await {
-                    if cx
-                        .update(|window, cx| {
-                            crate::toast::progress(UPDATE_PROGRESS, describe_download(step), window, cx)
-                        })
-                        .is_err()
-                    {
+                    let told = cx.update(|_window, cx| {
+                        crate::status_bar::working(
+                            this.clone().into(),
+                            crate::status_bar::JobKind::UpdateDownload,
+                            describe_download(step),
+                            None,
+                            cx,
+                        )
+                    });
+                    if told.is_err() {
                         break;
                     }
                 }
@@ -940,7 +943,7 @@ impl App {
             let (installed, ()) = futures::future::join(installing, listen).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.update_status = UpdateStatus::Idle;
-                crate::toast::resolved(UPDATE_PROGRESS, window, cx);
+                crate::status_bar::finished(cx.entity_id(), crate::status_bar::JobKind::UpdateDownload, cx);
                 if let Err(error) = installed {
                     let reason = format!("{}", error.format_with(&DefaultReportFormatter::ASCII));
                     tracing::warn!("Update installation failed: {reason}");
@@ -951,16 +954,26 @@ impl App {
         .detach();
     }
 
-    /// What is running, along the bottom of the window.
-    ///
-    /// The egui app has a status panel that names every background task and its
-    /// progress (`app.rs`'s `build_bottom_panel`); this names the two the app owns
-    /// -- a game-data cache job and an index build -- so neither runs invisibly.
-    /// A tab's own work (a directory scan, a replay parse) is still reported by
-    /// that tab and not here.
-    fn status_strip(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let mut jobs: Vec<AnyElement> = Vec::new();
+    /// The inspector the replay directory tab `id` shows. An id that names no
+    /// open tab shows the main inspector, so the body and the status bar agree.
+    fn shown_inspector(&self, id: EntityId) -> Entity<ReplayInspectorView> {
+        self.replay_directories
+            .iter()
+            .find(|tab| tab.inspector.entity_id() == id)
+            .map(|tab| tab.inspector.clone())
+            .unwrap_or_else(|| self.replay_inspector.clone())
+    }
 
+    /// The stats view the directory stats tab `id` shows, falling back the same
+    /// way as [`Self::shown_inspector`].
+    fn shown_stats(&self, id: EntityId) -> Entity<StatsView> {
+        self.directory_stats_view(id).unwrap_or_else(|| self.stats.clone())
+    }
+
+    /// The status bar along the bottom of the window: the active tab's side
+    /// panel toggles, its session control when it has one, and what is running.
+    fn status_strip(&self, cx: &Context<Self>) -> AnyElement {
+        let mut jobs: Vec<crate::status_bar::Job> = Vec::new();
         if let Some(job) = self.cache.running {
             let named = match job {
                 game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
@@ -968,32 +981,39 @@ impl App {
                 game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
                 game_data_cache::CacheJob::Planning => t!("ui.app.status_cache_planning"),
             };
-            jobs.push(status_job(named.into_owned(), self.cache.progress.map(|at| (at.done, at.total))));
+            jobs.push(crate::status_bar::Job {
+                name: named.into_owned().into(),
+                progress: self.cache.progress.and_then(|at| crate::status_bar::Progress::new(at.done, at.total)),
+            });
         }
         if let Some(step) = self.index_progress {
-            jobs.push(status_job(t!("ui.app.status_indexing").into_owned(), Some((step.done, step.total))));
+            jobs.push(crate::status_bar::Job {
+                name: t!("ui.app.status_indexing").into_owned().into(),
+                progress: crate::status_bar::Progress::new(step.done, step.total),
+            });
         }
+        jobs.extend(crate::status_bar::running(cx));
 
-        if jobs.is_empty() {
-            return None;
-        }
+        let inspector = match self.active_tab {
+            AppTab::ReplayInspector => Some(self.replay_inspector.clone()),
+            AppTab::ReplayDirectory(id) => Some(self.shown_inspector(id)),
+            _ => None,
+        };
+        let toggles = match self.active_tab {
+            AppTab::ReplayInspector | AppTab::ReplayDirectory(_) => {
+                inspector.as_ref().map(|view| view.read(cx).panel_toggles(view, cx)).unwrap_or_default()
+            }
+            AppTab::ArmorViewer => self.armor_pane.read(cx).panel_toggles(&self.armor_pane),
+            AppTab::Stats => self.stats.read(cx).panel_toggles(cx),
+            AppTab::DirectoryStats(id) => self.shown_stats(id).read(cx).panel_toggles(cx),
+            AppTab::Unpacker => self.unpacker.read(cx).panel_toggles(cx),
+            AppTab::PlayerTracker => self.player_tracker.read(cx).panel_toggles(cx),
+            AppTab::Search | AppTab::Settings | AppTab::Launcher => Vec::new(),
+        };
+        // A session belongs to the replay workspace it was started from.
+        let session = inspector.map(|view| crate::collab_popover::render(&view, cx));
 
-        Some(
-            h_flex()
-                .id("app-status-strip")
-                .test_support()
-                .flex_none()
-                .gap_3()
-                .items_center()
-                .px_2()
-                .py_1()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .text_xs()
-                .text_color(crate::theme::text_dim())
-                .children(jobs)
-                .into_any_element(),
-        )
+        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, cx)
     }
 
     /// Notes the files now being dragged over the window.
@@ -4028,18 +4048,10 @@ impl Render for App {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::Launcher => self.launcher.clone().into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
-            AppTab::ReplayDirectory(id) => self
-                .replay_directories
-                .iter()
-                .find(|tab| tab.inspector.entity_id() == id)
-                .map(|tab| tab.inspector.clone().into_any_element())
-                .unwrap_or_else(|| self.replay_inspector.clone().into_any_element()),
+            AppTab::ReplayDirectory(id) => self.shown_inspector(id).into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
-            AppTab::DirectoryStats(id) => self
-                .directory_stats_view(id)
-                .map(|view| view.into_any_element())
-                .unwrap_or_else(|| self.stats.clone().into_any_element()),
+            AppTab::DirectoryStats(id) => self.shown_stats(id).into_any_element(),
             AppTab::PlayerTracker => self.player_tracker.clone().into_any_element(),
             AppTab::Search => self.search.clone().into_any_element(),
             AppTab::Unpacker => self.unpacker.clone().into_any_element(),
@@ -4129,7 +4141,7 @@ impl Render for App {
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
             .child(div().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)))
-            .children(self.status_strip(cx))
+            .child(self.status_strip(cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Over the rest of the view: a drag is about to become a drop, and
             // what it would do is the only thing worth reading while it hovers.

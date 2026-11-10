@@ -390,6 +390,11 @@ pub struct PlayerTrackerView {
 }
 
 impl PlayerTrackerView {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, cx: &App) -> Vec<crate::status_bar::PanelToggle> {
+        crate::status_bar::PanelToggle::for_docks("tracker-dock-toggle", &self.dock_area, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.player_tracker.filter_hint").to_string()));
@@ -413,7 +418,9 @@ impl PlayerTrackerView {
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel, which is what the three sections read as until one
         // is dragged out.
-        let (dock_area, _) = DockSkin::dock_area("tracker-dock", None, window, cx);
+        let (dock_area, skin) = DockSkin::dock_area("tracker-dock", None, window, cx);
+        // The status bar shows and hides the docks.
+        skin.set_toggle_button_visible(false, cx);
         let this = cx.weak_entity();
         let panels: Vec<Entity<panels::TrackerPanel>> = SubTab::ALL
             .map(|section| {

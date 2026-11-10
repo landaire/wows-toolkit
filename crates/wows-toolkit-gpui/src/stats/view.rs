@@ -131,6 +131,11 @@ const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout";
 
 impl StatsView {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, cx: &App) -> Vec<crate::status_bar::PanelToggle> {
+        crate::status_bar::PanelToggle::for_docks("stats-dock-toggle", &self.dock_area, cx)
+    }
+
     /// Rebuilds the tab and its dock panels after the shared locale changes.
     pub fn set_locale(&mut self, cx: &mut Context<Self>) {
         self.overview.update(cx, |_, cx| cx.notify());
@@ -342,27 +347,19 @@ impl StatsView {
             return false;
         }
 
-        let dock = self.dock_area.downgrade();
-        let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> = chart_ids
-            .iter()
-            .copied()
-            .map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, dock.clone(), window, cx))))
-            .collect();
+        let chart_entities: HashMap<ChartId, Entity<StatsChartPanel>> =
+            chart_ids.iter().copied().map(|id| (id, cx.new(|cx| StatsChartPanel::new(id, window, cx)))).collect();
         let chart_registry: Arc<Mutex<HashMap<ChartId, WeakEntity<StatsChartPanel>>>> =
             Arc::new(Mutex::new(chart_entities.iter().map(|(id, chart)| (*id, chart.downgrade())).collect()));
 
         let overview = self.overview.downgrade();
-        let overview_dock = dock.clone();
         gpui_kit::component::dock::register_panel(cx, "StatsOverviewPanel", move |_state, _window, cx| {
-            let panel =
-                overview.upgrade().unwrap_or_else(|| cx.new(|cx| StatsOverviewPanel::new(overview_dock.clone(), cx)));
+            let panel = overview.upgrade().unwrap_or_else(|| cx.new(StatsOverviewPanel::new));
             panel_handle(panel)
         });
         let ships = self.ships.downgrade();
-        let ships_dock = dock.clone();
         gpui_kit::component::dock::register_panel(cx, "StatsShipsPanel", move |_state, window, cx| {
-            let panel =
-                ships.upgrade().unwrap_or_else(|| cx.new(|cx| StatsShipsPanel::new(ships_dock.clone(), window, cx)));
+            let panel = ships.upgrade().unwrap_or_else(|| cx.new(|cx| StatsShipsPanel::new(window, cx)));
             panel_handle(panel)
         });
         let chart_registry_for_build = chart_registry.clone();
@@ -373,7 +370,7 @@ impl StatsView {
                 .expect("Stats chart restore registry lock is not poisoned")
                 .get(&id)
                 .and_then(WeakEntity::upgrade)
-                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, dock.clone(), window, cx)));
+                .unwrap_or_else(|| cx.new(|cx| StatsChartPanel::new(id, window, cx)));
             panel_handle(panel)
         });
 
@@ -558,18 +555,17 @@ impl StatsView {
             StatsScope::Directory(_) => "directory-stats-dock",
         };
         let (dock_area, skin) = DockSkin::dock_area(dock_id, None, window, cx);
-        // Each panel's own header carries the collapse control
-        // (`ui::dock_collapse_button`), and render adds the expand rails.
+        // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
-        let overview = cx.new(|cx| StatsOverviewPanel::new(dock_area.downgrade(), cx));
+        let overview = cx.new(StatsOverviewPanel::new);
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(overview.clone()), DockPlacement::Center, None, window, cx);
         });
-        let ships = cx.new(|cx| StatsShipsPanel::new(dock_area.downgrade(), window, cx));
+        let ships = cx.new(|cx| StatsShipsPanel::new(window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
-        let first_chart = cx.new(|cx| StatsChartPanel::new(0, dock_area.downgrade(), window, cx));
+        let first_chart = cx.new(|cx| StatsChartPanel::new(0, window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
             // Overview and Ships share the main tab group; Charts opens beside them.
@@ -880,8 +876,7 @@ impl StatsView {
         let id = settings.id.unwrap_or(self.next_chart_id);
         self.next_chart_id = self.next_chart_id.max(id.saturating_add(1));
 
-        let dock = self.dock_area.downgrade();
-        let chart = cx.new(|cx| StatsChartPanel::new(id, dock, window, cx));
+        let chart = cx.new(|cx| StatsChartPanel::new(id, window, cx));
         self._chart_subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
         let games = self.games().to_vec();
@@ -1333,8 +1328,7 @@ impl Render for StatsView {
                         .group_hover("stats-chart-splitter", |this| this.bg(accent)),
                 )
         });
-        let dock_layout = dock_layout.size_full().children(chart_splitter);
-        let body = crate::ui::dock_with_expand_rails("stats-dock-rail", &self.dock_area, dock_layout, cx);
+        let body = dock_layout.size_full().children(chart_splitter);
 
         let header = self.directory_scope().map(|scope| super::directory::directory_header(scope, cx.entity(), cx));
         v_flex()

@@ -4,6 +4,7 @@
 //! `show_session_popover`). What it drives is `wt-collab-client`, shared with
 //! that app, so a session hosted from either looks the same to a peer.
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -74,17 +75,16 @@ fn localhost_copy<V: SessionHost + Render>(_view: &V) -> Option<AnyElement> {
 ///
 /// The button carries the session's own state: an active session is what the
 /// reader most needs to know is running, so it is on the control rather than
-/// behind a hover.
-/// `view` is the tab itself rather than its entity: this is called from
-/// inside that tab's own render, where the entity is leased and reading it
-/// would panic. The entity is only captured for the popover body, which runs
-/// later, when the lease has been released.
-pub fn render<V: SessionHost + Render>(view: &V, entity: &Entity<V>) -> AnyElement {
-    let active = view.collab().is_active();
+/// behind a hover. The popover is keyed by `entity`, so one opened over one
+/// replay tab is not left open over another.
+pub fn render<V: SessionHost + Render>(entity: &Entity<V>, cx: &App) -> AnyElement {
+    let active = entity.read(cx).collab().is_active();
     let tooltip = if active { t!("ui.collab.session_active") } else { t!("ui.collab.session") };
 
     let owner = entity.clone();
-    Popover::new("collab-session-popover")
+    Popover::new(("collab-session-popover", entity.entity_id()))
+        // The trigger sits on the status bar at the bottom of the window.
+        .anchor(Anchor::BottomLeft)
         .trigger(
             Button::new("collab-session-toggle")
                 .icon(crate::icons::Glyph::Radio)
@@ -96,7 +96,7 @@ pub fn render<V: SessionHost + Render>(view: &V, entity: &Entity<V>) -> AnyEleme
         )
         .content(move |_state, _window, cx| {
             let body = owner.update(cx, |view, cx| render_body(view, cx));
-            div().w(WIDTH).p_2().child(body).into_any_element()
+            div().id("collab-session-body").test_support().w(WIDTH).p_2().child(body).into_any_element()
         })
         .into_any_element()
 }

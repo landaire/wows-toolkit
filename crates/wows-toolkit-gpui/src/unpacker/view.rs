@@ -162,20 +162,23 @@ pub struct UnpackerView {
 }
 
 impl UnpackerView {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, cx: &App) -> Vec<crate::status_bar::PanelToggle> {
+        crate::status_bar::PanelToggle::for_docks("unpacker-dock-toggle", &self.dock_area, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
         let (dock_area, skin) = DockSkin::dock_area("unpacker-dock", None, window, cx);
-        // Each panel's own header carries the collapse control
-        // (`ui::dock_collapse_button`), and render adds the expand rails.
+        // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
-        let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, dock_area.downgrade(), window, cx));
-        let assets_browser =
-            cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, dock_area.downgrade(), window, cx));
+        let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
+        let assets_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, window, cx));
 
         let output_dir_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.output_dir_hint").to_string()));
-        let queue_panel = cx.new(|cx| QueuePanel::new(output_dir_input.clone(), dock_area.downgrade(), cx));
+        let queue_panel = cx.new(|cx| QueuePanel::new(output_dir_input.clone(), cx));
 
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(
@@ -465,8 +468,7 @@ impl UnpackerView {
         };
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let dock = self.dock_area.downgrade();
-        let panel = cx.new(|cx| SearchPanel::new(query.into(), source, stop_flag.clone(), dock, cx));
+        let panel = cx.new(|cx| SearchPanel::new(query.into(), source, stop_flag.clone(), cx));
         self.dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(panel.clone()), DockPlacement::Bottom, None, window, cx);
         });
@@ -887,8 +889,11 @@ impl Render for UnpackerView {
                 this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
             });
 
-        let dock = crate::ui::dock_with_expand_rails("unpacker-dock-rail", &self.dock_area, self.dock_area.clone(), cx);
-
-        v_flex().id("unpacker-root").track_focus(&self.focus_handle).size_full().child(chrome).child(dock)
+        v_flex()
+            .id("unpacker-root")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .child(chrome)
+            .child(self.dock_area.clone())
     }
 }

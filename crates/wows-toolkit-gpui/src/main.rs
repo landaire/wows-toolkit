@@ -45,6 +45,7 @@ mod settings;
 mod settings_store;
 mod slider_field;
 mod stats;
+mod status_bar;
 mod tactics;
 mod theme;
 mod toast;

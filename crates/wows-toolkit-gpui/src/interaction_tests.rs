@@ -67,8 +67,7 @@ const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
 const OUTPUT_DIR: &str = "unpacker-output-dir";
 const QUEUE_CLEAR_ALL: &str = "unpacker-queue-clear-all";
-const QUEUE_COLLAPSE: &str = "unpacker-queue-collapse";
-const QUEUE_RAIL: &str = "unpacker-dock-rail-right";
+const QUEUE_TOGGLE: &str = "unpacker-dock-toggle-right";
 const PKG_TREE_COLLAPSE: &str = "unpacker-pkg-tree-collapse";
 const PKG_TREE_RAIL: &str = "unpacker-pkg-tree-rail";
 const PKG_EXTRACT_LISTED: &str = "unpacker-pkg-extract-listed";
@@ -76,14 +75,12 @@ const PKG_EXTRACT_LISTED: &str = "unpacker-pkg-extract-listed";
 /// Stats tab filter bar (`stats::view`).
 const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
 const STATS_LIMIT_COUNT: &str = "stats-limit-count";
-const STATS_LEFT_RAIL: &str = "stats-dock-rail-left";
-const STATS_RIGHT_RAIL: &str = "stats-dock-rail-right";
+const STATS_LEFT_TOGGLE: &str = "stats-dock-toggle-left";
+const STATS_RIGHT_TOGGLE: &str = "stats-dock-toggle-right";
 
-/// The first chart's collapse control (`stats::chart_panel`), drawn only
-/// while the chart sits in an open side dock.
-fn first_chart_collapse() -> (&'static str, usize) {
-    ("chart-collapse-dock", 0)
-}
+/// The first chart's settings button (`stats::chart_panel`), drawn with the
+/// chart whether or not it has anything to plot.
+const FIRST_CHART_SETTINGS: (&str, usize) = ("chart-settings", 0);
 
 /// Player Tracker controls (`player_tracker`).
 const TRACKER_FILTER: &str = "tracker-filter";
@@ -484,42 +481,193 @@ fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppCont
 }
 
 /// The viewport tools and the visibility, hull and display options are a
-/// rail beside the viewport, collapsed from its own header to a control on
-/// the right edge.
+/// rail beside the viewport, which the status bar shows and hides.
 ///
 /// The viewport has no strip of its own, so the tools leave with the rail.
 #[gpui_kit::test]
-fn the_options_rail_collapses_to_an_edge_control_and_expands_from_it(cx: &mut TestAppContext) {
+fn the_status_bar_puts_the_options_rail_away_and_brings_it_back(cx: &mut TestAppContext) {
     let window = open_wide_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ArmorViewer, cx);
         window.render_frame(cx);
-
-        // Only the rail itself is asserted: with no game data no hull is
-        // loaded, and all three sections then say so rather than drawing
-        // controls that would act on an empty viewport.
         assert!(window.try_find("armor-options-panel").is_some(), "the rail is up without being asked for");
         assert!(window.try_find("armor-show-hidden-button").is_some(), "the tools are on the rail");
-        assert!(window.try_find("armor-options-expand").is_none(), "no expand control while the rail is up");
 
-        window.click("armor-options-collapse", cx);
+        window.click("armor-options-toggle", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-options-panel").is_none(), "the header button puts the rail away");
+        assert!(window.try_find("armor-options-panel").is_none(), "the toggle puts the rail away");
         assert!(window.try_find("armor-show-hidden-button").is_none(), "and the tools with it");
 
-        window.click("armor-options-expand", cx);
+        window.click("armor-options-toggle", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-options-panel").is_some(), "the edge control brings it back");
-        assert!(window.try_find("armor-options-expand").is_none(), "and goes away again");
+        assert!(window.try_find("armor-options-panel").is_some(), "and brings it back");
     })
     .expect("the test window stays open");
 }
 
-/// The ships list collapses from its own header to a control on the left
-/// edge, and expands from there.
+/// The status bar shows and hides the replay listing, and carries the
+/// session control on the replay tabs only: a session belongs to the replay
+/// workspace it was started from.
 #[gpui_kit::test]
-fn the_ships_list_collapses_to_an_edge_control_and_expands_from_it(cx: &mut TestAppContext) {
+fn the_status_bar_holds_the_listing_toggle_and_the_session_on_replay_tabs(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ReplayInspector, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("replay-browser-rows").is_some(), "the listing is up");
+        assert!(window.try_find("collab-session-toggle").is_some(), "the session control is on the bar");
+
+        window.click("replay-listing-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("replay-browser-rows").is_none(), "the toggle puts the listing away");
+
+        window.click("replay-listing-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("replay-browser-rows").is_some(), "and brings it back");
+
+        show_tab(window, AppTab::Settings, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("collab-session-toggle").is_none(), "no session control away from the replays");
+    })
+    .expect("the test window stays open");
+}
+
+/// Opening the session popover with no session offers a name and the two ways
+/// to start one, and starts neither until a name is given: every peer reads
+/// that name, so an unnamed session makes a roster nobody can follow.
+#[gpui_kit::test]
+fn the_session_popover_starts_nothing_without_a_display_name(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ReplayInspector, cx);
+        window.render_frame(cx);
+        window.click("collab-session-toggle", cx);
+        window.render_frame(cx);
+
+        assert!(window.try_find("collab-display-name").is_some(), "a name is asked for first");
+        assert!(window.try_find("collab-host").is_some());
+        assert!(window.try_find("collab-token").is_some());
+
+        window.click("collab-host", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, cx| {
+            let inspector = app.replay_inspector().read(cx);
+            assert!(
+                !crate::collab_popover::SessionHost::collab(inspector).is_active(),
+                "nothing started without a name to start it under"
+            );
+        })
+        .expect("the test window stays open");
+}
+
+/// One job is named on the bar with how far it has got; several are counted.
+/// A later report from one owner replaces its earlier one, and the same kind
+/// of work from two owners is two jobs, each finished on its own.
+#[gpui_kit::test]
+fn the_status_bar_names_one_job_and_counts_several(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        let first = cx.new(|_cx| ());
+        let second = cx.new(|_cx| ());
+        let kind = crate::status_bar::JobKind::Contribute;
+        window.render_frame(cx);
+        assert!(window.try_find("app-status-work").is_none(), "nothing is running");
+
+        let step = crate::status_bar::Progress::new(1, 4);
+        crate::status_bar::working(first.downgrade().into(), kind, "First job", step, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("app-status-work").label(), Some("First job 1 of 4"));
+
+        let step = crate::status_bar::Progress::new(2, 4);
+        crate::status_bar::working(first.downgrade().into(), kind, "First job", step, cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("app-status-work").label(),
+            Some("First job 2 of 4"),
+            "a later report replaces the earlier one"
+        );
+
+        crate::status_bar::working(second.downgrade().into(), kind, "Second job", None, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("app-status-work").label(), Some("2 tasks running"));
+
+        crate::status_bar::finished(first.entity_id(), kind, cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("app-status-work").label(),
+            Some("Second job"),
+            "finishing one owner's work leaves the other's"
+        );
+
+        crate::status_bar::finished(second.entity_id(), kind, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("app-status-work").is_none(), "finished work leaves the bar");
+    })
+    .expect("the test window stays open");
+}
+
+/// Work whose owner is dropped leaves the bar: a replay tab closed in the
+/// middle of a pass drops the pass before it can report itself finished.
+#[gpui_kit::test]
+fn work_leaves_the_status_bar_with_its_owner(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        let owner = cx.new(|_cx| ());
+        let kind = crate::status_bar::JobKind::Contribute;
+        crate::status_bar::working(owner.downgrade().into(), kind, "Contributing", None, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("app-status-work").is_some(), "the work is on the bar");
+
+        drop(owner);
+    })
+    .expect("the test window stays open");
+    // A dropped entity is released once the update that dropped it ends.
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("app-status-work").is_none(), "and leaves with its owner");
+    })
+    .expect("the test window stays open");
+}
+
+/// The session popover opens above its button. The button is on the status
+/// bar at the bottom of the window, so a popover opened below it would be
+/// pushed back over the button and the bar.
+#[gpui_kit::test]
+fn the_session_popover_opens_above_the_status_bar(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ReplayInspector, cx);
+        window.render_frame(cx);
+        window.click("collab-session-toggle", cx);
+        window.render_frame(cx);
+
+        let toggle = window.find("collab-session-toggle").bounds();
+        let popup = window.find("collab-session-body").bounds();
+        let viewport = window.viewport_size();
+        assert!(popup.bottom() <= toggle.top(), "the popover {popup:?} is above its button {toggle:?}");
+        assert!(
+            popup.top() >= px(0.) && popup.left() >= px(0.) && popup.right() <= viewport.width,
+            "the popover {popup:?} is inside the window {viewport:?}"
+        );
+    })
+    .expect("the test window stays open");
+}
+
+/// The status bar shows and hides the ships list.
+#[gpui_kit::test]
+fn the_status_bar_puts_the_ships_list_away_and_brings_it_back(cx: &mut TestAppContext) {
     let window = open_wide_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
@@ -527,22 +675,13 @@ fn the_ships_list_collapses_to_an_edge_control_and_expands_from_it(cx: &mut Test
         window.render_frame(cx);
         assert!(window.try_find(SHIP_SEARCH).is_some(), "the list is up without being asked for");
 
-        window.click("armor-ships-collapse", cx);
-    })
-    .expect("the test window stays open");
-    // The header button asks the pane through an event, which is delivered
-    // once the click's update ends.
-    cx.run_until_parked();
-
-    cx.update_window(window.into(), |_, window, cx| {
+        window.click("armor-ships-toggle", cx);
         window.render_frame(cx);
-        assert!(window.try_find(SHIP_SEARCH).is_none(), "the header button puts the list away");
-        assert!(window.try_find("armor-ships-collapse").is_none(), "its collapse button goes with it");
+        assert!(window.try_find(SHIP_SEARCH).is_none(), "the toggle puts the list away");
 
-        window.click("armor-ships-expand", cx);
+        window.click("armor-ships-toggle", cx);
         window.render_frame(cx);
-        assert!(window.try_find(SHIP_SEARCH).is_some(), "the edge control brings it back");
-        assert!(window.try_find("armor-ships-expand").is_none(), "and goes away again");
+        assert!(window.try_find(SHIP_SEARCH).is_some(), "and brings it back");
     })
     .expect("the test window stays open");
 }
@@ -919,7 +1058,7 @@ fn the_unpacker_folder_tree_collapses_to_a_rail_and_expands_again(cx: &mut TestA
 }
 
 #[gpui_kit::test]
-fn the_unpacker_queue_dock_collapses_to_a_rail_and_expands_again(cx: &mut TestAppContext) {
+fn the_status_bar_closes_the_unpacker_queue_dock_and_opens_it_again(cx: &mut TestAppContext) {
     let window = open_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
@@ -928,24 +1067,24 @@ fn the_unpacker_queue_dock_collapses_to_a_rail_and_expands_again(cx: &mut TestAp
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Unpacker, cx);
         window.render_frame(cx);
-        assert!(window.try_find(QUEUE_RAIL).is_none(), "no rail while the queue is up");
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "the queue is up");
 
-        window.click(QUEUE_COLLAPSE, cx);
+        window.click(QUEUE_TOGGLE, cx);
         window.render_frame(cx);
-        assert!(window.try_find(QUEUE_CLEAR_ALL).is_none(), "collapsing closes the queue dock");
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_none(), "the toggle closes the queue dock");
 
-        window.click(QUEUE_RAIL, cx);
+        window.click(QUEUE_TOGGLE, cx);
         window.render_frame(cx);
-        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "the rail opens the queue dock again");
-        assert!(window.try_find(QUEUE_RAIL).is_none(), "and goes away with it");
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "and opens it again");
     })
     .expect("the test window stays open");
 }
 
-/// A saved layout may leave the charts in a closed left dock. The restored tab
-/// has to offer a way to open it again, and the chart then collapses it back.
+/// A saved layout may leave the charts in a closed left dock. The status bar
+/// has to offer a way to open it again, and no toggle for a dock with nothing
+/// in it.
 #[gpui_kit::test]
-fn a_restored_closed_left_chart_dock_reopens_from_its_rail(cx: &mut TestAppContext) {
+fn a_restored_closed_left_chart_dock_reopens_from_the_status_bar(cx: &mut TestAppContext) {
     let window = open_app(cx);
     window
         .update(cx, |app, window, cx| {
@@ -964,18 +1103,17 @@ fn a_restored_closed_left_chart_dock_reopens_from_its_rail(cx: &mut TestAppConte
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
         window.render_frame(cx);
-        assert!(window.try_find(STATS_LEFT_RAIL).is_some(), "the closed left dock leaves a rail");
-        assert!(window.try_find(STATS_RIGHT_RAIL).is_none(), "and no other dock does");
-        assert!(window.try_find(first_chart_collapse()).is_none(), "the chart is not on screen");
+        assert!(window.try_find(STATS_LEFT_TOGGLE).is_some(), "the closed left dock has a toggle");
+        assert!(window.try_find(STATS_RIGHT_TOGGLE).is_none(), "the empty right dock does not");
+        assert!(window.try_find(FIRST_CHART_SETTINGS).is_none(), "the chart is not on screen");
 
-        window.click(STATS_LEFT_RAIL, cx);
+        window.click(STATS_LEFT_TOGGLE, cx);
         window.render_frame(cx);
-        assert!(window.try_find(STATS_LEFT_RAIL).is_none(), "the rail goes once the dock is open");
-        assert!(window.try_find(first_chart_collapse()).is_some(), "the chart is back with its collapse control");
+        assert!(window.try_find(FIRST_CHART_SETTINGS).is_some(), "the toggle opens the left dock");
 
-        window.click(first_chart_collapse(), cx);
+        window.click(STATS_LEFT_TOGGLE, cx);
         window.render_frame(cx);
-        assert!(window.try_find(STATS_LEFT_RAIL).is_some(), "collapsing from the chart closes the left dock");
+        assert!(window.try_find(FIRST_CHART_SETTINGS).is_none(), "and closes it again");
     })
     .expect("the test window stays open");
 }
