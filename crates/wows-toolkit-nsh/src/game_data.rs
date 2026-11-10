@@ -1138,17 +1138,14 @@ fn measure_cache_if_wanted() {
     });
 }
 
-/// Every replay in the game's replay directory and in the open directories,
-/// grouped by the builds nothing on this machine can read. Blocking: reads
-/// every replay's header.
-fn find_missing_builds() -> Result<Vec<MissingBuild>, GameDataError> {
+/// Every replay under `roots`, grouped by the builds nothing on this machine
+/// can read. Blocking: reads every replay's header.
+fn find_missing_builds(roots: &[PathBuf]) -> Result<Vec<MissingBuild>, GameDataError> {
     let cache = cache().ok_or(GameDataError::Unbound)?;
-    let mut roots: Vec<PathBuf> = replays_dir().into_iter().collect();
-    roots.extend(state().directories.directories().iter().map(|directory| directory.root.clone()));
 
     let mut missing: BTreeMap<u32, MissingBuild> = BTreeMap::new();
     for root in roots {
-        for path in replay_index::replays_under(&root) {
+        for path in replay_index::replays_under(root) {
             let Ok(meta) = wows_replays::ReplayFile::meta_from_file(&path) else { continue };
             let Some(version) = Version::try_from_client_exe(&meta.clientVersionFromExe) else { continue };
             let Some(build) = version.build_number() else { continue };
@@ -1161,6 +1158,26 @@ fn find_missing_builds() -> Result<Vec<MissingBuild>, GameDataError> {
     }
 
     Ok(missing.into_values().collect())
+}
+
+/// Offers `missing` for download in place of any offer shown, and asks the
+/// repository what it publishes for each. Blocking.
+fn offer_builds(missing: Vec<MissingBuild>) {
+    let requests: Vec<(u32, Option<String>)> =
+        missing.iter().map(|build| (build.build, Some(build.version.clone()))).collect();
+    update(|state| {
+        state.offer = OfferState { planning: true, builds: missing, open: true, ..OfferState::default() };
+    });
+
+    let planned = run_cache_job(CacheJob::Planning, move |client, base, _tip, _report| async move {
+        cache::plan(&client, &base, &requests).await
+    });
+    if let Err(error) = planned {
+        update(|state| {
+            state.offer.planning = false;
+            state.offer.failure = Some(crate::shell::sentence(&error));
+        });
+    }
 }
 
 fn availability_text(availability: Option<&RemoteAvailability>) -> String {
@@ -1620,7 +1637,10 @@ impl GameData {
     /// offered this session are left out.
     pub async fn check_missing_builds() -> Result<MissingBuildOffer, GameDataRequestError> {
         run_blocking(|| {
-            let missing = find_missing_builds()?;
+            let mut roots: Vec<PathBuf> = replays_dir().into_iter().collect();
+            roots.extend(state().directories.directories().iter().map(|directory| directory.root.clone()));
+
+            let missing = find_missing_builds(&roots)?;
             let missing: Vec<MissingBuild> = {
                 let state = state();
                 missing.into_iter().filter(|build| !state.offered_builds.contains(&build.build)).collect()
@@ -1630,21 +1650,31 @@ impl GameData {
                 return Ok(snapshot().offer);
             }
 
-            let requests: Vec<(u32, Option<String>)> =
-                missing.iter().map(|build| (build.build, Some(build.version.clone()))).collect();
-            update(|state| {
-                state.offer = OfferState { planning: true, builds: missing, open: true, ..OfferState::default() };
-            });
-            let planned = run_cache_job(CacheJob::Planning, move |client, base, _tip, _report| async move {
-                cache::plan(&client, &base, &requests).await
-            });
-            if let Err(error) = planned {
-                update(|state| {
-                    state.offer.planning = false;
-                    state.offer.failure = Some(crate::shell::sentence(&error));
-                });
-            }
+            offer_builds(missing);
+
             Ok(snapshot().offer)
+        })
+        .await
+    }
+
+    /// Offers the builds the replays in `directory` need and nothing here
+    /// has, those already offered this session included. `false` when none
+    /// is missing.
+    pub async fn check_directory_builds(directory: String) -> Result<bool, GameDataRequestError> {
+        run_blocking(move || {
+            let missing = find_missing_builds(&[PathBuf::from(directory)])?;
+            if missing.is_empty() {
+                return Ok(false);
+            }
+
+            update(|state| {
+                for build in &missing {
+                    state.offered_builds.remove(&build.build);
+                }
+            });
+            offer_builds(missing);
+
+            Ok(true)
         })
         .await
     }

@@ -677,3 +677,30 @@ fn copying_a_listed_replay_puts_the_file_on_the_clipboard() {
     app.press("Copy Replay").unwrap();
     app.wait_for("role:alert[/^the replay files could not be copied: /]").unwrap();
 }
+
+/// "Check game data" offers the builds an opened directory's replays need,
+/// again after the offer was declined, and says so when none is missing.
+#[test]
+fn checking_game_data_offers_the_directory_builds() {
+    const REPLAY: &str = "20190420_125057_PASB017-Montana-1945_15_NE_north.wowsreplay";
+
+    let empty = TestDirectory::new("check-empty");
+    let needing = TestDirectory::new("check-needing");
+    std::fs::copy(fixture(REPLAY), needing.0.join(REPLAY)).expect("the fixture is copied");
+
+    let mut app = app();
+    on_linux_desktop(&mut app);
+    let _empty = open_directory(&mut app, &empty.0);
+    app.wait_for("No replays found").unwrap();
+    app.press("Check game data").unwrap();
+    app.wait_for("role:alert[Game data is available for the listed replays.]").unwrap();
+
+    let _needing = open_directory(&mut app, &needing.0);
+    app.wait_for(&format!("label:{REPLAY}")).unwrap();
+    for _ in 0..2 {
+        app.press("Check game data").unwrap();
+        app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
+        app.press("Cancel").unwrap();
+        app.wait_for_gone("Download Game Data", GONE).unwrap();
+    }
+}

@@ -601,10 +601,10 @@ function setListingCollapsed(collapsed: boolean) {
   });
 }
 
-async function checkGameData() {
+/** Offers the builds `directory`'s replays need and nothing here has, those already offered included. */
+async function checkGameData(directory: string) {
   try {
-    const offer = await GameData.checkMissingBuilds();
-    if (!offer.open && offer.rows.length === 0) toast.info("Game data is available for the listed replays.");
+    if (!(await GameData.checkDirectoryBuilds(directory))) toast.info("Game data is available for the listed replays.");
   } catch (error) {
     toast.failed(errorText(error));
   }
@@ -1345,7 +1345,7 @@ function WorkspaceToolbar(props: { ws: Workspace; view: ReplayInspectorProps }) 
                 <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.mutedForeground }}>{path()}</Text>
               </View>
               <View tooltip={<Hint text={t("ui.replay.check_game_data_tooltip")}/>}>
-                <Button label={t("ui.replay.check_game_data")} variant="ghost" onPress={() => void checkGameData()}/>
+                <Button label={t("ui.replay.check_game_data")} variant="ghost" onPress={() => void checkGameData(path())}/>
               </View>
               <If when={props.view.onDirectoryStats !== undefined}>
                 <View tooltip={<Hint text={statsReady() ? t("ui.stats.open_directory_stats_tooltip") : t("ui.stats.directory_stats_unavailable")}/>}>
