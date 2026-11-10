@@ -95,10 +95,12 @@ pub(super) enum GpuState {
     Failed(GpuInitError),
 }
 
-/// The ship data every pane loads from: the export assets and the catalog.
+/// The ship data every pane loads from: the export assets, the catalog and
+/// the catalog tree's icons.
 pub(super) struct Bundle {
     pub assets: ShipAssets,
     pub catalog: ShipCatalog,
+    pub icons: super::catalog::CatalogIcons,
 }
 
 pub(super) enum BundleState {
@@ -1091,6 +1093,7 @@ fn load_bundle() -> Result<Bundle, BundleError> {
     let assets = load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider())
         .inspect_err(|error| tracing::error!("armor viewer: failed to load ship assets: {error}"))?;
     let catalog = ShipCatalog::build(loaded.provider());
+    let icons = super::catalog::CatalogIcons::read(loaded.vfs(), &catalog);
 
-    Ok(Bundle { assets, catalog })
+    Ok(Bundle { assets, catalog, icons })
 }

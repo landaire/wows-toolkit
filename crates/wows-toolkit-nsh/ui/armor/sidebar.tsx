@@ -1,4 +1,4 @@
-import { effect, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, Image, Scroll, signal, Text, untracked, View } from "nsh";
 import { ContextMenu, Input, Popover } from "nsh/base";
 import { Armor } from "wows-toolkit/native";
 import { MenuRow, Surface } from "../components";
@@ -17,15 +17,23 @@ const filtered = signal<CatalogView | null>(null);
 const expanded = signal<string[]>([]);
 let filterGeneration = 0;
 
+// A search opens the branches holding a match, which can still be folded;
+// clearing it folds everything, as the GPUI tree does.
 function setQuery(next: string) {
   query.set(next);
   const generation = ++filterGeneration;
   if (next.trim() === "") {
     filtered.set(null);
+    expanded.set([]);
     return;
   }
   void Armor.filterCatalog(next).then((result: CatalogView) => {
-    if (generation === filterGeneration) filtered.set(result);
+    if (generation !== filterGeneration) return;
+    filtered.set(result);
+    expanded.set(result.nations.flatMap((nation) => [
+      `n:${nation.nation}`,
+      ...nation.classes.map((group) => `c:${nation.nation}:${group.species}`),
+    ]));
   }).catch((error: unknown) => toast.failed(errorText(error)));
 }
 
@@ -40,6 +48,10 @@ function Chevron(props: { open: boolean }) {
 
 function ShipRow(props: { ship: CatalogShip }) {
   const open = () => call(Armor.openShip(props.ship.paramIndex, props.ship.name));
+  const selected = () => {
+    const view = armor();
+    return view?.panes.find((pane) => pane.id === view.activePane)?.paramIndex === props.ship.paramIndex;
+  };
   return (
     <ContextMenu
       offset={2}
@@ -49,12 +61,13 @@ function ShipRow(props: { ship: CatalogShip }) {
           testID={`armor-ship-${props.ship.paramIndex}`}
           role="button"
           accessibilityLabel={props.ship.label}
+          accessibilityState={{ selected: selected() }}
           onPress={open}
           hoverStyle={{ backgroundColor: colors.accent }}
           activeStyle={{ opacity: 0.7 }}
-          style={{ minHeight: 22, paddingLeft: 36, paddingRight: 6, justifyContent: "center", borderRadius: 4 }}
+          style={{ minHeight: 22, paddingLeft: 36, paddingRight: 6, justifyContent: "center", borderRadius: 4, backgroundColor: selected() ? colors.accent : undefined }}
         >
-          <Text style={{ fontSize: 12.5, color: colors.foreground }}>{`${props.ship.roman} ${props.ship.name}`}</Text>
+          <Text style={{ fontSize: 12.5, color: colors.foreground, fontWeight: selected() ? "600" : "400" }}>{`${props.ship.roman} ${props.ship.name}`}</Text>
         </View>
       }
     >
@@ -69,7 +82,7 @@ function ShipRow(props: { ship: CatalogShip }) {
 function ShipTree() {
   const searching = () => filtered() !== null;
   const tree = () => filtered() ?? catalog();
-  const isOpen = (key: string) => searching() || expanded().includes(key);
+  const isOpen = (key: string) => expanded().includes(key);
   return (
     <Scroll accessibilityLabel={t("ui.armor.ships")} style={{ flex: 1 }}>
       <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
@@ -88,6 +101,9 @@ function ShipTree() {
                   style={{ minHeight: 24, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 4, borderRadius: 4 }}
                 >
                   <Chevron open={isOpen(nationKey())}/>
+                  <If when={nation().flag}>
+                    <Image source={{ uri: nation().flag! }} style={{ width: 23, height: 16 }}/>
+                  </If>
                   <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{nation().label}</Text>
                 </View>
                 <If when={isOpen(nationKey())}>
@@ -106,6 +122,9 @@ function ShipTree() {
                               style={{ minHeight: 22, flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 8, borderRadius: 4 }}
                             >
                               <Chevron open={isOpen(classKey())}/>
+                              <If when={group().icon}>
+                                <Image source={{ uri: group().icon! }} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
+                              </If>
                               <Text style={{ fontSize: 12.5, color: colors.foreground }}>{group().label}</Text>
                             </View>
                             <If when={isOpen(classKey())}>
@@ -154,7 +173,6 @@ function CommonSettings() {
       }
     >
       <Surface style={{ padding: 10, gap: 8, backgroundColor: colors.popover }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.armor.common_settings")}</Text>
         <CheckRow
           id="armor-pane-mirror-cameras"
           label={t("ui.armor.mirror_cameras")}

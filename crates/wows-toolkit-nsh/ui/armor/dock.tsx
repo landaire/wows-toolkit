@@ -10,6 +10,8 @@ import { colors, controlRadius } from "../theme";
 import { armor, call, errorText, type ExportResult, hover, type HoverView, type PaneView } from "./state";
 import { IconButton, Swatch } from "./widgets";
 
+const paneBackground = "#1b1d22";
+
 /** Reports an export the way the other front ends do; a cancelled save says nothing. */
 export async function runExport(command: () => Promise<ExportResult | null>) {
   try {
@@ -95,16 +97,34 @@ function ViewportMenu(props: { pane: PaneView }) {
   );
 }
 
-/** The plate or camera ring under the pointer, beside it. */
-function HoverTip(props: { pane: PaneView }) {
+type Size = { width: number; height: number };
+
+/** The plate or camera ring under the pointer, beside it and kept 8 px inside the pane. */
+function HoverTip(props: { pane: PaneView; area: Size }) {
+  const tip = signal<Size>({ width: 0, height: 0 });
   const here = () => {
     const current = hover();
     return current && current.paneId === props.pane.id && (current.plate || current.ring?.length) ? current : null;
   };
+  const place = (at: number, size: number, room: number) => Math.max(8, Math.min(at + 16, room - size - 8));
   return (
     <If when={here()}>
       {(current) => (
-        <View style={{ position: "absolute", left: current().x + 16, top: current().y + 16, maxWidth: 280, padding: 8, gap: 3, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}>
+        <View
+          onLayout={({ bounds }) => tip.set({ width: bounds.size.width, height: bounds.size.height })}
+          style={{
+            position: "absolute",
+            left: place(current().x, tip().width, props.area.width),
+            top: place(current().y, tip().height, props.area.height),
+            maxWidth: 280,
+            padding: 8,
+            gap: 3,
+            borderRadius: controlRadius(),
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.popover,
+          }}
+        >
           <If when={current().ring?.length} else={
             <If when={current().plate}>
               {(plate) => (
@@ -157,9 +177,10 @@ function ExportConfirm(props: { pane: PaneView }) {
   );
 }
 
-function Overlay(props: { text: string; tone?: "error" }) {
+/** A pane message; `opaque` hides whatever the pane last drew behind it. */
+function Overlay(props: { text: string; tone?: "error"; opaque?: boolean }) {
   return (
-    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: props.opaque ? paneBackground : undefined }}>
       <Text style={{ fontSize: 13, color: props.tone === "error" ? colors.destructive : colors.mutedForeground }}>{props.text}</Text>
     </View>
   );
@@ -168,12 +189,14 @@ function Overlay(props: { text: string; tone?: "error" }) {
 function Pane(props: { pane: PaneView; several: boolean }) {
   const view = () => armor();
   const pane = () => props.pane;
-  const state = (): { text: string; tone?: "error" } | null => {
+  const area = signal<Size>({ width: 0, height: 0 });
+  // A load in flight covers the previous ship, so it is not mistaken for the new one.
+  const state = (): { text: string; tone?: "error"; opaque?: boolean } | null => {
     const current = view();
     if (!current) return null;
     if (current.gpu === "initializing") return { text: t("ui.armor.initializing") };
     if (current.gpu === "failed") return { text: t("ui.armor.init_failed", { reason: current.gpuError ?? "" }), tone: "error" };
-    if (pane().loading) return { text: t("ui.armor.loading_named_ship", { ship: pane().loading! }) };
+    if (pane().loading) return { text: t("ui.armor.loading_named_ship", { ship: pane().loading! }), opaque: true };
     if (pane().loadError) return { text: pane().loadError!, tone: "error" };
     if (!pane().ship) return { text: t("ui.armor.select_ship") };
     return null;
@@ -181,13 +204,14 @@ function Pane(props: { pane: PaneView; several: boolean }) {
   return (
     <View
       testID={`armor-viewport-pane-${pane().number}`}
+      onLayout={({ bounds }) => area.set({ width: bounds.size.width, height: bounds.size.height })}
       style={{
         flex: 1,
         minWidth: 0,
         minHeight: 0,
         borderWidth: props.several ? 2 : 0,
         borderColor: pane().active ? colors.primary : "transparent",
-        backgroundColor: "#1b1d22",
+        backgroundColor: paneBackground,
       }}
     >
       <Frame
@@ -207,9 +231,9 @@ function Pane(props: { pane: PaneView; several: boolean }) {
         </Each>
       </View>
       <If when={state()}>
-        {(current) => <Overlay text={current().text} tone={current().tone}/>}
+        {(current) => <Overlay text={current().text} tone={current().tone} opaque={current().opaque}/>}
       </If>
-      <HoverTip pane={pane()}/>
+      <HoverTip pane={pane()} area={area()}/>
       <ViewportMenu pane={pane()}/>
       <If when={pane().exportConfirm}>
         <ExportConfirm pane={pane()}/>

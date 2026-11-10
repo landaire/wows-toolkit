@@ -213,7 +213,7 @@ impl Armor {
         run(move || {
             let bundle = state::read(|state| state.bundle().cloned());
             // The tree is empty until the ship data has loaded.
-            Ok(bundle.map(|bundle| catalog_view(&bundle.catalog, &query)).unwrap_or_default())
+            Ok(bundle.map(|bundle| catalog_view(&bundle.catalog, &bundle.icons, &query)).unwrap_or_default())
         })
         .await
     }

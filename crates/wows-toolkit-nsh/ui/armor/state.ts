@@ -113,7 +113,7 @@ export type PenShipView = {
   label: string;
   firing: boolean;
   noShells?: string | null;
-  shells: { index: number; label: string; pen: string; verdict: ShellVerdict; verdictText: string; firing: boolean }[];
+  shells: { index: number; label: string; pickerLabel: string; pen: string; verdict: ShellVerdict; verdictText: string; firing: boolean }[];
 };
 
 export type PenView = {
@@ -210,7 +210,7 @@ export type HoverView = {
 
 export type CatalogShip = { paramIndex: string; name: string; tier: number; roman: string; label: string };
 export type CatalogView = {
-  nations: { nation: string; label: string; classes: { species: string; label: string; ships: CatalogShip[] }[] }[];
+  nations: { nation: string; label: string; flag?: string | null; classes: { species: string; label: string; icon?: string | null; ships: CatalogShip[] }[] }[];
 };
 
 export type ExportResult = { ship: string; path: string; bytes?: number | null; size?: string | null };

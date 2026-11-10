@@ -65,6 +65,8 @@ pub struct PenShellRow {
     pub index: ShellIndex,
     /// `"AP 460mm"`.
     pub label: String,
+    /// `"AP 460 mm"`, as the trajectory shell picker reads.
+    pub picker_label: String,
     /// The flat penetration (`"25mm"`), or `"-"` for AP and a shell without one.
     pub pen: String,
     pub verdict: Verdict,
@@ -181,6 +183,20 @@ impl PenState {
         self.firing_shell = Some(index);
     }
 
+    /// The shell a cast from the firing ship fires: the chosen one, else its
+    /// AP shell, else its first.
+    pub fn active_shell(&self) -> Option<ShellIndex> {
+        let ship = self.firing()?;
+        let index = self
+            .firing_shell
+            .map(ShellIndex::get)
+            .filter(|index| *index < ship.shells.len())
+            .or_else(|| ship.shells.iter().position(|shell| shell.ammo_type == AmmoType::AP))
+            .or_else(|| (!ship.shells.is_empty()).then_some(0))?;
+
+        Some(ShellIndex(index as u32))
+    }
+
     fn firing(&self) -> Option<&ComparisonShip> {
         let firing = self.firing_ship.as_deref()?;
         self.ships.iter().find(|ship| ship.param_index == firing)
@@ -192,7 +208,7 @@ impl PenState {
         let ship = self.firing().or_else(|| self.ships.first()).cloned();
         self.firing_ship = ship.as_ref().map(|ship| ship.param_index.clone());
 
-        (ship, self.firing_shell)
+        (ship, self.active_shell())
     }
 
     /// The ships a search offers, skipping those already compared.
@@ -215,6 +231,7 @@ impl PenState {
     /// The ship blocks, read against `thickness`.
     pub fn ship_rows(&self, thickness: Option<Millimeters>) -> Vec<PenShipRow> {
         let ifhe = Ifhe::from_enabled(self.ifhe);
+        let active_shell = self.active_shell();
         self.ships
             .iter()
             .map(|ship| {
@@ -229,10 +246,11 @@ impl PenState {
                         PenShellRow {
                             index,
                             label: shell_label(shell),
+                            picker_label: format!("{} {:.0} mm", shell.ammo_type.display_name(), shell.caliber.value()),
                             pen: pen_label(shell, ifhe),
                             verdict,
                             verdict_text: verdict_text(verdict),
-                            firing: firing && self.firing_shell == Some(index),
+                            firing: firing && active_shell == Some(index),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -366,8 +384,27 @@ mod tests {
         assert_eq!(pen.firing_shell, None);
         let (cast, shell) = pen.cast_ship();
         assert_eq!(cast.map(|ship| ship.param_index), Some("PASB018".to_owned()));
-        assert_eq!(shell, None);
+        assert_eq!(shell, Some(ShellIndex(0)), "the AP shell fires until another is chosen");
         assert_eq!(pen.firing_ship.as_deref(), Some("PASB018"));
+    }
+
+    #[test]
+    fn a_chosen_shell_fires_else_the_ap_shell_else_the_first() {
+        let mut pen = PenState::default();
+        let mut he_only = ship("PJSB018", "Yamato");
+        he_only.shells.reverse();
+        pen.add(he_only);
+        assert_eq!(pen.active_shell(), Some(ShellIndex(1)), "the AP shell is found where it sits");
+
+        pen.set_firing_shell(ShellIndex(0));
+        assert_eq!(pen.active_shell(), Some(ShellIndex(0)));
+
+        pen.ships[0].shells.retain(|shell| shell.ammo_type != AmmoType::AP);
+        pen.firing_shell = None;
+        assert_eq!(pen.active_shell(), Some(ShellIndex(0)));
+
+        pen.ships[0].shells.clear();
+        assert_eq!(pen.active_shell(), None);
     }
 
     #[test]

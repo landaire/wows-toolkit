@@ -588,7 +588,7 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
         plate,
         ships: state.pen.ship_rows(thickness),
         firing_ship: state.pen.firing_ship.clone(),
-        firing_shell: state.pen.firing_shell,
+        firing_shell: state.pen.active_shell(),
     };
 
     ArmorView {

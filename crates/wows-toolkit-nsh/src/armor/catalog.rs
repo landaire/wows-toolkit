@@ -1,10 +1,17 @@
 //! The ship catalog as the sidebar tree and the ship searches read it.
 
+use std::collections::HashMap;
+
+use base64::Engine as _;
 use nsh_core::prelude::JsObject;
 use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use wows_toolkit_viewmodel::ship_catalog::species_name;
 use wows_toolkit_viewmodel::ship_catalog::tier_roman;
+use wowsunpack::game_assets::GuiAsset;
+use wowsunpack::game_assets::ShipIconState;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::vfs::VfsPath;
 
 /// One ship row.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
@@ -25,6 +32,9 @@ pub struct CatalogClass {
     /// The class key (`"Destroyer"`), which the class icon is keyed on.
     pub species: String,
     pub label: String,
+    /// The class icon as an SVG `data:` URL, when the build has one.
+    #[prop(skip_none)]
+    pub icon: Option<String>,
     pub ships: Vec<CatalogShip>,
 }
 
@@ -35,6 +45,9 @@ pub struct CatalogNation {
     /// The raw nation key (`"usa"`), which the flag icon is keyed on.
     pub nation: String,
     pub label: String,
+    /// The nation flag as a PNG `data:` URL, when the build has one.
+    #[prop(skip_none)]
+    pub flag: Option<String>,
     pub classes: Vec<CatalogClass>,
 }
 
@@ -43,6 +56,38 @@ pub struct CatalogNation {
 #[non_exhaustive]
 pub struct CatalogView {
     pub nations: Vec<CatalogNation>,
+}
+
+/// The tree's nation flags and class icons as `data:` URLs, read once per build.
+#[derive(Debug, Default)]
+pub(super) struct CatalogIcons {
+    flags: HashMap<String, String>,
+    classes: HashMap<Species, String>,
+}
+
+impl CatalogIcons {
+    pub(super) fn read(vfs: &VfsPath, catalog: &ShipCatalog) -> Self {
+        let mut icons = Self::default();
+        for nation in &catalog.nations {
+            if let Some(bytes) = GuiAsset::NationFlag(&nation.nation).read(vfs, None) {
+                icons.flags.insert(nation.nation.clone(), data_url("image/png", &bytes));
+            }
+            for class in &nation.classes {
+                if icons.classes.contains_key(&class.species) {
+                    continue;
+                }
+                let asset = GuiAsset::ShipClassIcon { species: class.species, state: ShipIconState::Alive };
+                if let Some(bytes) = asset.read(vfs, None) {
+                    icons.classes.insert(class.species, data_url("image/svg+xml", &bytes));
+                }
+            }
+        }
+        icons
+    }
+}
+
+fn data_url(mime: &str, bytes: &[u8]) -> String {
+    format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// A search as the catalog's names are folded: accents removed, lowercased,
@@ -60,7 +105,7 @@ pub(super) fn ship_matches(ship: &ShipEntry, needle: &str) -> bool {
 
 /// The tree, keeping only the branches a search for `query` finds. An empty
 /// query keeps everything.
-pub(super) fn catalog_view(catalog: &ShipCatalog, query: &str) -> CatalogView {
+pub(super) fn catalog_view(catalog: &ShipCatalog, icons: &CatalogIcons, query: &str) -> CatalogView {
     let needle = fold_query(query);
     let mut nations = Vec::new();
     for nation in &catalog.nations {
@@ -78,13 +123,19 @@ pub(super) fn catalog_view(catalog: &ShipCatalog, query: &str) -> CatalogView {
             classes.push(CatalogClass {
                 species: format!("{:?}", class.species),
                 label: species_name(&class.species).to_owned(),
+                icon: icons.classes.get(&class.species).cloned(),
                 ships,
             });
         }
         if classes.is_empty() {
             continue;
         }
-        nations.push(CatalogNation { nation: nation.nation.clone(), label: nation.display_name.clone(), classes });
+        nations.push(CatalogNation {
+            nation: nation.nation.clone(),
+            label: nation.display_name.clone(),
+            flag: icons.flags.get(&nation.nation).cloned(),
+            classes,
+        });
     }
 
     CatalogView { nations }
@@ -105,7 +156,6 @@ fn ship_row(ship: &ShipEntry) -> CatalogShip {
 mod tests {
     use wows_toolkit_viewmodel::ship_catalog::ClassGroup;
     use wows_toolkit_viewmodel::ship_catalog::NationGroup;
-    use wowsunpack::game_params::types::Species;
 
     use super::*;
 
@@ -158,7 +208,7 @@ mod tests {
 
     #[test]
     fn an_unaccented_search_finds_an_accented_ship() {
-        let view = catalog_view(&catalog(), "smal");
+        let view = catalog_view(&catalog(), &CatalogIcons::default(), "smal");
 
         assert_eq!(param_indices(&view), ["PWSD110"]);
         assert_eq!(view.nations.len(), 1);
@@ -167,12 +217,12 @@ mod tests {
 
     #[test]
     fn an_accented_search_finds_it_too() {
-        assert_eq!(param_indices(&catalog_view(&catalog(), "Sm\u{e5}")), ["PWSD110"]);
+        assert_eq!(param_indices(&catalog_view(&catalog(), &CatalogIcons::default(), "Sm\u{e5}")), ["PWSD110"]);
     }
 
     #[test]
     fn an_empty_search_keeps_the_whole_tree() {
-        let view = catalog_view(&catalog(), " ");
+        let view = catalog_view(&catalog(), &CatalogIcons::default(), " ");
 
         assert_eq!(param_indices(&view), ["PWSD110", "PWSD108", "PJSB018"]);
         assert_eq!(view.nations[1].classes[0].ships[0].label, "X Yamato");
@@ -180,6 +230,6 @@ mod tests {
 
     #[test]
     fn a_search_with_no_match_leaves_no_branch() {
-        assert!(catalog_view(&catalog(), "iowa").nations.is_empty());
+        assert!(catalog_view(&catalog(), &CatalogIcons::default(), "iowa").nations.is_empty());
     }
 }
