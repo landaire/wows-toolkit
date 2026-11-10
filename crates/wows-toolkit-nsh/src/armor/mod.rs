@@ -15,6 +15,8 @@ mod module;
 mod pen;
 mod render;
 mod state;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 mod tree;
 mod view;
 

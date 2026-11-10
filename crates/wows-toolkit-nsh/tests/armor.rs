@@ -70,6 +70,8 @@ fn registries() -> Vec<nsh_core::element::Registry> {
 fn start() -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
+    // The armor service outlives each app, so a panel the last test opened would still be open.
+    wows_toolkit_nsh::armor::test_support::reset_panels();
     let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1600.0), Points(1000.0))).expect("the desktop viewport is applied");
