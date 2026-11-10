@@ -29,6 +29,10 @@ pub enum RendererError {
     UnknownWindow { replay_id: String },
     #[error("there is no replay to render")]
     NothingToRender,
+    #[error("there is no ship with entity {entity_id:?} in this battle")]
+    UnknownEntity { entity_id: String },
+    #[error("ship {entity_id} took no recorded hits, so there is no armor to show")]
+    NoArmorToShow { entity_id: String },
     #[error("the settings database could not be read, so there is no game data to read the replay with")]
     NoGameData,
 }

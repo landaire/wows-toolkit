@@ -107,6 +107,7 @@ impl Session {
         let result = {
             let mut viewer = self.lock();
             let result = change(&mut viewer);
+            feed_armor(&mut viewer);
             if viewer.take_changed() {
                 self.bump();
             }
@@ -184,10 +185,8 @@ impl Session {
             };
             let read = minimap::extract_events(&path, &game_data);
             match read {
-                // What each ship took is read for the armor viewer, which
-                // this viewport does not feed.
-                Ok((read, _shots)) => {
-                    session.update(|viewer| viewer.events_found(read.events, read.viewer_team));
+                Ok((read, shots)) => {
+                    session.update(|viewer| viewer.events_found(read.events, read.viewer_team, shots));
                 }
                 Err(err) => {
                     log::warn!("renderer: the battle's events could not be read: {err}");
@@ -245,6 +244,7 @@ impl Session {
                         }
                     }
                 }
+                feed_armor(&mut viewer);
                 if links.has_changed().unwrap_or(false) {
                     let link = links.borrow_and_update().clone();
                     viewer.set_collab(link);
@@ -347,4 +347,12 @@ fn placed_ranges(ships: &[Annotation], space_size: f32, version: wowsunpack::dat
     let Some(loaded) = crate::game_data::newest_loaded() else { return Vec::new() };
 
     board::ship_ranges(ships, loaded.provider(), Some(version), space_size)
+}
+
+/// Tells the armor viewer what the ship it follows had taken by where playback
+/// is, when that changed.
+fn feed_armor(viewer: &mut Viewer) {
+    if let Some(followed) = viewer.follow_armor() {
+        crate::armor::follow_realtime(followed.hits, followed.health, followed.at);
+    }
 }

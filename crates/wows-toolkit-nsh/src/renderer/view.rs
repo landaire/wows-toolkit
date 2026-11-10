@@ -251,6 +251,11 @@ pub struct RangeSwitchView {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct ShipMenuView {
     pub player: String,
+    /// The ship's entity, in decimal, for the realtime armor request.
+    pub entity_id: String,
+    /// The realtime armor item's label, offered only for a ship the battle
+    /// recorded hits on.
+    pub realtime_armor: Option<String>,
     pub trail: bool,
     pub ranges: Vec<RangeSwitchView>,
     pub all_ranges_on: bool,
@@ -568,6 +573,10 @@ pub fn ship_menu(viewer: &Viewer, pick: &ShipPick) -> ShipMenuView {
 
     ShipMenuView {
         player: pick.player_name.clone(),
+        entity_id: pick.entity_id.raw().to_string(),
+        realtime_armor: viewer
+            .has_armor_to_show(pick.entity_id)
+            .then(|| t!("ui.renderer.context.realtime_armor").into_owned()),
         trail: viewer.trail_shown(&pick.player_name),
         ranges,
         all_ranges_on: filter == ALL_RANGES,

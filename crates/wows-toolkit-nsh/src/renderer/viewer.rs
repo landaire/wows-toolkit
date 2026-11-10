@@ -24,6 +24,7 @@ use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::KIND_COUNT;
+use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
@@ -52,6 +53,8 @@ use wows_toolkit_replay_data::playback::ShipPick;
 use wows_toolkit_replay_data::playback::TICK;
 use wows_toolkit_replay_data::playback::Track;
 use wows_toolkit_replay_data::playback::ZOOM_PER_PIXEL;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use wowsunpack::game_params::types::Species;
@@ -71,6 +74,9 @@ use crate::frames::PixelPoint;
 use crate::frames::PixelSize;
 use crate::frames::PointerButton;
 use crate::frames::SurfaceInput;
+use crate::renderer::armor_link::ArmorLink;
+use crate::renderer::armor_link::RealtimeFollow;
+use crate::renderer::armor_link::RealtimeShow;
 
 /// How far, in device pixels, a press may travel and still be a click.
 const CLICK_SLOP: f32 = 4.0;
@@ -247,6 +253,8 @@ pub struct Viewer {
 
     notice: Option<Notice>,
     next_notice: u32,
+    /// The armor viewer this viewport drives, once a ship's armor was asked for.
+    armor: ArmorLink,
 
     /// The frame on screen is stale.
     dirty: bool,
@@ -305,6 +313,7 @@ impl Viewer {
             catalog: None,
             notice: None,
             next_notice: 0,
+            armor: ArmorLink::default(),
             dirty: true,
             changed: true,
         }
@@ -501,7 +510,9 @@ impl Viewer {
         &mut self,
         events: Vec<TimelineEvent>,
         viewer_team: Option<TeamId>,
+        shots: HashMap<EntityId, ShipShotTimeline>,
     ) {
+        self.armor.set_shots(shots);
         self.events = events;
         self.viewer_team = viewer_team;
         self.events_read = true;
@@ -642,6 +653,34 @@ impl Viewer {
         let Some(track) = self.track() else { return };
         let frame = track.frame_at(at + track.battle_start.seconds());
         self.go_to(frame);
+    }
+
+    /// Moves playback to the frame drawn at `clock`, as the armor viewer's
+    /// health strip asks.
+    pub fn go_to_clock(&mut self, clock: GameClock) {
+        let Some(track) = self.track() else { return };
+        let frame = track.frame_at(clock.seconds());
+        self.go_to(frame);
+    }
+
+    /// Whether the armor viewer could show `entity`'s ship.
+    pub fn has_armor_to_show(&self, entity: EntityId) -> bool {
+        let loaded = crate::game_data::newest_loaded();
+        self.track().is_some_and(|track| self.armor.can_show(track, self.at, entity, loaded.as_deref()))
+    }
+
+    /// What the armor viewer opens on for `entity`, which this viewport then
+    /// keeps up to date.
+    pub fn show_armor(&mut self, entity: EntityId) -> Option<RealtimeShow> {
+        let loaded = crate::game_data::newest_loaded();
+        let Phase::Ready(track) = &self.phase else { return None };
+        self.armor.show(track, self.at, entity, loaded.as_deref())
+    }
+
+    /// What the followed ship had taken by where playback is, when that changed.
+    pub fn follow_armor(&mut self) -> Option<RealtimeFollow> {
+        let clock = GameClock(self.track()?.seconds_at(self.at));
+        self.armor.follow(clock)
     }
 
     fn jump_to_event(&mut self, event: Option<(f32, String)>) {

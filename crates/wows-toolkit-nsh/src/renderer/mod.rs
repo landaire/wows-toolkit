@@ -3,6 +3,7 @@
 //! minimap hover preview; a battle the session plays elsewhere; and the batch
 //! render of many replays to video.
 
+mod armor_link;
 pub(crate) mod batch;
 mod error;
 mod preview;
@@ -29,6 +30,7 @@ use nsh_core::file_dialog::SaveDialog;
 use nsh_core::prelude::*;
 use rust_i18n::t;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_replays::types::EntityId;
 use wows_toolkit_replay_data::playback;
 use wows_toolkit_replay_data::playback::ExportError;
 use wows_toolkit_replay_data::playback::INKS;
@@ -338,6 +340,25 @@ impl ReplayRenderer {
         let session = session(id)?;
         let viewer = session.lock();
         Ok(viewer.ship_under((x as f32, y as f32)).map(|pick| view::ship_menu(&viewer, &pick)))
+    }
+
+    /// Opens the armor viewer on the ship `entity_id` (decimal) was in, with
+    /// what it had taken by where playback is, and follows playback from then
+    /// on. The viewer's health strip seeks this viewport.
+    pub fn show_armor(id: u32, entity_id: String) -> Result<(), RendererError> {
+        let raw: u32 = entity_id.parse().map_err(|_| RendererError::UnknownEntity { entity_id: entity_id.clone() })?;
+        let session = session(id)?;
+        let Some(show) = session.update(|viewer| viewer.show_armor(EntityId::from(raw))) else {
+            return Err(RendererError::NoArmorToShow { entity_id });
+        };
+        crate::armor::show_realtime(show.param_index, show.display_name, show.hits, show.incoming);
+        let seeking = Arc::downgrade(&session);
+        crate::armor::set_seek_handler(move |clock| {
+            if let Some(session) = seeking.upgrade() {
+                session.update(|viewer| viewer.go_to_clock(clock));
+            }
+        });
+        Ok(())
     }
 
     pub fn set_trail(id: u32, player: String, on: bool) -> Result<RendererView, RendererError> {

@@ -519,6 +519,18 @@ function openShipMenu(port: Viewport, at: { x: number; y: number }) {
     { label: player, disabled: true },
     { type: "separator" },
     { label: labels.showTrail, checked: menu.trail, onSelect: () => port.run(() => ReplayRenderer.setTrail(id, player, !menu!.trail)) },
+    ...(menu.realtimeArmor
+      ? [{
+        label: menu.realtimeArmor,
+        onSelect: () => {
+          try {
+            ReplayRenderer.showArmor(id, menu!.entityId);
+          } catch (error) {
+            port.say(errorMessage(error));
+          }
+        },
+      }]
+      : []),
     { label: labels.onlyTrail, onSelect: () => port.run(() => ReplayRenderer.onlyTrail(id, player)) },
     { type: "separator" },
     { label: labels.ranges, disabled: true },
