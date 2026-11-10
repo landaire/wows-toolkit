@@ -113,6 +113,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 /// A board on its own surface, sized and set on the test map, with the map
 /// drawn.
 fn board_on_map(name: &str) -> Arc<Shared> {
+    crate::isolate_test_storage();
     let shared = Shared::start(&SurfaceId::new(name), Board::new(Some(test_game()), CapLayoutDb::default(), None));
     shared.surface().send_input(SurfaceInput::Resized { size: SIZE, scale: 1.0 });
     let value = {

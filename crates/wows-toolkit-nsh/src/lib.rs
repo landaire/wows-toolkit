@@ -29,6 +29,15 @@ pub use search::{Palette, QueryBar, ReplaySearch, ShipSearch};
 pub use stats::Stats;
 pub use unpacker::{Unpacker, UnpackerProps};
 
+/// Points this test process's settings database at a temporary directory, so
+/// a unit test never reads or writes the user's own data.
+#[cfg(test)]
+pub(crate) fn isolate_test_storage() {
+    wows_toolkit_config::storage_override::set(
+        std::env::temp_dir().join(format!("wows-toolkit-nsh-unit-{}", std::process::id())),
+    );
+}
+
 use nsh_core::prelude::{Registry, native_module};
 
 /// The native services imported by the TSX application.
