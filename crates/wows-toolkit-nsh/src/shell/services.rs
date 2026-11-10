@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
+use nsh_core::file_dialog::FileFilter;
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::JsObject;
+use nsh_core::prelude::PropEnum;
 use nsh_core::prelude::background;
 use nsh_core::prelude::blocking;
 use nsh_core::prelude::module;
@@ -109,7 +113,60 @@ impl Shell {
     /// What the last run's crash left behind, removed as it is read so it is
     /// reported once. `None` when the last run did not crash.
     pub fn take_crash_report() -> Option<String> {
-        wows_toolkit_viewmodel::logging::take_crash_report()
+        let report = wows_toolkit_viewmodel::logging::take_crash_report();
+        // Kept for the session: a bug report copied later still names it.
+        if let Some(report) = &report {
+            *RECENT_CRASH.lock().unwrap_or_else(PoisonError::into_inner) = Some(report.clone());
+        }
+
+        report
+    }
+
+    /// Puts what a bug report needs on the clipboard: this build, the game
+    /// build loaded, the result mappings and how their last fetch went, and
+    /// the last crash, in the block the Discord channel asks for.
+    pub async fn copy_bug_report_info() -> Result<(), SettingsError> {
+        let settings = background(async {
+            let pool = crate::shell::settings::open().await?;
+            crate::shell::settings::load_from(&pool).await
+        })
+        .await
+        .map_err(SettingsError::Task)??;
+        let storage = wows_toolkit_config::storage_dir();
+        let report = wows_toolkit_viewmodel::bug_report::BugReportInfo {
+            constants_fetch: wows_toolkit_viewmodel::bug_report::constants_fetch_status(),
+            application_version: env!("CARGO_PKG_VERSION").to_owned(),
+            loaded_game_version: crate::game_data::newest_loaded()
+                .and_then(|loaded| loaded.version())
+                .map(wows_toolkit_viewmodel::bug_report::full_game_version),
+            downloaded_constants: wows_toolkit_viewmodel::bug_report::latest_downloaded_constants(storage.as_deref()),
+            constants_commit: settings.constants_commit,
+            recent_crash: RECENT_CRASH.lock().unwrap_or_else(PoisonError::into_inner).clone(),
+        };
+        nsh_core::prelude::set_clipboard(report.discord_code_block());
+
+        Ok(())
+    }
+
+    /// Installs a result mapping the reader picks as the newest loaded build's.
+    pub async fn import_constants(title: String) -> Result<ConstantsImport, ShellError> {
+        let Some(build) = crate::game_data::newest_loaded().map(|loaded| loaded.build()) else {
+            return Ok(ConstantsImport { state: ImportState::NoBuild, build: None });
+        };
+        let dialog = OpenDialog::files().title(title).filter(FileFilter::new("JSON", ["json"]));
+        let picked = nsh_core::prelude::pick_paths(dialog)
+            .await
+            .map_err(|error| ShellError::Dialog { reason: error.to_string() })?;
+        let Some(path) = picked.and_then(|mut paths| paths.pop()) else {
+            return Ok(ConstantsImport { state: ImportState::Cancelled, build: Some(build) });
+        };
+
+        blocking(move || wows_toolkit_replay_data::constants::import(&path, build))
+            .await
+            .map_err(ShellError::Task)?
+            .map_err(|reason| ShellError::ImportConstants { reason })?;
+
+        Ok(ConstantsImport { state: ImportState::Imported, build: Some(build) })
     }
 
     /// Where the rotated log files are written.
@@ -170,6 +227,26 @@ impl Shell {
     pub async fn check_for_update() -> Result<Option<ReleaseOffer>, UpdateError> {
         background(crate::shell::update::check_published()).await.map_err(UpdateError::Task)?
     }
+}
+
+/// The crash the last run left, once it has been read this session.
+static RECENT_CRASH: Mutex<Option<String>> = Mutex::new(None);
+
+/// What a result-mapping import came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum ImportState {
+    /// No game build is loaded, so there is nothing to import a mapping for.
+    NoBuild,
+    Cancelled,
+    Imported,
+}
+
+/// A result-mapping import, and the build it was for.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct ConstantsImport {
+    pub state: ImportState,
+    pub build: Option<u32>,
 }
 
 /// The log file put on the clipboard.
