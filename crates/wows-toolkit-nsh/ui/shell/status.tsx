@@ -2,8 +2,8 @@ import { signal, Text, View } from "nsh";
 import { t } from "../i18n";
 import { colors, semantic } from "../theme";
 
-/** One running job on the status strip: what it is, and how far it has got. */
-export type StatusJob = { label: string; done?: number; total?: number };
+/** One running job on the status strip: what it is, read in the current language, and how far it has got. */
+export type StatusJob = { label: () => string; done?: number; total?: number };
 
 const jobs = signal<Record<string, StatusJob>>({});
 
@@ -27,7 +27,7 @@ export function StatusBar() {
   return (
     <If when={shown().length > 0}>
       <View
-        accessibilityLabel="Running jobs"
+        accessibilityLabel={t("ui.app.status_running_jobs")}
         style={{ minHeight: 24, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}
       >
         <Each of={shown()}>
@@ -37,7 +37,7 @@ export function StatusBar() {
               const { done, total } = job();
               return done !== undefined && total !== undefined && total > 0 ? ` ${t("ui.app.status_of", { done, total })}` : "";
             };
-            return <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{`${job().label}${counted()}`}</Text>;
+            return <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{`${job().label()}${counted()}`}</Text>;
           }}
         </Each>
       </View>

@@ -4,7 +4,6 @@ import { AlertDialog, Button as BaseButton, Checkbox, Dialog, Input, Popover, Pr
 import { Menu } from "nsh/desktop";
 import {
   ReplayRenderer,
-  type BatchView,
   type PreviewView,
   type RendererRange,
   type RendererText,
@@ -807,45 +806,6 @@ export function WatchedPlaybackView(props: { replayId: string }) {
         </View>
       </If>
     </View>
-  );
-}
-
-const batch = signal<BatchView | null>(null);
-let followingBatch = false;
-
-async function followBatch() {
-  if (followingBatch) return;
-  followingBatch = true;
-  batch.set(ReplayRenderer.batch());
-  for (;;) {
-    batch.set(await ReplayRenderer.nextBatchChange(batch()?.revision ?? 0));
-  }
-}
-
-// Renders each replay in `paths` to its own video, into a folder the reader
-// picks or onto the clipboard. Progress shows in `BatchRenderStatus`.
-export async function renderReplaysToVideo(paths: string[], toClipboard: boolean): Promise<string | null> {
-  void followBatch();
-  try {
-    await ReplayRenderer.renderMany(paths, toClipboard);
-    return null;
-  } catch (error) {
-    return errorMessage(error);
-  }
-}
-
-// The batch render's progress line, for the app's status area.
-export function BatchRenderStatus() {
-  void followBatch();
-  return (
-    <If when={batch()?.text}>
-      <View accessibilityLabel="Batch render" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <If when={batch()!.running}>
-          <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={batch()!.text!}/></View>
-        </If>
-        <Text style={{ fontSize: 12, color: batch()!.failed ? colors.destructive : colors.mutedForeground }}>{batch()!.text}</Text>
-      </View>
-    </If>
   );
 }
 

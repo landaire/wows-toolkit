@@ -1,9 +1,10 @@
 import { signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
-import { Shell, type AppSettings } from "wows-toolkit/native";
-import { Button, centeredDialog, Surface } from "../components";
+import { GameData, Shell, type AppSettings } from "wows-toolkit/native";
+import { Button, centeredDialog, errorMessage, Surface } from "../components";
 import { applyLocale, t } from "../i18n";
 import { editSetting } from "../settings_store";
+import * as toast from "./toast";
 import { colors } from "../theme";
 
 /** What a fresh run still has to ask, in the order every front end asks it. */
@@ -131,6 +132,33 @@ export function FirstRunDialog() {
         <If when={current()?.kind === "language"}>
           <LanguageQuestion detected={detected()}/>
         </If>
+      </Surface>
+    </Dialog>
+  );
+}
+
+const refreshAsked = signal(false);
+
+/** Asks before re-reading every replay and rewriting what the index holds: long, and not worth starting twice. */
+export function confirmRefreshPersistedData() {
+  refreshAsked.set(true);
+}
+
+/** The confirmation for a full index refresh, mounted once over the whole window. */
+export function RefreshPersistedDataDialog() {
+  const refresh = () => {
+    refreshAsked.set(false);
+    void GameData.indexReplays("refreshAll").catch((error) => toast.failed(errorMessage(error)));
+  };
+  return (
+    <Dialog style={centeredDialog} open={refreshAsked()} onOpenChange={({ open }) => refreshAsked.set(open)}>
+      <Surface style={{ width: "100%", maxWidth: 520, padding: 20, gap: 14, backgroundColor: colors.popover }}>
+        <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.windows.refresh_persisted_data")}</Text>
+        <Text style={{ fontSize: 13, lineHeight: 19, color: colors.popoverForeground }}>{t("ui.dialogs.refresh_persisted_data_message")}</Text>
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+          <Button label={t("ui.buttons.cancel")} onPress={() => refreshAsked.set(false)}/>
+          <Button label={t("ui.buttons.refresh_persisted_data_confirm")} variant="primary" onPress={refresh}/>
+        </View>
       </Surface>
     </Dialog>
   );

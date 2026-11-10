@@ -10,13 +10,14 @@ import { AboutDialog, openAbout } from "./shell/about";
 import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, TabStrip, wowsDirInvalid } from "./shell/chrome";
 import { CrashDialog, reportLastCrash } from "./shell/diagnostics";
 import { contributeAll, copyBugReportInfo, copyLatestLog, setTheme } from "./shell/actions";
-import { askFirstRun, FirstRunDialog } from "./shell/first_run";
+import { askFirstRun, confirmRefreshPersistedData, FirstRunDialog, RefreshPersistedDataDialog } from "./shell/first_run";
 import { ErrorDialog, WarningDialog } from "./shell/notices";
 import { DebugNotice, debugMode, StatusBar } from "./shell/status";
+import { renderReplaysToVideo } from "./shell/batch_render";
 import * as toast from "./shell/toast";
 import { restartTwitch } from "./shell/twitch";
 import { checkForUpdate, UpdateDialog } from "./shell/update";
-import { GameDataStatus } from "./game_data";
+import { MissingBuildsDialog } from "./game_data";
 import { SessionButton } from "./collab";
 import { LauncherView } from "./launcher";
 import { activateStats, openDirectoryStats, StatsView } from "./stats";
@@ -25,9 +26,9 @@ import { bindSearchRowActions, bindSearchTab, searchFor, SearchView } from "./se
 import { bindPalette, CommandPalette, openPalette } from "./palette";
 import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { UnpackerView } from "./unpacker";
-import { BatchRenderStatus, followForcedWindows, MinimapPreview, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
+import { followForcedWindows, MinimapPreview, ReplayRendererView, WatchedPlaybackView } from "./renderer";
 import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
-import { importConstants, renderInInspector, ReplayInspectorView, watchSharedWindow } from "./replay_inspector";
+import { importConstants, openReplayDirectoryDialog, renderInInspector, ReplayInspectorView, watchSharedWindow } from "./replay_inspector";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -152,9 +153,16 @@ bindPalette({
         (error) => showNotice(errorMessage(error)),
       );
     },
+    openReplayDirectory: () => {
+      selectTab("replay-inspector");
+      void openReplayDirectoryDialog();
+    },
     indexAllReplays: () => void GameData.indexReplays("fillGaps"),
-    refreshPersistedData: () => void GameData.indexReplays("refreshAll"),
-    contributeAllReplays: ({ ignoreLedger }) => void contributeAll(ignoreLedger ? "ignore" : "consult"),
+    refreshPersistedData: confirmRefreshPersistedData,
+    contributeAllReplays: ({ ignoreLedger }) => {
+      selectTab("replay-inspector");
+      void contributeAll(ignoreLedger ? "ignore" : "consult");
+    },
     copyLatestLog: () => void copyLatestLog(),
     copyBugReportInfo: () => void copyBugReportInfo(),
     importConstants: () => {
@@ -240,16 +248,14 @@ function App() {
         menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsBoard}/>}
       />
       <View style={{ flex: 1, minHeight: 0 }}><Content/></View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}>
-        <View style={{ paddingHorizontal: 8 }}><GameDataStatus/></View>
-        <BatchRenderStatus/>
-        <View style={{ flex: 1 }}><StatusBar/></View>
-      </View>
+      <StatusBar/>
       <DebugNotice/>
       <DropScrim/>
       <toast.ToastLayer/>
       <WarningDialog/>
       <ErrorDialog/>
+      <MissingBuildsDialog/>
+      <RefreshPersistedDataDialog/>
       <AboutDialog version={startup.version}/>
       <UpdateDialog/>
       <CrashDialog/>

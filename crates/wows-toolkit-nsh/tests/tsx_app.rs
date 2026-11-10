@@ -756,14 +756,14 @@ fn top_level_navigation_and_application_menu_work() {
     app.press("Go to: Settings").unwrap();
     app.wait_for("Application Settings").unwrap();
 
-    app.press("label:Open application menu").unwrap();
+    app.press("label:File").unwrap();
     app.wait_for("Tactics Board").unwrap();
     app.press("About").unwrap();
     app.wait_for("Made by landaire.").unwrap();
     app.press("Cancel").unwrap();
     app.wait_for_gone("Made by landaire.", std::time::Duration::from_secs(5)).unwrap();
 
-    app.press("label:Open application menu").unwrap();
+    app.press("label:File").unwrap();
     app.press("Tactics Board").unwrap();
     app.wait_for("label:Ranges").unwrap();
     app.press("Close").unwrap();

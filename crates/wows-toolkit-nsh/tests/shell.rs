@@ -159,6 +159,52 @@ fn a_game_directory_without_an_install_is_refused_and_flagged() {
     app.submit("label:World of Warships Directory").unwrap();
     app.wait_for("text:/^World of Warships directory is not valid/").unwrap();
     assert_ne!(stored(keys::WOWS_DIR), Some(serde_json::json!("/no/such/install")), "a directory that is not an install is not saved");
+    app.wait_for("text:! Settings").unwrap();
+}
+
+#[test]
+fn the_palette_asks_before_refreshing_persisted_data() {
+    let guard = lock();
+    answered();
+    let mut app = app(guard);
+
+    app.press_key("mod+k").unwrap();
+    app.press("Refresh Persisted Replay Data...").unwrap();
+    app.wait_for("text:/^Re-parse every replay/").unwrap();
+    app.press("Cancel").unwrap();
+    app.wait_for_gone("text:/^Re-parse every replay/", Duration::from_secs(5)).unwrap();
+}
+
+#[test]
+fn the_palette_opens_a_replay_directory_in_the_inspector() {
+    let guard = lock();
+    answered();
+    let directory = storage().join("palette-directory");
+    std::fs::create_dir_all(&directory).expect("the replay directory is created");
+    let root = wows_toolkit_replay_data::directories::canonical_root(directory.clone());
+    let mut app = app(guard);
+
+    app.press_key("mod+,").unwrap();
+    app.wait_for("Application Settings").unwrap();
+    app.on_pick_paths(vec![directory]).unwrap();
+    app.press_key("mod+k").unwrap();
+    app.press("Open Replay Directory...").unwrap();
+    app.wait_for_gone("Application Settings", Duration::from_secs(5)).unwrap();
+    let shown = root.display().to_string();
+    app.wait_until("the directory opens in the inspector", Duration::from_secs(5), |screen| screen.shows(&shown)).unwrap();
+}
+
+#[test]
+fn sending_all_replays_from_the_palette_shows_the_inspector() {
+    let guard = lock();
+    answered();
+    let mut app = app(guard);
+
+    app.press_key("mod+,").unwrap();
+    app.wait_for("Application Settings").unwrap();
+    app.press_key("mod+k").unwrap();
+    app.press("Send All Replays to ShipBuilds").unwrap();
+    app.wait_for_gone("Application Settings", Duration::from_secs(5)).unwrap();
 }
 
 #[test]
@@ -204,14 +250,14 @@ fn the_menu_opens_about_and_links() {
     answered();
     let mut app = app(guard);
 
-    app.press("label:Open application menu").unwrap();
+    app.press("label:File").unwrap();
     app.press("About").unwrap();
     app.wait_for("Made by landaire.").unwrap();
     app.wait_for("text:https://github.com/landaire/wows-toolkit").unwrap();
     app.press("Cancel").unwrap();
     app.wait_for_gone("Made by landaire.", Duration::from_secs(5)).unwrap();
 
-    app.press("label:Open application menu").unwrap();
+    app.press("label:File").unwrap();
     app.press("Create Issue").unwrap();
     app.wait_until("the issue page opens", Duration::from_secs(5), |screen| {
         screen.opened_urls().iter().any(|url| url.contains("/issues/new"))

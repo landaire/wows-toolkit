@@ -253,7 +253,9 @@ function Permissions(props: { current: CollabState }) {
         onChange={(checked) => Collab.setPermissions(props.current.annotationsLocked, checked)}
       />
       <View style={{ flexDirection: "row" }}>
-        <Button label={t("ui.collab.reset_overrides")} onPress={() => Collab.resetOverrides()}/>
+        <View tooltip={t("ui.collab.reset_overrides_tooltip")}>
+          <Button label={t("ui.collab.reset_overrides")} onPress={() => Collab.resetOverrides()}/>
+        </View>
       </View>
     </View>
   );

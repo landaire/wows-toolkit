@@ -1,18 +1,67 @@
 import type { JSX } from "nsh";
 import { signal, Text, View } from "nsh";
-import { Checkbox, Dialog } from "nsh/base";
-import { GameData, type GameDataSnapshot } from "wows-toolkit/native";
-import { Button, centeredDialog, Surface } from "./components";
+import { Checkbox, Dialog, Menu, Progress } from "nsh/base";
+import { GameData, type GameDataSnapshot, type JobReport } from "wows-toolkit/native";
+import { Button, centeredDialog, MenuRow, Surface } from "./components";
 import { t } from "./i18n";
-import { colors } from "./theme";
+import { CommitInput } from "./shell/controls";
+import { showError } from "./shell/notices";
+import { clearStatusJob, setStatusJob } from "./shell/status";
+import * as toast from "./shell/toast";
+import { colors, controlRadius } from "./theme";
 
 const snapshot = signal<GameDataSnapshot | null>(null);
 const actionError = signal<string | null>(null);
 const ticked = signal<number[]>([]);
 let watching = false;
+/** The newest job report already said; `null` until one has been. */
+let lastSaid: number | null = null;
+
+/** How long a failure may be before it is worth a window rather than a toast. */
+const TOO_LONG_TO_TOAST = 160;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Says a finished job's report wherever the reader is. */
+function say(job: JobReport) {
+  switch (job.level) {
+    case "ok":
+      toast.ok(job.text);
+      return;
+    case "warn":
+      toast.warn(job.text);
+      return;
+    case "failed":
+      // A sentence is a toast; a chain of causes is read at length and copied.
+      if (job.text.length > TOO_LONG_TO_TOAST || job.text.includes("\n")) showError(job.text);
+      else toast.failed(job.text);
+  }
+}
+
+/** Takes a new snapshot: the reports not yet said, and the running jobs onto the status strip. */
+function adopt(next: GameDataSnapshot) {
+  snapshot.set(next);
+
+  for (const job of next.reports) {
+    if (lastSaid !== null && job.id <= lastSaid) continue;
+    lastSaid = job.id;
+    say(job);
+  }
+
+  const cache = next.cache;
+  if (cache.job) {
+    const job = cache.job;
+    setStatusJob("game-data-cache", { label: () => cacheJobText(job), done: cache.progressDone ?? undefined, total: cache.progressTotal ?? undefined });
+  } else {
+    clearStatusJob("game-data-cache");
+  }
+  if (next.index.running) {
+    setStatusJob("replay-index", { label: () => t("ui.app.status_indexing"), done: next.index.done, total: next.index.total });
+  } else {
+    clearStatusJob("replay-index");
+  }
 }
 
 /// Starts the service and the change feed once, whichever view mounts first.
@@ -23,8 +72,8 @@ function ensureWatching() {
   watching = true;
   void GameData.start()
     .then((next) => {
-      snapshot.set(next);
-      return GameData.watch((changed) => snapshot.set(changed));
+      adopt(next);
+      return GameData.watch(adopt);
     })
     .catch((error) => actionError.set(errorMessage(error)));
 }
@@ -49,46 +98,6 @@ function formatBytes(bytes: number): string {
     unit += 1;
   }
   return unit === 0 ? `${value} ${units[unit]}` : `${value.toFixed(2)} ${units[unit]}`;
-}
-
-function statusText(state: GameDataSnapshot | null): string {
-  if (!state) {
-    return actionError() ? t("ui.game_data.status_unavailable", { error: actionError()! }) : t("ui.game_data.status_starting");
-  }
-  switch (state.phase) {
-    case "notConfigured":
-      return state.reason ? t("ui.game_data.status_reason", { reason: state.reason }) : t("ui.game_data.status_not_configured");
-    case "loading":
-      return state.version ? t("ui.replay.loading_game_data_version", { version: state.version }) : t("ui.replay.loading_game_data");
-    case "ready":
-      return t("ui.game_data.status_ready", { version: state.version ?? t("ui.game_data.unknown_version"), build: state.build ?? "?" });
-    case "failed":
-      return t("ui.replay.game_data_failed", { error: state.reason ?? t("ui.game_data.unknown_reason") });
-  }
-}
-
-/// The status-bar indicator: what game data is loaded, and the index pass
-/// while one runs.
-export function GameDataStatus() {
-  ensureWatching();
-  const state = () => snapshot();
-  const indexing = () => {
-    const index = state()?.index;
-    return index?.running ? `${t("ui.app.status_indexing")} ${t("ui.app.status_of", { done: index.done, total: index.total })}` : null;
-  };
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-      <Text
-        accessibilityLabel={t("ui.game_data.status_label")}
-        style={{ fontSize: 11.5, color: state()?.phase === "failed" ? colors.destructive : colors.mutedForeground }}
-      >
-        {statusText(state())}
-      </Text>
-      <If when={indexing()}>
-        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{indexing()}</Text>
-      </If>
-    </View>
-  );
 }
 
 function Section(props: { title: string; description: string; children: JSX.Element }) {
@@ -122,8 +131,35 @@ function cacheJobText(job: string): string {
   }
 }
 
+/** The cache maintenance jobs, under one menu as the other front ends keep them. */
+function CacheActions(props: { busy: boolean }) {
+  const trigger = (
+    <View
+      role="button"
+      accessibilityLabel={t("ui.settings.wows.cache.actions")}
+      accessibilityState={{ disabled: props.busy }}
+      tooltip={t("ui.settings.wows.cache.actions_tooltip")}
+      hoverStyle={props.busy ? undefined : { backgroundColor: colors.accent }}
+      style={{ minHeight: 30, paddingHorizontal: 10, justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius(), opacity: props.busy ? 0.5 : 1 }}
+    >
+      <Text style={{ fontSize: 12.5, color: colors.foreground }}>{t("ui.settings.wows.cache.actions")}</Text>
+    </View>
+  );
+  return (
+    <If when={!props.busy} else={trigger}>
+      <Menu align="start" offset={4} margin={8} trigger={trigger}>
+        <Surface style={{ minWidth: 200, padding: 4, backgroundColor: colors.popover }}>
+          <MenuRow label={t("ui.settings.wows.cache.check_updates")} onSelect={() => void run(() => GameData.checkCacheUpdates())}/>
+          <MenuRow label={t("ui.settings.wows.cache.validate")} onSelect={() => void run(() => GameData.validateCache())}/>
+        </Surface>
+      </Menu>
+    </If>
+  );
+}
+
 /// The Settings section for the game-data cache: where it is, what it holds,
 /// and the maintenance that keeps it matching the published repository.
+/// Everything below the directory needs a measured cache holding a build.
 export function GameDataCacheSection() {
   ensureWatching();
   const cache = () => snapshot()?.cache;
@@ -144,55 +180,54 @@ export function GameDataCacheSection() {
           <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t("ui.game_data.auto_dump_hint")}</Text>
         </View>
       </Checkbox>
-      <Row>
-        <Line label={t("ui.game_data.cache_directory_label")} text={`${t("ui.settings.wows.cache.directory_label")} ${cache()?.directory ?? t("ui.game_data.unavailable")}`}/>
-        <Button label={t("ui.settings.wows.cache.browse")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.pickCacheDirectory())}/>
-      </Row>
-      <If when={cache()?.directory}>
-        <Row>
-          <Line
-            label={t("ui.game_data.cache_size_label")}
-            text={cache()?.sizeBytes == null ? t("ui.game_data.measuring") : t("ui.settings.wows.cache.stats", { size: formatBytes(cache()!.sizeBytes!), count: builds() })}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text style={{ fontSize: 12.5, color: colors.cardForeground }}>{t("ui.settings.wows.cache.directory_label")}</Text>
+        <View style={{ flex: 1 }}>
+          <CommitInput
+            label={t("ui.game_data.cache_directory_label")}
+            value={cache()?.directorySetting ?? ""}
+            placeholder={cache()?.defaultDirectory ?? ""}
+            onCommit={(value) => void run(() => GameData.setCacheDirectory(value))}
           />
+        </View>
+        <Button label={t("ui.settings.wows.cache.browse")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.pickCacheDirectory())}/>
+      </View>
+      <If when={cache()?.directory != null && builds() > 0}>
+        <Row>
+          <Line label={t("ui.game_data.cache_size_label")} text={t("ui.settings.wows.cache.stats", { size: formatBytes(cache()?.sizeBytes ?? 0), count: builds() })}/>
           <Button label={t("ui.settings.wows.cache.open_folder")} variant="ghost" onPress={() => void run(() => GameData.openCacheFolder())}/>
           <If when={builds() > 1}>
             <Button label={t("ui.settings.wows.cache.delete_old")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.deleteOldCacheBuilds())}/>
           </If>
         </Row>
         <Row>
-          <Button label={t("ui.settings.wows.cache.check_updates")} disabled={busy() || builds() === 0} onPress={() => void run(() => GameData.checkCacheUpdates())}/>
-          <Button label={t("ui.settings.wows.cache.validate")} disabled={busy() || builds() === 0} onPress={() => void run(() => GameData.validateCache())}/>
-          <Button label={t("ui.game_data.check_replays")} disabled={busy()} onPress={() => void run(() => GameData.checkMissingBuilds())}/>
+          <CacheActions busy={busy()}/>
+          <If when={busy()}>
+            <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={cacheJobText(cache()?.job ?? "")}/></View>
+          </If>
         </Row>
-      </If>
-      <If when={cache()?.job}>
-        <Line
-          tone="muted"
-          text={`${cacheJobText(cache()!.job!)}${cache()?.progressTotal ? ` ${cache()!.progressDone}/${cache()!.progressTotal}` : ""}`}
-        />
-      </If>
-      <If when={(cache()?.updates.length ?? 0) > 0}>
-        <Row>
-          <Line text={t("ui.settings.wows.cache.updates_available", { count: cache()!.updates.length })}/>
-          <Button label={t("ui.settings.wows.cache.update_all")} variant="primary" disabled={busy()} onPress={() => void run(() => GameData.updateCacheBuilds())}/>
-        </Row>
-      </If>
-      <If when={(cache()?.repair.length ?? 0) > 0}>
-        <Row>
-          <Line tone="error" text={t("ui.settings.wows.cache.repair_needed", { count: cache()!.repair.length })}/>
-          <Button label={t("ui.settings.wows.cache.repair")} variant="danger" disabled={busy()} onPress={() => void run(() => GameData.repairCacheBuilds())}/>
-        </Row>
-      </If>
-      <If when={cache()?.message}>
-        <Line label={t("ui.game_data.cache_message_label")} text={cache()!.message!}/>
-      </If>
-      <If when={cache()?.failure}>
-        <Line tone="error" text={cache()!.failure!}/>
+        <If when={(cache()?.progressTotal ?? 0) > 0}>
+          <Line tone="muted" text={`${cache()?.progressDone ?? 0} / ${cache()?.progressTotal ?? 0}`}/>
+        </If>
+        <If when={(cache()?.updates.length ?? 0) > 0}>
+          <Row>
+            <Line text={t("ui.settings.wows.cache.updates_available", { count: cache()!.updates.length })}/>
+            <Button label={t("ui.settings.wows.cache.update_all")} variant="primary" disabled={busy()} onPress={() => void run(() => GameData.updateCacheBuilds())}/>
+          </Row>
+        </If>
+        <If when={(cache()?.repair.length ?? 0) > 0}>
+          <Row>
+            <Line tone="error" text={t("ui.settings.wows.cache.repair_needed", { count: cache()!.repair.length })}/>
+            <Button label={t("ui.settings.wows.cache.repair")} variant="danger" disabled={busy()} onPress={() => void run(() => GameData.repairCacheBuilds())}/>
+          </Row>
+        </If>
+        <If when={cache()?.failure}>
+          <Line tone="error" text={cache()!.failure!}/>
+        </If>
       </If>
       <If when={actionError()}>
         <Line tone="error" text={actionError()!}/>
       </If>
-      <MissingBuildsDialog/>
     </Section>
   );
 }
@@ -202,8 +237,10 @@ function toggleBuild(build: number, checked: boolean) {
   ticked.set(checked ? [...current, build] : current);
 }
 
-/// The offer to download the game data the listed replays need.
-function MissingBuildsDialog() {
+/// The offer to download the game data the listed replays need, mounted once
+/// over the whole window so it opens on whichever tab asked.
+export function MissingBuildsDialog() {
+  ensureWatching();
   const offer = () => snapshot()?.offer;
   let seeded = "";
   const rows = () => {
@@ -296,50 +333,6 @@ export function ReplayIndexSection() {
       </If>
       <If when={actionError()}>
         <Line tone="error" text={actionError()!}/>
-      </If>
-    </Section>
-  );
-}
-
-/// The Settings section for the replay directories open beside the game's
-/// own: adding, pinning so they reopen at startup, and closing them.
-export function ReplayDirectoriesSection() {
-  ensureWatching();
-  const directories = () => snapshot()?.directories ?? [];
-  return (
-    <Section title={t("ui.game_data.directories_heading")} description={t("ui.game_data.directories_description")}>
-      <If when={directories().length === 0}>
-        <Line tone="muted" text={t("ui.game_data.directories_none")}/>
-      </If>
-      <Each of={directories()} key={(entry) => entry.path}>
-        {(entry) => (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            <View style={{ flexGrow: 1, flexBasis: 320, minWidth: 240, gap: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>
-                {entry().pinned ? t("ui.game_data.directory_pinned", { label: entry().label }) : entry().label}
-              </Text>
-              <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{entry().path}</Text>
-            </View>
-            <Button
-              label={t(entry().pinned ? "ui.game_data.unpin_directory" : "ui.game_data.pin_directory", { label: entry().label })}
-              variant="ghost"
-              onPress={() => void run(() => GameData.pinDirectory(entry().path, !entry().pinned))}
-            />
-            <Button label={t("ui.game_data.show_directory", { label: entry().label })} variant="ghost" onPress={() => void run(() => GameData.revealDirectory(entry().path))}/>
-            <Button
-              label={t("ui.game_data.close_directory", { label: entry().label })}
-              variant="ghost"
-              disabled={entry().pinned}
-              onPress={() => void run(async () => GameData.closeDirectory(entry().path))}
-            />
-          </View>
-        )}
-      </Each>
-      <Row>
-        <Button label={t("ui.game_data.add_directory")} onPress={() => void run(() => GameData.pickDirectory())}/>
-      </Row>
-      <If when={snapshot()?.directoriesError}>
-        <Line tone="error" text={snapshot()!.directoriesError!}/>
       </If>
     </Section>
   );
