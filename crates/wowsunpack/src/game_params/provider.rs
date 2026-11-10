@@ -2308,12 +2308,7 @@ impl GameMetadataProvider {
             debug!("requesting file: {path}");
 
             let mut file_data = Vec::new();
-            vfs.join(path)
-                .expect("failed to join path")
-                .open_file()
-                .expect("failed to open file")
-                .read_to_end(&mut file_data)
-                .expect("failed to read file");
+            vfs.join(path)?.open_file()?.read_to_end(&mut file_data)?;
 
             Ok(Cow::Owned(file_data))
         });
