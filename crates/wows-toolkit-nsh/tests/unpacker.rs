@@ -212,20 +212,6 @@ fn configure_settings(wows_dir: Option<&Path>, output_dir: Option<&Path>) -> Mut
     turn
 }
 
-#[cfg(feature = "buck")]
-fn start() -> nsh_testing::Headless {
-    let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
-    let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
-    let config = nsh_engine::EngineConfig {
-        ui_sets: registries(),
-        ..nsh_engine::EngineConfig::new(nsh_engine::Bundle::source(source))
-    };
-    let mut app = nsh_testing::Headless::start(config).expect("the TSX app starts");
-    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app
-}
-
-#[cfg(not(feature = "buck"))]
 fn start() -> nsh_testing::Headless {
     let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");

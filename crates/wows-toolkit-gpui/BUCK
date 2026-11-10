@@ -109,6 +109,7 @@ workspace_binary(
 )
 
 _TEST_SUPPORT_VARIANTS = {
+    "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",

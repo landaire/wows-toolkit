@@ -85,21 +85,6 @@ fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
 
-#[cfg(feature = "buck")]
-fn start() -> nsh_testing::Headless {
-    configure_test_storage();
-    let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
-    let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
-    let config = nsh_engine::EngineConfig {
-        ui_sets: registries(),
-        ..nsh_engine::EngineConfig::new(nsh_engine::Bundle::source(source))
-    };
-    let mut app = nsh_testing::Headless::start(config).expect("the TSX app starts");
-    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app
-}
-
-#[cfg(not(feature = "buck"))]
 fn start() -> nsh_testing::Headless {
     configure_test_storage();
     let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");

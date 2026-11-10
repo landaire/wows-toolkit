@@ -1,8 +1,14 @@
-#[cfg(target_os = "linux")]
-mod desktop;
+//! The WoWs Toolkit desktop app on Native Shell: the TSX interface in
+//! `crates/wows-toolkit-nsh/ui`, bundled at build time, over the native
+//! services of `wows_toolkit_nsh`.
 
 #[cfg(target_os = "linux")]
 use nsh_platform_linux as platform;
+
+/// The bundled TSX interface. The build names the file: Cargo's build script
+/// writes it, and Buck's `nsh_ui_bundle` rule does.
+#[cfg(target_os = "linux")]
+const BUNDLE: &str = include_str!(env!("NSH_BUNDLE_PATH"));
 
 #[cfg(target_os = "linux")]
 fn main() -> platform::gtk4::glib::ExitCode {
@@ -55,11 +61,11 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     wows_toolkit_nsh::frames::native::register(&components);
 
     let capabilities = bundle_capabilities()?;
-    let bundle = platform::Bundle::source(bundle_source()?)
+    let bundle = platform::Bundle::source(BUNDLE.to_owned())
         .with_app_id(Some(APP_ID))
         .with_capabilities_json(capabilities.as_deref())
         .map_err(std::io::Error::other)?;
-    Ok(desktop::run(
+    Ok(wows_toolkit_nsh::desktop::run(
         bundle,
         platform::AppOptions {
             // Named and versioned as the other front ends' windows are, so a
@@ -73,26 +79,9 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     ))
 }
 
-#[cfg(all(target_os = "linux", feature = "buck"))]
-fn bundle_source() -> Result<String, Box<dyn std::error::Error>> {
-    Ok(include_str!(env!("NSH_BUNDLE_PATH")).to_owned())
-}
-
-#[cfg(all(target_os = "linux", not(feature = "buck")))]
-fn bundle_source() -> Result<String, Box<dyn std::error::Error>> {
-    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
-    let bundled = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
-        entry,
-        minify: false,
-        split: false,
-        ui_sets: vec![nsh_base::registry().into(), wows_toolkit_nsh::registry().into()],
-    })?;
-    Ok(bundled.code)
-}
-
 #[cfg(target_os = "linux")]
 fn bundle_capabilities() -> Result<Option<String>, serde_json::Error> {
-    let manifest: serde_json::Value = serde_json::from_str(include_str!("../ui/nsh.json"))?;
+    let manifest: serde_json::Value = serde_json::from_str(wows_toolkit_nsh::APP_MANIFEST)?;
     Ok(manifest.get("capabilities").map(serde_json::Value::to_string))
 }
 

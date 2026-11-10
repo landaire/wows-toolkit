@@ -13564,94 +13564,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "env_filter-2.0.0.crate",
-    sha256 = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217",
-    strip_prefix = "env_filter-2.0.0",
-    urls = ["https://static.crates.io/crates/env_filter/2.0.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "env_filter-2.0.0",
-    srcs = [":env_filter-2.0.0.crate"],
-    crate = "env_filter",
-    crate_root = "env_filter-2.0.0.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "env_filter",
-        "CARGO_MANIFEST_DIR": "env_filter-2.0.0.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Filter log events using environment variables ",
-        "CARGO_PKG_NAME": "env_filter",
-        "CARGO_PKG_REPOSITORY": "https://github.com/rust-cli/env_logger",
-        "CARGO_PKG_VERSION": "2.0.0",
-        "CARGO_PKG_VERSION_MAJOR": "2",
-        "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "regex",
-        "std",
-    ],
-    visibility = [],
-    deps = [
-        ":log-0.4.34",
-        ":regex-1.13.1",
-    ],
-)
-
-alias(
-    name = "env_logger",
-    actual = ":env_logger-0.11.11",
-    visibility = ["PUBLIC"],
-)
-
-http_archive(
-    name = "env_logger-0.11.11.crate",
-    sha256 = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6",
-    strip_prefix = "env_logger-0.11.11",
-    urls = ["https://static.crates.io/crates/env_logger/0.11.11/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "env_logger-0.11.11",
-    srcs = [":env_logger-0.11.11.crate"],
-    crate = "env_logger",
-    crate_root = "env_logger-0.11.11.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "env_logger",
-        "CARGO_MANIFEST_DIR": "env_logger-0.11.11.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A logging implementation for `log` which is configured via an environment variable. ",
-        "CARGO_PKG_NAME": "env_logger",
-        "CARGO_PKG_REPOSITORY": "https://github.com/rust-cli/env_logger",
-        "CARGO_PKG_VERSION": "0.11.11",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
-        "CARGO_PKG_VERSION_PATCH": "11",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "auto-color",
-        "color",
-        "default",
-        "humantime",
-        "regex",
-    ],
-    visibility = [],
-    deps = [
-        ":anstream-1.0.0",
-        ":anstyle-1.0.14",
-        ":env_filter-2.0.0",
-        ":jiff-0.2.35",
-        ":log-0.4.34",
-    ],
-)
-
-http_archive(
     name = "epaint-0.37.0.crate",
     sha256 = "97bac86ae3dde93fc3951e790951caea739ff39a6c89d909cdaf1d9278dbb1bd",
     strip_prefix = "epaint-0.37.0",
@@ -18270,7 +18182,7 @@ cargo.rust_library(
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_kit_assets",
-        "CARGO_MANIFEST_DIR": "gpui-component-612a4e35e10905a2",
+        "CARGO_MANIFEST_DIR": "gpui-component-612a4e35e10905a2/crates/assets",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Default bundled assets for GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-kit-assets",
@@ -18423,14 +18335,13 @@ cargo.rust_library(
         ":anyhow-1.0.104",
         ":async-channel-2.5.0",
         ":async-task-4.7.1",
-        ":backtrace-0.3",
         ":backtrace-0.3.76",
         ":bitflags-2.13.2",
         ":chrono-0.4.45",
         ":derive_more-2.1.1",
         ":etagere-0.2.15",
         ":futures-0.3.34",
-        ":futures-concurrency-7",
+        ":futures-concurrency-7.7.1",
         ":gpui-pre-collections-0.3.11",
         ":gpui-pre-http-client-0.3.11",
         ":gpui-pre-macros-0.3.11",
@@ -18450,9 +18361,9 @@ cargo.rust_library(
         ":parking-2.2.1",
         ":parking_lot-0.12.5",
         ":pin-project-1.1.13",
-        ":postage-0.5",
+        ":postage-0.5.0",
         ":profiling-1.0.18",
-        ":proptest-1",
+        ":proptest-1.12.0",
         ":rand-0.9.5",
         ":raw-window-handle-0.6.2",
         ":regex-1.13.1",
@@ -18473,7 +18384,7 @@ cargo.rust_library(
         ":usvg-0.46.0",
         ":uuid-1.29.2",
         ":waker-fn-1.2.0",
-        ":web-time-1",
+        ":web-time-1.1.0",
     ],
 )
 
@@ -18716,7 +18627,7 @@ cargo.rust_library(
         ":futures-0.3.34",
         ":http-1.5.0",
         ":http-body-1.1.0",
-        ":log-0.4",
+        ":log-0.4.34",
         ":parking_lot-0.12.5",
         ":serde-1.0.229",
         ":serde_json-1.0.151",
@@ -18964,7 +18875,7 @@ cargo.rust_library(
         "linux-x86_64": dict(
             deps = [
                 ":gpui-pre-linux-0.3.11",
-                ":gpui-pre-wgpu-0.3",
+                ":gpui-pre-wgpu-0.3.11",
             ],
         ),
         "macos-arm64": dict(
@@ -19351,7 +19262,7 @@ cargo.rust_library(
         ":gpui-pre-0.3.11",
         ":gpui-pre-collections-0.3.11",
         ":gpui-pre-util-0.3.11",
-        ":image-0.25",
+        ":image-0.25.10",
         ":itertools-0.14.0",
         ":log-0.4.34",
         ":parking_lot-0.12.5",
@@ -26099,8 +26010,8 @@ cargo.rust_binary(
     ],
     visibility = [],
     deps = [
+        ":cc-1.4.7",
         ":pkg-config-0.3.34",
-        "//third-party/rust:cc-1",
     ],
 )
 
@@ -31271,6 +31182,57 @@ cargo.rust_library(
     ],
 )
 
+http_archive(
+    name = "nsh-dev-0.4.0.crate",
+    sha256 = "838f6e989c192376e931b32e58a132352cee34aece15fc63421d477948ca9d36",
+    strip_prefix = "nsh-dev-0.4.0",
+    urls = ["https://static.crates.io/crates/nsh-dev/0.4.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "nsh-dev-0.4.0",
+    srcs = [":nsh-dev-0.4.0.crate"],
+    crate = "nsh_dev",
+    crate_root = "nsh-dev-0.4.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "nsh_dev",
+        "CARGO_MANIFEST_DIR": "nsh-dev-0.4.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Development tooling: dev-server protocol, server (CLI side) and client (host side).",
+        "CARGO_PKG_NAME": "nsh-dev",
+        "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/nsh",
+        "CARGO_PKG_VERSION": "0.4.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(
+            features = ["client"],
+            deps = [":tungstenite-0.30.0"],
+        ),
+        "macos-arm64": dict(
+            features = ["client"],
+            deps = [":tungstenite-0.30.0"],
+        ),
+        "windows-msvc": dict(
+            features = ["client"],
+            deps = [":tungstenite-0.30.0"],
+        ),
+    },
+    visibility = [],
+    deps = [
+        ":base64-0.22.1",
+        ":dunce-1.0.5",
+        ":log-0.4.34",
+        ":serde-1.0.229",
+        ":serde_json-1.0.151",
+    ],
+)
+
 alias(
     name = "nsh-engine",
     actual = ":nsh-engine-0.4.0",
@@ -31304,19 +31266,18 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "js",
+        "js-core",
+    ],
     platform = {
         "linux-x86_64": dict(
             features = [
-                "js",
-                "js-core",
                 "net",
                 "shader",
             ],
             deps = [
                 ":libc-0.2.189",
-                ":nsh-js-0.4.0",
-                ":nsh-package-0.4.0",
-                ":oxc_sourcemap-9.0.0",
                 ":pollster-0.4.0",
                 ":ureq-3.4.2",
                 ":wgpu-29.0.4",
@@ -31334,6 +31295,9 @@ cargo.rust_library(
         ":crossbeam-channel-0.5.17",
         ":log-0.4.34",
         ":nsh-core-0.4.0",
+        ":nsh-js-0.4.0",
+        ":nsh-package-0.4.0",
+        ":oxc_sourcemap-9.0.0",
         ":rustc-hash-2.1.3",
         ":serde_json-1.0.151",
         ":tokio-1.53.1",
@@ -31482,11 +31446,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":getrandom-0.3.4"],
+        ),
+        "macos-arm64": dict(
+            deps = [":getrandom-0.3.4"],
+        ),
+        "windows-msvc": dict(
+            deps = [":getrandom-0.3.4"],
+        ),
+    },
     visibility = [],
     deps = [
         ":base64-0.22.1",
         ":ed25519-dalek-2.2.0",
-        ":getrandom-0.3.4",
         ":nsh-core-0.4.0",
         ":serde-1.0.229",
         ":serde_json-1.0.151",
@@ -31580,16 +31554,27 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "bundle",
         "default",
+        "js",
         "live",
     ],
     visibility = [],
     deps = [
+        ":base64-0.22.1",
         ":crossbeam-channel-0.5.17",
+        ":dunce-1.0.5",
         ":log-0.4.34",
+        ":nsh-bundler-0.4.0",
         ":nsh-core-0.4.0",
+        ":nsh-dev-0.4.0",
         ":nsh-engine-0.4.0",
+        ":nsh-js-0.4.0",
+        ":quickjs-jit-0.14.1",
         ":regex-1.13.1",
+        ":serde-1.0.229",
+        ":serde_json-1.0.151",
+        ":tokio-1.53.1",
         ":ureq-3.4.2",
     ],
 )
@@ -55294,6 +55279,53 @@ cargo.rust_library(
         ":rustls-0.23.45",
         ":rustls-pki-types-1.15.1",
         ":sha1-0.10.7",
+        ":thiserror-2.0.20",
+    ],
+)
+
+http_archive(
+    name = "tungstenite-0.30.0.crate",
+    sha256 = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22",
+    strip_prefix = "tungstenite-0.30.0",
+    urls = ["https://static.crates.io/crates/tungstenite/0.30.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "tungstenite-0.30.0",
+    srcs = [":tungstenite-0.30.0.crate"],
+    crate = "tungstenite",
+    crate_root = "tungstenite-0.30.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "tungstenite",
+        "CARGO_MANIFEST_DIR": "tungstenite-0.30.0.crate",
+        "CARGO_PKG_AUTHORS": "Alexey Galakhov:Daniel Abramov",
+        "CARGO_PKG_DESCRIPTION": "Lightweight stream-based WebSocket implementation",
+        "CARGO_PKG_NAME": "tungstenite",
+        "CARGO_PKG_REPOSITORY": "https://github.com/snapview/tungstenite-rs",
+        "CARGO_PKG_VERSION": "0.30.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "30",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "data-encoding",
+        "handshake",
+        "http",
+        "httparse",
+        "sha1",
+    ],
+    visibility = [],
+    deps = [
+        ":bytes-1.12.1",
+        ":data-encoding-2.11.1",
+        ":http-1.5.0",
+        ":httparse-1.10.1",
+        ":log-0.4.34",
+        ":rand-0.10.3",
+        ":sha1-0.11.0",
         ":thiserror-2.0.20",
     ],
 )

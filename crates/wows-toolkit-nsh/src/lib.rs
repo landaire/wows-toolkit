@@ -5,6 +5,8 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 pub mod armor;
 pub mod clipboard;
 pub mod collab;
+#[cfg(target_os = "linux")]
+pub mod desktop;
 pub mod frames;
 pub mod game_data;
 mod launcher;
@@ -38,6 +40,9 @@ pub(crate) fn isolate_test_storage() {
         std::env::temp_dir().join(format!("wows-toolkit-nsh-unit-{}", std::process::id())),
     );
 }
+
+/// The app's `nsh.json`: its name, id and the capabilities it asks for.
+pub const APP_MANIFEST: &str = include_str!("../ui/nsh.json");
 
 use nsh_core::prelude::{Registry, native_module};
 

@@ -1,14 +1,21 @@
 use nsh_core::{Points, Size};
 
+fn registries() -> Vec<nsh_core::element::Registry> {
+    vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
+}
+
+fn start() -> nsh_testing::Headless {
+    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
+    nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
+}
+
 fn app() -> nsh_testing::Headless {
     let storage = std::env::temp_dir().join(format!("wows-toolkit-nsh-tactics-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&storage);
     std::fs::create_dir(&storage).expect("the test settings directory is created");
     wows_toolkit_config::storage_override::set(storage);
 
-    let registries = vec![nsh_base::registry(), wows_toolkit_nsh::registry()];
-    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
-    let mut app = nsh_testing::tsx(&entry, registries).expect("the TSX app starts");
+    let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
     app.set_environment("desktop", |environment| {
         environment.os = nsh_core::platform::Os::Linux;

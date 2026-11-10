@@ -17,8 +17,8 @@ use gtk::prelude::GtkWindowExt as _;
 use gtk::prelude::ObjectExt as _;
 use gtk::prelude::WidgetExt as _;
 use gtk::glib;
-use wows_toolkit_nsh::shell::DEFAULT_ZOOM;
-use wows_toolkit_nsh::shell::window::MainWindowGeometry;
+use crate::shell::DEFAULT_ZOOM;
+use crate::shell::window::MainWindowGeometry;
 
 /// The host call the shell makes when the zoom setting changes.
 const ZOOM_CALL: &str = "shell.zoom";
@@ -59,7 +59,7 @@ pub fn run(bundle: platform::Bundle, options: platform::AppOptions) -> glib::Exi
 }
 
 fn open(app: &gtk::Application, bundle: platform::Bundle, options: platform::AppOptions) {
-    let remembered = wows_toolkit_nsh::shell::window::remembered();
+    let remembered = crate::shell::window::remembered();
     let size = remembered
         .and_then(|remembered| remembered.inner_size_points)
         .map(|[width, height]| (width.round() as i32, height.round() as i32))
@@ -175,8 +175,8 @@ fn store(window: &gtk::ApplicationWindow) {
         maximized: window.is_maximized(),
         fullscreen: window.is_fullscreen(),
     };
-    if let Err(err) = wows_toolkit_nsh::shell::window::store(geometry) {
-        tracing::error!("window geometry: {}", wows_toolkit_nsh::shell::chain(&err));
+    if let Err(err) = crate::shell::window::store(geometry) {
+        tracing::error!("window geometry: {}", crate::shell::chain(&err));
     }
 }
 

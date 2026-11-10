@@ -64,11 +64,17 @@ fn test_game() -> Arc<dyn BoardGame> {
     // machine may have none it looks for.
     let fonts = vfs.join("gui/fonts").expect("a fonts path");
     fonts.create_dir_all().expect("the fonts directory");
+    // Read from the source tree rather than embedded: Buck compiles this crate
+    // from a copy of its own files only, as it reads the replay fixtures.
+    let face = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../wows-toolkit-gpui/assets/fonts/Phosphor.ttf"),
+    )
+    .expect("the test font is readable");
     fonts
         .join("Warhelios.ttf")
         .and_then(|path| path.create_file())
         .expect("the font file")
-        .write_all(include_bytes!("../../../wows-toolkit-gpui/assets/fonts/Phosphor.ttf"))
+        .write_all(&face)
         .expect("the font is written");
     let space = vfs.join(SPACE).expect("a space path");
     space.create_dir_all().expect("the space directory");

@@ -6,6 +6,7 @@ members = [
     "crates/wows-toolkit-hardening",
     "crates/wows-toolkit-gpui",
     "crates/wows-toolkit-nsh",
+    "crates/wows-toolkit-nsh-app",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-toolkit-launcher",
     "crates/wows-toolkit-replay-data",

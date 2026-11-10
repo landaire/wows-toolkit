@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_integration_tests", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 export_file(
     name = "_cargo_manifest",
@@ -11,9 +11,8 @@ genrule(
     srcs = glob(["ui/**"]),
     out = "bundle.js",
     cmd = "$(exe //build-support/nsh-bundle:nsh_bundle) $SRCDIR/ui/App.tsx $OUT",
-    visibility = [],
+    visibility = ["//crates/wows-toolkit-nsh-app/..."],
 )
-
 
 NSH_COMMON_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
@@ -36,7 +35,6 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:humansize",
     "//third-party/rust:image",
     "//third-party/rust:reqwest",
-    "//third-party/rust:rustls",
     "//third-party/rust:tracing",
     "//third-party/rust:tracing-appender",
     "//third-party/rust:tracing-subscriber",
@@ -58,23 +56,33 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:tokio",
     "//third-party/rust:url",
     "//third-party/rust:tempfile",
-] + os_select(
+]
+
+NSH_PLATFORM_DEPS = os_select(
     macos = [],
     linux = ["//third-party/rust:nsh-platform-linux"],
     windows = [],
 )
 
-NSH_DEPS = [
+NSH_SHARED_DEPS = [
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
 ] + NSH_COMMON_DEPS
 
-NSH_TEST_DEPS = [
-    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
-    "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
-    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
-] + NSH_COMMON_DEPS
+NSH_DEPS = NSH_SHARED_DEPS + NSH_PLATFORM_DEPS
+
+# The test-support builds of the shared crates, so a test target links one
+# build of each and not the shipping one beside it.
+_TEST_SUPPORT_VARIANTS = {
+    "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
+    "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher": "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+}
+
+NSH_TEST_DEPS = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in NSH_SHARED_DEPS] + NSH_PLATFORM_DEPS
 
 workspace_library(
     name = "wows_toolkit_nsh",
@@ -95,16 +103,19 @@ workspace_library(
     deps = NSH_TEST_DEPS,
 )
 
-workspace_binary(
-    name = "nsh_bin",
+workspace_test(
+    name = "wows_toolkit_nsh_test",
     crate = "wows_toolkit_nsh",
+    crate_root = "src/lib.rs",
     package = "wows-toolkit-nsh",
     version = "1.0.3",
-    crate_root = "src/main.rs",
-    env = {"NSH_BUNDLE_PATH": "$(location :nsh_ui_bundle)"},
-    features = ["buck"],
-    resources = [":nsh_ui_bundle"],
-    deps = NSH_DEPS + [":wows_toolkit_nsh"],
+    features = ["test-support"],
+    deps = NSH_TEST_DEPS,
+    test_deps = [
+        "//third-party/rust:nsh-testing",
+        "//third-party/rust:nsh-engine",
+        "//third-party/rust:parking_lot",
+    ],
 )
 
 workspace_integration_tests(
@@ -112,8 +123,6 @@ workspace_integration_tests(
     version = "1.0.3",
     library = ":wows_toolkit_nsh_test_support",
     deps = NSH_TEST_DEPS,
-    features = ["buck"],
-    run_env = {"NSH_BUNDLE_PATH": "$(location :nsh_ui_bundle)"},
     test_deps = [
         "//third-party/rust:nsh-testing",
         "//third-party/rust:nsh-engine",

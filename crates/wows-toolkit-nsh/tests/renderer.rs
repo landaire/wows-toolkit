@@ -1,33 +1,67 @@
-//! Headless tests of the replay renderer's controls over the real TSX views.
+//! Headless tests of the replay renderer's controls, docked in the replay
+//! inspector of the real TSX app.
 
-#![cfg(not(feature = "buck"))]
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use nsh_core::{Points, Size};
 
 const FIXTURE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
+const SAMPLE_TITLE: &str = "Shimakaze - Fault Line";
 
-/// An app showing only the renderer on `replay`, through an entry written for
-/// the test: the view takes the replay's path as a prop.
-fn renderer_app(replay: &std::path::Path) -> (nsh_testing::Headless, tempfile::TempDir) {
-    static STORAGE: std::sync::LazyLock<tempfile::TempDir> =
-        std::sync::LazyLock::new(|| tempfile::tempdir().expect("a settings directory is created"));
-    wows_toolkit_config::storage_override::set(STORAGE.path().to_owned());
+static TEST_APP_LOCK: Mutex<()> = Mutex::new(());
 
-    let ui = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/renderer");
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let entry = dir.path().join("App.tsx");
-    std::fs::write(
-        &entry,
-        format!(
-            "import {{ mount, View }} from \"nsh\";\nimport {{ ReplayRendererView }} from {ui:?};\nmount(() => <View style={{{{ flex: 1 }}}}><ReplayRendererView path={replay:?}/></View>);\n",
-            ui = ui.display().to_string(),
-            replay = replay.display().to_string(),
-        ),
-    )
-    .expect("the entry is written");
-    let mut app = nsh_testing::tsx(&entry, vec![nsh_base::registry(), wows_toolkit_nsh::registry()]).expect("the TSX app starts");
-    app.set_viewport(Size::new(Points(1200.0), Points(900.0))).expect("the viewport is applied");
-    (app, dir)
+struct TestApp {
+    app: nsh_testing::Headless,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl std::ops::Deref for TestApp {
+    type Target = nsh_testing::Headless;
+
+    fn deref(&self) -> &Self::Target {
+        &self.app
+    }
+}
+
+impl std::ops::DerefMut for TestApp {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.app
+    }
+}
+
+fn registries() -> Vec<nsh_core::element::Registry> {
+    vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
+}
+
+fn start() -> nsh_testing::Headless {
+    let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
+    nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
+}
+
+/// The app, every replay the inspector opens read as the sample report, so a
+/// renderer can be asked for without a game install.
+fn app() -> TestApp {
+    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let storage = std::env::temp_dir().join(format!("wows-toolkit-nsh-renderer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir(&storage).expect("the test settings directory is created");
+    wows_toolkit_config::storage_override::set(storage);
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
+    let mut app = start();
+    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
+    TestApp { app, _guard: guard }
+}
+
+/// Opens `replay` in the inspector and docks a renderer for it.
+fn render(app: &mut TestApp, replay: PathBuf) {
+    app.on_pick_paths(vec![replay]).unwrap();
+    app.press("label:Open").unwrap();
+    app.press("Open Replay File...").unwrap();
+    app.wait_for(SAMPLE_TITLE).unwrap();
+    app.press("label:Actions").unwrap();
+    app.press("Render Replay").unwrap();
 }
 
 #[test]
@@ -36,7 +70,8 @@ fn a_replay_that_cannot_be_read_says_so_and_refuses_the_transport() {
     let broken = dir.path().join("broken.wowsreplay");
     std::fs::write(&broken, b"not a replay").expect("the file is written");
 
-    let (mut app, _entry) = renderer_app(&broken);
+    let mut app = app();
+    render(&mut app, broken);
 
     app.wait_for("This replay could not be played back").unwrap();
     app.wait_for("text:/the replay could not be read/").unwrap();
@@ -45,9 +80,10 @@ fn a_replay_that_cannot_be_read_says_so_and_refuses_the_transport() {
 
 #[test]
 fn the_transport_and_popovers_are_offered_for_a_replay() {
-    let replay = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FIXTURE);
+    let replay = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FIXTURE);
 
-    let (mut app, _entry) = renderer_app(&replay);
+    let mut app = app();
+    render(&mut app, replay);
 
     app.wait_for("Replay renderer").unwrap();
     for control in ["Seek", "Zoom", "Clock", "Jump to start", "Play", "Events"] {

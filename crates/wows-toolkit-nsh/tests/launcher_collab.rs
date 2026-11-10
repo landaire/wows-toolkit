@@ -54,23 +54,6 @@ fn app() -> TestApp {
 
 /// Starts the app once `prepare` has run against the test settings database,
 /// under the same lock, so no other test changes the database in between.
-#[cfg(feature = "buck")]
-fn app_after(prepare: impl FnOnce()) -> TestApp {
-    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    wows_toolkit_config::storage_override::set(test_storage().to_path_buf());
-    prepare();
-    let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
-    let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
-    let config = nsh_engine::EngineConfig {
-        ui_sets: registries(),
-        ..nsh_engine::EngineConfig::new(nsh_engine::Bundle::source(source))
-    };
-    let mut app = nsh_testing::Headless::start(config).expect("the TSX app starts");
-    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    TestApp { app, _guard: guard }
-}
-
-#[cfg(not(feature = "buck"))]
 fn app_after(prepare: impl FnOnce()) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     wows_toolkit_config::storage_override::set(test_storage().to_path_buf());

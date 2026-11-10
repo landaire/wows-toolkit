@@ -72,7 +72,6 @@ fn registries() -> Vec<nsh_core::element::Registry> {
 
 /// Starts the app with `wows_dir` saved as the WoWs directory and the service
 /// rebound to it.
-#[cfg(not(feature = "buck"))]
 fn app_with(wows_dir: Option<&Path>) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
@@ -87,30 +86,6 @@ fn app_with(wows_dir: Option<&Path>) -> TestApp {
 
     let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");
-    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    TestApp { app, _guard: guard }
-}
-
-#[cfg(feature = "buck")]
-fn app_with(wows_dir: Option<&Path>) -> TestApp {
-    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    configure_test_storage();
-    save_setting(keys::WOWS_DIR, &wows_dir.map(|dir| dir.display().to_string()).unwrap_or_default());
-    // The first-run questions and the startup update check are the shell's
-    // tests' to exercise; here they would stand in front of the sections.
-    for answered in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
-        save_setting(answered, &true);
-    }
-    save_setting(keys::CHECK_FOR_UPDATES, &false);
-    wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
-
-    let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
-    let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
-    let config = nsh_engine::EngineConfig {
-        ui_sets: registries(),
-        ..nsh_engine::EngineConfig::new(nsh_engine::Bundle::source(source))
-    };
-    let mut app = nsh_testing::Headless::start(config).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
     TestApp { app, _guard: guard }
 }

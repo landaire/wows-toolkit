@@ -83,18 +83,6 @@ fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
 
-#[cfg(feature = "buck")]
-fn start() -> nsh_testing::Headless {
-    let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
-    let source = std::fs::read_to_string(path).expect("the generated TSX bundle is readable");
-    let config = nsh_engine::EngineConfig {
-        ui_sets: registries(),
-        ..nsh_engine::EngineConfig::new(nsh_engine::Bundle::source(source))
-    };
-    nsh_testing::Headless::start(config).expect("the TSX app starts")
-}
-
-#[cfg(not(feature = "buck"))]
 fn start() -> nsh_testing::Headless {
     let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
@@ -323,6 +311,7 @@ fn importing_constants_without_a_loaded_build_is_refused() {
     let mut app = app(guard);
 
     app.press_key("mod+k").unwrap();
+    app.wait_for("Import constants.json File...").unwrap();
     app.press("Import constants.json File...").unwrap();
     app.wait_for("Load a game build first").unwrap();
     assert!(app.screen().file_requests().is_empty(), "no mapping is asked for without a build to install it for");

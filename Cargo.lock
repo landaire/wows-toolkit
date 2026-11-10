@@ -19072,7 +19072,6 @@ dependencies = [
  "log",
  "notify",
  "nsh-base",
- "nsh-bundler",
  "nsh-core",
  "nsh-engine",
  "nsh-platform-linux",
@@ -19081,7 +19080,6 @@ dependencies = [
  "png 0.18.1",
  "reqwest 0.12.28",
  "rust-i18n 3.1.5",
- "rustls",
  "serde",
  "serde_json",
  "sqlx",
@@ -19114,6 +19112,21 @@ dependencies = [
  "wowsunpack",
  "wt-collab-client",
  "wt-translations",
+]
+
+[[package]]
+name = "wows-toolkit-nsh-app"
+version = "1.0.3"
+dependencies = [
+ "log",
+ "nsh-base",
+ "nsh-bundler",
+ "nsh-platform-linux",
+ "rustls",
+ "serde_json",
+ "wows-toolkit-config",
+ "wows-toolkit-nsh",
+ "wows-toolkit-viewmodel",
 ]
 
 [[package]]
