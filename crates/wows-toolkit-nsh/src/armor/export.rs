@@ -10,6 +10,7 @@ use std::sync::Arc;
 use nsh_core::prelude::JsObject;
 use nsh_core::prelude::PropEnum;
 use rust_i18n::t;
+use wows_toolkit_armor::load_ship::HullUpgrade;
 use wows_toolkit_viewmodel::armor::export::ExportDefaults;
 use wows_toolkit_viewmodel::armor::export::ExportDraft;
 use wows_toolkit_viewmodel::armor::export::TextureResolution;
@@ -180,7 +181,7 @@ enum SizeState {
 
 pub(super) struct ExportDialog {
     source: ShipSource,
-    hull_upgrades: Vec<(String, String)>,
+    hull_upgrades: Vec<HullUpgrade>,
     meta: MetaState,
     size: SizeState,
     /// Camo ladders being read, so none is asked for twice.
@@ -205,7 +206,7 @@ impl ExportDialog {
             .hull_upgrades
             .iter()
             .enumerate()
-            .map(|(index, (key, label))| ChoiceView {
+            .map(|(index, HullUpgrade { key, label })| ChoiceView {
                 key: key.clone(),
                 label: label.clone(),
                 // No hull chosen is the first, which is what the exporter takes.
@@ -513,10 +514,10 @@ fn read_ship_meta(assets: &ShipAssets, param_index: &str, hull: Option<String>) 
 }
 
 /// The hull upgrades the ship offers, in the pane's own vocabulary.
-fn hull_upgrades_for(assets: &ShipAssets, param_index: &str) -> Vec<(String, String)> {
+fn hull_upgrades_for(assets: &ShipAssets, param_index: &str) -> Vec<HullUpgrade> {
     use wowsunpack::game_params::types::GameParamProvider;
 
     let Some(param) = assets.metadata().game_param_by_index(param_index) else { return Vec::new() };
     let Some(vehicle) = param.vehicle() else { return Vec::new() };
-    wows_toolkit_armor::load_ship::build_hull_upgrade_names(vehicle)
+    wows_toolkit_armor::load_ship::build_hull_upgrades(vehicle)
 }

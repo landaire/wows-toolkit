@@ -18,6 +18,7 @@ use wows_toolkit_armor::scene::ArmorScene;
 use wows_toolkit_armor::scene::Isolate;
 use wows_toolkit_armor::upload::DisplaySettings;
 use wows_toolkit_armor::viewport::types::LightingSettings;
+use wows_toolkit_armor::visibility::PartKey;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
 use wows_toolkit_viewmodel::formatting::byte_size;
@@ -290,7 +291,7 @@ impl Armor {
     }
 
     pub async fn disable_material(zone: String, material: String) -> Result<(), String> {
-        scene(move |scene| scene.disable_material(&zone, &material)).await
+        scene(move |scene| scene.disable_material(PartKey { zone, part: material })).await
     }
 
     /// The tree's All and None.
@@ -317,7 +318,7 @@ impl Armor {
     pub async fn set_part(zone: String, part: String, checked: bool) -> Result<(), String> {
         change(move |state| {
             let plates = state.part_thicknesses(&zone, &part);
-            state.act(|scene| scene.toggle_part(zone, part, plates, checked));
+            state.act(|scene| scene.toggle_part(PartKey { zone, part }, plates, checked));
         })
         .await
     }
@@ -327,7 +328,7 @@ impl Armor {
     }
 
     pub async fn hover_tree_part(zone: String, part: String) -> Result<(), String> {
-        scene(move |scene| scene.set_sidebar_hover(SidebarHighlightKey::Part(zone, part))).await
+        scene(move |scene| scene.set_sidebar_hover(SidebarHighlightKey::Part(PartKey { zone, part }))).await
     }
 
     pub async fn hover_tree_plate(zone: String, part: String, tenths: i32) -> Result<(), String> {

@@ -83,20 +83,24 @@ fn edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
     if a < b { (a, b) } else { (b, a) }
 }
 
-/// The gap ribbons for `armor`, and how many gaps they draw.
+/// The gap ribbons for an armor model.
+pub struct GapMesh {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+    /// How many gaps the ribbons draw.
+    pub gap_count: usize,
+}
+
+/// The gap ribbons for `armor`.
 ///
 /// Only the triangles the viewport is currently showing are walked: hiding a
 /// plate opens a hole in the model that is not a hole in the ship, and
 /// counting it would report the reader's own filter back to them.
-pub fn build_gap_mesh(
-    armor: &LoadedShipArmor,
-    visibility: VisibilityFilter,
-    show_zero_mm: bool,
-) -> (Vec<Vertex>, Vec<u32>, usize) {
+pub fn build_gap_mesh(armor: &LoadedShipArmor, visibility: VisibilityFilter, show_zero_mm: bool) -> GapMesh {
     let edges = boundary_edges(armor, visibility, show_zero_mm);
     let open = wide_enough_to_pass(&edges);
     let (vertices, indices) = ribbons(&open);
-    (vertices, indices, open.len())
+    GapMesh { vertices, indices, gap_count: open.len() }
 }
 
 /// Every edge of the shown surface that belongs to exactly one triangle, and

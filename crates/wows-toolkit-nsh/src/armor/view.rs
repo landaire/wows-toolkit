@@ -790,14 +790,14 @@ fn hull_view(scene: &ArmorScene) -> HullView {
     };
     let selection = scene.hull_selection();
     let upgrades = armor
-        .hull_upgrade_names
+        .hull_upgrades
         .iter()
         .enumerate()
-        .map(|(index, (key, label))| ChoiceView {
-            key: key.clone(),
-            label: label.clone(),
+        .map(|(index, upgrade)| ChoiceView {
+            key: upgrade.key.clone(),
+            label: upgrade.label.clone(),
             // No choice yet is the stock hull, listed first.
-            selected: selection.hull.as_ref().map_or(index == 0, |chosen| chosen == key),
+            selected: selection.hull.as_ref().map_or(index == 0, |chosen| *chosen == upgrade.key),
         })
         .collect();
     let modules = armor

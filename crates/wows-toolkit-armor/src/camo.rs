@@ -28,6 +28,7 @@ use wowsunpack::export::camouflage::UvTransform;
 
 use super::upload_hull::mfm_stem;
 use crate::load_ship::LoadedShipArmor;
+use crate::viewport::types::RgbaImage;
 
 /// Hermite smoothstep from 0 at `e0` to 1 at `e1`. Ports `common.rs:625-628`.
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -118,6 +119,12 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
     LowFreqLuma { w, h, data: sum }
 }
 
+/// Textures keyed by the hull part they cover.
+///
+/// The stock albedo is keyed by `.mfm` path and the composited camo by part
+/// stem, which is why the key is a plain `String` on both sides.
+pub type TexturesByPart = HashMap<String, RgbaImage>;
+
 /// Decode a camo scheme's per-stem textures into GPU-ready RGBA, compositing
 /// camos that carry a coverage alpha over the stock ship albedo (so the ship
 /// shows through the gaps and the hull is opaque). Opaque camos are passed
@@ -131,31 +138,13 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 /// stock detail stays in the parts the camo does not paint. That is entirely
 /// a property of the camo texture, so there is no waterline geometry involved
 /// here.
-/// One decoded texture: its size and its RGBA8 pixels.
-///
-/// A struct rather than a `(u32, u32, Vec<u8>)`, because a width and a height
-/// are the same type and nothing but the field name says which is which.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RgbaTexture {
-    pub width: u32,
-    pub height: u32,
-    /// Four bytes per pixel, row-major.
-    pub pixels: Vec<u8>,
-}
-
-/// Textures keyed by the hull part they cover.
-///
-/// The stock albedo is keyed by `.mfm` path and the composited camo by part
-/// stem, which is why the key is a plain `String` on both sides.
-pub type TexturesByPart = HashMap<String, RgbaTexture>;
-
 pub fn build_active_camo(
     textures: &SchemeTextures,
     uv_transforms: &HashMap<String, UvTransform>,
     use_color_scheme: bool,
     hull_textures: &TexturesByPart,
 ) -> (TexturesByPart, HashMap<String, UvTransform>) {
-    let stock_by_stem: HashMap<&str, &RgbaTexture> = hull_textures.iter().map(|(p, t)| (mfm_stem(p), t)).collect();
+    let stock_by_stem: HashMap<&str, &RgbaImage> = hull_textures.iter().map(|(p, t)| (mfm_stem(p), t)).collect();
 
     let mut out_textures: TexturesByPart = HashMap::new();
     let mut uvs = uv_transforms.clone();
@@ -168,6 +157,7 @@ pub fn build_active_camo(
         let (cw, ch) = (camo.width(), camo.height());
         let has_coverage = camo.pixels().any(|p| p.0[3] < 250);
 
+        // A stem without a transform draws untiled.
         let t = uv_transforms.get(stem).cloned().unwrap_or_default();
         let is_tiled = t.scale != [1.0, 1.0] || t.offset != [0.0, 0.0];
         let stock = stock_by_stem.get(stem.as_str()).copied();
@@ -254,7 +244,7 @@ pub fn build_active_camo(
             rgba
         };
 
-        out_textures.insert(stem.clone(), RgbaTexture { width: cw, height: ch, pixels });
+        out_textures.insert(stem.clone(), RgbaImage { width: cw, height: ch, pixels });
     }
     (out_textures, uvs)
 }
@@ -355,7 +345,11 @@ pub struct CamoDecode {
 /// (a camo selection) as well as inline
 /// ([`recompute_active_camo`], which the reload path uses because it is
 /// already re-uploading the hull in the same pass).
-pub fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
+pub fn decode_active_camo(
+    id: CamoSchemeId,
+    cached: Option<Arc<SchemeTextures>>,
+    armor: &LoadedShipArmor,
+) -> CamoDecode {
     let (textures, decoded) = match cached {
         Some(t) => (t, None),
         None => match armor.camo_source.decode(id) {
@@ -395,11 +389,11 @@ mod tests {
     use wowsunpack::export::camouflage::UvTransform;
     use wowsunpack::export::gltf_export::CamoOrigin;
 
-    use super::RgbaTexture;
     use super::bilinear_rgba;
     use super::build_active_camo;
     use super::remap_camo_selection;
     use super::smoothstep;
+    use crate::viewport::types::RgbaImage;
 
     fn scheme(id: usize, display_name: &str, origin: CamoOrigin) -> CamoSchemeInfo {
         CamoSchemeInfo {
@@ -448,8 +442,8 @@ mod tests {
         out
     }
 
-    fn solid_rgba(pixel: [u8; 4], w: u32, h: u32) -> RgbaTexture {
-        RgbaTexture { width: w, height: h, pixels: pixel.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+    fn solid_rgba(pixel: [u8; 4], w: u32, h: u32) -> RgbaImage {
+        RgbaImage { width: w, height: h, pixels: pixel.iter().copied().cycle().take((w * h * 4) as usize).collect() }
     }
 
     #[test]
@@ -465,7 +459,7 @@ mod tests {
 
     #[test]
     fn bilinear_rgba_returns_the_solid_color_of_a_uniform_texture() {
-        let RgbaTexture { width: w, height: h, pixels: data } = solid_rgba([10, 20, 30, 255], 4, 4);
+        let RgbaImage { width: w, height: h, pixels: data } = solid_rgba([10, 20, 30, 255], 4, 4);
         let sample = bilinear_rgba(&data, w, h, 0.3, 0.7);
         assert_eq!(sample, [10.0, 20.0, 30.0, 255.0]);
     }

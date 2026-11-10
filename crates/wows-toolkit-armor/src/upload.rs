@@ -36,9 +36,9 @@ use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::viewport::camera::ArcballCamera;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_HULL;
+use crate::viewport::renderer::RenderLayer;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::Bounds;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
 
@@ -46,8 +46,10 @@ use super::load_ship::ArmorTriangleTooltip;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::transform_normal;
+use super::visibility::PartKey;
 use super::visibility::VisibilityFilter;
 use super::visibility::part_on;
+use super::visibility::plate_explicitly_hidden;
 
 /// The v1 display-settings subset (Task 7b's display-settings popover,
 /// `popover.rs`): plate edges, waterline (+ its own opacity), zero-mm plate
@@ -155,10 +157,11 @@ pub fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, 
     if visibility.show_hidden_only && !info.hidden {
         return false;
     }
-    if !part_on(visibility.part, &info.zone, info.material.name()) {
+    let part = PartKey { zone: info.zone.clone(), part: info.material.name().to_owned() };
+    if !part_on(visibility.part, &part) {
         return false;
     }
-    !visibility.plate.get(&derive_plate_key(info)).copied().unwrap_or(false)
+    !plate_explicitly_hidden(visibility.plate, &derive_plate_key(info))
 }
 
 /// Clears `viewport` and uploads `armor`'s armor meshes (thickness-colored,
@@ -222,7 +225,7 @@ fn upload_armor_meshes(
         }
 
         if !indices.is_empty() {
-            let mesh_id = viewport.add_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+            let mesh_id = viewport.add_mesh(device, &vertices, &indices, RenderLayer::Opaque);
             mesh_triangle_info.push((mesh_id, tooltips));
         }
     }
@@ -233,7 +236,7 @@ fn upload_armor_meshes(
 
     if display.show_waterline {
         let (verts, indices) = create_water_plane(0.0, armor.bounds, display.waterline_opacity);
-        viewport.add_world_space_mesh(device, &verts, &indices, LAYER_HULL);
+        viewport.add_world_space_mesh(device, &verts, &indices, RenderLayer::Hull);
     }
 
     viewport.mark_dirty();
@@ -253,8 +256,7 @@ pub fn upload_armor_to_viewport(
     display: DisplaySettings,
 ) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
     let mesh_triangle_info = upload_armor_meshes(viewport, device, armor, visibility, display);
-    let (min, max) = armor.bounds;
-    viewport.camera = ArcballCamera::from_bounds(min, max);
+    viewport.camera = ArcballCamera::from_bounds(armor.bounds);
     viewport.mark_dirty();
     mesh_triangle_info
 }
@@ -275,15 +277,11 @@ pub fn reupload_armor_plates(
 
 /// Create a water plane quad at the given Y height, extending beyond the hull
 /// bounding box. Ports `armor_viewer::ui::tab::create_water_plane` verbatim.
-fn create_water_plane(
-    y: f32,
-    bounds: (crate::viewport::types::Vec3, crate::viewport::types::Vec3),
-    opacity: f32,
-) -> (Vec<Vertex>, Vec<u32>) {
-    let cx = (bounds.0.x + bounds.1.x) * 0.5;
-    let cz = (bounds.0.z + bounds.1.z) * 0.5;
-    let ex = (bounds.1.x - bounds.0.x) * 2.25;
-    let ez = (bounds.1.z - bounds.0.z) * 2.25;
+fn create_water_plane(y: f32, bounds: Bounds, opacity: f32) -> (Vec<Vertex>, Vec<u32>) {
+    let cx = (bounds.min.x + bounds.max.x) * 0.5;
+    let cz = (bounds.min.z + bounds.max.z) * 0.5;
+    let ex = (bounds.max.x - bounds.min.x) * 2.25;
+    let ez = (bounds.max.z - bounds.min.z) * 2.25;
 
     let color = [0.1, 0.4, 0.8, opacity];
     let normal = [0.0, 1.0, 0.0];
@@ -462,7 +460,7 @@ fn upload_plate_boundary_edges(
     }
 
     if !indices.is_empty() {
-        viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+        viewport.add_non_pickable_mesh(device, &vertices, &indices, RenderLayer::Opaque);
     }
 }
 
@@ -470,6 +468,10 @@ fn upload_plate_boundary_edges(
 mod tests {
     use super::*;
     use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
+
+    use crate::viewport::types::PixelSize;
+    use crate::viewport::types::RgbaImage;
+    use crate::visibility::PartKey;
 
     #[test]
     fn is_zero_mm_matches_the_egui_epsilon() {
@@ -515,7 +517,7 @@ mod tests {
         );
     }
 
-    fn no_overrides() -> (HashMap<(String, String), bool>, HashMap<PlateKey, bool>) {
+    fn no_overrides() -> (HashMap<PartKey, bool>, HashMap<PlateKey, bool>) {
         (HashMap::new(), HashMap::new())
     }
 
@@ -610,7 +612,7 @@ mod tests {
     fn plate_is_visible_hides_a_triangle_whose_part_is_off() {
         let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
         let mut part = HashMap::new();
-        part.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
+        part.insert(PartKey { zone: "Citadel".to_string(), part: "Cit_Belt".to_string() }, false);
         let plate = HashMap::new();
         assert!(!plate_is_visible(
             &info,
@@ -714,12 +716,8 @@ mod tests {
             .next()
             .expect("expected at least one battleship in the real catalog");
 
-        let armor = crate::load_ship::load_ship_armor_by_param(
-            &ship_assets,
-            &ship.param_index,
-            &ship.display_name,
-        )
-        .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index));
+        let armor = crate::load_ship::load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name)
+            .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index));
 
         let ctx = GpuContext::new().expect("owned wgpu device creation failed - no adapter available");
         let pipeline = ctx.pipeline();
@@ -780,8 +778,9 @@ mod tests {
         assert_eq!(viewport.camera.azimuth, azimuth_before, "re-upload for a visibility toggle must not rotate");
         assert_eq!(viewport.camera.elevation, elevation_before, "re-upload for a visibility toggle must not rotate");
 
-        let (w, h, rgba) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
+        let render_size = PixelSize { width: 512, height: 512 };
+        let RgbaImage { width: w, height: h, pixels: rgba } = viewport
+            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, render_size)
             .expect("offscreen render produced no pixels");
         assert_eq!(rgba.len(), (w * h * 4) as usize);
 
@@ -821,9 +820,10 @@ mod tests {
             VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             no_edges,
         );
-        let (_, _, rgba_no_edges) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
-            .expect("offscreen render produced no pixels");
+        let rgba_no_edges = viewport
+            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, render_size)
+            .expect("offscreen render produced no pixels")
+            .pixels;
         let black_pixels_no_edges =
             rgba_no_edges.as_chunks::<4>().0.iter().filter(|px| px[0] < 20 && px[1] < 20 && px[2] < 20).count();
         assert!(
@@ -843,9 +843,10 @@ mod tests {
             VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             dim,
         );
-        let (_, _, rgba_dim) = viewport
-            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, (512, 512))
-            .expect("offscreen render produced no pixels");
+        let rgba_dim = viewport
+            .render_offscreen_rgba(&ctx.device, &ctx.queue, &pipeline, render_size)
+            .expect("offscreen render produced no pixels")
+            .pixels;
         let avg_clear_distance = |rgba: &[u8]| -> f64 {
             let mut total = 0i64;
             let mut n = 0i64;

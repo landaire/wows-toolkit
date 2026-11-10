@@ -18,9 +18,9 @@ use std::time::Duration;
 use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::assets::load_ship_assets;
+use wows_toolkit_armor::error::ShipLoadError;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
-use wows_toolkit_armor::load_ship::ShipLoadError;
 use wows_toolkit_armor::load_ship::build_reload_options;
 use wows_toolkit_armor::load_ship::load_ship_armor_by_param;
 use wows_toolkit_armor::load_ship::load_ship_armor_with_options;
@@ -346,8 +346,8 @@ pub(super) fn drive(
         let scene = &mut state.panes[index].scene;
         let readback = match view {
             Some((size, _)) if !size.is_empty() => scene
-                .render((size.width, size.height))
-                .map(|(width, height, pixels)| Readback { width, height, pixels }),
+                .render(wows_toolkit_armor::viewport::types::PixelSize { width: size.width, height: size.height })
+                .map(|image| Readback { width: image.width, height: image.height, pixels: image.pixels }),
             _ => None,
         };
         let gizmo = if readback.is_some() { scene.gizmo() } else { None };

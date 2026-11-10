@@ -1,6 +1,6 @@
 //! Why an armor viewer request could not be answered.
 
-use wows_toolkit_armor::load_ship::ExportGlbError;
+use wows_toolkit_armor::error::ExportGlbError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArmorError {

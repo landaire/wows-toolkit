@@ -129,12 +129,18 @@ pub struct RingRequest<'a> {
     pub waterline_dy: f32,
 }
 
+/// The geometry for one camera mode's orbits, with the orbits themselves.
+pub struct CameraRingMesh {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+    /// Handed back alongside the mesh so a pointer resting on one can be told
+    /// which it is without the caller laying them out again.
+    pub hovers: Vec<RingHover>,
+}
+
 /// The overlay for one camera mode: the orbits at the selected field of view,
 /// the same orbits at both extremes of it, and the zoom path if asked for.
-///
-/// The orbits are handed back alongside the mesh so a pointer resting on one
-/// can be told which it is without the caller laying them out again.
-pub fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>, Vec<RingHover>) {
+pub fn build_camera_rings(request: &RingRequest<'_>) -> CameraRingMesh {
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut hovers: Vec<RingHover> = Vec::new();
@@ -182,7 +188,7 @@ pub fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>, 
         }
     }
 
-    (vertices, indices, hovers)
+    CameraRingMesh { vertices, indices, hovers }
 }
 
 /// How a hover names the field of view an orbit was resolved at.

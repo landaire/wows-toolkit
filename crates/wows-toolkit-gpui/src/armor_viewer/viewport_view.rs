@@ -42,8 +42,11 @@ use wows_toolkit_armor::viewport::device::GpuContext;
 use wows_toolkit_armor::viewport::gizmo;
 use wows_toolkit_armor::viewport::renderer::GpuPipeline;
 use wows_toolkit_armor::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::PixelSize;
+use wows_toolkit_armor::viewport::types::RgbaImage;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wows_toolkit_armor::viewport::types::ViewRect;
+use wows_toolkit_armor::visibility::PartKey;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wowsunpack::export::camo_textures::CamoSchemeId;
@@ -657,7 +660,8 @@ impl ViewportView {
         let Some(bounds) = self.last_bounds else { return };
         let width = bounds.size.width.as_f32().round() as u32;
         let height = bounds.size.height.as_f32().round() as u32;
-        let Some((w, h, rgba)) = self.scene.render((width, height)) else { return };
+        let size = PixelSize { width, height };
+        let Some(RgbaImage { width: w, height: h, pixels: rgba }) = self.scene.render(size) else { return };
         let new_image = readback_to_render_image(w, h, rgba);
         if let Some(old) = self.image.take() {
             let _ = window.drop_image(old);
@@ -1196,13 +1200,12 @@ impl Render for ViewportView {
                 menu = menu.separator();
 
                 let disable_entity = entity.clone();
-                let disable_zone = zone.clone();
-                let disable_material_name = material;
+                let disable_part = PartKey { zone: zone.clone(), part: material };
                 menu =
                     menu.item(PopupMenuItem::new(format!("Disable {label}")).on_click(move |_event, _window, cx| {
-                        disable_entity.update(cx, |view, cx| {
-                            view.update_scene(cx, |scene| scene.disable_material(&disable_zone, &disable_material_name))
-                        });
+                        let part = disable_part.clone();
+                        disable_entity
+                            .update(cx, |view, cx| view.update_scene(cx, |scene| scene.disable_material(part)));
                     }));
 
                 popover::quick_toggle_items(menu.separator(), &entity, cx)

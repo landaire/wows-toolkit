@@ -52,6 +52,7 @@ use crate::camo::CamoTextures;
 use crate::camo::decode_active_camo;
 use crate::camo::recompute_active_camo;
 use crate::camo::remap_camo_selection;
+use crate::error::GpuInitError;
 use crate::gaps;
 use crate::highlight;
 use crate::hits;
@@ -70,14 +71,19 @@ use crate::viewport::camera::Axis;
 use crate::viewport::device::GpuContext;
 use crate::viewport::gizmo;
 use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_OVERLAY;
+use crate::viewport::renderer::RenderLayer;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::Bounds;
 use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
+use crate::viewport::types::PixelSize;
+use crate::viewport::types::Ray;
+use crate::viewport::types::RgbaImage;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
 use crate::visibility;
+use crate::visibility::PartKey;
 use crate::visibility::SidebarHighlightKey;
 use crate::visibility::VisibilityFilter;
 use crate::visibility::VisibilitySnapshot;
@@ -155,7 +161,7 @@ pub struct Gpu {
 impl Gpu {
     /// Stands up the owned device and its pipeline. Blocks; run it off the UI
     /// thread.
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> Result<Self, GpuInitError> {
         let ctx = GpuContext::new()?;
         let pipeline = ctx.pipeline();
         Ok(Self { ctx: Arc::new(ctx), pipeline: Arc::new(pipeline) })
@@ -249,11 +255,7 @@ pub struct AllVisible {
 impl AllVisible {
     /// Read against this port's absence rules: a part with no entry is
     /// visible and a hull mesh with no entry is not.
-    pub fn of(
-        part: &HashMap<(String, String), bool>,
-        plate: &HashMap<PlateKey, bool>,
-        hull: &HashMap<String, bool>,
-    ) -> Self {
+    pub fn of(part: &HashMap<PartKey, bool>, plate: &HashMap<PlateKey, bool>, hull: &HashMap<String, bool>) -> Self {
         Self {
             hull: !hull.is_empty() && hull.values().all(|visible| *visible),
             armor: part.values().all(|visible| *visible) && !plate.values().any(|hidden| *hidden),
@@ -268,7 +270,7 @@ impl AllVisible {
 /// one ship's own scheme list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SyncedSettings {
-    pub part_visibility: HashMap<(String, String), bool>,
+    pub part_visibility: HashMap<PartKey, bool>,
     pub plate_visibility: HashMap<PlateKey, bool>,
     pub hull_visibility: HashMap<String, bool>,
     pub display_settings: DisplaySettings,
@@ -464,10 +466,31 @@ pub struct HullSelection {
     pub modules: HashMap<ComponentType, String>,
 }
 
+/// Identifies one reload, so a reload superseded by a later one is dropped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReloadGeneration(u64);
+
+impl ReloadGeneration {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// Identifies one camo selection, so a decode that lands after the selection
+/// moved on is dropped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CamoGeneration(u64);
+
+impl CamoGeneration {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 /// A camo decode to run off the caller's thread, then hand back to
 /// [`ArmorScene::apply_camo`].
 pub struct CamoJob {
-    generation: u64,
+    generation: CamoGeneration,
     id: CamoSchemeId,
     cached: Option<Arc<SchemeTextures>>,
     armor: Arc<LoadedShipArmor>,
@@ -475,7 +498,7 @@ pub struct CamoJob {
 
 /// A finished [`CamoJob`].
 pub struct CamoResult {
-    generation: u64,
+    generation: CamoGeneration,
     id: CamoSchemeId,
     decode: CamoDecode,
 }
@@ -494,7 +517,7 @@ pub struct ArmorScene {
     gpu: Option<Gpu>,
     /// The viewport's rectangle in the front end's logical coordinates.
     rect: Option<ViewRect>,
-    model_bounds: Option<(Vec3, Vec3)>,
+    model_bounds: Option<Bounds>,
     drag: Option<DragState>,
     gizmo_hover: Option<(Axis, bool)>,
     gizmo_press_in_box: bool,
@@ -503,7 +526,7 @@ pub struct ArmorScene {
     pending_armor: Option<Arc<LoadedShipArmor>>,
     current_armor: Option<Arc<LoadedShipArmor>>,
     /// Absent means visible; a value says whether the part is shown.
-    part_visibility: HashMap<(String, String), bool>,
+    part_visibility: HashMap<PartKey, bool>,
     armor_all_visible: bool,
     /// An entry means the plate is hidden.
     plate_visibility: HashMap<PlateKey, bool>,
@@ -514,12 +537,10 @@ pub struct ArmorScene {
     selected_hull: Option<String>,
     hull_lod: usize,
     selected_modules: HashMap<ComponentType, String>,
-    /// Bumped by every reload and every new ship, so a reload that lands
-    /// after another started is dropped.
-    reload_generation: u64,
+    reload_generation: ReloadGeneration,
     selected_camo: Option<CamoSchemeId>,
     camo_texture_cache: CamoTextureCache,
-    camo_generation: u64,
+    camo_generation: CamoGeneration,
     active_camo_textures: CamoTextures,
     active_camo_uvs: HashMap<String, UvTransform>,
     undo_stack: VisibilityUndoStack,
@@ -584,10 +605,10 @@ impl ArmorScene {
             selected_hull: None,
             hull_lod: DEFAULT_LOD,
             selected_modules: HashMap::new(),
-            reload_generation: 0,
+            reload_generation: ReloadGeneration::default(),
             selected_camo: None,
             camo_texture_cache: CamoTextureCache::default(),
-            camo_generation: 0,
+            camo_generation: CamoGeneration::default(),
             active_camo_textures: HashMap::new(),
             active_camo_uvs: HashMap::new(),
             undo_stack: VisibilityUndoStack::default(),
@@ -674,8 +695,10 @@ impl ArmorScene {
         self.rect
     }
 
-    fn viewport_size(&self) -> (f32, f32) {
-        self.rect.map(|rect| (rect.width(), rect.height())).unwrap_or((1.0, 1.0))
+    fn viewport_size(&self) -> Vec2 {
+        // Before the front end places the viewport, a unit size keeps the
+        // camera's per-pixel scaling finite.
+        self.rect.map(|rect| rect.size()).unwrap_or(Vec2::new(1.0, 1.0))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -688,12 +711,12 @@ impl ArmorScene {
 
     /// Renders at `size` device pixels when anything changed, returning the
     /// tightly packed sRGB RGBA8 readback.
-    pub fn render(&mut self, size: (u32, u32)) -> Option<(u32, u32, Vec<u8>)> {
+    pub fn render(&mut self, size: PixelSize) -> Option<RgbaImage> {
         let gpu = self.gpu.clone()?;
         if !self.viewport.is_dirty() {
             return None;
         }
-        let size = (size.0.max(1), size.1.max(1));
+        let size = PixelSize { width: size.width.max(1), height: size.height.max(1) };
         let frame = self.viewport.render_offscreen_rgba(&gpu.ctx.device, &gpu.ctx.queue, &gpu.pipeline, size)?;
         self.viewport.clear_dirty();
         Some(frame)
@@ -703,6 +726,8 @@ impl ArmorScene {
     /// from the saved defaults.
     pub fn apply_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>) {
         self.display_settings = DisplaySettings::from_defaults(defaults);
+        // Without a saved row, armor opens shown and the hull hidden, as on a
+        // fresh install.
         self.armor_all_visible = defaults.map(|d| d.armor_all_visible).unwrap_or(true);
         self.hull_all_visible = defaults.map(|d| d.hull_all_visible).unwrap_or(false);
         self.reupload_current_armor();
@@ -777,7 +802,7 @@ impl ArmorScene {
 
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
         let Some(gpu) = self.gpu.clone() else { return };
-        self.reload_generation += 1;
+        self.reload_generation = self.reload_generation.next();
         self.part_visibility.clear();
         self.plate_visibility.clear();
         self.hull_visibility.clear();
@@ -787,7 +812,7 @@ impl ArmorScene {
         self.selected_modules.clear();
         self.camera_rings.mode = first_camera_mode(&armor);
         self.selected_camo = None;
-        self.camo_generation = self.camo_generation.wrapping_add(1);
+        self.camo_generation = self.camo_generation.next();
         self.camo_texture_cache.clear();
         self.active_camo_textures.clear();
         self.active_camo_uvs.clear();
@@ -804,7 +829,7 @@ impl ArmorScene {
         if !self.armor_all_visible {
             for (zone, parts) in &armor.zone_parts {
                 for part in parts {
-                    self.part_visibility.insert((zone.clone(), part.clone()), false);
+                    self.part_visibility.insert(PartKey { zone: zone.clone(), part: part.clone() }, false);
                 }
             }
         }
@@ -973,7 +998,7 @@ impl ArmorScene {
 
     /// Points the camera where the lock says and marks what it is aimed at.
     /// A no-op while the lock is off or the ship names no orbit.
-    fn aim_perspective(&mut self, device: Option<&wgpu::Device>, bounds: (Vec3, Vec3)) {
+    fn aim_perspective(&mut self, device: Option<&wgpu::Device>, bounds: Bounds) {
         for id in self.aim_mesh_ids.drain(..) {
             self.viewport.remove_mesh(id);
         }
@@ -991,8 +1016,7 @@ impl ArmorScene {
         let look = self.viewport.pos_to_world_space(look_model);
         let target = water_aim_point(eye, look, AIM_MARKER_REACH);
 
-        let (min, max) = bounds;
-        let diagonal = (max - min).norm();
+        let diagonal = (bounds.max - bounds.min).norm();
         let camera = &mut self.viewport.camera;
         camera.set_eye_and_target(eye, target);
         camera.fov = self.perspective.camera.fov_deg.to_radians();
@@ -1005,7 +1029,7 @@ impl ArmorScene {
         let radius = (diagonal * AIM_MARKER_FRACTION).clamp(AIM_MARKER_MIN, AIM_MARKER_MAX);
         let (vertices, indices) = camera_rings::build_water_marker(target, radius, AIM_MARKER_COLOR);
         if !indices.is_empty() {
-            let id = self.viewport.add_world_space_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            let id = self.viewport.add_world_space_mesh(device, &vertices, &indices, RenderLayer::Overlay);
             self.aim_mesh_ids.push(id);
         }
     }
@@ -1107,7 +1131,9 @@ impl ArmorScene {
         let shell_dir = Vec3::new(bearing.x * cos, -sin, bearing.z * cos).normalize();
 
         let through = Vec3::new(at[0], at[1], at[2]);
-        let ray_hits = self.viewport.pick_all_ray_model_space(through - shell_dir * CAST_STANDOFF, shell_dir);
+        let ray_hits = self
+            .viewport
+            .pick_all_ray_model_space(Ray { origin: through - shell_dir * CAST_STANDOFF, direction: shell_dir });
         let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
         let first = hits.first()?;
         let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
@@ -1203,7 +1229,7 @@ impl ArmorScene {
             shown: self.splash_mode,
             boxes_shown: self.show_splash_boxes,
             has_data: self.current_armor.as_ref().is_some_and(|armor| armor.splash_data.is_some()),
-            zones_reached: self.splash_result.as_ref().map(|result| result.hit_zones.len()).unwrap_or(0),
+            zones_reached: self.splash_result.as_ref().map_or(0, |result| result.hit_zones.len()),
         }
     }
 
@@ -1327,12 +1353,12 @@ impl ArmorScene {
             }
             return;
         };
-        let Some((_, ray)) = self.viewport.screen_to_ray(pointer, rect) else { return };
-        let approach = trajectory::approach_xz(&ray);
+        let Some(ray) = self.viewport.screen_to_ray(pointer, rect) else { return };
+        let approach = trajectory::approach_xz(&ray.direction);
         let shell_dir = self.shell_direction(approach);
 
         let origin = surface.world_position - shell_dir * CAST_STANDOFF;
-        let ray_hits = self.viewport.pick_all_ray(origin, shell_dir);
+        let ray_hits = self.viewport.pick_all_ray(Ray { origin, direction: shell_dir });
         let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
         if hits.is_empty() {
             if !keep_existing {
@@ -1464,7 +1490,8 @@ impl ArmorScene {
                 })
                 .collect();
             let isolation = isolate(&zones, &hit_zones, &hit_plates);
-            self.part_visibility = isolation.parts;
+            self.part_visibility =
+                isolation.parts.into_iter().map(|((zone, part), shown)| (PartKey { zone, part }, shown)).collect();
             // The shared map says whether a plate is shown; this one says
             // whether it is hidden.
             self.plate_visibility = isolation
@@ -1505,7 +1532,12 @@ impl ArmorScene {
         Some((params, impact))
     }
 
-    fn build_cast_at(&self, hits: Vec<trajectory::TrajectoryHit>, shell_dir: Vec3, range: Km) -> trajectory::Trajectory {
+    fn build_cast_at(
+        &self,
+        hits: Vec<trajectory::TrajectoryHit>,
+        shell_dir: Vec3,
+        range: Km,
+    ) -> trajectory::Trajectory {
         let shell = self.cast_shell_at(range);
         let parts = shell.as_ref().map(|(params, impact)| (params, impact));
         trajectory::cast(hits, shell_dir, parts, self.model_extent(), self.continue_on_ricochet, range)
@@ -1532,7 +1564,7 @@ impl ArmorScene {
 
     fn model_extent(&self) -> f32 {
         match self.model_bounds {
-            Some((min, max)) => (max[0] - min[0]).max(max[2] - min[2]),
+            Some(Bounds { min, max }) => (max[0] - min[0]).max(max[2] - min[2]),
             None => DEFAULT_MODEL_EXTENT,
         }
     }
@@ -1552,11 +1584,11 @@ impl ArmorScene {
         let view = self.viewport.camera.view_matrix();
         let balls = gizmo::ball_draw_order(&view)
             .into_iter()
-            .map(|(axis, positive, dir, _depth)| GizmoBall {
-                axis,
-                positive,
-                tip: center + dir * gizmo::ARM_LEN,
-                hovered: self.gizmo_hover == Some((axis, positive)),
+            .map(|ball| GizmoBall {
+                axis: ball.axis,
+                positive: ball.positive,
+                tip: center + ball.dir * gizmo::ARM_LEN,
+                hovered: self.gizmo_hover == Some((ball.axis, ball.positive)),
             })
             .collect();
         Some(GizmoView { center, balls })
@@ -1572,8 +1604,8 @@ impl ArmorScene {
                 let in_gizmo = self.gizmo_rect().is_some_and(|rect| rect.contains(at));
                 self.gizmo_press_in_box = in_gizmo;
                 if !in_gizmo && clicks >= 2 && !self.perspective.enabled {
-                    if let Some((min, max)) = self.model_bounds {
-                        self.viewport.camera.reset(min, max);
+                    if let Some(bounds) = self.model_bounds {
+                        self.viewport.camera.reset(bounds);
                         self.viewport.mark_dirty();
                         self.changed_camera();
                     }
@@ -1603,18 +1635,18 @@ impl ArmorScene {
         }
 
         if let Some(drag) = self.drag {
-            let (dx, dy) = (at.x - drag.last.x, at.y - drag.last.y);
-            if dx != 0.0 || dy != 0.0 {
+            let delta = at - drag.last;
+            if delta.x != 0.0 || delta.y != 0.0 {
                 let size = self.viewport_size();
                 // A locked camera is steered on its orbit instead.
                 if self.perspective.enabled {
-                    if self.steer_perspective(dx, dy) {
+                    if self.steer_perspective(delta.x, delta.y) {
                         self.refresh_perspective();
                     }
                 } else {
                     match drag.kind {
-                        DragKind::Orbit => self.viewport.camera.orbit((dx, dy), size),
-                        DragKind::Pan => self.viewport.camera.pan((dx, dy), size),
+                        DragKind::Orbit => self.viewport.camera.orbit(delta, size),
+                        DragKind::Pan => self.viewport.camera.pan(delta, size),
                     }
                 }
                 let moved = drag.moved || (at - drag.start).norm() > DRAG_THRESHOLD_PX;
@@ -1789,7 +1821,7 @@ impl ArmorScene {
             }
             if motion.pan_x != 0.0 || motion.pan_y != 0.0 {
                 let size = self.viewport_size();
-                self.viewport.camera.pan_keys((motion.pan_x, motion.pan_y), dt.as_secs_f32(), size);
+                self.viewport.camera.pan_keys(Vec2::new(motion.pan_x, motion.pan_y), dt.as_secs_f32(), size);
             }
             moved = true;
         }
@@ -1801,8 +1833,8 @@ impl ArmorScene {
     }
 
     fn snap_camera(&mut self, axis: Axis, positive: bool) {
-        let (azimuth, elevation) = camera::ortho_view(axis, positive, self.viewport.camera.azimuth);
-        self.viewport.camera.animate_to(azimuth, elevation, GIZMO_SNAP_DURATION_SECS);
+        let angles = camera::ortho_view(axis, positive, self.viewport.camera.azimuth);
+        self.viewport.camera.animate_to(angles, GIZMO_SNAP_DURATION_SECS);
         self.viewport.mark_dirty();
         self.changed_camera();
     }
@@ -1899,15 +1931,9 @@ impl ArmorScene {
             SidebarHighlightKey::Zone(zone) => {
                 highlight::upload_zone_highlight(&mut self.viewport, device, &armor, zone, visibility, show_zero_mm)
             }
-            SidebarHighlightKey::Part(zone, part) => highlight::upload_part_highlight(
-                &mut self.viewport,
-                device,
-                &armor,
-                zone,
-                part,
-                visibility,
-                show_zero_mm,
-            ),
+            SidebarHighlightKey::Part(part) => {
+                highlight::upload_part_highlight(&mut self.viewport, device, &armor, part, visibility, show_zero_mm)
+            }
             SidebarHighlightKey::Plate(plate) => {
                 highlight::upload_plate_highlight(&mut self.viewport, device, &armor, plate, visibility, show_zero_mm)
             }
@@ -1939,7 +1965,7 @@ impl ArmorScene {
         }
     }
 
-    pub fn part_visibility(&self) -> &HashMap<(String, String), bool> {
+    pub fn part_visibility(&self) -> &HashMap<PartKey, bool> {
         &self.part_visibility
     }
 
@@ -1980,10 +2006,9 @@ impl ArmorScene {
     }
 
     /// "Disable {material}": turns that part off.
-    pub fn disable_material(&mut self, zone: &str, material: &str) {
-        let key = (zone.to_owned(), material.to_owned());
+    pub fn disable_material(&mut self, part: PartKey) {
         self.snapshot_and_mutate(|this| {
-            this.part_visibility.insert(key, false);
+            this.part_visibility.insert(part, false);
         });
     }
 
@@ -1993,7 +2018,7 @@ impl ArmorScene {
         self.snapshot_and_mutate(|this| {
             for (zone, parts) in &armor.zone_parts {
                 for part in parts {
-                    this.part_visibility.insert((zone.clone(), part.clone()), true);
+                    this.part_visibility.insert(PartKey { zone: zone.clone(), part: part.clone() }, true);
                 }
             }
             this.plate_visibility.clear();
@@ -2006,7 +2031,7 @@ impl ArmorScene {
         self.snapshot_and_mutate(|this| {
             for (zone, parts) in &armor.zone_parts {
                 for part in parts {
-                    this.part_visibility.insert((zone.clone(), part.clone()), false);
+                    this.part_visibility.insert(PartKey { zone: zone.clone(), part: part.clone() }, false);
                 }
             }
         });
@@ -2022,10 +2047,10 @@ impl ArmorScene {
 
     /// Sets one part, clearing that part's plate overrides whatever the new
     /// state is, as the egui part rows do.
-    pub fn toggle_part(&mut self, zone: String, part: String, plate_thicknesses: Vec<i32>, checked: bool) {
+    pub fn toggle_part(&mut self, part: PartKey, plate_thicknesses: Vec<i32>, checked: bool) {
         self.snapshot_and_mutate(move |this| {
-            visibility::clear_plate_overrides(&mut this.plate_visibility, &zone, &part, &plate_thicknesses);
-            this.part_visibility.insert((zone, part), checked);
+            visibility::clear_plate_overrides(&mut this.plate_visibility, &part, &plate_thicknesses);
+            this.part_visibility.insert(part, checked);
         });
     }
 
@@ -2038,7 +2063,7 @@ impl ArmorScene {
                 for z in &armor.zone_part_plates {
                     let on = z.name == zone;
                     for p in &z.parts {
-                        this.part_visibility.insert((z.name.clone(), p.name.clone()), on);
+                        this.part_visibility.insert(PartKey { zone: z.name.clone(), part: p.name.clone() }, on);
                         for &t in &p.plates {
                             this.plate_visibility.remove(&PlateKey {
                                 zone: z.name.clone(),
@@ -2052,7 +2077,7 @@ impl ArmorScene {
             }
             let Some(z) = armor.zone_part_plates.iter().find(|z| z.name == zone) else { return };
             for p in &z.parts {
-                this.part_visibility.insert((zone.clone(), p.name.clone()), checked);
+                this.part_visibility.insert(PartKey { zone: zone.clone(), part: p.name.clone() }, checked);
                 if checked {
                     for &t in &p.plates {
                         this.plate_visibility.remove(&PlateKey {
@@ -2133,23 +2158,27 @@ impl ArmorScene {
                 zoom_path_at_max_fov: self.camera_rings.zoom_path_at_max_fov,
                 waterline_dy: 0.0,
             };
-            let (vertices, indices, hovers) = camera_rings::build_camera_rings(&request);
-            if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            let rings = camera_rings::build_camera_rings(&request);
+            if !rings.indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(device, &rings.vertices, &rings.indices, RenderLayer::Overlay);
             }
-            self.ring_hovers = hovers;
+            self.ring_hovers = rings.hovers;
         }
 
         if self.display_settings.show_ship_center {
             let (vertices, indices) = hits::build_center_marker(armor.bounds);
-            self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            self.viewport.add_non_pickable_mesh(device, &vertices, &indices, RenderLayer::Overlay);
         }
 
         if !self.hits.is_empty() {
-            let (vertices, indices) =
-                hits::build_markers(&self.hits, armor.center(), Some(armor.bounds), self.display_settings.marker_opacity);
+            let (vertices, indices) = hits::build_markers(
+                &self.hits,
+                armor.center(),
+                Some(armor.bounds),
+                self.display_settings.marker_opacity,
+            );
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, RenderLayer::Overlay);
             }
         }
 
@@ -2159,7 +2188,7 @@ impl ArmorScene {
             let color = TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()];
             let (vertices, indices) = trajectory::build_mesh(cast, color, scale);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, RenderLayer::Overlay);
             }
         }
 
@@ -2167,9 +2196,14 @@ impl ArmorScene {
             && let Some(data) = armor.splash_data.as_ref()
         {
             let shapes: Vec<&wowsunpack::models::geometry::SplashBox> = data.boxes.iter().collect();
-            let (vertices, indices, _labels) = splash::build_splash_box_wireframes(&shapes);
-            if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            let wireframes = splash::build_splash_box_wireframes(&shapes);
+            if !wireframes.indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(
+                    device,
+                    &wireframes.vertices,
+                    &wireframes.indices,
+                    RenderLayer::Overlay,
+                );
             }
         }
 
@@ -2177,7 +2211,7 @@ impl ArmorScene {
             let (vertices, indices) =
                 splash::build_splash_cube_mesh(result.impact_point, result.half_extent, splash::CUBE_COLOR);
             if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, RenderLayer::Overlay);
             }
         }
 
@@ -2185,10 +2219,15 @@ impl ArmorScene {
         // not reported as a hole.
         self.gap_count = 0;
         if self.show_gaps {
-            let (vertices, indices, count) = gaps::build_gap_mesh(&armor, visibility, self.display_settings.show_zero_mm);
-            self.gap_count = count;
-            if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            let gap_mesh = gaps::build_gap_mesh(&armor, visibility, self.display_settings.show_zero_mm);
+            self.gap_count = gap_mesh.gap_count;
+            if !gap_mesh.indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(
+                    device,
+                    &gap_mesh.vertices,
+                    &gap_mesh.indices,
+                    RenderLayer::Overlay,
+                );
             }
         }
         self.aim_perspective(Some(device), armor.bounds);
@@ -2278,7 +2317,7 @@ impl ArmorScene {
             return None;
         }
         self.selected_camo = id;
-        self.camo_generation = self.camo_generation.wrapping_add(1);
+        self.camo_generation = self.camo_generation.next();
         self.changed_view();
         let Some((id, armor)) = id.zip(self.current_armor.clone()) else {
             self.active_camo_textures.clear();
@@ -2347,19 +2386,20 @@ impl ArmorScene {
 
     /// Starts a reload: the returned generation goes back to
     /// [`Self::apply_reload`], which drops a reload superseded by a later one.
-    pub fn begin_reload(&mut self) -> u64 {
-        self.reload_generation += 1;
+    pub fn begin_reload(&mut self) -> ReloadGeneration {
+        self.reload_generation = self.reload_generation.next();
         self.reload_generation
     }
 
     /// Takes a reloaded ship without moving the camera: keeps the visibility
     /// entries that still apply, remaps the camo by name, clears undo and
     /// hover.
-    pub fn apply_reload(&mut self, generation: u64, armor: Arc<LoadedShipArmor>) {
+    pub fn apply_reload(&mut self, generation: ReloadGeneration, armor: Arc<LoadedShipArmor>) {
         if generation != self.reload_generation || self.gpu.is_none() {
             return;
         }
         if let Some(old_id) = self.selected_camo {
+            // With no ship shown there are no old names to carry over.
             let old_infos = self.current_armor.as_ref().map(|a| a.camo_scheme_infos.as_slice()).unwrap_or(&[]);
             self.selected_camo = remap_camo_selection(old_infos, &armor.camo_scheme_infos, old_id);
             if self.selected_camo.is_none() {
@@ -2368,7 +2408,7 @@ impl ArmorScene {
         }
         // Keyed by the pre-reload ids, which no longer index the new list.
         self.camo_texture_cache.clear();
-        self.camo_generation = self.camo_generation.wrapping_add(1);
+        self.camo_generation = self.camo_generation.next();
         if !armor.camera_trajectories.iter().any(|(name, _)| Some(name) == self.camera_rings.mode.as_ref()) {
             self.camera_rings.mode = first_camera_mode(&armor);
         }
@@ -2448,11 +2488,14 @@ mod tests {
     #[test]
     fn one_hidden_part_or_plate_is_enough_to_say_not_everything() {
         let mut part = HashMap::new();
-        part.insert(("Citadel".to_owned(), "Belt".to_owned()), false);
+        part.insert(PartKey { zone: "Citadel".to_owned(), part: "Belt".to_owned() }, false);
         assert!(!AllVisible::of(&part, &HashMap::new(), &HashMap::new()).armor);
 
         let mut plate = HashMap::new();
-        plate.insert(PlateKey { zone: "Bow".to_owned(), material_name: "Bow_Bottom".to_owned(), thickness_tenths: 160 }, true);
+        plate.insert(
+            PlateKey { zone: "Bow".to_owned(), material_name: "Bow_Bottom".to_owned(), thickness_tenths: 160 },
+            true,
+        );
         assert!(!AllVisible::of(&HashMap::new(), &plate, &HashMap::new()).armor);
     }
 
@@ -2489,7 +2532,7 @@ mod tests {
         assert!(scene.hull_selection().modules.is_empty());
         let first = scene.begin_reload();
         let second = scene.begin_reload();
-        assert!(second > first);
+        assert_ne!(second, first);
     }
 
     #[test]

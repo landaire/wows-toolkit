@@ -12,7 +12,7 @@ const MARGIN: f32 = 8.0;
 pub fn gizmo_rect(viewport: ViewRect) -> ViewRect {
     let max_x = viewport.right() - MARGIN;
     let max_y = viewport.top() + MARGIN;
-    ViewRect::from_min_size((max_x - BOX_SIZE, max_y), (BOX_SIZE, BOX_SIZE))
+    ViewRect::from_min_size(Vec2::new(max_x - BOX_SIZE, max_y), Vec2::new(BOX_SIZE, BOX_SIZE))
 }
 
 fn axis_unit(axis: Axis, positive: bool) -> [f32; 3] {
@@ -42,36 +42,49 @@ pub fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) -> (Vec
     (Vec2::new(out[0], -out[1]), out[2])
 }
 
-/// The six signed axes paired with screen direction, ordered so the ball nearest
-/// the camera (largest view-space depth) comes LAST and draws on top.
-pub fn ball_draw_order(view: &[[f32; 4]; 4]) -> Vec<(Axis, bool, Vec2, f32)> {
-    let mut balls: Vec<(Axis, bool, Vec2, f32)> = Vec::with_capacity(6);
+/// One signed axis as the gizmo draws it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxisProjection {
+    pub axis: Axis,
+    pub positive: bool,
+    /// Foreshortened screen direction; see [`axis_screen_dir`].
+    pub dir: Vec2,
+    /// View-space depth; larger is nearer the camera.
+    pub depth: f32,
+}
+
+/// The six signed axes in a fixed order.
+fn axis_projections(view: &[[f32; 4]; 4]) -> Vec<AxisProjection> {
+    let mut balls = Vec::with_capacity(6);
     for axis in [Axis::X, Axis::Y, Axis::Z] {
         for positive in [true, false] {
             let (dir, depth) = axis_screen_dir(view, axis, positive);
-            balls.push((axis, positive, dir, depth));
+            balls.push(AxisProjection { axis, positive, dir, depth });
         }
     }
-    balls.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+    balls
+}
+
+/// The six signed axes ordered so the ball nearest the camera (largest
+/// view-space depth) comes LAST and draws on top.
+pub fn ball_draw_order(view: &[[f32; 4]; 4]) -> Vec<AxisProjection> {
+    let mut balls = axis_projections(view);
+    // Depths come from a finite view matrix; an incomparable pair keeps its order.
+    balls.sort_by(|a, b| a.depth.partial_cmp(&b.depth).unwrap_or(std::cmp::Ordering::Equal));
     balls
 }
 
 /// Which signed axis ball (if any) is nearest to `pointer` within BALL_R.
 pub fn hit_test(rect: ViewRect, camera: &ArcballCamera, pointer: Vec2) -> Option<(Axis, bool)> {
-    let view = camera.view_matrix();
     let center = rect.center();
-    let mut best: Option<(Axis, bool, f32)> = None;
-    for axis in [Axis::X, Axis::Y, Axis::Z] {
-        for positive in [true, false] {
-            let (dir, _depth) = axis_screen_dir(&view, axis, positive);
-            let p = center + dir * ARM_LEN;
-            let d = (p - pointer).norm();
-            if d <= BALL_R && best.is_none_or(|(_, _, bd)| d < bd) {
-                best = Some((axis, positive, d));
-            }
+    let mut best: Option<(AxisProjection, f32)> = None;
+    for ball in axis_projections(&camera.view_matrix()) {
+        let d = (center + ball.dir * ARM_LEN - pointer).norm();
+        if d <= BALL_R && best.is_none_or(|(_, bd)| d < bd) {
+            best = Some((ball, d));
         }
     }
-    best.map(|(a, p, _)| (a, p))
+    best.map(|(ball, _)| (ball.axis, ball.positive))
 }
 
 #[cfg(test)]
@@ -79,10 +92,15 @@ mod tests {
     use super::*;
     use crate::viewport::camera::ArcballCamera;
     use crate::viewport::camera::Axis;
+    use crate::viewport::types::Bounds;
     use crate::viewport::types::Vec3;
 
+    fn unit_box() -> Bounds {
+        Bounds { min: Vec3::new(-1.0, -1.0, -1.0), max: Vec3::new(1.0, 1.0, 1.0) }
+    }
+
     fn cam_facing_neg_z() -> ArcballCamera {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let mut c = ArcballCamera::from_bounds(unit_box());
         c.azimuth = 0.0;
         c.elevation = 0.0;
         c
@@ -99,7 +117,7 @@ mod tests {
     #[test]
     fn hit_test_center_of_a_ball_hits_it() {
         let c = cam_facing_neg_z();
-        let rect = ViewRect::from_min_size((0.0, 0.0), (400.0, 300.0));
+        let rect = ViewRect::from_min_size(Vec2::new(0.0, 0.0), Vec2::new(400.0, 300.0));
         let g = gizmo_rect(rect);
         let (dir, _) = axis_screen_dir(&c.view_matrix(), Axis::Y, true);
         let ball = g.center() + dir * ARM_LEN;
@@ -109,7 +127,7 @@ mod tests {
 
     #[test]
     fn toward_camera_axis_has_larger_depth() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let mut c = ArcballCamera::from_bounds(unit_box());
         c.azimuth = 0.0;
         c.elevation = 0.0;
         let view = c.view_matrix();
@@ -122,19 +140,19 @@ mod tests {
 
     #[test]
     fn nearest_ball_draws_last() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let mut c = ArcballCamera::from_bounds(unit_box());
         c.azimuth = 0.0;
         c.elevation = 0.0; // eye on +Z, so +Z axis points toward camera
         let order = ball_draw_order(&c.view_matrix());
         let last = order.last().unwrap();
-        assert_eq!((last.0, last.1), (Axis::Z, true), "nearest (+Z toward camera) must draw last");
-        let max_depth = order.iter().map(|b| b.3).fold(f32::MIN, f32::max);
-        assert!((last.3 - max_depth).abs() < 1e-6);
+        assert_eq!((last.axis, last.positive), (Axis::Z, true), "nearest (+Z toward camera) must draw last");
+        let max_depth = order.iter().map(|b| b.depth).fold(f32::MIN, f32::max);
+        assert!((last.depth - max_depth).abs() < 1e-6);
     }
 
     #[test]
     fn axis_pointing_at_camera_foreshortens() {
-        let mut c = ArcballCamera::from_bounds(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let mut c = ArcballCamera::from_bounds(unit_box());
         c.azimuth = 0.0;
         c.elevation = 0.0;
         let view = c.view_matrix();

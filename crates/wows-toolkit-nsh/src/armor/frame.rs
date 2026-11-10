@@ -290,6 +290,8 @@ mod tests {
 
         use wows_toolkit_armor::scene::ArmorScene;
         use wows_toolkit_armor::scene::Gpu;
+        use wows_toolkit_armor::viewport::types::PixelSize;
+        use wows_toolkit_armor::viewport::types::RgbaImage;
         use wows_toolkit_armor::viewport::types::ViewRect;
 
         let dir = std::path::PathBuf::from(std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR").expect("install dir"));
@@ -308,7 +310,8 @@ mod tests {
         scene.set_gpu(Gpu::new().expect("gpu"));
         scene.set_rect(ViewRect::new(0.0, 0.0, 800.0, 500.0));
         scene.show_armor(Arc::new(armor));
-        let (width, height, pixels) = scene.render((1600, 1000)).expect("a render");
+        let RgbaImage { width, height, pixels } =
+            scene.render(PixelSize { width: 1600, height: 1000 }).expect("a render");
         let frame = compose(Readback { width, height, pixels }, scene.gizmo().as_ref(), 2.0).expect("frame");
         assert_eq!(frame.alpha, AlphaMode::Straight);
 

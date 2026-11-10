@@ -22,8 +22,8 @@ impl ViewRect {
     }
 
     /// Build a rect from a top-left corner and a size.
-    pub fn from_min_size(min: (f32, f32), size: (f32, f32)) -> Self {
-        Self { x: min.0, y: min.1, w: size.0, h: size.1 }
+    pub fn from_min_size(min: Vec2, size: Vec2) -> Self {
+        Self { x: min.x, y: min.y, w: size.x, h: size.y }
     }
 
     pub fn left(&self) -> f32 {
@@ -64,6 +64,42 @@ impl ViewRect {
     pub fn contains(&self, p: Vec2) -> bool {
         p.x >= self.x && p.x <= self.right() && p.y >= self.y && p.y <= self.bottom()
     }
+}
+
+/// A render target's extent in device pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PixelSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Tightly packed RGBA8 pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RgbaImage {
+    pub width: u32,
+    pub height: u32,
+    /// Four bytes per pixel, row-major.
+    pub pixels: Vec<u8>,
+}
+
+/// An axis-aligned box in model space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl Bounds {
+    pub fn center(&self) -> Vec3 {
+        (self.min + self.max) * 0.5
+    }
+}
+
+/// A ray in 3D space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ray {
+    pub origin: Vec3,
+    pub direction: Vec3,
 }
 
 /// A single vertex sent to the GPU.

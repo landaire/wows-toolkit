@@ -27,12 +27,19 @@ use super::load_ship::ArmorZone;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
 
+/// A material part within an armor zone: the key `part_visibility` is held by.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PartKey {
+    pub zone: String,
+    pub part: String,
+}
+
 /// Borrowed view over the two visibility override maps, threaded through
 /// mesh uploads (`upload.rs`, `picking_ui.rs`) so a triangle's visibility can
 /// be resolved without cloning either map.
 #[derive(Clone, Copy)]
 pub struct VisibilityFilter<'a> {
-    pub part: &'a HashMap<(String, String), bool>,
+    pub part: &'a HashMap<PartKey, bool>,
     pub plate: &'a HashMap<PlateKey, bool>,
     /// Show only the plates the in-game armor viewer hides, which is how the
     /// egui app's "Show Hidden" mode reads: the plates that are functional in
@@ -44,7 +51,7 @@ pub struct VisibilityFilter<'a> {
 /// `armor_viewer::state::VisibilitySnapshot` verbatim.
 #[derive(Clone, Default)]
 pub struct VisibilitySnapshot {
-    pub part_visibility: HashMap<(String, String), bool>,
+    pub part_visibility: HashMap<PartKey, bool>,
     pub plate_visibility: HashMap<PlateKey, bool>,
 }
 
@@ -96,20 +103,21 @@ pub enum SidebarHighlightKey {
     /// All visible armor triangles in a zone.
     Zone(String),
     /// All visible armor triangles for a (zone, material/part).
-    Part(String, String),
+    Part(PartKey),
     /// A specific plate by (zone, material, thickness_i32).
     Plate(PlateKey),
 }
 
-/// Whether `(zone, part)` is visible per `part_visibility` (absent = visible).
-pub fn part_on(part_visibility: &HashMap<(String, String), bool>, zone: &str, part: &str) -> bool {
-    part_visibility.get(&(zone.to_string(), part.to_string())).copied().unwrap_or(true)
+/// Whether `key` is visible per `part_visibility` (absent = visible).
+pub fn part_on(part_visibility: &HashMap<PartKey, bool>, key: &PartKey) -> bool {
+    part_visibility.get(key).copied().unwrap_or(true)
 }
 
 /// Whether `key` is explicitly hidden in `plate_visibility` (this port's
 /// sense: present + `true` = hidden, absent = visible). See the module doc's
 /// convention note.
 pub fn plate_explicitly_hidden(plate_visibility: &HashMap<PlateKey, bool>, key: &PlateKey) -> bool {
+    // Absent means visible; see the module doc's convention note.
     plate_visibility.get(key).copied().unwrap_or(false)
 }
 
@@ -123,12 +131,12 @@ fn visible_thicknesses(part: &ZonePart, show_zero_mm: bool) -> impl Iterator<Ite
 /// (`tab.rs:4455-4464`).
 pub fn zone_all_on(
     zone: &ArmorZone,
-    part_visibility: &HashMap<(String, String), bool>,
+    part_visibility: &HashMap<PartKey, bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
     show_zero_mm: bool,
 ) -> bool {
     zone.parts.iter().all(|p| {
-        if !part_on(part_visibility, &zone.name, &p.name) {
+        if !part_on(part_visibility, &PartKey { zone: zone.name.clone(), part: p.name.clone() }) {
             return false;
         }
         !visible_thicknesses(p, show_zero_mm).any(|t| {
@@ -140,8 +148,8 @@ pub fn zone_all_on(
 
 /// Whether any part in `zone` is on. Ports the `zone_any_on` local from
 /// `draw_armor_visibility_popover` (`tab.rs:4465-4468`).
-pub fn zone_any_on(zone: &ArmorZone, part_visibility: &HashMap<(String, String), bool>) -> bool {
-    zone.parts.iter().any(|p| part_on(part_visibility, &zone.name, &p.name))
+pub fn zone_any_on(zone: &ArmorZone, part_visibility: &HashMap<PartKey, bool>) -> bool {
+    zone.parts.iter().any(|p| part_on(part_visibility, &PartKey { zone: zone.name.clone(), part: p.name.clone() }))
 }
 
 /// Whether any of `part`'s visible-thickness plates are explicitly hidden.
@@ -159,22 +167,17 @@ pub fn part_any_plate_hidden(
     })
 }
 
-/// Clears any `plate_visibility` override for `(zone, part, thickness)` for
-/// each of `thicknesses`, on a part checkbox toggle. Callers pass only the
+/// Clears any `plate_visibility` override for `part` at each of
+/// `thicknesses`, on a part checkbox toggle. Callers pass only the
 /// `show_zero_mm`-filtered thickness set (not every plate on the part), so an
 /// override on a thickness currently filtered out by `show_zero_mm` (e.g. a
 /// hidden 0mm plate while the filter is off) survives the toggle. Ports the
 /// egui original's clear scope (`tab.rs:4538-4540`, `4565-4567`).
-pub fn clear_plate_overrides(
-    plate_visibility: &mut HashMap<PlateKey, bool>,
-    zone: &str,
-    part: &str,
-    thicknesses: &[i32],
-) {
+pub fn clear_plate_overrides(plate_visibility: &mut HashMap<PlateKey, bool>, part: &PartKey, thicknesses: &[i32]) {
     for &t in thicknesses {
         plate_visibility.remove(&PlateKey {
-            zone: zone.to_string(),
-            material_name: part.to_string(),
+            zone: part.zone.clone(),
+            material_name: part.part.clone(),
             thickness_tenths: t,
         });
     }
@@ -186,6 +189,7 @@ pub fn clear_plate_overrides(
 /// (`popover.rs`); ports the `group_all_on`/`group_any_on` locals from
 /// `draw_hull_visibility_popover` (`tab.rs:3273-3274`).
 pub fn hull_group_all_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
+    // Absent means hidden, matching `upload_hull::upload_hull_meshes`.
     names.iter().all(|n| hull_visibility.get(n).copied().unwrap_or(false))
 }
 
@@ -208,10 +212,7 @@ pub fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: &[Strin
 /// carries the same opposite-of-`part_visibility` default too -- a newly
 /// appeared hull mesh name would otherwise silently stay hidden even when
 /// every other hull part is on).
-pub fn retain_hull_visibility(
-    hull_visibility: &mut HashMap<String, bool>,
-    hull_part_groups: &[(String, Vec<String>)],
-) {
+pub fn retain_hull_visibility(hull_visibility: &mut HashMap<String, bool>, hull_part_groups: &[(String, Vec<String>)]) {
     let default_on = hull_visibility.values().any(|&v| v);
     hull_visibility.retain(|name, _| hull_part_groups.iter().any(|(_, names)| names.contains(name)));
     for (_group, names) in hull_part_groups {
@@ -229,11 +230,8 @@ pub fn retain_hull_visibility(
 /// (`tab.rs:2719-2723`), whose explicit `or_insert(true)` fill is a no-op
 /// under this port's opposite default-boolean convention (see the module
 /// doc's convention note).
-pub fn retain_part_visibility(
-    part_visibility: &mut HashMap<(String, String), bool>,
-    zone_parts: &[(String, Vec<String>)],
-) {
-    part_visibility.retain(|(zone, part), _| zone_parts.iter().any(|(z, parts)| z == zone && parts.contains(part)));
+pub fn retain_part_visibility(part_visibility: &mut HashMap<PartKey, bool>, zone_parts: &[(String, Vec<String>)]) {
+    part_visibility.retain(|key, _| zone_parts.iter().any(|(z, parts)| *z == key.zone && parts.contains(&key.part)));
 }
 
 /// Drops `plate_visibility` entries for plate keys no longer present in
@@ -292,12 +290,16 @@ mod tests {
         }
     }
 
+    fn key(zone: &str, part: &str) -> PartKey {
+        PartKey { zone: zone.to_string(), part: part.to_string() }
+    }
+
     #[test]
     fn undo_stack_round_trips_a_single_mutation() {
         let mut stack = VisibilityUndoStack::default();
         let before = VisibilitySnapshot::default();
         let mut after = VisibilitySnapshot::default();
-        after.part_visibility.insert(("Hull".to_string(), "Belt".to_string()), false);
+        after.part_visibility.insert(key("Hull", "Belt"), false);
 
         stack.push(before.clone());
         let undone = stack.undo(after.clone()).expect("expected an undo entry");
@@ -312,14 +314,14 @@ mod tests {
         let mut stack = VisibilityUndoStack::default();
         for i in 0..(VisibilityUndoStack::MAX_ENTRIES + 10) {
             let mut snap = VisibilitySnapshot::default();
-            snap.part_visibility.insert(("Zone".to_string(), format!("P{i}")), true);
+            snap.part_visibility.insert(key("Zone", &format!("P{i}")), true);
             stack.push(snap);
         }
         assert_eq!(stack.undo.len(), VisibilityUndoStack::MAX_ENTRIES);
         // The oldest entries should have been dropped: the remaining stack's
         // bottom entry is the 11th pushed (index 10), not the 1st.
         assert_eq!(stack.undo[0].part_visibility.len(), 1);
-        assert!(stack.undo[0].part_visibility.contains_key(&("Zone".to_string(), "P10".to_string())));
+        assert!(stack.undo[0].part_visibility.contains_key(&key("Zone", "P10")));
     }
 
     #[test]
@@ -333,7 +335,7 @@ mod tests {
         let mut stack = VisibilityUndoStack::default();
         stack.push(VisibilitySnapshot::default());
         let mut later = VisibilitySnapshot::default();
-        later.part_visibility.insert(("A".to_string(), "B".to_string()), false);
+        later.part_visibility.insert(key("A", "B"), false);
         stack.undo(later).unwrap();
         assert!(!stack.redo.is_empty());
 
@@ -344,14 +346,14 @@ mod tests {
     #[test]
     fn part_on_defaults_to_visible_when_absent() {
         let map = HashMap::new();
-        assert!(part_on(&map, "Citadel", "Cit_Belt"));
+        assert!(part_on(&map, &key("Citadel", "Cit_Belt")));
     }
 
     #[test]
     fn part_on_respects_an_explicit_false() {
         let mut map = HashMap::new();
-        map.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
-        assert!(!part_on(&map, "Citadel", "Cit_Belt"));
+        map.insert(key("Citadel", "Cit_Belt"), false);
+        assert!(!part_on(&map, &key("Citadel", "Cit_Belt")));
     }
 
     #[test]
@@ -365,7 +367,7 @@ mod tests {
     fn zone_all_on_is_false_when_a_part_is_off() {
         let z = zone("Citadel", vec![("Cit_Belt", vec![320]), ("Cit_Deck", vec![200])]);
         let mut part_visibility = HashMap::new();
-        part_visibility.insert(("Citadel".to_string(), "Cit_Deck".to_string()), false);
+        part_visibility.insert(key("Citadel", "Cit_Deck"), false);
         assert!(!zone_all_on(&z, &part_visibility, &HashMap::new(), false));
         // The other part is still on, so the zone isn't fully off either.
         assert!(zone_any_on(&z, &part_visibility));
@@ -388,8 +390,8 @@ mod tests {
     fn zone_any_on_is_false_only_when_every_part_is_off() {
         let z = zone("Citadel", vec![("Cit_Belt", vec![320]), ("Cit_Deck", vec![200])]);
         let mut part_visibility = HashMap::new();
-        part_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
-        part_visibility.insert(("Citadel".to_string(), "Cit_Deck".to_string()), false);
+        part_visibility.insert(key("Citadel", "Cit_Belt"), false);
+        part_visibility.insert(key("Citadel", "Cit_Deck"), false);
         assert!(!zone_any_on(&z, &part_visibility));
     }
 
@@ -438,7 +440,7 @@ mod tests {
         // Toggling the part's checkbox while `show_zero_mm` is off passes only
         // the filtered (non-zero) thickness set, matching `render_part_row`'s
         // `visible_plates`.
-        clear_plate_overrides(&mut plate_visibility, "Citadel", "Cit_Belt", &[320]);
+        clear_plate_overrides(&mut plate_visibility, &key("Citadel", "Cit_Belt"), &[320]);
 
         assert!(!plate_visibility.contains_key(&PlateKey {
             zone: "Citadel".to_string(),
@@ -525,12 +527,12 @@ mod tests {
     #[test]
     fn retain_part_visibility_drops_parts_no_longer_present_and_keeps_survivors() {
         let mut vis = HashMap::new();
-        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
-        vis.insert(("Bow".to_string(), "Bow_Stale".to_string()), false);
+        vis.insert(key("Citadel", "Cit_Belt"), false);
+        vis.insert(key("Bow", "Bow_Stale"), false);
         let zone_parts = vec![("Citadel".to_string(), vec!["Cit_Belt".to_string()])];
         retain_part_visibility(&mut vis, &zone_parts);
-        assert!(!vis.contains_key(&("Bow".to_string(), "Bow_Stale".to_string())));
-        assert_eq!(vis.get(&("Citadel".to_string(), "Cit_Belt".to_string())), Some(&false));
+        assert!(!vis.contains_key(&key("Bow", "Bow_Stale")));
+        assert_eq!(vis.get(&key("Citadel", "Cit_Belt")), Some(&false));
     }
 
     #[test]

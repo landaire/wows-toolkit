@@ -45,6 +45,10 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 
+use crate::error::ExportGlbError;
+use crate::error::ShipLoadError;
+use crate::viewport::types::Bounds;
+use crate::viewport::types::RgbaImage;
 use crate::viewport::types::Vec3;
 
 /// Which plate a triangle belongs to.
@@ -93,32 +97,14 @@ pub struct ArmorTriangleTooltip {
     pub color: [f32; 4],
 }
 
-/// Reasons a ship's armor model failed to load.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum ShipLoadError {
-    #[error("no vehicle found for param index {0}")]
-    NoVehicle(String),
-    #[error("failed to export ship model: {0}")]
-    ShipExport(String),
-    #[error("failed to build armor meshes: {0}")]
-    ArmorMeshes(String),
-    #[error("failed to build hull meshes: {0}")]
-    HullMeshes(String),
-    #[error("failed to resolve camouflage textures: {0}")]
-    CamoSource(String),
-}
-
-/// Reasons a GLB model export ([`export_ship_glb`]) failed.
-#[derive(Debug, thiserror::Error)]
-pub enum ExportGlbError {
-    #[error("no vehicle found for param index {0}")]
-    NoVehicle(String),
-    #[error("failed to export ship model: {0}")]
-    ShipExport(String),
-    #[error("failed to create output file {path}: {source}")]
-    CreateFile { path: std::path::PathBuf, source: std::io::Error },
-    #[error("failed to write glb: {0}")]
-    WriteGlb(String),
+/// One hull upgrade a ship offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HullUpgrade {
+    /// The GameParams key a reload selects the upgrade by.
+    pub key: String,
+    /// The selector's label: a letter, plus the components that differ from
+    /// the first upgrade.
+    pub label: String,
 }
 
 /// Options for [`load_ship_armor`]. Built by [`default_load_options`] for a
@@ -131,7 +117,7 @@ pub struct ShipLoadOptions {
     pub selected_hull: Option<String>,
     pub module_overrides: HashMap<ComponentType, String>,
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
-    pub hull_upgrade_names: Vec<(String, String)>,
+    pub hull_upgrades: Vec<HullUpgrade>,
     /// The orbits the game's own camera rides for this ship, by mode name.
     pub camera_trajectories: Vec<(String, CameraTrajectory)>,
 }
@@ -145,7 +131,7 @@ pub struct LoadedShipArmor {
     /// `None` for a ship whose GameParams class this build does not know.
     pub species: Option<Species>,
     pub meshes: Vec<InteractiveArmorMesh>,
-    pub bounds: (Vec3, Vec3),
+    pub bounds: Bounds,
     pub zones: Vec<String>,
     /// Ordered mapping: zone name -> sorted list of unique material names in that zone.
     pub zone_parts: Vec<(String, Vec<String>)>,
@@ -158,8 +144,8 @@ pub struct LoadedShipArmor {
     pub hull_textures: super::camo::TexturesByPart,
     pub hull_lod_count: usize,
     pub hull_lod: usize,
-    /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
-    pub hull_upgrade_names: Vec<(String, String)>,
+    /// Available hull upgrades, sorted by key.
+    pub hull_upgrades: Vec<HullUpgrade>,
     /// The hull upgrade key that was used to load this armor data. `None` = stock.
     pub loaded_hull: Option<String>,
     /// Module alternatives for the loaded hull upgrade: component type -> component names.
@@ -185,7 +171,7 @@ pub struct LoadedShipArmor {
 impl LoadedShipArmor {
     /// Bounding-box center in model space.
     pub fn center(&self) -> Vec3 {
-        (self.bounds.0 + self.bounds.1) * 0.5
+        self.bounds.center()
     }
 }
 
@@ -220,7 +206,7 @@ pub fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec<(Strin
 
 /// Build sorted hull upgrade labels with diff-based suffixes. Ports
 /// `armor_viewer::common::build_hull_upgrade_names` verbatim.
-pub fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
+pub fn build_hull_upgrades(vehicle: &Vehicle) -> Vec<HullUpgrade> {
     vehicle
         .hull_upgrades()
         .map(|upgrades| {
@@ -243,10 +229,11 @@ pub fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
                     } else {
                         format!("{letter} ({})", diffs.join(", "))
                     };
-                    ((*k).clone(), label)
+                    HullUpgrade { key: (*k).clone(), label }
                 })
                 .collect()
         })
+        // A vehicle without upgrades has nothing to choose between.
         .unwrap_or_default()
 }
 
@@ -272,6 +259,7 @@ fn module_alternatives_for_hull(vehicle: &Vehicle, selected_hull: Option<&str>) 
             }?;
             Some(config.component_alternatives.iter().map(|(k, v)| (*k, v.clone())).collect())
         })
+        // No upgrades, or none to pick, offer no alternatives.
         .unwrap_or_default()
 }
 
@@ -283,7 +271,7 @@ fn default_load_options(vehicle: &Vehicle, display_name: &str, lod: usize) -> Sh
         selected_hull: None,
         module_overrides: HashMap::new(),
         module_alternatives: module_alternatives_for_hull(vehicle, None),
-        hull_upgrade_names: build_hull_upgrade_names(vehicle),
+        hull_upgrades: build_hull_upgrades(vehicle),
         camera_trajectories: vehicle.camera_trajectories().to_vec(),
     }
 }
@@ -305,7 +293,7 @@ fn reload_load_options(
         display_name,
         lod,
         module_alternatives: module_alternatives_for_hull(vehicle, selected_hull.as_deref()),
-        hull_upgrade_names: build_hull_upgrade_names(vehicle),
+        hull_upgrades: build_hull_upgrades(vehicle),
         camera_trajectories: vehicle.camera_trajectories().to_vec(),
         selected_hull,
         module_overrides,
@@ -331,11 +319,13 @@ fn load_ship_armor(
     };
     let ctx = ship_assets
         .load_ship_from_vehicle(vehicle, &export_options)
-        .map_err(|e| ShipLoadError::ShipExport(format!("{e:?}")))?;
+        .map_err(|report| ShipLoadError::ShipExport { source: report.into() })?;
 
-    let meshes = ctx.interactive_armor_meshes().map_err(|e| ShipLoadError::ArmorMeshes(format!("{e:?}")))?;
+    let meshes =
+        ctx.interactive_armor_meshes().map_err(|report| ShipLoadError::ArmorMeshes { source: report.into() })?;
 
     let splash_data = super::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
+    // A hull without a splash file has no boxes to group.
     let splash_box_groups =
         splash_data.as_ref().map(|data| super::splash::build_splash_box_groups(&data.boxes)).unwrap_or_default();
     let hit_locations = ctx.hit_locations().cloned();
@@ -385,6 +375,8 @@ fn load_ship_armor(
             let parts_with_plates = parts
                 .iter()
                 .map(|part| {
+                    // Both maps are built from the same triangles, so every
+                    // listed part has a plate set.
                     let plates = zone_part_plates_map
                         .get(zone)
                         .and_then(|m| m.get(part))
@@ -399,7 +391,8 @@ fn load_ship_armor(
 
     let zones: Vec<String> = zone_parts.iter().map(|(z, _)| z.clone()).collect();
 
-    let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| ShipLoadError::HullMeshes(format!("{e:?}")))?;
+    let hull_meshes =
+        ctx.interactive_hull_meshes().map_err(|report| ShipLoadError::HullMeshes { source: report.into() })?;
 
     for mesh in &hull_meshes {
         for pos in &mesh.positions {
@@ -418,16 +411,18 @@ fn load_ship_armor(
 
     let mut hull_textures = HashMap::new();
     for (mfm, png) in ctx.hull_base_albedos(&hull_meshes) {
+        // An albedo that does not decode leaves the mesh on the flat hull color.
         if let Ok(img) = image::load_from_memory(&png) {
             let rgba = img.to_rgba8();
-            let (w, h) = (rgba.width(), rgba.height());
-            hull_textures.insert(mfm, super::camo::RgbaTexture { width: w, height: h, pixels: rgba.into_raw() });
+            let (width, height) = (rgba.width(), rgba.height());
+            hull_textures.insert(mfm, RgbaImage { width, height, pixels: rgba.into_raw() });
         }
     }
 
     let hull_lod_count = ctx.hull_lod_count();
 
-    let camo_source = ctx.camo_texture_source().map_err(|e| ShipLoadError::CamoSource(format!("{e:?}")))?;
+    let camo_source =
+        ctx.camo_texture_source().map_err(|report| ShipLoadError::CamoSource { source: report.into() })?;
     let mut camo_scheme_infos = camo_source.scheme_infos();
     {
         let mut counts: HashMap<String, u32> = HashMap::new();
@@ -444,7 +439,7 @@ fn load_ship_armor(
         display_name: options.display_name,
         species,
         meshes,
-        bounds: (Vec3::new(min[0], min[1], min[2]), Vec3::new(max[0], max[1], max[2])),
+        bounds: Bounds { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) },
         zones,
         zone_parts,
         zone_part_plates,
@@ -453,7 +448,7 @@ fn load_ship_armor(
         hull_textures,
         hull_lod_count,
         hull_lod: options.lod,
-        hull_upgrade_names: options.hull_upgrade_names,
+        hull_upgrades: options.hull_upgrades,
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
@@ -475,7 +470,10 @@ pub const DEFAULT_LOD: usize = 0;
 /// [`load_ship_armor_with_options`] (Milestone 4 Task 8c reload).
 fn resolve_vehicle(ship_assets: &ShipAssets, param_index: &str) -> Result<Vehicle, ShipLoadError> {
     let param = ship_assets.metadata().game_param_by_index(param_index);
-    param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| ShipLoadError::NoVehicle(param_index.to_string()))
+    param
+        .as_ref()
+        .and_then(|p| p.vehicle().cloned())
+        .ok_or_else(|| ShipLoadError::NoVehicle { param_index: param_index.to_string() })
 }
 
 /// The class of `param_index`'s ship, or `None` when GameParams names one this
@@ -577,14 +575,14 @@ pub fn export_ship_glb(
 ) -> Result<(), ExportGlbError> {
     let vehicle = resolve_vehicle(ship_assets, param_index).map_err(|e| {
         tracing::debug!("armor viewer: GLB export vehicle resolution failed for {param_index}: {e}");
-        ExportGlbError::NoVehicle(param_index.to_string())
+        ExportGlbError::NoVehicle { param_index: param_index.to_string() }
     })?;
     let ctx = ship_assets
         .load_ship_from_vehicle(&vehicle, options)
-        .map_err(|e| ExportGlbError::ShipExport(format!("{e:?}")))?;
+        .map_err(|report| ExportGlbError::ShipExport { source: report.into() })?;
     let mut file = std::fs::File::create(path)
         .map_err(|source| ExportGlbError::CreateFile { path: path.to_path_buf(), source })?;
-    ctx.export_glb(&mut file).map_err(|e| ExportGlbError::WriteGlb(format!("{e:?}")))?;
+    ctx.export_glb(&mut file).map_err(|report| ExportGlbError::WriteGlb { source: report.into() })?;
     Ok(())
 }
 
@@ -727,7 +725,7 @@ mod tests {
         assert!(!armor.meshes.is_empty(), "expected at least one armor mesh");
         assert!(!armor.zones.is_empty(), "expected at least one armor zone");
         assert!(
-            armor.bounds.0.x < armor.bounds.1.x && armor.bounds.0.y < armor.bounds.1.y,
+            armor.bounds.min.x < armor.bounds.max.x && armor.bounds.min.y < armor.bounds.max.y,
             "expected a non-degenerate bounding box, got {:?}",
             armor.bounds
         );

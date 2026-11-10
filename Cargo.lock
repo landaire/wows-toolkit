@@ -18928,11 +18928,11 @@ dependencies = [
 name = "wows-toolkit-armor"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bytemuck",
  "image",
  "nalgebra",
  "pollster 0.4.0",
+ "rootcause",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

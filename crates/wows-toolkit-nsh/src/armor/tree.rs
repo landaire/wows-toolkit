@@ -8,6 +8,7 @@ use nsh_core::prelude::PropEnum;
 use wows_toolkit_armor::load_ship::ArmorZone;
 use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::load_ship::ZonePart;
+use wows_toolkit_armor::visibility::PartKey;
 use wows_toolkit_armor::visibility::TriState;
 use wows_toolkit_armor::visibility::hull_group_all_on;
 use wows_toolkit_armor::visibility::hull_group_any_on;
@@ -118,7 +119,7 @@ impl TreeNames<'_> {
 /// The armor tree. 0 mm plates are left out unless `show_zero_mm`.
 pub(super) fn zone_rows(
     zones: &[ArmorZone],
-    part_visibility: &HashMap<(String, String), bool>,
+    part_visibility: &HashMap<PartKey, bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
     show_zero_mm: bool,
     names: TreeNames<'_>,
@@ -145,12 +146,12 @@ pub(super) fn zone_rows(
 fn part_row(
     zone: &str,
     part: &ZonePart,
-    part_visibility: &HashMap<(String, String), bool>,
+    part_visibility: &HashMap<PartKey, bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
     show_zero_mm: bool,
     names: TreeNames<'_>,
 ) -> PartRow {
-    let visible = part_on(part_visibility, zone, &part.name);
+    let visible = part_on(part_visibility, &PartKey { zone: zone.to_owned(), part: part.name.clone() });
     let any_plate_hidden = part_any_plate_hidden(zone, part, plate_visibility, show_zero_mm);
     let thicknesses = shown_thicknesses(part, show_zero_mm);
     let single = thicknesses.len() <= 1;
@@ -237,8 +238,10 @@ mod tests {
     }
 
     fn rows(parts: &[(&str, bool)], hidden: &[PlateKey], show_zero_mm: bool) -> Vec<ZoneRow> {
-        let parts: HashMap<(String, String), bool> =
-            parts.iter().map(|(part, on)| (("Citadel".to_owned(), (*part).to_owned()), *on)).collect();
+        let parts: HashMap<PartKey, bool> = parts
+            .iter()
+            .map(|(part, on)| (PartKey { zone: "Citadel".to_owned(), part: (*part).to_owned() }, *on))
+            .collect();
         let plates: HashMap<PlateKey, bool> = hidden.iter().map(|key| (key.clone(), true)).collect();
         zone_rows(&[zone()], &parts, &plates, show_zero_mm, NAMES)
     }

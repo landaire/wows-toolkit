@@ -53,6 +53,7 @@ use wows_toolkit_armor::viewport::types::LightingSettings;
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
 use wows_toolkit_armor::load_ship::ArmorZone;
+use wows_toolkit_armor::load_ship::HullUpgrade;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::load_ship::ZonePart;
@@ -63,6 +64,7 @@ use wows_toolkit_armor::scene::CameraRingSettings;
 use wows_toolkit_armor::scene::PerspectiveSettings;
 use wows_toolkit_armor::scene::TrajectoryState;
 use super::viewport_view::ViewportView;
+use wows_toolkit_armor::visibility::PartKey;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_armor::visibility::TriState;
 use wows_toolkit_armor::visibility::hull_group_all_on;
@@ -990,7 +992,7 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
 
     let mut col = v_flex().w(px(260.)).gap_2().child(header);
 
-    if armor.hull_upgrade_names.len() > 1 {
+    if armor.hull_upgrades.len() > 1 {
         col = col.child(render_hull_upgrade_row(entity, &armor, &selected_hull));
     }
     for (ct, alternatives) in &armor.module_alternatives {
@@ -1028,7 +1030,7 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
 }
 
 /// Hull-upgrade selector row: a "Hull:" label followed by one selectable
-/// toggle per hull upgrade (`armor.hull_upgrade_names`, key -> label).
+/// toggle per hull upgrade (`armor.hull_upgrades`, key -> label).
 /// Selecting a different key switches to it (`ViewportView::select_hull_upgrade`,
 /// which also clears `selected_modules` and triggers a reload). Ports the
 /// egui `selectable_label` row (`tab.rs:3163-3175`); `selected_hull.is_none()`
@@ -1039,13 +1041,13 @@ fn render_hull_upgrade_row(
     armor: &LoadedShipArmor,
     selected_hull: &Option<String>,
 ) -> AnyElement {
-    let stock_key = &armor.hull_upgrade_names[0].0;
+    let stock_key = &armor.hull_upgrades[0].key;
     let mut row = h_flex()
         .gap_1()
         .items_center()
         .flex_wrap()
         .child(div().text_sm().flex_none().child(t!("ui.armor.upgrade").to_string()));
-    for (key, label) in &armor.hull_upgrade_names {
+    for HullUpgrade { key, label } in &armor.hull_upgrades {
         let is_selected = selected_hull.as_ref().map(|sel| sel == key).unwrap_or(key == stock_key);
         let toggle_entity = entity.clone();
         let toggle_key = key.clone();
@@ -1755,7 +1757,7 @@ impl TreeNames {
 fn render_zone_row(
     entity: &Entity<ViewportView>,
     zone: &ArmorZone,
-    part_visibility: &HashMap<(String, String), bool>,
+    part_visibility: &HashMap<PartKey, bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
     expanded_zones: &HashSet<String>,
     expanded_parts: &HashSet<(String, String)>,
@@ -1837,7 +1839,7 @@ fn render_part_row(
     entity: &Entity<ViewportView>,
     zone_name: &str,
     part: &ZonePart,
-    part_visibility: &HashMap<(String, String), bool>,
+    part_visibility: &HashMap<PartKey, bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
@@ -1845,13 +1847,13 @@ fn render_part_row(
     names: &TreeNames,
 ) -> AnyElement {
     let part_key = (zone_name.to_string(), part.name.clone());
-    let part_visible = part_on(part_visibility, zone_name, &part.name);
+    let scene_part = PartKey { zone: zone_name.to_string(), part: part.name.clone() };
+    let part_visible = part_on(part_visibility, &scene_part);
     let any_plate_hidden = part_any_plate_hidden(zone_name, part, plate_visibility, show_zero_mm);
     let visible_plates: Vec<i32> = part.plates.iter().copied().filter(|&t| show_zero_mm || t != 0).collect();
 
     let toggle_entity = entity.clone();
-    let toggle_zone_name = zone_name.to_string();
-    let toggle_part_name = part.name.clone();
+    let toggle_part = scene_part.clone();
     // Matches the egui original (`tab.rs:4538-4540`, `4565-4567`): clearing
     // overrides for the `show_zero_mm`-filtered plate set, not every plate
     // on the part, so an override on a thickness currently hidden by the
@@ -1865,17 +1867,15 @@ fn render_part_row(
             TriState::from_all_any(checked, checked),
             warn,
             move |checked, _window, cx| {
-                let (zone, part, plates, checked) =
-                    (toggle_zone_name.clone(), toggle_part_name.clone(), toggle_plates.clone(), *checked);
-                toggle_entity.update(cx, |view, cx| {
-                    view.update_scene(cx, |scene| scene.toggle_part(zone, part, plates, checked))
-                });
+                let (part, plates, checked) = (toggle_part.clone(), toggle_plates.clone(), *checked);
+                toggle_entity
+                    .update(cx, |view, cx| view.update_scene(cx, |scene| scene.toggle_part(part, plates, checked)));
             },
         );
         return hoverable_row(
             format!("armor-vis-part-row-{}-{}", zone_name, part.name),
             entity,
-            SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
+            SidebarHighlightKey::Part(scene_part),
             h_flex().gap_1().items_center().child(checkbox).child(div().text_sm().child(names.part(&part.name))),
         )
         .into_any_element();
@@ -1888,10 +1888,9 @@ fn render_part_row(
         state,
         warn,
         move |checked, _window, cx| {
-            let (zone, part, plates, checked) =
-                (toggle_zone_name.clone(), toggle_part_name.clone(), toggle_plates.clone(), *checked);
+            let (part, plates, checked) = (toggle_part.clone(), toggle_plates.clone(), *checked);
             toggle_entity
-                .update(cx, |view, cx| view.update_scene(cx, |scene| scene.toggle_part(zone, part, plates, checked)));
+                .update(cx, |view, cx| view.update_scene(cx, |scene| scene.toggle_part(part, plates, checked)));
         },
     );
 
@@ -1908,7 +1907,7 @@ fn render_part_row(
     let header = hoverable_row(
         format!("armor-vis-part-row-{}-{}", zone_name, part.name),
         entity,
-        SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
+        SidebarHighlightKey::Part(scene_part),
         h_flex()
             .gap_1()
             .items_center()

@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod camera_rings;
 pub mod camo;
+pub mod error;
 pub mod gaps;
 pub mod highlight;
 pub mod hits;

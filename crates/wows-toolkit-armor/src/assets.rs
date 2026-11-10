@@ -8,14 +8,7 @@ use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::VfsPath;
 
-/// Reasons the Armor Viewer's ship data failed to load. Wraps `ShipAssets`'
-/// `rootcause::Report` errors rather than surfacing the raw report type across
-/// the background-task boundary.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum ArmorAssetsError {
-    #[error("failed to load ship assets: {0}")]
-    ShipAssets(String),
-}
+use crate::error::ArmorAssetsError;
 
 /// Loads `vfs`/`metadata`'s [`ShipAssets`]. Synchronous and CPU/IO-bound;
 /// callers run it off the UI thread.
@@ -29,6 +22,6 @@ pub fn load_ship_assets(
     match assets_bin_bytes {
         Some(bytes) => Ok(ShipAssets::from_parts(vfs, Arc::clone(metadata), Arc::clone(bytes))),
         None => ShipAssets::from_vfs_with_metadata(vfs, Arc::clone(metadata))
-            .map_err(|report| ArmorAssetsError::ShipAssets(format!("{report:?}"))),
+            .map_err(|report| ArmorAssetsError::ShipAssets { source: report.into() }),
     }
 }
