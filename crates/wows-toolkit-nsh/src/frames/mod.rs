@@ -1,410 +1,238 @@
-//! CPU-rendered frames shown two ways: a GTK native component fed RGBA
-//! textures, and an nsh `image()` fed an encoded frame each time (a `data:`
-//! URI or a file path).
+//! CPU-rendered frames shown by the `wows.frame` native component.
+//!
+//! A producer (replay renderer, tactics board, minimap preview, armor
+//! viewport) owns a [`Surface`] named by a [`SurfaceId`]. It presents RGBA
+//! frames sized to the surface and reads the input the component forwards.
+//! The TSX side places `<Frame surface="..."/>`; the component binds to the
+//! surface of that name, so the producer and the view never share a handle.
 
-mod encode;
 #[cfg(target_os = "linux")]
 pub mod native;
-mod scene;
 
-use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
-use std::time::Instant;
 
-use tokio::sync::watch;
+use tokio::sync::mpsc;
 
-pub use self::encode::UriFormat;
-pub use self::scene::FRAME_SIDE;
-pub use self::scene::PanOffset;
-use self::scene::Scene;
+/// Name of a frame surface, shared by its producer and its `<Frame>` view.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SurfaceId(Arc<str>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameMode {
-    /// GTK native component: `gtk::Picture` + `gdk::MemoryTexture`.
-    Native,
-    /// nsh `image()` whose source is replaced each frame.
-    Image(ImageTransport, UriBuffering),
-}
-
-/// What the `image()` source carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageTransport {
-    /// A `data:` URI with the encoded bytes.
-    Data(UriFormat),
-    /// The absolute path of a BMP written to a RAM-backed directory.
-    BmpFile,
-}
-
-/// How the `image()` path swaps frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UriBuffering {
-    /// One `image()` whose source changes each frame.
-    Single,
-    /// Two stacked `image()`s; the back one takes the new source and is
-    /// shown once it reports loaded.
-    Swap,
-}
-
-impl FrameMode {
-    pub const ALL: [FrameMode; 7] = [
-        FrameMode::Native,
-        FrameMode::Image(ImageTransport::Data(UriFormat::Bmp), UriBuffering::Single),
-        FrameMode::Image(ImageTransport::Data(UriFormat::Png), UriBuffering::Single),
-        FrameMode::Image(ImageTransport::Data(UriFormat::Bmp), UriBuffering::Swap),
-        FrameMode::Image(ImageTransport::Data(UriFormat::Png), UriBuffering::Swap),
-        FrameMode::Image(ImageTransport::BmpFile, UriBuffering::Single),
-        FrameMode::Image(ImageTransport::BmpFile, UriBuffering::Swap),
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            FrameMode::Native => "native",
-            FrameMode::Image(ImageTransport::Data(UriFormat::Bmp), UriBuffering::Single) => "bmp",
-            FrameMode::Image(ImageTransport::Data(UriFormat::Png), UriBuffering::Single) => "png",
-            FrameMode::Image(ImageTransport::Data(UriFormat::Bmp), UriBuffering::Swap) => "bmp-swap",
-            FrameMode::Image(ImageTransport::Data(UriFormat::Png), UriBuffering::Swap) => "png-swap",
-            FrameMode::Image(ImageTransport::BmpFile, UriBuffering::Single) => "file",
-            FrameMode::Image(ImageTransport::BmpFile, UriBuffering::Swap) => "file-swap",
-        }
+impl SurfaceId {
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        Self(name.into())
     }
 
-    pub fn parse(label: &str) -> Option<FrameMode> {
-        FrameMode::ALL.into_iter().find(|mode| mode.label() == label)
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-/// Monotonic producer frame number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FrameSeq(pub u64);
+/// A size in device pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelSize {
+    pub width: u32,
+    pub height: u32,
+}
 
-pub struct RgbaFrame {
-    pub seq: FrameSeq,
+impl PixelSize {
+    pub fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+}
+
+/// A position in device pixels, relative to the surface's top-left corner.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PixelPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// How the alpha channel of a frame's pixels is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaMode {
+    /// tiny-skia pixmaps.
+    Premultiplied,
+    /// GPU readbacks and decoded images.
+    Straight,
+}
+
+/// One frame: tightly packed RGBA8 rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Frame {
+    pub size: PixelSize,
+    pub alpha: AlphaMode,
     pub pixels: Vec<u8>,
 }
 
-/// An `image()` source for one frame; equality is by sequence so signals skip
-/// the 3 MB compare.
-#[derive(Debug, Clone)]
-pub struct UriFrame {
-    pub seq: FrameSeq,
-    pub uri: Arc<str>,
+/// Errors from building a [`Frame`].
+#[derive(Debug, thiserror::Error)]
+pub enum FrameError {
+    #[error("frame of {width}x{height} needs {expected} bytes, got {actual}")]
+    PixelCount { width: u32, height: u32, expected: usize, actual: usize },
 }
 
-impl PartialEq for UriFrame {
-    fn eq(&self, other: &Self) -> bool {
-        self.seq == other.seq
-    }
-}
-
-/// Counters reset by each once-per-second report.
-#[derive(Default)]
-pub struct FrameStats {
-    produced: AtomicU64,
-    raster_ns: AtomicU64,
-    encode_ns: AtomicU64,
-    encoded_bytes: AtomicU64,
-    overwritten: AtomicU64,
-    displayed: AtomicU64,
-    display_ns: AtomicU64,
-    display_errors: AtomicU64,
-    loads: AtomicU64,
-    load_ns: AtomicU64,
-    nsh_responder_moves: AtomicU64,
-    nsh_mouse_moves: AtomicU64,
-    gtk_drag_updates: AtomicU64,
-    gtk_scrolls: AtomicU64,
-    gtk_zooms: AtomicU64,
-}
-
-impl FrameStats {
-    /// A frame reached the screen; `main_thread` is the GTK-side cost when known.
-    pub fn record_display(&self, main_thread: Option<Duration>) {
-        self.displayed.fetch_add(1, Ordering::Relaxed);
-        if let Some(cost) = main_thread {
-            self.display_ns.fetch_add(cost.as_nanos() as u64, Ordering::Relaxed);
+impl Frame {
+    pub fn new(size: PixelSize, alpha: AlphaMode, pixels: Vec<u8>) -> Result<Self, FrameError> {
+        let expected = size.width as usize * size.height as usize * 4;
+        if pixels.len() != expected {
+            return Err(FrameError::PixelCount {
+                width: size.width,
+                height: size.height,
+                expected,
+                actual: pixels.len(),
+            });
         }
+        Ok(Self { size, alpha, pixels })
     }
+}
 
-    pub fn record_display_error(&self) {
-        self.display_errors.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Time from an `image()`'s load start to its load event, on the engine thread.
-    pub fn record_load(&self, latency: Duration) {
-        self.loads.fetch_add(1, Ordering::Relaxed);
-        self.load_ns.fetch_add(latency.as_nanos() as u64, Ordering::Relaxed);
-    }
-
-    /// Frames the consumer never saw because a newer one replaced them.
-    pub fn record_skipped(&self, frames: u64) {
-        self.overwritten.fetch_add(frames, Ordering::Relaxed);
-    }
-
-    pub fn record_input(&self, input: InputKind) {
-        let counter = match input {
-            InputKind::NshResponderMove => &self.nsh_responder_moves,
-            InputKind::NshMouseMove => &self.nsh_mouse_moves,
-            InputKind::GtkDragUpdate => &self.gtk_drag_updates,
-            InputKind::GtkScroll => &self.gtk_scrolls,
-            InputKind::GtkZoom => &self.gtk_zooms,
-        };
-        counter.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn take(counter: &AtomicU64) -> u64 {
-        counter.swap(0, Ordering::Relaxed)
-    }
-
-    fn mean_ms(total_ns: &AtomicU64, count: u64) -> f64 {
-        let total = FrameStats::take(total_ns);
-        match count {
-            0 => 0.0,
-            n => total as f64 / n as f64 / 1e6,
-        }
-    }
+/// Modifier keys held during an input event.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub meta: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputKind {
-    NshResponderMove,
-    NshMouseMove,
-    GtkDragUpdate,
-    GtkScroll,
-    GtkZoom,
+pub enum PointerButton {
+    Primary,
+    Middle,
+    Secondary,
+    Other(u32),
 }
 
-/// BMP files of the file route, oldest first, deleted once a newer frame shows.
-struct FrameFiles {
-    dir: PathBuf,
-    written: VecDeque<(FrameSeq, PathBuf)>,
+/// Input the component forwards to the surface's producer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SurfaceInput {
+    /// The view's size changed; `scale` is device pixels per point.
+    Resized { size: PixelSize, scale: f32 },
+    PointerDown { at: PixelPoint, button: PointerButton, clicks: u32, modifiers: Modifiers },
+    PointerUp { at: PixelPoint, button: PointerButton, modifiers: Modifiers },
+    PointerMoved { at: PixelPoint, modifiers: Modifiers },
+    PointerLeft,
+    /// Wheel or touchpad scroll, in scroll steps (positive `dy`: down).
+    Wheel { at: Option<PixelPoint>, dx: f32, dy: f32, modifiers: Modifiers },
+    /// Touchpad pinch; `scale` is relative to the gesture's start.
+    Pinch { scale: f32 },
+    /// A key went down or up while the view had focus. `key` is the GDK key
+    /// name (`"w"`, `"Left"`, `"space"`).
+    Key { key: String, pressed: bool, modifiers: Modifiers },
+    Focus { focused: bool },
 }
 
-impl FrameFiles {
-    fn new() -> Self {
-        // /dev/shm keeps the files in RAM; XDG_RUNTIME_DIR is tmpfs on systemd hosts.
-        let base = match std::path::Path::new("/dev/shm").is_dir() {
-            true => PathBuf::from("/dev/shm"),
-            false => std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir),
-        };
-        let dir = base.join(format!("wows-toolkit-nsh-{}", std::process::id()));
-
-        Self { dir, written: VecDeque::new() }
-    }
-
-    fn write(&mut self, seq: FrameSeq, bytes: &[u8]) -> std::io::Result<PathBuf> {
-        std::fs::create_dir_all(&self.dir)?;
-        let path = self.dir.join(format!("frame-{}.bmp", seq.0));
-        std::fs::write(&path, bytes)?;
-        self.written.push_back((seq, path.clone()));
-
-        Ok(path)
-    }
-
-    fn release_before(&mut self, shown: FrameSeq) {
-        while let Some((seq, _)) = self.written.front()
-            && *seq < shown
-        {
-            let (_, path) = self.written.pop_front().expect("front was just checked");
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::warn!(target: "frames", "removing {}: {error}", path.display());
-            }
-        }
-    }
+/// A producer's frames and the input of the view showing them.
+pub struct Surface {
+    id: SurfaceId,
+    latest: Mutex<Option<Arc<Frame>>>,
+    generation: AtomicU64,
+    view_size: Mutex<Option<(PixelSize, f32)>>,
+    input: mpsc::UnboundedSender<SurfaceInput>,
+    receiver: Mutex<Option<mpsc::UnboundedReceiver<SurfaceInput>>>,
 }
 
-/// Shared between the producer thread, the GTK main thread and the engine thread.
-pub struct FrameHub {
-    mode: Mutex<FrameMode>,
-    active: AtomicBool,
-    pan: Mutex<PanOffset>,
-    rgba: Mutex<Option<RgbaFrame>>,
-    uri: watch::Sender<Option<UriFrame>>,
-    files: Mutex<FrameFiles>,
-    report: Mutex<String>,
-    pub stats: FrameStats,
-}
-
-impl FrameHub {
-    fn new() -> Self {
+impl Surface {
+    fn new(id: SurfaceId) -> Self {
+        let (input, receiver) = mpsc::unbounded_channel();
         Self {
-            mode: Mutex::new(FrameMode::Native),
-            active: AtomicBool::new(false),
-            pan: Mutex::new(PanOffset::default()),
-            rgba: Mutex::new(None),
-            uri: watch::Sender::new(None),
-            files: Mutex::new(FrameFiles::new()),
-            report: Mutex::new("waiting for the first report".to_owned()),
-            stats: FrameStats::default(),
+            id,
+            latest: Mutex::new(None),
+            generation: AtomicU64::new(0),
+            view_size: Mutex::new(None),
+            input,
+            receiver: Mutex::new(Some(receiver)),
         }
     }
 
-    pub fn mode(&self) -> FrameMode {
-        *self.mode.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn id(&self) -> &SurfaceId {
+        &self.id
     }
 
-    pub fn set_mode(&self, mode: FrameMode) {
-        *self.mode.lock().unwrap_or_else(|e| e.into_inner()) = mode;
-        log::info!(target: "frames", "mode -> {}", mode.label());
+    /// Replaces the shown frame. Frames not yet shown are dropped.
+    pub fn present(&self, frame: Frame) {
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(frame));
+        self.generation.fetch_add(1, Ordering::Release);
     }
 
-    pub fn set_active(&self, active: bool) {
-        self.active.store(active, Ordering::Relaxed);
+    /// Clears the view.
+    pub fn clear(&self) {
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.generation.fetch_add(1, Ordering::Release);
     }
 
-    pub fn pan_by(&self, dx: f32, dy: f32) {
-        let mut pan = self.pan.lock().unwrap_or_else(|e| e.into_inner());
-        pan.x += dx;
-        pan.y += dy;
+    /// The input stream. Only one producer reads it; later calls get `None`.
+    pub fn take_input(&self) -> Option<mpsc::UnboundedReceiver<SurfaceInput>> {
+        self.receiver.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
-    pub fn take_rgba(&self) -> Option<RgbaFrame> {
-        self.rgba.lock().unwrap_or_else(|e| e.into_inner()).take()
+    /// The size of the view last reported, if one is shown.
+    pub fn view_size(&self) -> Option<(PixelSize, f32)> {
+        *self.view_size.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The latest `image()` source; the engine thread awaits or polls it.
-    pub fn subscribe(&self) -> watch::Receiver<Option<UriFrame>> {
-        self.uri.subscribe()
+    /// Sends input as the view would; also used by headless tests, where
+    /// native components do not exist.
+    pub fn send_input(&self, input: SurfaceInput) {
+        if let SurfaceInput::Resized { size, scale } = &input {
+            *self.view_size.lock().unwrap_or_else(|e| e.into_inner()) = Some((*size, *scale));
+        }
+        // The producer may have stopped; input for it is then irrelevant.
+        let _ = self.input.send(input);
     }
 
-    /// `seq` reported loaded: older frame files are no longer shown.
-    pub fn frame_shown(&self, seq: FrameSeq) {
-        self.files.lock().unwrap_or_else(|e| e.into_inner()).release_before(seq);
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
-    pub fn report(&self) -> String {
-        self.report.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    fn publish(&self, seq: FrameSeq, mode: FrameMode, rgba: &[u8]) {
-        let transport = match mode {
-            FrameMode::Native => {
-                let frame = RgbaFrame { seq, pixels: rgba.to_vec() };
-                if self.rgba.lock().unwrap_or_else(|e| e.into_inner()).replace(frame).is_some() {
-                    self.stats.record_skipped(1);
-                }
-                return;
-            }
-            FrameMode::Image(transport, _) => transport,
-        };
-
-        let start = Instant::now();
-        let uri = match transport {
-            ImageTransport::Data(format) => encode::data_uri(format, rgba, FRAME_SIDE, FRAME_SIDE),
-            ImageTransport::BmpFile => {
-                let bytes = encode::bmp(rgba, FRAME_SIDE, FRAME_SIDE);
-                let written = self.files.lock().unwrap_or_else(|e| e.into_inner()).write(seq, &bytes);
-                match written {
-                    Ok(path) => path.to_string_lossy().into_owned(),
-                    Err(error) => {
-                        log::error!(target: "frames", "writing frame {}: {error}", seq.0);
-                        self.stats.record_display_error();
-                        return;
-                    }
-                }
-            }
-        };
-        self.stats.encode_ns.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        self.stats.encoded_bytes.fetch_add(uri.len() as u64, Ordering::Relaxed);
-
-        self.uri.send_replace(Some(UriFrame { seq, uri: Arc::from(uri) }));
-    }
-
-    fn write_report(&self, elapsed: Duration) {
-        let stats = &self.stats;
-        let produced = FrameStats::take(&stats.produced);
-        let raster_ms = FrameStats::mean_ms(&stats.raster_ns, produced);
-        let encode_ms = FrameStats::mean_ms(&stats.encode_ns, produced);
-        let source_kib = match produced {
-            0 => 0,
-            n => FrameStats::take(&stats.encoded_bytes) / n / 1024,
-        };
-        let displayed = FrameStats::take(&stats.displayed);
-        let display_ms = FrameStats::mean_ms(&stats.display_ns, displayed);
-        let loads = FrameStats::take(&stats.loads);
-        let load_ms = FrameStats::mean_ms(&stats.load_ns, loads);
-        let seconds = elapsed.as_secs_f64();
-
-        let report = format!(
-            "mode={} produced_fps={:.1} displayed_fps={:.1} raster_ms={raster_ms:.2} encode_ms={encode_ms:.2} \
-             source_kib={source_kib} load_ms={load_ms:.2} main_upload_ms={display_ms:.3} skipped={} \
-             display_errors={} input[nsh_responder_move={} nsh_mouse_move={} gtk_drag={} gtk_scroll={} gtk_zoom={}]",
-            self.mode().label(),
-            produced as f64 / seconds,
-            displayed as f64 / seconds,
-            FrameStats::take(&stats.overwritten),
-            FrameStats::take(&stats.display_errors),
-            FrameStats::take(&stats.nsh_responder_moves),
-            FrameStats::take(&stats.nsh_mouse_moves),
-            FrameStats::take(&stats.gtk_drag_updates),
-            FrameStats::take(&stats.gtk_scrolls),
-            FrameStats::take(&stats.gtk_zooms),
-        );
-        log::info!(target: "frames", "{report}");
-        *self.report.lock().unwrap_or_else(|e| e.into_inner()) = report;
+    /// The latest frame, for the view and for tests.
+    pub fn latest(&self) -> Option<Arc<Frame>> {
+        self.latest.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
-/// The process-wide hub; the first access starts the producer thread.
-static HUB: LazyLock<Arc<FrameHub>> = LazyLock::new(|| {
-    let hub = Arc::new(FrameHub::new());
-    let producer = Arc::clone(&hub);
-    std::thread::Builder::new()
-        .name("frame-producer".to_owned())
-        .spawn(move || produce(&producer))
-        .expect("spawning the frame producer thread");
-    hub
-});
+static SURFACES: LazyLock<Mutex<HashMap<SurfaceId, Arc<Surface>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub fn hub() -> &'static Arc<FrameHub> {
-    &HUB
+/// The surface named `id`, made on first use.
+pub fn surface(id: &SurfaceId) -> Arc<Surface> {
+    let mut surfaces = SURFACES.lock().unwrap_or_else(|e| e.into_inner());
+    Arc::clone(surfaces.entry(id.clone()).or_insert_with(|| Arc::new(Surface::new(id.clone()))))
 }
 
-fn produce(hub: &FrameHub) {
-    const PERIOD: Duration = Duration::from_nanos(1_000_000_000 / 30);
+/// Forgets the surface named `id`. A view still bound to it keeps its last
+/// frame; a later [`surface`] call makes a new one with a fresh input stream.
+pub fn release(id: &SurfaceId) {
+    SURFACES.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+}
 
-    let mut scene = Scene::new();
-    let mut seq = 0u64;
-    let mut next = Instant::now();
-    let mut report_start = Instant::now();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    loop {
-        if !hub.active.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(50));
-            next = Instant::now();
-            report_start = Instant::now();
-            continue;
-        }
+    #[test]
+    fn frame_rejects_wrong_pixel_count() {
+        let size = PixelSize { width: 2, height: 2 };
+        assert!(Frame::new(size, AlphaMode::Straight, vec![0; 15]).is_err());
+        assert!(Frame::new(size, AlphaMode::Straight, vec![0; 16]).is_ok());
+    }
 
-        let mode = hub.mode();
-        let pan = *hub.pan.lock().unwrap_or_else(|e| e.into_inner());
-
-        let start = Instant::now();
-        let rgba = scene.render(pan);
-        hub.stats.raster_ns.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-        seq += 1;
-        hub.publish(FrameSeq(seq), mode, rgba);
-        hub.stats.produced.fetch_add(1, Ordering::Relaxed);
-
-        let since_report = report_start.elapsed();
-        if since_report >= Duration::from_secs(1) {
-            hub.write_report(since_report);
-            report_start = Instant::now();
-        }
-
-        next += PERIOD;
-        let now = Instant::now();
-        match next.checked_duration_since(now) {
-            Some(wait) => std::thread::sleep(wait),
-            // Behind schedule: drop the backlog rather than burst.
-            None => next = now,
-        }
+    #[test]
+    fn input_reaches_the_single_reader_and_records_size() {
+        let id = SurfaceId::new("test-input");
+        let surface = surface(&id);
+        let mut input = surface.take_input().expect("first reader gets the stream");
+        assert!(surface.take_input().is_none());
+        let size = PixelSize { width: 30, height: 20 };
+        surface.send_input(SurfaceInput::Resized { size, scale: 2.0 });
+        assert_eq!(surface.view_size(), Some((size, 2.0)));
+        assert_eq!(input.try_recv().ok(), Some(SurfaceInput::Resized { size, scale: 2.0 }));
+        release(&id);
+        assert!(!Arc::ptr_eq(&surface, &super::surface(&id)));
+        release(&id);
     }
 }

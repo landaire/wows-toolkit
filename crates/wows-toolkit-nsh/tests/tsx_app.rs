@@ -394,7 +394,7 @@ fn search_queries_the_shared_replay_index() {
     let indexed_replay = replay.clone();
     tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
         async {
-            use std::path::{Path, PathBuf};
+            use std::path::Path;
 
             use wows_core::game_types::{AccountId, ArenaId, GameParamId};
             use wows_toolkit_config::index::rows::{

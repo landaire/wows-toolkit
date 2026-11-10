@@ -33,6 +33,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:sqlx",
     "//third-party/rust:sys-locale",
     "//third-party/rust:tiny-skia",
+    "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:url",
     "//third-party/rust:tempfile",
