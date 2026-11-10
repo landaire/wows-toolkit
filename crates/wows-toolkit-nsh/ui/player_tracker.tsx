@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { Clipboard, colorScheme, effect, Image, List, openUrl, Scroll, signal, Text, untracked, View } from "nsh";
-import { AlertDialog, Checkbox, DockArea, Input, Menu, MenuItem, Popover, Tooltip } from "nsh/base";
+import { AlertDialog, Checkbox, DockArea, Input, Menu, Popover, Tooltip } from "nsh/base";
 import {
   PlayerTracker,
   type ClanColumn,
@@ -409,17 +409,11 @@ function TrackerToolbar() {
         <Surface style={{ minWidth: 190, padding: 5, backgroundColor: colors.popover }}>
           <Each of={current().periods}>
             {(option) => (
-              <MenuItem
+              <MenuRow
+                label={option().label}
+                mark={option().period === current().period ? "check" : undefined}
                 onSelect={() => void selectPeriod(option().period)}
-                hoverStyle={{ backgroundColor: colors.accent }}
-                activeStyle={{ opacity: 0.72 }}
-                style={{ height: 30, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 12 }}
-              >
-                <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{option().label}</Text>
-                <If when={option().period === current().period}>
-                  <Icon name="check" size={12} color={colors.mutedForeground}/>
-                </If>
-              </MenuItem>
+              />
             )}
           </Each>
         </Surface>

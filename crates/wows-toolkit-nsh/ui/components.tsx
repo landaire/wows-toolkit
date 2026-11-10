@@ -92,7 +92,8 @@ export function Spinner(props: { label: string; size?: number; color?: string })
   );
 }
 
-export function MenuRow(props: { label: string; note?: string; danger?: boolean; onSelect: () => void }) {
+/** A menu entry. `mark` is an icon at its end, such as `check` beside the chosen entry. */
+export function MenuRow(props: { label: string; note?: string; mark?: IconName; danger?: boolean; onSelect: () => void }) {
   return (
     <MenuItem
       onSelect={props.onSelect}
@@ -103,6 +104,9 @@ export function MenuRow(props: { label: string; note?: string; danger?: boolean;
       <Text style={{ flex: 1, fontSize: 13, color: props.danger ? colors.destructive : colors.popoverForeground }}>{props.label}</Text>
       <If when={props.note}>
         <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{props.note}</Text>
+      </If>
+      <If when={props.mark}>
+        <Icon name={props.mark!} size={12} color={colors.mutedForeground}/>
       </If>
     </MenuItem>
   );
