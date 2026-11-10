@@ -11,12 +11,17 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Mutex;
 
+use base64::Engine as _;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::row_icons::ship_class_svg;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
+use wowsunpack::game_assets::GuiAsset;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::game_data::GameDataError;
@@ -51,7 +56,35 @@ pub struct ConstantsMismatch {
     pub version: String,
 }
 
+/// The recording player's nation flag and ship class icon, as `data:` URLs,
+/// which the tab title shows. Each is `None` when the build lacks it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TitleIcons {
+    pub nation_flag: Option<String>,
+    pub class_icon: Option<String>,
+}
+
+impl TitleIcons {
+    /// Reads the icons of `model`'s self row from `game_data`. Blocking.
+    pub fn read(model: &ReplayReportModel, game_data: &LoadedGameData) -> Self {
+        let Some(player) = model.rows.iter().find(|row| row.is_self) else {
+            return Self::default();
+        };
+        let vfs = game_data.vfs();
+
+        let nation_flag = player
+            .ship_id
+            .and_then(|id| GameParamProvider::game_param_by_id(game_data.provider().as_ref(), id))
+            .and_then(|param| GuiAsset::NationFlag(param.nation()).read(vfs, None))
+            .map(|bytes| data_uri("image/png", &bytes));
+        let class_icon = ship_class_svg(player.ship_class, vfs).map(|bytes| data_uri("image/svg+xml", &bytes));
+
+        Self { nation_flag, class_icon }
+    }
+}
+
 /// One parsed replay, as the inspector shows it.
+#[derive(Clone)]
 pub struct ReplayDocument {
     pub path: PathBuf,
     /// Other recordings of the same battle read alongside it.
@@ -73,6 +106,7 @@ pub struct ReplayDocument {
     /// This battle as the session statistics record it.
     pub session_stat: Option<PerGameStat>,
     pub constants_mismatch: Option<ConstantsMismatch>,
+    pub title_icons: TitleIcons,
 }
 
 impl ReplayDocument {
@@ -109,6 +143,8 @@ impl ReplayDocument {
             _ => None,
         };
 
+        let title_icons = TitleIcons::read(&model, &game_data);
+
         Self {
             path,
             alts,
@@ -121,8 +157,28 @@ impl ReplayDocument {
             vfs: Some(game_data.vfs().clone()),
             session_stat,
             constants_mismatch,
+            title_icons,
         }
     }
+
+    /// A copy with the rows `table` can rate and are not yet rated filled in;
+    /// `None` when that changes no row.
+    pub fn rated(&self, table: &PersonalRatingData) -> Option<Self> {
+        let unrated = |document: &Self| document.model.rows.iter().filter(|row| row.personal_rating.is_none()).count();
+        let before = unrated(self);
+        if before == 0 {
+            return None;
+        }
+
+        let mut rated = self.clone();
+        rated.model.populate_personal_ratings(table);
+
+        (unrated(&rated) < before).then_some(rated)
+    }
+}
+
+fn data_uri(mime: &str, bytes: &[u8]) -> String {
+    format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// What reads a replay into a document: the real parse, or a test's.
@@ -178,4 +234,21 @@ pub fn get(id: ReplayDocId) -> Option<Rc<ReplayDocument>> {
 /// Forgets a closed replay.
 pub fn remove(id: ReplayDocId) {
     DOCUMENTS.with(|documents| documents.borrow_mut().remove(&id));
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod tests {
+    use super::*;
+    use crate::replay_inspector::test_support;
+
+    #[test]
+    fn a_later_table_rates_the_unrated_self_row_once() {
+        let document = test_support::unrated_sample_document(Path::new("sample.wowsreplay"), &[]);
+        let table = test_support::sample_personal_rating();
+
+        let rated = document.rated(&table).expect("the self row becomes rated");
+
+        assert!(rated.model.rows.iter().any(|row| row.is_self && row.personal_rating.is_some()));
+        assert!(rated.rated(&table).is_none(), "nothing further is rated");
+    }
 }

@@ -384,3 +384,20 @@ fn the_palette_opens_a_replay_file() {
     app.press_key("enter").unwrap();
     app.wait_for(SAMPLE_TITLE).unwrap();
 }
+
+#[test]
+fn a_rating_table_that_loads_later_rates_the_open_replay() {
+    let mut app = app();
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_unrated_sample();
+    // The startup download may already have installed the published table.
+    wows_toolkit_nsh::game_data::set_personal_rating(None);
+    open_sample(&mut app);
+    app.wait_for("text:/Team Damage/").unwrap();
+    assert!(!app.shows("text:/PR: /"), "the replay was read without a rating table");
+
+    wows_toolkit_nsh::game_data::set_personal_rating(Some(
+        wows_toolkit_nsh::replay_inspector::test_support::sample_personal_rating(),
+    ));
+    app.wait_for("text:/PR: /").unwrap();
+    app.wait_for(SAMPLE_TITLE).unwrap();
+}

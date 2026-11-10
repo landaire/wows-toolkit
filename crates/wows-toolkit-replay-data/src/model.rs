@@ -363,6 +363,7 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
 /// `columns` starts as every `ReplayColumn` (mirroring `UiReport::new`'s
 /// initial full list); callers apply `columns::default_columns(&settings)` to
 /// filter the optional ones.
+#[derive(Clone)]
 pub struct ReplayReportModel {
     pub self_team: TeamId,
     pub rows: Vec<PlayerRow>,

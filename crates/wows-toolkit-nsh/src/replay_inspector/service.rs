@@ -141,6 +141,27 @@ impl ReplayInspectorService {
         document::remove(document);
     }
 
+    /// Rates the rows of an open replay that were read before the personal-
+    /// rating table loaded. Registers the rated replay in place of `document`
+    /// and summarizes it; `None` when the table is not loaded or rates no
+    /// further row.
+    pub async fn rerate(document: ReplayDocId) -> Result<Option<ReplaySummary>, InspectorError> {
+        let Some(table) = crate::game_data::personal_rating() else {
+            return Ok(None);
+        };
+        let Some(rated) = open_document(document)?.rated(&table) else {
+            return Ok(None);
+        };
+
+        let id = document::insert(rated);
+        document::remove(document);
+        let Some(rated) = document::get(id) else {
+            return Err(InspectorError::UnknownDocument { id });
+        };
+
+        Ok(Some(summary::summarize(id, &rated, dark(), None)))
+    }
+
     /// One of the replay's debug payloads; `None` when the replay has none.
     pub fn raw_json(document: ReplayDocId, which: RawJson) -> Result<Option<String>, InspectorError> {
         let document = open_document(document)?;

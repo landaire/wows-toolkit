@@ -855,9 +855,23 @@ fn scanning(browser: Browser) -> AnyElement {
         if total == 0 { 0.0 } else { done as f32 / total as f32 * 100.0 }
     };
 
+    // The walk has no total to measure against, so it shows activity alone.
+    let walking = move || browser.progress.with(|progress| progress.total == 0);
+
     view()
         .app_class(class("p-2 gap-1"))
-        .child(text(caption).app_class(class("text-sm text-muted-foreground")))
+        .child(
+            view()
+                .app_class(class("flex-row items-center gap-2"))
+                .child(when(walking, move || {
+                    progress()
+                        .indeterminate(true)
+                        .accessibility_label(move || Some(caption()))
+                        .track_class("w-[60px] h-1.5 rounded-full bg-muted overflow-hidden")
+                        .indicator_class("h-full rounded-full bg-primary")
+                }))
+                .child(text(caption).app_class(class("text-sm text-muted-foreground"))),
+        )
         .child(when(
             move || browser.progress.with(|progress| progress.total > 0),
             move || {

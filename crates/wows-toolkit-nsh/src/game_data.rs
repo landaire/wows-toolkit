@@ -341,6 +341,13 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
     state().personal_rating.clone()
 }
 
+/// Installs `table` as the personal-rating table, or clears it, for tests
+/// that have no network.
+#[cfg(feature = "test-support")]
+pub fn set_personal_rating(table: Option<PersonalRatingData>) {
+    update(|state| state.personal_rating = table.map(Arc::new));
+}
+
 /// Changes whenever the game data's state does.
 pub fn changes() -> tokio::sync::watch::Receiver<GameDataRevision> {
     SERVICE.changed.subscribe()
@@ -532,7 +539,10 @@ fn startup_work() {
             None
         }
     };
-    update(|state| state.personal_rating = rating.map(Arc::new));
+    // A failed refresh keeps a table already installed.
+    if let Some(rating) = rating {
+        update(|state| state.personal_rating = Some(Arc::new(rating)));
+    }
 }
 
 /// Watches the game's replay directory for binding `generation`, replacing
@@ -1160,6 +1170,8 @@ pub struct GameDataSnapshot {
     pub directories: Vec<DirectoryEntry>,
     pub directories_error: Option<String>,
     pub offer: MissingBuildOffer,
+    /// Whether the personal-rating table has loaded.
+    pub personal_rating_loaded: bool,
 }
 
 /// The load's part of the snapshot.
@@ -1269,6 +1281,7 @@ fn snapshot() -> GameDataSnapshot {
             objects: state.offer.objects.map(|count| count as u64),
             failure: state.offer.failure.clone(),
         },
+        personal_rating_loaded: state.personal_rating.is_some(),
     }
 }
 

@@ -94,6 +94,10 @@ pub struct ReplaySummary {
     pub file_name: String,
     /// `<self ship> - <map>`, or the map alone.
     pub title: String,
+    /// The recording player's nation flag as a PNG `data:` URL.
+    pub nation_flag: Option<String>,
+    /// The recording player's ship class icon as an SVG `data:` URL.
+    pub class_icon: Option<String>,
     /// `None` while the replay has no battle result yet.
     pub outcome: Option<Outcome>,
     /// `None` without a rating table, a self row or known damage.
@@ -141,6 +145,8 @@ pub fn summarize(
         // A document is read from a file, so its path always ends in a name.
         file_name: document.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
         title: summary::title(model),
+        nation_flag: document.title_icons.nation_flag.clone(),
+        class_icon: document.title_icons.class_icon.clone(),
         outcome,
         personal_rating,
         incomplete_results: document.raw_results_json.is_none(),
