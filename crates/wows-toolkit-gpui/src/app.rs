@@ -143,11 +143,14 @@ fn offer_update(
     cx: &mut gpui_kit::App,
 ) {
     let asset_url = release.asset_for_windows().map(|asset| asset.browser_download_url.clone());
-    window.open_dialog(cx, move |dialog, _window, _cx| {
+    window.open_dialog(cx, move |dialog, _window, cx| {
         let app = app.clone();
         let release_url = release.html_url.clone();
         let asset_url = asset_url.clone();
         let can_install = cfg!(target_os = "windows") && asset_url.is_some();
+        let border = cx.theme().border;
+        let notes_ground = cx.theme().muted;
+        let radius = cx.theme().radius;
         dialog
             .title(t!("ui.windows.update_available").into_owned())
             .w(px(680.))
@@ -159,22 +162,64 @@ fn offer_update(
                         "update-version",
                         t!("ui.dialogs.update_message", tag = release.tag_name).into_owned(),
                     ))
+                    // The notes are the release's own text, so they sit in a
+                    // framed box of their own: where they start and stop is
+                    // the frame, not a guess from the markdown's headings.
                     .when_some(release.body.clone().filter(|notes| !notes.trim().is_empty()), |body, notes| {
-                        body.child(div().id("update-notes-scroll").max_h(px(420.)).overflow_y_scroll().child(
-                            gpui_kit::component::text::TextView::markdown("update-notes", notes).selectable(true),
-                        ))
+                        body.child(
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(crate::theme::text_dim())
+                                        .child(t!("ui.dialogs.update_notes").into_owned()),
+                                )
+                                .child(
+                                    div()
+                                        .id("update-notes-scroll")
+                                        .max_h(px(420.))
+                                        .overflow_y_scroll()
+                                        .p_3()
+                                        .rounded(radius)
+                                        .border_1()
+                                        .border_color(border)
+                                        .bg(notes_ground)
+                                        .child(
+                                            gpui_kit::component::text::TextView::markdown("update-notes", notes)
+                                                .selectable(true),
+                                        ),
+                                ),
+                        )
                     })
                     .when(!cfg!(target_os = "windows"), |body| {
-                        body.child(t!("ui.dialogs.update_windows_only").into_owned())
+                        body.child(
+                            div()
+                                .text_sm()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.dialogs.update_windows_only").into_owned()),
+                        )
                     })
                     .when(cfg!(target_os = "windows") && asset_url.is_none(), |body| {
-                        body.child(t!("ui.dialogs.update_asset_pending").into_owned())
+                        body.child(
+                            div()
+                                .text_sm()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.dialogs.update_asset_pending").into_owned()),
+                        )
                     }),
             )
             .footer(
                 h_flex()
+                    .w_full()
                     .gap_2()
                     .justify_end()
+                    // A rule over the buttons, so they read as the dialog's
+                    // own actions rather than the end of the notes above.
+                    .pt_3()
+                    .border_t_1()
+                    .border_color(border)
                     .child(
                         Button::new("update-view-release")
                             .small()
