@@ -49,6 +49,15 @@ static TRACKER: LazyLock<Mutex<Tracker>> = LazyLock::new(|| Mutex::new(Tracker::
 /// each write takes the view as it stands once it holds this.
 static SETTINGS_WRITE: Mutex<()> = Mutex::new(());
 
+/// Held across each edit of the tracked rows, in memory and in the database
+/// together, and across each read of them: a note or a clear lands whole, in
+/// the order it was made, and a read sees the rows as one edit left them.
+static TRACKED_ROWS: Mutex<()> = Mutex::new(());
+
+fn tracked_rows() -> MutexGuard<'static, ()> {
+    TRACKED_ROWS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn tracker() -> MutexGuard<'static, Tracker> {
     // A request that panicked leaves the tracker as it last wrote it, which is
     // still a consistent view to draw.
@@ -213,10 +222,15 @@ where
 fn open(locale: &str) -> Result<TrackerOpened, TrackerError> {
     // The chip hover is worded by the viewmodel, in its own locale.
     wows_toolkit_viewmodel::set_locale(locale);
+    let _rows = tracked_rows();
     let opened = database::run(async |pool| database::open(pool).await)?;
 
     let mut tracker = tracker();
+    // Moved on rather than reset, so a read begun before this one cannot
+    // land over the rows it reads.
+    let tracked_revision = tracker.tracked_revision.wrapping_add(1);
     *tracker = Tracker::new();
+    tracker.tracked_revision = tracked_revision;
     tracker.settings = opened.settings;
     tracker.modes = opened.modes;
     tracker.tracked = opened.tracked;
@@ -233,17 +247,22 @@ fn refresh() -> Result<TrackerControls, TrackerError> {
         (tracker.generation, tracker.settings.period)
     };
 
-    let read = database::run(async |pool| {
-        let tracked = database::tracked_players(pool).await;
-        let players = database::index_players(pool, period, Timestamp::now()).await;
-        Ok((tracked, players))
+    // The revision is taken with the rows, so an edit made after this read
+    // keeps the read's rows from replacing it.
+    let tracked = {
+        let _rows = tracked_rows();
+        let read_at = tracker().tracked_revision;
+        database::run(async |pool| Ok(database::tracked_players(pool).await)).map(|tracked| (read_at, tracked))
+    };
+    let read = tracked.and_then(|tracked| {
+        database::run(async |pool| Ok((tracked, database::index_players(pool, period, Timestamp::now()).await)))
     });
 
     let mut tracker = tracker();
     if tracker.generation != generation {
         return Ok(tracker.controls());
     }
-    let (tracked, players) = match read {
+    let ((read_at, tracked), players) = match read {
         Ok(read) => read,
         Err(err) => {
             tracker.index = LoadState::Failed(err.report());
@@ -251,7 +270,9 @@ fn refresh() -> Result<TrackerControls, TrackerError> {
         }
     };
     match tracked {
-        Ok(tracked) => tracker.tracked = tracked,
+        Ok(tracked) => {
+            tracker.install_tracked(read_at, tracked);
+        }
         // Left as it was rather than emptied: a note written from here would
         // then be the only row an account has.
         Err(err) => tracker.note_error = Some(err.report()),
@@ -329,10 +350,11 @@ fn change_view_modes(change: impl FnOnce(&mut Tracker)) -> Result<(), TrackerErr
 
 fn save_note(account_id: &str, note: String) -> Result<TrackerControls, TrackerError> {
     let account = parse_account(account_id)?;
+
+    let _rows = tracked_rows();
     let Some(player) = tracker().set_note(account, note) else {
         return Ok(tracker().controls());
     };
-
     let written = database::run(async |pool| database::save_note(pool, account, player).await);
 
     let mut tracker = tracker();
@@ -345,9 +367,10 @@ fn save_note(account_id: &str, note: String) -> Result<TrackerControls, TrackerE
 }
 
 fn clear() -> Result<(), TrackerError> {
+    let _rows = tracked_rows();
     database::run(async |pool| database::clear_tracked(pool).await)?;
 
-    tracker().tracked.clear();
+    tracker().clear_tracked();
     Ok(())
 }
 

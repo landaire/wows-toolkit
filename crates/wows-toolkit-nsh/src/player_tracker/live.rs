@@ -897,6 +897,10 @@ mod tests {
     #[test]
     fn a_build_the_install_lacks_is_reported_as_unavailable() {
         let dir = tempfile::tempdir().expect("a temporary directory");
+        // The cache keeps its dumps under the app's storage, never the user's.
+        wows_toolkit_config::storage_override::set(
+            std::env::temp_dir().join(format!("wows-toolkit-nsh-tracker-storage-{}", std::process::id())),
+        );
 
         let missing = load_build(None, 12_668_706).err().expect("no cache, no build");
         assert!(matches!(missing, LiveDataError::NotConfigured));

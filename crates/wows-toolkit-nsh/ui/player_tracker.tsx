@@ -50,6 +50,8 @@ const editingNote = signal<string | null>(null);
 const noteDraft = signal("");
 let opened = false;
 let liveRevision = -1;
+let liveReading = false;
+let liveAgain = false;
 let tabShown = false;
 let currentMatchActive = false;
 let filterTimer: number | undefined;
@@ -65,7 +67,7 @@ export function activatePlayerTracker(locale: string) {
   if (!opened) {
     opened = true;
     void open(locale);
-    setInterval(() => void pollLive(), LIVE_POLL_MS);
+    setInterval(pollLive, LIVE_POLL_MS);
   }
   void PlayerTracker.syncLive().catch((error) => failure.set(errorMessage(error)));
 }
@@ -138,19 +140,32 @@ async function reloadClans() {
   }
 }
 
+/** Reads the Current Match section one read at a time. A request made while
+ * a read runs, or a revision that moved under it, reads again once it lands,
+ * so an older answer never replaces a newer one. */
 async function reloadLive() {
+  if (liveReading) {
+    liveAgain = true;
+    return;
+  }
+  liveReading = true;
   try {
-    live.set(await PlayerTracker.liveView());
-  } catch (error) {
-    failure.set(errorMessage(error));
+    do {
+      liveAgain = false;
+      liveRevision = PlayerTracker.liveRevision();
+      try {
+        live.set(await PlayerTracker.liveView());
+      } catch (error) {
+        failure.set(errorMessage(error));
+      }
+    } while (liveAgain || PlayerTracker.liveRevision() !== liveRevision);
+  } finally {
+    liveReading = false;
   }
 }
 
-async function pollLive() {
-  const revision = PlayerTracker.liveRevision();
-  if (revision === liveRevision) return;
-  liveRevision = revision;
-  await reloadLive();
+function pollLive() {
+  if (PlayerTracker.liveRevision() !== liveRevision) void reloadLive();
 }
 
 /** Applies a control change, then redraws what it affects. */

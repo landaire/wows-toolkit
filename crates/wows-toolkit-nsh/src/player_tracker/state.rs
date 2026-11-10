@@ -68,6 +68,9 @@ pub struct Tracker {
     pub note_error: Option<String>,
     /// Bumped per index read so a slower earlier one cannot land over a later.
     pub generation: u64,
+    /// Bumped whenever `tracked` is edited here, so a read of the stored rows
+    /// taken before the edit does not put the old rows back.
+    pub tracked_revision: u64,
 }
 
 impl Default for Tracker {
@@ -89,6 +92,7 @@ impl Tracker {
             clans: LoadState::Idle,
             note_error: None,
             generation: 0,
+            tracked_revision: 0,
         }
     }
 
@@ -318,8 +322,27 @@ impl Tracker {
             return None;
         }
         entry.notes = note;
+        let written = entry.clone();
+        self.tracked_revision = self.tracked_revision.wrapping_add(1);
 
-        Some(entry.clone())
+        Some(written)
+    }
+
+    /// Forgets every tracked player.
+    pub fn clear_tracked(&mut self) {
+        self.tracked.clear();
+        self.tracked_revision = self.tracked_revision.wrapping_add(1);
+    }
+
+    /// Installs the stored rows a read taken at `read_at` returned, unless
+    /// the rows were edited here since. Returns whether they were installed.
+    pub fn install_tracked(&mut self, read_at: u64, tracked: HashMap<AccountId, TrackedPlayer>) -> bool {
+        if self.tracked_revision != read_at {
+            return false;
+        }
+        self.tracked = tracked;
+
+        true
     }
 }
 
@@ -445,6 +468,29 @@ mod tests {
         assert_eq!(row.member_list[0].name, "Alpha");
         assert_eq!(row.member_list[0].matches, "seen in 2 matches");
         assert_eq!(row.severity, super::super::view::Severity::Noted);
+    }
+
+    /// Rows read before a note or a clear do not put the old rows back; rows
+    /// read after them do.
+    #[test]
+    fn rows_read_before_an_edit_are_not_installed_over_it() {
+        let mut tracker = loaded();
+        let stored: HashMap<AccountId, TrackedPlayer> =
+            [(AccountId(9), TrackedPlayer { notes: "old".to_string(), ..TrackedPlayer::default() })].into();
+
+        let read_at = tracker.tracked_revision;
+        tracker.set_note(AccountId(9), "new".to_string()).expect("the note changed");
+        assert!(!tracker.install_tracked(read_at, stored.clone()), "a read from before the note is stale");
+        assert_eq!(tracker.tracked[&AccountId(9)].notes, "new");
+
+        let read_at = tracker.tracked_revision;
+        tracker.clear_tracked();
+        assert!(!tracker.install_tracked(read_at, stored.clone()), "a read from before the clear is stale");
+        assert!(tracker.tracked.is_empty());
+
+        let read_at = tracker.tracked_revision;
+        assert!(tracker.install_tracked(read_at, stored));
+        assert_eq!(tracker.tracked[&AccountId(9)].notes, "old");
     }
 
     #[test]
