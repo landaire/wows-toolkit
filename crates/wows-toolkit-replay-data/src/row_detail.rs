@@ -154,16 +154,31 @@ pub fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
     ribbons.insert(insert_idx, bulge);
 }
 
-/// Scales native `(w, h)` to fit within a `max` by `max` box keeping the
+/// An icon's width and height, in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IconSize {
+    pub width: f32,
+    pub height: f32,
+}
+
+impl IconSize {
+    pub const fn square(edge: f32) -> Self {
+        Self { width: edge, height: edge }
+    }
+}
+
+/// Scales a `native` size to fit within a `max` by `max` box keeping the
 /// aspect ratio, so a wide ribbon renders short. Non-positive sizes fall back
 /// to a `max` square.
-pub fn fit_dims(w: f32, h: f32, max: f32) -> (f32, f32) {
-    if w <= 0.0 || h <= 0.0 {
-        return (max, max);
+pub fn fit_dims(native: IconSize, max: f32) -> IconSize {
+    let IconSize { width, height } = native;
+    if width <= 0.0 || height <= 0.0 {
+        return IconSize::square(max);
     }
 
-    let scale = (max / w).min(max / h);
-    (w * scale, h * scale)
+    let scale = (max / width).min(max / height);
+
+    IconSize { width: width * scale, height: height * scale }
 }
 
 /// A modernization or signal: its name (the game-params name when untranslated)
@@ -599,7 +614,7 @@ mod tests {
 
     #[test]
     fn fit_dims_keeps_a_wide_ribbon_short() {
-        let (w, h) = fit_dims(220.0, 60.0, 64.0);
+        let IconSize { width: w, height: h } = fit_dims(IconSize { width: 220.0, height: 60.0 }, 64.0);
         assert!((w - 64.0).abs() < 1e-4, "width should hit the box: {w}");
         assert!((h - 64.0 * 60.0 / 220.0).abs() < 1e-4, "height should scale with aspect: {h}");
         assert!(h < 20.0, "a wide ribbon must render short, got {h}");
@@ -607,15 +622,15 @@ mod tests {
 
     #[test]
     fn fit_dims_leaves_a_square_icon_square() {
-        assert_eq!(fit_dims(32.0, 32.0, 32.0), (32.0, 32.0));
-        let (w, h) = fit_dims(128.0, 128.0, 32.0);
+        assert_eq!(fit_dims(IconSize::square(32.0), 32.0), IconSize::square(32.0));
+        let IconSize { width: w, height: h } = fit_dims(IconSize::square(128.0), 32.0);
         assert!((w - 32.0).abs() < 1e-4 && (h - 32.0).abs() < 1e-4);
     }
 
     #[test]
     fn fit_dims_falls_back_to_a_square_for_degenerate_sizes() {
-        assert_eq!(fit_dims(0.0, 10.0, 64.0), (64.0, 64.0));
-        assert_eq!(fit_dims(10.0, 0.0, 64.0), (64.0, 64.0));
+        assert_eq!(fit_dims(IconSize { width: 0.0, height: 10.0 }, 64.0), IconSize::square(64.0));
+        assert_eq!(fit_dims(IconSize { width: 10.0, height: 0.0 }, 64.0), IconSize::square(64.0));
     }
 
     fn ribbon(name: &str) -> RibbonResult {

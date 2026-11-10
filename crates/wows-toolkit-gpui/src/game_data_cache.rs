@@ -18,7 +18,9 @@ use wows_toolkit_replay_data::cache;
 use wows_toolkit_replay_data::cache::CacheJob;
 use wows_toolkit_replay_data::cache::CacheOutcome;
 use wows_toolkit_replay_data::cache::CacheState;
+use wows_toolkit_replay_data::cache::MeasureGeneration;
 use wows_toolkit_replay_data::cache::Progress;
+use wows_toolkit_replay_data::error::CacheError;
 
 use crate::http;
 use crate::runtime;
@@ -29,9 +31,9 @@ use crate::runtime;
 /// against a directory that has since been left.
 pub fn measure<V: 'static>(
     base: PathBuf,
-    generation: u64,
+    generation: MeasureGeneration,
     cx: &mut Context<V>,
-    apply: impl FnOnce(&mut V, CacheStats, u64, &mut Context<V>) + 'static,
+    apply: impl FnOnce(&mut V, CacheStats, MeasureGeneration, &mut Context<V>) + 'static,
 ) {
     cx.spawn(async move |view, cx: &mut AsyncApp| {
         let measured = cx.background_spawn(async move { cache::measure(&base) }).await;
@@ -54,7 +56,7 @@ fn run<V, Work, Fut>(
 ) where
     V: 'static,
     Work: FnOnce(reqwest::Client, ProgressSink) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<CacheOutcome, String>>,
+    Fut: Future<Output = Result<CacheOutcome, CacheError>>,
 {
     let view = view.clone();
     // Callers can hold the owner entity while requesting an operation.
@@ -85,7 +87,9 @@ fn run<V, Work, Fut>(
             let outcome = match http::client(&proxy_url, reqwest::redirect::Policy::default()) {
                 Ok(client) => {
                     let sink = ProgressSink(progress_tx);
-                    runtime::block_on(cx, move || work(client, sink)).await.unwrap_or_else(CacheOutcome::Failed)
+                    runtime::block_on(cx, move || work(client, sink))
+                        .await
+                        .unwrap_or_else(|err| CacheOutcome::Failed(err.to_string()))
                 }
                 Err(err) => CacheOutcome::Failed(err.to_string()),
             };

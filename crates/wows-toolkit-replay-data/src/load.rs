@@ -81,6 +81,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
 use crate::error::AltRefusal;
+use crate::error::GameDataLoadError;
 use crate::error::PreloadError;
 use crate::error::ReplayLoadError;
 use crate::model::ReplayReportModel;
@@ -254,7 +255,7 @@ impl LoadedGameData {
     fn load_build(wows_dir: &Path, build: u32, locale: &str) -> Result<Self, ReplayLoadError> {
         profiling::mark(&format!("build{build}.begin"));
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build, AssetsBin::Omit)
-            .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+            .map_err(|e| GameDataLoadError::Vfs(Arc::new(e)))?;
         profiling::mark(&format!("build{build}.vfs"));
         let provider = Self::load_provider(&vfs, build)?;
         profiling::mark(&format!("build{build}.params"));
@@ -284,7 +285,7 @@ impl LoadedGameData {
     /// server's parameters must not answer for another's.
     fn load_dump(dump_dir: &Path, build: u32, locale: &str) -> Result<Self, ReplayLoadError> {
         let cas = BuildCas::open(dump_dir).ok_or_else(|| {
-            ReplayLoadError::GameData(format!("no metadata.toml in the dump at {}", dump_dir.display()))
+            ReplayLoadError::from(GameDataLoadError::NoDumpMetadata { dump_dir: dump_dir.to_path_buf() })
         })?;
         let dump_build = cas.metadata().build;
         if dump_build != build {
@@ -305,7 +306,7 @@ impl LoadedGameData {
             None => load_game_params(&vfs, dump_build)?,
         };
         let provider = GameMetadataProvider::from_params_with_vfs(params, &vfs)
-            .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+            .map_err(|e| GameDataLoadError::Params(Arc::new(e)))?;
         if let Some(catalog) = load_dump_translations(&cas, locale) {
             provider.set_translations(catalog);
         }
@@ -331,7 +332,7 @@ impl LoadedGameData {
     /// session.
     fn load_provider(vfs: &VfsPath, build: u32) -> Result<GameMetadataProvider, ReplayLoadError> {
         GameMetadataProvider::from_params_with_vfs(load_game_params(vfs, build)?, vfs)
-            .map_err(|e| ReplayLoadError::GameData(e.to_string()))
+            .map_err(|e| GameDataLoadError::Params(Arc::new(e)).into())
     }
 }
 
@@ -355,7 +356,7 @@ pub fn load_game_params(vfs: &VfsPath, build: u32) -> Result<Vec<Param>, ReplayL
     }
 
     tracing::info!(build, "no GameParams disk cache; parsing from game files");
-    let provider = GameMetadataProvider::from_vfs(vfs).map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+    let provider = GameMetadataProvider::from_vfs(vfs).map_err(|e| GameDataLoadError::Params(Arc::new(e)))?;
     let params: Vec<_> = provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
     if let Err(e) = game_params_cache::save(&cache_path, &params) {
         tracing::warn!(build, path = %cache_path.display(), error = %e, "failed to write GameParams disk cache");
@@ -703,7 +704,7 @@ impl GameDataCache {
 
         match outcome {
             Ok(result) => result.map(Arc::new),
-            Err(panic) => Err(ReplayLoadError::GameData(format!("game data load panicked: {}", panic_message(&panic)))),
+            Err(panic) => Err(GameDataLoadError::Panicked { message: panic_message(&panic) }.into()),
         }
     }
 }
@@ -878,7 +879,7 @@ pub fn preload_current_build(wows_dir: &Path, game_data: &GameDataCache) -> Resu
     profiling::mark("startup_preload.begin");
 
     let available = wowsunpack::game_data::list_available_builds(wows_dir)
-        .map_err(|error| PreloadError::ListBuilds { wows_dir: wows_dir.to_path_buf(), reason: error.to_string() })?;
+        .map_err(|error| PreloadError::ListBuilds { wows_dir: wows_dir.to_path_buf(), source: Arc::new(error) })?;
     let Some(build) = available.last().copied() else {
         return Err(PreloadError::NoInstalledBuilds { wows_dir: wows_dir.to_path_buf() });
     };
@@ -916,7 +917,7 @@ fn merged_report(
 ) -> Result<(wows_battle_world::report::BattleReport, bool), ReplayLoadError> {
     let mut read = Vec::with_capacity(alts.len());
     for path in alts {
-        let alt = ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(format!("{report:?}")))?;
+        let alt = ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(Arc::new(report)))?;
         read.push(alt);
     }
 
@@ -928,9 +929,9 @@ fn merged_report(
         primary,
         &read,
     )
-    .map_err(|err| ReplayLoadError::Parse(err.to_string()))?;
+    .map_err(|err| ReplayLoadError::Merge(Arc::new(err)))?;
 
-    while session.step().map_err(|err| ReplayLoadError::Parse(err.to_string()))?.is_some() {}
+    while session.step().map_err(|err| ReplayLoadError::Merge(Arc::new(err)))?.is_some() {}
     session.finish();
     let read_whole = !session.truncated();
     Ok((session.into_world().into_report(), read_whole))
@@ -1151,8 +1152,8 @@ pub fn parse_replay_with_alts(
 ) -> Result<ParsedReplay, ReplayLoadError> {
     let replay_file = ReplayFile::from_file(path).map_err(|report| {
         let is_io = matches!(report.current_context(), ParseError::Io(_));
-        let message = format!("{report:?}");
-        if is_io { ReplayLoadError::Io(message) } else { ReplayLoadError::Parse(message) }
+        let report = Arc::new(report);
+        if is_io { ReplayLoadError::Io(report) } else { ReplayLoadError::Parse(report) }
     })?;
     let meta = &replay_file.meta;
 
@@ -1304,7 +1305,7 @@ pub fn check_alt(primary: &Path, alt: &Path, game_data: &GameDataCache) -> Resul
     // The message reaches a toast, so it is the error's own sentence rather
     // than the rootcause dump the panel's failed state prints.
     let read = |path: &Path| {
-        ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(report.current_context().to_string()))
+        ReplayFile::from_file(path).map_err(|report| ReplayLoadError::CheckUnreadable(Arc::new(report)))
     };
     let primary_file = read(primary)?;
     let alt_file = read(alt)?;

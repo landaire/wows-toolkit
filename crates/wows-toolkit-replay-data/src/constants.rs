@@ -15,19 +15,21 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::error::ConstantsError;
+
 /// What a check of the published constants came to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Checked {
     /// A newer mapping was written for `build`, at this commit.
     Written { build: u32, commit: String },
     /// The repository is where it was when the mapping was last written.
     UpToDate,
     /// The repository could not be asked, or what it gave could not be written.
-    Failed(String),
+    Failed(ConstantsError),
 }
 
 /// What a fetch of one build's mapping came to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Fetched {
     /// The mapping for `build` is now on disk. `actual` is the build it was
     /// published under, which differs when a version fallback served it.
@@ -37,7 +39,7 @@ pub enum Fetched {
     },
     /// It was already there, so nothing was fetched.
     AlreadyOnDisk,
-    Failed(String),
+    Failed(ConstantsError),
 }
 
 /// Where a build's mapping is cached.
@@ -82,7 +84,7 @@ pub async fn check_latest(build: u32, known_commit: Option<String>) -> Checked {
             Err(err) => Checked::Failed(err),
         },
         Ok(None) => Checked::UpToDate,
-        Err(err) => Checked::Failed(err.to_string()),
+        Err(err) => Checked::Failed(err.into()),
     }
 }
 
@@ -121,7 +123,7 @@ pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached) -> V
             match wows_data_mgr::constants::ConstantsFetcher::new() {
                 Ok(built) => fetcher = Some(built),
                 Err(err) => {
-                    outcomes.push((build, Fetched::Failed(err.to_string())));
+                    outcomes.push((build, Fetched::Failed(ConstantsError::Fetcher(err))));
                     break;
                 }
             }
@@ -129,13 +131,13 @@ pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached) -> V
         let Some(asking) = fetcher.as_ref() else { break };
 
         let Some((data, actual)) = asking.fetch(build, version.as_deref()) else {
-            outcomes.push((build, Fetched::Failed("the repository published nothing for it".to_owned())));
+            outcomes.push((build, Fetched::Failed(ConstantsError::NothingPublished)));
             break;
         };
         // Written under the build that asked, so the next read of that
         // replay finds it whichever build it was published under.
         let written =
-            serde_json::to_vec(&data).map_err(|err| err.to_string()).and_then(|bytes| write_cached(build, &bytes));
+            serde_json::to_vec(&data).map_err(ConstantsError::Serialize).and_then(|bytes| write_cached(build, &bytes));
         outcomes.push((
             build,
             match written {
@@ -153,26 +155,26 @@ pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached) -> V
 /// For a build the repository does not publish: the file is read and parsed
 /// before anything is written, so a file that is not a mapping cannot replace one
 /// that is.
-pub fn import(from: &Path, build: u32) -> Result<(), String> {
-    let bytes = std::fs::read(from).map_err(|err| err.to_string())?;
-    let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|err| err.to_string())?;
+pub fn import(from: &Path, build: u32) -> Result<(), ConstantsError> {
+    let bytes = std::fs::read(from).map_err(ConstantsError::Read)?;
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(ConstantsError::Parse)?;
     if !parsed.is_object() {
-        return Err("that file is not a constants mapping".to_owned());
+        return Err(ConstantsError::NotAMapping);
     }
     write_cached(build, &bytes)
 }
 
 /// Writes `bytes` as `build`'s cached mapping.
-fn write_cached(build: u32, bytes: &[u8]) -> Result<(), String> {
+fn write_cached(build: u32, bytes: &[u8]) -> Result<(), ConstantsError> {
     let Some(path) = cached_path(build) else {
-        return Err("there is no storage directory to cache constants in".to_owned());
+        return Err(ConstantsError::NoStorageDir);
     };
     let beside = path.with_extension("json.part");
-    std::fs::write(&beside, bytes).map_err(|err| format!("{}: {err}", beside.display()))?;
+    std::fs::write(&beside, bytes).map_err(|source| ConstantsError::Write { path: beside.clone(), source })?;
     // Renamed over rather than written in place: a crash or a second app writing
     // the same path would otherwise leave a half-written file, which reads as a
     // mapping with nothing in it and silently changes what results decode to.
-    std::fs::rename(&beside, &path).map_err(|err| format!("{}: {err}", path.display()))
+    std::fs::rename(&beside, &path).map_err(|source| ConstantsError::Write { path, source })
 }
 
 #[cfg(test)]

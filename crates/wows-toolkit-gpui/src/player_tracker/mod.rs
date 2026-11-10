@@ -1220,7 +1220,11 @@ impl PlayerTrackerView {
 
         let proxy_url = self.proxy_url.clone();
         self._live_lookup = Some(cx.spawn(async move |this, cx| {
-            let fetched = runtime::spawn(cx, async move { live_match::fetch_stats(crate::http::USER_AGENT, &state, &proxy_url).await }).await;
+            let fetched = runtime::spawn(cx, async move {
+                let proxy_url = wows_toolkit_viewmodel::http::manual_proxy(&proxy_url);
+                live_match::fetch_stats(crate::http::USER_AGENT, &state, proxy_url).await
+            })
+            .await;
 
             let _ = this.update(cx, |this, cx| {
                 if this.live_started_at() != Some(started_at) {

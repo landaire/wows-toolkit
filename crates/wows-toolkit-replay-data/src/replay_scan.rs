@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use wows_replays::ReplayFile;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
@@ -67,7 +68,7 @@ pub fn is_finished_replay(path: &Path) -> bool {
 
 /// Reads the header of the replay at `path`.
 pub fn read_scanned(path: &Path) -> Result<ScannedReplay, ReplayLoadError> {
-    let meta = ReplayFile::meta_from_file(path).map_err(|err| ReplayLoadError::Parse(err.to_string()))?;
+    let meta = ReplayFile::meta_from_file(path).map_err(|err| ReplayLoadError::Header(Arc::new(err)))?;
 
     Ok(ScannedReplay {
         path: path.to_path_buf(),

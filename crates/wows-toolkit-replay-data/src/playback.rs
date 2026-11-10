@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::VideoCodec;
@@ -21,11 +22,13 @@ use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::draw_command::ShipConfigVisibility;
 use wows_minimap_renderer::encoder::EncoderStatus;
+use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::Version;
 
 use crate::load::GameDataCache;
+use crate::minimap::MapOrigin;
 use crate::minimap::PreviewError;
 use crate::minimap::SharedPreviewRenderer;
 
@@ -67,7 +70,7 @@ pub const ZOOM_PER_PIXEL: f32 = 0.01;
 
 /// Where the map's corner sits before a track says otherwise: below the strip
 /// the renderer reserves for the score bar and the timer.
-pub const DEFAULT_MAP_ORIGIN: (f32, f32) = (0.0, HUD_HEIGHT as f32);
+pub const DEFAULT_MAP_ORIGIN: MapOrigin = MapOrigin { x: 0.0, y: HUD_HEIGHT as f32 };
 
 /// A ship showing none of its ranges.
 pub const NO_RANGES: ShipConfigFilter = ShipConfigFilter {
@@ -128,10 +131,22 @@ pub const INKS: &[(&str, [u8; 4])] = &[
     ("pink", [255, 130, 180, 255]),
 ];
 
-/// The ships that can be placed on the map, as the egui toolbar offers them,
-/// short name first.
-pub const SPECIES: &[(&str, &str)] =
-    &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
+/// A ship that can be placed on the map: the toolbar's short name and the
+/// species name its icon is looked up by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShipSpecies {
+    pub short: &'static str,
+    pub name: &'static str,
+}
+
+/// The ships that can be placed on the map, as the egui toolbar offers them.
+pub const SPECIES: &[ShipSpecies] = &[
+    ShipSpecies { short: "DD", name: "Destroyer" },
+    ShipSpecies { short: "CA", name: "Cruiser" },
+    ShipSpecies { short: "BB", name: "Battleship" },
+    ShipSpecies { short: "CV", name: "AirCarrier" },
+    ShipSpecies { short: "SS", name: "Submarine" },
+];
 
 /// What a placed ship is tinted by which side it is on, `0xRRGGBB`.
 pub const FRIENDLY_TINT: u32 = 0x4CE8AA;
@@ -154,7 +169,7 @@ pub struct Track {
     /// gated on.
     pub version: Version,
     /// Where the map's top-left corner sits in these frames.
-    pub map_origin: (f32, f32),
+    pub map_origin: MapOrigin,
     /// The map's space name, which a peer watching this playback loads art by.
     pub space: String,
 }
@@ -180,23 +195,24 @@ impl Track {
         self.len().saturating_sub(1)
     }
 
-    /// The game time `index` was drawn at, in seconds. Zero past the end,
-    /// which only a track with no frames reaches.
-    pub fn seconds_at(&self, index: usize) -> f32 {
-        self.clocks.get(index).map_or(0.0, |clock| clock.seconds())
+    /// The game clock `index` was drawn at. Zero past the end, which only a
+    /// track with no frames reaches.
+    pub fn clock_at(&self, index: usize) -> GameClock {
+        self.clocks.get(index).copied().unwrap_or_default()
     }
 
     /// How far into the battle `index` is, which is the clock the game showed.
-    pub fn elapsed_at(&self, index: usize) -> f32 {
-        self.seconds_at(index) - self.battle_start.seconds()
+    /// Negative before the battle began.
+    pub fn elapsed_at(&self, index: usize) -> ElapsedClock {
+        ElapsedClock(self.clock_at(index) - self.battle_start)
     }
 
-    /// The last frame drawn at or before `seconds` of game time.
+    /// The last frame drawn at or before `clock`.
     ///
     /// Clocks ascend, so this is a partition point. A time before the first
     /// frame lands on that frame rather than nowhere.
-    pub fn frame_at(&self, seconds: f32) -> usize {
-        self.clocks.partition_point(|clock| clock.seconds() <= seconds).saturating_sub(1)
+    pub fn frame_at(&self, clock: GameClock) -> usize {
+        self.clocks.partition_point(|drawn| drawn.seconds() <= clock.seconds()).saturating_sub(1)
     }
 
     /// Where a clock sits along the track, as a fraction of its length.
@@ -204,7 +220,7 @@ impl Track {
     /// `None` when the track is too short to have a length to sit along.
     pub fn position_of(&self, clock: GameClock) -> Option<f32> {
         let last = self.len().checked_sub(1).filter(|last| *last > 0)?;
-        Some((self.frame_at(clock.seconds()) as f32 / last as f32).clamp(0.0, 1.0))
+        Some((self.frame_at(clock) as f32 / last as f32).clamp(0.0, 1.0))
     }
 
     /// The marks on a seek bar for where the battle began and ended, as
@@ -218,7 +234,7 @@ impl Track {
     /// The ship drawn nearest map point `at` in frame `index`, if one is close
     /// enough to have been meant. Reads the frame on screen rather than the
     /// whole track: a right-click picks what the reader can see.
-    pub fn ship_near(&self, index: usize, at: (f32, f32)) -> Option<ShipPick> {
+    pub fn ship_near(&self, index: usize, at: MinimapPos) -> Option<ShipPick> {
         let commands = self.frames.get(index)?;
         let mut best: Option<(f32, ShipPick)> = None;
         for command in commands {
@@ -228,7 +244,7 @@ impl Track {
                 _ => continue,
             };
             let Some(name) = player_name.clone() else { continue };
-            let away = ((pos.x - at.0).powi(2) + (pos.y - at.1).powi(2)).sqrt();
+            let away = ((pos.x - at.x).powi(2) + (pos.y - at.y).powi(2)).sqrt();
             if away > PICK_RADIUS {
                 continue;
             }
@@ -263,7 +279,10 @@ impl Track {
         let reading = match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
             None => AdvantageReading::TeamEliminated,
             Some(rows) => AdvantageReading::Rows {
-                rows: rows.into_iter().map(|row| (row.label_key, row.contribution)).collect(),
+                rows: rows
+                    .into_iter()
+                    .map(|row| AdvantageRow { label_key: row.label_key, contribution: row.contribution })
+                    .collect(),
                 hp_incomplete: !breakdown.hp_data_reliable,
             },
         };
@@ -277,9 +296,18 @@ impl Track {
 pub enum AdvantageReading {
     /// One team has nothing left to weigh.
     TeamEliminated,
-    /// Each factor's translation key and what it contributes, and whether the
-    /// health figures behind them were incomplete.
-    Rows { rows: Vec<(&'static str, String)>, hp_incomplete: bool },
+    /// Each factor and what it contributes, and whether the health figures
+    /// behind them were incomplete.
+    Rows { rows: Vec<AdvantageRow>, hp_incomplete: bool },
+}
+
+/// One factor of the team advantage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdvantageRow {
+    /// The factor's translation key.
+    pub label_key: &'static str,
+    /// What it contributes, already formatted.
+    pub contribution: String,
 }
 
 /// Where `speed` sits in the ladder; the first rung for a speed not on it.
@@ -373,7 +401,7 @@ pub fn bake(
         battle_end: baked.battle_end,
         space_size: baked.space_size,
         version: baked.version,
-        map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
+        map_origin: baked.map_origin,
         space: baked.map_name,
     };
 
@@ -664,7 +692,7 @@ pub fn frames_to_export<'a>(track: &'a Track, settings: &ExportSettings) -> &'a 
     if settings.include_pre_battle {
         return &track.frames;
     }
-    let from = track.frame_at(track.battle_start.seconds());
+    let from = track.frame_at(track.battle_start);
     track.frames.get(from..).unwrap_or(&track.frames)
 }
 
@@ -863,10 +891,10 @@ mod tests {
     fn a_clock_lands_on_the_last_frame_drawn_at_or_before_it() {
         let track = track(&[0.0, 0.5, 1.0, 1.5]);
 
-        assert_eq!(track.frame_at(-3.0), 0, "before the first frame is the first frame");
-        assert_eq!(track.frame_at(0.7), 1);
-        assert_eq!(track.frame_at(1.5), 3);
-        assert_eq!(track.frame_at(99.0), 3, "past the end is the last frame");
+        assert_eq!(track.frame_at(GameClock(-3.0)), 0, "before the first frame is the first frame");
+        assert_eq!(track.frame_at(GameClock(0.7)), 1);
+        assert_eq!(track.frame_at(GameClock(1.5)), 3);
+        assert_eq!(track.frame_at(GameClock(99.0)), 3, "past the end is the last frame");
     }
 
     #[test]
@@ -877,7 +905,7 @@ mod tests {
 
         track.battle_end = Some(GameClock(40.0));
         assert_eq!(track.battle_marks(), vec![0.2, 0.8]);
-        assert_eq!(track.elapsed_at(2), 10.0, "elapsed reads from the battle's start");
+        assert_eq!(track.elapsed_at(2), ElapsedClock(10.0), "elapsed reads from the battle's start");
     }
 
     #[test]

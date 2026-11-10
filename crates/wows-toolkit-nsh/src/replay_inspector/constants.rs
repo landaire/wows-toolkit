@@ -98,6 +98,7 @@ pub fn check_latest() -> Result<bool, InspectorError> {
             Ok(false)
         }
         Checked::Failed(reason) => {
+            let reason = reason.to_string();
             wows_toolkit_viewmodel::bug_report::record_constants_fetch(ConstantsFetchStatus::Failed(reason.clone()));
             tracing::warn!(%reason, "constants: the published mappings could not be checked");
             Err(InspectorError::ConstantsCheck { reason })
@@ -118,7 +119,7 @@ pub fn loaded_build() -> Result<u32, InspectorError> {
 /// Takes the `constants.json` at `from` as `build`'s mapping. Blocking.
 pub fn import(from: &Path, build: u32) -> Result<(), InspectorError> {
     wows_toolkit_replay_data::constants::import(from, build)
-        .map_err(|reason| InspectorError::ConstantsImport { reason })
+        .map_err(|reason| InspectorError::ConstantsImport { reason: reason.to_string() })
 }
 
 fn fetch(builds: Vec<(u32, Option<String>)>, cached: Cached) -> u32 {

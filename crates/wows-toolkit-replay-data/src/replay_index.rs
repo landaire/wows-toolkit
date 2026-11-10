@@ -175,7 +175,8 @@ pub fn build_index(
 
     // What is already in, so a second run costs a directory listing rather than
     // a re-parse of every replay in it. The egui app skips on the same ledger
-    // (`task/replays.rs:1434`).
+    // (`task/replays.rs:1434`). A ledger that cannot be read is treated as
+    // empty: that costs a re-parse of every replay, never a missed one.
     let indexed: std::collections::HashSet<String> = match mode {
         IndexMode::FillGaps => runtime.block_on(query::record_paths_in_source(pool, source_id)).unwrap_or_default(),
         IndexMode::RefreshAll => std::collections::HashSet::new(),

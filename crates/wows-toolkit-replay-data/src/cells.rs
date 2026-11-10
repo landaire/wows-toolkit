@@ -129,11 +129,9 @@ pub fn captain_points_tier(row: &PlayerRow) -> CaptainPointsTier {
 
 /// Cell text/color/hover for one column of one row. `debug` mirrors the
 /// app's debug-mode flag, which lifts NDA hiding and the enemy-only Skills
-/// gate (the brief's sketch omits this parameter, but NDA gating and the
-/// egui source both key off it alongside `should_hide_stats()`). Mirrors the
-/// per-column mapping in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`
-/// (values only; icons, menus, and multi-segment name coloring are
-/// Milestone 2).
+/// gate. Mirrors the per-column mapping in `ui/replay_parser/mod.rs`'s
+/// `TableDelegate::cell_ui` (values only; icons, menus, and multi-segment name
+/// coloring are the render layer's).
 pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue {
     let nda_active = row.should_hide_stats() && !debug;
 
@@ -143,8 +141,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             if let Some(div) = row.division_label.as_ref() {
                 parts.push(div.clone());
             }
-            if let Some(clan) = row.clan_tag.as_ref() {
-                parts.push(clan.clone());
+            if let Some(clan) = row.clan.as_ref() {
+                parts.push(clan.tag.clone());
             }
             parts.push(row.display_name.clone());
             CellValue::colored(parts.join(" "), ColorRole::Player(name_color_kind(row)))
@@ -266,13 +264,14 @@ mod tests {
     use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 
     use super::*;
+    use crate::model::PlayerClan;
     use crate::test_support::base_row;
 
     #[test]
     fn cell_value_name_joins_division_clan_and_display_name() {
         let row = PlayerRow {
             display_name: "Steve".to_string(),
-            clan_tag: Some("[ABC]".to_string()),
+            clan: Some(PlayerClan { tag: "[ABC]".to_string(), color_rgb: 0 }),
             division_label: Some("(A)".to_string()),
             ..base_row(1, Relation::new(1), false)
         };

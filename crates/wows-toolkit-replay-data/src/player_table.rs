@@ -238,8 +238,8 @@ pub fn twitch_hover_text(candidates: &[SniperCandidate]) -> Option<String> {
 /// `"[clan ]name[, ship]"`.
 pub fn menu_heading_text(row: &PlayerRow) -> String {
     let mut spoken = String::new();
-    if let Some(clan) = row.clan_tag.as_deref().filter(|clan| !clan.is_empty()) {
-        spoken.push_str(clan);
+    if let Some(clan) = row.clan.as_ref() {
+        spoken.push_str(&clan.tag);
         spoken.push(' ');
     }
     spoken.push_str(&row.display_name);

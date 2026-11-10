@@ -837,12 +837,12 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         cell =
             cell.child(div().flex_none().child(crate::ui::selectable_text(("replay-division", ix), div_label.clone())));
     }
-    if let Some(clan) = row.clan_tag.as_ref() {
+    if let Some(clan) = row.clan.as_ref() {
         cell = cell.child(
             div()
                 .flex_none()
-                .text_color(resolve_color(ColorRole::Fixed(row.clan_color_rgb)))
-                .child(crate::ui::selectable_text(("replay-clan", ix), clan.clone())),
+                .text_color(resolve_color(ColorRole::Fixed(clan.color_rgb)))
+                .child(crate::ui::selectable_text(("replay-clan", ix), clan.tag.clone())),
         );
     }
     cell = cell.child(
@@ -1044,8 +1044,8 @@ struct MenuHeading {
     /// Stands in for an icon the cache does not have, as in the Name cell, so
     /// it is read only when `icon` is `None`.
     species: Option<SharedString>,
-    clan: Option<SharedString>,
-    clan_color: Hsla,
+    /// The clan tag and its color.
+    clan: Option<(SharedString, Hsla)>,
     name: SharedString,
     name_color: Hsla,
     /// `None` for a row whose ship the recording never saw.
@@ -1055,7 +1055,10 @@ struct MenuHeading {
 }
 
 fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
-    let clan: Option<SharedString> = row.clan_tag.as_deref().filter(|clan| !clan.is_empty()).map(SharedString::from);
+    let clan = row
+        .clan
+        .as_ref()
+        .map(|clan| (SharedString::from(clan.tag.clone()), resolve_color(ColorRole::Fixed(clan.color_rgb))));
     let ship: Option<SharedString> = (!row.ship_name.is_empty()).then(|| row.ship_name.clone().into());
     let icon = icons.get(row.ship_class, player_color_kind_rgb(player_color_kind(row)));
     let species: Option<SharedString> = icon
@@ -1070,7 +1073,6 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
         icon,
         species,
         clan,
-        clan_color: resolve_color(ColorRole::Fixed(row.clan_color_rgb)),
         name: row.display_name.clone().into(),
         name_color: resolve_color(ColorRole::Player(name_color_kind(row))),
         ship,
@@ -1083,8 +1085,8 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
 fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
     let mut line = h_flex().gap_1().items_center().whitespace_nowrap();
 
-    if let Some(clan) = heading.clan.clone() {
-        line = line.child(div().flex_none().text_color(heading.clan_color).child(clan));
+    if let Some((clan, clan_color)) = heading.clan.clone() {
+        line = line.child(div().flex_none().text_color(clan_color).child(clan));
     }
     line = line.child(
         div()

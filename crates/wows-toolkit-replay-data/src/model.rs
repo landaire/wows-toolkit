@@ -29,6 +29,7 @@ use wows_replay_insights::battle_report::POTENTIAL_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::PotentialDamage;
 use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::RibbonResult;
+use wows_replay_insights::battle_report::SkillInfo;
 use wows_replay_insights::battle_report::TranslatedBuild;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::personal_rating::PersonalRatingData;
@@ -73,14 +74,13 @@ pub struct PlayerRow {
     pub is_abuser: bool,
     pub is_test_ship: bool,
     /// User-toggleable per-row NDA override. Always `false` fresh out of
-    /// `from_normalized`; a later "hide stats" UI action (Milestone 2) flips
-    /// it, mirroring the egui app's `PlayerReport::manual_stat_hide_toggle`.
+    /// `from_normalized`; the "hide stats" action flips it, mirroring the egui
+    /// app's `PlayerReport::manual_stat_hide_toggle`.
     pub manual_stat_hide_toggle: bool,
 
     pub display_name: String,
-    pub clan_tag: Option<String>,
-    /// Packed `0xRRGGBB` clan-league color, `0` when clanless.
-    pub clan_color_rgb: u32,
+    /// `None` when clanless.
+    pub clan: Option<PlayerClan>,
     pub division_label: Option<String>,
     /// True when this row is in the self player's division, but is not the
     /// self player itself (the "gold name" case).
@@ -168,9 +168,9 @@ pub struct PlayerRow {
     pub highest_tier: usize,
     pub num_tier_1_skills: usize,
     /// "{points}pts ({skills} skills)"; the tower-defense/warning tier icon
-    /// is rebuilt from `skill_warning` and `skill_points` by the render layer
-    /// (Milestone 2). Dazzle/IFA star/siren markers are not encoded in this
-    /// text; see `has_dazzle`/`has_ifa`.
+    /// is rebuilt from `skill_warning` and `skill_points` by the render layer.
+    /// Dazzle/IFA star/siren markers are not encoded in this text; see
+    /// `has_dazzle`/`has_ifa`.
     pub skill_label_text: String,
     pub skill_hover_text: Option<String>,
     /// What is wrong with this captain's skills, when something is. Either
@@ -178,12 +178,12 @@ pub struct PlayerRow {
     /// Mirrors `util::colorize_captain_points`.
     pub skill_warning: Option<SkillWarning>,
     /// Learned captain skills include Dazzle. Mirrors the `has_dazzle` scan
-    /// in `util::colorize_captain_points`; the render layer (Milestone 2)
-    /// prepends a star glyph when true.
+    /// in `util::colorize_captain_points`; the render layer prepends a star
+    /// glyph when true.
     pub has_dazzle: bool,
     /// Learned captain skills include Incoming Fire Alert. Mirrors the
     /// `has_ifa` scan in `util::colorize_captain_points`; the render layer
-    /// (Milestone 2) prepends a siren glyph when true.
+    /// prepends a siren glyph when true.
     pub has_ifa: bool,
 
     pub translated_build: Option<TranslatedBuild>,
@@ -191,11 +191,9 @@ pub struct PlayerRow {
     pub ribbons: Vec<RibbonResult>,
     pub consumables: Vec<ConsumableResult>,
 
-    /// Always `None` fresh out of `from_normalized`: PR reference data isn't
-    /// loaded at report-construction time, so the egui app computes PR in a
-    /// separate step (`UiReport::populate_personal_ratings`) once that data
-    /// is available. Call `ReplayReportModel::populate_personal_ratings`
-    /// after loading PR data to fill this in.
+    /// The rating the parse computed. `None` when the expected values were not
+    /// loaded yet; `ReplayReportModel::populate_personal_ratings` fills it in
+    /// once they are.
     pub personal_rating: Option<PersonalRatingResult>,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
@@ -255,6 +253,15 @@ impl PlayerRow {
     }
 }
 
+/// A row's clan tag and the color it is drawn in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerClan {
+    /// Already bracketed: `[TAG]`.
+    pub tag: String,
+    /// Packed `0xRRGGBB` clan-league color.
+    pub color_rgb: u32,
+}
+
 /// One in-game chat message, presentation-ready: bot/no-relation sender name
 /// and message text are already translated, the message body is already
 /// HTML-decoded, and the clan tag/color are plain (no brackets, no
@@ -312,7 +319,7 @@ fn clan_color_for_player(player: &Player) -> ClanColor {
 /// `&[GameMessage]` (`wows_battle_world::report::BattleReport::game_chat`).
 /// Ports `build_replay_chat_content`'s translation/decode logic
 /// (`ui/replay_parser/mod.rs` ~4893-4933) field-for-field, dropping only the
-/// rendering itself (Milestone 6's `chat.rs`).
+/// rendering itself (`chat.rs`).
 pub fn build_chat_messages(messages: &[GameMessage], metadata_provider: &GameMetadataProvider) -> Vec<ChatMessage> {
     messages.iter().map(|message| chat_message_from_game_message(message, metadata_provider)).collect()
 }
@@ -395,9 +402,9 @@ pub struct MatchContext {
 impl ReplayReportModel {
     /// Builds the presentation model from a normalized battle report. `meta`
     /// and `constants` are accepted for parity with the background-load
-    /// bundle the Milestone 5 loader already has on hand; both are fully
-    /// folded into `normalized` by the time this runs, so neither is read
-    /// here. `chat_messages` is the battle report's raw chat log
+    /// bundle the loader already has on hand; both are fully folded into
+    /// `normalized` by the time this runs, so neither is read here.
+    /// `chat_messages` is the battle report's raw chat log
     /// (`BattleReport::game_chat`), translated into `ReplayReportModel::chat`
     /// via `build_chat_messages`. `players` is the same battle report's raw
     /// `Player` list (`BattleReport::players`); `NormalizedPlayer` does not
@@ -463,11 +470,9 @@ impl ReplayReportModel {
         ship_id: impl Fn(&str) -> Option<GameParamId>,
         game_type_text: impl Fn(&str) -> String,
     ) -> Self {
-        let self_player = normalized.players.iter().find(|p| p.is_self);
-        let self_team =
-            self_player.map(|p| TeamId::from(p.team_id)).expect("normalized battle report carries no self player");
-        let self_division_id = self_player.and_then(|p| p.division_id);
-        let self_db_id = self_player.map(|p| p.db_id);
+        let self_player =
+            normalized.players.iter().find(|p| p.is_self).expect("normalized battle report carries no self player");
+        let self_team = TeamId::from(self_player.team_id);
 
         let rows = normalized
             .players
@@ -475,8 +480,8 @@ impl ReplayReportModel {
             .map(|np| {
                 PlayerRow::from_normalized_player(
                     np,
-                    self_division_id,
-                    self_db_id,
+                    self_player.division_id,
+                    self_player.db_id,
                     species_text(np.ship_class),
                     ship_id(&np.ship_index),
                 )
@@ -492,8 +497,8 @@ impl ReplayReportModel {
             timestamp: normalized.metadata.timestamp,
             chat: Vec::new(),
             context: MatchContext {
-                clan_tag: self_player.filter(|p| !p.clan.is_empty()).map(|p| format!("[{}]", p.clan)),
-                player_name: self_player.map(|p| p.display_name.clone()).unwrap_or_default(),
+                clan_tag: (!self_player.clan.is_empty()).then(|| format!("[{}]", self_player.clan)),
+                player_name: self_player.display_name.clone(),
                 game_type: game_type_text(&normalized.metadata.game_type),
                 version: normalized.metadata.version.to_path(),
                 game_mode: normalized.metadata.game_mode.clone(),
@@ -574,22 +579,24 @@ struct SkillLabel {
     warning: Option<SkillWarning>,
 }
 
-/// Ported from `util::colorize_captain_points`: text/hover/warning only, no
-/// icon glyphs or color (those are Milestone 2 concerns, derived from
-/// `warning`/`skill_points` by `columns::cell_value`).
-fn build_skill_label(
-    skill_points: usize,
-    num_skills: usize,
-    highest_tier: usize,
-    num_tier_1_skills: usize,
+/// Learned captain skills worth calling out beside the point count.
+#[derive(Clone, Copy, Debug, Default)]
+struct CaptainExtras {
     has_dazzle: bool,
     has_ifa: bool,
-) -> SkillLabel {
+}
+
+/// Ported from `util::colorize_captain_points`: text, hover and warning only.
+/// The tier icon and color are derived from `warning` and `skill_points` by
+/// `cells::cell_value`.
+fn build_skill_label(skills: &SkillInfo, extras: CaptainExtras) -> SkillLabel {
+    let SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills } = *skills;
+
     let mut extra_hover_text = Vec::new();
-    if has_dazzle {
+    if extras.has_dazzle {
         extra_hover_text.push("Dazzle");
     }
-    if has_ifa {
+    if extras.has_ifa {
         extra_hover_text.push("IFA");
     }
     let text = format!("{skill_points}pts ({num_skills} skills)");
@@ -623,26 +630,26 @@ fn build_skill_label(
 /// read from the skill grid (`TranslatedBuild::new` already flags `learned`
 /// per skill), matching the raw-`commander_skills` scan in
 /// `util::colorize_captain_points`.
-fn captain_extras(build: Option<&TranslatedBuild>) -> (bool, bool) {
+fn captain_extras(build: Option<&TranslatedBuild>) -> CaptainExtras {
+    let mut extras = CaptainExtras::default();
     let Some(rows) = build.and_then(|b| b.captain_skills.as_ref()) else {
-        return (false, false);
+        return extras;
     };
 
-    let mut has_dazzle = false;
-    let mut has_ifa = false;
     for row in rows {
         for skill in &row.skills {
             if !skill.learned {
                 continue;
             }
             match KnownCrewSkill::recognize(&skill.internal_name, skill.skill_type).known() {
-                Some(KnownCrewSkill::Dazzle) => has_dazzle = true,
-                Some(KnownCrewSkill::IncomingFireAlert) => has_ifa = true,
+                Some(KnownCrewSkill::Dazzle) => extras.has_dazzle = true,
+                Some(KnownCrewSkill::IncomingFireAlert) => extras.has_ifa = true,
                 _ => {}
             }
         }
     }
-    (has_dazzle, has_ifa)
+
+    extras
 }
 
 /// Comma-groups an integer for display (English/default grouping only; the
@@ -676,16 +683,15 @@ impl PlayerRow {
     fn from_normalized_player(
         np: &NormalizedPlayer,
         self_division_id: Option<u32>,
-        self_db_id: Option<AccountId>,
+        self_db_id: AccountId,
         ship_species_text: String,
         ship_id: Option<GameParamId>,
     ) -> Self {
-        let is_self_division_mate = match (self_division_id, self_db_id) {
-            (Some(self_div), Some(self_id)) => self_id != np.db_id && np.division_id == Some(self_div),
-            _ => false,
-        };
+        let is_self_division_mate =
+            self_division_id.is_some_and(|self_div| self_db_id != np.db_id && np.division_id == Some(self_div));
 
-        let clan_tag = (!np.clan.is_empty()).then(|| format!("[{}]", np.clan));
+        let clan =
+            (!np.clan.is_empty()).then(|| PlayerClan { tag: format!("[{}]", np.clan), color_rgb: np.clan_color_rgb });
 
         let server = np.server_results.as_ref();
 
@@ -788,15 +794,8 @@ impl PlayerRow {
         // for "this replay observed the vehicle entity".
         let has_vehicle_entity = np.build.is_some();
 
-        let (has_dazzle, has_ifa) = captain_extras(np.build.as_ref());
-        let skill_label = build_skill_label(
-            np.skill_info.skill_points,
-            np.skill_info.num_skills,
-            np.skill_info.highest_tier,
-            np.skill_info.num_tier_1_skills,
-            has_dazzle,
-            has_ifa,
-        );
+        let extras = captain_extras(np.build.as_ref());
+        let skill_label = build_skill_label(&np.skill_info, extras);
 
         PlayerRow {
             db_id: np.db_id,
@@ -808,8 +807,7 @@ impl PlayerRow {
             is_test_ship: np.is_test_ship,
             manual_stat_hide_toggle: false,
             display_name: np.display_name.clone(),
-            clan_tag,
-            clan_color_rgb: np.clan_color_rgb,
+            clan,
             division_label: np.division_label.clone(),
             is_self_division_mate,
             ship_name: np.ship_name.clone(),
@@ -860,14 +858,12 @@ impl PlayerRow {
             skill_label_text: skill_label.text,
             skill_hover_text: skill_label.hover,
             skill_warning: skill_label.warning,
-            has_dazzle,
-            has_ifa,
+            has_dazzle: extras.has_dazzle,
+            has_ifa: extras.has_ifa,
             translated_build: np.build.clone(),
             achievements: np.achievements.clone(),
             ribbons: np.ribbons.clone(),
             consumables: np.consumables.clone(),
-            // PR data isn't loaded at report-construction time; see the
-            // field doc and `ReplayReportModel::populate_personal_ratings`.
             personal_rating: np.personal_rating.clone(),
             // Needs the raw `Player`, which `NormalizedPlayer` does not
             // carry; see the field docs and `populate_action_links`.
@@ -965,16 +961,21 @@ mod tests {
     fn a_captain_s_two_skill_mistakes_are_reported_separately() {
         use super::SkillWarning;
 
+        let label = |skill_points, num_skills, highest_tier, num_tier_1_skills| {
+            let skills = SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills };
+            build_skill_label(&skills, CaptainExtras::default())
+        };
+
         // Six skills, all tier 1.
-        let tower = build_skill_label(6, 6, 1, 6, false, false);
+        let tower = label(6, 6, 1, 6);
         assert_eq!(tower.warning, Some(SkillWarning::TowerDefense));
 
         // Points spent, nothing above tier 2.
-        let shallow = build_skill_label(10, 5, 2, 0, false, false);
+        let shallow = label(10, 5, 2, 0);
         assert_eq!(shallow.warning, Some(SkillWarning::NoHighTier));
 
         // A build with neither problem.
-        let fine = build_skill_label(21, 7, 4, 1, false, false);
+        let fine = label(21, 7, 4, 1);
         assert_eq!(fine.warning, None);
     }
 

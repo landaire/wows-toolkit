@@ -1632,7 +1632,8 @@ mod tests {
         model.rows[0].shiptool_url = Some("https://shiptool.st/link?ship=PASC020&utm_source=wows_toolkit".to_owned());
         model.rows[0].ship_config_url = Some("https://app.wowssb.com/ship?shipIndexes=PASC020".to_owned());
         model.rows[0].display_name = "Harvey635".to_owned();
-        model.rows[0].clan_tag = Some("[RAIN]".to_owned());
+        model.rows[0].clan =
+            Some(wows_toolkit_replay_data::model::PlayerClan { tag: "[RAIN]".to_owned(), color_rgb: 0 });
         model.rows[0].ship_name = "Fletcher".to_owned();
 
         cx.update(gpui_kit::init);
