@@ -51,8 +51,8 @@ use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::incoming::group_incoming;
 
-use super::catalog::ShipCatalog;
-use super::catalog::tier_roman;
+use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
+use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use super::pane::ArmorViewerPane;
 use super::viewport_view::ArcSummary;
 use super::viewport_view::Isolate;

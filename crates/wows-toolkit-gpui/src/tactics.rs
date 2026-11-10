@@ -729,7 +729,7 @@ pub struct TacticsBoard {
     /// What is typed into the ship search, and what it matched. Placing a ship
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
-    matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
+    matched_ships: Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)>,
     map_select: Entity<SelectState<SearchableVec<MapItem>>>,
     _map_select_subscription: Subscription,
     map_picker_sync_needed: bool,
@@ -740,7 +740,7 @@ pub struct TacticsBoard {
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
     /// Every ship the build knows, built the first time one is looked up.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_catalog: Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>>,
     /// Which circles a placed ship shows. Every ship already on the board is
     /// given the same set, so two ships are compared on the same terms.
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
@@ -1892,12 +1892,12 @@ impl TacticsBoard {
     }
 
     /// Every ship the build knows, built the first time one is looked up.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+    fn ships(&mut self) -> Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>> {
         if let Some(catalog) = &self.ship_catalog {
             return Some(std::rc::Rc::clone(catalog));
         }
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        let catalog = std::rc::Rc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider()));
         self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
         Some(catalog)
     }
@@ -1908,7 +1908,7 @@ impl TacticsBoard {
     fn matching_ships(
         &mut self,
         typed: &str,
-    ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
+    ) -> Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)> {
         let query = unidecode::unidecode(typed.trim()).to_lowercase();
         if query.is_empty() {
             return Vec::new();
@@ -1934,7 +1934,7 @@ impl TacticsBoard {
     fn pick_ship(
         &mut self,
         species: wowsunpack::game_params::types::Species,
-        ship: &crate::armor_viewer::catalog::ShipEntry,
+        ship: &wows_toolkit_viewmodel::ship_catalog::ShipEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3214,7 +3214,7 @@ impl TacticsBoard {
                                 Button::new(("tactics-ship-match", index))
                                     .label(format!(
                                         "{} {}",
-                                        crate::armor_viewer::catalog::tier_roman(ship.tier),
+                                        wows_toolkit_viewmodel::ship_catalog::tier_roman(ship.tier),
                                         ship.display_name
                                     ))
                                     .compact()

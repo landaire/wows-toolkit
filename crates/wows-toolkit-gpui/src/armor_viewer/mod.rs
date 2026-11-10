@@ -2,10 +2,10 @@
 //! and key input drives the copied `viewport_3d` arcball camera, an
 //! on-demand (dirty-gated) offscreen render feeds a gpui_kit `RenderImage`, and a
 //! gpui-native overlay reimplements the navigation gizmo on top of it.
-//! `catalog` builds the ship selector's nation/class/ship listing from the
-//! loaded `GameMetadataProvider`; `assets` loads the shared `ShipAssets`
-//! (ship-export data) plus the catalog and its nation-flag/class-icon cache
-//! on the background executor. `sidebar` presents the catalog as a
+//! `wows_toolkit_viewmodel::ship_catalog` builds the ship selector's
+//! nation/class/ship listing from the loaded `GameMetadataProvider`; `assets`
+//! loads the shared `ShipAssets` (ship-export data) plus the catalog and its
+//! nation-flag/class-icon cache on the background executor. `sidebar` presents the catalog as a
 //! nation/class/ship tree with a search filter and emits a selection event;
 //! `load_ship` loads one ship's armor model on the background executor;
 //! `upload` uploads a loaded ship's armor meshes into a `Viewport3D`. `pane`
@@ -41,7 +41,6 @@ pub mod analysis;
 pub mod assets;
 pub mod camera_rings;
 pub(crate) mod camo;
-pub mod catalog;
 pub mod dock;
 mod export_dialog;
 mod gaps;
@@ -64,7 +63,6 @@ pub mod visibility;
 pub use assets::ArmorAssetsBundle;
 pub use assets::ArmorAssetsError;
 pub use assets::spawn_load_armor_assets;
-pub use catalog::ShipCatalog;
 pub use load_ship::LoadedShipArmor;
 pub use load_ship::ShipLoadError;
 pub use pane::ArmorViewerPane;

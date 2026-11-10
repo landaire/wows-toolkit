@@ -2,8 +2,8 @@
 //! by nation then class then sorted by tier/name. Ports the egui app's
 //! `ShipCatalog` (`crates/wows-toolkit/src/armor_viewer/ship_selector.rs`)
 //! verbatim -- same struct shapes, same filters (ship species only, no clan
-//! rentals), same sort order -- so the sidebar/tree Task 4 builds on top of
-//! this shows the exact same ship list the egui armor viewer does.
+//! rentals), same sort order -- so every ship list built on it shows the
+//! same ships the egui armor viewer does.
 
 use std::collections::HashMap;
 
@@ -264,7 +264,7 @@ mod tests {
     /// ```text
     /// WOWS_ARMOR_VIEWER_TEST_GAME_DIR="E:\WoWs\World_of_Warships" \
     /// WOWS_ARMOR_VIEWER_TEST_VERSION="15, 6, 0, 12830008" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
+    /// cargo test -p wows-toolkit-viewmodel -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
     /// ```
     ///
     /// Mirrors `replay_inspector::model`'s equivalent real-provider test.
