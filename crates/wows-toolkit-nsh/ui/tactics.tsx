@@ -1,11 +1,13 @@
 import type { JSX } from "nsh";
 import { Image, keymap, Scroll, signal, Text, View } from "nsh";
+import { platform } from "nsh";
 import { Button as BaseButton, Checkbox, Combobox, Dialog, Input, Popover, Tooltip } from "nsh/base";
 import { Menu } from "nsh/desktop";
 import { Tactics, type RangeName, type TacticsView, type ToolName } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
 import { Frame } from "./frame";
 import { t } from "./i18n";
+import { CheckMark, Icon } from "./icons";
 import { colors, controlRadius } from "./theme";
 
 const SURFACE = "tactics-board";
@@ -20,8 +22,11 @@ let lastNotice = 0;
 
 type ToolEntry = { name: ToolName; key: string; chord: string };
 
-// In the order the egui board takes them up. Measurement takes a plain key:
-// nsh keeps `mod+m` for minimizing the window.
+// The measurement chord: macOS keeps Cmd+M for minimizing the window, so it
+// takes Ctrl+M there.
+const MEASURE_CHORD = platform.os === "macos" ? "ctrl+m" : "mod+m";
+
+// In the order the egui board takes them up.
 const TOOLS: ToolEntry[] = [
   { name: "freehand", key: "ui.renderer.annotations.tool_freehand", chord: "mod+2" },
   { name: "line", key: "ui.renderer.annotations.tool_line", chord: "mod+4" },
@@ -29,7 +34,7 @@ const TOOLS: ToolEntry[] = [
   { name: "circle", key: "ui.renderer.annotations.tool_circle", chord: "mod+5" },
   { name: "rectangle", key: "ui.renderer.annotations.tool_rectangle", chord: "mod+6" },
   { name: "triangle", key: "ui.renderer.annotations.tool_triangle", chord: "mod+7" },
-  { name: "measurement", key: "ui.renderer.annotations.tool_measurement", chord: "m" },
+  { name: "measurement", key: "ui.renderer.annotations.tool_measurement", chord: MEASURE_CHORD },
   { name: "eraser", key: "ui.renderer.annotations.tool_eraser", chord: "mod+3" },
 ];
 
@@ -191,7 +196,7 @@ function Picker(props: {
       popupStyle={{ width: props.width + 80, maxHeight: 360, padding: 4, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}
       itemClass="rounded-md px-2 py-1.5 text-[12.5px] text-popover-foreground focus:bg-accent selected:font-semibold"
       inputStyle={{ flex: 1, fontSize: 12.5, color: colors.foreground, placeholderColor: colors.mutedForeground }}
-      triggerButton={<Text style={{ paddingHorizontal: 4, fontSize: 11, color: colors.mutedForeground }}>v</Text>}
+      triggerButton={<View style={{ paddingHorizontal: 4 }}><Icon name="chevron-down" size={14} color={colors.mutedForeground}/></View>}
       style={{ width: props.width, height: 28, paddingHorizontal: 8, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.input, borderRadius: controlRadius(), backgroundColor: colors.background }}
     />
   );
@@ -289,7 +294,7 @@ function RangeCircles(props: { view: TacticsView }) {
                 disabled={props.view.locked}
                 class="group flex-row items-center gap-2"
                 indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-                indicator={<Text class="text-[10px] text-primary-foreground">{range().checked ? "x" : ""}</Text>}
+                indicator={<CheckMark checked={range().checked}/>}
                 onChange={({ checked }) => run(() => Tactics.setRangeCircle(range().circle as RangeName, checked))}
               >
                 <Text style={{ fontSize: 12.5, color: colors.popoverForeground }}>{label()}</Text>
@@ -450,7 +455,7 @@ function DrawTools(props: { view: TacticsView }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
       <If when={locked()}>
-        <Label text={t("ui.tactics.drawing_locked")}/>
+        <Icon name="lock" size={14} color={colors.mutedForeground} accessibilityLabel={t("ui.tactics.drawing_locked")}/>
       </If>
       <Each of={TOOLS}>
         {(tool) => (
@@ -607,7 +612,7 @@ function BoardKeys() {
     "mod+5": shortcut("circle"),
     "mod+6": shortcut("rectangle"),
     "mod+7": shortcut("triangle"),
-    m: shortcut("measurement"),
+    [MEASURE_CHORD]: shortcut("measurement"),
     escape: () => run(() => Tactics.setTool(null)),
     "[": () => { if (hasTool()) run(() => Tactics.stepNib(-1)); },
     "]": () => { if (hasTool()) run(() => Tactics.stepNib(1)); },
