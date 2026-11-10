@@ -273,4 +273,49 @@ mod tests {
 
         assert_eq!(&frame.pixels[at..at + 3], &[(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8]);
     }
+
+    /// Renders a real ship through the scene and this frame path and writes
+    /// the frame as a PNG, as a smoke check of the whole pipeline. Needs a GPU
+    /// and an install:
+    ///
+    /// ```text
+    /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR=/path/to/World_of_Warships \
+    /// WOWS_ARMOR_SMOKE_PNG=/path/to/out.png \
+    /// cargo test -p wows-toolkit-nsh --no-default-features --lib -- --ignored renders_a_real_ship_into_a_frame
+    /// ```
+    #[test]
+    #[ignore = "needs a GPU and a game install; see the doc comment"]
+    fn renders_a_real_ship_into_a_frame() {
+        use std::sync::Arc;
+
+        use wows_toolkit_armor::scene::ArmorScene;
+        use wows_toolkit_armor::scene::Gpu;
+        use wows_toolkit_armor::viewport::types::ViewRect;
+
+        let dir = std::path::PathBuf::from(std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR").expect("install dir"));
+        let out = std::path::PathBuf::from(std::env::var("WOWS_ARMOR_SMOKE_PNG").expect("output png path"));
+        let build = *wowsunpack::game_data::list_available_builds(&dir).expect("builds").last().expect("a build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build, wowsunpack::game_data::AssetsBin::Overlay)
+            .expect("game vfs");
+        let metadata = Arc::new(wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs).expect("params"));
+        let assets = wows_toolkit_armor::assets::load_ship_assets(&vfs, None, &metadata).expect("ship assets");
+        let catalog = wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(&metadata);
+        let ship = catalog.ships().find(|ship| ship.search_name.contains("yamato")).expect("Yamato in the catalog");
+        let armor = wows_toolkit_armor::load_ship::load_ship_armor_by_param(&assets, &ship.param_index, &ship.display_name)
+            .expect("armor");
+
+        let mut scene = ArmorScene::new();
+        scene.set_gpu(Gpu::new().expect("gpu"));
+        scene.set_rect(ViewRect::new(0.0, 0.0, 800.0, 500.0));
+        scene.show_armor(Arc::new(armor));
+        let (width, height, pixels) = scene.render((1600, 1000)).expect("a render");
+        let frame = compose(Readback { width, height, pixels }, scene.gizmo().as_ref(), 2.0).expect("frame");
+        assert_eq!(frame.alpha, AlphaMode::Straight);
+
+        let file = std::fs::File::create(&out).expect("png file");
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), frame.size.width, frame.size.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().expect("png header").write_image_data(&frame.pixels).expect("png data");
+    }
 }
