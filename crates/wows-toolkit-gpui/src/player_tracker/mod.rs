@@ -103,9 +103,9 @@ use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
 
 use crate::replay_inspector::IconCache;
-use crate::replay_inspector::columns::ColorRole;
-use crate::replay_inspector::columns::PlayerColorKind;
 use crate::replay_inspector::columns::player_color_kind_rgb;
+use wows_toolkit_replay_data::cells::ColorRole;
+use wows_toolkit_replay_data::cells::PlayerColorKind;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;

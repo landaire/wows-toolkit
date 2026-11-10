@@ -37,29 +37,44 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::columns::BattleOutcome;
-use super::columns::CaptainPointsTier;
-use super::columns::CellValue;
-use super::columns::ColorRole;
-use super::columns::PlayerColorKind;
-use super::columns::cell_value;
-use super::columns::name_color_kind;
-use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
 use super::expanded;
 use super::icons::IconCache;
-use super::sort::SortColumn;
-use super::sort::SortOrder;
-use super::sort::sort_rows;
-use wows_replay_insights::battle_report::ConnectionNote;
+use wows_toolkit_replay_data::cells::BattleOutcome;
+use wows_toolkit_replay_data::cells::CaptainPointsTier;
+use wows_toolkit_replay_data::cells::CellValue;
+use wows_toolkit_replay_data::cells::ColorRole;
+use wows_toolkit_replay_data::cells::PlayerColorKind;
+use wows_toolkit_replay_data::cells::cell_value;
+use wows_toolkit_replay_data::cells::name_color_kind;
+use wows_toolkit_replay_data::cells::player_color_kind;
+use wows_toolkit_replay_data::player_table::COLUMN_DRAG_MIN;
+use wows_toolkit_replay_data::player_table::COLUMN_MIN_WIDTH;
+use wows_toolkit_replay_data::player_table::ROW_ACTIONS_WIDTH;
+use wows_toolkit_replay_data::player_table::SHIP_ICON_WIDTH;
+use wows_toolkit_replay_data::player_table::STICKY_COLUMN_COUNT;
+use wows_toolkit_replay_data::player_table::STICKY_MAX_FRACTION;
+use wows_toolkit_replay_data::player_table::TextMeasure;
+use wows_toolkit_replay_data::player_table::TextWeight;
+use wows_toolkit_replay_data::player_table::column_label;
+use wows_toolkit_replay_data::player_table::connection_hover_text;
+use wows_toolkit_replay_data::player_table::markdown_table;
+use wows_toolkit_replay_data::player_table::menu_heading_text;
+use wows_toolkit_replay_data::player_table::row_text;
+use wows_toolkit_replay_data::player_table::shows_build_links;
+use wows_toolkit_replay_data::player_table::table_text;
+use wows_toolkit_replay_data::player_table::twitch_hover_text;
+use wows_toolkit_replay_data::sort::SortColumn;
+use wows_toolkit_replay_data::sort::SortOrder;
+use wows_toolkit_replay_data::sort::sort_rows;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
-use wows_replays::types::Relation;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::SkillWarning;
+use wows_toolkit_replay_data::summary::TeamDamage;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -75,31 +90,12 @@ const LIST_OVERDRAW: Pixels = px(200.);
 const CELL_ID_STRIDE: usize = 32;
 const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE must exceed the column count");
 
-/// Columns pinned to the left edge of the table while the rest scroll
-/// horizontally: Name and ShipName, in that order. The egui app pins three
-/// (`num_sticky_cols(3)`, `mod.rs:2808`), the third being its Actions column,
-/// which a row carries itself here. `default_columns` always includes these two
-/// first and unconditionally, so this always freezes exactly them.
-const STICKY_COLUMN_COUNT: usize = 2;
-
-/// Column width bounds, matching the egui app's
-/// `Column::new(100.0).range(10.0..=500.0)` (`mod.rs:2795`).
-const COLUMN_MIN_WIDTH: f32 = 10.0;
-const COLUMN_MAX_WIDTH: f32 = 500.0;
-
-/// Fixed pixel width of the Name column's ship-class `img` icon
-/// (`name_cell`'s `.w(px(16.))`), the one piece of cell furniture that does
-/// not scale with the theme font size.
-const SHIP_ICON_WIDTH: f32 = 16.0;
-
 /// Rendered pixel width of `text` at the window's current font and
 /// `window.rem_size()` (the theme's body font size; see `theme.rs`), with
 /// `bold` reproducing `header_cell`'s `.font_weight(FontWeight::BOLD)`.
 /// Backs `measure_column_widths`'s one-shot content pass -- never called on a
-/// per-frame path. `pub(super)` so `expanded.rs`'s `expanded_detail_width`
-/// (the same one-shot pass, for expanded-row content) can reuse it instead of
-/// duplicating text shaping.
-pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
+/// per-frame path.
+fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
     if text.is_empty() {
         return 0.0;
     }
@@ -118,31 +114,28 @@ pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) ->
     window.text_system().shape_line(text, window.rem_size(), &[run], None).width().as_f32()
 }
 
-/// Computes every column's content-fit width: the widest of the column's
-/// header label and every row's rendered cell text, plus that column's
-/// furniture (icons, marker glyphs, the `px_1()` cell padding both
-/// `header_cell` and `cell_element` apply), clamped to
-/// `COLUMN_MIN_WIDTH..=COLUMN_MAX_WIDTH`. Indexed by `ReplayColumn as usize`
-/// (unconditionally sized to `ReplayColumn::ALL.len()`; a column absent from
-/// `model.columns` keeps the placeholder `COLUMN_MIN_WIDTH` entry, since it
-/// isn't rendered until `set_columns` brings it back and re-triggers this
-/// pass).
-///
-/// The Name column reserves `max(ship-class icon, its species-text fallback)`
-/// for the icon slot regardless of whether `IconCache` has resolved the icon
-/// yet (`name_cell` shows the fallback text until the background decode in
-/// `PlayerTable::new` completes) -- so this one pass stays correct across
-/// that transition without needing a second recompute when the icons land.
-///
-/// A row in `expanded` also folds `expanded::expanded_detail_width` into that
-/// row's per-column width alongside its collapsed content -- `table.rs`'s
-/// `render_column_cell` clamps an expanded row's detail (the Skills column's
-/// captain-skill grid and consumables table, in particular) to the column's
-/// measured width, so without this an expanded row's detail would clip at the
-/// collapsed-only width instead of growing the column to fit it.
-///
-/// Run once per data/column/debug/expanded-set change (`PlayerTable::new`,
-/// `set_columns`, `set_debug`, `toggle_expanded`), gated behind
+/// The window's text system, as the shared width pass measures with it.
+struct WindowMeasure<'a> {
+    window: &'a mut Window,
+}
+
+impl TextMeasure for WindowMeasure<'_> {
+    fn width(&mut self, text: &str, weight: TextWeight) -> f32 {
+        text_width(SharedString::from(text.to_owned()), self.window, weight == TextWeight::Bold)
+    }
+
+    fn rem(&self) -> f32 {
+        self.window.rem_size().as_f32()
+    }
+
+    // The detail's fixed columns are drawn at their nominal widths.
+    fn text_scale(&self) -> f32 {
+        1.0
+    }
+}
+
+/// Every column's content-fit width (`player_table::measure_column_widths`).
+/// Run once per data/column/debug/expanded-set change, gated behind
 /// `PlayerTable::widths_dirty` in `render` -- never per frame.
 fn measure_column_widths(
     model: &ReplayReportModel,
@@ -150,133 +143,17 @@ fn measure_column_widths(
     expanded: &HashSet<AccountId>,
     window: &mut Window,
 ) -> Vec<Pixels> {
-    let rem = window.rem_size().as_f32();
-    let gap_1 = rem * 0.25;
-    let gap_0p5 = rem * 0.125;
-    let cell_padding = rem * 0.5;
-    let icon_default = rem;
-    // The cells clip with `text_ellipsis()`, which truncates (dropping several
-    // trailing characters to make room for the "...") the moment the content
-    // reaches the available width. A column measured to exactly its content
-    // width therefore still shows an ellipsis, so give the text a little
-    // breathing room beyond the measured content plus padding.
-    let content_slack = rem * 0.5;
-
-    let mut widths = vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()];
-    for &col in &model.columns {
-        let header_w = text_width(column_label(col).into(), window, true);
-        let content_w = match col {
-            ReplayColumn::Name => {
-                let mut max_w = header_w;
-                for row in &model.rows {
-                    let cell = cell_value(row, col, debug);
-                    let text_w = text_width(cell.text.into(), window, false);
-                    let species_w = text_width(row.ship_species_text.clone().into(), window, false);
-                    let icon_w = species_w.max(SHIP_ICON_WIDTH);
-                    let status_count = usize::from(row.is_hidden_profile)
-                        + usize::from(row.connection.is_some())
-                        + usize::from(!row.twitch_candidates.is_empty());
-                    let mut row_w = icon_default
-                        + gap_1
-                        + icon_w
-                        + gap_1
-                        + text_w
-                        + ROW_ACTIONS_WIDTH
-                        + status_count as f32 * (icon_default + gap_1);
-                    if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
-                    }
-                    max_w = max_w.max(row_w);
-                }
-                max_w
-            }
-            ReplayColumn::Skills => {
-                let mut max_w = header_w;
-                for row in &model.rows {
-                    let cell = cell_value(row, col, debug);
-                    let text_w = text_width(cell.text.into(), window, false);
-                    let marker_count = row.skill_warning.is_some() as u32 + row.has_dazzle as u32 + row.has_ifa as u32;
-                    let mut row_w = if marker_count > 0 {
-                        let markers_w =
-                            marker_count as f32 * icon_default + marker_count.saturating_sub(1) as f32 * gap_0p5;
-                        markers_w + gap_1 + text_w
-                    } else {
-                        text_w
-                    };
-                    if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
-                    }
-                    max_w = max_w.max(row_w);
-                }
-                max_w
-            }
-            _ => {
-                let mut max_w = header_w;
-                for row in &model.rows {
-                    let cell = cell_value(row, col, debug);
-                    let mut row_w = text_width(cell.text.into(), window, false);
-                    if expanded.contains(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, debug, window));
-                    }
-                    max_w = max_w.max(row_w);
-                }
-                max_w
-            }
-        };
-        widths[col as usize] = px((content_w + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
-    }
-    widths
-}
-
-/// Header label for a column, matching the egui app's `ui.replay.column.*`
-/// English strings.
-pub(super) const fn column_label_key(col: ReplayColumn) -> &'static str {
-    match col {
-        ReplayColumn::Name => "ui.replay.column.player_name",
-        ReplayColumn::ShipName => "ui.replay.column.ship_name",
-        ReplayColumn::Skills => "ui.replay.column.skills",
-        ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
-        ReplayColumn::BaseXp => "stat.base_xp",
-        ReplayColumn::RawXp => "stat.raw_xp",
-        ReplayColumn::Kills => "ui.replay.column.kills",
-        ReplayColumn::ObservedDamage => "ui.replay.column.observed_damage",
-        ReplayColumn::ActualDamage => "ui.replay.column.actual_damage",
-        ReplayColumn::ReceivedDamage => "ui.replay.column.received_damage",
-        ReplayColumn::SpottingDamage => "stat.spotting_damage",
-        ReplayColumn::PotentialDamage => "ui.replay.column.potential_damage",
-        ReplayColumn::Hits => "ui.replay.column.hits",
-        ReplayColumn::Heals => "ui.replay.column.heals",
-        ReplayColumn::DistanceTraveled => "ui.replay.column.distance_traveled",
-        ReplayColumn::TimeLived => "ui.replay.column.time_lived",
-    }
-}
-
-/// The column's heading in the reader's own language.
-fn column_label(col: ReplayColumn) -> String {
-    t!(column_label_key(col)).into_owned()
-}
-
-/// The `SortColumn` a header click sorts by, or `None` for the columns the
-/// egui app renders as plain (non-clickable) headers: Actions, Skills, and
-/// Time Lived.
-fn column_sort(col: ReplayColumn) -> Option<SortColumn> {
-    match col {
-        ReplayColumn::Skills | ReplayColumn::TimeLived => None,
-        ReplayColumn::Name => Some(SortColumn::Name),
-        ReplayColumn::ShipName => Some(SortColumn::ShipName),
-        ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
-        ReplayColumn::BaseXp => Some(SortColumn::BaseXp),
-        ReplayColumn::RawXp => Some(SortColumn::RawXp),
-        ReplayColumn::Kills => Some(SortColumn::Kills),
-        ReplayColumn::ObservedDamage => Some(SortColumn::ObservedDamage),
-        ReplayColumn::ActualDamage => Some(SortColumn::ActualDamage),
-        ReplayColumn::ReceivedDamage => Some(SortColumn::ReceivedDamage),
-        ReplayColumn::SpottingDamage => Some(SortColumn::SpottingDamage),
-        ReplayColumn::PotentialDamage => Some(SortColumn::PotentialDamage),
-        ReplayColumn::Hits => Some(SortColumn::Hits),
-        ReplayColumn::Heals => Some(SortColumn::Heals),
-        ReplayColumn::DistanceTraveled => Some(SortColumn::DistanceTraveled),
-    }
+    let mut measure = WindowMeasure { window };
+    wows_toolkit_replay_data::player_table::measure_column_widths(
+        &model.rows,
+        &model.columns,
+        debug,
+        expanded,
+        &mut measure,
+    )
+    .into_iter()
+    .map(px)
+    .collect()
 }
 
 /// Sort-direction icon shown after the active sort column's label. The egui
@@ -416,10 +293,6 @@ struct ColumnDrag {
     width_start: Pixels,
 }
 
-/// The narrowest a dragged column may be made. Below this a column's own
-/// content is unreadable and its header is gone.
-const COLUMN_DRAG_MIN: Pixels = px(28.);
-
 /// The settings row the dragged column widths are kept in.
 ///
 /// The port's own row, not one the egui app reads: its table carries explicit
@@ -433,15 +306,6 @@ const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
 
 /// The width of the strip on a header's trailing edge that starts a drag.
 const RESIZE_GRIP: Pixels = px(6.);
-
-/// The most of the table's width the two frozen columns may take.
-///
-/// They are laid out at their own content width, which on a narrow dock panel
-/// is wider than the panel itself. Left to it they would paint past the
-/// panel's edge over whatever is beside it, and leave the scrolling columns no
-/// room to be reached at all. Capped, they clip instead, and the rest of the
-/// table stays scrollable.
-const STICKY_MAX_FRACTION: f32 = 0.6;
 
 /// Room kept for the horizontal scrollbar, so it is still reachable however
 /// wide the frozen columns are drawn.
@@ -542,23 +406,9 @@ impl PlayerTable {
         &self.model.context
     }
 
-    /// Damage dealt by each side: the reader's own team first.
-    ///
-    /// Rows with no server damage figure count as zero, which is what the
-    /// egui app's own tally does (`unwrap_or(0)`): a row that reported
-    /// nothing did not thereby deal damage.
-    pub fn team_damage(&self) -> (u64, u64) {
-        let mut friendly = 0u64;
-        let mut enemy = 0u64;
-        for row in &self.model.rows {
-            let damage = row.actual_damage.unwrap_or(0);
-            if row.relation.is_enemy() {
-                enemy += damage;
-            } else {
-                friendly += damage;
-            }
-        }
-        (friendly, enemy)
+    /// Damage dealt by each side.
+    pub fn team_damage(&self) -> TeamDamage {
+        wows_toolkit_replay_data::summary::team_damage(&self.model)
     }
 
     pub fn self_personal_rating(&self) -> Option<PersonalRatingResult> {
@@ -680,7 +530,7 @@ impl PlayerTable {
     /// every pointer move outside one.
     fn drag_column(&mut self, at: Pixels, cx: &mut Context<Self>) {
         let Some(drag) = self.resizing else { return };
-        let width = (drag.width_start + (at - drag.pointer_start)).max(COLUMN_DRAG_MIN);
+        let width = (drag.width_start + (at - drag.pointer_start)).max(px(COLUMN_DRAG_MIN));
         self.width_overrides[drag.column as usize] = Some(width);
         cx.notify();
     }
@@ -718,7 +568,7 @@ impl PlayerTable {
                 for (slot, width) in this.width_overrides.iter_mut().zip(widths) {
                     // A width narrower than the grip would leave a column
                     // that cannot be grabbed to widen again.
-                    *slot = width.map(|width| px(width).max(COLUMN_DRAG_MIN));
+                    *slot = width.map(|width| px(width.max(COLUMN_DRAG_MIN)));
                 }
                 cx.notify();
             });
@@ -747,50 +597,28 @@ impl PlayerTable {
     /// One cell's text as the table draws it.
     fn cell_text(&self, player: AccountId, col: ReplayColumn) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
-        Some(cell_value(row, col, self.debug).text.to_string())
+        Some(cell_value(row, col, self.debug).text)
     }
 
-    /// One row's visible cells, tab separated, which is what a spreadsheet
-    /// reads back as columns.
+    /// One row's visible cells, tab separated.
     fn row_text(&self, player: AccountId) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
-        Some(
-            self.model
-                .columns
-                .iter()
-                .map(|col| cell_value(row, *col, self.debug).text.to_string())
-                .collect::<Vec<_>>()
-                .join("\t"),
-        )
+        Some(row_text(row, &self.model.columns, self.debug))
     }
 
     /// The whole table: the column headings, then every row in the order the
     /// table is sorted into.
     fn table_text(&self) -> String {
-        let mut lines = vec![self.model.columns.iter().map(|col| column_label(*col)).collect::<Vec<_>>().join("\t")];
-        lines.extend(self.model.rows.iter().filter_map(|row| self.row_text(row.db_id)));
-        lines.join("\n")
+        table_text(&self.model.rows, &self.model.columns, self.debug)
     }
 
     fn row_markdown(&self, player: AccountId) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
-        Some(self.markdown_table(std::iter::once(row)))
+        Some(markdown_table([row], &self.model.columns, self.debug))
     }
 
     fn table_markdown(&self) -> String {
-        self.markdown_table(self.model.rows.iter())
-    }
-
-    fn markdown_table<'a>(&self, rows: impl Iterator<Item = &'a PlayerRow>) -> String {
-        let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
-        let mut lines = vec![
-            line(self.model.columns.iter().map(|col| markdown_cell(&column_label(*col))).collect()),
-            line(self.model.columns.iter().map(|_| "---".to_owned()).collect()),
-        ];
-        lines.extend(rows.map(|row| {
-            line(self.model.columns.iter().map(|col| markdown_cell(&cell_value(row, *col, self.debug).text)).collect())
-        }));
-        lines.join("\n")
+        markdown_table(&self.model.rows, &self.model.columns, self.debug)
     }
 
     /// Puts `col` back on its content-fitted width.
@@ -844,7 +672,7 @@ impl PlayerTable {
 
         let base = base.relative().child(grip);
 
-        match column_sort(col) {
+        match SortColumn::of_column(col) {
             None => base.child(column_label(col)).into_any_element(),
             Some(sort_column) => {
                 let sorted = self.sort.column() == sort_column;
@@ -1058,14 +886,6 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     container.child(cell).into_any_element()
 }
 
-/// What a connection history says, in the egui app's own wording.
-fn connection_hover_text(note: &ConnectionNote) -> String {
-    match note {
-        ConnectionNote::NeverConnected => t!("ui.replay.player.never_connected").into_owned(),
-        ConnectionNote::Interrupted { events } => format!("Player {}", events.join(", ")),
-    }
-}
-
 /// The Twitch chip: a logo beside the name when a chat login around this
 /// battle plausibly names this player.
 ///
@@ -1074,32 +894,7 @@ fn connection_hover_text(note: &ConnectionNote) -> String {
 /// chip.
 fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> {
     let first = candidates.first()?;
-
-    let hover: SharedString = candidates
-        .iter()
-        .map(|candidate| {
-            let minutes = candidate.minutes.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
-            format!(
-                "{}
-{}",
-                t!("ui.twitch.possible_name", name = candidate.login),
-                t!("ui.twitch.seen_minutes", minutes = minutes)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(
-            "
-
-",
-        )
-        .into();
-    let hover: SharedString = format!(
-        "{hover}
-
-{}",
-        t!("ui.twitch.click_to_copy")
-    )
-    .into();
+    let hover: SharedString = twitch_hover_text(candidates)?.into();
 
     let glyph = crate::icons::icon(crate::icons::TWITCH_LOGO)
         .id(("replay-twitch", ix))
@@ -1227,8 +1022,8 @@ struct ActionsMenuData {
     player: AccountId,
     /// Who the menu is about, drawn as the row reads.
     heading: MenuHeading,
-    relation: Relation,
-    has_vehicle_entity: bool,
+    /// Whether the build links belong in the menu (`player_table::shows_build_links`).
+    show_build_links: bool,
     ship_config_url: Option<String>,
     short_ship_config_url: Option<String>,
     shiptool_url: Option<String>,
@@ -1269,16 +1064,7 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
         .filter(|species| !species.is_empty())
         .map(SharedString::from);
 
-    let mut spoken = String::new();
-    if let Some(clan) = clan.as_ref() {
-        spoken.push_str(clan);
-        spoken.push(' ');
-    }
-    spoken.push_str(&row.display_name);
-    if let Some(ship) = ship.as_ref() {
-        spoken.push_str(", ");
-        spoken.push_str(ship);
-    }
+    let spoken = menu_heading_text(row);
 
     MenuHeading {
         icon,
@@ -1331,12 +1117,11 @@ fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
 }
 
 impl ActionsMenuData {
-    fn from_row(row: &PlayerRow, icons: &IconCache) -> Self {
+    fn from_row(row: &PlayerRow, icons: &IconCache, debug: bool) -> Self {
         Self {
             player: row.db_id,
             heading: heading_for(row, icons),
-            relation: row.relation,
-            has_vehicle_entity: row.has_vehicle_entity,
+            show_build_links: shows_build_links(row, debug),
             ship_config_url: row.ship_config_url.clone(),
             short_ship_config_url: row.short_ship_config_url.clone(),
             shiptool_url: row.shiptool_url.clone(),
@@ -1391,7 +1176,7 @@ fn build_actions_menu(
         .item(PopupMenuItem::element(move |_window, _cx| menu_heading_element(&heading)).disabled(true))
         .separator();
 
-    let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
+    let show_ship_config = row.show_build_links;
     // Whether anything stands between the heading's separator and the copy
     // block's, so the two never land back to back.
     let mut wrote_links = false;
@@ -1500,24 +1285,6 @@ fn build_actions_menu(
     menu
 }
 
-fn markdown_cell(text: &str) -> String {
-    let mut escaped = String::new();
-    for ch in text.replace("\r\n", "\n").chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '\n' | '\r' => escaped.push_str("<br>"),
-            '\\' | '|' | '`' | '*' | '_' | '[' | ']' | '~' => {
-                escaped.push('\\');
-                escaped.push(ch);
-            }
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
 /// Writes `text` to the clipboard and says so.
 ///
 /// `None` means the player the menu was opened on is no longer in the table,
@@ -1578,9 +1345,6 @@ fn row_actions(
         .child(menu_button)
         .into_any_element()
 }
-
-/// Room for the dots at the end of the name.
-const ROW_ACTIONS_WIDTH: f32 = 24.0;
 
 /// One column's collapsed cell, dispatching to the Name/Skills special-cased
 /// layouts and falling back to the generic `cell_element` for everything else.
@@ -1710,7 +1474,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     // A right-click anywhere on the row opens the same menu the dots do: it is
     // where a reader reaches for a row's actions, and the dots are what says so.
     let menu_entity = layout.entity.clone();
-    let menu_row = Rc::new(ActionsMenuData::from_row(row, layout.icons));
+    let menu_row = Rc::new(ActionsMenuData::from_row(row, layout.icons, layout.debug));
     let debug = layout.debug;
     let group = SharedString::from(format!("replay-row-{ix}"));
     h_flex()
@@ -1916,7 +1680,7 @@ mod tests {
     use wowsunpack::vfs::MemoryFS;
     use wowsunpack::vfs::VfsPath;
 
-    use super::super::sort::SortColumn;
+    use wows_toolkit_replay_data::sort::SortColumn;
     use super::PlayerTable;
     use wows_replays::types::Relation;
     use wows_toolkit_replay_data::columns::ReplayColumn;

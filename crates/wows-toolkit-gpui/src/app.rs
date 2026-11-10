@@ -49,7 +49,6 @@ use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::InspectorSettings;
-use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
@@ -63,6 +62,7 @@ use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_replay_data::replay_index;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
+use wows_toolkit_replay_data::replay_scan::MissingBuild;
 
 /// Where the menu's links go, as the egui menu bar sends them.
 const ISSUES_URL: &str = "https://github.com/landaire/wows-toolkit/issues/new/choose";

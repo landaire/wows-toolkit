@@ -9,7 +9,8 @@ use std::cmp::Reverse;
 use wows_replays::types::TeamId;
 use wowsunpack::game_params::types::Species;
 
-use wows_toolkit_replay_data::model::PlayerRow;
+use crate::columns::ReplayColumn;
+use crate::model::PlayerRow;
 
 /// Internal sort key that allows comparison across different value types.
 /// Mirrors `sorting.rs::SortKey`.
@@ -69,6 +70,30 @@ pub enum SortColumn {
     ReceivedDamage,
     DistanceTraveled,
     PersonalRating,
+}
+
+impl SortColumn {
+    /// What a click on `col`'s header sorts by. `None` for the columns the
+    /// egui app draws as plain headers: Skills and Time Lived.
+    pub fn of_column(col: ReplayColumn) -> Option<SortColumn> {
+        match col {
+            ReplayColumn::Skills | ReplayColumn::TimeLived => None,
+            ReplayColumn::Name => Some(SortColumn::Name),
+            ReplayColumn::ShipName => Some(SortColumn::ShipName),
+            ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
+            ReplayColumn::BaseXp => Some(SortColumn::BaseXp),
+            ReplayColumn::RawXp => Some(SortColumn::RawXp),
+            ReplayColumn::Kills => Some(SortColumn::Kills),
+            ReplayColumn::ObservedDamage => Some(SortColumn::ObservedDamage),
+            ReplayColumn::ActualDamage => Some(SortColumn::ActualDamage),
+            ReplayColumn::ReceivedDamage => Some(SortColumn::ReceivedDamage),
+            ReplayColumn::SpottingDamage => Some(SortColumn::SpottingDamage),
+            ReplayColumn::PotentialDamage => Some(SortColumn::PotentialDamage),
+            ReplayColumn::Hits => Some(SortColumn::Hits),
+            ReplayColumn::Heals => Some(SortColumn::Heals),
+            ReplayColumn::DistanceTraveled => Some(SortColumn::DistanceTraveled),
+        }
+    }
 }
 
 /// Sort order (ascending or descending) with the column being sorted.
@@ -171,7 +196,7 @@ mod tests {
     use wows_replays::types::Relation;
 
     use super::*;
-    use wows_toolkit_replay_data::test_support::base_row;
+    use crate::test_support::base_row;
 
     fn row_with(db_id: i64, team: i64, relation: Relation, is_self: bool, actual_damage: Option<u64>) -> PlayerRow {
         PlayerRow {

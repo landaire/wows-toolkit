@@ -9,7 +9,7 @@ impl TestDirectory {
     fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!("wows-toolkit-nsh-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir(&path).expect("the test replay directory is created");
+        std::fs::create_dir(&path).expect("the test directory is created");
         Self(path)
     }
 }
@@ -19,6 +19,7 @@ impl Drop for TestDirectory {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
 struct TestApp {
     app: nsh_testing::Headless,
     _guard: MutexGuard<'static, ()>,
@@ -120,137 +121,6 @@ impl TestApp {
         drop(app);
         TestApp { app: start(), _guard }
     }
-}
-
-#[test]
-fn replay_inspector_opens_and_displays_metadata() {
-    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
-
-    let mut app = app();
-    let replay = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FILE);
-    app.on_pick_paths(vec![replay]).unwrap();
-
-    app.press("Open Replay File...").unwrap();
-    assert_eq!(app.screen().file_requests().len(), 1, "the replay button must show one file dialog");
-    app.wait_for(FILE).unwrap();
-    app.wait_for("Players (15)").unwrap();
-    app.wait_for("Battle").unwrap();
-    app.wait_for("PVEBattle").unwrap();
-
-    app.press("Settings").unwrap();
-    app.press("Replay Inspector").unwrap();
-    app.wait_for(FILE).unwrap();
-    app.wait_for("Players (15)").unwrap();
-    app.press("Raw metadata").unwrap();
-    app.wait_for("text:/clientVersionFromXml/").unwrap();
-    app.press("Overview").unwrap();
-    app.wait_for("Battle").unwrap();
-
-    let export_directory = TestDirectory::new("replay-export");
-    let collision_selection = export_directory.0.join("narai");
-    let collision_path = collision_selection.with_extension("json");
-    std::fs::write(&collision_path, b"existing export").unwrap();
-    app.on_pick_save_path(Some(collision_selection)).unwrap();
-    app.press("Export Metadata...").unwrap();
-    app.wait_for("text:/^could not write replay metadata to /").unwrap();
-    assert_eq!(std::fs::read(&collision_path).unwrap(), b"existing export");
-
-    let selected_path = export_directory.0.join("narai-export");
-    let export_path = selected_path.with_extension("json");
-    app.on_pick_save_path(Some(selected_path)).unwrap();
-    app.press("Export Metadata...").unwrap();
-    app.wait_for("text:/^Replay metadata exported to /").unwrap();
-    let exported: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(export_path).expect("the metadata export is written"))
-            .expect("the metadata export is valid JSON");
-    assert_eq!(exported["fileName"], FILE);
-    assert_eq!(exported["mode"], "PVEBattle");
-    assert_eq!(exported["players"].as_array().map(Vec::len), Some(15));
-    assert!(exported.get("sourcePath").is_none());
-    assert!(exported["players"][0]["shipId"].as_u64().is_some());
-
-    let invalid = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    app.on_pick_paths(vec![invalid]).unwrap();
-    app.press("Open Replay File...").unwrap();
-    app.wait_for("text:/^could not parse replay /").unwrap();
-}
-
-#[test]
-fn dropping_a_replay_opens_it_in_the_inspector() {
-    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
-    let replay = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FILE);
-    let uri = url::Url::from_file_path(replay).expect("the replay path converts to a file URL").to_string();
-    let mut app = app();
-    app.set_environment("desktop", |environment| {
-        environment.os = nsh_core::platform::Os::Linux;
-        environment.idiom = nsh_core::platform::Idiom::Desktop;
-    })
-    .unwrap();
-
-    app.drop_files("Replay Inspector", vec![uri]).unwrap();
-    app.wait_for("PVEBattle").unwrap();
-    app.wait_for("Players (15)").unwrap();
-}
-
-#[test]
-fn replay_directory_lists_readable_files_and_reports_failures() {
-    const FIRST: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
-    const SECOND: &str = "20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay";
-
-    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays");
-    let directory = TestDirectory::new("replay-browser");
-    std::fs::copy(fixtures.join(FIRST), directory.0.join(FIRST)).expect("the first replay fixture is copied");
-    std::fs::copy(fixtures.join(SECOND), directory.0.join(SECOND)).expect("the second replay fixture is copied");
-    std::fs::write(directory.0.join("invalid.wowsreplay"), b"not a replay").expect("the invalid replay is written");
-
-    let mut app = app();
-    app.on_pick_paths(vec![directory.0.clone()]).unwrap();
-    app.press("Open Replay Directory...").unwrap();
-
-    let requests = app.screen().file_requests();
-    assert_eq!(requests.len(), 1, "the directory button must show one file dialog");
-    assert!(
-        matches!(
-            &requests[0],
-            nsh_core::file_dialog::FileRequest::OpenDialog(dialog) if dialog.picks_folders()
-        ),
-        "the replay browser must request a directory"
-    );
-    app.wait_for("2 replay file(s)").unwrap();
-    app.wait_for(FIRST).unwrap();
-    app.wait_for("PVEBattle").unwrap();
-    app.wait_for("1 replay file(s) could not be read.").unwrap();
-
-    app.press(SECOND).unwrap();
-    app.wait_for("PFSD210-Marceau").unwrap();
-    assert_eq!(app.screen().count(SECOND), Ok(2), "the selected replay must also appear in the inspector heading");
-
-    app.press_key("up").unwrap();
-    assert_eq!(app.screen().count(FIRST), Ok(2), "keyboard selection must update the inspector");
-
-    app.press("label:Sort by Replay").unwrap();
-    assert_eq!(app.screen().count(FIRST), Ok(2), "sorting must preserve replay identity");
-
-    app.press("label:Browse replay rows").unwrap();
-    app.press_key("up").unwrap();
-    assert_eq!(app.screen().count(SECOND), Ok(2), "keyboard selection must follow the sorted row order");
-
-    app.set_viewport(Size::new(Points(500.0), Points(700.0))).expect("the compact replay viewport is applied");
-    app.wait_for("Players (24)").unwrap();
-
-    app.on_pick_paths(vec![fixtures.join(FIRST)]).unwrap();
-    app.press("Open Replay File...").unwrap();
-    app.wait_for_gone(
-        &format!("wows-toolkit-nsh-replay-browser-{}", std::process::id()),
-        std::time::Duration::from_secs(5),
-    )
-    .unwrap();
-
-    let all_invalid = TestDirectory::new("replay-browser-all-invalid");
-    std::fs::write(all_invalid.0.join("invalid.wowsreplay"), b"not a replay").expect("the invalid replay is written");
-    app.on_pick_paths(vec![all_invalid.0.clone()]).unwrap();
-    app.press("Open Replay Directory...").unwrap();
-    app.wait_for("No readable replay files. 1 replay file(s) could not be read.").unwrap();
 }
 
 /// The session the Stats tests read: two Yamato games and a Montana game,
@@ -892,7 +762,6 @@ fn player_tracker_current_match_lists_the_battle_in_progress() {
 }
 
 #[test]
-
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 

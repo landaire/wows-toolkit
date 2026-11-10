@@ -1,6 +1,6 @@
-//! Fabricated sample model so the Replay Inspector tab renders a populated
-//! table before the real parse pipeline is wired. Replaced by real parsing in
-//! a later milestone; nothing here reflects a real replay.
+//! A fabricated, fully populated report model for the front ends' tests and
+//! layout checks: every column, marker, expanded section and chat channel
+//! has a value. Nothing here reflects a real replay.
 
 use std::collections::HashMap;
 
@@ -24,13 +24,13 @@ use wowsunpack::game_params::types::SkillPointCost;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::ChargeCount;
 
-use wows_toolkit_replay_data::columns::ReplayColumn;
-use wows_toolkit_replay_data::model::ChatMessage;
-use wows_toolkit_replay_data::model::ClanColor;
-use wows_toolkit_replay_data::model::MatchContext;
-use wows_toolkit_replay_data::model::PlayerRow;
-use wows_toolkit_replay_data::model::ReplayReportModel;
-use wows_toolkit_replay_data::model::SkillWarning;
+use crate::columns::ReplayColumn;
+use crate::model::ChatMessage;
+use crate::model::ClanColor;
+use crate::model::MatchContext;
+use crate::model::PlayerRow;
+use crate::model::ReplayReportModel;
+use crate::model::SkillWarning;
 
 /// A `PlayerRow` with every field at its absent/zero default, mirroring the
 /// test-only `base_row` fixture so the sample rows below can override just the
@@ -174,7 +174,7 @@ fn stat_row(
 }
 
 fn separate(n: u64) -> String {
-    wows_toolkit_replay_data::model::separate_number(n)
+    crate::model::separate_number(n)
 }
 
 /// Sample achievements for the self row's expanded Name-column content, so

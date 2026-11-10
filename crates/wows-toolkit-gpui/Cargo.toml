@@ -87,11 +87,8 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # Only to install the process-wide crypto provider at startup; see `main`.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
-# CBOR is what the match-stats service speaks, and one of the replay
-# export formats.
+# CBOR is what the match-stats service speaks.
 ciborium = "0.2"
-# The replay export's spreadsheet format.
-csv = "1"
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 rkyv = { workspace = true }
 # The recent-games input accepts digits only, which NumberInput takes as a

@@ -28,6 +28,7 @@ pub use settings::DEFAULT_ZOOM;
 pub use settings::ReplayPreferences;
 pub use settings::SettingKey;
 pub use settings::Settings;
+pub(crate) use settings::update_replay_settings;
 pub use twitch::Twitch;
 pub use twitch::TwitchState;
 pub use twitch::TwitchStatus;

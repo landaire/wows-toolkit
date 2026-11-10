@@ -216,6 +216,8 @@ fn seed_index() {
 #[test]
 fn a_typed_query_finds_and_opens_an_indexed_replay() {
     let mut app = app();
+    // The inspector reads every replay as the sample report, titled by its ship and map.
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
 
     app.press("Search").unwrap();
     // The tab opens on the saved query, which is empty: every indexed battle.
@@ -227,7 +229,7 @@ fn a_typed_query_finds_and_opens_an_indexed_replay() {
     app.wait_for("1 match(es)").unwrap();
 
     app.press(&format!("label:Open replay {}", replay().display())).unwrap();
-    app.wait_for("Players (15)").unwrap();
+    app.wait_for("Shimakaze - Fault Line").unwrap();
 }
 
 #[test]

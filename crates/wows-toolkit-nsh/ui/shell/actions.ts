@@ -30,25 +30,3 @@ export async function copyBugReportInfo() {
     toast.failed(errorText(error));
   }
 }
-
-/**
- * Installs a result mapping the reader picks for the loaded build. Resolves
- * to the build it was installed for, so an open replay can be read again.
- */
-export async function importConstants(): Promise<number | null> {
-  try {
-    const imported = await Shell.importConstants(t("ui.replay.constants_import_title"));
-    if (imported.state === "noBuild") {
-      toast.warn(t("ui.replay.constants_no_build"));
-      return null;
-    }
-    if (imported.state === "imported" && imported.build !== undefined && imported.build !== null) {
-      toast.ok(t("ui.replay.constants_imported", { build: imported.build }));
-      return imported.build;
-    }
-    return null;
-  } catch (error) {
-    toast.failed(t("ui.replay.constants_import_failed", { reason: errorText(error) }));
-    return null;
-  }
-}

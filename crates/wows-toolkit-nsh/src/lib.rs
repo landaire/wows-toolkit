@@ -11,7 +11,7 @@ mod launcher;
 mod native;
 mod player_tracker;
 mod renderer;
-mod replay;
+pub mod replay_inspector;
 pub mod runtime;
 mod search;
 mod settings_store;
@@ -26,7 +26,6 @@ pub use launcher::LauncherSession;
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
 pub use player_tracker::PlayerTracker;
 pub use renderer::ReplayRenderer;
-pub use replay::{ReplayInspector, ReplayInspectorProps};
 pub use search::{Palette, QueryBar, ReplaySearch, ShipSearch};
 pub use stats::Stats;
 pub use unpacker::{Unpacker, UnpackerProps};
@@ -59,6 +58,8 @@ fn native_module(registry: &mut Registry) {
     registry.module::<tactics::Tactics>();
     registry.module::<ReplaySearch>().module::<Palette>().class::<QueryBar>().class::<ShipSearch>();
     registry.module::<armor::Armor>();
-    registry.register::<ReplayInspector>();
+    registry.module::<replay_inspector::service::ReplayInspectorService>();
+    registry.register::<replay_inspector::table::PlayerTable>();
+    registry.register::<replay_inspector::browser::ReplayBrowser>();
     registry.register::<Unpacker>();
 }

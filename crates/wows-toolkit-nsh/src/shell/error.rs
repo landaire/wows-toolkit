@@ -90,8 +90,6 @@ pub enum ShellError {
     },
     #[error("the folder dialog could not be shown: {reason}")]
     Dialog { reason: String },
-    #[error("the replay data mapping could not be imported: {reason}")]
-    ImportConstants { reason: String },
     #[error("the shell task did not complete")]
     Task(#[source] tokio::task::JoinError),
 }

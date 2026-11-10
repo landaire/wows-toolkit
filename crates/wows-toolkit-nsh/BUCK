@@ -27,7 +27,6 @@ NSH_COMMON_DEPS = [
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-armor:wows_toolkit_armor",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
-    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-client:wt_collab_client",
@@ -48,6 +47,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:nsh-core",
     "//third-party/rust:notify",
     "//third-party/rust:png",
+    "//third-party/rust:notify",
     "//third-party/rust:serde_json",
     "//third-party/rust:serde",
     "//third-party/rust:rust-i18n",
@@ -67,11 +67,13 @@ NSH_COMMON_DEPS = [
 NSH_DEPS = [
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
 ] + NSH_COMMON_DEPS
 
 NSH_TEST_DEPS = [
     "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
 ] + NSH_COMMON_DEPS
 
 workspace_library(
@@ -88,6 +90,7 @@ workspace_library(
     crate = "wows_toolkit_nsh",
     package = "wows-toolkit-nsh",
     version = "1.0.3",
+    features = ["test-support"],
     env = {"CARGO_MANIFEST_DIR": "$(location :_cargo_manifest)/.."},
     deps = NSH_TEST_DEPS,
 )

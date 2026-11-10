@@ -1,7 +1,7 @@
 import { keymap, mount, signal, Storage, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { Dialog } from "nsh/base";
-import { GameData, ReplayInspector as NativeReplayInspector, Palette, Shell, Toolkit } from "wows-toolkit/native";
+import { GameData, Palette, Shell, Toolkit } from "wows-toolkit/native";
 import { EmptyState, errorMessage } from "./components";
 import { colors } from "./theme";
 import { applyLocale, t } from "./i18n";
@@ -10,7 +10,7 @@ import { SettingsView } from "./settings";
 import { AboutDialog, openAbout } from "./shell/about";
 import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, TabStrip, wowsDirInvalid } from "./shell/chrome";
 import { CrashDialog, reportLastCrash } from "./shell/diagnostics";
-import { contributeAll, copyBugReportInfo, copyLatestLog, importConstants, setTheme } from "./shell/actions";
+import { contributeAll, copyBugReportInfo, copyLatestLog, setTheme } from "./shell/actions";
 import { askFirstRun, FirstRunDialog } from "./shell/first_run";
 import { ErrorDialog, WarningDialog } from "./shell/notices";
 import { DebugNotice, debugMode, StatusBar } from "./shell/status";
@@ -28,6 +28,7 @@ import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { UnpackerView } from "./unpacker";
 import { BatchRenderStatus, followForcedWindows, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
 import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
+import { importConstants, ReplayInspectorView } from "./replay_inspector";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -153,10 +154,7 @@ bindPalette({
     copyBugReportInfo: () => void copyBugReportInfo(),
     importConstants: () => {
       selectTab("replay-inspector");
-      void importConstants().then((build) => {
-        // The open replay is read again under the mapping just installed.
-        if (build !== null && replayOpenPath() !== null) replayOpenRequestId.set(replayOpenRequestId() + 1);
-      });
+      void importConstants();
     },
     setTheme: ({ theme }) => setTheme(theme),
     viewArmor: ({ paramIndex, displayName }) => viewArmorShip(paramIndex, displayName),
@@ -173,7 +171,7 @@ function Content() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
-        <NativeReplayInspector openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
+        <ReplayInspectorView openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "launcher" ? "flex" : "none" }}>
         <LauncherView visible={tab().id === "launcher"}/>

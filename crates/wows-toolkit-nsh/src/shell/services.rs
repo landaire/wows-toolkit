@@ -4,10 +4,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
-use nsh_core::file_dialog::FileFilter;
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::JsObject;
-use nsh_core::prelude::PropEnum;
 use nsh_core::prelude::background;
 use nsh_core::prelude::blocking;
 use nsh_core::prelude::module;
@@ -148,27 +146,6 @@ impl Shell {
         Ok(())
     }
 
-    /// Installs a result mapping the reader picks as the newest loaded build's.
-    pub async fn import_constants(title: String) -> Result<ConstantsImport, ShellError> {
-        let Some(build) = crate::game_data::newest_loaded().map(|loaded| loaded.build()) else {
-            return Ok(ConstantsImport { state: ImportState::NoBuild, build: None });
-        };
-        let dialog = OpenDialog::files().title(title).filter(FileFilter::new("JSON", ["json"]));
-        let picked = nsh_core::prelude::pick_paths(dialog)
-            .await
-            .map_err(|error| ShellError::Dialog { reason: error.to_string() })?;
-        let Some(path) = picked.and_then(|mut paths| paths.pop()) else {
-            return Ok(ConstantsImport { state: ImportState::Cancelled, build: Some(build) });
-        };
-
-        blocking(move || wows_toolkit_replay_data::constants::import(&path, build))
-            .await
-            .map_err(ShellError::Task)?
-            .map_err(|reason| ShellError::ImportConstants { reason })?;
-
-        Ok(ConstantsImport { state: ImportState::Imported, build: Some(build) })
-    }
-
     /// Where the rotated log files are written.
     pub fn log_directory() -> String {
         wows_toolkit_viewmodel::logging::log_dir().display().to_string()
@@ -231,23 +208,6 @@ impl Shell {
 
 /// The crash the last run left, once it has been read this session.
 static RECENT_CRASH: Mutex<Option<String>> = Mutex::new(None);
-
-/// What a result-mapping import came to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub enum ImportState {
-    /// No game build is loaded, so there is nothing to import a mapping for.
-    NoBuild,
-    Cancelled,
-    Imported,
-}
-
-/// A result-mapping import, and the build it was for.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct ConstantsImport {
-    pub state: ImportState,
-    pub build: Option<u32>,
-}
 
 /// The log file put on the clipboard.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]

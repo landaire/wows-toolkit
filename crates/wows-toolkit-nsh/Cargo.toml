@@ -7,7 +7,8 @@ license = "MIT"
 publish = false
 [features]
 buck = []
-
+# Lets tests read every replay as the fabricated sample report.
+test-support = ["wows-toolkit-replay-data/test-support"]
 
 [dependencies]
 # Rendered videos go on the clipboard as a file list.
@@ -72,3 +73,4 @@ nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = { version = "0.4.0", features = ["bundle"] }
 # The session state a tactics board test hands a link.
 parking_lot = "0.12"
+wows-toolkit-nsh = { path = ".", default-features = false, features = ["test-support"] }
