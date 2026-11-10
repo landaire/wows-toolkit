@@ -2,11 +2,12 @@ import type { JSX } from "nsh";
 import { signal, Text, View } from "nsh";
 import { Checkbox, Dialog, Menu, Progress } from "nsh/base";
 import { GameData, type GameDataSnapshot, type JobReport } from "wows-toolkit/native";
-import { Button, centeredDialog, MenuRow, Surface } from "./components";
+import { Button, centeredDialog, MenuRow, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { CheckMark } from "./icons";
 import { CommitInput } from "./shell/controls";
 import { showError } from "./shell/notices";
+import { Field, Section } from "./settings_form";
 import { clearStatusJob, setStatusJob } from "./shell/status";
 import * as toast from "./shell/toast";
 import { colors, controlRadius } from "./theme";
@@ -101,18 +102,6 @@ function formatBytes(bytes: number): string {
   return unit === 0 ? `${value} ${units[unit]}` : `${value.toFixed(2)} ${units[unit]}`;
 }
 
-function Section(props: { title: string; description: string; children: JSX.Element }) {
-  return (
-    <Surface style={{ padding: 16, gap: 12 }}>
-      <View style={{ gap: 3 }}>
-        <Text style={{ fontSize: 16, fontWeight: "600", color: colors.cardForeground }}>{props.title}</Text>
-        <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
-      </View>
-      {props.children}
-    </Surface>
-  );
-}
-
 function Line(props: { text: string; tone?: "muted" | "error" | "normal"; label?: string }) {
   const color = () => props.tone === "error" ? colors.destructive : props.tone === "muted" ? colors.mutedForeground : colors.cardForeground;
   return <Text accessibilityLabel={props.label} style={{ fontSize: 12.5, lineHeight: 18, color: color() }}>{props.text}</Text>;
@@ -167,67 +156,76 @@ export function GameDataCacheSection() {
   const busy = () => cache()?.job != null;
   const builds = () => cache()?.buildCount ?? 0;
   return (
-    <Section title={t("ui.settings.wows.cache.heading")} description={t("ui.settings.wows.cache.description")}>
-      <Checkbox
-        accessibilityLabel={t("ui.settings.wows.cache.auto_dump")}
-        checked={cache()?.autoDump ?? false}
-        class="group flex-row items-start gap-3"
-        indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-        indicator={<CheckMark checked={cache()?.autoDump ?? false}/>}
-        onChange={({ checked }) => void run(() => GameData.setAutoDump(checked))}
-      >
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{t("ui.settings.wows.cache.auto_dump")}</Text>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t("ui.game_data.auto_dump_hint")}</Text>
+    <Section icon="archive" title={t("ui.settings.wows.cache.heading")} description={t("ui.settings.wows.cache.description")}>
+      <Field>
+        <Checkbox
+          accessibilityLabel={t("ui.settings.wows.cache.auto_dump")}
+          checked={cache()?.autoDump ?? false}
+          class="group flex-row items-start gap-3"
+          indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
+          indicator={<CheckMark checked={cache()?.autoDump ?? false}/>}
+          onChange={({ checked }) => void run(() => GameData.setAutoDump(checked))}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{t("ui.settings.wows.cache.auto_dump")}</Text>
+            <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t("ui.game_data.auto_dump_hint")}</Text>
+          </View>
+        </Checkbox>
+      </Field>
+      <Field label={t("ui.settings.wows.cache.directory_label")}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <CommitInput
+              label={t("ui.game_data.cache_directory_label")}
+              value={cache()?.directorySetting ?? ""}
+              placeholder={cache()?.defaultDirectory ?? ""}
+              onCommit={(value) => void run(() => GameData.setCacheDirectory(value))}
+            />
+          </View>
+          <Button label={t("ui.settings.wows.cache.browse")} icon="folder-open" variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.pickCacheDirectory())}/>
         </View>
-      </Checkbox>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ fontSize: 12.5, color: colors.cardForeground }}>{t("ui.settings.wows.cache.directory_label")}</Text>
-        <View style={{ flex: 1 }}>
-          <CommitInput
-            label={t("ui.game_data.cache_directory_label")}
-            value={cache()?.directorySetting ?? ""}
-            placeholder={cache()?.defaultDirectory ?? ""}
-            onCommit={(value) => void run(() => GameData.setCacheDirectory(value))}
-          />
-        </View>
-        <Button label={t("ui.settings.wows.cache.browse")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.pickCacheDirectory())}/>
-      </View>
+      </Field>
       <If when={cache()?.directory != null && builds() > 0}>
-        <Row>
-          <Line label={t("ui.game_data.cache_size_label")} text={t("ui.settings.wows.cache.stats", { size: formatBytes(cache()?.sizeBytes ?? 0), count: builds() })}/>
-          <Button label={t("ui.settings.wows.cache.open_folder")} variant="ghost" onPress={() => void run(() => GameData.openCacheFolder())}/>
-          <If when={builds() > 1}>
-            <Button label={t("ui.settings.wows.cache.delete_old")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.deleteOldCacheBuilds())}/>
-          </If>
-        </Row>
-        <Row>
-          <CacheActions busy={busy()}/>
-          <If when={busy()}>
-            <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={cacheJobText(cache()?.job ?? "")}/></View>
-          </If>
-        </Row>
-        <If when={(cache()?.progressTotal ?? 0) > 0}>
-          <Line tone="muted" text={`${cache()?.progressDone ?? 0} / ${cache()?.progressTotal ?? 0}`}/>
-        </If>
-        <If when={(cache()?.updates.length ?? 0) > 0}>
-          <Row>
-            <Line text={t("ui.settings.wows.cache.updates_available", { count: cache()!.updates.length })}/>
-            <Button label={t("ui.settings.wows.cache.update_all")} variant="primary" disabled={busy()} onPress={() => void run(() => GameData.updateCacheBuilds())}/>
-          </Row>
-        </If>
-        <If when={(cache()?.repair.length ?? 0) > 0}>
-          <Row>
-            <Line tone="error" text={t("ui.settings.wows.cache.repair_needed", { count: cache()!.repair.length })}/>
-            <Button label={t("ui.settings.wows.cache.repair")} variant="danger" disabled={busy()} onPress={() => void run(() => GameData.repairCacheBuilds())}/>
-          </Row>
-        </If>
-        <If when={cache()?.failure}>
-          <Line tone="error" text={cache()!.failure!}/>
-        </If>
+        <Field>
+          <View style={{ gap: 8 }}>
+            <Row>
+              <Line label={t("ui.game_data.cache_size_label")} text={t("ui.settings.wows.cache.stats", { size: formatBytes(cache()?.sizeBytes ?? 0), count: builds() })}/>
+              <Button label={t("ui.settings.wows.cache.open_folder")} variant="ghost" onPress={() => void run(() => GameData.openCacheFolder())}/>
+              <If when={builds() > 1}>
+                <Button label={t("ui.settings.wows.cache.delete_old")} variant="ghost" disabled={busy()} onPress={() => void run(() => GameData.deleteOldCacheBuilds())}/>
+              </If>
+            </Row>
+            <Row>
+              <CacheActions busy={busy()}/>
+              <If when={busy()}>
+                <View style={{ width: 48 }}><Progress value={0} indeterminate accessibilityLabel={cacheJobText(cache()?.job ?? "")}/></View>
+              </If>
+            </Row>
+            <If when={(cache()?.progressTotal ?? 0) > 0}>
+              <Line tone="muted" text={`${cache()?.progressDone ?? 0} / ${cache()?.progressTotal ?? 0}`}/>
+            </If>
+            <If when={(cache()?.updates.length ?? 0) > 0}>
+              <Row>
+                <Line text={t("ui.settings.wows.cache.updates_available", { count: cache()!.updates.length })}/>
+                <Button label={t("ui.settings.wows.cache.update_all")} variant="primary" disabled={busy()} onPress={() => void run(() => GameData.updateCacheBuilds())}/>
+              </Row>
+            </If>
+            <If when={(cache()?.repair.length ?? 0) > 0}>
+              <Row>
+                <Line tone="error" text={t("ui.settings.wows.cache.repair_needed", { count: cache()!.repair.length })}/>
+                <Button label={t("ui.settings.wows.cache.repair")} variant="danger" disabled={busy()} onPress={() => void run(() => GameData.repairCacheBuilds())}/>
+              </Row>
+            </If>
+            <If when={cache()?.failure}>
+              <Line tone="error" text={cache()!.failure!}/>
+            </If>
+          </View>
+        </Field>
       </If>
       <If when={actionError()}>
-        <Line tone="error" text={actionError()!}/>
+        <Field>
+          <Line tone="error" text={actionError()!}/>
+        </Field>
       </If>
     </Section>
   );
@@ -309,32 +307,37 @@ export function ReplayIndexSection() {
   const configured = () => snapshot()?.wowsDir != null;
   const running = () => index()?.running ?? false;
   return (
-    <Section title={t("ui.settings.index.heading")} description={t("ui.settings.index.description")}>
-      <Row>
-        <Button label={t("ui.settings.index.build")} disabled={!configured() || running()} onPress={() => void run(() => GameData.indexReplays("fillGaps"))}/>
-        <Button label={t("ui.settings.index.rebuild")} disabled={!configured() || running()} onPress={() => void run(() => GameData.indexReplays("refreshAll"))}/>
-        <If when={running()}>
-          <Button label={t("ui.buttons.stop")} variant="ghost" onPress={() => GameData.cancelIndexing()}/>
-        </If>
-      </Row>
-      <Line tone="muted" text={t("ui.settings.index.rebuild_hint")}/>
-      <If when={!configured()}>
-        <Line tone="muted" text={t("ui.game_data.index_needs_dir")}/>
-      </If>
-      <If when={running()}>
-        <Line
-          label={t("ui.game_data.index_progress_label")}
-          text={index()!.skipped > 0
-            ? t("ui.settings.index.progress_skipped", { done: index()!.done, total: index()!.total, skipped: index()!.skipped, failed: index()!.failed })
-            : t("ui.settings.index.progress", { done: index()!.done, total: index()!.total, failed: index()!.failed })}
-        />
-      </If>
-      <If when={index()?.outcome}>
-        <Line label={t("ui.game_data.index_outcome_label")} tone={index()!.outcomeFailed ? "error" : "normal"} text={index()!.outcome!}/>
-      </If>
-      <If when={actionError()}>
-        <Line tone="error" text={actionError()!}/>
-      </If>
+    <Section icon="database" title={t("ui.settings.index.heading")} description={t("ui.settings.index.description")}>
+      <Field>
+        <View style={{ gap: 8 }}>
+          <Row>
+            <Button label={t("ui.settings.index.build")} disabled={!configured() || running()} onPress={() => void run(() => GameData.indexReplays("fillGaps"))}/>
+            <Button label={t("ui.settings.index.rebuild")} disabled={!configured() || running()} onPress={() => void run(() => GameData.indexReplays("refreshAll"))}/>
+            <If when={running()}>
+              <Spinner size={14} label={t("ui.app.status_indexing")}/>
+              <Button label={t("ui.buttons.stop")} variant="ghost" onPress={() => GameData.cancelIndexing()}/>
+            </If>
+          </Row>
+          <Line tone="muted" text={t("ui.settings.index.rebuild_hint")}/>
+          <If when={!configured()}>
+            <Line tone="muted" text={t("ui.game_data.index_needs_dir")}/>
+          </If>
+          <If when={running()}>
+            <Line
+              label={t("ui.game_data.index_progress_label")}
+              text={index()!.skipped > 0
+                ? t("ui.settings.index.progress_skipped", { done: index()!.done, total: index()!.total, skipped: index()!.skipped, failed: index()!.failed })
+                : t("ui.settings.index.progress", { done: index()!.done, total: index()!.total, failed: index()!.failed })}
+            />
+          </If>
+          <If when={index()?.outcome}>
+            <Line label={t("ui.game_data.index_outcome_label")} tone={index()!.outcomeFailed ? "error" : "normal"} text={index()!.outcome!}/>
+          </If>
+          <If when={actionError()}>
+            <Line tone="error" text={actionError()!}/>
+          </If>
+        </View>
+      </Field>
     </Section>
   );
 }
