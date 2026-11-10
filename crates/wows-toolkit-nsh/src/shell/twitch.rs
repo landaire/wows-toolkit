@@ -86,9 +86,12 @@ impl Twitch {
 async fn start(generation: u64) -> Result<TwitchStatus, SettingsError> {
     let pool = crate::shell::settings::open().await?;
     let settings = crate::shell::settings::load_from(&pool).await?;
-    let token = wows_toolkit_config::queries::try_get_setting::<Token>(&pool, twitch_keys::TOKEN)
+    // The other front ends store the credential as an `Option`, so a cleared
+    // one is the row `null`.
+    let token = wows_toolkit_config::queries::try_get_setting::<Option<Token>>(&pool, twitch_keys::TOKEN)
         .await
-        .map_err(|source| SettingsError::Read { key: twitch_keys::TOKEN, source })?;
+        .map_err(|source| SettingsError::Read { key: twitch_keys::TOKEN, source })?
+        .flatten();
     let Some(token) = token else {
         return Ok(TwitchStatus { state: TwitchState::Unset, who: None });
     };

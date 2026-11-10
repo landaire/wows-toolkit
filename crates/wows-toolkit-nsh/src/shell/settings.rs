@@ -378,8 +378,11 @@ pub(crate) async fn load_from(pool: &SqlitePool) -> Result<AppSettings, Settings
             show_waterline: row.show_waterline,
             hull_opaque: row.hull_opaque,
         });
-    let twitch_user =
-        read::<TwitchToken>(pool, twitch_keys::TOKEN).await?.map(|token| token.username().to_owned());
+    // Stored as an `Option` by the other front ends: `null` is no credential.
+    let twitch_user = read::<Option<TwitchToken>>(pool, twitch_keys::TOKEN)
+        .await?
+        .flatten()
+        .map(|token| token.username().to_owned());
     let current_replay_path = read::<std::path::PathBuf>(pool, keys::CURRENT_REPLAY_PATH)
         .await?
         .map(|path| path.display().to_string())
