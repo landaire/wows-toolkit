@@ -215,4 +215,3 @@ fn pill_with_menu(
         .item(item(t!("ui.search.pill_delete").into_owned(), StructuralEdit::Delete, state.can_delete))
     })
 }
-

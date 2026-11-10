@@ -67,10 +67,10 @@ use wows_toolkit_replay_data::load::LoadedGameData;
 use gpui_kit::component::WindowExt as _;
 
 use super::assets::ArmorAssetsBundle;
-use wows_toolkit_armor::error::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
 use wows_replays::types::EntityId;
+use wows_toolkit_armor::error::ArmorAssetsError;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
 
 use super::export_dialog;
@@ -88,8 +88,6 @@ use super::dock::PanePosition;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
-use wows_toolkit_armor::load_ship::LoadedShipArmor;
-use wows_toolkit_armor::error::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
 use super::sidebar::CollapseSidebar;
@@ -100,6 +98,8 @@ use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
+use wows_toolkit_armor::error::ShipLoadError;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wowsunpack::game_params::types::Millimeters;
 
 /// The status strip above the split. Fixed, so what it says never moves the
@@ -1055,7 +1055,8 @@ impl ArmorViewerPane {
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
-                    let result = wows_toolkit_armor::load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
+                    let result =
+                        wows_toolkit_armor::load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
                     result.map(|()| {

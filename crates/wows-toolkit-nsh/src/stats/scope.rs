@@ -159,7 +159,13 @@ impl Scope {
     }
 
     pub(crate) fn snapshot(&self) -> StatsSnapshot {
-        snapshot(&self.games, &self.filters, self.last_limit, self.personal_rating.as_deref(), GameArt::current().as_ref())
+        snapshot(
+            &self.games,
+            &self.filters,
+            self.last_limit,
+            self.personal_rating.as_deref(),
+            GameArt::current().as_ref(),
+        )
     }
 
     pub(crate) fn chart_snapshots(&self) -> Vec<ChartSnapshot> {
@@ -314,9 +320,7 @@ fn with_ids(saved: Vec<ChartSettings>) -> Vec<ChartSettings> {
 }
 
 /// Runs `work` against the shared settings database on a runtime of its own.
-pub(crate) fn with_database<T>(
-    work: impl AsyncFnOnce(&SqlitePool) -> Result<T, StoreError>,
-) -> Result<T, StoreError> {
+pub(crate) fn with_database<T>(work: impl AsyncFnOnce(&SqlitePool) -> Result<T, StoreError>) -> Result<T, StoreError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -447,18 +451,28 @@ mod tests {
 
         let restored = restore(Some(saved), Some(&state)).expect("restores");
 
-        assert_eq!(restored.charts.iter().map(|chart| chart.id).collect::<Vec<_>>(), [Some(ChartId(3)), Some(ChartId(5))]);
+        assert_eq!(
+            restored.charts.iter().map(|chart| chart.id).collect::<Vec<_>>(),
+            [Some(ChartId(3)), Some(ChartId(5))]
+        );
         assert_eq!(restored.charts[0].mode, ChartMode::Bar);
         assert_eq!(layout::charts(&restored.layout).expect("charts"), [ChartId(3), ChartId(5)]);
     }
 
     #[test]
     fn rows_without_ids_are_numbered_by_position() {
-        let saved = vec![ChartSettings::default(), ChartSettings::default(), ChartSettings { id: Some(ChartId(4)), ..ChartSettings::default() }];
+        let saved = vec![
+            ChartSettings::default(),
+            ChartSettings::default(),
+            ChartSettings { id: Some(ChartId(4)), ..ChartSettings::default() },
+        ];
 
         let numbered = with_ids(saved);
 
-        assert_eq!(numbered.iter().map(|chart| chart.id).collect::<Vec<_>>(), [Some(ChartId(0)), Some(ChartId(5)), Some(ChartId(4))]);
+        assert_eq!(
+            numbered.iter().map(|chart| chart.id).collect::<Vec<_>>(),
+            [Some(ChartId(0)), Some(ChartId(5)), Some(ChartId(4))]
+        );
     }
 
     #[test]

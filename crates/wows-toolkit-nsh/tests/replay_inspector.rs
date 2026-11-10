@@ -331,7 +331,10 @@ fn a_directory_lists_its_replays_and_opens_them() {
     app.press("label:/^Close directory /").unwrap();
     app.wait_for_gone(&format!("label:{FIRST}"), GONE).unwrap();
     app.wait_for_gone(&tab, GONE).unwrap();
-    assert!(app.screen().selected("role:tab[Replay Inspector]").unwrap(), "closing the shown directory shows the Replay Inspector");
+    assert!(
+        app.screen().selected("role:tab[Replay Inspector]").unwrap(),
+        "closing the shown directory shows the Replay Inspector"
+    );
 }
 
 #[test]

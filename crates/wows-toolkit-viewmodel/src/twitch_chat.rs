@@ -28,9 +28,7 @@ pub enum PollError {
     Credential(
         #[source]
         Box<
-            twitch_api::twitch_oauth2::tokens::errors::ValidationError<
-                twitch_api::client::CompatError<reqwest::Error>,
-            >,
+            twitch_api::twitch_oauth2::tokens::errors::ValidationError<twitch_api::client::CompatError<reqwest::Error>>,
         >,
     ),
     #[error("the channel {channel:?} could not be looked up: {source}")]
@@ -73,7 +71,10 @@ impl Session {
                 client
                     .get_user_from_login(channel, &token)
                     .await
-                    .map_err(|source| PollError::ChannelLookup { channel: channel.to_string(), source: Box::new(source) })?
+                    .map_err(|source| PollError::ChannelLookup {
+                        channel: channel.to_string(),
+                        source: Box::new(source),
+                    })?
                     .ok_or_else(|| PollError::UnknownChannel { channel: channel.to_string() })?
                     .id
             }

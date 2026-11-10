@@ -51,12 +51,12 @@ use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::incoming::group_incoming;
 
-use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
-use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use super::pane::ArmorViewerPane;
+use super::viewport_view::ViewportView;
 use wows_toolkit_armor::scene::ArcSummary;
 use wows_toolkit_armor::scene::Isolate;
-use super::viewport_view::ViewportView;
+use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
+use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 
 /// The panel's own width, and the range it can be dragged over. Wide enough
 /// for a shell name beside its verdict.
@@ -921,7 +921,9 @@ fn describe_outcome(outcome: &ArcOutcome, shown: &ViewportView) -> String {
         ArcOutcome::Ricocheted { plate } => {
             t!("ui.armor.arc_ricochet", plate = describe_plate(plate, shown)).into_owned()
         }
-        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate, shown)).into_owned(),
+        ArcOutcome::Shattered { plate } => {
+            t!("ui.armor.arc_shatter", plate = describe_plate(plate, shown)).into_owned()
+        }
         ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate, shown)).into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),

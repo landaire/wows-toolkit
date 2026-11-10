@@ -65,9 +65,12 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_map_name;
 
+use crate::preview_hover::PreviewHover;
 use wows_toolkit_replay_data::browser_tree::BrowserNode;
 use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
+use wows_toolkit_replay_data::cells::BattleOutcome;
+use wows_toolkit_replay_data::cells::ColorRole;
 use wows_toolkit_replay_data::replay_scan::MissingBuild;
 use wows_toolkit_replay_data::replay_scan::ScanProgress;
 use wows_toolkit_replay_data::replay_scan::ScannedReplay;
@@ -76,9 +79,6 @@ use wows_toolkit_replay_data::replay_scan::listed_builds;
 use wows_toolkit_replay_data::replay_scan::missing_builds;
 use wows_toolkit_replay_data::replay_scan::read_scanned;
 use wows_toolkit_replay_data::replay_scan::scan_replay_files;
-use wows_toolkit_replay_data::cells::BattleOutcome;
-use wows_toolkit_replay_data::cells::ColorRole;
-use crate::preview_hover::PreviewHover;
 
 use super::table::resolve_color;
 use wows_toolkit_replay_data::load::GameDataCache;

@@ -74,8 +74,7 @@ fn gizmo_box(size: PixelSize, center: Vec2, scale: ScaleFactor) -> Option<GizmoB
 fn draw_gizmo(pixels: &mut [u8], size: PixelSize, gizmo: &GizmoView, scale: ScaleFactor) {
     let Some(area) = gizmo_box(size, gizmo.center, scale) else { return };
     let Some(mut pixmap) = Pixmap::new(area.size.width, area.size.height) else { return };
-    let transform =
-        Transform::from_row(scale.get(), 0.0, 0.0, scale.get(), -(area.left as f32), -(area.top as f32));
+    let transform = Transform::from_row(scale.get(), 0.0, 0.0, scale.get(), -(area.left as f32), -(area.top as f32));
 
     for ball in &gizmo.balls {
         draw_ball(&mut pixmap, gizmo.center, ball, transform);
@@ -121,10 +120,9 @@ fn draw_glyph(pixmap: &mut Pixmap, axis: Axis, at: Vec2, transform: Transform) {
     // Offsets from the ball's centre, one polyline per stroke.
     let strokes: &[&[Vec2]] = match axis {
         Axis::X => &[&[Vec2::new(-w, -h), Vec2::new(w, h)], &[Vec2::new(w, -h), Vec2::new(-w, h)]],
-        Axis::Y => &[
-            &[Vec2::new(-w, -h), Vec2::new(0.0, 0.0), Vec2::new(w, -h)],
-            &[Vec2::new(0.0, 0.0), Vec2::new(0.0, h)],
-        ],
+        Axis::Y => {
+            &[&[Vec2::new(-w, -h), Vec2::new(0.0, 0.0), Vec2::new(w, -h)], &[Vec2::new(0.0, 0.0), Vec2::new(0.0, h)]]
+        }
         Axis::Z => &[&[Vec2::new(-w, -h), Vec2::new(w, -h), Vec2::new(-w, h), Vec2::new(w, h)]],
     };
 
@@ -194,10 +192,7 @@ mod tests {
     const BACKGROUND: [u8; 4] = [10, 20, 30, 255];
 
     fn solid(width: u32, height: u32) -> Readback {
-        Readback {
-            size: PixelSize { width, height },
-            pixels: BACKGROUND.repeat(width as usize * height as usize),
-        }
+        Readback { size: PixelSize { width, height }, pixels: BACKGROUND.repeat(width as usize * height as usize) }
     }
 
     /// A pixel's column and row.
@@ -323,14 +318,17 @@ mod tests {
         let dir = std::path::PathBuf::from(std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR").expect("install dir"));
         let out = std::path::PathBuf::from(std::env::var("WOWS_ARMOR_SMOKE_PNG").expect("output png path"));
         let build = *wowsunpack::game_data::list_available_builds(&dir).expect("builds").last().expect("a build");
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build, wowsunpack::game_data::AssetsBin::Overlay)
-            .expect("game vfs");
-        let metadata = Arc::new(wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs).expect("params"));
+        let vfs =
+            wowsunpack::game_data::build_game_vfs_for_build(&dir, build, wowsunpack::game_data::AssetsBin::Overlay)
+                .expect("game vfs");
+        let metadata =
+            Arc::new(wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs).expect("params"));
         let assets = wows_toolkit_armor::assets::load_ship_assets(&vfs, None, &metadata).expect("ship assets");
         let catalog = wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(&metadata);
         let ship = catalog.ships().find(|ship| ship.search_name.contains("yamato")).expect("Yamato in the catalog");
-        let armor = wows_toolkit_armor::load_ship::load_ship_armor_by_param(&assets, &ship.param_index, &ship.display_name)
-            .expect("armor");
+        let armor =
+            wows_toolkit_armor::load_ship::load_ship_armor_by_param(&assets, &ship.param_index, &ship.display_name)
+                .expect("armor");
 
         let mut scene = ArmorScene::new();
         scene.set_gpu(Gpu::new().expect("gpu"));

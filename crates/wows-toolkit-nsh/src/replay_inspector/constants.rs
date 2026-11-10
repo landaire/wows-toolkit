@@ -131,7 +131,8 @@ pub fn loaded_build() -> Result<BuildNumber, InspectorError> {
 
 /// Takes the `constants.json` at `from` as `build`'s mapping. Blocking.
 pub fn import(from: &Path, build: BuildNumber) -> Result<(), InspectorError> {
-    wows_toolkit_replay_data::constants::import(from, build.0).map_err(|source| InspectorError::ConstantsImport { source })
+    wows_toolkit_replay_data::constants::import(from, build.0)
+        .map_err(|source| InspectorError::ConstantsImport { source })
 }
 
 fn fetch(builds: Vec<(BuildNumber, Option<String>)>, cached: Cached) -> u32 {

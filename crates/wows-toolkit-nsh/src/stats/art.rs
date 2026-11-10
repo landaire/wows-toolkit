@@ -67,7 +67,11 @@ impl GameArt {
     pub(crate) fn class_icon(&self, ship: GameParamId) -> Option<Arc<str>> {
         let param = GameParamProvider::game_param_by_id(self.loaded.provider().as_ref(), ship)?;
         let species = *param.species()?.known()?;
-        self.url(format!("class:{species:?}"), "image/svg+xml", GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive })
+        self.url(
+            format!("class:{species:?}"),
+            "image/svg+xml",
+            GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive },
+        )
     }
 
     fn url(&self, asset_key: String, mime: &str, asset: GuiAsset<'_>) -> Option<Arc<str>> {
@@ -76,9 +80,9 @@ impl GameArt {
             return known.clone();
         }
 
-        let url = asset
-            .read(self.loaded.vfs(), None)
-            .map(|bytes| Arc::<str>::from(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))));
+        let url = asset.read(self.loaded.vfs(), None).map(|bytes| {
+            Arc::<str>::from(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+        });
         URLS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(cache_key, url.clone());
         url
     }

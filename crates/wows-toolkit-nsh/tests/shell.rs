@@ -158,7 +158,11 @@ fn a_game_directory_without_an_install_is_refused_and_flagged() {
     app.type_text("label:World of Warships Directory", "/no/such/install").unwrap();
     app.submit("label:World of Warships Directory").unwrap();
     app.wait_for("text:/^World of Warships directory is not valid/").unwrap();
-    assert_ne!(stored(keys::WOWS_DIR), Some(serde_json::json!("/no/such/install")), "a directory that is not an install is not saved");
+    assert_ne!(
+        stored(keys::WOWS_DIR),
+        Some(serde_json::json!("/no/such/install")),
+        "a directory that is not an install is not saved"
+    );
     app.wait_for("text:! Settings").unwrap();
 }
 
@@ -191,7 +195,8 @@ fn the_palette_opens_a_replay_directory_in_the_inspector() {
     app.press("Open Replay Directory...").unwrap();
     app.wait_for_gone("Application Settings", Duration::from_secs(5)).unwrap();
     let shown = root.display().to_string();
-    app.wait_until("the directory opens in the inspector", Duration::from_secs(5), |screen| screen.shows(&shown)).unwrap();
+    app.wait_until("the directory opens in the inspector", Duration::from_secs(5), |screen| screen.shows(&shown))
+        .unwrap();
 }
 
 #[test]
@@ -241,7 +246,11 @@ fn a_reader_who_consented_before_replays_is_offered_them() {
     app.wait_for("Switch to Replay Sharing").unwrap();
     app.press("Keep Current Setting").unwrap();
     wait_for_setting(keys::REPLAY_CONSENT_SHOWN, serde_json::json!(true));
-    assert_eq!(stored(keys::DATA_SHARING_MODE), Some(serde_json::json!("build_data")), "keeping the setting changes nothing");
+    assert_eq!(
+        stored(keys::DATA_SHARING_MODE),
+        Some(serde_json::json!("build_data")),
+        "keeping the setting changes nothing"
+    );
 }
 
 #[test]
@@ -285,7 +294,10 @@ fn the_zoom_is_applied_through_the_window_and_saved() {
     app.press("Reset").unwrap();
     app.wait_for("1.15").unwrap();
     wait_for_setting(keys::ZOOM_FACTOR, serde_json::json!(1.15));
-    assert!(zooms.lock().unwrap().iter().any(|zoom| (zoom - 1.15).abs() < 1e-6), "the window was asked to draw at the default zoom");
+    assert!(
+        zooms.lock().unwrap().iter().any(|zoom| (zoom - 1.15).abs() < 1e-6),
+        "the window was asked to draw at the default zoom"
+    );
 }
 
 #[test]

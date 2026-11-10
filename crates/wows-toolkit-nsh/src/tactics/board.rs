@@ -251,11 +251,7 @@ pub struct Board {
 
 impl Board {
     pub fn new(game: Option<Arc<dyn BoardGame>>, layouts: CapLayoutDb, replays_dir: Option<PathBuf>) -> Self {
-        let maps = board::maps(
-            &layouts,
-            game.as_deref().map(BoardGame::metadata),
-            game.as_deref().map(BoardGame::vfs),
-        );
+        let maps = board::maps(&layouts, game.as_deref().map(BoardGame::metadata), game.as_deref().map(BoardGame::vfs));
         let board_id = BoardId::fresh();
         Self {
             game,
@@ -359,12 +355,9 @@ impl Board {
         match &self.mode {
             None => ModeEntry::Blank,
             // A key the mode list no longer holds has no layout to show.
-            Some(key) => self
-                .modes
-                .iter()
-                .find(|mode| mode.key == *key)
-                .cloned()
-                .map_or(ModeEntry::Blank, ModeEntry::Layout),
+            Some(key) => {
+                self.modes.iter().find(|mode| mode.key == *key).cloned().map_or(ModeEntry::Blank, ModeEntry::Layout)
+            }
         }
     }
 
@@ -657,10 +650,8 @@ impl Board {
         let caps = self.mode.as_ref().map(|key| board::caps_of(&self.layouts, key)).unwrap_or_default();
         self.set_caps(caps);
         self.selected = None;
-        self.map_info = self
-            .game
-            .as_deref()
-            .and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
+        self.map_info =
+            self.game.as_deref().and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
         self.map = Some(map);
         self.drawn = MapDrawn::NotShown;
         self.view = MapViewport::default();
@@ -768,12 +759,10 @@ impl Board {
         // nothing has a layout for carries the id zero, which names no map.
         let metadata = self.game.as_deref().map(BoardGame::metadata);
         let map_id = (read.map_id != 0).then_some(read.map_id);
-        let matching = self
-            .maps
-            .iter()
-            .find(|map| map.space == read.map_name && map.map_id == map_id)
-            .cloned()
-            .or_else(|| if map_id.is_none() { board::unique_map_for_space(&self.maps, &read.map_name) } else { None });
+        let matching =
+            self.maps.iter().find(|map| map.space == read.map_name && map.map_id == map_id).cloned().or_else(|| {
+                if map_id.is_none() { board::unique_map_for_space(&self.maps, &read.map_name) } else { None }
+            });
         // A map the list does not offer is opened as the preset names it and
         // added to the list.
         let map = matching.unwrap_or_else(|| MapChoice {
@@ -1197,7 +1186,8 @@ impl Board {
         let (species, ship) =
             self.matched_ships.get(index.position()).cloned().ok_or(TacticsError::UnknownShip { index })?;
         let game = self.game.clone().ok_or(TacticsError::NoGameData)?;
-        let param = game.metadata().game_param_by_index(&ship.param_index).ok_or(TacticsError::UnknownShip { index })?;
+        let param =
+            game.metadata().game_param_by_index(&ship.param_index).ok_or(TacticsError::UnknownShip { index })?;
 
         // The first ship placed is friendly; later ones keep the side last
         // chosen.
@@ -1321,7 +1311,8 @@ impl Board {
             && let Some(point) = self.map_point(at)
         {
             // A shape already picked out is dragged as a whole.
-            if !self.picked.is_empty() && self.shape_under(at).is_some_and(|found| self.picked.picked().contains(&found))
+            if !self.picked.is_empty()
+                && self.shape_under(at).is_some_and(|found| self.picked.picked().contains(&found))
             {
                 self.remember();
                 self.moving = Some((point, self.shapes()));
@@ -1586,21 +1577,15 @@ impl Board {
         self.owner = Some(shared.owner_user_id);
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
         self.collab = link.on_board(shared.board_id);
-        let map = MapChoice {
-            map_id: shared.map.map_id,
-            space: shared.map.space,
-            label: shared.map.label,
-        };
+        let map = MapChoice { map_id: shared.map.map_id, space: shared.map.space, label: shared.map.label };
         if !self.maps.iter().any(|candidate| MapChoiceKey::from(candidate) == MapChoiceKey::from(&map)) {
             self.maps.push(map.clone());
         }
         let metadata = self.game.as_deref().map(BoardGame::metadata);
         self.modes = board::modes(&self.layouts, map.map_id, metadata);
         self.mode = None;
-        self.map_info = self
-            .game
-            .as_deref()
-            .and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
+        self.map_info =
+            self.game.as_deref().and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
         self.map = Some(map);
         self.drawn = MapDrawn::NotShown;
         // Already in the session by definition, so nothing is announced back.

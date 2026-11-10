@@ -46,7 +46,6 @@ use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
 use super::load::spawn_parse;
 use super::load::spawn_startup_preload;
-use wows_toolkit_replay_data::export::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::RenderRequested;
 use super::panel::ReplayPanel;
@@ -56,6 +55,7 @@ use crate::stats::directory::DirectoryStatsRequested;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 use wows_toolkit_replay_data::columns::default_columns;
+use wows_toolkit_replay_data::export::AutoExport;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
 

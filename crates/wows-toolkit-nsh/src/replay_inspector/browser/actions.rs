@@ -32,11 +32,7 @@ pub(super) fn path_list(paths: &[PathBuf]) -> String {
 
 /// `paths` as a `text/uri-list`: what a file manager pastes as the files.
 pub(super) fn uri_list(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .filter_map(|path| Url::from_file_path(path).ok())
-        .map(|url| format!("{url}\r\n"))
-        .collect()
+    paths.iter().filter_map(|path| Url::from_file_path(path).ok()).map(|url| format!("{url}\r\n")).collect()
 }
 
 /// Shows `path` in the system file manager. A file manager that is not

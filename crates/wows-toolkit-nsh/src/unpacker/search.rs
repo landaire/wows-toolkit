@@ -149,7 +149,11 @@ pub fn search_view(run: SearchRun, tab: Tab) -> AnyElement {
                         .accessibility_label(run.title(tab))
                         .value(move || {
                             let progress = run.progress.get();
-                            if progress.total == 0 { 0.0 } else { progress.scanned as f32 / progress.total as f32 * 100.0 }
+                            if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.scanned as f32 / progress.total as f32 * 100.0
+                            }
                         })
                         .track_class("h-2 rounded-full bg-muted")
                         .indicator_class("h-2 rounded-full bg-primary"),

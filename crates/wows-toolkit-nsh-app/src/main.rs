@@ -31,11 +31,10 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     // The log file is what a bug report is copied from, so it starts before
     // anything that could fail. An unreadable database reads as logging on,
     // the default every front end uses.
-    let to_file = wows_toolkit_config::load_startup_setting::<bool>(
-        wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING,
-    )
-    .unwrap_or(None)
-    .unwrap_or(true);
+    let to_file =
+        wows_toolkit_config::load_startup_setting::<bool>(wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING)
+            .unwrap_or(None)
+            .unwrap_or(true);
     let _log_guard = wows_toolkit_nsh::shell::logging::init(to_file);
     wows_toolkit_viewmodel::logging::install_panic_hook();
 

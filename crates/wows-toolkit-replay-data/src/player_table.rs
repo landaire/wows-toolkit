@@ -169,7 +169,11 @@ pub fn table_text(rows: &[PlayerRow], columns: &[ReplayColumn], debug: bool) -> 
 }
 
 /// `rows` as a Markdown pipe table under the column headings.
-pub fn markdown_table<'a>(rows: impl IntoIterator<Item = &'a PlayerRow>, columns: &[ReplayColumn], debug: bool) -> String {
+pub fn markdown_table<'a>(
+    rows: impl IntoIterator<Item = &'a PlayerRow>,
+    columns: &[ReplayColumn],
+    debug: bool,
+) -> String {
     let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
     let mut lines = vec![
         line(columns.iter().map(|col| markdown_cell(&column_label(*col))).collect()),
@@ -281,7 +285,10 @@ mod tests {
         let table = table_text(&rows, &columns, false);
         let lines: Vec<&str> = table.lines().collect();
         assert_eq!(lines.len(), 3, "a heading line and one line per row: {table:?}");
-        assert_eq!(lines[0], format!("{}\t{}", column_label(ReplayColumn::ShipName), column_label(ReplayColumn::Kills)));
+        assert_eq!(
+            lines[0],
+            format!("{}\t{}", column_label(ReplayColumn::ShipName), column_label(ReplayColumn::Kills))
+        );
         assert_eq!(lines[1], row);
     }
 

@@ -149,7 +149,12 @@ fn name_section(table: Table, row: &PlayerRow, debug: bool, icons: &TableIcons) 
         let mut content = vec![section_heading(t!("ui.replay.sections.achievements").into_owned())];
         for achievement in &row.achievements {
             let icon = icons.icon(&RowIcon::achievement(&achievement.icon_key));
-            content.push(icon_label_row(icon, achievement_label(achievement), &achievement.description, LARGE_ICON_SIZE));
+            content.push(icon_label_row(
+                icon,
+                achievement_label(achievement),
+                &achievement.description,
+                LARGE_ICON_SIZE,
+            ));
         }
         section(&mut parts, content);
     }
@@ -405,11 +410,9 @@ fn wrapping(cells: Vec<AnyElement>) -> AnyElement {
 fn module_cell(icons: &TableIcons, icon: RowIcon, module: &TranslatedModule) -> AnyElement {
     let text = module_text(module);
     let content = match icons.icon(&icon) {
-        Some(image_icon) => image(image_icon.uri)
-            .label(text.name)
-            .w(px(MODULE_ICON_SIZE))
-            .h(px(MODULE_ICON_SIZE))
-            .into_element(),
+        Some(image_icon) => {
+            image(image_icon.uri).label(text.name).w(px(MODULE_ICON_SIZE)).h(px(MODULE_ICON_SIZE)).into_element()
+        }
         None => detail_text(text.name).into_element(),
     };
 
@@ -447,7 +450,9 @@ fn skill_grid(tiers: &[SkillGridRow], icons: &TableIcons) -> AnyElement {
                     view()
                         .app_class(class("flex-row items-center gap-1"))
                         .child(
-                            dim_text(skill_tier_label(tier)).app_class(class("flex-none text-xs text-muted-foreground")).w(px(SKILL_COST_WIDTH)),
+                            dim_text(skill_tier_label(tier))
+                                .app_class(class("flex-none text-xs text-muted-foreground"))
+                                .w(px(SKILL_COST_WIDTH)),
                         )
                         .children(tier.skills.iter().map(|skill| skill_cell(skill, icons)).collect::<Vec<_>>())
                         .into_element()
@@ -491,14 +496,16 @@ fn consumables_table(consumables: &[ConsumableResult], icons: &TableIcons) -> An
 
     let lines = consumables.iter().map(|consumable| {
         let counts = consumable_counts(consumable);
-        let mut name = view().app_class(class("flex-row flex-none items-center gap-1 overflow-hidden")).w(px(name_width));
+        let mut name =
+            view().app_class(class("flex-row flex-none items-center gap-1 overflow-hidden")).w(px(name_width));
         if let Some(icon) = icons.icon(&RowIcon::Consumable(consumable.icon_key.clone())) {
             name = name.child(
                 image(icon.uri).app_class(class("flex-none")).w(px(CONSUMABLE_ICON_SIZE)).h(px(CONSUMABLE_ICON_SIZE)),
             );
         }
         name = name.child(
-            detail_text(consumable.display_name.clone()).app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")),
+            detail_text(consumable.display_name.clone())
+                .app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")),
         );
 
         view()
@@ -510,21 +517,12 @@ fn consumables_table(consumables: &[ConsumableResult], icons: &TableIcons) -> An
             .into_element()
     });
 
-    view()
-        .app_class(class("flex-col gap-1"))
-        .child(header)
-        .children(lines.collect::<Vec<_>>())
-        .into_element()
+    view().app_class(class("flex-col gap-1")).child(header).children(lines.collect::<Vec<_>>()).into_element()
 }
 
 /// The ammo-type breakdown, then one line per other player with the share,
 /// which holding alt turns around.
-fn damage_section(
-    table: Table,
-    row: &PlayerRow,
-    debug: bool,
-    direction: DamageDirection,
-) -> Option<AnyElement> {
+fn damage_section(table: Table, row: &PlayerRow, debug: bool, direction: DamageDirection) -> Option<AnyElement> {
     if nda_hidden(row, debug) {
         return Some(nda_text());
     }

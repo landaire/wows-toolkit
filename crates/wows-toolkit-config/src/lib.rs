@@ -17,8 +17,8 @@ pub use db::StartupSettingError;
 pub use db::db_path;
 pub use db::is_migrated;
 pub use db::load_main_window_settings;
-pub use db::load_window_settings;
 pub use db::load_startup_setting;
+pub use db::load_window_settings;
 pub use db::open_db;
 pub use db::open_db_at;
 pub use db::set_migrated;
@@ -45,10 +45,7 @@ pub fn storage_dir() -> Option<PathBuf> {
     }
     // A test build that reaches the platform directory would read and write
     // the running user's own database.
-    assert!(
-        !cfg!(feature = "test-support"),
-        "storage_dir called in a test-support build before storage_override::set"
-    );
+    assert!(!cfg!(feature = "test-support"), "storage_dir called in a test-support build before storage_override::set");
 
     #[cfg(target_os = "windows")]
     {

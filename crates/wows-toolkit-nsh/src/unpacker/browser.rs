@@ -8,10 +8,10 @@ use nsh_base::SelectValue;
 use nsh_base::TreeEntry;
 use nsh_base::TreeItem;
 use nsh_base::checkbox;
-use nsh_base::h_resizable;
-use nsh_base::resizable_panel;
 use nsh_base::context_menu;
+use nsh_base::h_resizable;
 use nsh_base::menu_item;
+use nsh_base::resizable_panel;
 use nsh_base::tree;
 use nsh_core::prelude::*;
 use wows_toolkit_viewmodel::formatting::byte_size;
@@ -286,7 +286,11 @@ fn folder_row(entry: &TreeEntry) -> AnyElement {
                 .children(folder.then(|| icon(Icon::ChevronRight, px(12.0)))),
         )
         // TreeEntry carries no expansion state, so the row's aria-expanded picks the icon.
-        .child(icon(Icon::Folder, px(14.0)).test_id("unpacker-folder").app_class(class("text-primary group-aria-expanded:hidden")))
+        .child(
+            icon(Icon::Folder, px(14.0))
+                .test_id("unpacker-folder")
+                .app_class(class("text-primary group-aria-expanded:hidden")),
+        )
         .child(
             icon(Icon::FolderOpen, px(14.0))
                 .test_id("unpacker-folder-open")
@@ -415,11 +419,18 @@ fn listing_row(pane: BrowserPane, tab: Tab, at: Position) -> AnyElement {
         .child(
             view()
                 .w(px(20.0))
-                .tooltip(tip(move || tab.text(if is_dir() { "ui.unpacker.queue_folder" } else { "ui.unpacker.queue_file" })))
+                .tooltip(tip(move || {
+                    tab.text(if is_dir() { "ui.unpacker.queue_folder" } else { "ui.unpacker.queue_file" })
+                }))
                 .child(queue_toggle),
         )
         .child(view().app_class(class("w-6 text-primary")).child(dynamic(move || {
-            data.with(|row| row.as_ref().map(|row| icon(Glyph::of(&row.label, row.is_dir).icon(), px(14.0))).into_iter().collect::<Vec<_>>())
+            data.with(|row| {
+                row.as_ref()
+                    .map(|row| icon(Glyph::of(&row.label, row.is_dir).icon(), px(14.0)))
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            })
         })))
         .child(text(field(|row| row.label.clone())).app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")))
         .child(

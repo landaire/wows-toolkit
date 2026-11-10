@@ -40,6 +40,8 @@ use rust_i18n::t;
 use super::columns::player_color_kind_rgb;
 use super::expanded;
 use super::icons::IconCache;
+use wows_replay_insights::personal_rating::PersonalRatingResult;
+use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::cells::BattleOutcome;
 use wows_toolkit_replay_data::cells::CaptainPointsTier;
 use wows_toolkit_replay_data::cells::CellValue;
@@ -48,6 +50,11 @@ use wows_toolkit_replay_data::cells::PlayerColorKind;
 use wows_toolkit_replay_data::cells::cell_value;
 use wows_toolkit_replay_data::cells::name_color_kind;
 use wows_toolkit_replay_data::cells::player_color_kind;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_replay_data::player_table::COLUMN_DRAG_MIN;
 use wows_toolkit_replay_data::player_table::COLUMN_MIN_WIDTH;
 use wows_toolkit_replay_data::player_table::ROW_ACTIONS_WIDTH;
@@ -67,13 +74,6 @@ use wows_toolkit_replay_data::player_table::twitch_hover_text;
 use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_replay_data::sort::SortOrder;
 use wows_toolkit_replay_data::sort::sort_rows;
-use wows_replay_insights::personal_rating::PersonalRatingResult;
-use wows_replays::types::AccountId;
-use wows_toolkit_replay_data::columns::ReplayColumn;
-use wows_toolkit_replay_data::model::MatchContext;
-use wows_toolkit_replay_data::model::PlayerRow;
-use wows_toolkit_replay_data::model::ReplayReportModel;
-use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_replay_data::summary::TeamDamage;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -1682,12 +1682,12 @@ mod tests {
     use wowsunpack::vfs::MemoryFS;
     use wowsunpack::vfs::VfsPath;
 
-    use wows_toolkit_replay_data::sort::SortColumn;
     use super::PlayerTable;
     use wows_replays::types::Relation;
     use wows_toolkit_replay_data::columns::ReplayColumn;
     use wows_toolkit_replay_data::model::MatchContext;
     use wows_toolkit_replay_data::model::ReplayReportModel;
+    use wows_toolkit_replay_data::sort::SortColumn;
     use wows_toolkit_replay_data::test_support::base_row;
 
     fn two_row_model() -> ReplayReportModel {

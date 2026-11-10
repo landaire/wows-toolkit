@@ -201,7 +201,9 @@ impl Preview {
                 let frame = match baked.track.as_ref().filter(|track| !track.is_empty()) {
                     Some(track) => {
                         let since = *started.get_or_insert_with(Instant::now);
-                        track.index_at(since.elapsed()).and_then(|index| Some((Still::Frame(index), track.at(since.elapsed())?)))
+                        track
+                            .index_at(since.elapsed())
+                            .and_then(|index| Some((Still::Frame(index), track.at(since.elapsed())?)))
                     }
                     None => baked.map.clone().map(|map| (Still::Map, map)),
                 };
@@ -262,7 +264,11 @@ impl Preview {
     fn bake(self: &Arc<Self>, path: &Path, edge: PreviewEdge, baked: &Arc<Mutex<Baked>>) {
         let Some(game_data) = crate::game_data::cache() else {
             baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).done = true;
-            self.tell(Progress { expecting: false, stalled: false, failure: Some(RendererError::NoGameData.to_string()) });
+            self.tell(Progress {
+                expecting: false,
+                stalled: false,
+                failure: Some(RendererError::NoGameData.to_string()),
+            });
             return;
         };
         if let Ok(meta) = wows_replays::ReplayFile::meta_from_file(path)

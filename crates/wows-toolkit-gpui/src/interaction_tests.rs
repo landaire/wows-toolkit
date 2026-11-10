@@ -2057,9 +2057,9 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
         wows_toolkit_viewmodel::query_bar::pills::EditablePart::Operator,
         &wows_toolkit_config::index::query_ast::OperatorPreferences::default(),
     )
-        .into_iter()
-        .find(|choice| !choice.current)
-        .expect("the term takes more than one operator");
+    .into_iter()
+    .find(|choice| !choice.current)
+    .expect("the term takes more than one operator");
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Search, cx);
@@ -2509,8 +2509,8 @@ fn settle(cx: &mut TestAppContext, window: WindowHandle<gpui_kit::component::Roo
 /// Escape or Backspace in its empty field goes back to the root list.
 #[gpui_kit::test]
 fn the_palette_opens_any_ship_in_the_armor_viewer(cx: &mut TestAppContext) {
-    use crate::palette::armor_ship_row;
     use crate::palette::TestArmorShips;
+    use crate::palette::armor_ship_row;
     use wowsunpack::game_params::types::Species;
 
     let (window, _app) = open_app_in_root(cx);

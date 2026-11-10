@@ -18,8 +18,8 @@ use nsh_core::prelude::background;
 use nsh_core::prelude::blocking;
 use nsh_core::prelude::module;
 use tokio::sync::Notify;
-use wows_toolkit_viewmodel::upload::contribute::ContributeError;
 use wows_toolkit_viewmodel::upload::contribute::Candidate;
+use wows_toolkit_viewmodel::upload::contribute::ContributeError;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
 use wows_toolkit_viewmodel::upload::contribute::Outcome;
 use wows_toolkit_viewmodel::upload::shareable::Shareable;
@@ -140,11 +140,10 @@ pub async fn contribute(path: PathBuf, shareable: Shareable, ledger: LedgerUse) 
     let proxy_url = crate::shell::settings::manual_proxy(&pool).await?;
 
     let redirects = reqwest::redirect::Policy::none();
-    let client =
-        match wows_toolkit_viewmodel::http::client(USER_AGENT, proxy_url.as_deref(), redirects) {
-            Ok(client) => client,
-            Err(err) => return Ok(Outcome::Failed(ContributeError::Client(err))),
-        };
+    let client = match wows_toolkit_viewmodel::http::client(USER_AGENT, proxy_url.as_deref(), redirects) {
+        Ok(client) => client,
+        Err(err) => return Ok(Outcome::Failed(ContributeError::Client(err))),
+    };
     let first_seen = wows_toolkit_viewmodel::upload::contribute::first_seen(&pool, &path).await;
     let candidate = Candidate { path, shareable, first_seen };
 

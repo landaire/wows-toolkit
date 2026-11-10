@@ -24,7 +24,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -55,6 +54,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
+use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -617,8 +617,9 @@ impl ReplayRendererPanel {
     /// replay, and the viewport is worth showing before it finishes.
     fn start_event_scan(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
         self._events = Some(cx.spawn(async move |this, cx| {
-            let read =
-                cx.background_spawn(async move { wows_toolkit_replay_data::minimap::extract_events(&path, &game_data) }).await;
+            let read = cx
+                .background_spawn(async move { wows_toolkit_replay_data::minimap::extract_events(&path, &game_data) })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 match read {
                     Ok((read, shots)) => {
@@ -5218,7 +5219,10 @@ mod tests {
             .iter()
             .find(|toggle| toggle.id == "renderer-opt-team-rosters")
             .expect("the rosters have a switch");
-        let mut options = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..wows_toolkit_replay_data::playback::playback_options() };
+        let mut options = wows_minimap_renderer::RenderOptions {
+            show_stats_panel: true,
+            ..wows_toolkit_replay_data::playback::playback_options()
+        };
         let mut dead = true;
 
         (toggle.write)(&mut options, &mut dead, true);

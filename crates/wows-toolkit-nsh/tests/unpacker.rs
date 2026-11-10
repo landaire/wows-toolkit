@@ -59,7 +59,8 @@ impl FixtureInstall {
             }
         }
         std::fs::write(packages.join(VOLUME), &volume).expect("the fixture volume is written");
-        std::fs::write(idx_dir.join("fixture.idx"), idx_v40(resources, &file_infos)).expect("the fixture idx is written");
+        std::fs::write(idx_dir.join("fixture.idx"), idx_v40(resources, &file_infos))
+            .expect("the fixture idx is written");
 
         Self { root }
     }
@@ -257,7 +258,10 @@ fn the_unpacker_browses_filters_queues_extracts_searches_views_and_exports() {
     let closed = screen.count("id:unpacker-folder").unwrap();
     let open = screen.count("id:unpacker-folder-open").unwrap();
     assert_eq!(closed + open, rows, "one folder icon per row: {closed} closed, {open} open, {rows} rows");
-    assert!(open > 0 && closed > 0, "the expanded root is open and its collapsed folders closed: {closed} closed, {open} open");
+    assert!(
+        open > 0 && closed > 0,
+        "the expanded root is open and its collapsed folders closed: {closed} closed, {open} open"
+    );
 
     // Queueing from the listing feeds the queue panel and the Extract label.
     app.wait_for("label:Queue this file: notes.txt").unwrap();

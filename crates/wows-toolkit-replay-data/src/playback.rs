@@ -228,7 +228,11 @@ impl Track {
     /// and often past the last shot, so the battle proper is a stretch inside
     /// the track rather than the whole of it.
     pub fn battle_marks(&self) -> Vec<f32> {
-        [Some(self.battle_start), self.battle_end].into_iter().flatten().filter_map(|clock| self.position_of(clock)).collect()
+        [Some(self.battle_start), self.battle_end]
+            .into_iter()
+            .flatten()
+            .filter_map(|clock| self.position_of(clock))
+            .collect()
     }
 
     /// The ship drawn nearest map point `at` in frame `index`, if one is close
@@ -262,7 +266,9 @@ impl Track {
         commands
             .iter()
             .filter_map(|command| match command {
-                DrawCommand::Ship { player_name, .. } | DrawCommand::DeadShip { player_name, .. } => player_name.clone(),
+                DrawCommand::Ship { player_name, .. } | DrawCommand::DeadShip { player_name, .. } => {
+                    player_name.clone()
+                }
                 _ => None,
             })
             .collect()
@@ -949,7 +955,8 @@ mod tests {
 
     #[test]
     fn a_batch_draws_the_saved_layers_without_the_stats_panel_or_ranges() {
-        let saved = SavedRenderOptions { show_stats_panel: true, show_ship_config: true, ..SavedRenderOptions::default() };
+        let saved =
+            SavedRenderOptions { show_stats_panel: true, show_ship_config: true, ..SavedRenderOptions::default() };
 
         let (options, _) = batch_options(&saved);
 

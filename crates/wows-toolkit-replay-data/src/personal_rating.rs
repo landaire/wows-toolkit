@@ -13,8 +13,7 @@ use crate::error::RefreshError;
 
 /// Fetches the published expected values.
 async fn fetch(user_agent: &str, proxy_url: Option<&str>) -> Result<Vec<u8>, RefreshError> {
-    let client =
-        wows_toolkit_viewmodel::http::client(user_agent, proxy_url, reqwest::redirect::Policy::default())?;
+    let client = wows_toolkit_viewmodel::http::client(user_agent, proxy_url, reqwest::redirect::Policy::default())?;
 
     let response = client
         .get(personal_rating::EXPECTED_VALUES_URL)

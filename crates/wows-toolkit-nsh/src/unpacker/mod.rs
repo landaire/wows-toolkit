@@ -583,11 +583,16 @@ fn tab_view(tab: Tab) -> AnyElement {
                         .accessibility_label(tab.text("ui.unpacker.version"))
                         .items(move || {
                             tab.builds.with(|builds| {
-                                builds.iter().map(|build| SelectItem::new(build.to_string(), build.to_string())).collect::<Vec<_>>()
+                                builds
+                                    .iter()
+                                    .map(|build| SelectItem::new(build.to_string(), build.to_string()))
+                                    .collect::<Vec<_>>()
                             })
                         })
                         .value(move || {
-                            SelectValue::Controlled(tab.selected_build.get().map(|build| SharedString::from(build.to_string())))
+                            SelectValue::Controlled(
+                                tab.selected_build.get().map(|build| SharedString::from(build.to_string())),
+                            )
                         })
                         .app_class(class(
                             "w-40 min-h-7 px-2 rounded-(--radius) border border-input bg-background text-xs",
@@ -636,11 +641,21 @@ fn tab_view(tab: Tab) -> AnyElement {
         .child(
             view()
                 .app_class(class("flex-1 min-h-0 flex-row"))
-                .child(view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Left, Icon::PanelLeftOpen)))
-                .child(view().app_class(class("flex-1 min-w-0 min-h-0")).child(area).child(
-                    view().app_class(class("flex-row justify-center")).child(rail(DockPlacement::Bottom, Icon::PanelBottomOpen)),
-                ))
-                .child(view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Right, Icon::PanelRightOpen))),
+                .child(
+                    view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Left, Icon::PanelLeftOpen)),
+                )
+                .child(
+                    view().app_class(class("flex-1 min-w-0 min-h-0")).child(area).child(
+                        view()
+                            .app_class(class("flex-row justify-center"))
+                            .child(rail(DockPlacement::Bottom, Icon::PanelBottomOpen)),
+                    ),
+                )
+                .child(
+                    view()
+                        .app_class(class("items-center pt-1"))
+                        .child(rail(DockPlacement::Right, Icon::PanelRightOpen)),
+                ),
         )
         .into_element()
 }

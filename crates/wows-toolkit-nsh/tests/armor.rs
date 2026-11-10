@@ -52,7 +52,9 @@ fn configure_test_storage() {
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
             for key in ["build_consent_window_shown", "replay_consent_prompt_shown", "language_selection_shown"] {
-                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
             }
             wows_toolkit_config::queries::set_setting_raw(&pool, "check_for_updates", "false")
                 .await
@@ -162,7 +164,8 @@ fn the_penetration_panel_opens_from_its_toggle_and_closes_from_its_header() {
 #[test]
 fn without_game_data_the_ships_list_says_why_it_is_empty() {
     let mut app = armor_viewer();
-    app.wait_for(r"text:/^(Load game data in Settings to use the Armor Viewer\.|Loading ship catalog\.\.\.)$/").unwrap();
+    app.wait_for(r"text:/^(Load game data in Settings to use the Armor Viewer\.|Loading ship catalog\.\.\.)$/")
+        .unwrap();
 
     // A host without a GPU stops at the viewport's own state rather than the ship prompt.
     app.wait_for(
@@ -216,6 +219,9 @@ fn the_penetration_panel_scrolls_only_its_ship_list() {
     app.press("id:armor-analysis-toggle").unwrap();
     app.wait_for("id:armor-pen-ships").unwrap();
     app.wait_for("id:armor-pen-ships >> text:Search and add ships above to compare penetration").unwrap();
-    assert!(!app.screen().matches("id:armor-pen-ships >> id:armor-pen-search").unwrap(), "the search sits above the list");
+    assert!(
+        !app.screen().matches("id:armor-pen-ships >> id:armor-pen-search").unwrap(),
+        "the search sits above the list"
+    );
     assert!(!app.screen().matches("id:armor-pen-clear").unwrap(), "Clear all needs a ship to clear");
 }

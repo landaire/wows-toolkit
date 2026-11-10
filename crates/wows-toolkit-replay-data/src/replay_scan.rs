@@ -179,7 +179,8 @@ mod tests {
 
     #[test]
     fn listed_builds_are_counted_per_build_and_skip_headers_without_one() {
-        let files = vec![listed(Some(200), "0.11.0"), listed(Some(100), "0.10.5"), listed(Some(200), ""), listed(None, "")];
+        let files =
+            vec![listed(Some(200), "0.11.0"), listed(Some(100), "0.10.5"), listed(Some(200), ""), listed(None, "")];
 
         assert_eq!(
             listed_builds(&files),
@@ -200,7 +201,12 @@ mod tests {
         std::fs::create_dir_all(cache_dir.path().join("0.10.5_100")).expect("the dump directory is created");
         std::fs::write(cache_dir.path().join("0.10.5_100").join("metadata.toml"), "").expect("the dump is marked");
 
-        let files = vec![listed(Some(100), "0.10.5"), listed(Some(200), "0.11.0"), listed(Some(200), "0.11.0"), listed(None, "")];
+        let files = vec![
+            listed(Some(100), "0.10.5"),
+            listed(Some(200), "0.11.0"),
+            listed(Some(200), "0.11.0"),
+            listed(None, ""),
+        ];
 
         // A directory that is not an install, so only the cache can answer.
         let cache =

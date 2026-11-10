@@ -172,8 +172,8 @@ mod tests {
         let stored = with_field(None, SearchField::Query, serde_json::json!("outcome:win")).expect("an object");
         let stored = with_field(Some(stored), SearchField::History, serde_json::json!(["a", "b"])).expect("an object");
         let stored = with_field(Some(stored), SearchField::Sort, sort_value(sort)).expect("an object");
-        let stored = with_field(Some(stored), SearchField::OperatorPreferences, serde_json::json!({}))
-            .expect("an object");
+        let stored =
+            with_field(Some(stored), SearchField::OperatorPreferences, serde_json::json!({})).expect("an object");
 
         let saved = SavedSearch::parse(Some(stored)).expect("the row reads back");
 

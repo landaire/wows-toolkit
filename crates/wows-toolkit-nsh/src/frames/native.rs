@@ -185,7 +185,10 @@ impl FrameView {
             let Some(widget) = controller.widget().and_downcast::<gtk::Picture>() else { return };
             let at = to_pixels(&widget, x, y);
             motion_last.set(Some(at));
-            send(&motion_binding, SurfaceInput::PointerMoved { at, modifiers: modifiers(controller.current_event_state()) });
+            send(
+                &motion_binding,
+                SurfaceInput::PointerMoved { at, modifiers: modifiers(controller.current_event_state()) },
+            );
         });
         let leave_binding = Rc::clone(&binding);
         let leave_last = Rc::clone(&last_pointer);
@@ -223,13 +226,19 @@ impl FrameView {
         let down_binding = Rc::clone(&binding);
         keys.connect_key_pressed(move |_, key, _code, state| {
             let Some(name) = key.name() else { return glib::Propagation::Proceed };
-            send(&down_binding, SurfaceInput::Key { key: name.to_string(), pressed: true, modifiers: modifiers(state) });
+            send(
+                &down_binding,
+                SurfaceInput::Key { key: name.to_string(), pressed: true, modifiers: modifiers(state) },
+            );
             glib::Propagation::Stop
         });
         let up_binding = Rc::clone(&binding);
         keys.connect_key_released(move |_, key, _code, state| {
             if let Some(name) = key.name() {
-                send(&up_binding, SurfaceInput::Key { key: name.to_string(), pressed: false, modifiers: modifiers(state) });
+                send(
+                    &up_binding,
+                    SurfaceInput::Key { key: name.to_string(), pressed: false, modifiers: modifiers(state) },
+                );
             }
         });
         picture.add_controller(keys);

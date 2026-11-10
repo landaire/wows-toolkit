@@ -30,10 +30,8 @@ pub struct InspectorSettings {
 /// Reads the inspector's settings.
 pub fn load() -> Result<InspectorSettings, InspectorError> {
     with_pool(|pool| async move {
-        let wows_dir = optional::<String>(&pool, keys::WOWS_DIR)
-            .await?
-            .filter(|dir| !dir.trim().is_empty())
-            .map(PathBuf::from);
+        let wows_dir =
+            optional::<String>(&pool, keys::WOWS_DIR).await?.filter(|dir| !dir.trim().is_empty()).map(PathBuf::from);
 
         // An absent row is a fresh install; these are the same defaults the
         // Settings tab shows for it.

@@ -85,9 +85,15 @@ fn test_game() -> Arc<dyn BoardGame> {
     let art = image::RgbImage::from_pixel(768, 768, image::Rgb(WATER));
     let mut png = Vec::new();
     art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).expect("the art encodes");
-    space.join("minimap_water.png").and_then(|path| path.create_file()).expect("the art file").write_all(&png).expect("the art is written");
+    space
+        .join("minimap_water.png")
+        .and_then(|path| path.create_file())
+        .expect("the art file")
+        .write_all(&png)
+        .expect("the art is written");
 
-    let settings = r#"<space.settings><bounds minX="-8" maxX="7" minY="-8" maxY="7"/><chunkSize>100</chunkSize></space.settings>"#;
+    let settings =
+        r#"<space.settings><bounds minX="-8" maxX="7" minY="-8" maxY="7"/><chunkSize>100</chunkSize></space.settings>"#;
     space
         .join("space.settings")
         .and_then(|path| path.create_file())
@@ -146,7 +152,10 @@ fn send(shared: &Shared, input: SurfaceInput) {
 }
 
 fn press(shared: &Shared, at: PixelPoint) {
-    send(shared, SurfaceInput::PointerDown { at, button: PointerButton::Primary, clicks: 1, modifiers: Modifiers::default() });
+    send(
+        shared,
+        SurfaceInput::PointerDown { at, button: PointerButton::Primary, clicks: 1, modifiers: Modifiers::default() },
+    );
 }
 
 fn drag_to(shared: &Shared, at: PixelPoint) {
@@ -264,9 +273,10 @@ fn a_picked_shape_moves_and_turns() {
     press(&shared, handle);
     drag_to(&shared, PixelPoint { x: handle.x + 80.0, y: handle.y + 60.0 });
     release(&shared, PixelPoint { x: handle.x + 80.0, y: handle.y + 60.0 });
-    wait_until("the rectangle to turn", || {
-        matches!(shared.lock().shapes()[0], Annotation::Rectangle { rotation: turned, .. } if turned != rotation)
-    });
+    wait_until(
+        "the rectangle to turn",
+        || matches!(shared.lock().shapes()[0], Annotation::Rectangle { rotation: turned, .. } if turned != rotation),
+    );
 }
 
 /// The wheel zooms about the pointer, a drag pans the zoomed map, and a
@@ -275,12 +285,15 @@ fn a_picked_shape_moves_and_turns() {
 fn the_wheel_zooms_a_drag_pans_and_a_double_click_resets() {
     let shared = board_on_map("tactics-test-view");
 
-    send(&shared, SurfaceInput::Wheel {
-        at: Some(on_frame(384.0, 384.0)),
-        dx: ScrollSteps::new(0.0),
-        dy: ScrollSteps::new(-5.0),
-        modifiers: Modifiers::default(),
-    });
+    send(
+        &shared,
+        SurfaceInput::Wheel {
+            at: Some(on_frame(384.0, 384.0)),
+            dx: ScrollSteps::new(0.0),
+            dy: ScrollSteps::new(-5.0),
+            modifiers: Modifiers::default(),
+        },
+    );
     wait_until("a zoom", || shared.lock().view().zoom() > 1.0);
     let zoomed = shared.lock().view();
 
@@ -289,12 +302,15 @@ fn the_wheel_zooms_a_drag_pans_and_a_double_click_resets() {
     release(&shared, on_frame(150.0, 120.0));
     wait_until("a pan", || shared.lock().view().pan() != zoomed.pan());
 
-    send(&shared, SurfaceInput::PointerDown {
-        at: on_frame(100.0, 100.0),
-        button: PointerButton::Primary,
-        clicks: 2,
-        modifiers: Modifiers::default(),
-    });
+    send(
+        &shared,
+        SurfaceInput::PointerDown {
+            at: on_frame(100.0, 100.0),
+            button: PointerButton::Primary,
+            clicks: 2,
+            modifiers: Modifiers::default(),
+        },
+    );
     release(&shared, on_frame(100.0, 100.0));
     wait_until("the whole map", || shared.lock().view().is_whole_map());
 }
@@ -367,7 +383,8 @@ fn the_board_follows_a_new_session_link() {
 
     let shared = board_on_map("tactics-test-follow");
     let (links, watched) = tokio::sync::watch::channel(wt_collab_client::link::CollabLink::default());
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a runtime");
+    let runtime =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a runtime");
     runtime.spawn(Arc::clone(&shared).follow_links(watched));
 
     let state = Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));

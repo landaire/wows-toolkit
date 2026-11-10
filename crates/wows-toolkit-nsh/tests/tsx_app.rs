@@ -68,17 +68,16 @@ fn configure_test_storage() {
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
             for key in ["build_consent_window_shown", "replay_consent_prompt_shown", "language_selection_shown"] {
-                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
             }
             wows_toolkit_config::queries::set_setting_raw(&pool, "check_for_updates", "false")
                 .await
                 .expect("the startup update check is off");
         },
     );
-    assert!(
-        wows_toolkit_config::db_path().starts_with(path),
-        "the tests open their own database, never the user's"
-    );
+    assert!(wows_toolkit_config::db_path().starts_with(path), "the tests open their own database, never the user's");
 }
 
 fn registries() -> Vec<nsh_core::element::Registry> {
@@ -124,26 +123,32 @@ fn seed_stats() {
             "session_stats_division_filter",
             "session_stats_game_mode_filter",
         ] {
-            sqlx::query("DELETE FROM settings WHERE key = ?").bind(key).execute(pool).await.expect("a saved stats row is reset");
+            sqlx::query("DELETE FROM settings WHERE key = ?")
+                .bind(key)
+                .execute(pool)
+                .await
+                .expect("a saved stats row is reset");
         }
-        let game = |sort_key: &str, ship_name: &str, ship_id: i64, damage: i64, is_win: bool, match_group: &str| SessionStatRow {
-            id: 0,
-            sort_key: sort_key.to_owned(),
-            ship_name: ship_name.to_owned(),
-            ship_id,
-            player_id: 7,
-            game_time: format!("{sort_key} 12:00:00"),
-            match_group: match_group.to_owned(),
-            damage,
-            spotting_damage: 10_000,
-            frags: 2,
-            raw_xp: 1_500,
-            base_xp: 1_000,
-            is_win,
-            is_loss: !is_win,
-            is_draw: false,
-            is_div: false,
-            achievements: "[]".to_owned(),
+        let game = |sort_key: &str, ship_name: &str, ship_id: i64, damage: i64, is_win: bool, match_group: &str| {
+            SessionStatRow {
+                id: 0,
+                sort_key: sort_key.to_owned(),
+                ship_name: ship_name.to_owned(),
+                ship_id,
+                player_id: 7,
+                game_time: format!("{sort_key} 12:00:00"),
+                match_group: match_group.to_owned(),
+                damage,
+                spotting_damage: 10_000,
+                frags: 2,
+                raw_xp: 1_500,
+                base_xp: 1_000,
+                is_win,
+                is_loss: !is_win,
+                is_draw: false,
+                is_div: false,
+                achievements: "[]".to_owned(),
+            }
         };
         for row in [
             game("2026-01-01", "Yamato", 42, 100_000, true, "pvp"),
@@ -230,7 +235,10 @@ fn stats_clearing_a_ship_asks_again_unless_ctrl_is_held() {
 
     app.press("label:Remove all Montana games (Ctrl+Click to skip confirmation)").unwrap();
     app.wait_for("Press again to forget this ship's games").unwrap();
-    app.press("label:Press again to forget this ship's games: Remove all Montana games (Ctrl+Click to skip confirmation)").unwrap();
+    app.press(
+        "label:Press again to forget this ship's games: Remove all Montana games (Ctrl+Click to skip confirmation)",
+    )
+    .unwrap();
     app.wait_for("1/1").unwrap();
     app.wait_for_gone("Montana", std::time::Duration::from_secs(5)).unwrap();
 
@@ -522,7 +530,10 @@ fn seed_player_tracker() {
                 let mut player = TrackedPlayer {
                     last_name: seeded.name.to_string(),
                     db_id: AccountId(seeded.account),
-                    names: std::iter::once(seeded.name).chain(seeded.aliases.iter().copied()).map(String::from).collect(),
+                    names: std::iter::once(seeded.name)
+                        .chain(seeded.aliases.iter().copied())
+                        .map(String::from)
+                        .collect(),
                     clan: seeded.clan.to_string(),
                     ..TrackedPlayer::default()
                 };
@@ -550,7 +561,8 @@ fn seed_player_tracker() {
 /// tree order; a header shows its new order before the reloaded rows land.
 fn wait_for_order(app: &mut TestApp, first: &str, second: &str) {
     app.wait_until(&format!("{first} is listed above {second}"), std::time::Duration::from_secs(5), |screen| {
-        let at = |row: usize, name: &str| screen.matches(&format!("id:player-row-{row} >> text:{name}")).unwrap_or(false);
+        let at =
+            |row: usize, name: &str| screen.matches(&format!("id:player-row-{row} >> text:{name}")).unwrap_or(false);
         at(0, first) && at(1, second)
     })
     .unwrap();
@@ -670,8 +682,9 @@ fn player_tracker_clears_only_after_confirmation() {
     let mut app = app();
     seed_player_tracker();
     open_player_tracker(&mut app);
-    let tracked_count =
-        || with_test_database(async |pool| wows_toolkit_viewmodel::player_tracker::store::load(pool).await.unwrap().len());
+    let tracked_count = || {
+        with_test_database(async |pool| wows_toolkit_viewmodel::player_tracker::store::load(pool).await.unwrap().len())
+    };
 
     app.on_dialog(|_| nsh_testing::DialogAnswer::Press("Cancel".to_owned()));
     app.press("Clear Stats").unwrap();
@@ -723,8 +736,12 @@ fn player_tracker_view_round_trips_through_the_shared_settings_row() {
     assert_eq!(saved.sort.column, SortColumn::Name);
     assert_eq!(saved.sort.order, SortOrder::Ascending);
     assert_eq!(saved.filter, "Foe");
-    let modes = with_test_database(async |pool| wows_toolkit_viewmodel::player_tracker::store::load_view_modes(pool).await);
-    assert_eq!(modes.current_match_view_mode, wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode::Compact);
+    let modes =
+        with_test_database(async |pool| wows_toolkit_viewmodel::player_tracker::store::load_view_modes(pool).await);
+    assert_eq!(
+        modes.current_match_view_mode,
+        wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode::Compact
+    );
 
     let mut app = app.restart();
     app.press("Player Tracker").unwrap();
@@ -778,8 +795,11 @@ fn player_tracker_current_match_lists_the_battle_in_progress() {
     app.wait_for("Enemies").unwrap();
     // No fixture build is reachable: the directory holds no game, so the
     // battle's build does not load and the ships and figures say why.
-    app.wait_for_within("text:/^Stats unavailable: this battle's game data did not load: /", std::time::Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/^Stats unavailable: this battle's game data did not load: /",
+        std::time::Duration::from_secs(10),
+    )
+    .unwrap();
     // The index met the enemy in three battles.
     app.wait_for_within("label:/^Seen 3 times total/", std::time::Duration::from_secs(10)).unwrap();
 

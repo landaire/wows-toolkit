@@ -361,7 +361,12 @@ impl ReplayRenderer {
         change(id, |viewer| viewer.only_trail(&player))
     }
 
-    pub fn set_range(id: RendererId, player: String, range: RendererRange, on: bool) -> Result<RendererView, RendererError> {
+    pub fn set_range(
+        id: RendererId,
+        player: String,
+        range: RendererRange,
+        on: bool,
+    ) -> Result<RendererView, RendererError> {
         change(id, |viewer| viewer.set_ranges_for(&player, |filter| *view::range_switch(filter, range) = on))
     }
 

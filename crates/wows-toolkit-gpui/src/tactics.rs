@@ -1002,11 +1002,7 @@ impl TacticsBoard {
         self.owner = Some(board.owner_user_id);
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
         self.collab = link.on_board(board.board_id);
-        let map = MapChoice {
-            map_id: board.map.map_id,
-            space: board.map.space,
-            label: board.map.label,
-        };
+        let map = MapChoice { map_id: board.map.map_id, space: board.map.space, label: board.map.label };
         if !self.maps.iter().any(|candidate| MapChoiceKey::from(candidate) == MapChoiceKey::from(&map)) {
             self.maps.push(map.clone());
         }

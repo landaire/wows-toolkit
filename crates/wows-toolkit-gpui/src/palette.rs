@@ -41,9 +41,6 @@ use wowsunpack::game_params::types::Species;
 use crate::app::App;
 use crate::app::AppTab;
 use crate::armor_viewer::ArmorViewerPane;
-use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
-use wows_toolkit_viewmodel::ship_catalog::species_name;
-use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::runtime;
 use crate::settings_store;
@@ -52,6 +49,9 @@ use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::palette::ShipRow;
 use wows_toolkit_viewmodel::palette::rank_ships;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
+use wows_toolkit_viewmodel::ship_catalog::species_name;
+use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 
 /// What confirming an entry asks the window to do.
 #[derive(Debug, Clone, PartialEq, Eq)]

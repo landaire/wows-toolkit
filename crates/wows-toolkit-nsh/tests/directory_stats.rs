@@ -33,7 +33,9 @@ fn directory_stats_open_from_the_listing_as_a_tab_after_stats() {
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
             for key in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
-                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
             }
             wows_toolkit_config::queries::set_setting_raw(&pool, keys::CHECK_FOR_UPDATES, "false")
                 .await

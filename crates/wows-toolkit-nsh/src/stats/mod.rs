@@ -32,6 +32,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart_model::ChartModel;
 
+use crate::text::text;
 use chart::Chart;
 use chart::ChartPalette;
 use directory::DirectoryId;
@@ -45,7 +46,6 @@ use ids::ParamIdText;
 use ids::ScopeName;
 use ids::ViewChartId;
 use scope::Scope;
-use crate::text::text;
 
 pub use chart::ChartSnapshot;
 pub use chart::StatChoice;
@@ -227,7 +227,8 @@ fn open_directory(root: PathBuf) -> Result<DirectoryOpened, StatsError> {
         directory::start(id, game_data);
     }
 
-    let (status, charts) = with_directory(id, |scope, read| Ok((read.status(scope_view(scope, None)), scope.chart_ids())))?;
+    let (status, charts) =
+        with_directory(id, |scope, read| Ok((read.status(scope_view(scope, None)), scope.chart_ids())))?;
     Ok(DirectoryOpened { scope: id.scope_name(), layout: layout::default_layout(&charts), status })
 }
 
@@ -316,7 +317,11 @@ fn persist_charts(scope: &ScopeName) -> Option<StoreError> {
 }
 
 fn scope_view(scope: &Scope, save_error: Option<StoreError>) -> ScopeView {
-    ScopeView { stats: scope.snapshot(), charts: scope.chart_snapshots(), save_error: save_error.map(|error| error.to_string()) }
+    ScopeView {
+        stats: scope.snapshot(),
+        charts: scope.chart_snapshots(),
+        save_error: save_error.map(|error| error.to_string()),
+    }
 }
 
 fn chart_update(
@@ -462,7 +467,11 @@ impl Stats {
         .await
     }
 
-    pub async fn chart_combined(scope: ScopeName, chart: ViewChartId, combined: bool) -> Result<ChartUpdate, StatsError> {
+    pub async fn chart_combined(
+        scope: ScopeName,
+        chart: ViewChartId,
+        combined: bool,
+    ) -> Result<ChartUpdate, StatsError> {
         off_thread(move || chart_update(scope, chart, move |model| model.set_combined(combined))).await
     }
 
@@ -492,7 +501,11 @@ impl Stats {
         .await
     }
 
-    pub async fn chart_toggle_mode(scope: ScopeName, chart: ViewChartId, mode: MatchGroup) -> Result<ChartUpdate, StatsError> {
+    pub async fn chart_toggle_mode(
+        scope: ScopeName,
+        chart: ViewChartId,
+        mode: MatchGroup,
+    ) -> Result<ChartUpdate, StatsError> {
         off_thread(move || {
             chart_update(scope, chart, move |model| {
                 model.toggle_own_mode(mode.as_str());
@@ -510,7 +523,11 @@ impl Stats {
         .await
     }
 
-    pub async fn chart_toggle_ship(scope: ScopeName, chart: ViewChartId, ship: ParamIdText) -> Result<ChartUpdate, StatsError> {
+    pub async fn chart_toggle_ship(
+        scope: ScopeName,
+        chart: ViewChartId,
+        ship: ParamIdText,
+    ) -> Result<ChartUpdate, StatsError> {
         let ship = ship_id(&ship)?;
         off_thread(move || chart_update(scope, chart, move |model| model.toggle_ship(ship))).await
     }
@@ -555,7 +572,11 @@ impl Stats {
         let axis = parse(&theme.axis)?;
         chart::set_palette(ChartPalette {
             background: parse(&theme.background)?,
-            colors: wows_toolkit_viewmodel::stats::plot::Colors { axis, grid: axis.opacity(0.4), text: parse(&theme.text)? },
+            colors: wows_toolkit_viewmodel::stats::plot::Colors {
+                axis,
+                grid: axis.opacity(0.4),
+                text: parse(&theme.text)?,
+            },
         });
 
         let scopes = SCOPES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -604,7 +625,10 @@ impl Stats {
     }
 
     /// Resolves once the directory view has moved past `revision`.
-    pub async fn directory_status(scope: ScopeName, revision: DirectoryRevision) -> Result<DirectoryStatus, StatsError> {
+    pub async fn directory_status(
+        scope: ScopeName,
+        revision: DirectoryRevision,
+    ) -> Result<DirectoryStatus, StatsError> {
         let id = DirectoryId::parse(&scope).ok_or_else(|| StatsError::UnknownScope { scope: scope.clone() })?;
         let mut revisions = with_directory(id, |_, read| Ok(read.revisions()))?;
         // The view closed, dropping the sender.

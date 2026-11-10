@@ -90,7 +90,10 @@ fn a_tsx_icon_paints_in_its_own_color_or_the_text_color() {
     app.wait_for("label:Close").expect("the colored icon is on screen");
     app.wait_for("label:Twitch").expect("the filled icon is on screen");
 
-    assert!(painted(&paints, Painted::Stroke(TEXT_COLOR)), "an icon without a color strokes in the text color: {paints:?}");
+    assert!(
+        painted(&paints, Painted::Stroke(TEXT_COLOR)),
+        "an icon without a color strokes in the text color: {paints:?}"
+    );
     assert!(painted(&paints, Painted::Stroke(OWN_COLOR)), "an icon with a color strokes in it: {paints:?}");
     assert!(painted(&paints, Painted::Fill(FILL_COLOR)), "a filled icon fills in its color: {paints:?}");
 }

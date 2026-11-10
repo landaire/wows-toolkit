@@ -41,10 +41,9 @@ pub fn remember(defaults: SavedRenderOptions, cx: &mut App) -> bool {
     };
 
     cx.spawn(async move |cx: &mut AsyncApp| {
-        let written = runtime::spawn(cx, async move {
-            wows_toolkit_replay_data::render_defaults::save(&pool, &defaults).await
-        })
-        .await;
+        let written =
+            runtime::spawn(cx, async move { wows_toolkit_replay_data::render_defaults::save(&pool, &defaults).await })
+                .await;
 
         match written {
             Ok(Ok(())) => {}

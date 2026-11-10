@@ -156,10 +156,13 @@ impl DirectoryRead {
 
     pub(crate) fn status(&self, view: ScopeView) -> DirectoryStatus {
         let progress = match self.state {
-            ReadState::Scanning(progress) | ReadState::Reading(progress) => Some(ReadProgress(f64::from(progress.fraction()))),
+            ReadState::Scanning(progress) | ReadState::Reading(progress) => {
+                Some(ReadProgress(f64::from(progress.fraction())))
+            }
             ReadState::Walking | ReadState::Finished => None,
         };
-        let count = |progress: ReplaySetProgress| [("done", progress.done.to_string()), ("total", progress.total.to_string())];
+        let count =
+            |progress: ReplaySetProgress| [("done", progress.done.to_string()), ("total", progress.total.to_string())];
         let status = match self.state {
             ReadState::Walking => Some(text("ui.stats.directory_walking")),
             ReadState::Scanning(progress) => {
@@ -173,9 +176,8 @@ impl DirectoryRead {
             ReadState::Finished => None,
         };
         let skips = self.skips;
-        let skipped = (skips.total() > 0).then(|| {
-            text_with("ui.stats.directory_skipped", &[("count", &skips.total().to_string())])
-        });
+        let skipped = (skips.total() > 0)
+            .then(|| text_with("ui.stats.directory_skipped", &[("count", &skips.total().to_string())]));
         let skipped_detail = (skips.total() > 0).then(|| {
             text_with(
                 "ui.stats.directory_skipped_detail",

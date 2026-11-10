@@ -133,7 +133,11 @@ impl LiveWatcher {
 
     /// Takes the read made for `stamp` (`None` when there was no battle to
     /// read).
-    pub fn settle(&mut self, stamp: Option<ArenaInfoStamp>, read: Option<Result<LiveMatch, LiveMatchError>>) -> Settled {
+    pub fn settle(
+        &mut self,
+        stamp: Option<ArenaInfoStamp>,
+        read: Option<Result<LiveMatch, LiveMatchError>>,
+    ) -> Settled {
         let live = match read {
             None => None,
             Some(Ok(live)) => Some(live),

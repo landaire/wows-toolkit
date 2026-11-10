@@ -325,9 +325,8 @@ impl QueryBar {
             })
             .collect();
         let date = suggest::date_value_at_caret(&self.pending);
-        let calendar_date = date
-            .filter(|text| jiff::civil::Date::strptime("%Y-%m-%d", text).is_ok())
-            .map(str::to_owned);
+        let calendar_date =
+            date.filter(|text| jiff::civil::Date::strptime("%Y-%m-%d", text).is_ok()).map(str::to_owned);
 
         QueryBarView {
             pending: self.pending.clone(),
@@ -747,11 +746,10 @@ impl QueryBar {
     }
 
     fn segment(&self, expr: &MatchExpr, path: &NodePath, role: SegmentRole, text: String) -> PillSegmentView {
-        let choices: Vec<ChoiceView> =
-            pills::choices(expr, path, EditablePart::of(role), &self.operator_preferences)
-                .into_iter()
-                .map(|choice| ChoiceView { label: choice.label, taken: choice.taken, current: choice.current })
-                .collect();
+        let choices: Vec<ChoiceView> = pills::choices(expr, path, EditablePart::of(role), &self.operator_preferences)
+            .into_iter()
+            .map(|choice| ChoiceView { label: choice.label, taken: choice.taken, current: choice.current })
+            .collect();
         let kind = match role {
             SegmentRole::Filter => SegmentKind::Field,
             SegmentRole::Operator => SegmentKind::Operator,

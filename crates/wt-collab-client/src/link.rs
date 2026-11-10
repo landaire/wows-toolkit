@@ -352,9 +352,7 @@ impl CollabLink {
         }
         let changed = {
             let sync = match self.board {
-                Some(board_id) => {
-                    state.tactics_boards.get_mut(&board_id.raw()).map(|board| &mut board.annotation_sync)
-                }
+                Some(board_id) => state.tactics_boards.get_mut(&board_id.raw()).map(|board| &mut board.annotation_sync),
                 None => Some(state.current_annotation_sync.get_or_insert_with(Default::default)),
             };
             let Some(sync) = sync else { return };
@@ -531,10 +529,8 @@ impl CollabLink {
                 }
             }
         }
-        let _ = tx.send(LocalEvent::CapPoint {
-            board_id,
-            event: crate::peer::LocalCapPointEvent::Remove { id: id.raw() },
-        });
+        let _ =
+            tx.send(LocalEvent::CapPoint { board_id, event: crate::peer::LocalCapPointEvent::Remove { id: id.raw() } });
     }
 
     /// This board's capture points as the session holds them.
@@ -615,16 +611,11 @@ impl CollabLink {
     /// and reaching a gpui entity from the peer task would need a channel into
     /// the UI thread that the viewport is already draining. It looks for frames
     /// on its own timer instead.
-    pub fn watch_window(
-        &self,
-        replay_id: ReplayId,
-        frames: std::sync::mpsc::SyncSender<crate::PlaybackFrame>,
-    ) {
+    pub fn watch_window(&self, replay_id: ReplayId, frames: std::sync::mpsc::SyncSender<crate::PlaybackFrame>) {
         let Some(state) = &self.state else { return };
-        state.lock().register_viewport_sink(
-            replay_id.raw(),
-            crate::ViewportSink { frame_tx: Some(frames), wake: None },
-        );
+        state
+            .lock()
+            .register_viewport_sink(replay_id.raw(), crate::ViewportSink { frame_tx: Some(frames), wake: None });
     }
 
     /// Says this end has stopped drawing one of the session's windows.
@@ -773,7 +764,11 @@ fn held_of(sync: &crate::AnnotationSyncState) -> Vec<crate::drawing::Held> {
         .iter()
         .zip(&sync.ids)
         .zip(&sync.owners)
-        .map(|((annotation, id), owner)| crate::drawing::Held { id: *id, owner: *owner, annotation: annotation.clone() })
+        .map(|((annotation, id), owner)| crate::drawing::Held {
+            id: *id,
+            owner: *owner,
+            annotation: annotation.clone(),
+        })
         .collect()
 }
 
@@ -874,9 +869,7 @@ mod annotation_tests {
         let sent: Vec<crate::types::Annotation> = events
             .try_iter()
             .filter_map(|event| match event {
-                LocalEvent::Annotation(crate::peer::LocalAnnotationEvent::Set { annotation, .. }) => {
-                    Some(annotation)
-                }
+                LocalEvent::Annotation(crate::peer::LocalAnnotationEvent::Set { annotation, .. }) => Some(annotation),
                 _ => None,
             })
             .collect();
@@ -938,10 +931,10 @@ mod board_tests {
     use super::LocalEvent;
     use super::SessionState;
     use super::UserId;
-    use parking_lot::Mutex;
-    use std::sync::Arc;
     use crate::TacticsBoardSessionState;
     use crate::protocol::WireCapPoint;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
 
     fn circle(radius: f32) -> crate::types::Annotation {
         crate::types::Annotation::Circle {
@@ -1062,9 +1055,7 @@ mod board_tests {
         let sent: Vec<(u64, u64)> = events
             .try_iter()
             .filter_map(|event| match event {
-                LocalEvent::Annotation(crate::peer::LocalAnnotationEvent::Set { id, owner, .. }) => {
-                    Some((id, owner))
-                }
+                LocalEvent::Annotation(crate::peer::LocalAnnotationEvent::Set { id, owner, .. }) => Some((id, owner)),
                 _ => None,
             })
             .collect();

@@ -55,7 +55,8 @@ pub fn viewer_view(document: &ViewerDocument, tab: Tab) -> AnyElement {
 /// decoded: the platform decodes it, and reports a failure rather than
 /// showing nothing.
 fn image_view(title: &str, bytes: &[u8], tab: Tab) -> AnyElement {
-    let source = format!("data:{};base64,{}", image_mime(title), base64::engine::general_purpose::STANDARD.encode(bytes));
+    let source =
+        format!("data:{};base64,{}", image_mime(title), base64::engine::general_purpose::STANDARD.encode(bytes));
     let failure = signal(None::<String>);
     let size = signal(None::<Size<DevicePixels>>);
 
@@ -64,7 +65,11 @@ fn image_view(title: &str, bytes: &[u8], tab: Tab) -> AnyElement {
         .child(when(
             move || failure.with(Option::is_some),
             // Built only once a failure is set, so the reason is present.
-            move || status(tab.text_with("ui.unpacker.image_decode_failed", &[("reason", &failure.get().unwrap_or_default())])),
+            move || {
+                status(
+                    tab.text_with("ui.unpacker.image_decode_failed", &[("reason", &failure.get().unwrap_or_default())]),
+                )
+            },
         ))
         .child(when(
             move || failure.with(Option::is_none),

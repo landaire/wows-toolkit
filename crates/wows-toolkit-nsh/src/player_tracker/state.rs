@@ -232,9 +232,7 @@ impl Tracker {
         let status = match &self.index {
             LoadState::Idle => Some(text("ui.player_tracker.waiting_for_index")),
             LoadState::Loading => Some(text("ui.player_tracker.loading_players")),
-            LoadState::Failed(reason) => {
-                Some(text_with("ui.player_tracker.index_failed", &[("reason", reason)]))
-            }
+            LoadState::Failed(reason) => Some(text_with("ui.player_tracker.index_failed", &[("reason", reason)])),
             LoadState::Loaded if rows.is_empty() => Some(text("ui.player_tracker.no_players")),
             LoadState::Loaded => None,
         };
@@ -247,9 +245,8 @@ impl Tracker {
         let count = detail.total_encounters.to_string();
 
         PlayerDetailView {
-            aliases: (!detail.aliases.is_empty()).then(|| {
-                text_with("ui.player_tracker.aliases_hover", &[("names", &detail.aliases.join(", "))])
-            }),
+            aliases: (!detail.aliases.is_empty())
+                .then(|| text_with("ui.player_tracker.aliases_hover", &[("names", &detail.aliases.join(", "))])),
             last_encountered: detail.last_seen.map(|last_seen| {
                 let timestamp = history::exact_timestamp_text(last_seen);
                 text_with("ui.player_tracker.last_encountered_exact", &[("timestamp", &timestamp)])
@@ -311,9 +308,7 @@ impl Tracker {
         let status = match &self.clans {
             LoadState::Idle => Some(text("ui.player_tracker.waiting_for_index")),
             LoadState::Loading => Some(text("ui.player_tracker.loading_clans")),
-            LoadState::Failed(reason) => {
-                Some(text_with("ui.player_tracker.index_failed", &[("reason", reason)]))
-            }
+            LoadState::Failed(reason) => Some(text_with("ui.player_tracker.index_failed", &[("reason", reason)])),
             LoadState::Loaded if rows.is_empty() => Some(text("ui.player_tracker.clan_no_data")),
             LoadState::Loaded => None,
         };
@@ -386,7 +381,12 @@ mod tests {
     use super::*;
 
     fn facet(account: i64, name: &str, clan: &str, matches: i64) -> PlayerFacet {
-        PlayerFacet { account_id: AccountId(account), latest_name: name.to_string(), clan: clan.to_string(), match_count: matches }
+        PlayerFacet {
+            account_id: AccountId(account),
+            latest_name: name.to_string(),
+            clan: clan.to_string(),
+            match_count: matches,
+        }
     }
 
     fn tracked(name: &str, clan: &str, encounters: &[(i64, Timestamp, bool)]) -> TrackedPlayer {
@@ -476,10 +476,9 @@ mod tests {
     fn the_clans_table_counts_tracked_encounters_and_lists_members() {
         let now = Timestamp::now();
         let mut tracker = loaded();
-        tracker.tracked.insert(
-            AccountId(1),
-            tracked("Alpha", "RAIN", &[(1, now - 1.hour(), false), (2, now - 2.hours(), false)]),
-        );
+        tracker
+            .tracked
+            .insert(AccountId(1), tracked("Alpha", "RAIN", &[(1, now - 1.hour(), false), (2, now - 2.hours(), false)]));
         tracker.tracked.insert(AccountId(2), tracked("Beta", "RAIN", &[(1, now - 1.hour(), false)]));
 
         let table = tracker.clans_table(now);

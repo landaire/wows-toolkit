@@ -220,7 +220,9 @@ fn forget_manual_installs() {
             .expect("the launcher row is readable");
         if let Some(mut row) = row {
             row["manual_installs"] = serde_json::json!([]);
-            wows_toolkit_config::queries::set_setting(&pool, "launcher", &row).await.expect("the launcher row is saved");
+            wows_toolkit_config::queries::set_setting(&pool, "launcher", &row)
+                .await
+                .expect("the launcher row is saved");
         }
     });
 }

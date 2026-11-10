@@ -123,6 +123,7 @@ fn the_timeline_fills_in_without_being_reopened() {
     app.press("label:Event Timeline").unwrap();
     app.wait_for("text:Event Timeline").unwrap();
     app.wait_for_gone("text:Parsing events...", SCAN).unwrap();
-    app.wait_for("text:/^(No significant events detected\\.|No events match the current filter\\.|\\d+:\\d\\d)$/").unwrap();
+    app.wait_for("text:/^(No significant events detected\\.|No events match the current filter\\.|\\d+:\\d\\d)$/")
+        .unwrap();
     app.wait_for("text:Event Timeline").unwrap();
 }

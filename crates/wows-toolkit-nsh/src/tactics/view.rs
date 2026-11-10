@@ -177,12 +177,8 @@ pub struct TacticsView {
 /// What `board` shows, at `revision`.
 pub fn of(board: &Board, revision: ViewRevision) -> TacticsView {
     let titles = board::map_titles(board.maps());
-    let maps: Vec<PickerItem> = board
-        .maps()
-        .iter()
-        .zip(titles)
-        .map(|(map, title)| PickerItem { value: map_value(map), title })
-        .collect();
+    let maps: Vec<PickerItem> =
+        board.maps().iter().zip(titles).map(|(map, title)| PickerItem { value: map_value(map), title }).collect();
     let map = board.map().map(map_value).and_then(|value| maps.iter().find(|item| item.value == value).cloned());
 
     let mode_item = |entry: &ModeEntry| PickerItem {
@@ -214,8 +210,15 @@ pub fn of(board: &Board, revision: ViewRevision) -> TacticsView {
     let ranges: Vec<RangeView> = board::RANGE_CIRCLES
         .iter()
         .map(|(circle, key)| {
-            let enabled = u32::from(circle.is_on(filter)) + ships.iter().filter(|ship| circle.is_on(ship)).count() as u32;
-            RangeView { circle: range_name(*circle), label: rust_i18n::t!(*key).into_owned(), checked: enabled == total, enabled, total }
+            let enabled =
+                u32::from(circle.is_on(filter)) + ships.iter().filter(|ship| circle.is_on(ship)).count() as u32;
+            RangeView {
+                circle: range_name(*circle),
+                label: rust_i18n::t!(*key).into_owned(),
+                checked: enabled == total,
+                enabled,
+                total,
+            }
         })
         .collect();
 

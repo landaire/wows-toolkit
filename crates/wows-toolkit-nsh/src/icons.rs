@@ -227,7 +227,10 @@ mod tests {
             let svg = icon.svg();
             let strokes = svg.matches(r#"stroke="currentColor""#).count();
             let fills = svg.matches(r#"fill="currentColor""#).count();
-            assert!(strokes <= 1 && fills <= 1 && strokes + fills >= 1, "{icon:?} paints in the text color at its root");
+            assert!(
+                strokes <= 1 && fills <= 1 && strokes + fills >= 1,
+                "{icon:?} paints in the text color at its root"
+            );
             assert_eq!(svg.matches("currentColor").count(), strokes + fills, "{icon:?} paints nothing else in it");
             assert_eq!(svg.matches(r#"stroke-width="2""#).count(), strokes, "{icon:?} sets a stroke's width once");
 

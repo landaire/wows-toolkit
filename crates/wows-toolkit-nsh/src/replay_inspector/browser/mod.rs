@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use notify::RecommendedWatcher;
 use nsh_base::alert_dialog;
 use nsh_base::context_menu;
 use nsh_base::dialog;
@@ -28,7 +29,6 @@ use nsh_core::Color;
 use nsh_core::Hsla;
 use nsh_core::keymap::When;
 use nsh_core::prelude::*;
-use notify::RecommendedWatcher;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::query;
@@ -318,10 +318,7 @@ pub fn ReplayBrowser(props: ReplayBrowserProps, cx: Scope<ReplayBrowserEvent>) -
     browser.follow_game_data();
     browser.bind_keys();
 
-    view()
-        .app_class(class("flex-1 min-h-0 min-w-0"))
-        .child(body(browser))
-        .child(controls_dialog(browser))
+    view().app_class(class("flex-1 min-h-0 min-w-0")).child(body(browser)).child(controls_dialog(browser))
 }
 
 impl Browser {
@@ -694,7 +691,9 @@ impl Browser {
                 let Ok(controls) = blocking(actions::read_controls).await else { return };
                 match controls {
                     Controls::Groups(groups) => self.controls.set(Some(Rc::new(groups))),
-                    Controls::Unavailable => self.notice(t!("ui.replay.controls.unavailable").into_owned(), NoticeLevel::Warn),
+                    Controls::Unavailable => {
+                        self.notice(t!("ui.replay.controls.unavailable").into_owned(), NoticeLevel::Warn)
+                    }
                     // Nothing is loaded to read the reference from.
                     Controls::NoBuild => {}
                 }
@@ -707,11 +706,9 @@ impl Browser {
     fn open_in_game(self, wows_dir: PathBuf, replay: PathBuf) {
         self.owner.run(|| {
             spawn(async move {
-                let confirmed = confirm(
-                    t!("ui.replay.context.open_in_game").into_owned(),
-                    t!("confirm.open_in_game").into_owned(),
-                )
-                .await;
+                let confirmed =
+                    confirm(t!("ui.replay.context.open_in_game").into_owned(), t!("confirm.open_in_game").into_owned())
+                        .await;
                 if !confirmed {
                     return;
                 }
@@ -882,13 +879,10 @@ fn scanning(browser: Browser) -> AnyElement {
 }
 
 fn tree(browser: Browser) -> AnyElement {
-    let rows = virtual_list(
-        move || browser.listing.with(Listing::shown_len),
-        move |at: Position| row(browser, at),
-    )
-    .estimated_item_size(row_height)
-    .element_ref(&browser.list)
-    .app_class(class("flex-1 min-h-0"));
+    let rows = virtual_list(move || browser.listing.with(Listing::shown_len), move |at: Position| row(browser, at))
+        .estimated_item_size(row_height)
+        .element_ref(&browser.list)
+        .app_class(class("flex-1 min-h-0"));
 
     view()
         .role(AccessibilityRole::Tree)
@@ -941,11 +935,7 @@ fn row(browser: Browser, at: Position) -> AnyElement {
 
     // A fixed height: the list places rows by their measured size, and the
     // menu's closed popup must not add to it.
-    view()
-        .h(row_height)
-        .app_class(class("w-full min-w-0 overflow-hidden"))
-        .child(menu)
-        .into_element()
+    view().h(row_height).app_class(class("w-full min-w-0 overflow-hidden")).child(menu).into_element()
 }
 
 /// Both lines at the text size the reader chose.
@@ -999,20 +989,22 @@ fn leaf_lines(leaf: &Leaf) -> AnyElement {
         MatchOutcome::Draw => "shrink min-w-0 text-sm text-draw truncate",
         MatchOutcome::Unknown => "shrink min-w-0 text-sm text-foreground truncate",
     };
-    let mut identity =
-        view().app_class(class("flex-row items-center gap-1 min-w-0 w-full")).child(text(leaf.label.clone()).app_class(class(tint)));
+    let mut identity = view()
+        .app_class(class("flex-row items-center gap-1 min-w-0 w-full"))
+        .child(text(leaf.label.clone()).app_class(class(tint)));
     if leaf.in_division {
-        identity = identity.child(
-            icon(Icon::Users, px(12.0))
-                .text_color(AdaptiveColor { light: hsla(LIGHT_SEMANTIC.division), dark: hsla(DARK_SEMANTIC.division) }),
-        );
+        identity =
+            identity.child(icon(Icon::Users, px(12.0)).text_color(AdaptiveColor {
+                light: hsla(LIGHT_SEMANTIC.division),
+                dark: hsla(DARK_SEMANTIC.division),
+            }));
     }
 
     let stats = view().app_class(class("flex-row items-center min-w-0 overflow-hidden")).children(
         leaf.stats.iter().map(|part| match part {
-            LinePart::Text(said) => text(said.clone())
-                .app_class(class("text-xs text-muted-foreground whitespace-nowrap"))
-                .into_element(),
+            LinePart::Text(said) => {
+                text(said.clone()).app_class(class("text-xs text-muted-foreground whitespace-nowrap")).into_element()
+            }
             LinePart::Glyph(glyph) => match glyph::icon_of(glyph) {
                 Some(drawn) => glyph_view(drawn, "text-muted-foreground"),
                 None => text(*glyph).app_class(class("text-xs text-muted-foreground")).into_element(),
@@ -1020,11 +1012,7 @@ fn leaf_lines(leaf: &Leaf) -> AnyElement {
         }),
     );
 
-    view()
-        .app_class(class("flex-1 min-w-0 justify-center overflow-hidden"))
-        .child(identity)
-        .child(stats)
-        .into_element()
+    view().app_class(class("flex-1 min-w-0 justify-center overflow-hidden")).child(identity).child(stats).into_element()
 }
 
 fn glyph_view(drawn: Icon, color: &'static str) -> AnyElement {

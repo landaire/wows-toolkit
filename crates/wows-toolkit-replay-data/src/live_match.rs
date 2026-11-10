@@ -206,7 +206,9 @@ mod tests {
         }
 
         let refused = budget.check(ArenaId::from(1), start).expect_err("the window is spent");
-        assert!(matches!(refused, MatchStatsError::RateLimited { retry_after } if retry_after == match_stats::RATE_LIMIT_WINDOW));
+        assert!(
+            matches!(refused, MatchStatsError::RateLimited { retry_after } if retry_after == match_stats::RATE_LIMIT_WINDOW)
+        );
         assert!(budget.check(ArenaId::from(1), start + match_stats::RATE_LIMIT_WINDOW).is_ok(), "the window ages out");
     }
 
@@ -217,7 +219,11 @@ mod tests {
         let arena = ArenaId::from(3);
 
         budget.note_failure(arena, &StatsError::NoRoster, now);
-        budget.note_failure(arena, &StatsError::Refused(MatchStatsError::RateLimited { retry_after: Duration::ZERO }), now);
+        budget.note_failure(
+            arena,
+            &StatsError::Refused(MatchStatsError::RateLimited { retry_after: Duration::ZERO }),
+            now,
+        );
         budget.note_failure(arena, &StatsError::Refused(MatchStatsError::NoEligiblePlayers), now);
         assert!(budget.check(arena, now).is_ok(), "nothing the service answered failed");
 
@@ -292,7 +298,8 @@ mod tests {
             .expect("the replay names its build");
 
         let dir = tempfile::tempdir().expect("a temporary directory");
-        std::fs::write(dir.path().join(ARENA_INFO_FILE), replay.raw_meta.as_bytes()).expect("the arena info is writable");
+        std::fs::write(dir.path().join(ARENA_INFO_FILE), replay.raw_meta.as_bytes())
+            .expect("the arena info is writable");
         std::fs::write(dir.path().join(LIVE_STREAM_FILE), replay.packet_data()).expect("the stream is writable");
 
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));

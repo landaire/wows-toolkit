@@ -1919,9 +1919,7 @@ impl App {
                 crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
             }
             wows_toolkit_viewmodel::palette::PaletteMode::Players
-            | wows_toolkit_viewmodel::palette::PaletteMode::MyShips => {
-                crate::palette::ModeSource::Index
-            }
+            | wows_toolkit_viewmodel::palette::PaletteMode::MyShips => crate::palette::ModeSource::Index,
         };
 
         self.palette = cx.new(|cx| CommandState::new(window, cx));

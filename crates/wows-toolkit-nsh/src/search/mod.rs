@@ -304,9 +304,7 @@ impl ReplaySearch {
     /// The widths the reader dragged each column to, in [`Self::columns`]
     /// order; `null` for a column left at its default.
     pub async fn load_column_widths() -> Result<Vec<Option<ColumnWidth>>, SearchError> {
-        blocking(load_column_widths)
-            .await
-            .map_err(|source| SearchError::Task { task: "column width read", source })?
+        blocking(load_column_widths).await.map_err(|source| SearchError::Task { task: "column width read", source })?
     }
 
     pub async fn save_column_widths(widths: Vec<Option<ColumnWidth>>) -> Result<(), SearchError> {
@@ -468,7 +466,8 @@ fn write_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> 
         let stored = wows_toolkit_config::queries::try_get_setting::<JsonValue>(&pool, SEARCH_SETTINGS_KEY)
             .await
             .map_err(|source| SearchError::ReadSettings { source })?;
-        let stored = search_settings::with_field(stored, field, value).map_err(|source| SearchError::Saved { source })?;
+        let stored =
+            search_settings::with_field(stored, field, value).map_err(|source| SearchError::Saved { source })?;
         wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &stored.to_string())
             .await
             .map_err(|source| SearchError::WriteSettings { field: field.key(), source })

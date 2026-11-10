@@ -58,7 +58,11 @@ pub fn sample_personal_rating() -> PersonalRatingData {
     let mut data = HashMap::new();
     data.insert(
         UNRATED_SAMPLE_SHIP.to_string(),
-        ShipExpectedValuesEntry::Values(ShipExpectedValues { average_damage_dealt: 50_000.0, average_frags: 1.0, win_rate: 50.0 }),
+        ShipExpectedValuesEntry::Values(ShipExpectedValues {
+            average_damage_dealt: 50_000.0,
+            average_frags: 1.0,
+            win_rate: 50.0,
+        }),
     );
     let mut table = PersonalRatingData::new();
     table.load(ExpectedValuesData { time: 0, data });

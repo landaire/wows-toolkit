@@ -44,10 +44,7 @@ impl Naming {
         let own = listed.build.and_then(|build| self.cache.as_ref()?.loaded_build(build));
         let Some(data) = own.as_ref().or(self.current.as_ref()) else {
             return RowIdentity {
-                ship: listed
-                    .ship_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| t!("ui.replay.spectator").into_owned()),
+                ship: listed.ship_id.map(|id| id.to_string()).unwrap_or_else(|| t!("ui.replay.spectator").into_owned()),
                 map: listed.map_name.clone(),
                 scenario: listed.scenario.clone(),
                 mode: listed.game_type.clone(),
@@ -470,7 +467,8 @@ impl Listing {
                     // Every leaf comes from `translated`, which `hover` was built from.
                     let hover = hover.remove(path.as_path()).unwrap_or_default();
                     // A scanned replay is a file, so its path always ends in a name.
-                    let file_name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                    let file_name =
+                        path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
                     Node::Leaf(Rc::new(Leaf { path, file_name, label, stats, outcome, in_division, map_name, hover }))
                 }
             };
@@ -582,7 +580,11 @@ mod tests {
     fn ctrl_clicking_builds_a_selection_and_a_plain_click_replaces_it() {
         let mut listing = listing(
             ReplayGrouping::None,
-            &[("c.wowsreplay", "01.01.2026 00:00:00"), ("b.wowsreplay", "01.01.2026 00:00:00"), ("a.wowsreplay", "01.01.2026 00:00:00")],
+            &[
+                ("c.wowsreplay", "01.01.2026 00:00:00"),
+                ("b.wowsreplay", "01.01.2026 00:00:00"),
+                ("a.wowsreplay", "01.01.2026 00:00:00"),
+            ],
         );
         let a = PathBuf::from("a.wowsreplay");
         let b = PathBuf::from("b.wowsreplay");

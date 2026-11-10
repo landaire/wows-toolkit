@@ -658,12 +658,11 @@ fn state_view(state: &LiveState, tracker: &Tracker, now: Timestamp) -> LiveView 
 fn team_view(title_key: &str, rows: &[LiveRosterRow], context: &RosterContext) -> TeamView {
     // `visible_stat_modes` names at least one scope; the fallback is unused.
     let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
-    let average_win_rate = context.stats.and_then(|stats| team_average_win_rate(rows, stats, lead)).map(|rate| {
-        BandedText {
+    let average_win_rate =
+        context.stats.and_then(|stats| team_average_win_rate(rows, stats, lead)).map(|rate| BandedText {
             text: text_with("ui.player_tracker.team_average_win_rate", &[("rate", &format!("{rate:.1}%"))]),
             band: band(PersonalRatingCategory::from_win_rate(rate)),
-        }
-    });
+        });
     let average_rating =
         context.stats.and_then(|stats| team_average_personal_rating(rows, stats, lead)).map(|rating| BandedText {
             text: format!("{}: {rating:.0}", text("stat.avg_pr")),
@@ -762,7 +761,9 @@ fn scope_cells(
         let (mark, hover) = match status {
             PlayerStatsStatus::Hidden => (StatsMark::Hidden, "ui.player_tracker.stats_hidden"),
             PlayerStatsStatus::Unavailable => (StatsMark::Unavailable, "ui.player_tracker.stats_no_data"),
-            PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => (StatsMark::Unknown, "ui.player_tracker.stats_no_data"),
+            PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => {
+                (StatsMark::Unknown, "ui.player_tracker.stats_no_data")
+            }
         };
         return ScopeCellsView {
             mark: Some(mark),
@@ -903,7 +904,11 @@ mod tests {
     }
 
     fn lookup(started_at: Timestamp, arena: i64) -> HeldLookup {
-        HeldLookup { generation: WatchGeneration(1), started_at, state: ArenaState { arena_id: ArenaId::from(arena), players: Vec::new() } }
+        HeldLookup {
+            generation: WatchGeneration(1),
+            started_at,
+            state: ArenaState { arena_id: ArenaId::from(arena), players: Vec::new() },
+        }
     }
 
     #[test]
@@ -961,7 +966,9 @@ mod tests {
         let missing = load_build(None, BuildNumber(12_668_706)).err().expect("no cache, no build");
         assert!(matches!(missing, LiveDataError::NotConfigured));
 
-        let err = load_build(Some(GameDataCache::new(dir.path().to_owned())), BuildNumber(12_668_706)).err().expect("no install");
+        let err = load_build(Some(GameDataCache::new(dir.path().to_owned())), BuildNumber(12_668_706))
+            .err()
+            .expect("no install");
         assert!(matches!(err, LiveDataError::Build(_)));
         assert!(err.to_string().starts_with("this battle's game data did not load: "), "got {err}");
     }
@@ -970,7 +977,11 @@ mod tests {
     fn the_roster_splits_by_team_and_counts_who_was_met_before() {
         let now = Timestamp::now();
         let mut tracker = Tracker::new();
-        let mut met = TrackedPlayer { last_name: "Stranger99".to_string(), notes: "rushes B".to_string(), ..TrackedPlayer::default() };
+        let mut met = TrackedPlayer {
+            last_name: "Stranger99".to_string(),
+            notes: "rushes B".to_string(),
+            ..TrackedPlayer::default()
+        };
         for arena in 1..=4 {
             met.arena_ids.insert(ArenaId::from(arena));
             met.timestamps.insert(now - arena.hours());
@@ -1102,7 +1113,10 @@ mod tests {
         assert!(sent.is_some(), "showing the section sends the held lookup");
         assert!(matches!(state.stats, StatsState::Fetching));
 
-        state.lookups.budget.remember(MatchStatsResponse { arena_id: ArenaId::from(9), players: vec![figures(1, PlayerStatsStatus::Ok)] });
+        state.lookups.budget.remember(MatchStatsResponse {
+            arena_id: ArenaId::from(9),
+            players: vec![figures(1, PlayerStatsStatus::Ok)],
+        });
         assert!(offer_lookup(&mut state, lookup(now, 9)).is_none());
         assert!(matches!(&state.stats, StatsState::Ready(players) if players.contains_key(&AccountId(1))));
 
@@ -1123,7 +1137,10 @@ mod tests {
         let view = state_view(&state, &Tracker::new(), now);
         assert_eq!(
             view.note,
-            Some(text_with("ui.player_tracker.stats_unavailable", &[("reason", "rate limited, try again in 20 minutes")]))
+            Some(text_with(
+                "ui.player_tracker.stats_unavailable",
+                &[("reason", "rate limited, try again in 20 minutes")]
+            ))
         );
     }
 

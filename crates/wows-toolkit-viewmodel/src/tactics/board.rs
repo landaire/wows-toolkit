@@ -166,11 +166,7 @@ pub struct ModeChoice {
 /// The recorded layouts first, then whatever else the loaded build ships art
 /// for: a map nobody has a replay of can still be drawn on, it simply starts
 /// with no capture points.
-pub fn maps(
-    layouts: &CapLayoutDb,
-    metadata: Option<&GameMetadataProvider>,
-    vfs: Option<&VfsPath>,
-) -> Vec<MapChoice> {
+pub fn maps(layouts: &CapLayoutDb, metadata: Option<&GameMetadataProvider>, vfs: Option<&VfsPath>) -> Vec<MapChoice> {
     let mut maps: Vec<MapChoice> = layouts
         .maps()
         .into_iter()
@@ -1011,9 +1007,7 @@ mod tests {
         }
         assert!(fit.to_frame(ElementPos { x: 20.0, y: 100.0 }).is_none(), "in the left margin");
         assert!(fit.to_element(FramePos { x: 100.0, y: 50.0 }).is_none(), "past the far edge");
-        assert!(
-            Letterbox::fitting(ElementPos { x: 0.0, y: 0.0 }, extent(400.0, 200.0), extent(0.0, 100.0)).is_none()
-        );
+        assert!(Letterbox::fitting(ElementPos { x: 0.0, y: 0.0 }, extent(400.0, 200.0), extent(0.0, 100.0)).is_none());
     }
 
     /// The walk finds replays in nested directories in name order and skips

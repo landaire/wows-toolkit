@@ -34,16 +34,12 @@ fn Host() -> impl IntoElement {
     let notice = signal(String::new());
     let columns: Vec<SharedString> = ReplayColumn::ALL.iter().map(|col| SharedString::from(column_key(*col))).collect();
 
-    view()
-        .w(px(1400.0))
-        .h(px(800.0))
-        .child(text(move || format!("notice: {}", notice.get())))
-        .child(
-            player_table()
-                .document(Some(id))
-                .columns(columns)
-                .on_notice(move |text: &SharedString| notice.set(text.to_string())),
-        )
+    view().w(px(1400.0)).h(px(800.0)).child(text(move || format!("notice: {}", notice.get()))).child(
+        player_table()
+            .document(Some(id))
+            .columns(columns)
+            .on_notice(move |text: &SharedString| notice.set(text.to_string())),
+    )
 }
 
 fn start() -> Headless {

@@ -73,7 +73,9 @@ static TEST_STORAGE: LazyLock<PathBuf> = LazyLock::new(|| {
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database is created");
             for key in ["build_consent_window_shown", "replay_consent_prompt_shown", "language_selection_shown"] {
-                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
             }
             wows_toolkit_config::queries::set_setting_raw(&pool, "check_for_updates", "false")
                 .await
@@ -116,9 +118,12 @@ fn start(window: Option<serde_json::Value>) -> TestWindow {
     let released = Arc::clone(&record);
     host.handle("window.released", move |_call| *released.released.lock().unwrap() += 1);
 
-    let mut app =
-        nsh_testing::Headless::start(nsh_engine::EngineConfig { ui_sets: registries(), host, ..nsh_engine::EngineConfig::new(bundle) })
-            .expect("the engine starts");
+    let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig {
+        ui_sets: registries(),
+        host,
+        ..nsh_engine::EngineConfig::new(bundle)
+    })
+    .expect("the engine starts");
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
 
     TestWindow { app, record, _guard: guard }

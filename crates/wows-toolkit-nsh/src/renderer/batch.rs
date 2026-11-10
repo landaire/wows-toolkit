@@ -94,20 +94,19 @@ pub fn start(
     std::thread::spawn(move || {
         // Nothing stops a batch once it is under way, as in the other apps.
         let cancel = AtomicBool::new(false);
-        let outcome =
-            playback::batch_export(paths, &game_data, &out_dir, &defaults, &cancel, |step: BatchStep| {
-                publish(|state| {
-                    state.text = Some(
-                        t!(
-                            "ui.replay.renderer.batch_progress",
-                            done = step.done + 1,
-                            total = step.total,
-                            replay = step.replay
-                        )
-                        .into_owned(),
-                    );
-                });
+        let outcome = playback::batch_export(paths, &game_data, &out_dir, &defaults, &cancel, |step: BatchStep| {
+            publish(|state| {
+                state.text = Some(
+                    t!(
+                        "ui.replay.renderer.batch_progress",
+                        done = step.done + 1,
+                        total = step.total,
+                        replay = step.replay
+                    )
+                    .into_owned(),
+                );
             });
+        });
         let (said, failed) = summary(&outcome, &out_dir, target);
         publish(|state| {
             state.running = false;
@@ -125,8 +124,12 @@ fn summary(outcome: &BatchOutcome, out_dir: &Path, target: BatchTarget) -> (Stri
         return match crate::clipboard::copy_files(&outcome.written) {
             Ok(()) => (t!("ui.replay.renderer.batch_copied", written = written).into_owned(), failed > 0),
             Err(err) => (
-                t!("ui.replay.renderer.batch_not_copied", dir = out_dir.display().to_string(), reason = err.to_string())
-                    .into_owned(),
+                t!(
+                    "ui.replay.renderer.batch_not_copied",
+                    dir = out_dir.display().to_string(),
+                    reason = err.to_string()
+                )
+                .into_owned(),
                 true,
             ),
         };

@@ -192,8 +192,7 @@ impl StatsChartPanel {
             view: self.model.view(),
         };
 
-        let rendered =
-            plot_image::render(&plot, plot::colors(cx), plot_image::COPY_BACKGROUND, width, height, 1.0);
+        let rendered = plot_image::render(&plot, plot::colors(cx), plot_image::COPY_BACKGROUND, width, height, 1.0);
         let Some(mut image) = rendered else {
             crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
             return;

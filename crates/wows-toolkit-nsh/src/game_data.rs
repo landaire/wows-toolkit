@@ -622,10 +622,9 @@ fn startup_work() {
     }
 
     let rating = match job_runtime() {
-        Ok(runtime) => runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(
-            USER_AGENT,
-            proxy.as_deref(),
-        )),
+        Ok(runtime) => {
+            runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(USER_AGENT, proxy.as_deref()))
+        }
         Err(error) => {
             log::warn!("personal rating: {}", crate::shell::chain(&error));
             None

@@ -174,8 +174,16 @@ impl Chart {
             }
         }
 
-        let producer = Producer { model: Arc::clone(&model), surface: shown, size: None, drag: None, pinch: None, moved: moved_sender };
-        let spawned = std::thread::Builder::new().name(surface.as_str().to_owned()).spawn(move || producer.run(&receiver));
+        let producer = Producer {
+            model: Arc::clone(&model),
+            surface: shown,
+            size: None,
+            drag: None,
+            pinch: None,
+            moved: moved_sender,
+        };
+        let spawned =
+            std::thread::Builder::new().name(surface.as_str().to_owned()).spawn(move || producer.run(&receiver));
         if let Err(error) = spawned {
             log::warn!("stats: chart {} is not drawn: {error}", surface.as_str());
         }
@@ -276,7 +284,11 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
         stats: model
             .selectable_stats()
             .into_iter()
-            .map(|stat| StatOption { stat: StatChoice::from_stat(stat), label: stat.label(), selected: stat == model.stat() })
+            .map(|stat| StatOption {
+                stat: StatChoice::from_stat(stat),
+                label: stat.label(),
+                selected: stat == model.stat(),
+            })
             .collect(),
         running: model.running() || model.combined(),
         combined: model.combined(),
@@ -454,7 +466,10 @@ impl Producer {
                 self.pinch = None;
                 false
             }
-            SurfaceInput::PointerDown { .. } | SurfaceInput::PointerUp { .. } | SurfaceInput::Key { .. } | SurfaceInput::Focus { .. } => false,
+            SurfaceInput::PointerDown { .. }
+            | SurfaceInput::PointerUp { .. }
+            | SurfaceInput::Key { .. }
+            | SurfaceInput::Focus { .. } => false,
         }
     }
 
@@ -564,16 +579,31 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
 
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: frames::ScaleFactor::new(2.0) });
+        surface.send_input(SurfaceInput::Resized {
+            size: PixelSize { width: 640, height: 400 },
+            scale: frames::ScaleFactor::new(2.0),
+        });
         let first = wait_for_frame(&surface, None);
         assert_eq!(first.size, PixelSize { width: 640, height: 400 });
-        assert!(first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
+        assert!(
+            first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]),
+            "the plot marks the frame"
+        );
 
         let mut moved = chart.view_moved();
         let modifiers = Modifiers::default();
-        surface.send_input(SurfaceInput::PointerDown { at: PixelPoint { x: 200.0, y: 200.0 }, button: PointerButton::Primary, clicks: 1, modifiers });
+        surface.send_input(SurfaceInput::PointerDown {
+            at: PixelPoint { x: 200.0, y: 200.0 },
+            button: PointerButton::Primary,
+            clicks: 1,
+            modifiers,
+        });
         surface.send_input(SurfaceInput::PointerMoved { at: PixelPoint { x: 260.0, y: 220.0 }, modifiers });
-        surface.send_input(SurfaceInput::PointerUp { at: PixelPoint { x: 260.0, y: 220.0 }, button: PointerButton::Primary, modifiers });
+        surface.send_input(SurfaceInput::PointerUp {
+            at: PixelPoint { x: 260.0, y: 220.0 },
+            button: PointerButton::Primary,
+            modifiers,
+        });
         let panned = wait_for_frame(&surface, Some(Arc::clone(&first)));
         assert_ne!(panned.pixels, first.pixels, "the panned plot draws differently");
         tokio::runtime::Builder::new_current_thread().build().expect("a runtime").block_on(async {
@@ -582,7 +612,12 @@ mod tests {
         let view = chart.read(ChartModel::view);
         assert_eq!(view.pan, PlotPoint::new(30.0, 10.0), "device pixels pan by logical pixels");
 
-        surface.send_input(SurfaceInput::PointerDown { at: PixelPoint { x: 10.0, y: 10.0 }, button: PointerButton::Primary, clicks: 2, modifiers });
+        surface.send_input(SurfaceInput::PointerDown {
+            at: PixelPoint { x: 10.0, y: 10.0 },
+            button: PointerButton::Primary,
+            clicks: 2,
+            modifiers,
+        });
         tokio::runtime::Builder::new_current_thread().build().expect("a runtime").block_on(async {
             moved.wait_for(|moved| !*moved).await.expect("a double click resets the view");
         });
@@ -596,7 +631,10 @@ mod tests {
         let id = SurfaceId::new("stats-test-chart-bars");
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 300, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
+        surface.send_input(SurfaceInput::Resized {
+            size: PixelSize { width: 300, height: 200 },
+            scale: frames::ScaleFactor::new(1.0),
+        });
         wait_for_frame(&surface, None);
 
         surface.send_input(SurfaceInput::Wheel {
@@ -619,7 +657,10 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         assert!(matches!(chart.image(), Err(ChartImageError::NotShown)));
 
-        frames::surface(&id).send_input(SurfaceInput::Resized { size: PixelSize { width: 320, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
+        frames::surface(&id).send_input(SurfaceInput::Resized {
+            size: PixelSize { width: 320, height: 200 },
+            scale: frames::ScaleFactor::new(1.0),
+        });
         let url = chart.image().expect("a shown chart copies");
 
         let encoded = url.strip_prefix("data:image/png;base64,").expect("a PNG data URL");

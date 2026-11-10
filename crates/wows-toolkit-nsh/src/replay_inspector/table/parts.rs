@@ -30,9 +30,7 @@ pub fn tip_lines(content: &str) -> AnyElement {
             content
                 .split('\n')
                 .map(|line| {
-                    text(line.to_owned())
-                        .app_class(class("font-mono text-xs text-popover-foreground"))
-                        .into_element()
+                    text(line.to_owned()).app_class(class("font-mono text-xs text-popover-foreground")).into_element()
                 })
                 .collect::<Vec<_>>(),
         )

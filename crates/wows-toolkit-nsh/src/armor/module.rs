@@ -421,10 +421,7 @@ impl Armor {
 
     /// Where the legend was dragged to.
     pub async fn move_legend(x: f32, y: f32) -> Result<(), ArmorError> {
-        change(move |state| {
-            state.set_legend(|legend| legend.position = LegendPosition { x, y })
-        })
-        .await
+        change(move |state| state.set_legend(|legend| legend.position = LegendPosition { x, y })).await
     }
 
     pub async fn set_plate_edges(on: bool) -> Result<(), ArmorError> {

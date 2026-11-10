@@ -885,12 +885,10 @@ impl SearchView {
             let _guard = write_lock.lock().await;
             let written = runtime::spawn(cx, async move {
                 let key = field.key();
-                let stored = wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(
-                    &pool,
-                    SEARCH_SETTINGS_KEY,
-                )
-                .await
-                .map_err(|error| format!("Could not read Search settings before saving {key}: {error}"))?;
+                let stored =
+                    wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY)
+                        .await
+                        .map_err(|error| format!("Could not read Search settings before saving {key}: {error}"))?;
                 let stored = search_settings::with_field(stored, field, value)
                     .map_err(|error| format!("{error}; {key} was not saved"))?;
                 let json = stored.to_string();
@@ -1085,8 +1083,7 @@ impl SearchView {
         self._value_lookup = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(VALUE_DEBOUNCE).await;
             let asked = request.clone();
-            let found =
-                runtime::spawn(cx, async move { search_results::look_up_values(&pool, &asked).await }).await;
+            let found = runtime::spawn(cx, async move { search_results::look_up_values(&pool, &asked).await }).await;
             let _ = this.update(cx, |this, cx| {
                 // The caret has moved on to another field since.
                 if this.value_request.as_ref() != Some(&request) {

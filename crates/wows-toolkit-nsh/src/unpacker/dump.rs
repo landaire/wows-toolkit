@@ -48,20 +48,27 @@ pub fn dump_menu(tab: Tab) -> AnyElement {
             .child(text(label).app_class(class("text-xs text-popover-foreground")))
             .into_element()
     };
-    let heading = |label: String| text(label).app_class(class("px-2 pt-1 text-xs font-semibold text-popover-foreground"));
+    let heading =
+        |label: String| text(label).app_class(class("px-2 pt-1 text-xs font-semibold text-popover-foreground"));
 
     let mut items = vec![heading(tab.text("ui.unpacker.whole_tree")).into_element()];
     items.extend(GameParamsFormat::ALL.into_iter().map(|format| item(format, false)));
     items.push(heading(tab.text("ui.unpacker.base_only")).into_element());
     // The base-entry cut only applies to the raw tree.
-    items.extend(GameParamsFormat::ALL.into_iter().filter(|format| !format.is_minimal()).map(|format| item(format, true)));
+    items.extend(
+        GameParamsFormat::ALL.into_iter().filter(|format| !format.is_minimal()).map(|format| item(format, true)),
+    );
 
     menu()
         .trigger(
             button(tab.text("ui.unpacker.dump_parameters"), ButtonStyle::Secondary)
                 .disabled(move || !loaded())
                 .tooltip(tip(move || {
-                    if loaded() { tab.text("ui.unpacker.dump_parameters_tooltip") } else { tab.text("ui.unpacker.load_a_build") }
+                    if loaded() {
+                        tab.text("ui.unpacker.dump_parameters_tooltip")
+                    } else {
+                        tab.text("ui.unpacker.load_a_build")
+                    }
                 })),
         )
         .popup_class("min-w-52 p-1 gap-1 rounded-(--radius) border border-border bg-popover")

@@ -427,8 +427,7 @@ pub fn of(id: RendererId, surface: &str, viewer: &Viewer, revision: Revision) ->
         has_next_event: viewer.next_event().is_some(),
         export,
         export_failure: viewer.export_failure().map(ToString::to_string),
-        software_encode: !settings.prefer_cpu
-            && playback::must_use_cpu(&settings, playback::encoder_status()),
+        software_encode: !settings.prefer_cpu && playback::must_use_cpu(&settings, playback::encoder_status()),
         ctrl_held: viewer.ctrl_held(),
         // A reading is only taken over a sized view.
         reading: viewer.reading().zip(viewer.viewport()).map(|(reading, view)| ReadingView {
@@ -577,7 +576,11 @@ pub fn ship_menu(viewer: &Viewer, menu: &ShipMenu) -> ShipMenuView {
         (RendererRange::Hydro, "ui.renderer.context.hydro"),
     ]
     .into_iter()
-    .map(|(range, label)| RangeSwitchView { range, label: t!(label).into_owned(), on: *range_switch(&mut filter, range) })
+    .map(|(range, label)| RangeSwitchView {
+        range,
+        label: t!(label).into_owned(),
+        on: *range_switch(&mut filter, range),
+    })
     .collect();
 
     ShipMenuView {

@@ -489,8 +489,12 @@ fn paint_legend(plot: &Plot<'_>, bounds: PlotRect, width: f32, color: PlotColor,
     }
 
     let right = bounds.right() - RIGHT_GUTTER;
-    let column =
-        PlotRect::new(right - width, bounds.origin.y + TOP_GUTTER, width, (bounds.height - (TOP_GUTTER + BOTTOM_GUTTER)).max(0.0));
+    let column = PlotRect::new(
+        right - width,
+        bounds.origin.y + TOP_GUTTER,
+        width,
+        (bounds.height - (TOP_GUTTER + BOTTOM_GUTTER)).max(0.0),
+    );
     let rows = (column.height / LEGEND_ROW).floor() as usize;
     let show_more = plot.series.len() > rows && rows > 0;
     let visible = if show_more { rows.saturating_sub(1) } else { rows };

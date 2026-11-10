@@ -444,7 +444,8 @@ async fn save_path(dialog: SaveDialog) -> Result<Option<PathBuf>, InspectorError
 /// Reads the replay row, applies `edit` and writes it back, ordered with the
 /// Settings tab's writes of the same row.
 async fn edit_replay_row(edit: impl FnOnce(&mut ReplaySettings) + Send + 'static) -> Result<(), InspectorError> {
-    let written = nsh_core::prelude::background(crate::shell::update_replay_settings(edit)).await.map_err(task_failed)??;
+    let written =
+        nsh_core::prelude::background(crate::shell::update_replay_settings(edit)).await.map_err(task_failed)??;
     remember_row(written);
 
     Ok(())

@@ -1304,9 +1304,8 @@ pub fn parse_replay_with_alts(
 pub fn check_alt(primary: &Path, alt: &Path, game_data: &GameDataCache) -> Result<(), ReplayLoadError> {
     // The message reaches a toast, so it is the error's own sentence rather
     // than the rootcause dump the panel's failed state prints.
-    let read = |path: &Path| {
-        ReplayFile::from_file(path).map_err(|report| ReplayLoadError::CheckUnreadable(Arc::new(report)))
-    };
+    let read =
+        |path: &Path| ReplayFile::from_file(path).map_err(|report| ReplayLoadError::CheckUnreadable(Arc::new(report)));
     let primary_file = read(primary)?;
     let alt_file = read(alt)?;
 

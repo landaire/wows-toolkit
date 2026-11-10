@@ -61,16 +61,28 @@ pub enum SessionNotice {
     HostingStarted,
     /// This app has joined someone else's session.
     Connected,
-    UserJoined { name: String },
-    UserLeft { name: String },
-    UserTimedOut { name: String },
+    UserJoined {
+        name: String,
+    },
+    UserLeft {
+        name: String,
+    },
+    UserTimedOut {
+        name: String,
+    },
     /// The host opened a replay.
-    ReplayOpened { replay_name: String },
+    ReplayOpened {
+        replay_name: String,
+    },
     /// The host closed a replay.
     ReplayClosed,
     Ended,
-    Failed { reason: String },
-    Rejected { reason: String },
+    Failed {
+        reason: String,
+    },
+    Rejected {
+        reason: String,
+    },
 }
 
 impl SessionNotice {
@@ -252,12 +264,7 @@ impl SessionController {
         // Only a host or a co-host has a mesh to send frames into.
         let frames = self.may_steer().then(|| handle.frame_tx.clone());
 
-        CollabLink::connected(
-            Arc::clone(&self.state),
-            handle.local_tx.clone(),
-            frames,
-            handle.command_tx.clone(),
-        )
+        CollabLink::connected(Arc::clone(&self.state), handle.local_tx.clone(), frames, handle.command_tx.clone())
     }
 
     /// Starts hosting on `runtime`.

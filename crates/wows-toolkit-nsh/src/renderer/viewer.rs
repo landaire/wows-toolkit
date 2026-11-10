@@ -31,8 +31,8 @@ use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
-use wows_replays::types::GameParamId;
 use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::minimap::MapOrigin;
 use wows_toolkit_replay_data::minimap::ReplayRenderer;
 use wows_toolkit_replay_data::minimap::SharedPreviewRenderer;
@@ -900,11 +900,8 @@ impl Viewer {
         // at once.
         let renderer = self.renderer.take()?;
         self.export_failure = None;
-        self.export = Some(ExportProgress {
-            done: 0,
-            total: frames.len() as u64,
-            stage: playback::ExportStage::Encoding,
-        });
+        self.export =
+            Some(ExportProgress { done: 0, total: frames.len() as u64, stage: playback::ExportStage::Encoding });
         self.playing = false;
         self.changed = true;
 
@@ -1139,7 +1136,10 @@ impl Viewer {
                 let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
                 let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
                 let mut turned = before;
-                wt_collab_client::drawing::rotate_annotation(&mut turned, wt_collab_client::drawing::bearing(middle, to_collab(point)));
+                wt_collab_client::drawing::rotate_annotation(
+                    &mut turned,
+                    wt_collab_client::drawing::bearing(middle, to_collab(point)),
+                );
                 self.collab.update_annotation(index, turned);
                 self.touch();
             }

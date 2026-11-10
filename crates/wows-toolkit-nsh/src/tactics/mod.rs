@@ -66,7 +66,9 @@ fn follow_session() {
         }
     };
     let task = runtime.spawn(shared.follow_links(links));
-    if let Some(previous) = SESSION_FOLLOWER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).replace(task.abort_handle()) {
+    if let Some(previous) =
+        SESSION_FOLLOWER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).replace(task.abort_handle())
+    {
         previous.abort();
     }
 }

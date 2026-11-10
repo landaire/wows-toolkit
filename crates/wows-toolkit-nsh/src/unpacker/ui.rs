@@ -62,9 +62,7 @@ pub fn text_field(value: Signal<String>, placeholder: String, label: String) -> 
         .value(move || value.get())
         .placeholder(placeholder)
         .on_change(move |text: &str| value.set(text.to_owned()))
-        .app_class(class(
-            "min-h-7 px-2 rounded-(--radius) border border-input bg-background text-xs text-foreground",
-        ))
+        .app_class(class("min-h-7 px-2 rounded-(--radius) border border-input bg-background text-xs text-foreground"))
 }
 
 /// Dim secondary text.

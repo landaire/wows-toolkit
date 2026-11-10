@@ -167,7 +167,13 @@ fn draw_handle(canvas: &mut Pixmap, handle: TurnHandle, scale: ScaleFactor) {
     stem.move_to(handle.center.x, handle.center.y);
     stem.line_to(handle.anchor.x, handle.anchor.y);
     if let Some(stem) = stem.finish() {
-        canvas.stroke_path(&stem, &paint, &Stroke { width: scale.max(1.0), ..Stroke::default() }, Transform::identity(), None);
+        canvas.stroke_path(
+            &stem,
+            &paint,
+            &Stroke { width: scale.max(1.0), ..Stroke::default() },
+            Transform::identity(),
+            None,
+        );
     }
 
     if let Some(dot) = PathBuilder::from_circle(handle.center.x, handle.center.y, HANDLE_RADIUS * scale) {

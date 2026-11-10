@@ -155,7 +155,10 @@ pub enum PaneState {
 pub enum Rows {
     /// The selected directory's own entries.
     Directory(Vec<ListingEntry>),
-    Filtered { files: Arc<FileList>, matches: Vec<FileIndex> },
+    Filtered {
+        files: Arc<FileList>,
+        matches: Vec<FileIndex>,
+    },
 }
 
 impl Rows {
@@ -268,7 +271,10 @@ pub fn ancestors(dir: &str) -> Vec<String> {
 /// extensions the egui and GPUI listings offer "View Contents" for.
 pub fn is_viewable(label: &str) -> bool {
     extension(label).is_some_and(|extension| {
-        matches!(extension.as_str(), "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg")
+        matches!(
+            extension.as_str(),
+            "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg"
+        )
     })
 }
 

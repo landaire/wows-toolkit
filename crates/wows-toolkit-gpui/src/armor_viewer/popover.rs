@@ -59,11 +59,13 @@ use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
+use super::viewport_view::ViewportView;
+use crate::armor_viewer::analysis;
+use crate::armor_viewer::pane::ArmorViewerPane;
 use wows_toolkit_armor::scene::ArmorScene;
 use wows_toolkit_armor::scene::CameraRingSettings;
 use wows_toolkit_armor::scene::PerspectiveSettings;
 use wows_toolkit_armor::scene::TrajectoryState;
-use super::viewport_view::ViewportView;
 use wows_toolkit_armor::visibility::PartKey;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_armor::visibility::TriState;
@@ -74,8 +76,6 @@ use wows_toolkit_armor::visibility::part_on;
 use wows_toolkit_armor::visibility::plate_explicitly_hidden;
 use wows_toolkit_armor::visibility::zone_all_on;
 use wows_toolkit_armor::visibility::zone_any_on;
-use crate::armor_viewer::analysis;
-use crate::armor_viewer::pane::ArmorViewerPane;
 use wowsunpack::game_params::types::Km;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
@@ -1745,7 +1745,11 @@ impl TreeNames {
     /// still loading.
     fn part(&self, key: &str) -> String {
         match &self.bundle {
-            Some(bundle) => wows_toolkit_viewmodel::ship_catalog::translate_material_key(bundle.assets.metadata(), key, self.species),
+            Some(bundle) => wows_toolkit_viewmodel::ship_catalog::translate_material_key(
+                bundle.assets.metadata(),
+                key,
+                self.species,
+            ),
             None => key.to_owned(),
         }
     }

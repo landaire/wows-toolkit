@@ -110,14 +110,24 @@ fn roster(track: &Track, at: FrameIndex) -> Vec<&RosterRow> {
 
 /// Which ship `entity` was in and what it is called, read off the roster the
 /// frame carries: a ship command says who is in it but not which ship it is.
-fn armor_target(track: &Track, at: FrameIndex, entity: EntityId, loaded: Option<&LoadedGameData>) -> Option<ArmorTarget> {
+fn armor_target(
+    track: &Track,
+    at: FrameIndex,
+    entity: EntityId,
+    loaded: Option<&LoadedGameData>,
+) -> Option<ArmorTarget> {
     let param_id = roster(track, at).into_iter().find(|row| row.entity_id == entity)?.ship_param_id?;
     let param = loaded?.provider().game_param_by_id(param_id)?;
     Some(ArmorTarget { param_index: param.index().to_string(), display_name: param.name().to_string() })
 }
 
 /// Who was shooting at `victim`, and which shells are main battery ones.
-fn incoming_context(track: &Track, at: FrameIndex, victim: EntityId, loaded: Option<&LoadedGameData>) -> IncomingContext {
+fn incoming_context(
+    track: &Track,
+    at: FrameIndex,
+    victim: EntityId,
+    loaded: Option<&LoadedGameData>,
+) -> IncomingContext {
     let mut context = IncomingContext::default();
     let rows = roster(track, at);
     let Some(victim_team) = rows.iter().find(|row| row.entity_id == victim).map(|row| row.team_id) else {

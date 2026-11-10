@@ -165,19 +165,47 @@ pub enum PointerButton {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceInput {
     /// The view's size changed.
-    Resized { size: PixelSize, scale: ScaleFactor },
-    PointerDown { at: PixelPoint, button: PointerButton, clicks: u32, modifiers: Modifiers },
-    PointerUp { at: PixelPoint, button: PointerButton, modifiers: Modifiers },
-    PointerMoved { at: PixelPoint, modifiers: Modifiers },
+    Resized {
+        size: PixelSize,
+        scale: ScaleFactor,
+    },
+    PointerDown {
+        at: PixelPoint,
+        button: PointerButton,
+        clicks: u32,
+        modifiers: Modifiers,
+    },
+    PointerUp {
+        at: PixelPoint,
+        button: PointerButton,
+        modifiers: Modifiers,
+    },
+    PointerMoved {
+        at: PixelPoint,
+        modifiers: Modifiers,
+    },
     PointerLeft,
     /// Wheel or touchpad scroll (positive `dy`: down).
-    Wheel { at: Option<PixelPoint>, dx: ScrollSteps, dy: ScrollSteps, modifiers: Modifiers },
+    Wheel {
+        at: Option<PixelPoint>,
+        dx: ScrollSteps,
+        dy: ScrollSteps,
+        modifiers: Modifiers,
+    },
     /// Touchpad pinch.
-    Pinch { scale: PinchScale },
+    Pinch {
+        scale: PinchScale,
+    },
     /// A key went down or up while the view had focus. `key` is the GDK key
     /// name (`"w"`, `"Left"`, `"space"`).
-    Key { key: String, pressed: bool, modifiers: Modifiers },
-    Focus { focused: bool },
+    Key {
+        key: String,
+        pressed: bool,
+        modifiers: Modifiers,
+    },
+    Focus {
+        focused: bool,
+    },
 }
 
 /// A producer's frames and the input of the view showing them.

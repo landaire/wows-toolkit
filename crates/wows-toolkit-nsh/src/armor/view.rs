@@ -631,9 +631,9 @@ fn pane_view(pane: &Pane, index: usize, active: bool) -> PaneView {
         PaneLoad::Idle | PaneLoad::Failed { .. } => None,
     };
     let load_error = match &pane.load {
-        PaneLoad::Failed { display_name, error } => Some(
-            t!("ui.armor.ship_load_failed", ship = display_name.clone(), reason = error.to_string()).into_owned(),
-        ),
+        PaneLoad::Failed { display_name, error } => {
+            Some(t!("ui.armor.ship_load_failed", ship = display_name.clone(), reason = error.to_string()).into_owned())
+        }
         PaneLoad::Idle | PaneLoad::Loading { .. } => None,
     };
     let hits = scene.hits_drawn();

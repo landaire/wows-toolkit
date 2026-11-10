@@ -38,8 +38,7 @@ pub struct ClanInputs {
 
 /// Runs `work` against the shared database.
 pub fn run<T>(work: impl AsyncFnOnce(&SqlitePool) -> Result<T, TrackerError>) -> Result<T, TrackerError> {
-    let runtime =
-        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(TrackerError::Runtime)?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(TrackerError::Runtime)?;
 
     runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(TrackerError::Open)?;
@@ -136,5 +135,8 @@ pub async fn chat_observations(
         query::observations_in_window(pool, start.as_second(), end.as_second()).await.map_err(TrackerError::Index)?;
 
     // Every row lies between two valid timestamps, so none is dropped here.
-    Ok(rows.into_iter().filter_map(|(login, seen_at)| Timestamp::from_second(seen_at).ok().map(|at| (login, at))).collect())
+    Ok(rows
+        .into_iter()
+        .filter_map(|(login, seen_at)| Timestamp::from_second(seen_at).ok().map(|at| (login, at)))
+        .collect())
 }

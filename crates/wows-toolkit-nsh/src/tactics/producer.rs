@@ -248,7 +248,9 @@ impl Shared {
 fn apply(board: &mut Board, input: SurfaceInput) {
     match input {
         SurfaceInput::Resized { size, scale } => board.resize(ViewSize { size, scale }),
-        SurfaceInput::PointerDown { at, button, clicks, modifiers } => board.pointer_down(at, button, clicks, modifiers),
+        SurfaceInput::PointerDown { at, button, clicks, modifiers } => {
+            board.pointer_down(at, button, clicks, modifiers)
+        }
         SurfaceInput::PointerUp { at, button, .. } => board.pointer_up(at, button),
         SurfaceInput::PointerMoved { at, .. } => board.pointer_moved(at),
         SurfaceInput::PointerLeft => board.pointer_left(),

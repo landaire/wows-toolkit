@@ -76,7 +76,8 @@ impl wows_toolkit_nsh::clipboard::FileClipboard for RecordingClipboard {
     }
 }
 
-static CLIPBOARD: RecordingClipboard = RecordingClipboard { copied: Mutex::new(Vec::new()), refuse: AtomicBool::new(false) };
+static CLIPBOARD: RecordingClipboard =
+    RecordingClipboard { copied: Mutex::new(Vec::new()), refuse: AtomicBool::new(false) };
 
 /// The app over an index holding one battle, with no saved Search state.
 fn app() -> TestApp {
@@ -312,12 +313,16 @@ fn a_pill_menu_negates_and_undo_restores() {
 
     app.right_click("id:search-pill-0").unwrap();
     app.choose_menu_item("Negate").unwrap();
-    app.wait_until("the negated pill", GONE, |screen| screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() != before)
-        .unwrap();
+    app.wait_until("the negated pill", GONE, |screen| {
+        screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() != before
+    })
+    .unwrap();
 
     app.press_key("mod+z").unwrap();
-    app.wait_until("the original pill", GONE, |screen| screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() == before)
-        .unwrap();
+    app.wait_until("the original pill", GONE, |screen| {
+        screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() == before
+    })
+    .unwrap();
 }
 
 #[test]
@@ -477,7 +482,9 @@ fn a_language_change_rewords_the_rows_on_screen() {
     tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
-            wows_toolkit_config::queries::set_setting_raw(&pool, "locale", r#""en""#).await.expect("the locale is reset");
+            wows_toolkit_config::queries::set_setting_raw(&pool, "locale", r#""en""#)
+                .await
+                .expect("the locale is reset");
         },
     );
 }

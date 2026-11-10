@@ -489,8 +489,8 @@ mod tests {
 
         let mut selected = Selection::default();
         selected.set_many(paths.clone());
-        let none = apply_structural_edit(&expr, &paths[0], StructuralEdit::Delete, &selected)
-            .expect("delete edits the query");
+        let none =
+            apply_structural_edit(&expr, &paths[0], StructuralEdit::Delete, &selected).expect("delete edits the query");
         assert_eq!(query_text::print_query(&none), "");
     }
 

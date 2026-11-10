@@ -104,11 +104,11 @@ use wowsunpack::game_params::types::Species;
 
 use crate::replay_inspector::IconCache;
 use crate::replay_inspector::columns::player_color_kind_rgb;
-use wows_toolkit_replay_data::cells::ColorRole;
-use wows_toolkit_replay_data::cells::PlayerColorKind;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
+use wows_toolkit_replay_data::cells::ColorRole;
+use wows_toolkit_replay_data::cells::PlayerColorKind;
 use wows_toolkit_replay_data::error::StatsError;
 use wows_toolkit_replay_data::live_match;
 use wows_toolkit_replay_data::load::GameDataCache;
@@ -2981,8 +2981,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
-            .expect("the arena info is writable");
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES).expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_some()
@@ -3402,10 +3401,10 @@ mod tests {
     fn the_stats_lookup_waits_for_the_current_match_section(cx: &mut TestAppContext) {
         use super::HeldLookup;
         use super::StatsState;
-        use wows_toolkit_replay_data::error::StatsError;
         use std::time::Instant;
         use wows_replays::analyzer::arena_scan::ArenaState;
         use wows_replays::types::ArenaId;
+        use wows_toolkit_replay_data::error::StatsError;
         use wows_toolkit_viewmodel::match_stats::MatchStatsError;
         use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 

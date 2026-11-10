@@ -97,9 +97,8 @@ impl ShipRow {
     /// reading (`X`, `Battleship`).
     pub fn new(param_index: String, display_name: String, tier: &str, class: &str, nation: &str) -> Self {
         let search_name = normalize_ship_search(&display_name);
-        let label =
-            t!("ui.palette.armor_ship_row", name = display_name, tier = tier, class = class, nation = nation)
-                .into_owned();
+        let label = t!("ui.palette.armor_ship_row", name = display_name, tier = tier, class = class, nation = nation)
+            .into_owned();
 
         Self { param_index, display_name, search_name, label }
     }
@@ -171,7 +170,11 @@ pub async fn index_rows(
             Ok(found
                 .into_iter()
                 .map(|ship| IndexRow {
-                    label: format!("{} -- {}", ship.ship_name, t!("ui.palette.matches_found", count = ship.match_count)),
+                    label: format!(
+                        "{} -- {}",
+                        ship.ship_name,
+                        t!("ui.palette.matches_found", count = ship.match_count)
+                    ),
                     query: query_text::print_query(&seed::my_matches_in_ship(ship.ship_id)),
                 })
                 .collect())

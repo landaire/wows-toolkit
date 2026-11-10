@@ -259,11 +259,19 @@ pub(crate) fn snapshot(
     }
 }
 
-fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Option<&GameArt>, locale: &str) -> OverviewSnapshot {
+fn overview(
+    games: &[&PerGameStat],
+    table: Option<&PersonalRatingData>,
+    art: Option<&GameArt>,
+    locale: &str,
+) -> OverviewSnapshot {
     let summary = SessionSummary::from_games(games);
     let ships = per_ship_performance_by_id(games);
     let ship_name = |ship: GameParamId| {
-        games.iter().find(|game| game.ship_id == ship).map_or_else(|| ship.raw().to_string(), |game| game.ship_name.clone())
+        games
+            .iter()
+            .find(|game| game.ship_id == ship)
+            .map_or_else(|| ship.raw().to_string(), |game| game.ship_name.clone())
     };
 
     let record = match summary.win_rate() {
@@ -277,7 +285,9 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Opt
         .map(|achievement| {
             let tile = AchievementTile {
                 id: ParamIdText::from_id(achievement.game_param_id),
-                name: art.and_then(|art| art.achievement_name(&achievement.icon_key)).unwrap_or(achievement.display_name),
+                name: art
+                    .and_then(|art| art.achievement_name(&achievement.icon_key))
+                    .unwrap_or(achievement.display_name),
                 description: art
                     .and_then(|art| art.achievement_description(&achievement.icon_key))
                     .unwrap_or(achievement.description),
@@ -313,7 +323,9 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Opt
                     win_rate: info.win_rate().map_or_else(|| "-".to_owned(), |rate| format!("{rate:.1}%")),
                     average_damage: info.avg_damage().map_or_else(
                         || "-".to_owned(),
-                        |damage| wows_toolkit_viewmodel::formatting::separate_number(damage.round() as u64, Some(locale)),
+                        |damage| {
+                            wows_toolkit_viewmodel::formatting::separate_number(damage.round() as u64, Some(locale))
+                        },
                     ),
                     average_frags: info.avg_frags().map_or_else(|| "-".to_owned(), |frags| format!("{frags:.2}")),
                 })

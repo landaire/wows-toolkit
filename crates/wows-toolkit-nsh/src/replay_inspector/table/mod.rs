@@ -203,9 +203,7 @@ fn secondary(modifiers: &Modifiers) -> bool {
 impl Table {
     fn new(props: PlayerTableProps, cx: Scope<PlayerTableEvent>) -> Self {
         let debug = computed(move || props.debug.get());
-        let document = computed(move || {
-            document::get(props.document.get()?).map(DocHandle)
-        });
+        let document = computed(move || document::get(props.document.get()?).map(DocHandle));
         let columns = computed(move || {
             props
                 .columns
@@ -509,12 +507,10 @@ impl Table {
     }
 
     fn header(self) -> AnyElement {
-        let sticky = dynamic(move || {
-            self.sticky_columns().into_iter().map(|col| self.header_cell(col)).collect::<Vec<_>>()
-        });
-        let scrolling = dynamic(move || {
-            self.scroll_columns().into_iter().map(|col| self.header_cell(col)).collect::<Vec<_>>()
-        });
+        let sticky =
+            dynamic(move || self.sticky_columns().into_iter().map(|col| self.header_cell(col)).collect::<Vec<_>>());
+        let scrolling =
+            dynamic(move || self.scroll_columns().into_iter().map(|col| self.header_cell(col)).collect::<Vec<_>>());
 
         view()
             .app_class(class("flex-row flex-none w-full border-b border-border"))

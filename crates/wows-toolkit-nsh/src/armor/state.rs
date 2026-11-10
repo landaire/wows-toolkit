@@ -418,9 +418,13 @@ pub(super) fn drive(
         let scene = &mut state.panes[index].scene;
         let render = match view {
             Some(view) if !view.size.is_empty() => {
-                let size = wows_toolkit_armor::viewport::types::PixelSize { width: view.size.width, height: view.size.height };
+                let size =
+                    wows_toolkit_armor::viewport::types::PixelSize { width: view.size.width, height: view.size.height };
                 scene.render(size).map(|image| Render {
-                    readback: Readback { size: PixelSize { width: image.width, height: image.height }, pixels: image.pixels },
+                    readback: Readback {
+                        size: PixelSize { width: image.width, height: image.height },
+                        pixels: image.pixels,
+                    },
                     gizmo: scene.gizmo(),
                     scale: view.scale,
                 })

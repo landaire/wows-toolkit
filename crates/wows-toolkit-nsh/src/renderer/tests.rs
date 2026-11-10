@@ -120,8 +120,17 @@ fn the_wheel_zooms_about_the_pointer_and_a_double_click_puts_the_map_back() {
     assert!((after.x - under.x).abs() < 1.0 && (after.y - under.y).abs() < 1.0, "what was under the pointer stays");
 
     let click = |viewer: &mut Viewer, clicks: u32| {
-        viewer.apply(SurfaceInput::PointerDown { at: over_map, button: PointerButton::Primary, clicks, modifiers: Modifiers::default() });
-        viewer.apply(SurfaceInput::PointerUp { at: over_map, button: PointerButton::Primary, modifiers: Modifiers::default() });
+        viewer.apply(SurfaceInput::PointerDown {
+            at: over_map,
+            button: PointerButton::Primary,
+            clicks,
+            modifiers: Modifiers::default(),
+        });
+        viewer.apply(SurfaceInput::PointerUp {
+            at: over_map,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::default(),
+        });
     };
     click(&mut viewer, 1);
     assert!(!viewer.map_view().is_whole_map(), "a single click leaves the zoom");
@@ -137,9 +146,18 @@ fn a_drag_pans_a_zoomed_map_and_the_hud_strip_is_not_the_map() {
     viewer.set_zoom(4.0);
     let before = viewer.map_view().pan();
     let start = PixelPoint { x: 400.0, y: 400.0 };
-    viewer.apply(SurfaceInput::PointerDown { at: start, button: PointerButton::Primary, clicks: 1, modifiers: Modifiers::default() });
+    viewer.apply(SurfaceInput::PointerDown {
+        at: start,
+        button: PointerButton::Primary,
+        clicks: 1,
+        modifiers: Modifiers::default(),
+    });
     viewer.apply(SurfaceInput::PointerMoved { at: PixelPoint { x: 300.0, y: 350.0 }, modifiers: Modifiers::default() });
-    viewer.apply(SurfaceInput::PointerUp { at: PixelPoint { x: 300.0, y: 350.0 }, button: PointerButton::Primary, modifiers: Modifiers::default() });
+    viewer.apply(SurfaceInput::PointerUp {
+        at: PixelPoint { x: 300.0, y: 350.0 },
+        button: PointerButton::Primary,
+        modifiers: Modifiers::default(),
+    });
 
     let after = viewer.map_view().pan();
     assert!(after.0 > before.0 && after.1 > before.1, "the map follows the pointer: {before:?} -> {after:?}");

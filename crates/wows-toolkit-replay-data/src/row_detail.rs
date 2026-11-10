@@ -9,11 +9,11 @@ use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+use wows_toolkit_viewmodel::breakdown::BreakdownRow;
+use wows_toolkit_viewmodel::fire_chance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
-use wows_toolkit_viewmodel::breakdown::BreakdownRow;
-use wows_toolkit_viewmodel::fire_chance;
 
 use crate::cells::NDA;
 use crate::columns::ReplayColumn;
@@ -293,7 +293,10 @@ pub fn damage_target_rows(
             }
             let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
             let pct = interaction_percentage(interaction, direction, alt_held);
-            Some(BreakdownRow { label: other.ship_name.clone(), value: format!("{} ({pct:.0}%)", separate_number(amount)) })
+            Some(BreakdownRow {
+                label: other.ship_name.clone(),
+                value: format!("{} ({pct:.0}%)", separate_number(amount)),
+            })
         })
         .collect()
 }
@@ -326,9 +329,7 @@ pub fn expanded_detail_width(
         ReplayColumn::Name => name_section_width(row, debug, measure),
         ReplayColumn::Skills => build_section_width(row, debug, measure),
         ReplayColumn::ActualDamage => damage_section_width(row, all_rows, debug, DamageDirection::Dealt, measure),
-        ReplayColumn::ReceivedDamage => {
-            damage_section_width(row, all_rows, debug, DamageDirection::Received, measure)
-        }
+        ReplayColumn::ReceivedDamage => damage_section_width(row, all_rows, debug, DamageDirection::Received, measure),
         ReplayColumn::PotentialDamage => {
             nda_gated_breakdown_width(row.potential_damage_breakdown.as_deref(), row, debug, measure)
         }
@@ -447,8 +448,7 @@ fn fire_chance_width(row: &PlayerRow, debug: bool, measure: &mut impl TextMeasur
         return max_w.max(measure.width(NDA, TextWeight::Regular));
     }
     if fire_chance.eligible_hits == 0 {
-        return max_w
-            .max(measure.width(&t!("ui.replay.sections.fire_chance_no_eligible_hits"), TextWeight::Regular));
+        return max_w.max(measure.width(&t!("ui.replay.sections.fire_chance_no_eligible_hits"), TextWeight::Regular));
     }
 
     let counts =
@@ -463,10 +463,8 @@ fn fire_chance_width(row: &PlayerRow, debug: bool, measure: &mut impl TextMeasur
         max_w = max_w.max(measure.width(&line, TextWeight::Regular));
     }
 
-    let tallies = [
-        fire_chance::fire_chance_battle_tally_rows(fire_chance),
-        fire_chance::fire_chance_ribbon_rows(fire_chance),
-    ];
+    let tallies =
+        [fire_chance::fire_chance_battle_tally_rows(fire_chance), fire_chance::fire_chance_ribbon_rows(fire_chance)];
     for tally in tallies.iter().flatten() {
         let label = measure.width(&tally.label, TextWeight::Regular);
         let count = TALLY_COUNT_WIDTH * measure.text_scale();
@@ -787,7 +785,10 @@ mod tests {
     fn skill_grid_width_of_a_full_tier_far_exceeds_a_typical_collapsed_skills_width() {
         let collapsed_skills_column_width = 90.0;
         let width = skill_grid_width(&[skill_tier(7)], 4.0);
-        assert!(width > collapsed_skills_column_width, "grid width {width} should exceed {collapsed_skills_column_width}");
+        assert!(
+            width > collapsed_skills_column_width,
+            "grid width {width} should exceed {collapsed_skills_column_width}"
+        );
     }
 
     #[test]

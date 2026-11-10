@@ -118,7 +118,9 @@ impl RowLayout<'_> {
                 } else {
                     "bg-background"
                 };
-                Some(SharedString::from(format!("group relative flex-row w-full py-0.5 {align} {background} hover:bg-muted")))
+                Some(SharedString::from(format!(
+                    "group relative flex-row w-full py-0.5 {align} {background} hover:bg-muted"
+                )))
             })
             .on_press(move |press: &PressEvent| {
                 if secondary(&press.modifiers) {
@@ -162,10 +164,8 @@ impl RowLayout<'_> {
             _ => self.plain_cell(col, cell_value(self.row, col, self.debug)),
         };
 
-        let detail = self
-            .is_expanded
-            .then(|| detail::column_detail(table, col, self.row, self.debug, self.icons))
-            .flatten();
+        let detail =
+            self.is_expanded.then(|| detail::column_detail(table, col, self.row, self.debug, self.icons)).flatten();
         let cell = match detail {
             Some(detail) => view()
                 .app_class(class("flex-col flex-none gap-1 overflow-hidden"))
@@ -233,9 +233,9 @@ impl RowLayout<'_> {
                     icon.tooltip(tip(row.ship_species_text.clone())).into_element()
                 }
             }
-            None => text(row.ship_species_text.clone())
-                .app_class(class("flex-none text-xs text-foreground"))
-                .into_element(),
+            None => {
+                text(row.ship_species_text.clone()).app_class(class("flex-none text-xs text-foreground")).into_element()
+            }
         });
 
         if let Some(division) = row.division_label.as_ref() {
@@ -354,7 +354,10 @@ impl RowLayout<'_> {
             .w(move || Length::from(px(table.width(ReplayColumn::Skills))))
             .text_color(color)
             .children(
-                marks.into_iter().map(|mark| icon(mark, px(14.0)).app_class(class("flex-none")).into_element()).collect::<Vec<_>>(),
+                marks
+                    .into_iter()
+                    .map(|mark| icon(mark, px(14.0)).app_class(class("flex-none")).into_element())
+                    .collect::<Vec<_>>(),
             )
             .child(text(cell.text).app_class(class("text-sm truncate")).text_color(color));
         match cell.hover {

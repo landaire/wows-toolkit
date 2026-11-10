@@ -30,8 +30,9 @@ pub enum LayoutStoreError {
 /// Every recorded layout. A row that will not read is skipped and logged: the
 /// rest still offer their modes.
 pub async fn load_from_db(pool: &sqlx::SqlitePool) -> Result<CapLayoutDb, LayoutStoreError> {
-    let rows =
-        wows_toolkit_config::queries::get_all_cap_layouts(pool).await.map_err(|source| LayoutStoreError::Read { source })?;
+    let rows = wows_toolkit_config::queries::get_all_cap_layouts(pool)
+        .await
+        .map_err(|source| LayoutStoreError::Read { source })?;
 
     let mut db = CapLayoutDb::default();
     for (map_id, scenario_config_id, blob) in rows {
@@ -54,7 +55,8 @@ pub async fn load_from_db(pool: &sqlx::SqlitePool) -> Result<CapLayoutDb, Layout
 /// Writes one layout, leaving every other row as it is.
 pub async fn save_layout_to_db(pool: &sqlx::SqlitePool, layout: &CapLayout) -> Result<(), LayoutStoreError> {
     let map_id = layout.key.map_id;
-    let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|source| LayoutStoreError::Encode { map_id, source })?;
+    let blob =
+        rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|source| LayoutStoreError::Encode { map_id, source })?;
 
     wows_toolkit_config::queries::upsert_cap_layout(pool, map_id as i64, layout.key.scenario_config_id as i64, &blob)
         .await

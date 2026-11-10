@@ -156,13 +156,10 @@ impl QueueState {
         self.extract.with(|state| match state {
             ExtractState::Idle => None,
             ExtractState::Counting => Some(tab.text("ui.unpacker.counting_files")),
-            ExtractState::Running(progress) => Some(tab.text_with(
-                "ui.unpacker.extracting",
-                &[("done", &progress.written), ("total", &progress.total)],
-            )),
-            ExtractState::Failed(error) => {
-                Some(tab.text_with("ui.unpacker.extract_failed", &[("reason", &**error)]))
-            }
+            ExtractState::Running(progress) => Some(
+                tab.text_with("ui.unpacker.extracting", &[("done", &progress.written), ("total", &progress.total)]),
+            ),
+            ExtractState::Failed(error) => Some(tab.text_with("ui.unpacker.extract_failed", &[("reason", &**error)])),
             ExtractState::Done(ExtractOutcome::Completed { written }) => {
                 Some(tab.text_with("ui.unpacker.extracted", &[("count", written)]))
             }
@@ -283,16 +280,22 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
                         .on_press(move |_: &PressEvent| queue.browse(tab)),
                 ),
         )
-        .child(view().tooltip(tip(tab.text("ui.unpacker.decode_prototypes_tooltip"))).child(
-            checkbox()
-                .accessibility_label(tab.text("ui.unpacker.decode_prototypes"))
-                .checked(move || queue.prototypes.get() == PrototypeOutput::DecodeToJson)
-                .on_change(move |checked: &bool| {
-                    queue.prototypes.set(if *checked { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw });
-                })
-                .app_class(class("flex-row items-center gap-2"))
-                .child(text(tab.text("ui.unpacker.decode_prototypes")).app_class(class("text-xs text-foreground"))),
-        ));
+        .child(
+            view().tooltip(tip(tab.text("ui.unpacker.decode_prototypes_tooltip"))).child(
+                checkbox()
+                    .accessibility_label(tab.text("ui.unpacker.decode_prototypes"))
+                    .checked(move || queue.prototypes.get() == PrototypeOutput::DecodeToJson)
+                    .on_change(move |checked: &bool| {
+                        queue.prototypes.set(if *checked {
+                            PrototypeOutput::DecodeToJson
+                        } else {
+                            PrototypeOutput::Raw
+                        });
+                    })
+                    .app_class(class("flex-row items-center gap-2"))
+                    .child(text(tab.text("ui.unpacker.decode_prototypes")).app_class(class("text-xs text-foreground"))),
+            ),
+        );
 
     let summary = view()
         .app_class(class("flex-row items-center gap-1 px-2 py-1"))
@@ -308,7 +311,10 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
 
     let entries = view()
         .app_class(class("flex-1 min-h-0"))
-        .child(when(move || count() == 0, move || caption(tab.text("ui.unpacker.queue_empty")).app_class(class("p-2 text-xs text-muted-foreground"))))
+        .child(when(
+            move || count() == 0,
+            move || caption(tab.text("ui.unpacker.queue_empty")).app_class(class("p-2 text-xs text-muted-foreground")),
+        ))
         .child(when(
             move || count() > 0,
             move || {
@@ -359,7 +365,11 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
             view()
                 .app_class(class("h-4"))
                 // Idle: the line is blank but keeps its place.
-                .child(caption(move || queue.status(tab).unwrap_or_default()).accessible(true).role(AccessibilityRole::Alert)),
+                .child(
+                    caption(move || queue.status(tab).unwrap_or_default())
+                        .accessible(true)
+                        .role(AccessibilityRole::Alert),
+                ),
         )
         // Both slots are always there, empty while nothing is being
         // written, so a run starting does not push the queue down.
@@ -378,23 +388,19 @@ pub fn queue_view(queue: QueueState, tab: Tab) -> AnyElement {
                     .indicator_class("h-2 rounded-full bg-primary")
             },
         )))
-        .child(view().app_class(class("h-4")).child(
-            text(move || {
-                queue.extract.with(|state| match state {
-                    ExtractState::Running(progress) => progress.file.clone(),
-                    _ => String::new(),
+        .child(
+            view().app_class(class("h-4")).child(
+                text(move || {
+                    queue.extract.with(|state| match state {
+                        ExtractState::Running(progress) => progress.file.clone(),
+                        _ => String::new(),
+                    })
                 })
-            })
-            .app_class(class("text-xs text-muted-foreground truncate")),
-        ));
+                .app_class(class("text-xs text-muted-foreground truncate")),
+            ),
+        );
 
-    view()
-        .app_class(class("flex-1 min-h-0"))
-        .child(destination)
-        .child(summary)
-        .child(entries)
-        .child(run)
-        .into_element()
+    view().app_class(class("flex-1 min-h-0")).child(destination).child(summary).child(entries).child(run).into_element()
 }
 
 fn queue_row(queue: QueueState, tab: Tab, at: Position) -> AnyElement {

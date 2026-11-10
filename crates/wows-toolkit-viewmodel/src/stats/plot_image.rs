@@ -86,8 +86,12 @@ impl ImageCanvas {
     /// The current clip as a mask over the pixmap.
     fn clip_mask(&self) -> Option<tiny_skia::Mask> {
         let area = self.clip?;
-        let rect =
-            Rect::from_xywh(area.origin.x * self.scale, area.origin.y * self.scale, area.width * self.scale, area.height * self.scale)?;
+        let rect = Rect::from_xywh(
+            area.origin.x * self.scale,
+            area.origin.y * self.scale,
+            area.width * self.scale,
+            area.height * self.scale,
+        )?;
         let mut mask = tiny_skia::Mask::new(self.pixmap.width(), self.pixmap.height())?;
         let mut rect_path = PathBuilder::new();
         rect_path.push_rect(rect);
@@ -107,7 +111,12 @@ impl ImageCanvas {
         // ab_glyph positions from the baseline; the callers give a top edge.
         let baseline = origin.y * self.scale + device_size;
         let clip = self.clip.map(|clip| {
-            PlotRect::new(clip.origin.x * self.scale, clip.origin.y * self.scale, clip.width * self.scale, clip.height * self.scale)
+            PlotRect::new(
+                clip.origin.x * self.scale,
+                clip.origin.y * self.scale,
+                clip.width * self.scale,
+                clip.height * self.scale,
+            )
         });
 
         for ch in text.chars() {
@@ -128,7 +137,10 @@ impl ImageCanvas {
                         let px_x = bounds.min.x + x as f32;
                         let px_y = bounds.min.y + y as f32;
                         let inside = clip.is_none_or(|clip| {
-                            px_x >= clip.origin.x && px_x < clip.right() && px_y >= clip.origin.y && px_y < clip.bottom()
+                            px_x >= clip.origin.x
+                                && px_x < clip.right()
+                                && px_y >= clip.origin.y
+                                && px_y < clip.bottom()
                         });
                         if inside {
                             blend(&mut self.pixmap, px_x, px_y, color, coverage);
@@ -164,7 +176,13 @@ impl PlotCanvas for ImageCanvas {
             let mut path = PathBuilder::new();
             path.push_oval(rect);
             if let Some(path) = path.finish() {
-                self.pixmap.fill_path(&path, &solid(color), tiny_skia::FillRule::Winding, Transform::identity(), mask.as_ref());
+                self.pixmap.fill_path(
+                    &path,
+                    &solid(color),
+                    tiny_skia::FillRule::Winding,
+                    Transform::identity(),
+                    mask.as_ref(),
+                );
             }
             return;
         }
@@ -282,7 +300,10 @@ impl Faces {
     /// `id`'s bytes and face index, read out of the database once.
     fn bytes(&self, id: fontdb::ID) -> Option<FaceBytes> {
         let mut bytes = self.bytes.lock().expect("the face cache is only held to read or fill it");
-        bytes.entry(id).or_insert_with(|| self.db.with_face_data(id, |data, index| Arc::new((data.to_vec(), index)))).clone()
+        bytes
+            .entry(id)
+            .or_insert_with(|| self.db.with_face_data(id, |data, index| Arc::new((data.to_vec(), index))))
+            .clone()
     }
 
     /// The first face that can draw `ch`.
@@ -360,7 +381,9 @@ mod tests {
         vec![ChartSeries {
             name: "Yamato".to_string(),
             color: Rgb { r: 200, g: 80, b: 80 },
-            points: (0..5).map(|index| SeriesPoint { label: index.to_string(), value: index as f64 * 1000.0 }).collect(),
+            points: (0..5)
+                .map(|index| SeriesPoint { label: index.to_string(), value: index as f64 * 1000.0 })
+                .collect(),
         }]
     }
 

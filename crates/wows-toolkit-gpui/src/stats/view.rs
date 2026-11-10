@@ -501,8 +501,11 @@ impl StatsView {
                             this.add_chart_with(settings, window, cx);
                         }
                     } else {
-                        let saved_ids: Vec<_> =
-                            saved.iter().enumerate().map(|(index, settings)| settings.id.unwrap_or(ChartId(index))).collect();
+                        let saved_ids: Vec<_> = saved
+                            .iter()
+                            .enumerate()
+                            .map(|(index, settings)| settings.id.unwrap_or(ChartId(index)))
+                            .collect();
                         for (id, settings) in saved_ids.into_iter().zip(saved) {
                             if let Some(chart) = this.charts.iter().find(|chart| chart.read(cx).id() == id).cloned() {
                                 chart.update(cx, |panel, cx| panel.apply_settings(settings, cx));

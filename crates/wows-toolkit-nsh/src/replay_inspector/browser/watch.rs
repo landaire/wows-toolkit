@@ -92,7 +92,10 @@ mod tests {
         let replay = "replays/20260818_132652_PWSD610-Smaland.wowsreplay";
         let path = PathBuf::from(replay);
 
-        assert_eq!(changes(event(EventKind::Create(CreateKind::File), replay)), vec![DirChange::Appeared(path.clone())]);
+        assert_eq!(
+            changes(event(EventKind::Create(CreateKind::File), replay)),
+            vec![DirChange::Appeared(path.clone())]
+        );
         assert_eq!(
             changes(event(EventKind::Modify(ModifyKind::Name(RenameMode::To)), replay)),
             vec![DirChange::Appeared(path.clone())],

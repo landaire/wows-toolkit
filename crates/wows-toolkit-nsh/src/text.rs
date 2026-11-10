@@ -5,7 +5,8 @@ use std::sync::LazyLock;
 
 use rust_i18n::Backend as _;
 
-static CATALOG: LazyLock<wt_translations::TranslationsBackend> = LazyLock::new(wt_translations::TranslationsBackend::load);
+static CATALOG: LazyLock<wt_translations::TranslationsBackend> =
+    LazyLock::new(wt_translations::TranslationsBackend::load);
 
 /// The catalog's text for `key` in the selected locale, falling back to
 /// English as `rust_i18n::t!` does, and to the key itself when neither has

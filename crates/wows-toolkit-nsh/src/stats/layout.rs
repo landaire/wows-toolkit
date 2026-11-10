@@ -97,8 +97,7 @@ impl StatsPanel {
 /// The layout a tab opens with: Overview and Ships share the center, and
 /// each chart sits in the right dock.
 pub(crate) fn default_layout(charts: &[ChartId]) -> DockAreaLayout {
-    let center =
-        DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key()).active_index(0);
+    let center = DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key()).active_index(0);
     let mut layout = DockAreaLayout::new(DockLayout::h_split().child(center, None));
     for id in charts {
         layout = with_chart(layout, *id);
