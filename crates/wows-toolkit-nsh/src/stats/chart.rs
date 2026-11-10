@@ -30,6 +30,7 @@ use crate::frames::PixelSize;
 use crate::frames::PointerButton;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
 
 /// How much one wheel step zooms, as the GPUI chart zooms per scroll event.
 const WHEEL_ZOOM: f32 = 1.1;
@@ -206,14 +207,14 @@ impl Chart {
 
     /// The chart drawn at the size it shows at, as a PNG `data:` URL.
     pub(crate) fn image(&self) -> Result<String, ChartImageError> {
-        let Some((size, scale)) = frames::surface(&self.surface).view_size() else {
+        let Some(ViewSize { size, scale }) = frames::surface(&self.surface).view_size() else {
             return Err(ChartImageError::NotShown);
         };
         let palette = *PALETTE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let snapshot = self.read(PlotSnapshot::of).ok_or(ChartImageError::Empty)?;
         let (width, height, mut pixels) = snapshot
-            .render(palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale)
+            .render(palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale.get())
             .ok_or(ChartImageError::Empty)?;
         plot_image::unpremultiply(&mut pixels);
 
@@ -405,7 +406,7 @@ impl Producer {
 
         match input {
             SurfaceInput::Resized { size, scale } => {
-                self.size = Some((size, scale));
+                self.size = Some((size, scale.get()));
                 true
             }
             SurfaceInput::PointerDown { at, button: PointerButton::Primary, clicks, .. } => {
@@ -432,6 +433,7 @@ impl Producer {
                 false
             }
             SurfaceInput::Wheel { at, dy, .. } => {
+                let dy = dy.get();
                 if dy == 0.0 || !self.pannable() {
                     return false;
                 }
@@ -440,6 +442,7 @@ impl Producer {
                 self.change_view(|view| view.zoom_about(factor, cursor))
             }
             SurfaceInput::Pinch { scale: gesture } => {
+                let gesture = gesture.get();
                 if !self.pannable() {
                     return false;
                 }
@@ -565,7 +568,7 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
 
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: 2.0 });
+        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: frames::ScaleFactor::new(2.0) });
         let first = wait_for_frame(&surface, None);
         assert_eq!(first.size, PixelSize { width: 640, height: 400 });
         assert!(first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
@@ -597,10 +600,15 @@ mod tests {
         let id = SurfaceId::new("stats-test-chart-bars");
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 300, height: 200 }, scale: 1.0 });
+        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 300, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
         wait_for_frame(&surface, None);
 
-        surface.send_input(SurfaceInput::Wheel { at: Some(PixelPoint { x: 100.0, y: 100.0 }), dx: 0.0, dy: -1.0, modifiers: Modifiers::default() });
+        surface.send_input(SurfaceInput::Wheel {
+            at: Some(PixelPoint { x: 100.0, y: 100.0 }),
+            dx: frames::ScrollSteps::new(0.0),
+            dy: frames::ScrollSteps::new(-1.0),
+            modifiers: Modifiers::default(),
+        });
         chart.redraw();
         wait_for_frame(&surface, None);
 
@@ -615,7 +623,7 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         assert!(matches!(chart.image(), Err(ChartImageError::NotShown)));
 
-        frames::surface(&id).send_input(SurfaceInput::Resized { size: PixelSize { width: 320, height: 200 }, scale: 1.0 });
+        frames::surface(&id).send_input(SurfaceInput::Resized { size: PixelSize { width: 320, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
         let url = chart.image().expect("a shown chart copies");
 
         let encoded = url.strip_prefix("data:image/png;base64,").expect("a PNG data URL");
