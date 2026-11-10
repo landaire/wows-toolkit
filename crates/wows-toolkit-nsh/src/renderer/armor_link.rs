@@ -16,6 +16,8 @@ use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::playback::Track;
 use wowsunpack::game_params::types::GameParamProvider as _;
 
+use crate::renderer::ids::FrameIndex;
+
 /// What the viewer is asked to open on.
 pub struct RealtimeShow {
     pub param_index: String,
@@ -44,7 +46,7 @@ impl ArmorLink {
 
     /// Whether `entity` has anything a viewer could show: only a ship the
     /// battle recorded hits on, since the viewer's point is where they landed.
-    pub fn can_show(&self, track: &Track, at: usize, entity: EntityId, loaded: Option<&LoadedGameData>) -> bool {
+    pub fn can_show(&self, track: &Track, at: FrameIndex, entity: EntityId, loaded: Option<&LoadedGameData>) -> bool {
         self.shots.get(&entity).is_some_and(|timeline| !timeline.hits.is_empty())
             && armor_target(track, at, entity, loaded).is_some()
     }
@@ -53,13 +55,13 @@ impl ArmorLink {
     pub fn show(
         &mut self,
         track: &Track,
-        at: usize,
+        at: FrameIndex,
         entity: EntityId,
         loaded: Option<&LoadedGameData>,
     ) -> Option<RealtimeShow> {
-        let (param_index, display_name) = armor_target(track, at, entity, loaded)?;
+        let target = armor_target(track, at, entity, loaded)?;
         let timeline = self.shots.get(&entity)?.clone();
-        let clock = GameClock(track.seconds_at(at));
+        let clock = track.clock_at(at.get());
 
         let mut feed = RealtimeArmorFeed::new(timeline);
         feed.advance_to(clock);
@@ -72,7 +74,7 @@ impl ArmorLink {
         incoming.at = Some(clock);
         let hits = feed.taken().to_vec();
         self.following = Some((entity, feed));
-        Some(RealtimeShow { param_index, display_name, hits, incoming })
+        Some(RealtimeShow { param_index: target.param_index, display_name: target.display_name, hits, incoming })
     }
 
     /// What the followed ship had taken by `clock`, when that changed. Telling
@@ -88,8 +90,14 @@ impl ArmorLink {
     }
 }
 
-fn roster(track: &Track, at: usize) -> Vec<&RosterRow> {
-    let Some(commands) = track.frames.get(at) else { return Vec::new() };
+/// Which ship `ArmorLink::show` opens on.
+struct ArmorTarget {
+    param_index: String,
+    display_name: String,
+}
+
+fn roster(track: &Track, at: FrameIndex) -> Vec<&RosterRow> {
+    let Some(commands) = track.frames.get(at.get()) else { return Vec::new() };
     commands
         .iter()
         .filter_map(|command| match command {
@@ -102,14 +110,14 @@ fn roster(track: &Track, at: usize) -> Vec<&RosterRow> {
 
 /// Which ship `entity` was in and what it is called, read off the roster the
 /// frame carries: a ship command says who is in it but not which ship it is.
-fn armor_target(track: &Track, at: usize, entity: EntityId, loaded: Option<&LoadedGameData>) -> Option<(String, String)> {
+fn armor_target(track: &Track, at: FrameIndex, entity: EntityId, loaded: Option<&LoadedGameData>) -> Option<ArmorTarget> {
     let param_id = roster(track, at).into_iter().find(|row| row.entity_id == entity)?.ship_param_id?;
     let param = loaded?.provider().game_param_by_id(param_id)?;
-    Some((param.index().to_string(), param.name().to_string()))
+    Some(ArmorTarget { param_index: param.index().to_string(), display_name: param.name().to_string() })
 }
 
 /// Who was shooting at `victim`, and which shells are main battery ones.
-fn incoming_context(track: &Track, at: usize, victim: EntityId, loaded: Option<&LoadedGameData>) -> IncomingContext {
+fn incoming_context(track: &Track, at: FrameIndex, victim: EntityId, loaded: Option<&LoadedGameData>) -> IncomingContext {
     let mut context = IncomingContext::default();
     let rows = roster(track, at);
     let Some(victim_team) = rows.iter().find(|row| row.entity_id == victim).map(|row| row.team_id) else {

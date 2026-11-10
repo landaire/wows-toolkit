@@ -33,8 +33,11 @@ use crate::frames::FrameError;
 use crate::frames::PixelSize;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
-use crate::renderer::raster;
+use crate::frames::SurfaceInput;
 use crate::renderer::RendererError;
+use crate::renderer::ids::RendererId;
+use crate::renderer::ids::Revision;
+use crate::renderer::raster;
 
 /// How long a preview goes without a new frame before the bake behind it
 /// reads as stuck rather than busy. Comfortably longer than the gap between
@@ -52,10 +55,10 @@ const DWELL_STEP: Duration = Duration::from_millis(25);
 /// The preview, as the view shows it.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct PreviewView {
-    pub id: u32,
+    pub id: RendererId,
     pub surface: String,
     /// Changes whenever anything here does.
-    pub revision: u32,
+    pub revision: Revision,
     /// Whether a preview is on its way: the dwell is counting down or a bake
     /// runs. The map's space is held for the whole of it.
     pub expecting: bool,
@@ -76,9 +79,9 @@ struct Progress {
 
 /// One hover preview and the thread playing it.
 pub struct Preview {
-    id: u32,
+    id: RendererId,
     surface: Arc<Surface>,
-    progress: watch::Sender<(u32, Progress)>,
+    progress: watch::Sender<(Revision, Progress)>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -92,14 +95,30 @@ struct Baked {
     done: bool,
 }
 
+/// Which image a preview puts up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Still {
+    /// The map alone, before the track arrives.
+    Map,
+    /// Frame `index` of the track.
+    Frame(usize),
+}
+
+/// What the surface last showed, and at what size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Shown {
+    still: Still,
+    size: PixelSize,
+}
+
 impl Preview {
     /// Starts the preview of `path` on the surface named `name`.
-    pub fn open(id: u32, name: &str, path: PathBuf) -> Arc<Self> {
+    pub fn open(id: RendererId, name: &str, path: PathBuf) -> Arc<Self> {
         let surface = frames::surface(&SurfaceId::new(name));
         let preview = Arc::new(Self {
             id,
             surface,
-            progress: watch::channel((0, Progress { expecting: true, ..Progress::default() })).0,
+            progress: watch::channel((Revision::default(), Progress { expecting: true, ..Progress::default() })).0,
             cancel: Arc::new(AtomicBool::new(false)),
         });
         let playing = Arc::clone(&preview);
@@ -129,7 +148,7 @@ impl Preview {
     }
 
     /// Resolves with the preview once it differs from `after`.
-    pub async fn next_change(&self, after: u32) -> PreviewView {
+    pub async fn next_change(&self, after: Revision) -> PreviewView {
         let mut changes = self.progress.subscribe();
         let _ = changes.wait_for(|(revision, _)| *revision != after).await;
         self.view()
@@ -141,7 +160,7 @@ impl Preview {
                 return false;
             }
             *held = progress;
-            *revision = revision.wrapping_add(1);
+            *revision = revision.next();
             true
         });
     }
@@ -154,7 +173,7 @@ impl Preview {
         // The view's own input means nothing to a preview, but it is read so
         // it does not pile up while the pointer moves over the map.
         let mut input = self.surface.take_input();
-        let drain = |input: &mut Option<tokio::sync::mpsc::UnboundedReceiver<crate::frames::SurfaceInput>>| {
+        let drain = |input: &mut Option<tokio::sync::mpsc::UnboundedReceiver<SurfaceInput>>| {
             if let Some(input) = input.as_mut() {
                 while input.try_recv().is_ok() {}
             }
@@ -168,10 +187,12 @@ impl Preview {
         }
 
         let baked = Arc::new(Mutex::new(Baked::default()));
-        let edge = PreviewEdge::for_scale_factor(self.surface.view_size().map_or(1.0, |(_, scale)| scale));
+        // A view not yet sized is taken as one device pixel per point; the
+        // frames are fitted to whatever size it then reports.
+        let edge = PreviewEdge::for_scale_factor(self.surface.view_size().map_or(1.0, |view| view.scale.get()));
         self.bake(path, edge, &baked);
 
-        let mut shown: Option<(usize, PixelSize)> = None;
+        let mut shown: Option<Shown> = None;
         let mut started: Option<Instant> = None;
         while !self.cancelled() {
             drain(&mut input);
@@ -180,9 +201,9 @@ impl Preview {
                 let frame = match baked.track.as_ref().filter(|track| !track.is_empty()) {
                     Some(track) => {
                         let since = *started.get_or_insert_with(Instant::now);
-                        track.index_at(since.elapsed()).and_then(|index| Some((index + 1, track.at(since.elapsed())?)))
+                        track.index_at(since.elapsed()).and_then(|index| Some((Still::Frame(index), track.at(since.elapsed())?)))
                     }
-                    None => baked.map.clone().map(|map| (0, map)),
+                    None => baked.map.clone().map(|map| (Still::Map, map)),
                 };
                 let stalled = !baked.done
                     && match (&baked.track, baked.last_frame) {
@@ -197,14 +218,14 @@ impl Preview {
             };
             self.tell(Progress { failure: self.progress.borrow().1.failure.clone(), ..progress });
 
-            if let Some((index, image)) = frame
-                && let Some((size, _)) = self.surface.view_size()
-                && shown != Some((index, size))
+            if let Some((still, image)) = frame
+                && let Some(view) = self.surface.view_size()
+                && shown != Some(Shown { still, size: view.size })
             {
-                match present(&image, size) {
+                match present(&image, view.size) {
                     Ok(frame) => {
                         self.surface.present(frame);
-                        shown = Some((index, size));
+                        shown = Some(Shown { still, size: view.size });
                     }
                     Err(err) => log::warn!("minimap preview: a frame could not be built: {err}"),
                 }

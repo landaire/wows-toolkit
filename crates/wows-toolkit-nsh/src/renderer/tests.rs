@@ -13,7 +13,10 @@ use crate::frames::Modifiers;
 use crate::frames::PixelPoint;
 use crate::frames::PixelSize;
 use crate::frames::PointerButton;
+use crate::frames::ScaleFactor;
+use crate::frames::ScrollSteps;
 use crate::frames::SurfaceInput;
+use crate::renderer::geometry::CanvasSize;
 use crate::renderer::viewer::Viewer;
 
 /// A viewer holding a battle of `clocks.len()` empty frames, shown on a view
@@ -31,8 +34,9 @@ fn ready(clocks: &[f32]) -> Viewer {
         space: String::new(),
     };
     viewer.adopt_track_for_test(track);
-    viewer.apply(SurfaceInput::Resized { size: PixelSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }, scale: 1.0 });
-    viewer.drew((MINIMAP_SIZE, CANVAS_HEIGHT), Vec::new());
+    let size = PixelSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT };
+    viewer.apply(SurfaceInput::Resized { size, scale: ScaleFactor::new(1.0) });
+    viewer.drew(CanvasSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }, Vec::new());
     viewer
 }
 
@@ -55,9 +59,9 @@ fn the_keyboard_plays_seeks_and_changes_speed() {
     assert!(!viewer.is_playing());
 
     key(&mut viewer, "Right", Modifiers::default());
-    assert_eq!(viewer.at(), 20, "ten seconds on is twenty half-second frames");
+    assert_eq!(viewer.at().get(), 20, "ten seconds on is twenty half-second frames");
     key(&mut viewer, "Left", Modifiers::default());
-    assert_eq!(viewer.at(), 0);
+    assert_eq!(viewer.at().get(), 0);
 
     let before = viewer.speed();
     key(&mut viewer, "Up", Modifiers::default());
@@ -71,11 +75,11 @@ fn playing_from_the_end_starts_again_and_stops_at_the_end() {
     let mut viewer = ready(&clocks(3));
     viewer.go_to_end();
     viewer.toggle_playing();
-    assert_eq!(viewer.at(), 0, "playing from the end starts again");
+    assert_eq!(viewer.at().get(), 0, "playing from the end starts again");
 
     viewer.tick();
     viewer.tick();
-    assert_eq!(viewer.at(), 2);
+    assert_eq!(viewer.at().get(), 2);
     viewer.tick();
     assert!(!viewer.is_playing(), "and stops on the last frame");
 }
@@ -96,10 +100,15 @@ fn the_wheel_zooms_about_the_pointer_and_a_double_click_puts_the_map_back() {
     let over_map = PixelPoint { x: 200.0, y: 300.0 };
     let under = viewer.map_point(over_map).expect("the pointer is over the map");
 
-    viewer.apply(SurfaceInput::Wheel { at: Some(over_map), dx: 0.0, dy: -3.0, modifiers: Modifiers::default() });
+    viewer.apply(SurfaceInput::Wheel {
+        at: Some(over_map),
+        dx: ScrollSteps::new(0.0),
+        dy: ScrollSteps::new(-3.0),
+        modifiers: Modifiers::default(),
+    });
     assert!(viewer.map_view().zoom() > 1.0, "a step up zooms in");
     let after = viewer.map_point(over_map).expect("still over the map");
-    assert!((after.0 - under.0).abs() < 1.0 && (after.1 - under.1).abs() < 1.0, "what was under the pointer stays");
+    assert!((after.x - under.x).abs() < 1.0 && (after.y - under.y).abs() < 1.0, "what was under the pointer stays");
 
     let click = |viewer: &mut Viewer, clicks: u32| {
         viewer.apply(SurfaceInput::PointerDown { at: over_map, button: PointerButton::Primary, clicks, modifiers: Modifiers::default() });

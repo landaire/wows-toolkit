@@ -12,6 +12,7 @@ use std::time::Duration;
 use rust_i18n::t;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::config::should_draw_command;
@@ -28,6 +29,12 @@ use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
+use wows_replays::types::ElapsedClock;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameParamId;
+use wows_replays::types::GameClock;
+use wows_toolkit_replay_data::minimap::MapOrigin;
+use wows_toolkit_replay_data::minimap::ReplayRenderer;
 use wows_toolkit_replay_data::minimap::SharedPreviewRenderer;
 use wows_toolkit_replay_data::minimap::layout_for;
 use wows_toolkit_replay_data::playback;
@@ -48,15 +55,13 @@ use wows_toolkit_replay_data::playback::NO_RANGES;
 use wows_toolkit_replay_data::playback::PING_SECONDS;
 use wows_toolkit_replay_data::playback::SEEK_STEP;
 use wows_toolkit_replay_data::playback::SHIP_MATCHES;
-use wows_toolkit_replay_data::playback::SPEEDS;
 use wows_toolkit_replay_data::playback::ShipPick;
 use wows_toolkit_replay_data::playback::TICK;
 use wows_toolkit_replay_data::playback::Track;
 use wows_toolkit_replay_data::playback::ZOOM_PER_PIXEL;
-use wows_replays::types::EntityId;
-use wows_replays::types::GameClock;
 use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
+use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::TeamId;
 use wt_collab_client::drawing::Drawing;
@@ -70,13 +75,30 @@ use wt_collab_client::link::CollabLink;
 use wt_collab_client::types::Annotation;
 
 use crate::frames::Modifiers;
+use crate::frames::PinchScale;
 use crate::frames::PixelPoint;
-use crate::frames::PixelSize;
 use crate::frames::PointerButton;
+use crate::frames::ScrollSteps;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
 use crate::renderer::armor_link::ArmorLink;
 use crate::renderer::armor_link::RealtimeFollow;
 use crate::renderer::armor_link::RealtimeShow;
+use crate::renderer::error::ExportFailure;
+use crate::renderer::error::ReplayLoadError;
+use crate::renderer::geometry::CanvasPoint;
+use crate::renderer::geometry::CanvasSize;
+use crate::renderer::geometry::DevicePixel;
+use crate::renderer::geometry::DrawnPoint;
+use crate::renderer::geometry::Fit;
+use crate::renderer::geometry::LogicalPoint;
+use crate::renderer::geometry::RotationHandle;
+use crate::renderer::geometry::from_collab;
+use crate::renderer::geometry::to_collab;
+use crate::renderer::ids::FrameIndex;
+use crate::renderer::ids::MatchIndex;
+use crate::renderer::ids::NoticeId;
+use crate::renderer::ids::SpeedIndex;
 
 /// How far, in device pixels, a press may travel and still be a click.
 const CLICK_SLOP: f32 = 4.0;
@@ -84,51 +106,20 @@ const CLICK_SLOP: f32 = 4.0;
 /// How much one wheel step is worth in pixels of travel, for the zoom rate.
 const WHEEL_STEP_PIXELS: f32 = 20.0;
 
-/// The size of the view the frames are drawn for.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Viewport {
-    pub size: PixelSize,
-    /// Device pixels per point.
-    pub scale: f32,
-}
-
 /// What the viewport is doing.
 pub enum Phase {
     /// Reading the replay and walking the battle.
     Baking,
     Ready(Track),
-    Failed(String),
-}
-
-/// Where the canvas lands in the viewport: drawn to fit without stretching,
-/// centred.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Fit {
-    pub scale: f32,
-    pub left: f32,
-    pub top: f32,
-}
-
-impl Fit {
-    /// `canvas` fitted into `into`, or `None` while either is empty.
-    pub fn of(canvas: (u32, u32), into: PixelSize) -> Option<Self> {
-        if canvas.0 == 0 || canvas.1 == 0 || into.is_empty() {
-            return None;
-        }
-        let scale = (into.width as f32 / canvas.0 as f32).min(into.height as f32 / canvas.1 as f32);
-        let left = (into.width as f32 - canvas.0 as f32 * scale) / 2.0;
-        let top = (into.height as f32 - canvas.1 as f32 * scale) / 2.0;
-
-        Some(Self { scale, left, top })
-    }
+    Failed(ReplayLoadError),
 }
 
 /// What a hover over the frame reads: a roster consumable or the advantage
 /// label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reading {
-    /// Where the pointer is, in device pixels.
-    pub at: (i32, i32),
+    /// Where the pointer is.
+    pub at: DevicePixel,
     pub title: String,
     pub lines: Vec<String>,
     /// The reading's explanation, under a rule.
@@ -140,11 +131,12 @@ pub struct Reading {
 enum Press {
     /// Building a shape with the tool in hand.
     Stroking,
-    /// Turning a picked shape by its handle, from how it was.
+    /// Turning a picked shape by its handle, from how it was. `index` is the
+    /// session's index of the annotation.
     Turning { index: usize, before: Annotation },
     /// Moving the picked shapes, from where the drag began in map space and
     /// what they looked like then.
-    Moving { from: [f32; 2], before: Vec<Annotation> },
+    Moving { from: MinimapPos, before: Vec<Annotation> },
     /// Panning a zoomed map.
     Panning { last: PixelPoint },
     /// Nothing yet; it becomes a click if it does not travel.
@@ -162,7 +154,7 @@ struct Pressed {
 /// A message about something the viewport did, for the view to show once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    pub id: u32,
+    pub id: NoticeId,
     pub text: String,
 }
 
@@ -173,35 +165,47 @@ pub struct ExportJob {
     pub settings: ExportSettings,
 }
 
+/// Where a finished export went.
+pub enum ExportDone {
+    Written(PathBuf),
+    /// Onto the clipboard, which needs no saying.
+    Copied,
+}
+
 /// What a frame draws.
 pub struct DrawJob {
     pub renderer: SharedPreviewRenderer,
     pub commands: Vec<DrawCommand>,
     pub view: MapViewport,
-    pub viewport: Viewport,
-    /// The rotation handle and the point on its shape the stem runs to, in
-    /// device pixels.
-    pub handle: Option<((f32, f32), (f32, f32))>,
-    /// The peers' pings: where, in device pixels, how far grown, and colour
-    /// with alpha.
+    pub viewport: ViewSize,
+    pub handle: Option<RotationHandle>,
     pub pings: Vec<PingMark>,
 }
 
 /// One ping's ring as drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PingMark {
-    pub at: (f32, f32),
+    pub at: PixelPoint,
+    /// In device pixels.
     pub radius: f32,
     pub color: [u8; 3],
     pub alpha: f32,
 }
 
-/// A peer's pointer, in points from the frame's top left.
+/// A peer's pointer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeerCursor {
-    pub at: (f32, f32),
+    pub at: LogicalPoint,
     pub name: String,
     pub color: [u8; 3],
+}
+
+/// The placed ships whose ranges need drawing, with the map's size and build
+/// to read them at.
+pub struct PlacedShips {
+    pub ships: Vec<Annotation>,
+    pub space_size: f32,
+    pub version: Version,
 }
 
 /// One playback viewport.
@@ -212,12 +216,12 @@ pub struct Viewer {
     renderer: Option<SharedPreviewRenderer>,
     alts: Vec<PathBuf>,
 
-    at: usize,
+    at: FrameIndex,
     playing: bool,
     speed: f32,
     view: MapViewport,
-    viewport: Option<Viewport>,
-    canvas: Option<(u32, u32)>,
+    viewport: Option<ViewSize>,
+    canvas: Option<CanvasSize>,
 
     options: RenderOptions,
     show_dead_ships: bool,
@@ -226,7 +230,7 @@ pub struct Viewer {
     ship_ranges: HashMap<String, ShipConfigFilter>,
     export_settings: ExportSettings,
     export: Option<ExportProgress>,
-    export_failure: Option<String>,
+    export_failure: Option<ExportFailure>,
 
     events: Vec<TimelineEvent>,
     events_read: bool,
@@ -243,7 +247,7 @@ pub struct Viewer {
     collab: CollabLink,
     replay_id: ReplayId,
     shared: bool,
-    reported_cursor: Option<[f32; 2]>,
+    reported_cursor: Option<MinimapPos>,
     drawing: Drawing,
     picked: Selection,
     history: Vec<Vec<Held>>,
@@ -252,7 +256,7 @@ pub struct Viewer {
     catalog: Option<Arc<ShipCatalog>>,
 
     notice: Option<Notice>,
-    next_notice: u32,
+    last_notice: NoticeId,
     /// The armor viewer this viewport drives, once a ship's armor was asked for.
     armor: ArmorLink,
 
@@ -275,7 +279,7 @@ impl Viewer {
             phase: Phase::Baking,
             renderer: None,
             alts,
-            at: 0,
+            at: FrameIndex::default(),
             playing: false,
             speed: DEFAULT_SPEED,
             view: MapViewport::default(),
@@ -312,7 +316,7 @@ impl Viewer {
             matched_ships: Vec::new(),
             catalog: None,
             notice: None,
-            next_notice: 0,
+            last_notice: NoticeId::default(),
             armor: ArmorLink::default(),
             dirty: true,
             changed: true,
@@ -346,7 +350,7 @@ impl Viewer {
         self.track().is_some()
     }
 
-    pub fn at(&self) -> usize {
+    pub fn at(&self) -> FrameIndex {
         self.at
     }
 
@@ -362,7 +366,7 @@ impl Viewer {
         self.view
     }
 
-    pub fn viewport(&self) -> Option<Viewport> {
+    pub fn viewport(&self) -> Option<ViewSize> {
         self.viewport
     }
 
@@ -382,8 +386,8 @@ impl Viewer {
         self.export
     }
 
-    pub fn export_failure(&self) -> Option<&str> {
-        self.export_failure.as_deref()
+    pub fn export_failure(&self) -> Option<&ExportFailure> {
+        self.export_failure.as_ref()
     }
 
     pub fn reading(&self) -> Option<&Reading> {
@@ -454,8 +458,8 @@ impl Viewer {
     }
 
     fn say(&mut self, text: String) {
-        self.next_notice = self.next_notice.wrapping_add(1);
-        self.notice = Some(Notice { id: self.next_notice, text });
+        self.last_notice = self.last_notice.next();
+        self.notice = Some(Notice { id: self.last_notice, text });
         self.changed = true;
     }
 
@@ -472,7 +476,7 @@ impl Viewer {
     /// defaults.
     pub fn baked(&mut self, track: Track, renderer: SharedPreviewRenderer, defaults: &SavedRenderOptions) {
         self.renderer = Some(renderer);
-        self.at = self.at.min(track.last());
+        self.at = self.at.min(last_frame(&track));
         self.phase = Phase::Ready(track);
         self.export_settings = playback::export_settings_of(defaults);
         defaults.apply_to(&mut self.options);
@@ -492,7 +496,7 @@ impl Viewer {
         self.touch();
     }
 
-    pub fn bake_failed(&mut self, reason: String) {
+    pub fn bake_failed(&mut self, reason: ReplayLoadError) {
         self.phase = Phase::Failed(reason);
         self.touch();
     }
@@ -533,13 +537,12 @@ impl Viewer {
         (wanted != self.layout && self.is_ready()).then_some(wanted)
     }
 
-    /// Moves onto the canvas `layout` needs, drawn through `renderer` with the
-    /// map's corner at `origin`.
-    pub fn adopt_layout(&mut self, layout: SidePanelLayout, renderer: SharedPreviewRenderer, origin: (u32, u32)) {
+    /// Moves onto the canvas `layout` needs, drawn through `built`.
+    pub fn adopt_layout(&mut self, layout: SidePanelLayout, built: ReplayRenderer) {
         self.layout = layout;
-        self.renderer = Some(renderer);
+        self.renderer = Some(built.renderer);
         if let Phase::Ready(track) = &mut self.phase {
-            track.map_origin = (origin.0 as f32, origin.1 as f32);
+            track.map_origin = built.map_origin;
         }
         self.canvas = None;
         self.touch();
@@ -557,17 +560,17 @@ impl Viewer {
         if !self.playing {
             return;
         }
-        let Some(last) = self.track().map(Track::last) else { return };
+        let Some(last) = self.track().map(last_frame) else { return };
         if self.at >= last {
             self.playing = false;
             self.changed = true;
             return;
         }
-        self.set_at(self.at + 1);
+        self.set_at(self.at.next());
     }
 
-    pub fn set_at(&mut self, at: usize) {
-        let Some(last) = self.track().map(Track::last) else { return };
+    pub fn set_at(&mut self, at: FrameIndex) {
+        let Some(last) = self.track().map(last_frame) else { return };
         let at = at.min(last);
         if at == self.at {
             return;
@@ -589,50 +592,50 @@ impl Viewer {
         self.playing = !self.playing;
         // Playing from the end starts again at the beginning, which is what a
         // transport with no stop button has to mean.
-        if self.playing && self.track().is_some_and(|track| self.at >= track.last()) {
-            self.set_at(0);
+        if self.playing && self.track().is_some_and(|track| self.at >= last_frame(track)) {
+            self.set_at(FrameIndex::default());
         }
         self.changed = true;
     }
 
-    pub fn go_to(&mut self, at: usize) {
+    pub fn go_to(&mut self, at: FrameIndex) {
         if self.steerable() {
             self.set_at(at);
         }
     }
 
     pub fn go_to_end(&mut self) {
-        let Some(last) = self.track().map(Track::last) else { return };
+        let Some(last) = self.track().map(last_frame) else { return };
         self.go_to(last);
     }
 
-    /// Moves playback `delta` seconds of game time from where it is.
-    pub fn seek_by(&mut self, delta: f32) {
+    /// Moves playback `seconds` of game time from where it is, either way.
+    pub fn seek_by(&mut self, seconds: f32) {
         let Some(track) = self.track() else { return };
-        let at = track.frame_at(track.seconds_at(self.at) + delta);
+        let at = FrameIndex::new(track.frame_at(track.clock_at(self.at.get()) + seconds));
         self.go_to(at);
     }
 
-    pub fn set_speed_index(&mut self, index: usize) {
-        let Some(speed) = SPEEDS.get(index) else { return };
+    pub fn set_speed_index(&mut self, index: SpeedIndex) {
+        let speed = index.speed();
         if (self.speed - speed).abs() < f32::EPSILON {
             return;
         }
-        self.speed = *speed;
+        self.speed = speed;
         self.changed = true;
     }
 
     /// Moves one rung along the speed ladder. Nothing happens at either end.
     pub fn step_speed(&mut self, step: isize) {
         let here = playback::speed_index(self.speed);
-        if let Some(next) = here.checked_add_signed(step) {
+        if let Some(next) = here.checked_add_signed(step).and_then(SpeedIndex::new) {
             self.set_speed_index(next);
         }
     }
 
     /// How far into the battle playback is.
-    fn elapsed_now(&self) -> Option<f32> {
-        self.track().map(|track| track.elapsed_at(self.at))
+    fn elapsed_now(&self) -> Option<ElapsedClock> {
+        self.track().map(|track| track.elapsed_at(self.at.get()))
     }
 
     /// The event before where playback is. Half a second back, as the egui
@@ -640,18 +643,18 @@ impl Viewer {
     /// would find the same one.
     pub fn previous_event(&self) -> Option<&TimelineEvent> {
         let here = self.elapsed_now()?;
-        self.events.iter().rev().find(|event| event.clock.seconds() < here - 0.5)
+        self.events.iter().rev().find(|event| event.clock < here - 0.5)
     }
 
     pub fn next_event(&self) -> Option<&TimelineEvent> {
         let here = self.elapsed_now()?;
-        self.events.iter().find(|event| event.clock.seconds() > here)
+        self.events.iter().find(|event| event.clock > here)
     }
 
-    /// Moves playback to `at` seconds into the battle.
-    pub fn go_to_event_at(&mut self, at: f32) {
+    /// Moves playback to `at` into the battle.
+    pub fn go_to_event_at(&mut self, at: ElapsedClock) {
         let Some(track) = self.track() else { return };
-        let frame = track.frame_at(at + track.battle_start.seconds());
+        let frame = FrameIndex::new(track.frame_at(track.battle_start + at.seconds()));
         self.go_to(frame);
     }
 
@@ -659,7 +662,7 @@ impl Viewer {
     /// health strip asks.
     pub fn go_to_clock(&mut self, clock: GameClock) {
         let Some(track) = self.track() else { return };
-        let frame = track.frame_at(clock.seconds());
+        let frame = FrameIndex::new(track.frame_at(clock));
         self.go_to(frame);
     }
 
@@ -679,11 +682,11 @@ impl Viewer {
 
     /// What the followed ship had taken by where playback is, when that changed.
     pub fn follow_armor(&mut self) -> Option<RealtimeFollow> {
-        let clock = GameClock(self.track()?.seconds_at(self.at));
+        let clock = self.track()?.clock_at(self.at.get());
         self.armor.follow(clock)
     }
 
-    fn jump_to_event(&mut self, event: Option<(f32, String)>) {
+    fn jump_to_event(&mut self, event: Option<(ElapsedClock, String)>) {
         let Some((at, said)) = event else { return };
         if !self.steerable() {
             return;
@@ -693,12 +696,12 @@ impl Viewer {
     }
 
     pub fn jump_to_previous_event(&mut self) {
-        let event = self.previous_event().map(|event| (event.clock.seconds(), format_timeline_event(event)));
+        let event = self.previous_event().map(|event| (event.clock, format_timeline_event(event)));
         self.jump_to_event(event);
     }
 
     pub fn jump_to_next_event(&mut self) {
-        let event = self.next_event().map(|event| (event.clock.seconds(), format_timeline_event(event)));
+        let event = self.next_event().map(|event| (event.clock, format_timeline_event(event)));
         self.jump_to_event(event);
     }
 
@@ -833,15 +836,15 @@ impl Viewer {
     }
 
     fn drawn_ships(&self) -> Vec<String> {
-        self.track().map(|track| track.drawn_ships(self.at)).unwrap_or_default()
+        // Before a bake there is no ship drawn at all.
+        self.track().map(|track| track.drawn_ships(self.at.get())).unwrap_or_default()
     }
 
-    /// The ship under `at` points from the frame's top left, for its menu.
-    pub fn ship_under(&self, at: (f32, f32)) -> Option<ShipPick> {
-        let scale = self.viewport?.scale;
-        let point = PixelPoint { x: at.0 * scale, y: at.1 * scale };
-        let (x, y) = self.map_point(point)?;
-        self.track()?.ship_near(self.at, (x, y))
+    /// The ship under `at`, for its menu.
+    pub fn ship_under(&self, at: LogicalPoint) -> Option<ShipPick> {
+        let point = at.to_device(self.viewport?.scale);
+        let map = self.map_point(point)?;
+        self.track()?.ship_near(self.at.get(), map)
     }
 
     /// Starts an export of what is on screen: the frames the settings cover,
@@ -886,13 +889,13 @@ impl Viewer {
     }
 
     /// An export ended: the renderer comes back, and a failure is kept to say.
-    pub fn export_finished(&mut self, renderer: SharedPreviewRenderer, outcome: Result<Option<String>, String>) {
+    pub fn export_finished(&mut self, renderer: SharedPreviewRenderer, outcome: Result<ExportDone, ExportFailure>) {
         self.renderer = Some(renderer);
         self.export = None;
         match outcome {
-            Ok(Some(said)) => self.say(said),
-            Ok(None) => {}
-            Err(reason) => self.export_failure = Some(reason),
+            Ok(ExportDone::Written(path)) => self.say(path.display().to_string()),
+            Ok(ExportDone::Copied) => {}
+            Err(failure) => self.export_failure = Some(failure),
         }
         self.touch();
     }
@@ -901,7 +904,9 @@ impl Viewer {
         Fit::of(self.canvas?, self.viewport?.size)
     }
 
-    fn map_origin(&self) -> (f32, f32) {
+    /// Where the map's corner sits on the canvas. Before a bake the canvas is
+    /// the one with no side panel.
+    fn map_origin(&self) -> MapOrigin {
         self.track().map_or(DEFAULT_MAP_ORIGIN, |track| track.map_origin)
     }
 
@@ -919,39 +924,43 @@ impl Viewer {
 
     /// Where a device point lands on the whole canvas. Not clamped: a point
     /// off the edge reads as nothing there.
-    fn canvas_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
+    fn canvas_point(&self, at: PixelPoint) -> Option<CanvasPoint> {
         let fit = self.fit()?;
-        Some(((at.x - fit.left) / fit.scale, (at.y - fit.top) / fit.scale))
+        Some(CanvasPoint { x: (at.x - fit.left) / fit.scale, y: (at.y - fit.top) / fit.scale })
     }
 
     /// Where a device point lands in the drawn map, after zoom and pan.
-    fn drawn_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
-        let (x, y) = self.canvas_point(at)?;
+    fn drawn_point(&self, at: PixelPoint) -> Option<DrawnPoint> {
+        let canvas = self.canvas_point(at)?;
         let origin = self.map_origin();
-        let (x, y) = (x - origin.0, y - origin.1);
+        let drawn = DrawnPoint { x: canvas.x - origin.x, y: canvas.y - origin.y };
         let width = self.shaped_view().drawn_width();
         let height = MINIMAP_SIZE as f32;
-        (x >= 0.0 && x < width && y >= 0.0 && y < height).then_some((x, y))
+        (drawn.x >= 0.0 && drawn.x < width && drawn.y >= 0.0 && drawn.y < height).then_some(drawn)
     }
 
     /// Where a device point lands in map space, which is what ships, shapes
     /// and peers' cursors are in.
-    pub fn map_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
-        let (x, y) = self.drawn_point(at)?;
-        Some(self.shaped_view().to_map(x, y))
+    pub fn map_point(&self, at: PixelPoint) -> Option<MinimapPos> {
+        let drawn = self.drawn_point(at)?;
+        let (x, y) = self.shaped_view().to_map(drawn.x, drawn.y);
+        Some(MinimapPos { x, y })
     }
 
     /// The inverse: where a map point is drawn, in device pixels. `None` for a
     /// point the window does not show.
-    pub fn device_point(&self, at: (f32, f32)) -> Option<(f32, f32)> {
+    pub fn device_point(&self, at: MinimapPos) -> Option<PixelPoint> {
         let fit = self.fit()?;
         let view = self.shaped_view();
-        let drawn = (view.x(at.0), view.y(at.1));
-        if drawn.0 < 0.0 || drawn.0 >= view.drawn_width() || drawn.1 < 0.0 || drawn.1 >= MINIMAP_SIZE as f32 {
+        let drawn = DrawnPoint { x: view.x(at.x), y: view.y(at.y) };
+        if drawn.x < 0.0 || drawn.x >= view.drawn_width() || drawn.y < 0.0 || drawn.y >= MINIMAP_SIZE as f32 {
             return None;
         }
         let origin = self.map_origin();
-        Some((fit.left + (drawn.0 + origin.0) * fit.scale, fit.top + (drawn.1 + origin.1) * fit.scale))
+        Some(PixelPoint {
+            x: fit.left + (drawn.x + origin.x) * fit.scale,
+            y: fit.top + (drawn.y + origin.y) * fit.scale,
+        })
     }
 
     /// Takes one input event of the frame surface.
@@ -961,7 +970,7 @@ impl Viewer {
         }
         match input {
             SurfaceInput::Resized { size, scale } => {
-                self.viewport = Some(Viewport { size, scale });
+                self.viewport = Some(ViewSize { size, scale });
                 self.touch();
             }
             SurfaceInput::PointerDown { at, button: PointerButton::Primary, clicks, modifiers } => {
@@ -982,10 +991,7 @@ impl Viewer {
                 }
             }
             SurfaceInput::Wheel { at, dy, .. } => self.wheel(at, dy),
-            SurfaceInput::Pinch { scale } => {
-                let base = *self.pinch_base.get_or_insert(self.view.zoom());
-                self.set_zoom(base * scale);
-            }
+            SurfaceInput::Pinch { scale } => self.pinch(scale),
             SurfaceInput::Key { key, pressed, modifiers } => self.key(&key, pressed, modifiers),
             SurfaceInput::Focus { focused } => {
                 if !focused && self.ctrl_held {
@@ -1036,26 +1042,31 @@ impl Viewer {
     }
 
     /// The wheel zooms about whatever is under the pointer.
-    fn wheel(&mut self, at: Option<PixelPoint>, dy: f32) {
-        if !self.is_ready() || dy == 0.0 {
+    fn wheel(&mut self, at: Option<PixelPoint>, dy: ScrollSteps) {
+        if !self.is_ready() || dy.get() == 0.0 {
             return;
         }
         let Some(drawn) = at.and_then(|at| self.drawn_point(at)) else { return };
         // A step down is travel away from the map, which zooms out.
-        let travel = -dy * WHEEL_STEP_PIXELS;
+        let travel = -dy.get() * WHEEL_STEP_PIXELS;
         let zoom = self.view.zoom() * (1.0 + travel * ZOOM_PER_PIXEL);
-        self.set_view(self.shaped_view().zoomed_about(zoom, drawn));
+        self.set_view(self.shaped_view().zoomed_about(zoom, (drawn.x, drawn.y)));
+    }
+
+    /// A pinch scales the zoom it began at.
+    fn pinch(&mut self, scale: PinchScale) {
+        let base = *self.pinch_base.get_or_insert(self.view.zoom());
+        self.set_zoom(base * scale.get());
     }
 
     fn pointer_down(&mut self, at: PixelPoint, clicks: u32, modifiers: Modifiers) {
         let press = match self.map_point(at) {
             None => Press::Idle,
             Some(point) => {
-                let point = [point.0, point.1];
                 if self.has_tool() {
                     // A tool in hand takes the drag: a reader dragging to draw
                     // is not asking to pan the map under their line.
-                    self.stroke(Stroke::Began { at: point });
+                    self.stroke(Stroke::Began { at: to_collab(point) });
                     Press::Stroking
                 } else if let Some((index, before)) = self.handle_under(at) {
                     // Snapshotted as the handle is taken hold of: the turn
@@ -1077,7 +1088,7 @@ impl Viewer {
     fn pointer_moved(&mut self, at: PixelPoint, modifiers: Modifiers) {
         self.pointer = Some(at);
         let map = self.map_point(at);
-        self.report_cursor(map.map(|(x, y)| [x, y]));
+        self.report_cursor(map);
         self.update_reading(at);
 
         let Some(pressed) = self.pressed.clone() else {
@@ -1089,16 +1100,16 @@ impl Viewer {
         };
         match pressed.press {
             Press::Stroking => {
-                if let Some((x, y)) = map {
-                    self.stroke(Stroke::Moved { at: [x, y], straight: modifiers.shift });
+                if let Some(point) = map {
+                    self.stroke(Stroke::Moved { at: to_collab(point), straight: modifiers.shift });
                 }
             }
             Press::Turning { index, before } => {
-                let Some((x, y)) = map else { return };
+                let Some(point) = map else { return };
                 let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
                 let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
                 let mut turned = before;
-                wt_collab_client::drawing::rotate_annotation(&mut turned, wt_collab_client::drawing::bearing(middle, [x, y]));
+                wt_collab_client::drawing::rotate_annotation(&mut turned, wt_collab_client::drawing::bearing(middle, to_collab(point)));
                 self.collab.update_annotation(index, turned);
                 self.touch();
             }
@@ -1118,17 +1129,17 @@ impl Viewer {
         let Some(pressed) = self.pressed.take() else { return };
         let travelled = (at.x - pressed.at.x).hypot(at.y - pressed.at.y);
         let (clicks, add) = (pressed.clicks, pressed.modifiers.control);
-        let map = self.map_point(at).map(|(x, y)| [x, y]);
+        let map = self.map_point(at);
         match pressed.press {
             Press::Stroking => {
                 if travelled < CLICK_SLOP {
                     // A tool that places rather than drags wants the click.
                     self.drawing.cancel();
                     if let Some(point) = map {
-                        self.stroke(Stroke::Clicked { at: point });
+                        self.stroke(Stroke::Clicked { at: to_collab(point) });
                     }
                 } else if let Some(point) = map {
-                    self.stroke(Stroke::Ended { at: point });
+                    self.stroke(Stroke::Ended { at: to_collab(point) });
                 }
             }
             // A turn, like a move, reaches the session once more at the end.
@@ -1145,7 +1156,7 @@ impl Viewer {
                 }
                 let Some(point) = map else { return };
                 self.remember();
-                let delta = [point[0] - from[0], point[1] - from[1]];
+                let delta = [point.x - from.x, point.y - from.y];
                 for index in self.picked.picked().to_vec() {
                     let Some(annotation) = before.get(index) else { continue };
                     let mut moved = annotation.clone();
@@ -1164,11 +1175,11 @@ impl Viewer {
 
     /// A click with no tool picks a drawn shape out to move; a double-click
     /// anywhere else puts the whole map back.
-    fn click(&mut self, at: Option<[f32; 2]>, clicks: u32, add: bool) {
+    fn click(&mut self, at: Option<MinimapPos>, clicks: u32, add: bool) {
         if let Some(point) = at {
             let annotations = self.collab.annotations();
             if !annotations.is_empty() {
-                self.picked.click(&annotations, point, add);
+                self.picked.click(&annotations, to_collab(point), add);
                 self.picked.retain_within(&annotations);
                 self.touch();
                 if !self.picked.is_empty() {
@@ -1198,9 +1209,9 @@ impl Viewer {
 
     fn consumable_at(&self, at: PixelPoint) -> Option<Reading> {
         let point = self.canvas_point(at)?;
-        let region = self.regions.iter().find(|region| region.contains(point))?;
+        let region = self.regions.iter().find(|region| region.contains((point.x, point.y)))?;
         let RegionKind::RosterConsumable { entity_id, index } = region.kind;
-        let commands = self.track()?.frames.get(self.at)?;
+        let commands = self.track()?.frames.get(self.at.get())?;
         commands.iter().find_map(|command| {
             let DrawCommand::TeamRoster { rows, .. } = command else { return None };
             let row = rows.iter().find(|row| row.entity_id == entity_id)?;
@@ -1210,7 +1221,7 @@ impl Viewer {
             said.extend(lines.timing.clone());
             said.extend(lines.active.clone());
             Some(Reading {
-                at: (at.x as i32, at.y as i32),
+                at: DevicePixel::containing(at),
                 title: lines.name.clone(),
                 lines: said,
                 detail: (!lines.description.is_empty()).then(|| lines.description.clone()),
@@ -1221,16 +1232,16 @@ impl Viewer {
     /// The advantage label is drawn into the frame, so the strip it sits in
     /// is what the reader hovers.
     fn advantage_at(&self, at: PixelPoint) -> Option<Reading> {
-        let (_, y) = self.canvas_point(at)?;
-        if !(0.0..DEFAULT_MAP_ORIGIN.1).contains(&y) {
+        let point = self.canvas_point(at)?;
+        if !(0.0..DEFAULT_MAP_ORIGIN.y).contains(&point.y) {
             return None;
         }
-        let reading = self.track()?.advantage_reading(self.at)?;
+        let reading = self.track()?.advantage_reading(self.at.get())?;
         let lines = match reading {
             AdvantageReading::TeamEliminated => vec![t!("ui.renderer.advantage.team_eliminated").into_owned()],
             AdvantageReading::Rows { rows, hp_incomplete } => {
                 let mut lines: Vec<String> =
-                    rows.into_iter().map(|(key, contribution)| format!("{}  {contribution}", t!(key))).collect();
+                    rows.into_iter().map(|row| format!("{}  {}", t!(row.label_key), row.contribution)).collect();
                 if hp_incomplete {
                     lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
                 }
@@ -1238,7 +1249,7 @@ impl Viewer {
             }
         };
         Some(Reading {
-            at: (at.x as i32, at.y as i32),
+            at: DevicePixel::containing(at),
             title: t!("ui.renderer.advantage.breakdown").into_owned(),
             lines,
             detail: None,
@@ -1283,38 +1294,38 @@ impl Viewer {
             return;
         }
         let Some(track) = self.track() else { return };
-        let Some(commands) = track.frames.get(self.at) else { return };
+        let Some(commands) = track.frames.get(self.at.get()) else { return };
         self.collab.broadcast_frame(wt_collab_client::peer::FrameBroadcast {
             replay_id: self.replay_id.raw(),
-            clock: track.seconds_at(self.at),
-            frame_index: self.at as u32,
+            clock: track.clock_at(self.at.get()).seconds(),
+            frame_index: self.at.get() as u32,
             total_frames: track.len() as u32,
-            game_duration: track.seconds_at(track.last()),
+            game_duration: track.clock_at(track.last()).seconds(),
             commands: commands.clone(),
         });
     }
 
     /// Tells the session where this app's pointer is on the map, when it has
     /// moved to a different map point.
-    fn report_cursor(&mut self, at: Option<[f32; 2]>) {
+    fn report_cursor(&mut self, at: Option<MinimapPos>) {
         if !self.collab.is_active() {
             return;
         }
         let moved = match (self.reported_cursor, at) {
-            (Some(was), Some(now)) => (was[0] - now[0]).abs() >= 1.0 || (was[1] - now[1]).abs() >= 1.0,
+            (Some(was), Some(now)) => (was.x - now.x).abs() >= 1.0 || (was.y - now.y).abs() >= 1.0,
             (None, None) => false,
             _ => true,
         };
         if moved {
             self.reported_cursor = at;
-            self.collab.report_cursor(at);
+            self.collab.report_cursor(at.map(to_collab));
         }
     }
 
     /// Drops a ping where the pointer is, for everyone in the session.
     fn ping(&mut self, at: PixelPoint) {
-        let Some((x, y)) = self.map_point(at) else { return };
-        self.collab.send_ping([x, y]);
+        let Some(point) = self.map_point(at) else { return };
+        self.collab.send_ping(to_collab(point));
     }
 
     /// Forgets the pings whose ripple has ended; part of a running session's
@@ -1324,22 +1335,22 @@ impl Viewer {
         self.touch();
     }
 
-    /// The peers' pointers, in points from the frame's top left.
+    /// The peers' pointers.
     pub fn peer_cursors(&self) -> Vec<PeerCursor> {
         let Some(scale) = self.viewport.map(|viewport| viewport.scale) else { return Vec::new() };
         self.collab
             .peer_cursors()
             .into_iter()
             .filter_map(|cursor| {
-                let pos = cursor.pos?;
-                let (x, y) = self.device_point((pos[0], pos[1]))?;
-                Some(PeerCursor { at: (x / scale, y / scale), name: cursor.name, color: cursor.color })
+                let at = self.device_point(from_collab(cursor.pos?))?;
+                Some(PeerCursor { at: LogicalPoint::from_device(at, scale), name: cursor.name, color: cursor.color })
             })
             .collect()
     }
 
     fn ping_marks(&self) -> Vec<PingMark> {
-        let scale = self.viewport.map_or(1.0, |viewport| viewport.scale);
+        // Without a view size no map point is on screen.
+        let Some(scale) = self.viewport.map(|viewport| viewport.scale) else { return Vec::new() };
         self.collab
             .peer_pings()
             .into_iter()
@@ -1348,10 +1359,10 @@ impl Viewer {
                 if age > PING_SECONDS {
                     return None;
                 }
-                let at = self.device_point((ping.pos[0], ping.pos[1]))?;
+                let at = self.device_point(from_collab(ping.pos))?;
                 Some(PingMark {
                     at,
-                    radius: playback::PING_RADIUS * scale * (0.3 + age / PING_SECONDS),
+                    radius: playback::PING_RADIUS * scale.get() * (0.3 + age / PING_SECONDS),
                     color: ping.color,
                     alpha: 1.0 - age / PING_SECONDS,
                 })
@@ -1447,28 +1458,27 @@ impl Viewer {
     /// The shape whose rotation handle is under the device point `at`. A
     /// handle belongs to a single picked shape that has a bearing at all.
     fn handle_under(&self, at: PixelPoint) -> Option<(usize, Annotation)> {
-        let (index, annotation, (handle, _)) = self.picked_handle()?;
-        let scale = self.viewport.map_or(1.0, |viewport| viewport.scale);
-        let reach = (HANDLE_RADIUS + 8.0) * scale;
-        let away = (at.x - handle.0).hypot(at.y - handle.1);
-        (away < reach).then_some((index, annotation))
+        let picked = self.picked_handle()?;
+        let reach = (HANDLE_RADIUS + 8.0) * self.viewport?.scale.get();
+        let away = (at.x - picked.handle.handle.x).hypot(at.y - picked.handle.handle.y);
+        (away < reach).then_some((picked.index, picked.annotation))
     }
 
     /// The picked shape that can be turned, and where its handle and the top
     /// of the shape are drawn. Above the shape by a fixed screen distance, so
     /// the handle stays the same size and reach at every zoom.
-    fn picked_handle(&self) -> Option<(usize, Annotation, ((f32, f32), (f32, f32)))> {
+    fn picked_handle(&self) -> Option<PickedHandle> {
         let index = self.picked.single()?;
         let annotation = self.collab.annotations().get(index)?.clone();
         if !wt_collab_client::drawing::can_rotate(&annotation) {
             return None;
         }
         let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(&annotation);
-        let anchor = self.device_point(((left + right) / 2.0, top))?;
-        let scale = self.viewport.map_or(1.0, |viewport| viewport.scale);
-        let handle = (anchor.0, anchor.1 - HANDLE_DISTANCE * scale);
+        let anchor = self.device_point(MinimapPos { x: (left + right) / 2.0, y: top })?;
+        let scale = self.viewport?.scale.get();
+        let handle = PixelPoint { x: anchor.x, y: anchor.y - HANDLE_DISTANCE * scale };
 
-        Some((index, annotation, (handle, anchor)))
+        Some(PickedHandle { index, annotation, handle: RotationHandle { handle, anchor } })
     }
 
     /// Whether the picked shape is a ship, and what it is called if one has
@@ -1510,9 +1520,9 @@ impl Viewer {
 
     /// Gives the picked ship the identity of match `index`, which is what its
     /// ranges are read from. `param_id` is that ship's game param.
-    pub fn name_picked_ship(&mut self, index: usize, param_id: u64) {
+    pub fn name_picked_ship(&mut self, index: MatchIndex, param_id: GameParamId) {
         let Some(picked) = self.picked.single() else { return };
-        let Some((species, ship)) = self.matched_ships.get(index).cloned() else { return };
+        let Some((species, ship)) = self.matched_ships.get(index.get()).cloned() else { return };
         let annotations = self.collab.annotations();
         let Some(Annotation::Ship { pos, yaw, friendly, .. }) = annotations.get(picked) else { return };
 
@@ -1525,7 +1535,7 @@ impl Viewer {
                 species: format!("{species:?}"),
                 friendly: *friendly,
                 config: Some(wt_collab_client::types::AnnotationShipConfig {
-                    param_id,
+                    param_id: param_id.raw(),
                     ship_name: ship.display_name.clone(),
                     // Stock hull and no modifiers, where the egui chooser
                     // leaves it.
@@ -1539,8 +1549,8 @@ impl Viewer {
     }
 
     /// The ship search's match `index`, by its param index.
-    pub fn matched_param_index(&self, index: usize) -> Option<&str> {
-        self.matched_ships.get(index).map(|(_, ship)| ship.param_index.as_str())
+    pub fn matched_param_index(&self, index: MatchIndex) -> Option<&str> {
+        self.matched_ships.get(index.get()).map(|(_, ship)| ship.param_index.as_str())
     }
 
     /// What the next frame draws, or `None` while there is nothing to draw it
@@ -1549,7 +1559,7 @@ impl Viewer {
         let track = self.track()?;
         let renderer = self.renderer.clone()?;
         let viewport = self.viewport.filter(|viewport| !viewport.size.is_empty())?;
-        let at = self.at.min(track.last());
+        let at = self.at.min(last_frame(track)).get();
         let frame = track.frames.get(at)?;
 
         // Trails first, so they sit behind everything, as the egui renderer
@@ -1572,7 +1582,7 @@ impl Viewer {
         commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
         commands.extend(placed_ranges);
         if let Some(pointer) = self.pointer.and_then(|at| self.map_point(at))
-            && let Some(part_drawn) = self.drawing.in_progress([pointer.0, pointer.1])
+            && let Some(part_drawn) = self.drawing.in_progress(to_collab(pointer))
         {
             commands.extend(wt_collab_client::geometry::annotation_commands(&part_drawn));
         }
@@ -1582,14 +1592,14 @@ impl Viewer {
             commands,
             view: self.shaped_view(),
             viewport,
-            handle: self.picked_handle().map(|(_, _, handle)| handle),
+            handle: self.picked_handle().map(|picked| picked.handle),
             pings: self.ping_marks(),
         })
     }
 
     /// The frame the producer drew: its canvas size and what a pointer can
     /// rest on in it.
-    pub fn drew(&mut self, canvas: (u32, u32), regions: Vec<DrawnRegion>) {
+    pub fn drew(&mut self, canvas: CanvasSize, regions: Vec<DrawnRegion>) {
         if self.canvas != Some(canvas) {
             self.changed = true;
         }
@@ -1600,9 +1610,8 @@ impl Viewer {
         }
     }
 
-    /// The placed ships whose ranges need drawing: their annotations, with the
-    /// map's size and build to read them at.
-    pub fn placed_ships(&self) -> Option<(Vec<Annotation>, f32, wowsunpack::data::Version)> {
+    /// The placed ships whose ranges need drawing.
+    pub fn placed_ships(&self) -> Option<PlacedShips> {
         let track = self.track()?;
         let ships: Vec<Annotation> = self
             .collab
@@ -1610,8 +1619,19 @@ impl Viewer {
             .into_iter()
             .filter(|annotation| matches!(annotation, Annotation::Ship { config: Some(_), .. }))
             .collect();
-        (!ships.is_empty()).then(|| (ships, track.space_size, track.version))
+        (!ships.is_empty()).then_some(PlacedShips { ships, space_size: track.space_size, version: track.version })
     }
+}
+
+/// The picked shape that can be turned, by its session index, and its handle.
+struct PickedHandle {
+    index: usize,
+    annotation: Annotation,
+    handle: RotationHandle,
+}
+
+fn last_frame(track: &Track) -> FrameIndex {
+    FrameIndex::new(track.last())
 }
 
 /// The tool a key takes up with ctrl held, in the order the egui board

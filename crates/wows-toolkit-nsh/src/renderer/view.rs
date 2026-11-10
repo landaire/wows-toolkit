@@ -21,6 +21,9 @@ use wows_toolkit_replay_data::playback::ShipPick;
 use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use wt_collab_client::drawing::Tool;
 
+use crate::renderer::ids::NoticeId;
+use crate::renderer::ids::RendererId;
+use crate::renderer::ids::Revision;
 use crate::renderer::viewer::Phase;
 use crate::renderer::viewer::Viewer;
 
@@ -111,18 +114,18 @@ pub struct ShipMatchView {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct NoticeView {
     /// Counts up, so the same text said twice is shown twice.
-    pub id: u32,
+    pub id: NoticeId,
     pub text: String,
 }
 
 /// Everything the transport, the overlays and the drawing tools read.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct RendererView {
-    pub id: u32,
+    pub id: RendererId,
     /// The frame surface the viewport draws on.
     pub surface: String,
     /// Changes whenever anything here does.
-    pub revision: u32,
+    pub revision: Revision,
     pub title: String,
     pub status: RendererStatus,
     pub failure: Option<String>,
@@ -355,7 +358,7 @@ pub fn tool_of(tool: RendererTool) -> Tool {
         RendererTool::Rectangle => Tool::Rectangle { filled: false },
         RendererTool::Triangle => Tool::Triangle { filled: false },
         RendererTool::Measurement => Tool::Measurement,
-        RendererTool::Ship => Tool::Ship { species: playback::SPECIES[0].1.to_owned(), friendly: true, yaw: 0.0 },
+        RendererTool::Ship => Tool::Ship { species: playback::SPECIES[0].name.to_owned(), friendly: true, yaw: 0.0 },
     }
 }
 
@@ -379,17 +382,21 @@ fn hex(color: [u8; 3]) -> String {
 }
 
 /// What `viewer` shows, at `revision`.
-pub fn of(id: u32, surface: &str, viewer: &Viewer, revision: u32) -> RendererView {
+pub fn of(id: RendererId, surface: &str, viewer: &Viewer, revision: Revision) -> RendererView {
     let track = viewer.track();
     let (status, failure) = match viewer.phase() {
         Phase::Baking => (RendererStatus::Baking, None),
         Phase::Ready(_) => (RendererStatus::Ready, None),
-        Phase::Failed(reason) => (RendererStatus::Failed, Some(reason.clone())),
+        Phase::Failed(reason) => (RendererStatus::Failed, Some(reason.to_string())),
     };
+    // Nothing to time before the battle is read.
     let clock = track.map_or_else(String::new, |track| {
-        format!("{} / {}", playback::mmss(track.elapsed_at(viewer.at())), playback::mmss(track.elapsed_at(track.last())))
+        format!(
+            "{} / {}",
+            playback::mmss(track.elapsed_at(viewer.at().get()).seconds()),
+            playback::mmss(track.elapsed_at(track.last()).seconds())
+        )
     });
-    let scale = viewer.viewport().map_or(1.0, |viewport| viewport.scale);
     let export = viewer.export().map(|progress| {
         if progress.total == 0 {
             return ExportView { fraction: None, label: t!("ui.renderer.preparing_export").into_owned() };
@@ -410,7 +417,7 @@ pub fn of(id: u32, surface: &str, viewer: &Viewer, revision: u32) -> RendererVie
         status,
         failure,
         playing: viewer.is_playing(),
-        frame: viewer.at() as u32,
+        frame: viewer.at().get() as u32,
         last_frame: track.map_or(0, |track| track.last() as u32),
         clock,
         speed_index: playback::speed_index(viewer.speed()) as u32,
@@ -420,13 +427,14 @@ pub fn of(id: u32, surface: &str, viewer: &Viewer, revision: u32) -> RendererVie
         has_previous_event: viewer.previous_event().is_some(),
         has_next_event: viewer.next_event().is_some(),
         export,
-        export_failure: viewer.export_failure().map(str::to_owned),
+        export_failure: viewer.export_failure().map(ToString::to_string),
         software_encode: !settings.prefer_cpu
             && playback::must_use_cpu(&settings, playback::encoder_status()),
         ctrl_held: viewer.ctrl_held(),
-        reading: viewer.reading().map(|reading| ReadingView {
-            x: f64::from(reading.at.0 as f32 / scale),
-            y: f64::from(reading.at.1 as f32 / scale),
+        // A reading is only taken over a sized view.
+        reading: viewer.reading().zip(viewer.viewport()).map(|(reading, view)| ReadingView {
+            x: f64::from(reading.at.x as f32 / view.scale.get()),
+            y: f64::from(reading.at.y as f32 / view.scale.get()),
             title: reading.title.clone(),
             lines: reading.lines.clone(),
             detail: reading.detail.clone(),
@@ -435,8 +443,8 @@ pub fn of(id: u32, surface: &str, viewer: &Viewer, revision: u32) -> RendererVie
             .peer_cursors()
             .into_iter()
             .map(|cursor| CursorView {
-                x: f64::from(cursor.at.0),
-                y: f64::from(cursor.at.1),
+                x: f64::from(cursor.at.x),
+                y: f64::from(cursor.at.y),
                 name: cursor.name,
                 color: hex(cursor.color),
             })
@@ -446,8 +454,8 @@ pub fn of(id: u32, surface: &str, viewer: &Viewer, revision: u32) -> RendererVie
         placing: match drawing.tool() {
             Tool::Ship { species, friendly, .. } => playback::SPECIES
                 .iter()
-                .find(|(_, name)| name == species)
-                .map(|(short, _)| PlacingView { short: (*short).to_owned(), friendly: *friendly }),
+                .find(|entry| entry.name == species.as_str())
+                .map(|entry| PlacingView { short: entry.short.to_owned(), friendly: *friendly }),
             _ => None,
         },
         ink: INKS.iter().position(|(_, ink)| *ink == drawing.color()).map(|index| index as u32),
