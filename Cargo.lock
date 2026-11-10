@@ -19103,6 +19103,7 @@ dependencies = [
 name = "wows-toolkit-replay-data"
 version = "0.1.0"
 dependencies = [
+ "ciborium",
  "escaper",
  "filetime",
  "gettext",
@@ -19114,6 +19115,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "walkdir",
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",

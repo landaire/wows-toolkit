@@ -58,6 +58,19 @@ pub enum HttpError {
     Build(#[source] reqwest::Error),
 }
 
+/// Why the battle in progress has no figures from the stats service.
+#[derive(Debug, thiserror::Error)]
+pub enum StatsError {
+    #[error("the roster could not be read from the live replay")]
+    NoRoster,
+    #[error(transparent)]
+    Refused(#[from] wows_toolkit_viewmodel::match_stats::MatchStatsError),
+    #[error(transparent)]
+    Client(#[from] HttpError),
+    #[error("could not reach the stats service")]
+    Transport(#[source] reqwest::Error),
+}
+
 /// Why the personal-rating expected values could not be refreshed.
 #[derive(Debug, thiserror::Error)]
 pub enum RefreshError {

@@ -14,6 +14,7 @@ REPLAY_DATA_COMMON_DEPS = [
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
     "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:ciborium",
     "//third-party/rust:escaper",
     "//third-party/rust:gettext",
     "//third-party/rust:jiff",
@@ -23,6 +24,7 @@ REPLAY_DATA_COMMON_DEPS = [
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
+    "//third-party/rust:walkdir",
 ]
 
 REPLAY_DATA_DEPS = REPLAY_DATA_COMMON_DEPS + [

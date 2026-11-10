@@ -668,7 +668,9 @@ fn cache_job_finished(outcome: CacheOutcome) {
 /// Measures the cache when nothing has, on a thread of its own.
 fn measure_cache_if_wanted() {
     let Ok((base, _, _)) = cache_target() else { return };
-    let Some(generation) = update(|state| state.cache.wants_measure()) else { return };
+    // Claimed without telling the watchers: nothing they show changed yet,
+    // and a notice here would wake `GameData.watch`, which measures again.
+    let Some(generation) = state().cache.wants_measure() else { return };
 
     spawn("game-data-cache-measure", move || {
         let stats = cache::measure(&base);
@@ -985,7 +987,11 @@ impl GameData {
         let mut changes = SERVICE.changed.subscribe();
         loop {
             measure_cache_if_wanted();
-            on_change.post(snapshot());
+            // Awaited rather than posted: a callback whose engine is gone
+            // fails here, which ends the feed.
+            if on_change.call_async(snapshot()).await.is_err() {
+                return Ok(());
+            }
             if changes.changed().await.is_err() {
                 return Ok(());
             }
