@@ -36,6 +36,8 @@ pub use search::Palette;
 pub use search::QueryBar;
 pub use search::ReplaySearch;
 pub use search::ShipSearch;
+#[cfg(feature = "test-support")]
+pub use search::ship_names;
 pub use stats::Stats;
 pub use unpacker::Unpacker;
 pub use unpacker::UnpackerProps;

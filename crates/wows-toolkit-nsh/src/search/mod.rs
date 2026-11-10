@@ -4,13 +4,19 @@
 mod bar;
 mod error;
 mod palette;
+pub mod ship_names;
 
 pub use bar::QueryBar;
 pub use palette::Palette;
 pub use palette::ShipSearch;
 
+use std::collections::VecDeque;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::PoisonError;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
 use nsh_core::JsonValue;
 use nsh_core::prelude::*;
@@ -22,6 +28,7 @@ use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::listing_row;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
@@ -40,10 +47,23 @@ use wows_toolkit_viewmodel::translate;
 use crate::js_newtype::js_newtype;
 use bar::CompletionView;
 use error::SearchError;
+use ship_names::ShipKey;
 
 /// Serializes read-modify-writes of the saved row, so two fields saved at
 /// once do not drop each other.
 static SETTINGS_WRITE: Mutex<()> = Mutex::new(());
+
+/// The latest pages of results, which a hovered row is named from. A page a
+/// newer request overtook may still be the one shown, so a few are kept.
+static PAGES: Mutex<VecDeque<KeptPage>> = Mutex::new(VecDeque::new());
+
+static NEXT_PAGE: AtomicU32 = AtomicU32::new(0);
+
+/// Identifies one page of results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageId(u32);
+
+js_newtype!(PageId, u32);
 
 /// A results column the index can order by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -139,6 +159,7 @@ pub struct SearchRow {
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct SearchPage {
+    pub id: PageId,
     pub rows: Vec<SearchRow>,
     /// More matches than the page holds.
     pub truncated: bool,
@@ -325,6 +346,77 @@ impl ReplaySearch {
             .await
             .map_err(|source| SearchError::Task { task: "replay copy", source })?
     }
+
+    /// Names the ship of the row for `path` on page `page` from the build its
+    /// match was recorded on, loading that build when it is not loaded. Every
+    /// row of the page that build names the same ship on, as it reads with
+    /// that name; none when the page is gone, the row has no ship or the
+    /// build cannot name it.
+    pub async fn name_hovered_ship(page: PageId, path: String) -> Result<Vec<SearchRow>, SearchError> {
+        blocking(move || name_hovered_ship(page, Path::new(&path)))
+            .await
+            .map_err(|source| SearchError::Task { task: "ship naming", source })
+    }
+
+    /// Calls `on_change` whenever the game data the settings bind to is
+    /// replaced or changes language, which the names on the rows were read
+    /// from.
+    pub async fn watch_game_data(on_change: Callback) {
+        let mut changes = crate::game_data::changes();
+        let mut bound = match blocking(NamingSource::current).await {
+            Ok(bound) => bound,
+            Err(error) => {
+                log::warn!("search: the game data watch did not start: {error}");
+                return;
+            }
+        };
+
+        loop {
+            if changes.changed().await.is_err() {
+                return;
+            }
+
+            // The service has started by now, so this reads its state and
+            // nothing else.
+            let current = NamingSource::current();
+            if current.same(&bound) {
+                continue;
+            }
+
+            bound = current;
+            if on_change.call_async(()).await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// One page of results kept for naming a hovered row.
+struct KeptPage {
+    id: PageId,
+    hits: Vec<MatchHit>,
+}
+
+/// The game data a row's ship name is read from, and its language.
+struct NamingSource {
+    cache: Option<GameDataCache>,
+    locale: Option<String>,
+}
+
+impl NamingSource {
+    fn current() -> Self {
+        Self { cache: crate::game_data::cache(), locale: crate::game_data::locale() }
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        let same_cache = match (&self.cache, &other.cache) {
+            (Some(cache), Some(other)) => cache.same_source(other),
+            (None, None) => true,
+            _ => false,
+        };
+
+        same_cache && self.locale == other.locale
+    }
 }
 
 fn copy_replay_file(path: PathBuf) -> Result<(), SearchError> {
@@ -367,14 +459,54 @@ fn run_search(text: &str, sort: SortSpec) -> Result<SearchPage, SearchError> {
         .filter(|missing| search::game_mode_gap_applies(*missing, &expr))
         .map(search_results::game_mode_gap_hint);
 
-    Ok(SearchPage { rows: hits.iter().map(search_row).collect(), truncated, count, game_mode_gap })
+    let names = ship_names::loaded_names(hits.iter().filter_map(ShipKey::of));
+    let rows: Vec<SearchRow> =
+        hits.iter().map(|hit| search_row(hit, ShipKey::of(hit).and_then(|key| names.get(&key).cloned()))).collect();
+    let id = keep_page(hits);
+
+    Ok(SearchPage { id, rows, truncated, count, game_mode_gap })
 }
 
-fn search_row(hit: &MatchHit) -> SearchRow {
-    // The name stored at index time: a live name needs the match's own build
-    // loaded, which is the game data service's to provide. A match with no
-    // stored name shows a dash.
-    let ship = search::ship_display_name(hit, None).unwrap_or_else(|| "-".to_owned());
+/// Keeps `hits` as a new page, dropping the oldest past the few kept.
+fn keep_page(hits: Vec<MatchHit>) -> PageId {
+    const KEPT_PAGES: usize = 4;
+
+    let id = PageId(NEXT_PAGE.fetch_add(1, Ordering::Relaxed));
+    let mut pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
+    if pages.len() == KEPT_PAGES {
+        pages.pop_front();
+    }
+    pages.push_back(KeptPage { id, hits });
+
+    id
+}
+
+fn name_hovered_ship(page: PageId, path: &Path) -> Vec<SearchRow> {
+    let Some((key, hits)) = same_ship_hits(page, path) else { return Vec::new() };
+
+    // Loaded outside the pages' lock: a build load takes seconds.
+    let Some(name) = ship_names::load_name(key) else { return Vec::new() };
+
+    hits.iter().map(|hit| search_row(hit, Some(name.clone()))).collect()
+}
+
+/// The ship of the row for `path` on page `page`, and every match of that
+/// page with the same ship on the same build.
+fn same_ship_hits(page: PageId, path: &Path) -> Option<(ShipKey, Vec<MatchHit>)> {
+    let pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
+    let kept = pages.iter().find(|kept| kept.id == page)?;
+    let key = kept.hits.iter().find(|hit| hit.replay_path == path).and_then(ShipKey::of)?;
+    let hits = kept.hits.iter().filter(|hit| ShipKey::of(hit) == Some(key)).cloned().collect();
+
+    Some((key, hits))
+}
+
+/// `live` is the name the match's own build gives its ship, when that build
+/// is loaded; otherwise the row reads the name stored at index time, and a
+/// match with neither shows a dash.
+fn search_row(hit: &MatchHit, live: Option<String>) -> SearchRow {
+    let ship = search::ship_display_name_from_parts(hit.self_ship_id, hit.self_ship_name.as_deref(), live)
+        .unwrap_or_else(|| "-".to_owned());
     let facts = listing_row::hover_facts_for_match(hit, ship.clone(), None)
         .into_iter()
         .map(|fact| HoverFact { label: fact.label, value: fact.value })

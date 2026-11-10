@@ -50,6 +50,10 @@ const OUTCOME_COLORS = {
   draw: { dark: "#e9e5dd", light: "#5c5950" },
 } as const;
 const WARNING = "#e8a54a";
+// How far under the pill box the completion list and calendar open, and the
+// list's narrowest width.
+const DROPDOWN_GAP = 4;
+const COMPLETIONS_MIN_WIDTH = 260;
 
 type RunState =
   | { kind: "idle" }
@@ -57,6 +61,9 @@ type RunState =
   | { kind: "running" }
   | { kind: "failed"; reason: string }
   | { kind: "done" };
+
+/** A view's frame relative to its parent, as `onLayout` reports it. */
+type Frame = { origin: { x: number; y: number }; size: { width: number; height: number } };
 
 /** What a result row can do beyond opening and copying, when the app has it. */
 export type SearchRowActions = {
@@ -86,14 +93,7 @@ effect(() => {
   shownLocale = locale;
   untracked(() => {
     view.set(bar.view());
-    if (!page() || runState().kind !== "done") return;
-    // The same lookup again, so the rows' words follow; nothing is saved.
-    generation += 1;
-    const asked = generation;
-    void ReplaySearch.search(lastRunQuery, sort()).then(
-      (found) => { if (asked === generation) page.set(found); },
-      (error) => { if (asked === generation) runState.set({ kind: "failed", reason: errorMessage(error) }); },
-    );
+    rerunShown();
   });
 });
 const completionsOpen = signal(false);
@@ -116,6 +116,9 @@ const listOffset = signal(0);
 const tableOffset = signal(0);
 const resultsSize = signal({ width: 0, height: 0 });
 const rowActions = signal<SearchRowActions>({});
+// The bar row in the query bar's strip, and the pill box in that row.
+const barRowFrame = signal<Frame | null>(null);
+const pillsFrame = signal<Frame | null>(null);
 let lastRunQuery = "";
 let generation = 0;
 let rerunTimer: number | undefined;
@@ -129,6 +132,8 @@ let queryDirty = false;
 let sortDirty = false;
 let historyDirty = false;
 let preferencesDirty = false;
+let watchingGameData = false;
+let rerunWhenDone = false;
 let showSearchTab: () => void = () => {};
 
 function errorMessage(error: unknown): string {
@@ -161,6 +166,46 @@ export function searchFor(query: string) {
 
 function refresh() {
   view.set(bar.view());
+}
+
+/** Runs the shown query again so the rows reword themselves; nothing is saved. */
+function rerunShown() {
+  if (runState().kind === "running") {
+    // The running search may have read the words being replaced.
+    rerunWhenDone = true;
+    return;
+  }
+  if (!page() || runState().kind !== "done") return;
+  generation += 1;
+  const asked = generation;
+  void ReplaySearch.search(lastRunQuery, sort()).then(
+    (found) => {
+      if (asked !== generation) return;
+      page.set(found);
+      const at = hovered();
+      const row = at && found.rows.find((candidate) => candidate.replayPath === at.row.replayPath);
+      if (at && row) hovered.set({ ...at, row });
+    },
+    (error) => { if (asked === generation) runState.set({ kind: "failed", reason: errorMessage(error) }); },
+  );
+}
+
+/** Names the hovered row's ship from the build its match was recorded on, and every row of that ship on that build with it. */
+function nameHoveredShip(path: string) {
+  const shown = page();
+  if (!shown) return;
+  void ReplaySearch.nameHoveredShip(shown.id, path).then(
+    (named) => {
+      const current = page();
+      if (named.length === 0 || current?.id !== shown.id) return;
+      const renamed = new Map(named.map((row) => [row.replayPath, row]));
+      page.set({ ...current, rows: current.rows.map((row) => renamed.get(row.replayPath) ?? row) });
+      const at = hovered();
+      const row = at && renamed.get(at.row.replayPath);
+      if (at && row) hovered.set({ ...at, row });
+    },
+    (error) => console.warn(`The hovered row's ship could not be named: ${errorMessage(error)}`),
+  );
 }
 
 function closeCompletions() {
@@ -206,14 +251,22 @@ function run() {
     persist(() => ReplaySearch.saveOperatorPreferences(preferences));
   }
   persist(() => ReplaySearch.saveQuery(plan.query));
+  // The rows give way to the status until the answer lands, so nothing
+  // points into them meanwhile.
   runState.set({ kind: "running" });
+  rerunWhenDone = false;
+  clearTimeout(dwellTimer);
+  hovered.set(null);
+  listOffset.set(0);
   void ReplaySearch.search(plan.query, sort()).then(
     (found) => {
       if (asked !== generation) return;
-      clearTimeout(dwellTimer);
       page.set(found);
-      hovered.set(null);
       runState.set({ kind: "done" });
+      if (rerunWhenDone) {
+        rerunWhenDone = false;
+        rerunShown();
+      }
     },
     (error) => {
       if (asked !== generation) return;
@@ -675,7 +728,7 @@ function BarTokens() {
   // tokens: one input for the life of the bar, which keeps its focus while
   // the pills around it change.
   return (
-    <View testID="search-pills" style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius() }}>
+    <View testID="search-pills" onLayout={({ bounds }) => pillsFrame.set(bounds)} style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius() }}>
       <Each of={view().tokens.filter((token) => token.kind !== "caret")}>
         {(token, index) => {
           const kind = () => token().kind;
@@ -710,11 +763,20 @@ function CalendarDay(props: { item: CalendarEntry }) {
   return <Text style={{ minWidth: 26, textAlign: "center", fontSize: 12, color: colors.popoverForeground }}>{String(props.item.value)}</Text>;
 }
 
+/** Under the pill box's bottom-left corner, in the query bar strip, once both are measured; moved left when the strip is too narrow for the list. */
+function dropdownAnchor(): { left: number; top: number } | null {
+  const row = barRowFrame();
+  const pills = pillsFrame();
+  if (!row || !pills) return null;
+  const left = Math.max(0, Math.min(row.origin.x + pills.origin.x, row.origin.x + row.size.width - COMPLETIONS_MIN_WIDTH));
+  return { left, top: row.origin.y + pills.origin.y + pills.size.height + DROPDOWN_GAP };
+}
+
 function Dropdown() {
   return (
     <>
-      <If when={completionsOpen() && view().wantsCalendar}>
-        <Surface style={{ position: "absolute", top: 44, left: 40, padding: 6, backgroundColor: colors.popover, zIndex: 10 }}>
+      <If when={completionsOpen() && view().wantsCalendar && dropdownAnchor()}>
+        <Surface style={{ position: "absolute", ...dropdownAnchor()!, padding: 6, backgroundColor: colors.popover, zIndex: 10 }}>
           <View testID="search-calendar">
             <Calendar
               value={view().calendarDate ?? null}
@@ -725,8 +787,8 @@ function Dropdown() {
           </View>
         </Surface>
       </If>
-      <If when={completionsOpen() && !view().wantsCalendar && (offered().length > 0 || valueLookupRunning())}>
-        <Surface style={{ position: "absolute", top: 44, left: 40, minWidth: 260, maxWidth: 460, maxHeight: 260, padding: 4, backgroundColor: colors.popover, zIndex: 10 }}>
+      <If when={completionsOpen() && !view().wantsCalendar && (offered().length > 0 || valueLookupRunning()) && dropdownAnchor()}>
+        <Surface style={{ position: "absolute", ...dropdownAnchor()!, minWidth: COMPLETIONS_MIN_WIDTH, maxWidth: 460, maxHeight: 260, padding: 4, backgroundColor: colors.popover, zIndex: 10 }}>
           <Scroll testID="search-completions" style={{ maxHeight: 250 }}>
             <If when={valueLookupRunning()}>
               <Text style={{ padding: 6, fontSize: 11.5, color: colors.mutedForeground }}>{text.lookingUpValues}</Text>
@@ -784,7 +846,8 @@ function QueryBarRow() {
   };
   return (
     <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, gap: 4, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 5 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View onLayout={({ bounds }) => barRowFrame.set(bounds)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Icon name="search" size={16} color={colors.mutedForeground}/>
         <BarTokens/>
         <Button label={t("ui.tabs.search")} testID="search-run" onPress={commitAndRun}/>
       </View>
@@ -872,7 +935,10 @@ function ResultRow(props: { row: SearchRow; index: number }) {
         if (hovered()?.row.replayPath === row.replayPath) return;
         const x = (event?.position.x ?? 0) - tableOffset();
         const y = HEADER_HEIGHT + index * ROW_HEIGHT - listOffset() + (event?.position.y ?? 0);
-        dwellTimer = setTimeout(() => hovered.set({ row, index, x, y }), DWELL);
+        dwellTimer = setTimeout(() => {
+          hovered.set({ row, index, x, y });
+          nameHoveredShip(row.replayPath);
+        }, DWELL);
       }}
       hoverStyle={{ backgroundColor: colors.accent }}
       activeStyle={{ opacity: 0.72 }}
@@ -966,7 +1032,7 @@ function statusText(): string | null {
     case "idle": return text.typeAQuery;
     // Said in its own strip under the bar, not in place of the results.
     case "invalid": return rows > 0 ? null : text.typeAQuery;
-    case "running": return rows > 0 ? null : text.searching;
+    case "running": return text.searching;
     case "failed": return fill(text.failed, state.reason);
     case "done": return rows === 0 ? text.noMatches : null;
   }
@@ -1020,6 +1086,11 @@ export function SearchView(props: { onOpenReplay: (path: string) => void; onNoti
   openReplay = props.onOpenReplay;
   notice = props.onNotice;
   openSavedQuery();
+  if (!watchingGameData) {
+    watchingGameData = true;
+    // Names on the rows were read from the game data; replaced data names them again.
+    void ReplaySearch.watchGameData(rerunShown);
+  }
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <QueryBarRow/>

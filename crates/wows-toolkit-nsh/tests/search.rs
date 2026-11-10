@@ -1,12 +1,15 @@
 //! Headless behavior of the Search tab and the command palette over the real
 //! TSX bundle.
 
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
-use nsh_core::{Points, Size};
+use nsh_core::{MountBatch, MountItem, NodeId, Points, Size};
+use wows_toolkit_nsh::replay_inspector::constants::BuildNumber;
+use wows_toolkit_nsh::ship_names::{BuildReach, ShipKey, ShipNamer};
 
 const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
 const QUERY: &str = "label:Replay search query";
@@ -95,20 +98,94 @@ static CLIPBOARD: RecordingClipboard =
 
 /// The app over an index holding one battle, with no saved Search state.
 fn app() -> TestApp {
+    launch(None, None)
+}
+
+/// [`app`], its ships named by `namer` in place of the game data, with every
+/// frame the app lays out recorded in `layout`.
+fn launch(namer: Option<ShipNamer>, layout: Option<Arc<Mutex<Layout>>>) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     wows_toolkit_nsh::clipboard::replace(&CLIPBOARD);
     CLIPBOARD.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    wows_toolkit_nsh::ship_names::set_namer(namer);
     seed_index();
     let mut app = start();
+    if let Some(layout) = layout {
+        app.observe(move |_, batch| layout.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).record(batch));
+    }
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
     TestApp { app, _guard: guard }
+}
+
+/// Each view's parent, frame and test id, as the batches applied so far set
+/// them.
+#[derive(Default)]
+struct Layout {
+    parents: HashMap<NodeId, NodeId>,
+    frames: HashMap<NodeId, nsh_core::Bounds<Points>>,
+    tagged: HashMap<String, NodeId>,
+}
+
+/// A view's edges in the root's points.
+#[derive(Debug, Clone, Copy)]
+struct Edges {
+    left: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl Layout {
+    fn record(&mut self, batch: &MountBatch) {
+        for item in &batch.items {
+            match item {
+                MountItem::Insert { parent, child, .. } => {
+                    self.parents.insert(*child, *parent);
+                }
+                MountItem::Remove { id } | MountItem::Delete { id } => {
+                    self.parents.remove(id);
+                }
+                MountItem::Frame { id, frame } => {
+                    self.frames.insert(*id, *frame);
+                }
+                MountItem::ViewProps { id, props } => {
+                    if let Some(test_id) = &props.test_id {
+                        self.tagged.insert(test_id.to_string(), *id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The edges of the view tagged `test_id` in the root, its frame moved
+    /// by those of the views around it. Scroll offsets are left out: none of
+    /// the views measured here is scrolled.
+    fn edges(&self, test_id: &str) -> Edges {
+        let id = self.tagged[test_id];
+        let frame = self.frames[&id];
+        let mut left = frame.origin.x.0;
+        let mut top = frame.origin.y.0;
+        let mut at = id;
+        while let Some(parent) = self.parents.get(&at) {
+            if let Some(around) = self.frames.get(parent) {
+                left += around.origin.x.0;
+                top += around.origin.y.0;
+            }
+            at = *parent;
+        }
+
+        Edges { left, top, bottom: top + frame.size.height.0 }
+    }
 }
 
 /// [`app`] as a Linux desktop, which has a mouse to right-click and hover
 /// with.
 fn desktop_app() -> TestApp {
-    let mut app = app();
+    as_desktop(app())
+}
+
+fn as_desktop(mut app: TestApp) -> TestApp {
     app.set_environment("desktop", |environment| {
         environment.os = nsh_core::platform::Os::Linux;
         environment.idiom = nsh_core::platform::Idiom::Desktop;
@@ -527,4 +604,160 @@ fn a_language_change_rewords_the_rows_on_screen() {
     with_test_database(async |pool| {
         wows_toolkit_config::queries::set_setting_raw(pool, "locale", r#""en""#).await.expect("the locale is reset");
     });
+}
+
+/// The seeded battle's ship as its build knows it.
+fn seeded_ship(key: ShipKey) -> bool {
+    key.build == BuildNumber(1234) && key.ship == wows_core::game_types::GameParamId::from(999u64)
+}
+
+/// Names the seeded ship as if its build were loaded.
+fn name_loaded(key: ShipKey, _reach: BuildReach) -> Option<String> {
+    seeded_ship(key).then(|| "Harugumo (live)".to_owned())
+}
+
+/// Names the seeded ship only by loading its build: none is loaded.
+fn name_by_loading(key: ShipKey, reach: BuildReach) -> Option<String> {
+    (reach == BuildReach::Load && seeded_ship(key)).then(|| "Harugumo (loaded)".to_owned())
+}
+
+/// How many times [`new_game_data_names_the_rows_again`] has changed the
+/// game data, which [`name_by_binding`] names the ship after.
+static BINDINGS: AtomicU8 = AtomicU8::new(0);
+
+/// Names the seeded ship after the game data the test has bound.
+fn name_by_binding(key: ShipKey, _reach: BuildReach) -> Option<String> {
+    seeded_ship(key).then(|| format!("Harugumo ({})", BINDINGS.load(Ordering::SeqCst)))
+}
+
+/// Holds every lookup of loaded names while set, so a search stays running.
+static HOLD_SEARCH: AtomicBool = AtomicBool::new(false);
+
+/// Names nothing, waiting while [`HOLD_SEARCH`] is set.
+fn name_when_released(_key: ShipKey, reach: BuildReach) -> Option<String> {
+    let deadline = std::time::Instant::now() + GONE;
+    while reach == BuildReach::Loaded && HOLD_SEARCH.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    None
+}
+
+/// Saves `value` in settings row `key` and rebinds the game data to it.
+fn rebind_game_data(key: &str, value: &str) {
+    with_test_database(async |pool| {
+        wows_toolkit_config::queries::set_setting_raw(pool, key, value).await.expect("the game data setting is saved");
+    });
+    wows_toolkit_nsh::game_data::reload_settings().expect("the game data rebinds");
+}
+
+/// Puts the game data settings a test changed back, however it ends.
+struct RestoreGameData;
+
+impl Drop for RestoreGameData {
+    fn drop(&mut self) {
+        rebind_game_data(wows_toolkit_viewmodel::settings::keys::AUTO_DUMP_GAME_DATA, "false");
+        rebind_game_data(wows_toolkit_viewmodel::settings::keys::LOCALE, r#""en""#);
+        BINDINGS.store(0, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_loaded_build_names_the_ship_column() {
+    let mut app = launch(Some(name_loaded), None);
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo (live)").unwrap();
+    assert!(!app.shows("Harugumo"), "the build's name replaces the one stored at index time");
+}
+
+#[test]
+fn hovering_a_row_names_its_ship_from_its_build() {
+    let mut app = as_desktop(launch(Some(name_by_loading), None));
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    app.hover(&format!("label:Open replay {}", replay().display())).unwrap();
+    app.wait_for(&format!("label:Preview {}", replay().display())).unwrap();
+    app.wait_until("the row and its preview name the loaded ship", GONE, |screen| {
+        screen.count("text:Harugumo (loaded)") == Ok(2)
+    })
+    .unwrap();
+    assert!(!app.shows("Harugumo"), "the stored name is gone from the row and the preview");
+}
+
+#[test]
+fn new_game_data_names_the_rows_again() {
+    BINDINGS.store(0, Ordering::SeqCst);
+    let mut app = launch(Some(name_by_binding), None);
+    let _restore = RestoreGameData;
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo (0)").unwrap();
+
+    // The auto-dump flag is fixed per cache, so a change replaces the cache.
+    BINDINGS.store(1, Ordering::SeqCst);
+    rebind_game_data(wows_toolkit_viewmodel::settings::keys::AUTO_DUMP_GAME_DATA, "true");
+    app.wait_for("Harugumo (1)").unwrap();
+    assert!(!app.shows("Harugumo (0)"), "no name read from the replaced game data stays");
+
+    // A language change keeps the cache and rewords what it names.
+    BINDINGS.store(2, Ordering::SeqCst);
+    rebind_game_data(wows_toolkit_viewmodel::settings::keys::LOCALE, r#""de""#);
+    app.wait_for("Harugumo (2)").unwrap();
+}
+
+#[test]
+fn a_running_search_replaces_the_rows() {
+    HOLD_SEARCH.store(false, Ordering::SeqCst);
+    let mut app = launch(Some(name_when_released), None);
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    HOLD_SEARCH.store(true, Ordering::SeqCst);
+    app.press("id:search-run").unwrap();
+    app.wait_for("Searching...").unwrap();
+    assert!(!app.shows("Harugumo"), "the earlier rows give way while the search runs");
+    HOLD_SEARCH.store(false, Ordering::SeqCst);
+    app.wait_for("Harugumo").unwrap();
+}
+
+#[test]
+fn the_completions_open_under_a_wrapped_pill_box() {
+    use wows_toolkit_viewmodel::query_bar::suggest::SuggestionKind;
+
+    let field = wows_toolkit_viewmodel::query_bar::suggest::static_suggestions()
+        .into_iter()
+        .find(|suggestion| matches!(suggestion.kind, SuggestionKind::MatchField(_)))
+        .expect("there are field suggestions")
+        .label
+        .clone();
+    let needle: String = field.chars().take(3).collect();
+    let layout = Arc::new(Mutex::new(Layout::default()));
+    let mut app = launch(None, Some(Arc::clone(&layout)));
+    // Narrow, so the pills take more than one line.
+    app.set_viewport(Size::new(Points(520.0), Points(900.0))).expect("the narrow viewport is applied");
+
+    app.press("Search").unwrap();
+    app.type_text(QUERY, "outcome:win map:Ocean outcome:win map:Ocean outcome:win map:Ocean").unwrap();
+    app.submit(QUERY).unwrap();
+    // Six pills and the five connectors between them.
+    app.wait_for("id:search-pill-10").unwrap();
+    app.type_text(QUERY, &needle).unwrap();
+    app.wait_for("id:search-completion-0").unwrap();
+
+    let layout = layout.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let first_pill = layout.edges("search-pill-0");
+    let last_pill = layout.edges("search-pill-10");
+    let bar = layout.edges("search-pills");
+    let completion = layout.edges("search-completion-0");
+    assert!(last_pill.top >= first_pill.bottom, "the pills wrap onto a second line: {first_pill:?}, {last_pill:?}");
+    // The list's own frame and padding sit between the bar and its first row.
+    assert!(
+        completion.top >= bar.bottom && completion.top <= bar.bottom + 16.0,
+        "the list opens just under the bar: {bar:?}, {completion:?}"
+    );
+    assert!(
+        (completion.left - bar.left).abs() <= 8.0,
+        "the list starts at the bar's left edge: {bar:?}, {completion:?}"
+    );
 }

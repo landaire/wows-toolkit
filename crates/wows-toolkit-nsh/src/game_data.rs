@@ -395,6 +395,13 @@ pub fn cache() -> Option<GameDataCache> {
     state().binding.as_ref().map(|binding| binding.cache.clone())
 }
 
+/// The language the bound game data names things in.
+pub fn locale() -> Option<String> {
+    ensure_started();
+
+    state().binding.as_ref().map(|binding| binding.settings.locale.clone())
+}
+
 /// The newest build already loaded, without loading anything.
 pub fn newest_loaded() -> Option<Arc<LoadedGameData>> {
     cache()?.newest_loaded()
