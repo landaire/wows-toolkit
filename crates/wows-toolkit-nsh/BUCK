@@ -55,7 +55,6 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:tiny-skia",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
-    "//third-party/rust:url",
     "//third-party/rust:tempfile",
 ]
 
@@ -128,5 +127,6 @@ workspace_integration_tests(
         "//third-party/rust:nsh-testing",
         "//third-party/rust:nsh-engine",
         "//third-party/rust:parking_lot",
+        "//third-party/rust:url",
     ],
 )

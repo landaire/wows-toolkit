@@ -93,4 +93,9 @@ pub enum InspectorError {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("the replay files could not be copied: {source}")]
+    Clipboard {
+        #[source]
+        source: arboard::Error,
+    },
 }

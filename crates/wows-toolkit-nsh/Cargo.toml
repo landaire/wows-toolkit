@@ -37,7 +37,6 @@ wows_replays = { path = "../wows-replays", default-features = false, features = 
 wows-core = { path = "../wows-core" }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 sqlx = { workspace = true }
-url = "2.5.8"
 wows-toolkit-armor = { path = "../wows-toolkit-armor" }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
@@ -69,4 +68,5 @@ nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = { version = "0.4.0", features = ["bundle"] }
 # The session state a tactics board test hands a link.
 parking_lot = "0.12"
+url = "2.5.8"
 wows-toolkit-nsh = { path = ".", default-features = false, features = ["test-support"] }

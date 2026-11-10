@@ -683,13 +683,29 @@ impl Browser {
     /// Puts the replay files on the clipboard, so they paste into a file
     /// manager or an upload dialog rather than as their paths.
     fn copy_replays(self, paths: &[PathBuf]) {
-        set_clipboard(actions::uri_list(paths));
+        let paths = paths.to_vec();
+        self.owner.run(|| {
+            spawn(async move {
+                let count = paths.len();
+                let copied = blocking(move || {
+                    crate::clipboard::copy_files(&paths).map_err(|source| InspectorError::Clipboard { source })
+                })
+                .await
+                .map_err(|source| InspectorError::Task { source })
+                .flatten();
+                if let Err(failure) = copied {
+                    tracing::warn!("replay listing: {failure}");
+                    self.notice(failure.to_string(), NoticeLevel::Failed);
+                    return;
+                }
 
-        let said = match paths.len() {
-            1 => t!("ui.replay.context.copy_replay"),
-            count => t!("ui.replay.context.copy_replays", count = count),
-        };
-        self.notice(said.into_owned(), NoticeLevel::Ok);
+                let said = match count {
+                    1 => t!("ui.replay.context.copy_replay"),
+                    count => t!("ui.replay.context.copy_replays", count = count),
+                };
+                self.notice(said.into_owned(), NoticeLevel::Ok);
+            })
+        });
     }
 
     fn copy_paths(paths: &[PathBuf]) {

@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use nsh_core::Points;
@@ -161,10 +163,44 @@ fn start() -> nsh_testing::Headless {
     nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
 }
 
+/// Takes the copies the app makes in place of the system clipboard, so no
+/// test writes the user's clipboard.
+struct RecordingClipboard {
+    copied: Mutex<Vec<Vec<PathBuf>>>,
+    refuse: AtomicBool,
+}
+
+impl RecordingClipboard {
+    fn last(&self) -> Option<Vec<PathBuf>> {
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).last().cloned()
+    }
+}
+
+impl wows_toolkit_nsh::clipboard::FileClipboard for RecordingClipboard {
+    fn copy_files(&self, files: &[PathBuf]) -> Result<(), arboard::Error> {
+        if self.refuse.load(Ordering::SeqCst) {
+            return Err(arboard::Error::ClipboardNotSupported);
+        }
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(files.to_vec());
+        Ok(())
+    }
+}
+
+static CLIPBOARD: RecordingClipboard =
+    RecordingClipboard { copied: Mutex::new(Vec::new()), refuse: AtomicBool::new(false) };
+
+/// Sends the app's file copies to [`CLIPBOARD`], emptied and accepting.
+fn record_clipboard() {
+    wows_toolkit_nsh::clipboard::replace(&CLIPBOARD);
+    CLIPBOARD.refuse.store(false, Ordering::SeqCst);
+    CLIPBOARD.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+}
+
 /// The app, every replay it opens read as the sample report.
 fn app() -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
+    record_clipboard();
     wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
@@ -190,6 +226,7 @@ fn install_with(name: &str, replays: &[&str]) -> TestDirectory {
 fn app_with_install(install: &Path, autoload: bool) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
+    record_clipboard();
     wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
     let settings = InstallSettings::bind(install, autoload);
     let mut app = start();
@@ -259,6 +296,26 @@ fn open_file(app: &mut TestApp, path: PathBuf) {
     app.on_pick_paths(vec![path]).unwrap();
     app.press("label:Open").unwrap();
     app.press("Open Replay File...").unwrap();
+}
+
+/// Opens `directory` as a workspace of its own through the Open menu.
+fn open_directory(app: &mut TestApp, directory: &Path) -> OpenedDirectory {
+    app.on_pick_paths(vec![directory.to_path_buf()]).unwrap();
+    app.press("label:Open").unwrap();
+    app.press("Open Replay Directory...").unwrap();
+
+    OpenedDirectory(wows_toolkit_replay_data::directories::canonical_root(directory.to_path_buf()))
+}
+
+/// A directory opened as a workspace, closed when dropped: the registry is
+/// the process's, and a tab left open would stand in the next test.
+struct OpenedDirectory(PathBuf);
+
+impl Drop for OpenedDirectory {
+    fn drop(&mut self) {
+        // A test that closed the directory itself leaves nothing to close.
+        let _ = wows_toolkit_nsh::game_data::GameData::close_directory(self.0.display().to_string());
+    }
 }
 
 fn open_sample(app: &mut TestApp) {
@@ -410,9 +467,7 @@ fn a_directory_lists_its_replays_and_opens_them() {
 
     let mut app = app();
     on_linux_desktop(&mut app);
-    app.on_pick_paths(vec![directory.0.clone()]).unwrap();
-    app.press("label:Open").unwrap();
-    app.press("Open Replay Directory...").unwrap();
+    let _opened = open_directory(&mut app, &directory.0);
     let requests = app.screen().file_requests();
     assert!(
         matches!(requests.last(), Some(nsh_core::file_dialog::FileRequest::OpenDialog(dialog)) if dialog.picks_folders()),
@@ -596,4 +651,29 @@ fn the_listing_reads_the_index_again_after_a_pass() {
     app.press("Index All Replays").unwrap();
     app.wait_for_within("text:/^Indexed 0 replays, 1 were already in/", Duration::from_secs(30)).unwrap();
     app.wait_for_gone("text:/not indexed/", GONE).unwrap();
+}
+
+/// "Copy Replay" puts the file itself on the clipboard, and says so when the
+/// clipboard refuses it.
+#[test]
+fn copying_a_listed_replay_puts_the_file_on_the_clipboard() {
+    let directory = TestDirectory::new("copy");
+    std::fs::copy(fixture(FIRST), directory.0.join(FIRST)).expect("the fixture is copied");
+
+    let mut app = app();
+    on_linux_desktop(&mut app);
+    let _opened = open_directory(&mut app, &directory.0);
+    let row = format!("label:{FIRST}");
+    app.wait_for(&row).unwrap();
+
+    app.right_click(&row).unwrap();
+    app.press("Copy Replay").unwrap();
+    app.wait_for("role:alert[Copy Replay]").unwrap();
+    let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
+    assert_eq!(CLIPBOARD.last(), Some(vec![root.join(FIRST)]), "the replay file is on the clipboard");
+
+    CLIPBOARD.refuse.store(true, Ordering::SeqCst);
+    app.right_click(&row).unwrap();
+    app.press("Copy Replay").unwrap();
+    app.wait_for("role:alert[/^the replay files could not be copied: /]").unwrap();
 }
