@@ -541,7 +541,7 @@ impl ReplayRenderer {
             return Err(RendererError::BatchRunning);
         }
         let (out_dir, target) = if to_clipboard {
-            (playback::temporary_batch_dir().ok_or(RendererError::NoTemporaryFile)?, batch::BatchTarget::Clipboard)
+            (playback::temporary_batch_dir().ok_or(RendererError::NoTemporaryDirectory)?, batch::BatchTarget::Clipboard)
         } else {
             let dialog = OpenDialog::folders().title(t!("ui.replay.renderer.export_video").into_owned());
             let picked = pick_paths(dialog).await.map_err(|reason| RendererError::Dialog { reason })?;

@@ -19,6 +19,7 @@ use crate::frames::PointerButton;
 use crate::frames::ScaleFactor;
 use crate::frames::ScrollSteps;
 use crate::frames::SurfaceInput;
+use crate::renderer::RendererError;
 use crate::renderer::geometry::CanvasSize;
 use crate::renderer::geometry::LogicalPoint;
 use crate::renderer::viewer::Viewer;
@@ -213,4 +214,26 @@ fn the_ship_menu_stays_open_across_toggles_until_closed() {
     viewer.open_ship_menu(at);
     viewer.open_ship_menu(LogicalPoint { x: 2.0, y: CANVAS_HEIGHT as f32 - 2.0 });
     assert!(viewer.ship_menu().is_none(), "a right-click on open water closes it");
+}
+
+#[test]
+fn the_errors_a_reader_sees_are_said_from_the_catalog() {
+    let shown = [
+        RendererError::Dialog { reason: "portal gone".to_owned() },
+        RendererError::NotReady,
+        RendererError::NoTemporaryFile,
+        RendererError::NoTemporaryDirectory,
+        RendererError::BatchRunning,
+        RendererError::UnknownWindow { replay_id: "7".to_owned() },
+        RendererError::NoGameData,
+    ];
+    for error in &shown {
+        let text = error.user_text();
+        // A key missing from the catalog reads as the key itself.
+        assert!(!text.contains("ui.replay.renderer."), "{error:?} has no catalog text: {text}");
+    }
+
+    assert_eq!(RendererError::NoTemporaryDirectory.user_text(), "That location cannot be written to");
+    assert!(RendererError::Dialog { reason: "portal gone".to_owned() }.user_text().contains("portal gone"));
+    assert!(RendererError::UnknownWindow { replay_id: "7".to_owned() }.user_text().contains('7'));
 }
