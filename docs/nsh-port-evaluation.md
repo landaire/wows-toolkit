@@ -1,5 +1,7 @@
 # Evaluation: porting the GPUI app to Native Shell (nsh)
 
+This evaluation was written before the port. The spike it describes was replaced by the full port; see [nsh-port-parity.md](nsh-port-parity.md) for what the NSH app does now.
+
 Evaluated 2026-11-06 against `crates/wows-toolkit-gpui` (81k LOC including inline tests) and `crates/wows-toolkit-viewmodel` (21k LOC). The target is [Native Shell](https://nsh.dev) 0.4.0 from crates.io, in pure Rust with no TSX and no QuickJS. nsh was read at tag `v0.4.0`. Facts that exist only on nsh `main` (`beade99a`, 2026-11-07) are marked "`main` only". Unless noted, nsh paths are relative to `crates/` in the nsh repository at `v0.4.0`. The spike in `crates/wows-toolkit-nsh` measured the riskiest paths on the Linux GTK 4 backend.
 
 ## Verdict
