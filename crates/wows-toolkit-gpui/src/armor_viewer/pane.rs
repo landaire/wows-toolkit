@@ -60,9 +60,9 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
-use crate::replay_inspector::load::LoadedGameData;
 use crate::viewport::device::GpuContext;
 use crate::viewport::renderer::GpuPipeline;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 use gpui_kit::component::WindowExt as _;
 

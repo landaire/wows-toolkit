@@ -6,8 +6,9 @@
 //! `preferences.xml`'s `<last_server_version>` node when that subdirectory
 //! exists on disk (`task/replays.rs::load_wows_files`, the
 //! `available_builds`/`latest_build` selection dropped -- this module only
-//! needs the replays directory, not a loaded game build). `resolve_replays_dir`
-//! ports that lookup; `scan_replay_files` then lists `*.wowsreplay` files
+//! needs the replays directory, not a loaded game build).
+//! `wows_toolkit_replay_data::load::resolve_replays_dir` ports that lookup;
+//! `scan_replay_files` then lists `*.wowsreplay` files
 //! (skipping `temp.wowsreplay`, matching `task/replays.rs::replay_filepaths`)
 //! and reads each one's header via `ReplayFile::meta_from_file` -- plaintext
 //! metadata only, no packet decryption/decompression, so this is safe to run
@@ -76,9 +77,9 @@ use super::columns::BattleOutcome;
 use super::columns::ColorRole;
 use crate::preview_hover::PreviewHover;
 
-use super::load::GameDataCache;
-use super::load::GameDataStatus;
 use super::table::resolve_color;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataStatus;
 
 /// The egui app's `t!("ui.replay.spectator")` value
 /// (`crates/wt-translations/translations/en.toml`'s `[ui.replay] spectator`
@@ -705,7 +706,7 @@ impl ReplayBrowser {
         let (reports, mut progress_rx) = futures::channel::mpsc::unbounded();
 
         cx.spawn(async move |this, cx| {
-            let replays_dir = resolve_replays_dir(Path::new(&wows_dir));
+            let replays_dir = wows_toolkit_replay_data::load::resolve_replays_dir(Path::new(&wows_dir));
             let scanned = replays_dir.clone();
             let scan = cx.background_spawn(async move { scan_replay_files(&scanned, &reports) });
 
@@ -1664,41 +1665,6 @@ impl Render for ReplayBrowser {
     }
 }
 
-/// Resolves the replays directory for `wows_dir`: `{wows_dir}/replays`,
-/// overridden by a build-specific subdirectory when `preferences.xml` names
-/// one and it exists on disk. Ports the relevant slice of
-/// `task/replays.rs::load_wows_files` (`mod.rs:342-375`); the
-/// `available_builds` gate and the (functionally redundant -- both loop
-/// entries were the identical path) double directory-existence check in the
-/// original are both dropped as out of scope for a directory-only lookup.
-pub(crate) fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
-    let default_dir = wows_dir.join("replays");
-
-    let Some(version_str) =
-        std::fs::read_to_string(wows_dir.join("preferences.xml")).ok().and_then(|data| last_server_version(&data))
-    else {
-        return default_dir;
-    };
-    let Some(version) = Version::try_from_client_exe(&version_str) else {
-        return default_dir;
-    };
-
-    let versioned_dir = default_dir.join(format!("{}.{}.{}.0", version.major, version.minor, version.patch));
-    if versioned_dir.exists() { versioned_dir } else { default_dir }
-}
-
-/// Reads the `<last_server_version>...</last_server_version>` node out of a
-/// WoWs `preferences.xml`'s raw contents. Ports
-/// `task/replays.rs::current_build_from_preferences`.
-pub(super) fn last_server_version(data: &str) -> Option<String> {
-    const OPEN: &str = "<last_server_version>";
-    const CLOSE: &str = "</last_server_version>";
-    let start = data.find(OPEN)?;
-    let end_of_node = data[start..].find(CLOSE)?;
-    let version_str = &data[start + OPEN.len()..start + end_of_node];
-    Some(version_str.trim().to_string())
-}
-
 /// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
 /// reads each one's header-only metadata. Ports
 /// `task/replays.rs::replay_filepaths`'s filter (minus the creation-time
@@ -2133,8 +2099,6 @@ mod tests {
     }
 
     use super::is_finished_replay;
-    use super::last_server_version;
-    use super::resolve_replays_dir;
     use std::path::Path;
 
     #[test]
@@ -2144,41 +2108,5 @@ mod tests {
         assert!(!is_finished_replay(Path::new("replays/temp.wowsreplay")));
         assert!(!is_finished_replay(Path::new("replays/tempArenaInfo.json")));
         assert!(!is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland")));
-    }
-
-    #[test]
-    fn last_server_version_reads_the_node_contents() {
-        let xml = "<preferences><clientOptions><last_server_version>13, 11, 0, 12668706</last_server_version></clientOptions></preferences>";
-        assert_eq!(last_server_version(xml).as_deref(), Some("13, 11, 0, 12668706"));
-    }
-
-    #[test]
-    fn last_server_version_is_none_when_the_node_is_absent() {
-        assert_eq!(last_server_version("<preferences></preferences>"), None);
-    }
-
-    #[test]
-    fn resolve_replays_dir_falls_back_to_the_default_when_no_preferences_file_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-no-prefs");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        assert_eq!(resolve_replays_dir(&dir), dir.join("replays"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn resolve_replays_dir_prefers_the_versioned_subdir_when_it_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-versioned");
-        let _ = std::fs::remove_dir_all(&dir);
-        let versioned = dir.join("replays").join("13.11.0.0");
-        std::fs::create_dir_all(&versioned).unwrap();
-        std::fs::write(dir.join("preferences.xml"), "<last_server_version>13, 11, 0, 12668706</last_server_version>")
-            .unwrap();
-
-        assert_eq!(resolve_replays_dir(&dir), versioned);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -36,7 +36,7 @@ use wowsunpack::vfs::VfsPath;
 
 use crate::replay_inspector::icons::IconCache;
 use crate::replay_inspector::icons::decode_ship_class_svg;
-use crate::replay_inspector::load::LoadedGameData;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 use super::catalog::ShipCatalog;
 
@@ -128,7 +128,7 @@ fn load_catalog_icons(catalog: &ShipCatalog, vfs: &VfsPath, svg_renderer: &SvgRe
 }
 
 /// Kicks off the Armor Viewer's ship-data load on the background executor.
-/// `loaded` is expected to come from the same [`GameDataCache`](super::super::replay_inspector::GameDataCache)
+/// `loaded` is expected to come from the same [`GameDataCache`](wows_toolkit_replay_data::load::GameDataCache)
 /// the replay inspector preloads at startup, so this never triggers a
 /// second VFS/`GameParams` load for the same build.
 pub fn spawn_load_armor_assets(

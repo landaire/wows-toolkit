@@ -3,7 +3,9 @@ use std::path::Path;
 use gpui_kit::component::tooltip::Tooltip;
 
 use super::*;
-use crate::replay_inspector::load::GameDataCache;
+use wows_toolkit_replay_data::directories::canonical_root;
+use wows_toolkit_replay_data::directories::shortened_path;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// A stats tab over every replay in one directory. Not saved: the tabs last
 /// one run.
@@ -104,7 +106,7 @@ impl App {
             return AppTab::Stats.label().into_any_element();
         };
         let full_path = tab.root.display().to_string();
-        let label = t!("ui.tabs.directory_stats", dir = replay_directories::shortened_path(&tab.root)).into_owned();
+        let label = t!("ui.tabs.directory_stats", dir = shortened_path(&tab.root)).into_owned();
         let close = cx.entity();
 
         h_flex()
@@ -128,10 +130,4 @@ impl App {
             )
             .into_any_element()
     }
-}
-
-/// Canonical, so two spellings of one directory share a tab. A path that
-/// will not resolve is kept as given: the read reports it empty.
-fn canonical_root(root: PathBuf) -> PathBuf {
-    std::fs::canonicalize(&root).unwrap_or(root)
 }

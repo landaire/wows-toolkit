@@ -98,15 +98,15 @@ use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
 
-use crate::replay_inspector::GameDataCache;
 use crate::replay_inspector::IconCache;
-use crate::replay_inspector::LoadedGameData;
 use crate::replay_inspector::columns::ColorRole;
 use crate::replay_inspector::columns::PlayerColorKind;
 use crate::replay_inspector::columns::player_color_kind_rgb;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 const ROW_HEIGHT: Pixels = px(24.);
 const NAME_COLUMN_WIDTH: Pixels = px(220.);
@@ -2874,9 +2874,9 @@ mod tests {
 
     use super::PlayerTrackerView;
     use super::SubTab;
-    use crate::replay_inspector::GameDataCache;
     use jiff::Timestamp;
     use wows_replays::types::AccountId;
+    use wows_toolkit_replay_data::load::GameDataCache;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
     use wows_toolkit_viewmodel::match_stats::Region;

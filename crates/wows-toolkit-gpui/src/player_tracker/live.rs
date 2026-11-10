@@ -212,7 +212,7 @@ pub enum StatsError {
     #[error(transparent)]
     Refused(#[from] MatchStatsError),
     #[error(transparent)]
-    Client(#[from] crate::http::HttpError),
+    Client(#[from] wows_toolkit_replay_data::error::HttpError),
     #[error("could not reach the stats service")]
     Transport(#[source] reqwest::Error),
 }
@@ -413,7 +413,7 @@ mod tests {
 #[cfg(test)]
 mod scan_tests {
     use super::*;
-    use crate::replay_inspector::GameDataCache;
+    use wows_toolkit_replay_data::load::GameDataCache;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 
     /// Splits a real replay back into the two halves the game writes during a

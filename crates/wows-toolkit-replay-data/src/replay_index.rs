@@ -23,8 +23,9 @@ use wows_toolkit_config::index::unindexable::Unindexable;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
 
-use crate::replay_inspector::load::GameDataCache;
-use crate::replay_inspector::load::parse_replay;
+use crate::error::IndexOneError;
+use crate::load::GameDataCache;
+use crate::load::parse_replay;
 
 /// The extension the game records replays under.
 const REPLAY_EXTENSION: &str = "wowsreplay";
@@ -99,15 +100,6 @@ impl IndexMode {
     }
 }
 
-/// Why a replay contributed nothing.
-#[derive(Debug, thiserror::Error)]
-pub enum IndexOneError {
-    #[error("the replay could not be read")]
-    Parse(String),
-    #[error("the rows could not be stored")]
-    Store(#[from] wows_toolkit_config::index::rows::IndexError),
-}
-
 /// Parses one replay and stores what it says.
 ///
 /// Blocking: the parse walks the packet stream and the writes are awaited on
@@ -121,7 +113,7 @@ pub fn index_one(
     indexed_at: Timestamp,
     mode: IndexWriteMode,
 ) -> Result<(), IndexOneError> {
-    let parsed = parse_replay(path, game_data, None).map_err(|err| IndexOneError::Parse(err.to_string()))?;
+    let parsed = parse_replay(path, game_data, None).map_err(IndexOneError::Parse)?;
     let battle = &parsed.indexable;
 
     let context = IndexContext {

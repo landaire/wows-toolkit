@@ -19025,6 +19025,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-launcher",
+ "wows-toolkit-replay-data",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",
@@ -19095,6 +19096,30 @@ dependencies = [
  "wows-toolkit-viewmodel",
  "wows_replays",
  "wt-translations",
+]
+
+[[package]]
+name = "wows-toolkit-replay-data"
+version = "0.1.0"
+dependencies = [
+ "escaper",
+ "filetime",
+ "gettext",
+ "jiff",
+ "reqwest 0.12.28",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wows-battle-world",
+ "wows-data-mgr",
+ "wows-replay-insights",
+ "wows-toolkit-config",
+ "wows-toolkit-viewmodel",
+ "wows_replays",
+ "wowsunpack",
 ]
 
 [[package]]

@@ -643,7 +643,7 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
 #[gpui_kit::test]
 fn the_session_rating_table_reaches_the_replay_inspector(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    let table = Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+    let table = Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
     let session = SessionData { personal_rating: Some(table), ..SessionData::default() };
 
     window
@@ -2591,7 +2591,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(replays.path().to_path_buf(), game_data, window, cx);
         })
         .expect("the test window stays open");
@@ -2605,7 +2605,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(alias.clone(), game_data, window, cx);
         })
         .expect("the test window stays open");
