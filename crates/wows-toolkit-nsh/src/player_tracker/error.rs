@@ -1,4 +1,5 @@
 use std::error::Error as _;
+use std::fmt;
 
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::queries::SettingError;
@@ -41,16 +42,42 @@ pub enum TrackerError {
 }
 
 impl TrackerError {
-    /// The error and every cause under it, as one line for the interface.
-    pub fn report(&self) -> String {
-        let mut text = self.to_string();
-        let mut cause = self.source();
+    /// The error and every cause under it, displayed as one line.
+    pub fn chain(&self) -> ErrorChain<'_> {
+        ErrorChain(self)
+    }
+}
+
+/// Displays a [`TrackerError`] followed by each of its causes, joined by
+/// `": "`, as the interface shows it.
+pub struct ErrorChain<'a>(&'a TrackerError);
+
+impl fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut cause = self.0.source();
         while let Some(error) = cause {
-            text.push_str(": ");
-            text.push_str(&error.to_string());
+            write!(f, ": {error}")?;
             cause = error.source();
         }
 
-        text
+        Ok(())
+    }
+}
+
+/// A tracker request's failure as the TSX view receives it: the error and
+/// every cause under it.
+#[derive(Debug)]
+pub struct TrackerReport(TrackerError);
+
+impl From<TrackerError> for TrackerReport {
+    fn from(error: TrackerError) -> Self {
+        Self(error)
+    }
+}
+
+impl fmt::Display for TrackerReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0.chain(), f)
     }
 }

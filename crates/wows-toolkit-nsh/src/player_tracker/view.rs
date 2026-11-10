@@ -2,6 +2,7 @@
 //! the reader's language, every rule already applied.
 
 use nsh_core::prelude::*;
+use wows_replays::types::AccountId;
 use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
 use wows_toolkit_viewmodel::player_tracker::EncounterSeverity;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
@@ -9,6 +10,29 @@ use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
+
+use crate::js_newtype::js_newtype;
+
+use super::error::TrackerError;
+
+/// An account id as the view holds it: decimal text, since the view's
+/// numbers cannot hold every `i64`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountIdText(String);
+
+js_newtype!(AccountIdText, String);
+
+impl AccountIdText {
+    pub fn to_account(&self) -> Result<AccountId, TrackerError> {
+        self.0.parse::<i64>().map(AccountId).map_err(|_| TrackerError::AccountId { value: self.0.clone() })
+    }
+}
+
+impl From<AccountId> for AccountIdText {
+    fn from(account: AccountId) -> Self {
+        Self(account.0.to_string())
+    }
+}
 
 /// How far back the tracker looks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -331,7 +355,7 @@ pub struct PlayerDetailView {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct PlayerRowView {
-    pub account_id: String,
+    pub account_id: AccountIdText,
     pub name: String,
     pub clan: String,
     pub total_encounters: String,
@@ -358,7 +382,7 @@ pub struct PlayersTable {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ClanMemberView {
-    pub account_id: String,
+    pub account_id: AccountIdText,
     pub name: String,
     pub matches: String,
 }
@@ -481,7 +505,7 @@ pub struct RosterRowView {
     #[prop(skip_none)]
     pub shipbuilds_url: Option<String>,
     #[prop(skip_none)]
-    pub account_id: Option<String>,
+    pub account_id: Option<AccountIdText>,
 }
 
 /// One team of the live roster.

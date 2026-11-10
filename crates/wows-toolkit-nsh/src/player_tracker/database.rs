@@ -126,9 +126,15 @@ pub async fn accounts_named(pool: &SqlitePool, names: &[String]) -> Result<HashM
     query::accounts_named(pool, names).await.map_err(TrackerError::Index)
 }
 
-/// Twitch chat logins seen in `[start, end]`, as unix seconds.
-pub async fn chat_observations(pool: &SqlitePool, start: i64, end: i64) -> Result<Vec<(String, Timestamp)>, TrackerError> {
-    let rows = query::observations_in_window(pool, start, end).await.map_err(TrackerError::Index)?;
+/// Twitch chat logins seen in `[start, end]`, to the whole second.
+pub async fn chat_observations(
+    pool: &SqlitePool,
+    start: Timestamp,
+    end: Timestamp,
+) -> Result<Vec<(String, Timestamp)>, TrackerError> {
+    let rows =
+        query::observations_in_window(pool, start.as_second(), end.as_second()).await.map_err(TrackerError::Index)?;
 
+    // Every row lies between two valid timestamps, so none is dropped here.
     Ok(rows.into_iter().filter_map(|(login, seen_at)| Timestamp::from_second(seen_at).ok().map(|at| (login, at))).collect())
 }
