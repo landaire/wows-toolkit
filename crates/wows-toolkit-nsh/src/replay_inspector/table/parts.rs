@@ -4,8 +4,8 @@ use nsh_base::menu_item;
 use nsh_base::menu_separator;
 use nsh_core::prelude::*;
 
-use crate::replay_inspector::table::glyphs::Glyph;
-use crate::replay_inspector::table::glyphs::glyph;
+use crate::icons::Icon;
+use crate::icons::icon;
 
 /// Tailwind classes as `app_class` takes them.
 pub fn class(names: &'static str) -> Option<SharedString> {
@@ -58,7 +58,7 @@ pub fn separator() -> AnyElement {
 }
 
 /// A small pressable glyph, named for assistive technologies.
-pub fn glyph_button(mark: Glyph, label: impl Into<SharedString>) -> View {
+pub fn glyph_button(mark: Icon, label: impl Into<SharedString>) -> View {
     view()
         .accessible(true)
         .role(AccessibilityRole::Button)
@@ -67,17 +67,17 @@ pub fn glyph_button(mark: Glyph, label: impl Into<SharedString>) -> View {
             "flex-none items-center justify-center w-5 h-5 rounded-(--radius) text-muted-foreground \
              hover:bg-accent hover:text-foreground active:opacity-70",
         ))
-        .child(glyph(mark, 12.0))
+        .child(icon(mark, px(12.0)))
 }
 
 /// The classes a row menu's popup draws with.
 pub const MENU_POPUP: &str = "min-w-56 p-1 rounded-(--radius) border border-border bg-popover";
 
 /// One menu item: an optional glyph and its text.
-pub fn menu_entry(label: impl Into<SharedString>, mark: Option<Glyph>, on_select: impl Fn() + 'static) -> AnyElement {
+pub fn menu_entry(label: impl Into<SharedString>, mark: Option<Icon>, on_select: impl Fn() + 'static) -> AnyElement {
     let label = label.into();
     let mark = match mark {
-        Some(mark) => glyph(mark, 14.0).app_class(class("flex-none text-popover-foreground")).into_element(),
+        Some(mark) => icon(mark, px(14.0)).app_class(class("flex-none text-popover-foreground")).into_element(),
         None => view().app_class(class("w-3.5 flex-none")).into_element(),
     };
 

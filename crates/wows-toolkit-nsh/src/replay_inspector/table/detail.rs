@@ -51,10 +51,10 @@ use wows_toolkit_viewmodel::fire_chance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 
+use crate::icons::Icon;
+use crate::icons::icon;
 use crate::replay_inspector::table::EngineMeasure;
 use crate::replay_inspector::table::Table;
-use crate::replay_inspector::table::glyphs::Glyph;
-use crate::replay_inspector::table::glyphs::glyph;
 use crate::replay_inspector::table::icons::IconImage;
 use crate::replay_inspector::table::icons::TableIcons;
 use crate::replay_inspector::table::parts::class;
@@ -201,7 +201,7 @@ fn fire_chance_section(
     let mut headline = view().app_class(class("flex-row items-center gap-2")).child(
         view()
             .app_class(class("flex-row items-center gap-1"))
-            .child(glyph(Glyph::Fire, 12.0).app_class(class("flex-none text-foreground")))
+            .child(icon(Icon::Flame, px(12.0)).app_class(class("flex-none text-foreground")))
             .child(
                 text(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits))
                     .app_class(class("text-xs font-bold text-foreground")),
@@ -210,7 +210,7 @@ fn fire_chance_section(
     if let Some(expected) = fire_chance::expected_fires_text(fire_chance) {
         headline = headline.child(dim_text(expected));
     }
-    headline = headline.child(glyph_button(Glyph::Copy, copy_hint.clone()).tooltip(tip(copy_hint)).on_press(
+    headline = headline.child(glyph_button(Icon::Copy, copy_hint.clone()).tooltip(tip(copy_hint)).on_press(
         move |_: &PressEvent| {
             set_clipboard(copy.clone());
             table.notice(copied.clone());

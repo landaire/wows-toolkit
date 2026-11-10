@@ -25,11 +25,11 @@ use wows_toolkit_replay_data::player_table::shows_build_links;
 use wows_toolkit_replay_data::player_table::twitch_hover_text;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 
+use crate::icons::Icon;
+use crate::icons::icon;
 use crate::replay_inspector::table::Table;
 use crate::replay_inspector::table::colors;
 use crate::replay_inspector::table::detail;
-use crate::replay_inspector::table::glyphs::Glyph;
-use crate::replay_inspector::table::glyphs::glyph;
 use crate::replay_inspector::table::icons::TableIcons;
 use crate::replay_inspector::table::parts::MENU_POPUP;
 use crate::replay_inspector::table::parts::class;
@@ -211,9 +211,9 @@ impl RowLayout<'_> {
         let player = row.db_id;
 
         let (caret, caret_label) = if self.is_expanded {
-            (Glyph::CaretDown, format!("Collapse {}", row.display_name))
+            (Icon::ChevronDown, format!("Collapse {}", row.display_name))
         } else {
-            (Glyph::CaretRight, format!("Expand {}", row.display_name))
+            (Icon::ChevronRight, format!("Expand {}", row.display_name))
         };
         let mut cell = view()
             .app_class(class("flex-1 min-w-0 flex-row items-center gap-1 overflow-hidden"))
@@ -260,7 +260,7 @@ impl RowLayout<'_> {
                     .label(hidden.clone())
                     .app_class(class("flex-none text-muted-foreground"))
                     .tooltip(tip(hidden))
-                    .child(glyph(Glyph::EyeSlash, 14.0)),
+                    .child(icon(Icon::EyeOff, px(14.0))),
             );
         }
         if let Some(chip) = self.twitch_chip() {
@@ -274,7 +274,7 @@ impl RowLayout<'_> {
                     .label(hover.clone())
                     .app_class(class("flex-none text-muted-foreground"))
                     .tooltip(tip(hover))
-                    .child(glyph(Glyph::Plugs, 14.0)),
+                    .child(icon(Icon::Plug, px(14.0))),
             );
         }
 
@@ -296,14 +296,14 @@ impl RowLayout<'_> {
         if let [only] = candidates.as_slice() {
             let login = only.login.clone();
             return Some(
-                glyph_button(Glyph::TwitchLogo, hover.clone())
+                glyph_button(Icon::Twitch, hover.clone())
                     .tooltip(tip(hover))
                     .on_press(move |_: &PressEvent| copy_login(table, &login))
                     .into_element(),
             );
         }
 
-        let trigger = glyph_button(Glyph::TwitchLogo, hover.clone()).tooltip(tip(hover));
+        let trigger = glyph_button(Icon::Twitch, hover.clone()).tooltip(tip(hover));
         Some(
             menu()
                 .trigger(trigger)
@@ -313,7 +313,7 @@ impl RowLayout<'_> {
                         .iter()
                         .map(|SniperCandidate { login, .. }| {
                             let login = login.clone();
-                            menu_entry(login.clone(), Some(Glyph::Copy), move || copy_login(table, &login))
+                            menu_entry(login.clone(), Some(Icon::Copy), move || copy_login(table, &login))
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -338,14 +338,14 @@ impl RowLayout<'_> {
         let color = colors::role(role);
         let mut marks = Vec::new();
         if row.has_dazzle {
-            marks.push(Glyph::StarFill);
+            marks.push(Icon::StarFilled);
         }
         if row.has_ifa {
-            marks.push(Glyph::Bell);
+            marks.push(Icon::Bell);
         }
         match row.skill_warning {
-            Some(SkillWarning::TowerDefense) => marks.push(Glyph::CastleTurret),
-            Some(SkillWarning::NoHighTier) => marks.push(Glyph::Warning),
+            Some(SkillWarning::TowerDefense) => marks.push(Icon::Castle),
+            Some(SkillWarning::NoHighTier) => marks.push(Icon::TriangleAlert),
             None => {}
         }
 
@@ -354,7 +354,7 @@ impl RowLayout<'_> {
             .w(move || Length::from(px(table.width(ReplayColumn::Skills))))
             .text_color(color)
             .children(
-                marks.into_iter().map(|mark| glyph(mark, 14.0).app_class(class("flex-none")).into_element()).collect::<Vec<_>>(),
+                marks.into_iter().map(|mark| icon(mark, px(14.0)).app_class(class("flex-none")).into_element()).collect::<Vec<_>>(),
             )
             .child(text(cell.text).app_class(class("text-sm truncate")).text_color(color));
         match cell.hover {
@@ -376,7 +376,7 @@ impl RowLayout<'_> {
                 "items-center justify-center w-6 h-6 rounded-(--radius) text-muted-foreground opacity-0 \
                  group-hover:opacity-100 aria-expanded:opacity-100 hover:bg-accent hover:text-foreground",
             ))
-            .child(glyph(Glyph::DotsThree, 14.0));
+            .child(icon(Icon::Ellipsis, px(14.0)));
         let data = Rc::new(MenuData::from_row(self.row, self.icons, self.debug));
 
         view()
@@ -500,14 +500,14 @@ fn menu_items(
         }
         if let Some(url) = data.ship_config_url.clone() {
             build_links.push(link_entry(t!("ui.replay.build.open_in_browser").into_owned(), url.clone()));
-            build_links.push(menu_entry(t!("ui.replay.build.copy_link").into_owned(), Some(Glyph::Copy), move || {
+            build_links.push(menu_entry(t!("ui.replay.build.copy_link").into_owned(), Some(Icon::Copy), move || {
                 copy_link(table, &url)
             }));
         }
         if let Some(url) = data.short_ship_config_url.clone() {
             build_links.push(menu_entry(
                 t!("ui.replay.build.copy_short_link").into_owned(),
-                Some(Glyph::Copy),
+                Some(Icon::Copy),
                 move || copy_link(table, &url),
             ));
         }
@@ -530,7 +530,7 @@ fn menu_items(
             when(
                 move || menu_cell.with(Option::is_some),
                 move || {
-                    menu_entry(t!("ui.replay.context.copy_cell").into_owned(), Some(Glyph::Copy), move || {
+                    menu_entry(t!("ui.replay.context.copy_cell").into_owned(), Some(Icon::Copy), move || {
                         if let Some(col) = menu_cell.get_untracked() {
                             table.copy_cell(player, col);
                         }
@@ -540,18 +540,18 @@ fn menu_items(
             .into_element(),
         );
     }
-    items.push(menu_entry(t!("ui.replay.context.copy_row").into_owned(), Some(Glyph::Copy), move || {
+    items.push(menu_entry(t!("ui.replay.context.copy_row").into_owned(), Some(Icon::Copy), move || {
         table.copy_row(player)
     }));
-    items.push(menu_entry(t!("ui.replay.context.copy_table").into_owned(), Some(Glyph::Copy), move || {
+    items.push(menu_entry(t!("ui.replay.context.copy_table").into_owned(), Some(Icon::Copy), move || {
         table.copy_table()
     }));
-    items.push(menu_entry("Copy row as Markdown", Some(Glyph::Copy), move || table.copy_row_markdown(player)));
-    items.push(menu_entry("Copy table as Markdown", Some(Glyph::Copy), move || table.copy_table_markdown()));
+    items.push(menu_entry("Copy row as Markdown", Some(Icon::Copy), move || table.copy_row_markdown(player)));
+    items.push(menu_entry("Copy table as Markdown", Some(Icon::Copy), move || table.copy_table_markdown()));
 
     if let Some(json) = data.raw_metadata_json.clone() {
         items.push(menu_rule());
-        items.push(menu_entry(t!("ui.replay.debug.view_raw_metadata").into_owned(), Some(Glyph::File), move || {
+        items.push(menu_entry(t!("ui.replay.debug.view_raw_metadata").into_owned(), Some(Icon::File), move || {
             table.cx.emit(super::PlayerTableEvent::ViewRawJson(SharedString::from(json.clone())))
         }));
     }
@@ -561,7 +561,7 @@ fn menu_items(
 
 /// An item that opens `url` in the browser.
 fn link_entry(label: String, url: String) -> AnyElement {
-    menu_entry(label, Some(Glyph::ArrowSquareOut), move || {
+    menu_entry(label, Some(Icon::ExternalLink), move || {
         // The URL opens when asked; whether it did is not reported here.
         spawn(open_url(url.clone()));
     })
