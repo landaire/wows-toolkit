@@ -46,29 +46,29 @@ use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
 use super::analysis::SimAgreement;
-use super::camera_rings;
-use super::gaps;
-use super::splash;
-use super::trajectory;
+use wows_toolkit_armor::camera_rings;
+use wows_toolkit_armor::gaps;
+use wows_toolkit_armor::splash;
+use wows_toolkit_armor::trajectory;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
-use crate::armor_viewer::camo::build_active_camo;
+use wows_toolkit_armor::camo::build_active_camo;
 use crate::armor_viewer::load_ship;
-use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
-use crate::armor_viewer::load_ship::LoadedShipArmor;
-use crate::armor_viewer::load_ship::PlateKey;
-use crate::armor_viewer::load_ship::ShipLoadError;
+use wows_toolkit_armor::load_ship::ArmorTriangleTooltip;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::load_ship::ShipLoadError;
 use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
-use crate::armor_viewer::upload;
-use crate::armor_viewer::upload::upload_armor_to_viewport;
-use crate::armor_viewer::upload_hull;
-use crate::armor_viewer::visibility;
-use crate::armor_viewer::visibility::SidebarHighlightKey;
-use crate::armor_viewer::visibility::VisibilityFilter;
-use crate::armor_viewer::visibility::VisibilitySnapshot;
-use crate::armor_viewer::visibility::VisibilityUndoStack;
+use wows_toolkit_armor::upload;
+use wows_toolkit_armor::upload::upload_armor_to_viewport;
+use wows_toolkit_armor::upload_hull;
+use wows_toolkit_armor::visibility;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
+use wows_toolkit_armor::visibility::VisibilityFilter;
+use wows_toolkit_armor::visibility::VisibilitySnapshot;
+use wows_toolkit_armor::visibility::VisibilityUndoStack;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -80,21 +80,21 @@ use wows_toolkit_viewmodel::armor::arc::ZoneShape;
 use wows_toolkit_viewmodel::armor::arc::describe_arc;
 use wows_toolkit_viewmodel::armor::arc::isolate;
 
-use crate::viewport::camera;
-use crate::viewport::camera::ArcballCamera;
-use crate::viewport::camera::Axis;
-use crate::viewport::device::GpuContext;
-use crate::viewport::device::readback_to_render_image;
-use crate::viewport::gizmo;
-use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_OVERLAY;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::LightingSettings;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vec2;
-use crate::viewport::types::Vec3;
-use crate::viewport::types::ViewRect;
+use wows_toolkit_armor::viewport::camera;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
+use wows_toolkit_armor::viewport::camera::Axis;
+use wows_toolkit_armor::viewport::device::GpuContext;
+use super::render_image::readback_to_render_image;
+use wows_toolkit_armor::viewport::gizmo;
+use wows_toolkit_armor::viewport::renderer::GpuPipeline;
+use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
+use wows_toolkit_armor::viewport::renderer::LAYER_OVERLAY;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vec2;
+use wows_toolkit_armor::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::ViewRect;
 use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::GameParamId;
@@ -600,7 +600,7 @@ pub struct ViewportView {
     /// can read it while building the hull-upgrade selector.
     pub(crate) selected_hull: Option<String>,
     /// The hull LOD level selected in the hull popover, `0` = highest detail
-    /// (matching `load_ship::DEFAULT_LOD`). Reset to `0` whenever a new ship
+    /// (matching `wows_toolkit_armor::load_ship::DEFAULT_LOD`). Reset to `0` whenever a new ship
     /// loads. `pub(crate)` so `popover.rs` can read it while building the LOD
     /// selector.
     pub(crate) hull_lod: usize,
@@ -722,10 +722,10 @@ pub struct ViewportView {
     perspective: PerspectiveSettings,
     /// The free camera as it was when the lock went on, put back when it comes
     /// off: a reader who was looking at a plate is looking at it again.
-    camera_before_lock: Option<crate::viewport::camera::ArcballCamera>,
+    camera_before_lock: Option<wows_toolkit_armor::viewport::camera::ArcballCamera>,
     /// The meshes marking where the locked camera is aimed, dropped and rebuilt
     /// as it moves.
-    aim_mesh_ids: Vec<crate::viewport::types::MeshId>,
+    aim_mesh_ids: Vec<wows_toolkit_armor::viewport::types::MeshId>,
     /// Whether the openings in the armor are marked, and how many were
     /// found last time they were looked for. The count is what the rail
     /// reports, so it is kept rather than recomputed per frame.
@@ -871,7 +871,7 @@ impl ViewportView {
             expanded_camo_groups: HashSet::new(),
             reload_source: None,
             selected_hull: None,
-            hull_lod: load_ship::DEFAULT_LOD,
+            hull_lod: wows_toolkit_armor::load_ship::DEFAULT_LOD,
             selected_modules: HashMap::new(),
             reload_generation: 0,
             selected_camo: None,
@@ -1239,7 +1239,7 @@ impl ViewportView {
         self.expanded_hull_groups.clear();
         self.expanded_camo_groups.clear();
         self.selected_hull = None;
-        self.hull_lod = load_ship::DEFAULT_LOD;
+        self.hull_lod = wows_toolkit_armor::load_ship::DEFAULT_LOD;
         self.selected_modules.clear();
         self.camera_rings.mode = first_camera_mode(&armor);
         self.selected_camo = None;
@@ -1462,7 +1462,7 @@ impl ViewportView {
     ///
     /// A no-op while the lock is off, and while the ship names no orbit to lock
     /// onto: there is nothing to put the eye on.
-    fn apply_perspective(&mut self, device: &wgpu::Device, armor: &super::load_ship::LoadedShipArmor) {
+    fn apply_perspective(&mut self, device: &wgpu::Device, armor: &wows_toolkit_armor::load_ship::LoadedShipArmor) {
         self.aim_perspective(Some(device), armor.bounds);
     }
 
@@ -2555,8 +2555,8 @@ impl ViewportView {
         let rect = view_rect_from_bounds(bounds);
         let hit = self.viewport.pick(point_to_vec2(position), rect);
         let found =
-            hit.as_ref().and_then(|h| picking_ui::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
-                let key = picking_ui::plate_key_of(tooltip);
+            hit.as_ref().and_then(|h| wows_toolkit_armor::highlight::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
+                let key = wows_toolkit_armor::highlight::plate_key_of(tooltip);
                 (key, tooltip.clone())
             });
         let Some((key, tooltip)) = found else { return self.clear_plate_hover() };
@@ -2615,7 +2615,7 @@ impl ViewportView {
     }
 
     /// Replaces the hover-highlight overlay mesh with one for `key`, via
-    /// `picking_ui::upload_plate_highlight`. A no-op (leaves no highlight) if
+    /// `wows_toolkit_armor::highlight::upload_plate_highlight`. A no-op (leaves no highlight) if
     /// the GPU device isn't ready or there is no armor loaded, which should
     /// not happen in practice since `update_plate_hover` already checked both.
     fn rebuild_hover_highlight(&mut self, key: &PlateKey) {
@@ -2629,7 +2629,7 @@ impl ViewportView {
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
-        let mesh_id = picking_ui::upload_plate_highlight(
+        let mesh_id = wows_toolkit_armor::highlight::upload_plate_highlight(
             &mut self.viewport,
             &ctx.device,
             &armor,
@@ -2642,7 +2642,7 @@ impl ViewportView {
     }
 
     /// Replaces the sidebar-hover highlight overlay mesh for `key`, via
-    /// `picking_ui::upload_zone_highlight`/`upload_part_highlight`/
+    /// `wows_toolkit_armor::highlight::upload_zone_highlight`/`upload_part_highlight`/
     /// `upload_plate_highlight`. A no-op (leaves no highlight) if the GPU
     /// device isn't ready or there is no armor loaded. Also used by
     /// `reupload_current_armor` to rebuild an already-active sidebar
@@ -2660,7 +2660,7 @@ impl ViewportView {
         };
         let show_zero_mm = self.display_settings.show_zero_mm;
         let mesh_id = match &key {
-            SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
+            SidebarHighlightKey::Zone(zone) => wows_toolkit_armor::highlight::upload_zone_highlight(
                 &mut self.viewport,
                 &ctx.device,
                 &armor,
@@ -2668,7 +2668,7 @@ impl ViewportView {
                 visibility,
                 show_zero_mm,
             ),
-            SidebarHighlightKey::Part(zone, part) => picking_ui::upload_part_highlight(
+            SidebarHighlightKey::Part(zone, part) => wows_toolkit_armor::highlight::upload_part_highlight(
                 &mut self.viewport,
                 &ctx.device,
                 &armor,
@@ -2677,7 +2677,7 @@ impl ViewportView {
                 visibility,
                 show_zero_mm,
             ),
-            SidebarHighlightKey::Plate(pk) => picking_ui::upload_plate_highlight(
+            SidebarHighlightKey::Plate(pk) => wows_toolkit_armor::highlight::upload_plate_highlight(
                 &mut self.viewport,
                 &ctx.device,
                 &armor,
@@ -2991,12 +2991,12 @@ impl ViewportView {
         }
 
         if self.display_settings.show_ship_center {
-            let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
+            let (vertices, indices) = wows_toolkit_armor::hits::build_center_marker(armor.bounds);
             self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
         }
 
         if !self.hits.is_empty() {
-            let (vertices, indices) = super::hits::build_markers(
+            let (vertices, indices) = wows_toolkit_armor::hits::build_markers(
                 &self.hits,
                 armor.center(),
                 Some(armor.bounds),
@@ -3060,7 +3060,7 @@ impl ViewportView {
                 .mesh_triangle_info
                 .iter()
                 .flat_map(|(_, tooltips)| tooltips)
-                .any(|t| picking_ui::plate_key_of(t) == hover.key);
+                .any(|t| wows_toolkit_armor::highlight::plate_key_of(t) == hover.key);
             if still_visible {
                 self.rebuild_hover_highlight(&hover.key);
             } else {
@@ -3266,7 +3266,7 @@ impl ViewportView {
         let param_index = source.param_index.clone();
         let display_name = source.display_name.clone();
 
-        let options = match load_ship::build_reload_options(
+        let options = match wows_toolkit_armor::load_ship::build_reload_options(
             &bundle.assets,
             &param_index,
             display_name,
@@ -3336,7 +3336,7 @@ impl ViewportView {
     /// load in this pane (`reload_ship` above). Ports the egui app's Export
     /// button handler (`tab.rs:1057-1097`), except the LOD/hull/module
     /// options reflect the pane's selection AS OF OPEN TIME rather than
-    /// egui's fixed `lod: 0` -- see `load_ship::export_options_from_selection`'s
+    /// egui's fixed `lod: 0` -- see `wows_toolkit_armor::load_ship::export_options_from_selection`'s
     /// doc. Textures are embedded either way (`textures: true`).
     ///
     /// Reports the outcome in the words `ArmorViewerPane::export_model` uses
@@ -3346,14 +3346,14 @@ impl ViewportView {
         cx.notify();
         let asked = crate::dialog::save_file(
             None,
-            &load_ship::default_export_filename(&snapshot.display_name),
+            &wows_toolkit_armor::load_ship::default_export_filename(&snapshot.display_name),
             Some(crate::dialog::GLB),
         );
 
         let bundle = snapshot.bundle;
         let param_index = snapshot.param_index;
         let display_name = snapshot.display_name;
-        let options = load_ship::export_options_from_selection(
+        let options = wows_toolkit_armor::load_ship::export_options_from_selection(
             snapshot.hull_lod,
             snapshot.selected_hull,
             snapshot.selected_modules,
@@ -3364,7 +3364,7 @@ impl ViewportView {
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
-                    let result = load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path);
+                    let result = wows_toolkit_armor::load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path);
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
                     result.map(|()| {
@@ -3970,7 +3970,7 @@ impl CamoTextureCache {
 
 /// Per-hull-part composited camo textures, keyed as
 /// [`upload_hull::upload_hull_meshes`] expects.
-type CamoTextures = super::camo::TexturesByPart;
+type CamoTextures = wows_toolkit_armor::camo::TexturesByPart;
 
 /// One scheme's decoded and composited textures.
 struct CamoDecode {
@@ -4199,8 +4199,8 @@ mod tests {
     use super::remap_camo_selection;
     use super::vec2_to_point;
     use super::view_rect_from_bounds;
-    use crate::armor_viewer::upload::DisplaySettings;
-    use crate::viewport::types::LightingSettings;
+    use wows_toolkit_armor::upload::DisplaySettings;
+    use wows_toolkit_armor::viewport::types::LightingSettings;
     use gpui_kit::Bounds;
     use gpui_kit::point;
     use gpui_kit::px;

@@ -11,7 +11,7 @@ use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
 
 /// CPU-side mesh data retained for picking.
-pub(crate) struct PickableMesh {
+pub struct PickableMesh {
     pub positions: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
     /// The box around the whole mesh, so a ray that misses it is not tested
@@ -108,7 +108,7 @@ pub fn ray_triangle_intersect(origin: &Vec3, dir: &Vec3, v0: &Vec3, v1: &Vec3, v
 
 /// Pick ALL triangles hit by a ray from an arbitrary origin and direction, sorted by distance.
 /// Each result includes the triangle normal.
-pub(crate) fn pick_all_ray(
+pub fn pick_all_ray(
     origin: Vec3,
     dir: Vec3,
     meshes: &[(MeshId, &PickableMesh, bool)],

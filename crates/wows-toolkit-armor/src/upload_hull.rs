@@ -57,7 +57,7 @@ const LUMA_SAMPLE_STRIDE: usize = 37;
 /// Extracts the file stem (no directory, no `.mfm` extension) from an mfm
 /// path, for matching a hull mesh's texture against `active_camo_textures`'s
 /// keys. Ports `armor_viewer::common::mfm_stem` verbatim.
-pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
+pub fn mfm_stem(mfm_path: &str) -> &str {
     let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
     base.strip_suffix(".mfm").unwrap_or(base)
 }
@@ -71,7 +71,7 @@ pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
 /// (e.g. a camo with light stripes on a dark base); keying off the P95 bright
 /// pixels caps the boost by the brightest regions directly, so they do not
 /// saturate to white while dark textures still get boosted.
-pub(crate) fn tex_brightness(rgba: &[u8]) -> f32 {
+pub fn tex_brightness(rgba: &[u8]) -> f32 {
     let mut lumas: Vec<f32> = rgba
         .as_chunks::<4>()
         .0

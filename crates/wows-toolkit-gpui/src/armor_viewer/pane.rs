@@ -60,14 +60,14 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
-use crate::viewport::device::GpuContext;
-use crate::viewport::renderer::GpuPipeline;
+use wows_toolkit_armor::viewport::device::GpuContext;
+use wows_toolkit_armor::viewport::renderer::GpuPipeline;
 use wows_toolkit_replay_data::load::LoadedGameData;
 
 use gpui_kit::component::WindowExt as _;
 
 use super::assets::ArmorAssetsBundle;
-use super::assets::ArmorAssetsError;
+use wows_toolkit_armor::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
 use wows_replays::types::EntityId;
@@ -88,8 +88,8 @@ use super::dock::PanePosition;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::ShipLoadError;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
 use super::sidebar::CollapseSidebar;
@@ -1048,7 +1048,7 @@ impl ArmorViewerPane {
 
         let asked = crate::dialog::save_file(
             None,
-            &load_ship::default_export_filename(&display_name),
+            &wows_toolkit_armor::load_ship::default_export_filename(&display_name),
             Some(crate::dialog::GLB),
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -1056,7 +1056,7 @@ impl ArmorViewerPane {
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
-                    let result = load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
+                    let result = wows_toolkit_armor::load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
                     result.map(|()| {
@@ -1089,7 +1089,7 @@ impl ArmorViewerPane {
         param_index: String,
         display_name: String,
         hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
-        incoming: Box<crate::replay_renderer::IncomingContext>,
+        incoming: Box<wows_toolkit_armor::realtime::IncomingContext>,
         cx: &mut Context<Self>,
     ) {
         self.pending_hits = hits;
@@ -1534,7 +1534,7 @@ impl EventEmitter<SeekRequested> for ArmorViewerPane {}
 /// What was fired at the ship on screen.
 #[derive(Default)]
 pub(crate) struct IncomingFire {
-    pub(crate) context: crate::replay_renderer::IncomingContext,
+    pub(crate) context: wows_toolkit_armor::realtime::IncomingContext,
     pub(crate) filter: IncomingFilter,
     /// The ship the log is about. A comparison run against any other hull would
     /// be about plating those shells never met, which a compare split would

@@ -327,7 +327,7 @@ pub struct ReplayRendererPanel {
     /// was last told. Kept so playback only disturbs the viewer when the set
     /// of hits actually changes: showing them again rebuilds the hull's
     /// meshes, which is far too much work for every frame.
-    armor_following: Option<(EntityId, crate::armor_viewer::realtime::RealtimeArmorFeed)>,
+    armor_following: Option<(EntityId, wows_toolkit_armor::realtime::RealtimeArmorFeed)>,
     _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
@@ -373,35 +373,6 @@ impl ExportStage {
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
 
-/// Who was firing at one ship, and with what.
-///
-/// Read off the battle rather than off the hits, because the filter has to be
-/// able to offer an attacker before any of their shells have landed.
-#[derive(Clone, Debug, Default)]
-pub struct IncomingContext {
-    /// Every enemy of the ship being looked at, named as the log lists them.
-    /// The keys are also what counts as incoming fire.
-    pub attackers: std::collections::BTreeMap<EntityId, String>,
-    /// Every hit that ship takes over the whole battle, which is what the log
-    /// lists: it is a reading of the battle rather than of where playback is.
-    pub taken: Vec<PreExtractedHit>,
-    /// That ship's health over the battle, as the strip beside the log draws
-    /// it. `None` for a ship nothing recorded the health of.
-    pub health: Option<wows_toolkit_viewmodel::armor::health_strip::HealthStrip>,
-    /// Where playback stood when the viewer was asked for, so the strip marks it
-    /// straight away rather than waiting for playback to move.
-    pub at: Option<wows_replays::types::GameClock>,
-    /// The main battery shells of every ship in the battle, so secondaries can
-    /// be told apart from them. Empty is not knowledge that none are main
-    /// battery, and the filter reads it that way.
-    pub main_battery: std::collections::HashSet<wows_replays::types::GameParamId>,
-    /// The shell each landed salvo was fired with, so the viewer can send that
-    /// shell through the hull itself and say whether it agrees with the server.
-    /// A salvo whose shell this build cannot name is left out rather than
-    /// simulated with a stand-in.
-    pub shells: std::collections::HashMap<wows_replays::types::GameParamId, wowsunpack::game_params::types::ShellInfo>,
-}
-
 /// What the viewport asks of whoever is hosting it.
 #[derive(Clone, Debug)]
 pub enum RendererEvent {
@@ -419,7 +390,7 @@ pub enum RendererEvent {
         hits: Vec<PreExtractedHit>,
         /// Who was shooting at that ship, so the viewer can say which salvo a
         /// hit came from and offer one attacker at a time.
-        incoming: Box<IncomingContext>,
+        incoming: Box<wows_toolkit_armor::realtime::IncomingContext>,
     },
     /// Playback moved, and the ship an armor viewer is already open on has
     /// taken different hits by this point.
@@ -1215,7 +1186,7 @@ impl ReplayRendererPanel {
         let Some((param_index, display_name)) = self.armor_target(entity_id) else { return };
         let Some(timeline) = self.shots.get(&entity_id).cloned() else { return };
 
-        let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(timeline);
+        let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(timeline);
         feed.advance_to(GameClock(self.clock_of(self.at)));
         let mut incoming = self.incoming_context(entity_id);
         // The log reads the whole battle, not the part played so far: scrubbing
@@ -1238,10 +1209,10 @@ impl ReplayRendererPanel {
     ///
     /// Read off the roster the frame already carries, which is the only place
     /// that says which team a ship is on and what it is called at once.
-    fn incoming_context(&self, victim: EntityId) -> IncomingContext {
+    fn incoming_context(&self, victim: EntityId) -> wows_toolkit_armor::realtime::IncomingContext {
         use wowsunpack::game_params::types::GameParamProvider as _;
 
-        let mut context = IncomingContext::default();
+        let mut context = wows_toolkit_armor::realtime::IncomingContext::default();
         let Some(track) = self.track() else { return context };
         let Some(commands) = track.frames.get(self.at) else { return context };
         // One roster per team, so every one of them is read: the enemies are in
@@ -1277,7 +1248,7 @@ impl ReplayRendererPanel {
     }
 
     /// Names the shell behind each salvo that landed on the ship.
-    fn resolve_incoming_shells(&self, context: &mut IncomingContext) {
+    fn resolve_incoming_shells(&self, context: &mut wows_toolkit_armor::realtime::IncomingContext) {
         let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
             // Without game data no shell can be named, so no shell can be
             // simulated and the log carries no verdicts at all.
@@ -1306,8 +1277,8 @@ impl ReplayRendererPanel {
         let Some((_, feed)) = self.armor_following.as_mut() else { return };
         let moved = feed.advance_to(clock);
         let changed = match moved {
-            crate::armor_viewer::realtime::Advance::Rewound => true,
-            crate::armor_viewer::realtime::Advance::Gained(gained) => !gained.is_empty(),
+            wows_toolkit_armor::realtime::Advance::Rewound => true,
+            wows_toolkit_armor::realtime::Advance::Gained(gained) => !gained.is_empty(),
         };
         if !changed {
             return;
@@ -6594,7 +6565,7 @@ mod tests {
                 panel.shots.insert(ship, ShipShotTimeline { hits: Vec::new(), health_history });
                 // Following starts without a viewer, which is what the
                 // menu's own guard is for; seeded here directly.
-                let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(
+                let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(
                     panel.shots.get(&ship).expect("just inserted").clone(),
                 );
                 feed.advance_to(GameClock(0.0));

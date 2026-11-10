@@ -43,7 +43,7 @@ const MIN_GAP_WIDTH: f32 = 0.12;
 
 /// One edge of the armor surface, and which way that surface faces.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct EdgeData {
+pub struct EdgeData {
     pub p0: [f32; 3],
     pub p1: [f32; 3],
     /// The face normal of the triangle the edge was first seen on, which is
@@ -88,7 +88,7 @@ fn edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
 /// Only the triangles the viewport is currently showing are walked: hiding a
 /// plate opens a hole in the model that is not a hole in the ship, and
 /// counting it would report the reader's own filter back to them.
-pub(crate) fn build_gap_mesh(
+pub fn build_gap_mesh(
     armor: &LoadedShipArmor,
     visibility: VisibilityFilter,
     show_zero_mm: bool,

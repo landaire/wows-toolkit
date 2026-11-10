@@ -102,14 +102,14 @@ pub enum SidebarHighlightKey {
 }
 
 /// Whether `(zone, part)` is visible per `part_visibility` (absent = visible).
-pub(crate) fn part_on(part_visibility: &HashMap<(String, String), bool>, zone: &str, part: &str) -> bool {
+pub fn part_on(part_visibility: &HashMap<(String, String), bool>, zone: &str, part: &str) -> bool {
     part_visibility.get(&(zone.to_string(), part.to_string())).copied().unwrap_or(true)
 }
 
 /// Whether `key` is explicitly hidden in `plate_visibility` (this port's
 /// sense: present + `true` = hidden, absent = visible). See the module doc's
 /// convention note.
-pub(crate) fn plate_explicitly_hidden(plate_visibility: &HashMap<PlateKey, bool>, key: &PlateKey) -> bool {
+pub fn plate_explicitly_hidden(plate_visibility: &HashMap<PlateKey, bool>, key: &PlateKey) -> bool {
     plate_visibility.get(key).copied().unwrap_or(false)
 }
 
@@ -121,7 +121,7 @@ fn visible_thicknesses(part: &ZonePart, show_zero_mm: bool) -> impl Iterator<Ite
 /// Whether every part in `zone` is on, AND no plate in the zone is explicitly
 /// hidden. Ports the `zone_all_on` local from `draw_armor_visibility_popover`
 /// (`tab.rs:4455-4464`).
-pub(crate) fn zone_all_on(
+pub fn zone_all_on(
     zone: &ArmorZone,
     part_visibility: &HashMap<(String, String), bool>,
     plate_visibility: &HashMap<PlateKey, bool>,
@@ -140,14 +140,14 @@ pub(crate) fn zone_all_on(
 
 /// Whether any part in `zone` is on. Ports the `zone_any_on` local from
 /// `draw_armor_visibility_popover` (`tab.rs:4465-4468`).
-pub(crate) fn zone_any_on(zone: &ArmorZone, part_visibility: &HashMap<(String, String), bool>) -> bool {
+pub fn zone_any_on(zone: &ArmorZone, part_visibility: &HashMap<(String, String), bool>) -> bool {
     zone.parts.iter().any(|p| part_on(part_visibility, &zone.name, &p.name))
 }
 
 /// Whether any of `part`'s visible-thickness plates are explicitly hidden.
 /// Ports the `any_plate_hidden` local from `draw_armor_visibility_popover`
 /// (`tab.rs:4523-4526`).
-pub(crate) fn part_any_plate_hidden(
+pub fn part_any_plate_hidden(
     zone: &str,
     part: &ZonePart,
     plate_visibility: &HashMap<PlateKey, bool>,
@@ -165,7 +165,7 @@ pub(crate) fn part_any_plate_hidden(
 /// override on a thickness currently filtered out by `show_zero_mm` (e.g. a
 /// hidden 0mm plate while the filter is off) survives the toggle. Ports the
 /// egui original's clear scope (`tab.rs:4538-4540`, `4565-4567`).
-pub(crate) fn clear_plate_overrides(
+pub fn clear_plate_overrides(
     plate_visibility: &mut HashMap<PlateKey, bool>,
     zone: &str,
     part: &str,
@@ -185,13 +185,13 @@ pub(crate) fn clear_plate_overrides(
 /// default). Drives the hull popover's group-checkbox tri-state
 /// (`popover.rs`); ports the `group_all_on`/`group_any_on` locals from
 /// `draw_hull_visibility_popover` (`tab.rs:3273-3274`).
-pub(crate) fn hull_group_all_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
+pub fn hull_group_all_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
     names.iter().all(|n| hull_visibility.get(n).copied().unwrap_or(false))
 }
 
 /// Whether any named hull mesh in `names` is visible per `hull_visibility`.
 /// See [`hull_group_all_on`]'s doc.
-pub(crate) fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
+pub fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: &[String]) -> bool {
     names.iter().any(|n| hull_visibility.get(n).copied().unwrap_or(false))
 }
 
@@ -208,7 +208,7 @@ pub(crate) fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: 
 /// carries the same opposite-of-`part_visibility` default too -- a newly
 /// appeared hull mesh name would otherwise silently stay hidden even when
 /// every other hull part is on).
-pub(crate) fn retain_hull_visibility(
+pub fn retain_hull_visibility(
     hull_visibility: &mut HashMap<String, bool>,
     hull_part_groups: &[(String, Vec<String>)],
 ) {
@@ -229,7 +229,7 @@ pub(crate) fn retain_hull_visibility(
 /// (`tab.rs:2719-2723`), whose explicit `or_insert(true)` fill is a no-op
 /// under this port's opposite default-boolean convention (see the module
 /// doc's convention note).
-pub(crate) fn retain_part_visibility(
+pub fn retain_part_visibility(
     part_visibility: &mut HashMap<(String, String), bool>,
     zone_parts: &[(String, Vec<String>)],
 ) {
@@ -240,7 +240,7 @@ pub(crate) fn retain_part_visibility(
 /// `zone_part_plates` (post-reload). Same no-default-fill rationale as
 /// [`retain_part_visibility`]; matches the egui app's own `apply_upgrade_reload`
 /// plate retain (`tab.rs:2725-2729`), which likewise has no default-fill.
-pub(crate) fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, bool>, zone_part_plates: &[ArmorZone]) {
+pub fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, bool>, zone_part_plates: &[ArmorZone]) {
     plate_visibility.retain(|key, _| {
         zone_part_plates.iter().any(|zone| {
             zone.name == key.zone
@@ -255,14 +255,14 @@ pub(crate) fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, b
 /// A checkbox's on/off/indeterminate state, driving both the checked value
 /// and whether the popover draws the partial-state dash.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum TriState {
+pub enum TriState {
     Off,
     Partial,
     On,
 }
 
 impl TriState {
-    pub(crate) fn from_all_any(all_on: bool, any_on: bool) -> Self {
+    pub fn from_all_any(all_on: bool, any_on: bool) -> Self {
         if all_on {
             TriState::On
         } else if any_on {
@@ -272,11 +272,11 @@ impl TriState {
         }
     }
 
-    pub(crate) fn checked(self) -> bool {
+    pub fn checked(self) -> bool {
         self == TriState::On
     }
 
-    pub(crate) fn partial(self) -> bool {
+    pub fn partial(self) -> bool {
         self == TriState::Partial
     }
 }

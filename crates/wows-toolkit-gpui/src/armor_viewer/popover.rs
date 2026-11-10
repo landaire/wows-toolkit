@@ -48,29 +48,29 @@ use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Species;
 
-use crate::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
-use super::load_ship::ArmorZone;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::PlateKey;
-use super::load_ship::ZonePart;
+use wows_toolkit_armor::load_ship::ArmorZone;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
 use super::viewport_view::CameraRingSettings;
 use super::viewport_view::PerspectiveSettings;
 use super::viewport_view::TrajectoryState;
 use super::viewport_view::ViewportView;
-use super::visibility::SidebarHighlightKey;
-use super::visibility::TriState;
-use super::visibility::hull_group_all_on;
-use super::visibility::hull_group_any_on;
-use super::visibility::part_any_plate_hidden;
-use super::visibility::part_on;
-use super::visibility::plate_explicitly_hidden;
-use super::visibility::zone_all_on;
-use super::visibility::zone_any_on;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
+use wows_toolkit_armor::visibility::TriState;
+use wows_toolkit_armor::visibility::hull_group_all_on;
+use wows_toolkit_armor::visibility::hull_group_any_on;
+use wows_toolkit_armor::visibility::part_any_plate_hidden;
+use wows_toolkit_armor::visibility::part_on;
+use wows_toolkit_armor::visibility::plate_explicitly_hidden;
+use wows_toolkit_armor::visibility::zone_all_on;
+use wows_toolkit_armor::visibility::zone_any_on;
 use crate::armor_viewer::analysis;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use wowsunpack::game_params::types::Km;
@@ -1363,7 +1363,7 @@ fn render_hull_mesh_row(
 /// Taken as a snapshot because the content builder runs while the popover is
 /// open and must not hold a borrow of the view it came from.
 struct DisplayPopoverSnapshot {
-    display: super::upload::DisplaySettings,
+    display: wows_toolkit_armor::upload::DisplaySettings,
     lighting: LightingSettings,
     waterline_slider: Entity<SliderState>,
     marker_slider: Entity<SliderState>,
