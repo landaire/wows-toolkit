@@ -2,7 +2,7 @@ import type { JSX } from "nsh";
 import { Clipboard, colorScheme, effect, Image, Scroll, signal, Text, untracked, View } from "nsh";
 import { Checkbox, Dialog, DockArea, Input, Menu, NumberInput, Popover, Toolbar, type DockAreaApi, type DockAreaLayout, type DockTab } from "nsh/base";
 import { Stats, type ChartSnapshot, type DirectoryOpened, type DirectoryStatus, type FilterState, type RatingChip, type ScopeView, type ShipSection, type StatsText } from "wows-toolkit/native";
-import { Button, EmptyState, errorMessage, Hint, inputStyle, MenuRow, Surface } from "./components";
+import { Button, dockTab, dockTabBar, EmptyState, errorMessage, Hint, inputStyle, MenuRow, ShipClassIcon, Surface } from "./components";
 import { Frame } from "./frame";
 import { currentLocale, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
@@ -488,8 +488,8 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
             renderTab={(tab) => <PanelTab model={model} tab={tab}/>}
             renderEmpty={() => <EmptyState title={text.overview} description={text.noGames}/>}
             groupClass="flex-1 min-h-0 bg-background"
-            tabBarClass="flex-row items-center gap-1 px-1 border-b border-border bg-card"
-            tabClass="px-2.5 py-1.5 rounded-md selected:bg-accent"
+            tabBarClass={dockTabBar}
+            tabClass={dockTab}
             contentClass="flex-1 min-h-0"
             dockClass="border-l border-border"
             handleClass="bg-border group-hover:bg-primary"
@@ -1018,7 +1018,7 @@ function ShipsPanel(props: { model: StatsModel }) {
                         <Image src={section().nationFlag!} style={{ width: 23, height: 16 }}/>
                       </If>
                       <If when={section().classIcon}>
-                        <Image src={section().classIcon!} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
+                        {(classIcon) => <ShipClassIcon icon={classIcon()} tint={colors.foreground}/>}
                       </If>
                       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                         <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.foreground }}>{section().name}</Text>

@@ -22,7 +22,7 @@ import {
   type GameDataSnapshot,
   type ReplaySummary,
 } from "wows-toolkit/native";
-import { Button, MenuRow, Spinner, Surface } from "./components";
+import { Button, dockTab, dockTabBar, MenuRow, ShipClassIcon, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting } from "./settings_store";
 import { debugMode } from "./shell/status";
@@ -870,7 +870,7 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
         {(flag) => <Image src={flag()} style={{ width: 23, height: 16 }}/>}
       </If>
       <If when={loaded()?.classIcon}>
-        {(icon) => <Image src={icon()} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>}
+        {(classIcon) => <ShipClassIcon icon={classIcon()} tint={colors.foreground}/>}
       </If>
       <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12.5 }}>{title()}</Text>
       <View
@@ -1297,8 +1297,8 @@ function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) 
         </View>
       )}
       groupStyle={{ flex: 1, minHeight: 0 }}
-      tabBarClass="flex-row border-b border-border bg-card"
-      tabClass="h-8 px-3 justify-center text-muted-foreground hover:bg-accent selected:bg-background selected:text-foreground"
+      tabBarClass={dockTabBar}
+      tabClass={dockTab}
       contentStyle={{ flex: 1, minHeight: 0 }}
       handleStyle={{ backgroundColor: colors.border }}
       dropIndicatorStyle={{ backgroundColor: colors.accent, opacity: 0.4 }}

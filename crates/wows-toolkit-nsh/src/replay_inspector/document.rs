@@ -15,7 +15,6 @@ use base64::Engine as _;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::model::ReplayReportModel;
-use wows_toolkit_replay_data::row_icons::ship_class_svg;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
@@ -24,6 +23,7 @@ use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
+use crate::class_icon::ClassIcon;
 use crate::game_data::GameDataError;
 use crate::js_newtype::js_newtype;
 use crate::replay_inspector::constants::BuildNumber;
@@ -56,12 +56,12 @@ pub struct ConstantsMismatch {
     pub version: String,
 }
 
-/// The recording player's nation flag and ship class icon, as `data:` URLs,
-/// which the tab title shows. Each is `None` when the build lacks it.
+/// The recording player's nation flag, as a `data:` URL, and ship class
+/// icon, which the tab title shows. Each is `None` when the build lacks it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TitleIcons {
     pub nation_flag: Option<String>,
-    pub class_icon: Option<String>,
+    pub class_icon: Option<ClassIcon>,
 }
 
 impl TitleIcons {
@@ -77,7 +77,7 @@ impl TitleIcons {
             .and_then(|id| GameParamProvider::game_param_by_id(game_data.provider().as_ref(), id))
             .and_then(|param| GuiAsset::NationFlag(param.nation()).read(vfs, None))
             .map(|bytes| data_uri("image/png", &bytes));
-        let class_icon = ship_class_svg(player.ship_class, vfs).map(|bytes| data_uri("image/svg+xml", &bytes));
+        let class_icon = ClassIcon::read(player.ship_class, vfs);
 
         Self { nation_flag, class_icon }
     }

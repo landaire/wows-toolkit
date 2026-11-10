@@ -14,9 +14,10 @@ use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::row_detail::IconSize;
 use wows_toolkit_replay_data::row_icons::RowIcon;
 use wows_toolkit_replay_data::row_icons::row_icons;
-use wows_toolkit_replay_data::row_icons::ship_class_svg;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
+
+use crate::class_icon::ClassIcon;
 
 /// One decoded-on-demand icon: its source and its natural size in pixels,
 /// which wide ribbons are fitted by.
@@ -29,7 +30,7 @@ pub struct IconImage {
 /// What the background read found.
 #[derive(Debug, Default)]
 struct LoadedIcons {
-    ship_classes: HashMap<Species, SharedString>,
+    ship_classes: HashMap<Species, ClassIcon>,
     keyed: HashMap<RowIcon, IconImage>,
 }
 
@@ -44,9 +45,9 @@ impl PartialEq for TableIcons {
 }
 
 impl TableIcons {
-    /// The class icon for `species`, as SVG; the table tints and turns it.
-    pub fn ship_class(&self, species: Species) -> Option<SharedString> {
-        self.0.ship_classes.get(&species).cloned()
+    /// The class icon for `species`; the table tints and turns it.
+    pub fn ship_class(&self, species: Species) -> Option<&ClassIcon> {
+        self.0.ship_classes.get(&species)
     }
 
     pub fn icon(&self, icon: &RowIcon) -> Option<IconImage> {
@@ -76,8 +77,8 @@ fn read(classes: &[Species], wanted: &[RowIcon], vfs: &VfsPath) -> LoadedIcons {
     let mut loaded = LoadedIcons::default();
 
     for species in classes {
-        if let Some(bytes) = ship_class_svg(*species, vfs) {
-            loaded.ship_classes.insert(*species, data_uri("image/svg+xml", &bytes));
+        if let Some(icon) = ClassIcon::read(*species, vfs) {
+            loaded.ship_classes.insert(*species, icon);
         }
     }
 

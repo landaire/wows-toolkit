@@ -94,3 +94,10 @@ pub fn status(content: impl IntoReactive<SharedString>) -> AnyElement {
 pub fn class(names: &'static str) -> Option<SharedString> {
     Some(SharedString::from(names))
 }
+
+/// A dock's tab bar and tabs, the look every dock in the app shares
+/// (`dockTabBar` and `dockTab` in `ui/components.tsx`): flat tabs on the
+/// card color, the shown one in the color of the panel under it.
+pub const DOCK_TAB_BAR: &str = "flex-row border-b border-border bg-card";
+pub const DOCK_TAB: &str =
+    "h-8 px-3 justify-center text-muted-foreground hover:bg-accent selected:bg-background selected:text-foreground";

@@ -25,8 +25,8 @@ use nsh_base::SelectValue;
 use nsh_base::dock::DockArea;
 use nsh_base::dock::DockAreaApi;
 use nsh_base::dock::DockAreaLayout;
-use nsh_base::dock::DockInfo;
 use nsh_base::dock::DockLayout;
+use nsh_base::dock::DockNode;
 use nsh_base::dock::DockPanel;
 use nsh_base::dock::DockPanelOptions;
 use nsh_base::dock::DockPlacement;
@@ -465,44 +465,46 @@ impl Tab {
             icon_button(Icon::X, format!("Close {title}"))
                 .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.close_panel(panel.clone())))
         });
+        // A docked panel's tab puts its dock away, as the stats docks do,
+        // rather than a header row of its own above the tab bar.
+        let collapse = self.dock_of(&dock_tab.panel).map(|placement| {
+            let glyph = match placement {
+                DockPlacement::Left => Icon::PanelLeftClose,
+                DockPlacement::Bottom => Icon::PanelBottom,
+                DockPlacement::Right | DockPlacement::Center => Icon::PanelRightClose,
+            };
+            icon_button(glyph, self.text("ui.buttons.collapse_panel"))
+                .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.set_dock_open(placement, false)))
+        });
 
         view()
-            .app_class(class("flex-row items-center gap-1 px-2"))
+            .app_class(class("flex-row items-center gap-1"))
             .child(text(title).app_class(class("text-xs")))
             .children(close)
+            .children(collapse)
             .into_element()
     }
 
-    /// A side or bottom dock's header control that puts it away.
-    fn render_dock(&self, info: &DockInfo) -> AnyElement {
-        let tab = *self;
-        let placement = info.placement;
-        let glyph = match placement {
-            DockPlacement::Left => Icon::PanelLeftClose,
-            DockPlacement::Bottom => Icon::PanelBottom,
-            DockPlacement::Right | DockPlacement::Center => Icon::PanelRightClose,
-        };
-        view()
-            .app_class(class("flex-row justify-end px-1"))
-            .child(
-                icon_button(glyph, self.text("ui.buttons.collapse_panel"))
-                    .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.set_dock_open(placement, false))),
-            )
-            .into_element()
+    /// The dock `panel` is in, `None` when it is in the center.
+    fn dock_of(&self, panel: &PanelId) -> Option<DockPlacement> {
+        fn holds(node: &DockNode, panel: &PanelId) -> bool {
+            match node {
+                DockNode::Split { children, .. } => children.iter().any(|child| holds(child, panel)),
+                DockNode::Tabs { panels, .. } => panels.contains(panel),
+            }
+        }
+
+        self.layout.with(|layout| {
+            [DockPlacement::Left, DockPlacement::Right, DockPlacement::Bottom]
+                .into_iter()
+                .find(|&placement| layout.dock(placement).is_some_and(|region| holds(&region.layout, panel)))
+        })
     }
 
     /// Whether the dock at `placement` holds panels but is put away, so a
     /// rail has to offer it back.
     fn dock_closed(&self, placement: DockPlacement) -> bool {
-        self.layout.with(|layout| {
-            let region = match placement {
-                DockPlacement::Right => layout.right.as_ref(),
-                DockPlacement::Bottom => layout.bottom.as_ref(),
-                DockPlacement::Left => layout.left.as_ref(),
-                DockPlacement::Center => None,
-            };
-            region.is_some_and(|region| region.open == Some(false))
-        })
+        self.layout.with(|layout| layout.dock(placement).is_some_and(|region| region.open == Some(false)))
     }
 
     /// Selects the build a selector item names. Every item is a build this
@@ -613,15 +615,14 @@ fn tab_view(tab: Tab) -> AnyElement {
         .app_class(class("flex-1 min-w-0 min-h-0"))
         .layout(move || tab.layout.get())
         .panels(fixed_panels())
-        .tab_bar_class("flex-row items-center gap-1 h-8 px-1 border-b border-border bg-card")
-        .tab_class("h-7 rounded-(--radius) text-muted-foreground selected:bg-accent selected:text-foreground")
+        .tab_bar_class(ui::DOCK_TAB_BAR)
+        .tab_class(ui::DOCK_TAB)
         .content_class("flex-1 min-h-0")
         .group_class("flex-1 min-h-0 bg-background")
         .dock_class("bg-background border-border")
         .handle_class("bg-border")
         .render_panel(move |panel: &DockPanel| tab.render_panel(&panel.id))
         .render_tab(move |dock_tab: &DockTab| tab.render_tab(dock_tab))
-        .render_dock(move |info: &DockInfo| tab.render_dock(info))
         .on_layout_change(move |next: &DockAreaLayout| tab.layout.set(next.clone()))
         .on_panel_remove(move |panel: &PanelId| tab.panel_removed(panel));
 

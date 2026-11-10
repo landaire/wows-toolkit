@@ -1,12 +1,32 @@
 import type { JSX, ViewStyle } from "nsh";
-import { Text, View } from "nsh";
+import { Image, Text, View } from "nsh";
 import { Button as BaseButton, MenuItem, Tooltip } from "nsh/base";
 import { Icon, type IconName } from "./icons";
+import type { ClassIcon } from "wows-toolkit/native";
 import { colors, controlRadius } from "./theme";
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * A ship class icon from the game, turned upright and tinted as the other
+ * front ends draw it: the fill takes `tint`, the outline stays dark.
+ */
+export function ShipClassIcon(props: { icon: ClassIcon; tint: string; label?: string; size?: number }) {
+  const size = () => props.size ?? 16;
+  const layer = () => ({ position: "absolute" as const, left: 0, top: 0, width: size(), height: size(), objectFit: "contain" as const });
+  return (
+    <View accessibilityLabel={props.label} style={{ width: size(), height: size(), transform: [{ rotate: "90deg" }] }}>
+      <Image src={props.icon.outline} style={layer()}/>
+      <Image src={props.icon.fill} style={{ ...layer(), tintColor: props.tint }}/>
+    </View>
+  );
+}
+
+/** A dock's tab bar and tabs, the look every dock in the app shares (`DOCK_TAB_BAR` and `DOCK_TAB` in `src/unpacker/ui.rs`): flat tabs on the card color, the shown one in the color of the panel under it. */
+export const dockTabBar = "flex-row border-b border-border bg-card";
+export const dockTab = "h-8 px-3 justify-center text-muted-foreground hover:bg-accent selected:bg-background selected:text-foreground";
 
 /** A `Dialog`'s popup style that puts its content in the middle of the window, as the other front ends' modal windows are. */
 export const centeredDialog: ViewStyle = { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 };

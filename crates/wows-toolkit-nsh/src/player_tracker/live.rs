@@ -16,7 +16,6 @@ use std::sync::MutexGuard;
 use std::time::Duration;
 use std::time::Instant;
 
-use base64::Engine as _;
 use jiff::Timestamp;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
@@ -52,12 +51,11 @@ use wows_toolkit_viewmodel::player_tracker::live_source::POLL_INTERVAL;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 use wows_toolkit_viewmodel::twitch;
-use wowsunpack::game_assets::GuiAsset;
-use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
+use crate::class_icon::ClassIcon;
 use crate::js_newtype::js_newtype;
 use crate::replay_inspector::constants::BuildNumber;
 use crate::text::text;
@@ -174,7 +172,7 @@ pub struct LiveState {
     /// The battle's build, which resolves ships and classes.
     ships: Option<BuildShips>,
     /// Each roster class's icon from that build.
-    class_icons: HashMap<Species, Arc<str>>,
+    class_icons: HashMap<Species, ClassIcon>,
     /// Account ids, realms and clans the scan recovered; `tempArenaInfo`
     /// carries none of them.
     identities: Option<LiveIdentities>,
@@ -454,9 +452,9 @@ fn load_build(cache: Option<GameDataCache>, build: BuildNumber) -> Result<Arc<Lo
     cache.get_or_load_build(build.0).map_err(LiveDataError::Build)
 }
 
-/// Each class of `ships` with its icon in `metadata`'s build, as an SVG
-/// `data:` URL. A class the build has no icon for is left out.
-fn class_icons(metadata: &LoadedGameData, ships: &[wows_replays::types::GameParamId]) -> HashMap<Species, Arc<str>> {
+/// Each class of `ships` with its icon in `metadata`'s build. A class the
+/// build has no icon for is left out.
+fn class_icons(metadata: &LoadedGameData, ships: &[wows_replays::types::GameParamId]) -> HashMap<Species, ClassIcon> {
     let provider = metadata.provider();
     let mut icons = HashMap::new();
     for ship in ships {
@@ -466,18 +464,12 @@ fn class_icons(metadata: &LoadedGameData, ships: &[wows_replays::types::GamePara
         if icons.contains_key(&species) {
             continue;
         }
-        if let Some(icon) = class_icon(metadata.vfs(), species) {
+        if let Some(icon) = ClassIcon::read(species, metadata.vfs()) {
             icons.insert(species, icon);
         }
     }
 
     icons
-}
-
-fn class_icon(vfs: &wowsunpack::vfs::VfsPath, species: Species) -> Option<Arc<str>> {
-    let bytes = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.read(vfs, None)?;
-
-    Some(Arc::from(format!("data:image/svg+xml;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
 }
 
 /// Answers `lookup` from what this session already has, returns it to be
@@ -729,7 +721,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
             None => row.name.clone(),
         },
         tint: row.tint.into(),
-        class_icon: class_icon.map(|icon| icon.to_string()),
+        class_icon: class_icon.cloned(),
         class_name: class_icon.and(row.species_text.clone()),
         // A ship the build has not resolved reads as a dash.
         ship: row.ship_name.clone().unwrap_or_else(|| "-".to_string()),
@@ -1142,24 +1134,5 @@ mod tests {
                 &[("reason", "rate limited, try again in 20 minutes")]
             ))
         );
-    }
-
-    #[test]
-    fn a_class_icon_is_read_from_the_build_as_svg() {
-        use std::io::Write as _;
-
-        let vfs: wowsunpack::vfs::VfsPath = wowsunpack::vfs::MemoryFS::new().into();
-        let dir = vfs.join("gui/fla/minimap/ship_icons").expect("a path");
-        dir.create_dir_all().expect("the icon directory");
-        dir.join("minimap_destroyer.svg")
-            .expect("a path")
-            .create_file()
-            .expect("the icon file")
-            .write_all(b"<svg/>")
-            .expect("the icon is written");
-
-        let icon = class_icon(&vfs, Species::Destroyer).expect("the destroyer icon is there");
-        assert_eq!(&*icon, "data:image/svg+xml;base64,PHN2Zy8+");
-        assert!(class_icon(&vfs, Species::Cruiser).is_none(), "a class the build lacks has no icon");
     }
 }

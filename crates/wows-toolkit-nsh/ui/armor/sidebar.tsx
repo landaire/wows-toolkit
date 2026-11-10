@@ -1,7 +1,7 @@
 import { computed, effect, Image, signal, Text, untracked, View } from "nsh";
 import { ContextMenu, Input, Popover, Tree, type TreeApi, type TreeEntry, type TreeItem } from "nsh/base";
 import { Armor } from "wows-toolkit/native";
-import { MenuRow, Surface } from "../components";
+import { MenuRow, ShipClassIcon, Surface } from "../components";
 import { inputStyle } from "../shell/controls";
 import { t } from "../i18n";
 import { Icon } from "../icons";
@@ -149,7 +149,7 @@ function TreeRow(props: { entry: TreeEntry; info: RowInfo | undefined }) {
           {(src) => <Image src={src()} style={{ width: 23, height: 16 }}/>}
         </If>
         <If when={icon()}>
-          {(src) => <Image src={src()} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>}
+          {(classIcon) => <ShipClassIcon icon={classIcon()} tint={colors.foreground}/>}
         </If>
         <Text style={{ fontSize: 12.5, fontWeight: props.info?.kind === "nation" ? "600" : "400", color: colors.foreground }}>{props.entry.label}</Text>
       </View>

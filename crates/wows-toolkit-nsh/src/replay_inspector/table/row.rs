@@ -25,6 +25,7 @@ use wows_toolkit_replay_data::player_table::shows_build_links;
 use wows_toolkit_replay_data::player_table::twitch_hover_text;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 
+use crate::class_icon::ClassIcon;
 use crate::icons::Icon;
 use crate::icons::icon;
 use crate::replay_inspector::table::Table;
@@ -220,13 +221,12 @@ impl RowLayout<'_> {
             .child(glyph_button(caret, caret_label).on_press(move |_: &PressEvent| table.toggle_expanded(player)));
 
         cell = cell.child(match self.icons.ship_class(row.ship_class) {
-            Some(uri) => {
-                let icon = image(uri)
-                    .label(row.ship_species_text.clone())
-                    .tint_color(colors::player(player_color_kind(row)))
-                    .app_class(class("flex-none rotate-90"))
-                    .w(px(SHIP_ICON_WIDTH))
-                    .h(px(SHIP_ICON_WIDTH));
+            Some(class_icon) => {
+                let icon = class_icon.element(
+                    colors::player(player_color_kind(row)),
+                    SHIP_ICON_WIDTH,
+                    row.ship_species_text.clone(),
+                );
                 if row.ship_species_text.is_empty() {
                     icon.into_element()
                 } else {
@@ -419,7 +419,7 @@ struct MenuHeading {
     name: String,
     name_color: AdaptiveColor,
     /// The class icon, tinted as the Name cell draws it, else its name.
-    class_icon: Option<(SharedString, AdaptiveColor)>,
+    class_icon: Option<(ClassIcon, AdaptiveColor)>,
     species: String,
     ship: Option<String>,
     spoken: String,
@@ -431,7 +431,9 @@ impl MenuData {
             clan: row.clan.as_ref().map(|clan| (clan.tag.clone(), colors::fixed(clan.color_rgb))),
             name: row.display_name.clone(),
             name_color: colors::player(name_color_kind(row)),
-            class_icon: icons.ship_class(row.ship_class).map(|uri| (uri, colors::player(player_color_kind(row)))),
+            class_icon: icons
+                .ship_class(row.ship_class)
+                .map(|icon| (icon.clone(), colors::player(player_color_kind(row)))),
             species: row.ship_species_text.clone(),
             ship: (!row.ship_name.is_empty()).then(|| row.ship_name.clone()),
             spoken: menu_heading_text(row),
@@ -459,13 +461,7 @@ fn heading_view(heading: &MenuHeading) -> AnyElement {
 
     if let Some(ship) = heading.ship.clone() {
         line = match heading.class_icon.clone() {
-            Some((uri, tint)) => line.child(
-                image(uri)
-                    .tint_color(tint)
-                    .app_class(class("flex-none rotate-90"))
-                    .w(px(SHIP_ICON_WIDTH))
-                    .h(px(SHIP_ICON_WIDTH)),
-            ),
+            Some((icon, tint)) => line.child(icon.element(tint, SHIP_ICON_WIDTH, heading.species.clone())),
             None if !heading.species.is_empty() => {
                 line.child(text(heading.species.clone()).app_class(class("flex-none text-xs text-foreground")))
             }

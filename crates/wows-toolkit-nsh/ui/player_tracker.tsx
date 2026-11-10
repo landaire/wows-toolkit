@@ -23,7 +23,7 @@ import {
   type TrackerLabels,
   type ViewMode,
 } from "wows-toolkit/native";
-import { Button, errorMessage, inputStyle, MenuRow, Surface } from "./components";
+import { Button, dockTab, dockTabBar, errorMessage, inputStyle, MenuRow, ShipClassIcon, Surface } from "./components";
 import { currentLocale, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { colors, controlRadius } from "./theme";
@@ -779,11 +779,7 @@ function ClassIcon(props: { row: RosterRowView }) {
   return (
     <View style={{ width: 16, height: 16 }} tooltip={props.row.className ? <Hint text={props.row.className}/> : undefined}>
       <If when={props.row.classIcon}>
-        <Image
-          src={props.row.classIcon!}
-          accessibilityLabel={props.row.className ?? ""}
-          style={{ width: 16, height: 16, objectFit: "contain", tintColor: tintColor(props.row.tint), transform: [{ rotate: "90deg" }] }}
-        />
+        {(classIcon) => <ShipClassIcon icon={classIcon()} tint={tintColor(props.row.tint)} label={props.row.className ?? ""}/>}
       </If>
     </View>
   );
@@ -927,8 +923,8 @@ function Sections(props: { tracker: PlayerTrackerProps }) {
         if (active) void reloadClans();
       }}
       groupClass="flex-1"
-      tabBarClass="flex-row border-b border-border"
-      tabClass="group px-3 py-1.5 selected:bg-muted"
+      tabBarClass={dockTabBar}
+      tabClass={`group ${dockTab}`}
       contentClass="flex-1"
       handleClass="bg-border group-hover:bg-muted-foreground group-active:bg-primary"
       handleAccessibilityLabel="Resize"

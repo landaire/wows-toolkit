@@ -30,6 +30,7 @@ use super::art::GameArt;
 use super::ids::MatchGroup;
 use super::ids::ParamIdText;
 use super::scope::RecentLimit;
+use crate::class_icon::ClassIcon;
 use crate::text::text;
 use crate::text::text_with;
 
@@ -177,8 +178,8 @@ pub struct ShipSection {
     pub clear_label: String,
     /// The nation's flag as a `data:` URL, once game data has loaded.
     pub nation_flag: Option<String>,
-    /// The class icon as an SVG `data:` URL, once game data has loaded.
-    pub class_icon: Option<String>,
+    /// The class icon, once game data has loaded.
+    pub class_icon: Option<ClassIcon>,
 }
 
 /// Everything the tab shows outside its charts.
@@ -398,7 +399,7 @@ fn ship_sections(
                     .collect(),
                 clear_label: text_with("ui.stats.remove_games_hint", &[("ship", &ship)]),
                 nation_flag: art.and_then(|art| art.nation_flag(ship_id)).map(|url| url.to_string()),
-                class_icon: art.and_then(|art| art.class_icon(ship_id)).map(|url| url.to_string()),
+                class_icon: art.and_then(|art| art.class_icon(ship_id)),
                 header,
                 name: ship,
             };

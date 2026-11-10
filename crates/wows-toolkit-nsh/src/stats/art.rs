@@ -12,11 +12,12 @@ use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_assets::GuiAsset;
-use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::translations::translate_achievement_description;
 use wowsunpack::game_params::translations::translate_achievement_name;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Species;
 
+use crate::class_icon::ClassIcon;
 use crate::replay_inspector::constants::BuildNumber;
 
 /// An asset read from one build.
@@ -29,6 +30,12 @@ struct ArtKey {
 /// `data:` URLs already read, by build and asset. `None` records an asset
 /// the build does not have, so it is not looked for again.
 static URLS: LazyLock<Mutex<HashMap<ArtKey, Option<Arc<str>>>>> = LazyLock::new(Mutex::default);
+
+/// A ship class in one build.
+type ClassKey = (BuildNumber, Species);
+
+/// Class icons already read, by build and class; `None` as for [`URLS`].
+static CLASS_ICONS: LazyLock<Mutex<HashMap<ClassKey, Option<ClassIcon>>>> = LazyLock::new(Mutex::default);
 
 /// The loaded build's art and names.
 pub(crate) struct GameArt {
@@ -62,16 +69,19 @@ impl GameArt {
         self.url(format!("nation:{nation}"), "image/png", GuiAsset::NationFlag(&nation))
     }
 
-    /// The ship's class icon as an SVG `data:` URL. The view tints it and
-    /// turns it upright, as the GPUI table does.
-    pub(crate) fn class_icon(&self, ship: GameParamId) -> Option<Arc<str>> {
+    /// The ship's class icon. The view tints it and turns it upright, as the
+    /// GPUI table does.
+    pub(crate) fn class_icon(&self, ship: GameParamId) -> Option<ClassIcon> {
         let param = GameParamProvider::game_param_by_id(self.loaded.provider().as_ref(), ship)?;
         let species = *param.species()?.known()?;
-        self.url(
-            format!("class:{species:?}"),
-            "image/svg+xml",
-            GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive },
-        )
+        let cache_key = (BuildNumber(self.loaded.build()), species);
+        if let Some(known) = CLASS_ICONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&cache_key) {
+            return known.clone();
+        }
+
+        let icon = ClassIcon::read(species, self.loaded.vfs());
+        CLASS_ICONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(cache_key, icon.clone());
+        icon
     }
 
     fn url(&self, asset_key: String, mime: &str, asset: GuiAsset<'_>) -> Option<Arc<str>> {

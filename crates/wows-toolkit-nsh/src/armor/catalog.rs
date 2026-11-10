@@ -9,9 +9,10 @@ use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use wows_toolkit_viewmodel::ship_catalog::species_name;
 use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use wowsunpack::game_assets::GuiAsset;
-use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
+
+use crate::class_icon::ClassIcon;
 
 /// One ship row.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
@@ -32,9 +33,9 @@ pub struct CatalogClass {
     /// The class key (`"Destroyer"`), which the class icon is keyed on.
     pub species: String,
     pub label: String,
-    /// The class icon as an SVG `data:` URL, when the build has one.
+    /// The class icon, when the build has one.
     #[prop(skip_none)]
-    pub icon: Option<String>,
+    pub icon: Option<ClassIcon>,
     pub ships: Vec<CatalogShip>,
 }
 
@@ -58,11 +59,12 @@ pub struct CatalogView {
     pub nations: Vec<CatalogNation>,
 }
 
-/// The tree's nation flags and class icons as `data:` URLs, read once per build.
+/// The tree's nation flags as `data:` URLs and class icons, read once per
+/// build.
 #[derive(Debug, Default)]
 pub(super) struct CatalogIcons {
     flags: HashMap<String, String>,
-    classes: HashMap<Species, String>,
+    classes: HashMap<Species, ClassIcon>,
 }
 
 impl CatalogIcons {
@@ -76,9 +78,8 @@ impl CatalogIcons {
                 if icons.classes.contains_key(&class.species) {
                     continue;
                 }
-                let asset = GuiAsset::ShipClassIcon { species: class.species, state: ShipIconState::Alive };
-                if let Some(bytes) = asset.read(vfs, None) {
-                    icons.classes.insert(class.species, data_url("image/svg+xml", &bytes));
+                if let Some(icon) = ClassIcon::read(class.species, vfs) {
+                    icons.classes.insert(class.species, icon);
                 }
             }
         }

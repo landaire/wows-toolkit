@@ -3,6 +3,7 @@
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
 pub mod armor;
+mod class_icon;
 pub mod cli;
 pub mod clipboard;
 pub mod collab;

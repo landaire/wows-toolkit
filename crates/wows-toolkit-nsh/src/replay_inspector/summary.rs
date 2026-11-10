@@ -16,6 +16,7 @@ use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::theme::Semantic;
 use wows_toolkit_viewmodel::theme::semantic_for;
 
+use crate::class_icon::ClassIcon;
 use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::document::ReplayDocId;
 use crate::replay_inspector::document::ReplayDocument;
@@ -96,8 +97,8 @@ pub struct ReplaySummary {
     pub title: String,
     /// The recording player's nation flag as a PNG `data:` URL.
     pub nation_flag: Option<String>,
-    /// The recording player's ship class icon as an SVG `data:` URL.
-    pub class_icon: Option<String>,
+    /// The recording player's ship class icon.
+    pub class_icon: Option<ClassIcon>,
     /// `None` while the replay has no battle result yet.
     pub outcome: Option<Outcome>,
     /// `None` without a rating table, a self row or known damage.

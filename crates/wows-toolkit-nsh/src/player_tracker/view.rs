@@ -11,6 +11,7 @@ use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 
+use crate::class_icon::ClassIcon;
 use crate::js_newtype::js_newtype;
 
 use super::error::TrackerError;
@@ -477,10 +478,10 @@ pub struct RosterRowView {
     /// The name with the clan tag the scan found, if any.
     pub name: String,
     pub tint: Tint,
-    /// The ship class icon from the battle's build, as an SVG `data:` URL.
-    /// The view tints it like the name and turns it upright.
+    /// The ship class icon from the battle's build. The view tints it like
+    /// the name and turns it upright.
     #[prop(skip_none)]
-    pub class_icon: Option<String>,
+    pub class_icon: Option<ClassIcon>,
     /// The ship class's name, the icon's hover.
     #[prop(skip_none)]
     pub class_name: Option<String>,
