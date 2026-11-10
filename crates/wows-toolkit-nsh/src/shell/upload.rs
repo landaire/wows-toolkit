@@ -5,13 +5,19 @@
 //! `wows_toolkit_viewmodel::upload`, shared with the other front ends so all of
 //! them decide the same thing about the same replay and keep one ledger.
 
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use nsh_core::prelude::JsObject;
 use nsh_core::prelude::PropEnum;
 use nsh_core::prelude::background;
 use nsh_core::prelude::blocking;
 use nsh_core::prelude::module;
+use tokio::sync::Notify;
 use wows_toolkit_viewmodel::upload::contribute::Candidate;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
 use wows_toolkit_viewmodel::upload::contribute::Outcome;
@@ -75,12 +81,60 @@ impl Contribution {
     }
 }
 
+/// The replays being contributed in this process: the automatic contribution
+/// of a landed battle and a contribute-all pass may reach the same replay at
+/// once, and both would find it missing from the ledger and send it.
+struct Claims {
+    held: Mutex<BTreeSet<PathBuf>>,
+    released: Notify,
+}
+
+impl Claims {
+    fn new() -> Self {
+        Self { held: Mutex::new(BTreeSet::new()), released: Notify::new() }
+    }
+
+    /// Holds `path` until the claim drops, first waiting out whoever holds it.
+    /// The waiter then reads the ledger the holder wrote, or sends itself when
+    /// the holder failed.
+    async fn claim(&self, path: &Path) -> Claim<'_> {
+        loop {
+            // Enabled before the check, so a release between the check and the
+            // wait still wakes it.
+            let mut released = std::pin::pin!(self.released.notified());
+            released.as_mut().enable();
+            if self.held.lock().unwrap_or_else(PoisonError::into_inner).insert(path.to_path_buf()) {
+                return Claim { claims: self, path: path.to_path_buf() };
+            }
+            released.await;
+        }
+    }
+}
+
+/// One replay held by a contribution, released when it drops.
+struct Claim<'a> {
+    claims: &'a Claims,
+    path: PathBuf,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.claims.held.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.path);
+        self.claims.released.notify_waiters();
+    }
+}
+
+static CLAIMS: LazyLock<Claims> = LazyLock::new(Claims::new);
+
 /// Sends what the data-sharing setting asks for about the replay at `path`,
 /// whose parse found `shareable`, and records what was sent.
 ///
 /// The mode and proxy are read from the shared settings at the moment of the
 /// send, so a change made in any front end applies to the next battle.
+///
+/// A second call for a replay already being contributed waits for the first.
 pub async fn contribute(path: PathBuf, shareable: Shareable, ledger: LedgerUse) -> Result<Outcome, SettingsError> {
+    let _claim = CLAIMS.claim(&path).await;
     let pool = crate::shell::settings::open().await?;
     let settings = crate::shell::settings::load_from(&pool).await?;
     let mode = parse_sharing(&settings.data_sharing)?;
@@ -137,5 +191,63 @@ impl Uploads {
         let outcome = background(contribute_path(PathBuf::from(path), ledger.usage())).await.map_err(UploadError::Task)??;
 
         Ok(Contribution::from_outcome(outcome))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().expect("a test runtime starts")
+    }
+
+    #[test]
+    fn a_replay_being_contributed_is_claimed_again_only_once_released() {
+        runtime().block_on(async {
+            let claims = Claims::new();
+            let path = Path::new("/replays/battle.wowsreplay");
+            let first = claims.claim(path).await;
+
+            let second = tokio::time::timeout(Duration::from_millis(50), claims.claim(path)).await;
+            assert!(second.is_err(), "a held replay waits for its holder");
+
+            // A failed send releases the replay as a finished one does.
+            drop(first);
+            let third = tokio::time::timeout(Duration::from_secs(5), claims.claim(path)).await;
+            assert!(third.is_ok(), "a released replay is claimed again");
+        });
+    }
+
+    #[test]
+    fn a_waiting_claim_proceeds_when_the_holder_releases() {
+        runtime().block_on(async {
+            let claims = Claims::new();
+            let path = Path::new("/replays/battle.wowsreplay");
+            let first = claims.claim(path).await;
+
+            let waiter = claims.claim(path);
+            let release = async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                drop(first);
+            };
+            let (claimed, ()) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(waiter, release) })
+                .await
+                .expect("the waiter is woken by the release");
+            assert_eq!(claimed.path, path);
+        });
+    }
+
+    #[test]
+    fn different_replays_are_claimed_independently() {
+        runtime().block_on(async {
+            let claims = Claims::new();
+            let _first = claims.claim(Path::new("/replays/a.wowsreplay")).await;
+
+            let other = tokio::time::timeout(Duration::from_millis(50), claims.claim(Path::new("/replays/b.wowsreplay"))).await;
+            assert!(other.is_ok());
+        });
     }
 }
