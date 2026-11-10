@@ -4,7 +4,7 @@ import { Select } from "nsh/base";
 import { Armor } from "wows-toolkit/native";
 import { t } from "../i18n";
 import { Icon } from "../icons";
-import { colors, controlRadius } from "../theme";
+import { colors, controlRadius, semantic } from "../theme";
 import { PenSearch } from "./analysis";
 import { armor, type CamoGroup, type CamoView, call, type DisplayView, type HullView, type PartView, type ZoneView } from "./state";
 import { CheckRow, ChoiceRow, ColorRow, Heading, Hint, IconButton, Rule, SliderRow, Swatch, ToolButton } from "./widgets";

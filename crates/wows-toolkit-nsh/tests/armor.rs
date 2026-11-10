@@ -1,6 +1,7 @@
 //! Headless interaction tests of the Armor Viewer tab over the real TSX bundle.
 //! They run without game data, so they cover the controls that work before a
-//! ship is loaded.
+//! ship is loaded; the views that need a ship run over a fake service state
+//! (`tests/armor/*.tsx`).
 
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -67,16 +68,33 @@ fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
 
-fn start() -> TestApp {
+fn launch(entry: PathBuf) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     // The armor service outlives each app, so a panel the last test opened would still be open.
     wows_toolkit_nsh::armor::test_support::reset_panels();
-    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1600.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app.wait_for("role:tab[Armor Viewer]").expect("the tab strip is drawn");
     TestApp { app, _guard: guard }
+}
+
+fn start() -> TestApp {
+    let mut app = launch(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx"));
+    app.wait_for("role:tab[Armor Viewer]").expect("the tab strip is drawn");
+    app
+}
+
+/// An armor view over the fake service state of `tests/armor/<name>`, on a
+/// desktop where a press gives a view the keyboard focus (the headless
+/// platform moves it to views only as macOS and the web do).
+fn fixture(name: &str) -> TestApp {
+    let mut app = launch(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/armor").join(name));
+    app.set_environment("desktop", |environment| {
+        environment.os = nsh_core::platform::Os::MacOs;
+        environment.idiom = nsh_core::platform::Idiom::Desktop;
+    })
+    .expect("the desktop environment is applied");
+    app
 }
 
 /// The app with the Armor Viewer tab selected and its first view drawn.
@@ -226,4 +244,12 @@ fn the_penetration_panel_scrolls_only_its_ship_list() {
         "the search sits above the list"
     );
     assert!(!app.screen().matches("id:armor-pen-clear").unwrap(), "Clear all needs a ship to clear");
+}
+
+#[test]
+fn a_partly_shown_zone_draws_its_mixed_checkbox() {
+    let mut app = fixture("options_rail.tsx");
+    app.press("id:armor-options-section-Visibility").unwrap();
+    app.wait_for("id:armor-vis-zone-Citadel").unwrap();
+    app.wait_for("id:armor-vis-zone-Citadel >> text:-").unwrap();
 }
