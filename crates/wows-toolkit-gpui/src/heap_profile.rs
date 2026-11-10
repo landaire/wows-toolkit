@@ -47,18 +47,20 @@ mod enabled {
         std::env::var(name).ok()?.parse().ok()
     }
 
-    /// Milliseconds since the profiler started, so a mark can be placed
-    /// against the timed samples without matching wall clocks.
-    fn elapsed_ms() -> u128 {
-        static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        STARTED.get_or_init(std::time::Instant::now).elapsed().as_millis()
-    }
+    /// When the profiler started, so a mark can be placed against the timed
+    /// samples without matching wall clocks. Unset in a process that never
+    /// started one, such as a test binary, which has no profiled heap to read.
+    static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
     pub fn mark(label: &str) {
+        let Some(started) = STARTED.get() else {
+            return;
+        };
+
         let stats = dhat::HeapStats::get();
         write_line(&format!(
             "mark at_ms={} label={label} curr_bytes={} curr_blocks={} max_bytes={} max_blocks={}",
-            elapsed_ms(),
+            started.elapsed().as_millis(),
             stats.curr_bytes,
             stats.curr_blocks,
             stats.max_bytes,
@@ -71,7 +73,7 @@ mod enabled {
         let profiler = dhat::Profiler::builder().trim_backtraces(Some(trim)).build();
         // Leaked rather than dropped: see the module note.
         std::mem::forget(profiler);
-        elapsed_ms();
+        let started = *STARTED.get_or_init(std::time::Instant::now);
         write_line("profiler_started");
 
         let settle = env_var("DHAT_RUN_SECS").unwrap_or(DEFAULT_SETTLE_SECS);
@@ -81,7 +83,7 @@ mod enabled {
                 let stats = dhat::HeapStats::get();
                 write_line(&format!(
                     "heapstats round={round} at_ms={} curr_bytes={} curr_blocks={} max_bytes={} max_blocks={} total_bytes={} total_blocks={}",
-                    elapsed_ms(),
+                    started.elapsed().as_millis(),
                     stats.curr_bytes,
                     stats.curr_blocks,
                     stats.max_bytes,
