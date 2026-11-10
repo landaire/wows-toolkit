@@ -7,6 +7,7 @@
 pub mod clans;
 pub mod history;
 pub mod live;
+pub mod live_source;
 pub mod store;
 
 /// How loudly a number of encounters reads.
@@ -591,6 +592,48 @@ impl ClanSort {
         } else {
             Self::default()
         }
+    }
+}
+
+/// The settings row the tracker keeps its view in.
+pub const TRACKER_SETTINGS_KEY: &str = "player_tracker";
+
+/// What the tracker remembers between sessions: the window of time it looks
+/// back over, how each table is ordered, and what the filter box holds.
+///
+/// The egui tracker keeps none of this, so this row is shared by the GPUI and
+/// NSH front ends only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackerSettings {
+    #[serde(default)]
+    pub period: TimePeriod,
+    #[serde(default)]
+    pub sort: Sort,
+    #[serde(default)]
+    pub clan_sort: ClanSort,
+    #[serde(default)]
+    pub filter: String,
+}
+
+#[cfg(test)]
+mod tracker_settings_tests {
+    use super::*;
+
+    #[test]
+    fn the_saved_view_round_trips_through_the_settings_row() {
+        let saved = TrackerSettings {
+            period: TimePeriod::LastWeek,
+            sort: Sort::default().toggled(SortColumn::Name),
+            clan_sort: ClanSort::default().toggled(ClanSortColumn::Members),
+            filter: "RAIN".to_string(),
+        };
+        let json = serde_json::to_string(&saved).expect("the view serializes");
+        let read: TrackerSettings = serde_json::from_str(&json).expect("and reads back");
+        assert_eq!(read, saved);
+
+        // A row written before a field existed still reads, on the defaults.
+        let older: TrackerSettings = serde_json::from_str("{}").expect("an empty row reads");
+        assert_eq!(older, TrackerSettings::default());
     }
 }
 

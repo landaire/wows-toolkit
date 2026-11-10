@@ -1,21 +1,14 @@
 //! The battle currently in progress.
 //!
-//! The game writes `tempArenaInfo.json` into its replays directory when a
-//! battle starts and removes it when the battle ends, so the file's presence
-//! is the signal. Its contents are the same metadata a finished replay
-//! carries, which is what `LiveMatch::from_meta` reads.
-//!
-//! **Polled, not watched.** A filesystem watcher reports changes only, so a
-//! battle already under way when the app starts raises no event; the egui app
-//! covers that with a separate startup check. One poll covers both, and at
-//! this interval costs a `stat` per tick.
+//! Where it is read from and when it counts as changed are shared
+//! (`wows_toolkit_viewmodel::player_tracker::live_source`); this drives the
+//! poll on the app's executor, scans the roster's identities, and asks the
+//! stats service about it.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use std::time::SystemTime;
 
 use gpui_kit::App;
 use gpui_kit::AppContext;
@@ -31,85 +24,13 @@ use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
 use wows_toolkit_viewmodel::match_stats::RateLimiter;
 use wows_toolkit_viewmodel::match_stats::build_request;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
+use wows_toolkit_viewmodel::player_tracker::live_source::LiveSource;
+use wows_toolkit_viewmodel::player_tracker::live_source::LiveWatcher;
+use wows_toolkit_viewmodel::player_tracker::live_source::POLL_INTERVAL;
+use wows_toolkit_viewmodel::player_tracker::live_source::Settled;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-
-/// How often the replays directory is checked for a battle in progress.
-///
-/// A battle lasts twenty minutes, so noticing one a couple of seconds late
-/// costs nothing; polling faster only spends more syscalls.
-pub const POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-/// The file the game writes for the duration of a battle.
-pub const ARENA_INFO_FILE: &str = "tempArenaInfo.json";
-
-/// The bare packet stream the game writes beside it. Wrapped into a replay
-/// file only once the battle ends.
-pub const LIVE_STREAM_FILE: &str = "temp.wowsreplay";
-
-/// How many times an unreadable arena info is re-read before it is taken at
-/// face value as "no battle this app can read".
-///
-/// The game flushes the file in one go, so a couple of ticks covers the race;
-/// past that the file is malformed rather than incomplete, and re-reading it
-/// every two seconds for a whole battle only fills the log.
-const READ_ATTEMPTS: usize = 3;
-
-/// Where a battle in progress keeps its two halves.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveSource {
-    pub arena_info: PathBuf,
-    pub stream: PathBuf,
-}
-
-impl LiveSource {
-    /// The pair inside `replay_dir`, whether or not a battle is under way.
-    pub fn in_dir(replay_dir: &Path) -> Self {
-        Self { arena_info: replay_dir.join(ARENA_INFO_FILE), stream: replay_dir.join(LIVE_STREAM_FILE) }
-    }
-}
-
-/// What one poll found.
-///
-/// Size and modified time together distinguish one battle from the next: the
-/// game rewrites the file per battle, and a player who returns to port and
-/// queues again produces a second file where the first had been.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArenaInfoStamp {
-    pub modified: SystemTime,
-    pub len: u64,
-}
-
-/// The stamp of the battle in progress, or `None` when there is none.
-pub fn poll(source: &LiveSource) -> Option<ArenaInfoStamp> {
-    let metadata = std::fs::metadata(&source.arena_info).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    Some(ArenaInfoStamp { modified: metadata.modified().ok()?, len: metadata.len() })
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LiveMatchError {
-    #[error("the arena info could not be read")]
-    Read(#[source] std::io::Error),
-    #[error("the arena info is not a replay header")]
-    Parse(#[source] wows_replays::ParseError),
-    #[error("the arena info carries no date the game's format reads")]
-    NoTimestamp,
-}
-
-/// Reads the battle in progress.
-///
-/// The game flushes this file at match start and may not have finished, so a
-/// parse failure is an ordinary "not yet" for the next poll to retry rather
-/// than a permanent error.
-pub fn read(source: &LiveSource) -> Result<LiveMatch, LiveMatchError> {
-    let bytes = std::fs::read(&source.arena_info).map_err(LiveMatchError::Read)?;
-    let replay = ReplayFile::from_decrypted_parts(bytes, Vec::new()).map_err(LiveMatchError::Parse)?;
-    LiveMatch::from_meta(&replay.meta).ok_or(LiveMatchError::NoTimestamp)
-}
 
 /// Polls `replay_dir`, handing each change to `on_change`; `None` means no
 /// battle is under way.
@@ -124,55 +45,34 @@ pub fn watch(
     let source = LiveSource::in_dir(&replay_dir);
 
     cx.spawn(async move |cx| {
-        let mut current: Option<ArenaInfoStamp> = None;
-        // Nothing has been reported yet, so the first poll reports even when
-        // it finds no battle: the tab shows "checking" until it does.
-        let mut reported = false;
-        // Reading a file the game is still flushing fails; the next tick
-        // retries it. A file that never parses is reported once, as absent,
-        // rather than re-read every two seconds for the whole battle.
-        let mut attempts = 0usize;
+        let mut watcher = LiveWatcher::new();
 
         loop {
             // `poll` is a blocking `metadata`, which on a network share or a
             // spun-down drive would stall a frame if it ran here.
             let stamp = {
                 let source = source.clone();
-                cx.background_spawn(async move { poll(&source) }).await
+                cx.background_spawn(async move { wows_toolkit_viewmodel::player_tracker::live_source::poll(&source) })
+                    .await
             };
 
-            if stamp != current || !reported {
+            if watcher.wants_read(stamp.as_ref()) {
                 let read_source = source.clone();
                 let read = match stamp {
-                    Some(_) => Some(cx.background_spawn(async move { read(&read_source) }).await),
+                    Some(_) => Some(
+                        cx.background_spawn(async move {
+                            wows_toolkit_viewmodel::player_tracker::live_source::read(&read_source)
+                        })
+                        .await,
+                    ),
                     None => None,
                 };
 
-                let settled = match &read {
-                    // No battle: nothing to wait for.
-                    None => true,
-                    Some(Ok(_)) => true,
-                    Some(Err(err)) => {
-                        attempts += 1;
-                        let give_up = attempts >= READ_ATTEMPTS;
-                        if give_up {
-                            tracing::warn!("live match: the arena info never parsed, giving up on it: {err}");
-                        } else {
-                            tracing::debug!("live match: the arena info is not readable yet: {err}");
-                        }
-                        give_up
-                    }
-                };
-
-                if settled {
-                    current = stamp;
-                    reported = true;
-                    attempts = 0;
-                    let live = read.and_then(|read| read.ok());
-                    // The view is gone; so is any reason to keep polling.
-                    if !on_change(live, cx) {
-                        return;
-                    }
+                // The view is gone; so is any reason to keep polling.
+                if let Settled::Report(live) = watcher.settle(stamp, read)
+                    && !on_change(live, cx)
+                {
+                    return;
                 }
             }
 
@@ -335,86 +235,13 @@ pub fn refusal_text(error: &StatsError) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("wt-gpui-live-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("the test directory is creatable");
-        dir
-    }
-
-    /// The shape of a `tempArenaInfo.json`: the same metadata a finished
-    /// replay carries, with every key `ReplayMeta` has no default for.
-    const ARENA_INFO: &str = r#"{
-        "gameMode": 7,
-        "clientVersionFromExe": "13, 11, 0, 12668706",
-        "mapDisplayName": "ocean",
-        "mapId": 1,
-        "clientVersionFromXml": "13, 11, 0, 12668706",
-        "duration": 1200,
-        "gameLogic": null,
-        "name": "12x12",
-        "scenario": "Domination",
-        "playerID": 0,
-        "vehicles": [{"shipId": 100, "relation": 0, "id": 1, "name": "Me"},
-                     {"shipId": 200, "relation": 2, "id": 2, "name": "Foe"}],
-        "playersPerTeam": 12,
-        "dateTime": "28.12.2023 00:52:26",
-        "mapName": "spaces/00_CO_ocean",
-        "playerName": "Me",
-        "scenarioConfigId": 1,
-        "teamsCount": 2,
-        "logic": null,
-        "playerVehicle": "PFSD110-Kleber"
-    }"#;
-
-    #[test]
-    fn an_empty_replay_directory_reports_no_battle() {
-        let dir = temp_dir("idle");
-        assert!(poll(&LiveSource::in_dir(&dir)).is_none());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_written_arena_info_reports_a_battle_and_reads_its_roster() {
-        let dir = temp_dir("in-match");
-        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
-        let source = LiveSource::in_dir(&dir);
-
-        assert!(poll(&source).is_some(), "the file's presence is the signal");
-        let live = read(&source).expect("the roster reads");
-        assert_eq!(live.players.len(), 2);
-        assert_eq!(live.build, Some(12668706));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_half_written_arena_info_is_reported_rather_than_read_as_an_empty_roster() {
-        let dir = temp_dir("half-written");
-        std::fs::write(dir.join(ARENA_INFO_FILE), br#"{"gameMode": 7,"#).expect("the arena info is writable");
-
-        let error = read(&LiveSource::in_dir(&dir)).expect_err("a truncated header is not a roster");
-        assert!(matches!(error, LiveMatchError::Parse(_)));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_stream_is_the_sibling_the_game_writes() {
-        let source = LiveSource::in_dir(Path::new("/replays"));
-        assert!(source.arena_info.ends_with(ARENA_INFO_FILE));
-        assert!(source.stream.ends_with(LIVE_STREAM_FILE));
-    }
-}
-
-#[cfg(test)]
 mod scan_tests {
     use super::*;
+    use std::path::Path;
     use wows_toolkit_replay_data::load::GameDataCache;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
+    use wows_toolkit_viewmodel::player_tracker::live_source::ARENA_INFO_FILE;
+    use wows_toolkit_viewmodel::player_tracker::live_source::LIVE_STREAM_FILE;
 
     /// Splits a real replay back into the two halves the game writes during a
     /// battle, then reads the roster off them exactly as the live scan does.
