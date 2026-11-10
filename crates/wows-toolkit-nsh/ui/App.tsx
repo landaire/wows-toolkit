@@ -4,6 +4,7 @@ import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } fr
 import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
+import { GameDataCacheSection, GameDataStatus, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -925,6 +926,9 @@ function SettingsView() {
                 />
               </View>
             </SettingsSection>
+            <GameDataCacheSection/>
+            <ReplayIndexSection/>
+            <ReplayDirectoriesSection/>
           </View>
         </Scroll>
       </If>
@@ -1073,7 +1077,7 @@ function App() {
       <TabStrip/>
       <View style={{ flex: 1 }}><Content/></View>
       <View style={{ height: 26, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card }}>
-        <Text style={{ flex: 1, fontSize: 11.5, color: colors.mutedForeground }}>Ready</Text>
+        <View style={{ flex: 1 }}><GameDataStatus/></View>
         <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>WoWs Toolkit {startup.version}</Text>
       </View>
       <Notice/>

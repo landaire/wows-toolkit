@@ -1,6 +1,7 @@
 load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
 
 VIEWMODEL_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-config:wows_toolkit_config",
@@ -18,6 +19,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:regex",
     "//third-party/rust:roxmltree",
     "//third-party/rust:rust-i18n",
+    "//third-party/rust:rkyv",
     "//third-party/rust:semver",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",

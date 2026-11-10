@@ -1,4 +1,5 @@
 pub mod frames;
+pub mod game_data;
 mod native;
 mod replay;
 
@@ -11,5 +12,6 @@ use nsh_core::prelude::{Registry, native_module};
 #[native_module("wows-toolkit/native")]
 fn native_module(registry: &mut Registry) {
     registry.module::<Toolkit>();
+    registry.module::<game_data::GameData>();
     registry.register::<ReplayInspector>();
 }
