@@ -70,7 +70,7 @@ fn localhost_copy<V: SessionHost + Render>(_view: &V) -> Option<AnyElement> {
     None
 }
 
-/// The header button and the popover under it.
+/// The session button and the popover above it.
 ///
 /// The button carries the session's own state: an active session is what the
 /// reader most needs to know is running, so it is on the control rather than
@@ -79,18 +79,18 @@ fn localhost_copy<V: SessionHost + Render>(_view: &V) -> Option<AnyElement> {
 /// inside that tab's own render, where the entity is leased and reading it
 /// would panic. The entity is only captured for the popover body, which runs
 /// later, when the lease has been released.
-pub fn render<V: SessionHost + Render>(view: &V, entity: &Entity<V>, cx: &mut Context<V>) -> AnyElement {
+pub fn render<V: SessionHost + Render>(view: &V, entity: &Entity<V>) -> AnyElement {
     let active = view.collab().is_active();
-    let label = t!("ui.collab.session").into_owned();
-    let _ = cx;
+    let tooltip = if active { t!("ui.collab.session_active") } else { t!("ui.collab.session") };
 
     let owner = entity.clone();
     Popover::new("collab-session-popover")
         .trigger(
             Button::new("collab-session-toggle")
                 .icon(crate::icons::Glyph::Radio)
-                .label(label)
-                .compact()
+                .ghost()
+                .small()
+                .tooltip(tooltip.into_owned())
                 // A running session is the state worth seeing at a glance.
                 .when(active, |button| button.danger()),
         )
