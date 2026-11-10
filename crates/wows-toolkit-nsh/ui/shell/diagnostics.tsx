@@ -1,7 +1,7 @@
 import { Scroll, signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
 import { Shell } from "wows-toolkit/native";
-import { Button, Surface } from "../components";
+import { Button, centeredDialog, Surface } from "../components";
 import { t } from "../i18n";
 import { colors } from "../theme";
 import * as toast from "./toast";
@@ -31,7 +31,7 @@ export async function copyLatestLog() {
 /** The Crash Detected window: what the last run left, with a way to copy it into a report. */
 export function CrashDialog() {
   return (
-    <Dialog open={crashReport() !== null} onOpenChange={({ open }) => { if (!open) crashReport.set(null); }}>
+    <Dialog style={centeredDialog} open={crashReport() !== null} onOpenChange={({ open }) => { if (!open) crashReport.set(null); }}>
       <Surface style={{ width: "100%", maxWidth: 640, padding: 20, gap: 12, backgroundColor: colors.popover }}>
         <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.windows.crash_detected")}</Text>
         <Text style={{ fontSize: 13, lineHeight: 19, color: colors.popoverForeground }}>{t("ui.dialogs.crash_message")}</Text>

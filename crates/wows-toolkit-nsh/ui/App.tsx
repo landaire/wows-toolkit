@@ -5,18 +5,18 @@ import { GameData, ReplayInspector as NativeReplayInspector, Palette, Shell, Too
 import { EmptyState, errorMessage } from "./components";
 import { colors } from "./theme";
 import { applyLocale, t } from "./i18n";
-import { editSetting, loadAppSettings } from "./settings_store";
+import { loadAppSettings } from "./settings_store";
 import { SettingsView } from "./settings";
 import { AboutDialog, openAbout } from "./shell/about";
 import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, TabStrip, wowsDirInvalid } from "./shell/chrome";
-import { copyLatestLog, CrashDialog, reportLastCrash } from "./shell/diagnostics";
+import { CrashDialog, reportLastCrash } from "./shell/diagnostics";
+import { contributeAll, copyBugReportInfo, copyLatestLog, importConstants, setTheme } from "./shell/actions";
 import { askFirstRun, FirstRunDialog } from "./shell/first_run";
 import { ErrorDialog, WarningDialog } from "./shell/notices";
 import { DebugNotice, debugMode, StatusBar } from "./shell/status";
 import * as toast from "./shell/toast";
 import { restartTwitch } from "./shell/twitch";
 import { checkForUpdate, UpdateDialog } from "./shell/update";
-import { contributeAll } from "./shell/uploads";
 import { GameDataStatus } from "./game_data";
 import { SessionButton } from "./collab";
 import { LauncherView } from "./launcher";
@@ -145,7 +145,15 @@ bindPalette({
     refreshPersistedData: () => void GameData.indexReplays("refreshAll"),
     contributeAllReplays: ({ ignoreLedger }) => void contributeAll(ignoreLedger ? "ignore" : "consult"),
     copyLatestLog: () => void copyLatestLog(),
-    setTheme: ({ theme }) => void editSetting("theme", theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"),
+    copyBugReportInfo: () => void copyBugReportInfo(),
+    importConstants: () => {
+      selectTab("replay-inspector");
+      void importConstants().then((build) => {
+        // The open replay is read again under the mapping just installed.
+        if (build !== null && replayOpenPath() !== null) replayOpenRequestId.set(replayOpenRequestId() + 1);
+      });
+    },
+    setTheme: ({ theme }) => setTheme(theme),
     tacticsBoard: openTacticsBoard,
     checkUpdates: () => void checkForUpdate("byHand"),
     about: openAbout,

@@ -1,7 +1,7 @@
 import { signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
 import { Shell, type AppSettings } from "wows-toolkit/native";
-import { Button, Surface } from "../components";
+import { Button, centeredDialog, Surface } from "../components";
 import { applyLocale, t } from "../i18n";
 import { editSetting } from "../settings_store";
 import { colors } from "../theme";
@@ -120,7 +120,7 @@ export function FirstRunDialog() {
     return asked?.kind === "language" ? asked.detected : "en";
   };
   return (
-    <Dialog open={current() !== null} onOpenChange={() => undefined}>
+    <Dialog style={centeredDialog} open={current() !== null} onOpenChange={() => undefined}>
       <Surface style={{ width: "100%", maxWidth: 560, padding: 20, gap: 14, backgroundColor: colors.popover }}>
         <If when={current()?.kind === "buildConsent"}>
           <BuildConsent/>

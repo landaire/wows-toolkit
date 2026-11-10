@@ -1,7 +1,7 @@
 import { signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
 import { Shell } from "wows-toolkit/native";
-import { Button, Surface } from "../components";
+import { Button, centeredDialog, Surface } from "../components";
 import { t } from "../i18n";
 import { colors } from "../theme";
 
@@ -25,7 +25,7 @@ export function AboutDialog(props: { version: string }) {
     PROJECT_URL,
   ];
   return (
-    <Dialog open={open()} onOpenChange={({ open: shown }) => open.set(shown)}>
+    <Dialog style={centeredDialog} open={open()} onOpenChange={({ open: shown }) => open.set(shown)}>
       <Surface style={{ width: "100%", maxWidth: 520, padding: 20, gap: 12, backgroundColor: colors.popover }}>
         <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.windows.about")}</Text>
         <View selectable style={{ gap: 10 }}>

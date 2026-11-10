@@ -1,7 +1,7 @@
 import { Scroll, signal, Text, View } from "nsh";
 import { Dialog, TextView } from "nsh/base";
 import { Shell, type ReleaseOffer } from "wows-toolkit/native";
-import { Button, Surface } from "../components";
+import { Button, centeredDialog, Surface } from "../components";
 import { t } from "../i18n";
 import { colors } from "../theme";
 import { showError } from "./notices";
@@ -48,7 +48,7 @@ export async function checkForUpdate(asked: Asked) {
 export function UpdateDialog() {
   const current = () => offer();
   return (
-    <Dialog open={current() !== null} onOpenChange={({ open }) => { if (!open) offer.set(null); }}>
+    <Dialog style={centeredDialog} open={current() !== null} onOpenChange={({ open }) => { if (!open) offer.set(null); }}>
       <Surface style={{ width: "100%", maxWidth: 680, padding: 20, gap: 12, backgroundColor: colors.popover }}>
         <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.windows.update_available")}</Text>
         <View selectable>

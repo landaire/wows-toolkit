@@ -7,6 +7,9 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A `Dialog`'s popup style that puts its content in the middle of the window, as the other front ends' modal windows are. */
+export const centeredDialog: ViewStyle = { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 };
+
 export const inputStyle = {
   minHeight: 34,
   paddingHorizontal: 9,

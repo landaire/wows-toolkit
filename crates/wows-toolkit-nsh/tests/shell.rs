@@ -297,3 +297,45 @@ fn the_last_runs_crash_is_reported_once() {
     app.wait_for("Copied to clipboard").unwrap();
     assert!(!wows_toolkit_viewmodel::logging::panic_log_path().exists(), "the report is taken as it is read");
 }
+
+#[test]
+fn the_palette_sets_the_theme_and_copies_the_bug_report() {
+    let guard = lock();
+    answered();
+    seed(&[(keys::THEME, "\"System\"")]);
+    let mut app = app(guard);
+
+    app.press_key("mod+k").unwrap();
+    app.press("Theme: Light").unwrap();
+    wait_for_setting(keys::THEME, serde_json::json!("Light"));
+
+    app.press_key("mod+k").unwrap();
+    app.press("Copy Bug Report Info").unwrap();
+    app.wait_for("Bug report information copied.").unwrap();
+    let copied = app.screen().clipboard().expect("the report is on the clipboard").to_owned();
+    assert!(copied.contains(env!("CARGO_PKG_VERSION")), "the report names this build: {copied}");
+}
+
+#[test]
+fn importing_constants_without_a_loaded_build_is_refused() {
+    let guard = lock();
+    answered();
+    let mut app = app(guard);
+
+    app.press_key("mod+k").unwrap();
+    app.press("Import constants.json File...").unwrap();
+    app.wait_for("Load a game build first").unwrap();
+    assert!(app.screen().file_requests().is_empty(), "no mapping is asked for without a build to install it for");
+}
+
+#[test]
+fn a_cleared_twitch_credential_written_by_the_other_front_ends_loads() {
+    let guard = lock();
+    answered();
+    seed(&[("twitch_token", "null")]);
+    let mut app = app(guard);
+
+    app.press_key("mod+,").unwrap();
+    app.wait_for("Twitch Settings").unwrap();
+    assert!(!app.shows("Failed to load settings"));
+}

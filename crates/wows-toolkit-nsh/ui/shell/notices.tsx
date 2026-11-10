@@ -1,7 +1,7 @@
 import { Scroll, signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
 import { Shell } from "wows-toolkit/native";
-import { Button, Surface } from "../components";
+import { Button, centeredDialog, Surface } from "../components";
 import { t } from "../i18n";
 import { appSettings, editSetting } from "../settings_store";
 import { colors } from "../theme";
@@ -60,7 +60,7 @@ export function WarningDialog() {
     pending?.go();
   };
   return (
-    <Dialog open={asked() !== null} onOpenChange={({ open }) => { if (!open) asked.set(null); }}>
+    <Dialog style={centeredDialog} open={asked() !== null} onOpenChange={({ open }) => { if (!open) asked.set(null); }}>
       <Surface style={{ width: "100%", maxWidth: 520, padding: 20, gap: 14, backgroundColor: colors.popover }}>
         <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{title()}</Text>
         <Text style={{ fontSize: 13, lineHeight: 19, color: colors.popoverForeground }}>{message()}</Text>
@@ -88,7 +88,7 @@ export function WarningDialog() {
 /** The full-text error, mounted once over the whole window. */
 export function ErrorDialog() {
   return (
-    <Dialog open={errorText() !== null} onOpenChange={({ open }) => { if (!open) errorText.set(null); }}>
+    <Dialog style={centeredDialog} open={errorText() !== null} onOpenChange={({ open }) => { if (!open) errorText.set(null); }}>
       <Surface style={{ width: "100%", maxWidth: 600, padding: 20, gap: 12, backgroundColor: colors.popover }}>
         <Text style={{ fontSize: 17, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.windows.error")}</Text>
         <Text style={{ fontSize: 13, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.labels.error_occurred")}</Text>
