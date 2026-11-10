@@ -29,4 +29,6 @@ pub enum RendererError {
     UnknownWindow { replay_id: String },
     #[error("there is no replay to render")]
     NothingToRender,
+    #[error("no World of Warships directory is set, so there is no game data to read the replay with")]
+    NoGameData,
 }

@@ -25,7 +25,6 @@ use crate::frames::PixelSize;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::renderer::raster;
-use crate::renderer::services;
 
 /// How often the frames the session has sent are looked for. A plain wait
 /// on the channel: watching someone else's playback is worth a tenth of a
@@ -130,7 +129,7 @@ impl Watched {
 
     fn run(self: Arc<Self>, window: SharedWindow) {
         let replay_id = ReplayId::new(window.replay_id);
-        let link = services::collab_link();
+        let link = crate::collab::link();
         let (tx, frames) = std::sync::mpsc::sync_channel(DEPTH);
         link.watch_window(replay_id, tx);
         let art = window.art_png.as_ref().and_then(|png| match image::load_from_memory(png) {
@@ -170,15 +169,16 @@ impl Watched {
             if drawn.as_ref().is_some_and(|(_, at)| *at == size) {
                 continue;
             }
+            let Some(game_data) = crate::game_data::cache() else { continue };
             let map = match &art {
                 Some(art) => minimap::render_map_art(
                     &format!("watched-{}", replay_id.raw()),
                     art,
-                    &services::game_data(),
+                    &game_data,
                     MapViewport::default(),
                     commands,
                 ),
-                None => minimap::render_map(&window.map_name, &services::game_data(), MapViewport::default(), commands),
+                None => minimap::render_map(&window.map_name, &game_data, MapViewport::default(), commands),
             };
             // Nothing to draw the commands over: the fonts and icons a frame
             // needs are this build's own.

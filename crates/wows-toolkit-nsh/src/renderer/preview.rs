@@ -34,7 +34,7 @@ use crate::frames::PixelSize;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::renderer::raster;
-use crate::renderer::services;
+use crate::renderer::RendererError;
 
 /// How long a preview goes without a new frame before the bake behind it
 /// reads as stuck rather than busy. Comfortably longer than the gap between
@@ -239,7 +239,11 @@ impl Preview {
     /// build already open, while the bake may still be loading the one the
     /// replay was recorded on.
     fn bake(self: &Arc<Self>, path: &Path, edge: PreviewEdge, baked: &Arc<Mutex<Baked>>) {
-        let game_data = services::game_data();
+        let Some(game_data) = crate::game_data::cache() else {
+            baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).done = true;
+            self.tell(Progress { expecting: false, stalled: false, failure: Some(RendererError::NoGameData.to_string()) });
+            return;
+        };
         if let Ok(meta) = wows_replays::ReplayFile::meta_from_file(path)
             && let Some(map) = minimap::map_frame(&meta.mapName, &game_data, edge)
         {

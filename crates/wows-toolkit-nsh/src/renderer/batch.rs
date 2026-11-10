@@ -9,11 +9,10 @@ use std::sync::atomic::AtomicBool;
 use nsh_core::prelude::*;
 use rust_i18n::t;
 use tokio::sync::watch;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::playback;
 use wows_toolkit_replay_data::playback::BatchOutcome;
 use wows_toolkit_replay_data::playback::BatchStep;
-
-use crate::renderer::services;
 
 /// Where a batch writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,9 +72,15 @@ pub fn is_running() -> bool {
     BATCH.borrow().running
 }
 
-/// Renders `paths` into `out_dir` on its own thread, saying which replay it
-/// has reached and what it managed in the end.
-pub fn start(paths: Vec<PathBuf>, out_dir: PathBuf, target: BatchTarget, defaults: wows_minimap_renderer::SavedRenderOptions) {
+/// Renders `paths` into `out_dir` against `game_data` on its own thread,
+/// saying which replay it has reached and what it managed in the end.
+pub fn start(
+    paths: Vec<PathBuf>,
+    game_data: GameDataCache,
+    out_dir: PathBuf,
+    target: BatchTarget,
+    defaults: wows_minimap_renderer::SavedRenderOptions,
+) {
     let count = paths.len();
     let shown = out_dir.display().to_string();
     publish(|state| {
@@ -88,7 +93,7 @@ pub fn start(paths: Vec<PathBuf>, out_dir: PathBuf, target: BatchTarget, default
         // Nothing stops a batch once it is under way, as in the other apps.
         let cancel = AtomicBool::new(false);
         let outcome =
-            playback::batch_export(paths, &services::game_data(), &out_dir, &defaults, &cancel, |step: BatchStep| {
+            playback::batch_export(paths, &game_data, &out_dir, &defaults, &cancel, |step: BatchStep| {
                 publish(|state| {
                     state.text = Some(
                         t!(

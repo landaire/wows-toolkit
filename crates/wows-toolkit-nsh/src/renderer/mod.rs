@@ -3,11 +3,10 @@
 //! minimap hover preview; a battle the session plays elsewhere; and the batch
 //! render of many replays to video.
 
-mod batch;
+pub(crate) mod batch;
 mod error;
 mod preview;
 mod raster;
-mod services;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -402,7 +401,7 @@ impl ReplayRenderer {
     pub fn search_ships(id: u32, query: String) -> Result<RendererView, RendererError> {
         change(id, |viewer| {
             viewer.search_ships(&query, || {
-                let loaded = services::game_data().newest_loaded()?;
+                let loaded = crate::game_data::newest_loaded()?;
                 Some(Arc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider())))
             });
         })
@@ -416,8 +415,7 @@ impl ReplayRenderer {
             .matched_param_index(index as usize)
             .map(str::to_owned)
             .ok_or(RendererError::UnknownShip { index })?;
-        let param_id = services::game_data()
-            .newest_loaded()
+        let param_id = crate::game_data::newest_loaded()
             .and_then(|loaded| loaded.provider().game_param_by_index(&param_index))
             .map(|param| param.id().raw())
             .ok_or(RendererError::UnknownShipParam { param_index })?;
@@ -481,7 +479,7 @@ impl ReplayRenderer {
     /// playing.
     pub fn open_watched(replay_id: String) -> Result<WatchedView, RendererError> {
         let raw: u64 = replay_id.parse().map_err(|_| RendererError::UnknownWindow { replay_id: replay_id.clone() })?;
-        let window = services::shared_windows()
+        let window = crate::collab::shared_windows()
             .into_iter()
             .find(|window| window.replay_id == raw)
             .ok_or(RendererError::UnknownWindow { replay_id })?;
@@ -508,18 +506,19 @@ impl ReplayRenderer {
     /// open, by replay id, once there are some. Nothing is asked of a reader
     /// who switched automatic opening off.
     pub async fn next_forced_windows() -> Vec<String> {
-        // Looked for on a timer: an ask arrives whenever the host makes it.
-        const POLL: std::time::Duration = std::time::Duration::from_millis(500);
+        let mut revisions = crate::collab::revisions();
         loop {
             let auto_open = !wows_toolkit_config::load_startup_setting::<bool>(keys::DISABLE_AUTO_OPEN_SESSION_WINDOWS)
                 .ok()
                 .flatten()
                 .unwrap_or(false);
-            let asked = services::collab_link().take_forced_windows();
+            let asked = crate::collab::link().take_forced_windows();
             if auto_open && !asked.is_empty() {
                 return asked.into_iter().map(|id| id.to_string()).collect();
             }
-            blocking(|| std::thread::sleep(POLL)).await.ok();
+            // The sender lives for the process, so the wait only ends on a
+            // change.
+            let _ = revisions.changed().await;
         }
     }
 
@@ -542,7 +541,8 @@ impl ReplayRenderer {
             (dir, batch::BatchTarget::Directory)
         };
         let defaults = defaults().await;
-        batch::start(paths.into_iter().map(PathBuf::from).collect(), out_dir, target, defaults);
+        let game_data = crate::game_data::cache().ok_or(RendererError::NoGameData)?;
+        batch::start(paths.into_iter().map(PathBuf::from).collect(), game_data, out_dir, target, defaults);
         Ok(true)
     }
 

@@ -17,16 +17,16 @@ use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_toolkit_replay_data::minimap;
 use wows_toolkit_replay_data::playback;
-use wowsunpack::game_params::types::GameParamProvider;
 use wt_collab_client::link::CollabLink;
 use wt_collab_client::types::Annotation;
+use wows_toolkit_viewmodel::tactics::board;
 
 use crate::frames;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
 use crate::renderer::raster;
-use crate::renderer::services;
+use crate::renderer::RendererError;
 use crate::renderer::viewer::Viewer;
 
 /// How often a viewport in a running session redraws, which is what moves a
@@ -61,7 +61,7 @@ impl Session {
         let surface = frames::surface(id);
         let (wake, messages) = mpsc::channel();
         let (revision, _) = watch::channel(0);
-        let links = services::collab_links();
+        let links = crate::collab::subscribe();
         let collab = links.borrow().clone();
         let session = Arc::new(Self {
             viewer: Mutex::new(Viewer::new(path, alts, collab)),
@@ -147,7 +147,16 @@ impl Session {
         };
         let session = Arc::clone(self);
         std::thread::spawn(move || {
-            let game_data = services::game_data();
+            let Some(game_data) = crate::game_data::cache() else {
+                // An unreadable file is the more useful thing to say, and
+                // needs no game data to find out.
+                let said = match wows_replays::ReplayFile::meta_from_file(&path) {
+                    Err(err) => minimap::PreviewError::UnreadableReplay(err).to_string(),
+                    Ok(_) => RendererError::NoGameData.to_string(),
+                };
+                session.update(|viewer| viewer.bake_failed(said));
+                return;
+            };
             let baked = playback::bake(&path, &alts, &game_data, &session.cancel);
             if session.cancel.load(Ordering::Relaxed) {
                 return;
@@ -168,7 +177,12 @@ impl Session {
         let path = self.lock().path().clone();
         let session = Arc::clone(self);
         std::thread::spawn(move || {
-            let read = minimap::extract_events(&path, &services::game_data());
+            let Some(game_data) = crate::game_data::cache() else {
+                log::warn!("renderer: the battle's events could not be read: {}", RendererError::NoGameData);
+                session.update(Viewer::events_failed);
+                return;
+            };
+            let read = minimap::extract_events(&path, &game_data);
             match read {
                 // What each ship took is read for the armor viewer, which
                 // this viewport does not feed.
@@ -254,7 +268,10 @@ impl Session {
             let Some(wanted) = viewer.wanted_layout() else { return };
             (wanted, viewer.path().clone())
         };
-        let built = minimap::renderer_for_replay(&path, &services::game_data(), wanted);
+        let built = match crate::game_data::cache() {
+            Some(game_data) => minimap::renderer_for_replay(&path, &game_data, wanted).map_err(|err| err.to_string()),
+            None => Err(RendererError::NoGameData.to_string()),
+        };
         self.update(|viewer| match built {
             Ok((renderer, origin)) => viewer.adopt_layout(wanted, renderer, origin),
             Err(err) => {
@@ -280,8 +297,7 @@ impl Session {
         };
         std::thread::spawn(move || {
             let (link, replay_id, replay_name, space, version) = shared;
-            let art_png = services::game_data()
-                .newest_loaded()
+            let art_png = crate::game_data::newest_loaded()
                 .and_then(|loaded| wows_minimap_renderer::assets::load_map_image(&space, loaded.vfs()))
                 .and_then(|art| {
                     let mut png = Vec::new();
@@ -325,22 +341,10 @@ impl Session {
     }
 }
 
-/// The range circles every placed ship asks for, read out of its own game
-/// data. Nothing is drawn for a ship not yet named, since there is no ship to
-/// read the ranges of.
+/// The range circles every placed ship asks for, read out of the newest
+/// loaded build. Nothing is drawn before a build has loaded.
 fn placed_ranges(ships: &[Annotation], space_size: f32, version: wowsunpack::data::Version) -> Vec<DrawCommand> {
-    let Some(loaded) = services::game_data().newest_loaded() else { return Vec::new() };
-    let provider: &dyn GameParamProvider = loaded.provider().as_ref();
+    let Some(loaded) = crate::game_data::newest_loaded() else { return Vec::new() };
 
-    let mut circles = Vec::new();
-    for ship in ships {
-        let Annotation::Ship { config: Some(config), .. } = ship else { continue };
-        let Some(param) = provider.game_param_by_id(config.param_id.into()) else { continue };
-        let Some(vehicle) = param.vehicle() else { continue };
-        let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
-        let ranges = vehicle.resolve_ranges(Some(provider), hull, version);
-        circles.extend(wt_collab_client::geometry::ship_range_commands(ship, &ranges, space_size));
-    }
-
-    circles
+    board::ship_ranges(ships, loaded.provider(), Some(version), space_size)
 }
