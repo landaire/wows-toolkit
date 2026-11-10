@@ -420,7 +420,11 @@ mod tests {
     fn settings_round_trip_through_the_shared_database() {
         let storage = tempfile::tempdir().expect("a settings directory is created");
         wows_toolkit_config::storage_override::set(storage.path().to_owned());
-        let install = storage.path().join("World_of_Warships");
+        // The override is set once per process; another test may have set it
+        // first, so the directory is read back rather than assumed.
+        let storage = wows_toolkit_config::storage_dir().expect("the test storage directory is set");
+        std::fs::create_dir_all(&storage).expect("the test storage directory exists");
+        let install = storage.join("World_of_Warships");
         std::fs::create_dir_all(install.join("bin")).expect("a game bin directory is created");
         let settings = SettingsState {
             wows_dir: install.display().to_string(),
@@ -436,7 +440,7 @@ mod tests {
             proxy_url: "proxy.example:8080".to_owned(),
             collab_display_name: "Tester".to_owned(),
             disable_auto_open_session_windows: true,
-            storage_dir: storage.path().display().to_string(),
+            storage_dir: storage.display().to_string(),
         };
 
         let fields = vec![
