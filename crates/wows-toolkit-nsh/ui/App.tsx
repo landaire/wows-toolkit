@@ -1,25 +1,29 @@
 import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
-import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Shell, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
+import { Command, Dialog, Input, Menu } from "nsh/base";
+import { ReplayInspector as NativeReplayInspector, Shell, Toolkit, type PlayerTrackerState, type SearchState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
-import { applyLocale } from "./i18n";
-import { loadAppSettings } from "./settings_store";
+import { applyLocale, t } from "./i18n";
+import { appSettings, loadAppSettings } from "./settings_store";
+import { SettingsView } from "./settings";
+import { AboutDialog, openAbout } from "./shell/about";
+import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, TabStrip, wowsDirInvalid } from "./shell/chrome";
+import { copyLatestLog, CrashDialog, reportLastCrash } from "./shell/diagnostics";
+import { askFirstRun, FirstRunDialog } from "./shell/first_run";
 import { ErrorDialog, WarningDialog } from "./shell/notices";
+import { DebugNotice, debugMode, StatusBar } from "./shell/status";
 import * as toast from "./shell/toast";
+import { restartTwitch } from "./shell/twitch";
+import { checkForUpdate, UpdateDialog } from "./shell/update";
+import { contributeAll } from "./shell/uploads";
+import { GameDataStatus } from "./game_data";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
-const aboutOpen = signal(false);
 const tacticsOpen = signal(false);
 const paletteOpen = signal(false);
 const paletteQuery = signal("");
-const settings = signal<SettingsState | null>(null);
-const settingsBaseline = signal<SettingsState | null>(null);
-const settingsLoading = signal(false);
-const settingsSaving = signal(false);
-const settingsError = signal<string | null>(null);
 const statistics = signal<StatisticsState | null>(null);
 const statisticsLoading = signal(false);
 const statisticsError = signal<string | null>(null);
@@ -37,7 +41,6 @@ const searchSortColumn = signal("date");
 const searchSortDescending = signal(true);
 const replayOpenPath = signal<string | null>(null);
 const replayOpenRequestId = signal(0);
-let settingsRequested = false;
 let statisticsRequested = false;
 let playerTrackerRequested = false;
 let playerTrackerGeneration = 0;
@@ -46,22 +49,26 @@ let playerTrackerRequestActive = false;
 let playerTrackerRequestPending = false;
 const STORAGE_TAB = "application.active-tab";
 
-Window.setTitle(startup.title);
+Window.setTitle(`${startup.title} v${startup.version}`);
 void Storage.getItem(STORAGE_TAB).then((saved) => {
   if (saved && startup.tabs.some((tab) => tab.id === saved)) selectTab(saved);
 });
 applyLocale(startup.locale);
 void loadAppSettings().then((loaded) => {
   if (!loaded) return;
+  // What may be shared is the reader's to answer before anything is sent
+  // under a default, so the first-run question comes first.
+  askFirstRun(loaded, startup.locale);
+  reportLastCrash();
   if (loaded.locale) applyLocale(loaded.locale);
   void Shell.applyTheme(loaded.theme);
+  applyZoom(loaded.zoom);
+  debugMode.set(loaded.debugMode);
+  if (loaded.checkForUpdates) void checkForUpdate("startup");
+  void restartTwitch();
 });
 
 function selectTab(id: string) {
-  if (id === "settings" && !settingsRequested) {
-    settingsRequested = true;
-    void loadSettings();
-  }
   if (id === "statistics" && !statisticsRequested) {
     statisticsRequested = true;
     void loadStatistics();
@@ -76,70 +83,6 @@ function selectTab(id: string) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function loadSettings() {
-  settingsLoading.set(true);
-  settingsError.set(null);
-  try {
-    const loaded = await Toolkit.loadSettings();
-    settings.set(loaded);
-    settingsBaseline.set({ ...loaded });
-  } catch (error) {
-    settingsError.set(`Settings could not be loaded: ${errorMessage(error)}`);
-  } finally {
-    settingsLoading.set(false);
-  }
-}
-
-function updateSetting<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
-  const current = settings();
-  if (current) settings.set({ ...current, [key]: value });
-}
-
-async function saveSettings() {
-  const current = settings();
-  const baseline = settingsBaseline();
-  if (!current || !baseline || settingsSaving()) return;
-  const editable: (keyof SettingsState)[] = [
-    "wowsDir",
-    "locale",
-    "checkForUpdates",
-    "enableLogging",
-    "debugMode",
-    "autoLoadLatestReplay",
-    "outputDir",
-    "autoDumpGameData",
-    "gameDataCacheDir",
-    "dataSharing",
-    "proxyUrl",
-    "collabDisplayName",
-    "disableAutoOpenSessionWindows",
-  ];
-  const changed = editable.filter((key) => current[key] !== baseline[key]);
-  if (changed.length === 0) {
-    showNotice("No settings changes.");
-    return;
-  }
-  settingsSaving.set(true);
-  settingsError.set(null);
-  try {
-    const committed = await Toolkit.saveSettings(current, changed);
-    settings.set(committed);
-    settingsBaseline.set({ ...committed });
-    showNotice("Settings saved.");
-    try {
-      const refreshed = await Toolkit.loadSettings();
-      settings.set(refreshed);
-      settingsBaseline.set({ ...refreshed });
-    } catch (error) {
-      settingsError.set(`Settings were saved but could not be refreshed: ${errorMessage(error)}`);
-    }
-  } catch (error) {
-    settingsError.set(`Settings could not be saved: ${errorMessage(error)}`);
-  } finally {
-    settingsSaving.set(false);
-  }
 }
 
 async function loadStatistics() {
@@ -262,19 +205,25 @@ function openReplayPath(path: string) {
   selectTab("replay-inspector");
 }
 
+/** A replay dragged onto the window opens; only a replay, and only one, since the inspector opens a file, not a set. */
 function openDroppedReplay(uris: string[]) {
+  hoveringFiles.set(false);
+  const replays: string[] = [];
   for (const uri of uris) {
     try {
       const url = new URL(uri);
-      if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith(".wowsreplay")) {
-        openReplayPath(decodeURIComponent(url.pathname));
-        return;
-      }
+      if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith(".wowsreplay")) replays.push(decodeURIComponent(url.pathname));
     } catch {
       continue;
     }
   }
-  showNotice("Drop a World of Warships replay file.");
+  if (replays.length === 0) {
+    toast.warn(t("ui.messages.drop_not_a_replay"));
+  } else if (replays.length > 1) {
+    toast.warn(t("ui.messages.drop_one_at_a_time"));
+  } else {
+    openReplayPath(replays[0]);
+  }
 }
 
 function searchColumnHeader(label: string, column: string, width: number) {
@@ -294,9 +243,6 @@ function searchColumnHeader(label: string, column: string, width: number) {
   );
 }
 
-
-
-
 function showNotice(message: string) {
   toast.info(message);
 }
@@ -304,46 +250,6 @@ function showNotice(message: string) {
 function openPalette() {
   paletteQuery.set("");
   paletteOpen.set(true);
-}
-
-type Release = {
-  tag_name: string;
-  draft: boolean;
-  prerelease: boolean;
-};
-
-function version(value: string): number[] | null {
-  const match = value.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function compareVersions(left: number[], right: number[]): number {
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-}
-
-async function checkForUpdates() {
-  showNotice("Checking for updates...");
-  try {
-    const response = await fetch("https://api.github.com/repos/landaire/wows-toolkit/releases?per_page=100", {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!response.ok) throw new Error(`release server returned ${response.status}`);
-    const current = version(startup.version);
-    if (!current) throw new Error(`invalid running version ${startup.version}`);
-    const includePrerelease = startup.version.includes("-");
-    const available = (await response.json() as Release[])
-      .filter((release) => !release.draft && (includePrerelease || !release.prerelease))
-      .map((release) => ({ release, version: version(release.tag_name) }))
-      .filter((candidate): candidate is { release: Release; version: number[] } =>
-        candidate.version !== null && compareVersions(candidate.version, current) > 0)
-      .sort((left, right) => compareVersions(right.version, left.version))[0];
-    showNotice(available ? `Version ${available.release.tag_name.replace(/^v/, "")} is available.` : startup.text.appUpToDate);
-  } catch (error) {
-    showNotice(`Update check failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
 keymap.bind({
@@ -356,74 +262,10 @@ keymap.bind({
   "mod+7": () => selectTab(startup.tabs[6].id),
   "mod+,": () => selectTab("settings"),
   "mod+k": openPalette,
+  "mod+p": openPalette,
+  // Flips debug detail for this session only, as the other front ends do.
+  "mod+shift+d": () => debugMode.set(!debugMode()),
 });
-
-function ApplicationMenu() {
-  return (
-    <Toolbar accessibilityLabel="Application menu">
-      <Menu
-        align="end"
-        offset={5}
-        margin={8}
-        trigger={
-          <View
-            accessibilityLabel="Open application menu"
-            hoverStyle={{ backgroundColor: colors.accent }}
-            activeStyle={{ opacity: 0.68 }}
-            style={{ width: 32, height: 30, borderRadius: controlRadius(), alignItems: "center", justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 18, color: colors.foreground }}>...</Text>
-          </View>
-        }
-      >
-        <Surface style={{ minWidth: 220, padding: 5, backgroundColor: colors.popover }}>
-          <MenuRow label="Command Palette" note={keymap.label("mod+k")} onSelect={openPalette}/>
-          <MenuRow label={startup.text.tacticsBoard} onSelect={() => tacticsOpen.set(true)}/>
-          <MenuRow label={startup.text.checkUpdates} onSelect={() => void checkForUpdates()}/>
-          <MenuRow label={`${startup.text.about} WoWs Toolkit`} onSelect={() => aboutOpen.set(true)}/>
-          <View style={{ height: 1, marginVertical: 4, backgroundColor: colors.border }}/>
-          <MenuRow label={startup.text.quit} note={keymap.label("mod+q")} danger onSelect={() => Window.close()}/>
-        </Surface>
-      </Menu>
-    </Toolbar>
-  );
-}
-
-function TabStrip() {
-  return (
-    <View role="tablist" style={{ minHeight: 38, flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card }}>
-      <Each of={startup.tabs}>
-        {(tab, index) => {
-          const selected = () => activeTab() === tab().id;
-          return (
-            <View
-              role="tab"
-              accessibilityLabel={tab().label}
-              accessibilityState={{ selected: selected() }}
-              onPress={() => selectTab(tab().id)}
-              hoverStyle={selected() ? undefined : { backgroundColor: colors.accent }}
-              activeStyle={{ opacity: 0.7 }}
-              style={{
-                height: 30,
-                paddingHorizontal: 10,
-                borderRadius: controlRadius(),
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: selected() ? colors.primary : "transparent",
-              }}
-            >
-              <Text style={{ fontSize: 12.5, fontWeight: selected() ? "600" : "400", color: selected() ? colors.primaryForeground : colors.mutedForeground }}>
-                {tab().label}
-              </Text>
-            </View>
-          );
-        }}
-      </Each>
-      <View style={{ flex: 1 }}/>
-      <ApplicationMenu/>
-    </View>
-  );
-}
 
 const descriptions: Record<string, string> = {
   "replay-inspector": "Open a replay file or drag one into this window. Replay metadata, players, battle events, chat, damage, achievements, and export controls appear here.",
@@ -722,222 +564,6 @@ const inputStyle = {
   color: colors.foreground,
 };
 
-function SettingsField(props: {
-  label: string;
-  description: string;
-  value: string;
-  placeholder?: string;
-  masked?: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <View style={{ gap: 5 }}>
-      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
-      <Input
-        accessibilityLabel={props.label}
-        value={props.value}
-        placeholder={props.placeholder}
-        masked={props.masked}
-        onChange={({ value }) => props.onChange(value)}
-        style={inputStyle}
-      />
-      <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
-    </View>
-  );
-}
-
-function SettingsToggle(props: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <Checkbox
-      accessibilityLabel={props.label}
-      checked={props.checked}
-      class="group flex-row items-start gap-3"
-      indicatorClass="mt-0.5 w-[18px] h-[18px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[11px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
-      onChange={({ checked }) => props.onChange(checked)}
-    >
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
-        <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
-      </View>
-    </Checkbox>
-  );
-}
-
-function SettingsSection(props: { title: string; children: JSX.Element }) {
-  return (
-    <Surface style={{ padding: 16, gap: 14 }}>
-      <Text style={{ fontSize: 16, fontWeight: "600", color: colors.cardForeground }}>{props.title}</Text>
-      {props.children}
-    </Surface>
-  );
-}
-
-function SharingOption(props: { value: SettingsState["dataSharing"]; label: string; description: string }) {
-  const selected = () => settings()?.dataSharing === props.value;
-  return (
-    <Radio
-      accessibilityLabel={props.label}
-      checked={selected()}
-      class="group flex-row items-start gap-3"
-      onChange={() => updateSetting("dataSharing", props.value)}
-    >
-      <View class="mt-0.5 w-[18px] h-[18px] rounded-full border border-border items-center justify-center">
-        <View class="w-[10px] h-[10px] rounded-full group-checked:bg-primary"/>
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>{props.label}</Text>
-        <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>{props.description}</Text>
-      </View>
-    </Radio>
-  );
-}
-
-function SettingsView() {
-  const current = () => settings();
-  return (
-    <View disabled={settingsLoading() || settingsSaving()} style={{ flex: 1, minHeight: 0 }}>
-      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Settings</Text>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Shared with the egui and GPUI applications</Text>
-        </View>
-        <Button label="Reload" variant="ghost" disabled={settingsLoading() || settingsSaving()} onPress={() => void loadSettings()}/>
-        <Button label={settingsSaving() ? "Saving..." : "Save Settings"} variant="primary" disabled={!current() || settingsLoading() || settingsSaving()} onPress={() => void saveSettings()}/>
-      </View>
-      <If when={settingsLoading() && !current()}>
-        <EmptyState title="Loading settings" description="Opening the shared WoWs Toolkit settings database."/>
-      </If>
-      <If when={!settingsLoading() && !current()}>
-        <EmptyState title="Settings unavailable" description={settingsError() ?? "The settings database could not be opened."} action={<Button label="Try Again" onPress={() => void loadSettings()}/>}/>
-      </If>
-      <If when={current()}>
-        <Scroll style={{ flex: 1 }}>
-          <View style={{ width: "100%", maxWidth: 980, alignSelf: "center", padding: 18, gap: 14 }}>
-            <If when={settingsError()}>
-              <Surface style={{ padding: 12, borderColor: colors.destructive }}>
-                <Text style={{ fontSize: 12, color: colors.destructive }}>{settingsError()}</Text>
-              </Surface>
-            </If>
-            <SettingsSection title="Appearance and language">
-              <View style={{ gap: 13 }}>
-                <View style={{ gap: 3 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.cardForeground }}>Theme</Text>
-                  <Text style={{ fontSize: 13, color: colors.foreground }}>NSH default</Text>
-                  <Text style={{ fontSize: 12, lineHeight: 17, color: colors.mutedForeground }}>Uses NSH system tokens and follows the desktop appearance.</Text>
-                </View>
-                <SettingsField
-                  label="Language code"
-                  description="Leave empty to use the system language. A language change applies after restart."
-                  value={current()!.locale}
-                  placeholder={startup.locale}
-                  onChange={(value) => updateSetting("locale", value)}
-                />
-              </View>
-            </SettingsSection>
-            <SettingsSection title="Game and files">
-              <View style={{ gap: 14 }}>
-                <SettingsField
-                  label="World of Warships directory"
-                  description="Installation directory used to load game data."
-                  value={current()!.wowsDir}
-                  placeholder="/path/to/World_of_Warships"
-                  onChange={(value) => updateSetting("wowsDir", value)}
-                />
-                <SettingsField
-                  label="Resource unpacker output directory"
-                  description="Extracted game files are written here."
-                  value={current()!.outputDir}
-                  placeholder="/path/to/output"
-                  onChange={(value) => updateSetting("outputDir", value)}
-                />
-                <SettingsField
-                  label="Game data cache directory"
-                  description="Leave empty to use the application data directory."
-                  value={current()!.gameDataCacheDir}
-                  placeholder={current()!.storageDir}
-                  onChange={(value) => updateSetting("gameDataCacheDir", value)}
-                />
-                <Text style={{ fontSize: 11, color: colors.mutedForeground }}>Application data: {current()!.storageDir || "Unavailable"}</Text>
-              </View>
-            </SettingsSection>
-            <SettingsSection title="Replay and diagnostics">
-              <View style={{ gap: 14 }}>
-                <SettingsToggle
-                  label="Automatically load the latest replay"
-                  description="Open the newest replay when replay monitoring starts."
-                  checked={current()!.autoLoadLatestReplay}
-                  onChange={(checked) => updateSetting("autoLoadLatestReplay", checked)}
-                />
-                <SettingsToggle
-                  label="Cache game data automatically"
-                  description="Keep data required to open replays after a game update."
-                  checked={current()!.autoDumpGameData}
-                  onChange={(checked) => updateSetting("autoDumpGameData", checked)}
-                />
-                <SettingsToggle
-                  label="Check for updates at startup"
-                  description="Query the release service when the application starts."
-                  checked={current()!.checkForUpdates}
-                  onChange={(checked) => updateSetting("checkForUpdates", checked)}
-                />
-                <SettingsToggle
-                  label="Write diagnostic logs"
-                  description="Write a rotated log file for diagnostics."
-                  checked={current()!.enableLogging}
-                  onChange={(checked) => updateSetting("enableLogging", checked)}
-                />
-                <SettingsToggle
-                  label="Debug replay details"
-                  description="Show replay data intended for diagnostic work."
-                  checked={current()!.debugMode}
-                  onChange={(checked) => updateSetting("debugMode", checked)}
-                />
-              </View>
-            </SettingsSection>
-            <SettingsSection title="Data sharing">
-              <RadioGroup accessibilityLabel="Data sharing mode" class="gap-12">
-                <SharingOption value="off" label="Off" description="Nothing is sent."/>
-                <SharingOption value="build_data" label="Ship builds" description="Per-player ship builds are sent after a battle."/>
-                <SharingOption value="replays" label="Replays" description="The replay file is sent once results are available."/>
-              </RadioGroup>
-            </SettingsSection>
-            <SettingsSection title="Network and collaboration">
-              <View style={{ gap: 14 }}>
-                <SettingsField
-                  label="Proxy URL"
-                  description="Optional HTTP proxy. A host and port without a scheme uses http."
-                  value={current()!.proxyUrl}
-                  placeholder="proxy.example:8080"
-                  masked
-                  onChange={(value) => updateSetting("proxyUrl", value)}
-                />
-                <SettingsField
-                  label="Collaboration display name"
-                  description="Name shown to other participants in a collaboration session."
-                  value={current()!.collabDisplayName}
-                  onChange={(value) => updateSetting("collabDisplayName", value)}
-                />
-                <SettingsToggle
-                  label="Do not open shared windows automatically"
-                  description="Leave session windows closed until you choose to open them."
-                  checked={current()!.disableAutoOpenSessionWindows}
-                  onChange={(checked) => updateSetting("disableAutoOpenSessionWindows", checked)}
-                />
-              </View>
-            </SettingsSection>
-          </View>
-        </Scroll>
-      </If>
-    </View>
-  );
-}
-
 function Content() {
   const tab = () => startup.tabs.find((candidate) => candidate.id === activeTab()) ?? startup.tabs[0];
   return (
@@ -961,21 +587,6 @@ function Content() {
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>
-  );
-}
-
-function AboutDialog() {
-  return (
-    <Dialog open={aboutOpen()} onOpenChange={({ open }) => aboutOpen.set(open)}>
-      <Surface style={{ width: "100%", maxWidth: 460, padding: 22, gap: 12, backgroundColor: colors.popover }}>
-        <Text style={{ fontSize: 21, fontWeight: "600", color: colors.popoverForeground }}>WoWs Toolkit</Text>
-        <Text style={{ fontSize: 13, color: colors.mutedForeground }}>Version {startup.version}</Text>
-        <Text style={{ fontSize: 14, lineHeight: 21, color: colors.popoverForeground }}>Tools for World of Warships replays, game data, statistics, rendering, and collaboration.</Text>
-        <View style={{ alignItems: "flex-end" }}>
-          <Button label="Close" onPress={() => aboutOpen.set(false)}/>
-        </View>
-      </Surface>
-    </Dialog>
   );
 }
 
@@ -1007,6 +618,9 @@ const commandItems = [
   { id: "action:tactics", label: startup.text.tacticsBoard, keywords: ["map", "plan"], group: "Actions" },
   { id: "action:updates", label: startup.text.checkUpdates, keywords: ["release", "version"], group: "Actions" },
   { id: "action:about", label: `${startup.text.about} WoWs Toolkit`, keywords: ["version"], group: "Actions" },
+  { id: "action:copy-log", label: t("ui.replay.copy_latest_log"), keywords: ["log", "bug", "report"], group: "Actions" },
+  { id: "action:send-all", label: t("ui.palette.send_all_replays"), keywords: ["shipbuilds", "upload", "share"], group: "Actions" },
+  { id: "action:send-all-again", label: t("ui.palette.send_all_replays_again"), keywords: ["shipbuilds", "upload", "share"], group: "Actions" },
 ];
 
 function executeCommand(id: string) {
@@ -1016,9 +630,15 @@ function executeCommand(id: string) {
   } else if (id === "action:tactics") {
     tacticsOpen.set(true);
   } else if (id === "action:updates") {
-    void checkForUpdates();
+    void checkForUpdate("byHand");
   } else if (id === "action:about") {
-    aboutOpen.set(true);
+    openAbout();
+  } else if (id === "action:copy-log") {
+    void copyLatestLog();
+  } else if (id === "action:send-all") {
+    void contributeAll("consult");
+  } else if (id === "action:send-all-again") {
+    void contributeAll("ignore");
   }
 }
 
@@ -1065,17 +685,33 @@ function CommandPalette() {
 
 function App() {
   return (
-    <View onFileDrop={({ uris }) => openDroppedReplay(uris)} style={{ flex: 1, backgroundColor: colors.background }}>
-      <TabStrip/>
-      <View style={{ flex: 1 }}><Content/></View>
-      <View style={{ height: 26, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card }}>
-        <Text style={{ flex: 1, fontSize: 11.5, color: colors.mutedForeground }}>Ready</Text>
-        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>WoWs Toolkit {startup.version}</Text>
+    <View
+      onFileDrop={({ uris }) => openDroppedReplay(uris)}
+      onFileDragEnter={() => hoveringFiles.set(true)}
+      onFileDragLeave={() => hoveringFiles.set(false)}
+      style={{ flex: 1, backgroundColor: colors.background }}
+    >
+      <TabStrip
+        tabs={startup.tabs}
+        active={activeTab()}
+        attention={(id) => id === "settings" && wowsDirInvalid()}
+        onSelect={selectTab}
+        menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={() => tacticsOpen.set(true)}/>}
+      />
+      <View style={{ flex: 1, minHeight: 0 }}><Content/></View>
+      <View style={{ flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}>
+        <View style={{ paddingHorizontal: 8 }}><GameDataStatus/></View>
+        <View style={{ flex: 1 }}><StatusBar/></View>
       </View>
+      <DebugNotice/>
+      <DropScrim/>
       <toast.ToastLayer/>
       <WarningDialog/>
       <ErrorDialog/>
-      <AboutDialog/>
+      <AboutDialog version={startup.version}/>
+      <UpdateDialog/>
+      <CrashDialog/>
+      <FirstRunDialog/>
       <TacticsDialog/>
       <CommandPalette/>
     </View>

@@ -8,6 +8,7 @@ members = [
     "crates/wows-toolkit-nsh",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-toolkit-launcher",
+    "crates/wows-toolkit-replay-data",
     "crates/wows-core",
     "crates/wowsunpack",
     "crates/wows-replays",

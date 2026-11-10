@@ -25,7 +25,7 @@ use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
 
 use crate::collab::ReplayId;
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// How often the frames the session has sent are looked for.
 ///

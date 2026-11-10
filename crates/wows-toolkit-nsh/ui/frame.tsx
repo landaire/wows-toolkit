@@ -1,6 +1,5 @@
 import type { ViewStyle } from "nsh";
-import { View } from "nsh";
-import { nativeComponent } from "nsh/native";
+import { nativeComponent, View } from "nsh";
 
 const NativeFrame = nativeComponent("wows.frame", { props: ["surface"], events: ["secondaryPress"] });
 

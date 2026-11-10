@@ -114,6 +114,23 @@ pub enum PasteError {
     Settings(#[from] SettingsError),
 }
 
+/// Why a replay could not be contributed.
+#[derive(Debug, thiserror::Error)]
+pub enum UploadError {
+    #[error("{}", chain(source))]
+    Settings {
+        #[from]
+        source: SettingsError,
+    },
+    #[error("{}", chain(source))]
+    Parse {
+        #[from]
+        source: crate::game_data::GameDataError,
+    },
+    #[error("the contribution task did not complete")]
+    Task(#[source] tokio::task::JoinError),
+}
+
 /// `error` and each error under it, one per line.
 pub fn chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();

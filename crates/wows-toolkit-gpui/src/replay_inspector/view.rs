@@ -44,9 +44,6 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
-use super::columns::default_columns;
-use super::load::GameDataCache;
-use super::load::GameDataStatus;
 use super::load::spawn_parse;
 use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
@@ -58,6 +55,9 @@ use crate::replay_renderer::ReplayRendererPanel;
 use crate::stats::directory::DirectoryStatsRequested;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
+use wows_toolkit_replay_data::columns::default_columns;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataStatus;
 
 /// Identifies the message a batch render keeps on screen while it runs, so each
 /// step replaces the last rather than stacking.
@@ -451,7 +451,7 @@ impl ReplayInspectorView {
             let wows_dir = PathBuf::from(&wows_dir);
             let dump_base = wows_toolkit_config::game_data_dump_base_with_override(&game_data_cache_dir);
             cx.background_spawn(async move {
-                super::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
+                wows_toolkit_replay_data::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
             })
             .detach();
         }
@@ -465,7 +465,7 @@ impl ReplayInspectorView {
         // rather than a build load, so the listing can say which version it is
         // waiting for while the load runs.
         self.game_data_status = GameDataStatus::Loading {
-            version: super::load::installed_version(std::path::Path::new(&wows_dir))
+            version: wows_toolkit_replay_data::load::installed_version(std::path::Path::new(&wows_dir))
                 .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
         };
         let status = self.game_data_status.clone();
@@ -528,9 +528,12 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
-            ReplayBrowserEvent::BuildsListed(builds) => {
-                self.fetch_missing_constants(builds.clone(), crate::constants::Cached::Keep, window, cx)
-            }
+            ReplayBrowserEvent::BuildsListed(builds) => self.fetch_missing_constants(
+                builds.clone(),
+                wows_toolkit_replay_data::constants::Cached::Keep,
+                window,
+                cx,
+            ),
             ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
             ReplayBrowserEvent::RenderManyToClipboard(paths) => {
                 self.render_many_to_clipboard(paths.clone(), window, cx)
@@ -575,7 +578,7 @@ impl ReplayInspectorView {
     fn fetch_missing_constants(
         &mut self,
         builds: Vec<(u32, Option<String>)>,
-        cached: crate::constants::Cached,
+        cached: wows_toolkit_replay_data::constants::Cached,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -585,7 +588,10 @@ impl ReplayInspectorView {
         let wanted: Vec<(u32, Option<String>)> = builds
             .into_iter()
             .filter(|(build, _)| !self.constants_asked.contains(build))
-            .filter(|(build, _)| cached == crate::constants::Cached::Replace || !crate::constants::is_cached(*build))
+            .filter(|(build, _)| {
+                cached == wows_toolkit_replay_data::constants::Cached::Replace
+                    || !wows_toolkit_replay_data::constants::is_cached(*build)
+            })
             .collect();
         if wanted.is_empty() {
             return;
@@ -601,7 +607,7 @@ impl ReplayInspectorView {
             let mut answered = Vec::new();
             for (build, outcome) in outcomes {
                 match outcome {
-                    crate::constants::Fetched::Written { build, actual } => {
+                    wows_toolkit_replay_data::constants::Fetched::Written { build, actual } => {
                         wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                             wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
                         );
@@ -609,11 +615,11 @@ impl ReplayInspectorView {
                         written += 1;
                         answered.push(build);
                     }
-                    crate::constants::Fetched::AlreadyOnDisk => answered.push(build),
+                    wows_toolkit_replay_data::constants::Fetched::AlreadyOnDisk => answered.push(build),
                     // Left unanswered deliberately: a repository that refused once
                     // is worth asking again on a later scan, where marking it here
                     // would need a restart to retry.
-                    crate::constants::Fetched::Failed(reason) => {
+                    wows_toolkit_replay_data::constants::Fetched::Failed(reason) => {
                         wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                             wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(format!(
                                 "build {build}: {reason}"
@@ -670,7 +676,12 @@ impl ReplayInspectorView {
         // Asked about again, whatever this session already asked: the answer it
         // got is the mapping that does not fit.
         self.constants_asked.remove(&build);
-        self.fetch_missing_constants(vec![(build, version)], crate::constants::Cached::Replace, window, cx);
+        self.fetch_missing_constants(
+            vec![(build, version)],
+            wows_toolkit_replay_data::constants::Cached::Replace,
+            window,
+            cx,
+        );
     }
 
     /// Moves the playback that is feeding an armor viewer to `clock`.
@@ -715,7 +726,7 @@ impl ReplayInspectorView {
 
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
-            let imported = crate::constants::import(&path, build);
+            let imported = wows_toolkit_replay_data::constants::import(&path, build);
             let _ = this.update_in(cx, |this, window, cx| match imported {
                 Ok(()) => {
                     crate::toast::ok(t!("ui.replay.constants_imported", build = build).into_owned(), window, cx);
@@ -1162,7 +1173,7 @@ impl ReplayInspectorView {
                         Ok(source) => source,
                         Err(err) => return Err(err.to_string()),
                     };
-                    crate::replay_index::index_one(
+                    wows_toolkit_replay_data::replay_index::index_one(
                         &runtime,
                         &pool,
                         &path,
@@ -1397,7 +1408,10 @@ impl ReplayInspectorView {
                 let parsed = {
                     let game_data = game_data.clone();
                     let path = path.clone();
-                    cx.background_spawn(async move { super::load::parse_replay(&path, &game_data, None) }).await
+                    cx.background_spawn(
+                        async move { wows_toolkit_replay_data::load::parse_replay(&path, &game_data, None) },
+                    )
+                    .await
                 };
                 let stat = match parsed {
                     Ok(parsed) => parsed.session_stat,

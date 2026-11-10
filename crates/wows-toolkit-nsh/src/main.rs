@@ -1,4 +1,7 @@
 #[cfg(target_os = "linux")]
+mod desktop;
+
+#[cfg(target_os = "linux")]
 use nsh_platform_linux as platform;
 
 #[cfg(target_os = "linux")]
@@ -56,12 +59,13 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
         .with_app_id(Some(APP_ID))
         .with_capabilities_json(capabilities.as_deref())
         .map_err(std::io::Error::other)?;
-    Ok(platform::run_app(
-        platform::AppSource::Bundle(bundle),
+    Ok(desktop::run(
+        bundle,
         platform::AppOptions {
-            title: "WoWs Toolkit".to_owned(),
+            // Named and versioned as the other front ends' windows are, so a
+            // bug report names a build.
+            title: format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION")),
             app_id: APP_ID.to_owned(),
-            size: (1400, 1000),
             fps: std::env::var_os("WTN_FPS").is_some(),
             components,
             ..Default::default()

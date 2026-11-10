@@ -38,6 +38,13 @@ export const semantic = {
   get error() { return token("error"); },
   get ok() { return token("ok"); },
   get notice() { return token("notice"); },
+  get textStrong() { return token("text-strong"); },
+  get textDim() { return token("text-dim"); },
+  get division() { return token("division"); },
+  get abuser() { return token("abuser"); },
+  get chatDivision() { return token("chat-division"); },
+  get chatTeam() { return token("chat-team"); },
+  get chatOther() { return token("chat-other"); },
 };
 
 export const controlRadius = () => token("radius");

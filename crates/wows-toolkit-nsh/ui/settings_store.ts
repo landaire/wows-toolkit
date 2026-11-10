@@ -1,5 +1,5 @@
 import { signal } from "nsh";
-import { Settings, type AppSettings, type ReplayPreferences, type SettingKey } from "wows-toolkit/native";
+import { GameData, Settings, type AppSettings, type ReplayPreferences, type SettingKey } from "wows-toolkit/native";
 import * as toast from "./shell/toast";
 
 /** The settings the shell read at startup, kept in step with every edit. `null` until the read lands. */
@@ -29,6 +29,9 @@ export async function loadAppSettings(): Promise<AppSettings | null> {
   }
 }
 
+/** The settings the loaded game data was read under. */
+const GAME_DATA_KEYS: readonly SettingKey[] = ["wowsDir", "locale", "autoDumpGameData", "gameDataCacheDir", "proxyUrl"];
+
 /** The value type of each setting `editSetting` writes. */
 type Editable = { [K in SettingKey]: K extends keyof AppSettings ? NonNullable<AppSettings[K]> : never };
 
@@ -44,6 +47,8 @@ export async function editSetting<K extends SettingKey>(key: K, value: Editable[
   appSettings.set({ ...current, [key]: value });
   try {
     await Settings.save(key, value);
+    // The game data follows these, so it is bound to them again.
+    if (GAME_DATA_KEYS.includes(key)) void GameData.reload();
     return true;
   } catch (error) {
     const now = appSettings();

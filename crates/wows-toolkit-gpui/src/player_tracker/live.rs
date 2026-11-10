@@ -413,7 +413,7 @@ mod tests {
 #[cfg(test)]
 mod scan_tests {
     use super::*;
-    use crate::replay_inspector::GameDataCache;
+    use wows_toolkit_replay_data::load::GameDataCache;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 
     /// Splits a real replay back into the two halves the game writes during a

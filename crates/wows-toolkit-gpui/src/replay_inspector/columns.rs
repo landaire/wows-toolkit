@@ -1,86 +1,16 @@
-//! Column set, cell formatting, and number formatting. Mirrors
-//! `ui/replay_parser/sorting.rs` (`ReplayColumn`, declaration order) and the
-//! per-cell mapping in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`.
-//! Colors are represented as `ColorRole`, resolved to real colors by the
-//! render layer (Milestone 2); no `gpui_kit`/`egui` color type appears here.
+//! Cell formatting for the replay player list. Mirrors the per-cell mapping
+//! in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`. The column set is
+//! `wows_toolkit_replay_data::columns`. Colors are represented as
+//! `ColorRole`, resolved to real colors by the render layer; no
+//! `gpui_kit`/`egui` color type appears here.
 
 use rust_i18n::t;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::Relation;
-use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::breakdown;
-
-use super::model::PlayerRow;
-pub use super::model::separate_number;
-
-/// All displayable columns in the replay player list, in the same
-/// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus
-/// its `Actions` column: a row's actions are on the row itself here, revealed
-/// on hover and on a right-click, so they need no column of their own.
-/// `default_columns` re-sorts to this order after filtering, matching
-/// `update_visible_columns`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReplayColumn {
-    Name,
-    ShipName,
-    Skills,
-    PersonalRating,
-    BaseXp,
-    RawXp,
-    Kills,
-    ObservedDamage,
-    ActualDamage,
-    ReceivedDamage,
-    SpottingDamage,
-    PotentialDamage,
-    Hits,
-    Heals,
-    DistanceTraveled,
-    TimeLived,
-}
-
-impl ReplayColumn {
-    pub const ALL: [ReplayColumn; 16] = [
-        ReplayColumn::Name,
-        ReplayColumn::ShipName,
-        ReplayColumn::Skills,
-        ReplayColumn::PersonalRating,
-        ReplayColumn::BaseXp,
-        ReplayColumn::RawXp,
-        ReplayColumn::Kills,
-        ReplayColumn::ObservedDamage,
-        ReplayColumn::ActualDamage,
-        ReplayColumn::ReceivedDamage,
-        ReplayColumn::SpottingDamage,
-        ReplayColumn::PotentialDamage,
-        ReplayColumn::Hits,
-        ReplayColumn::Heals,
-        ReplayColumn::DistanceTraveled,
-        ReplayColumn::TimeLived,
-    ];
-
-    /// The `ReplaySettings` flag that gates this column's visibility, for the
-    /// five user-toggleable columns. `None` for always-on columns. Mirrors
-    /// `update_visible_columns`'s `optional_columns` table.
-    fn settings_gate(self) -> Option<fn(&ReplaySettings) -> bool> {
-        match self {
-            ReplayColumn::RawXp => Some(|s| s.show_raw_xp),
-            ReplayColumn::ObservedDamage => Some(|s| s.show_observed_damage),
-            ReplayColumn::Heals => Some(|s| s.show_heals),
-            ReplayColumn::ReceivedDamage => Some(|s| s.show_received_damage),
-            ReplayColumn::DistanceTraveled => Some(|s| s.show_distance_traveled),
-            _ => None,
-        }
-    }
-}
-
-/// The column set for a fresh replay load, given the persisted display
-/// settings: always-on columns unconditionally, the five optional columns
-/// only when their `ReplaySettings` flag is set, in declaration order.
-/// Mirrors `UiReport::update_visible_columns`.
-pub fn default_columns(settings: &ReplaySettings) -> Vec<ReplayColumn> {
-    ReplayColumn::ALL.into_iter().filter(|col| col.settings_gate().is_none_or(|gate| gate(settings))).collect()
-}
 
 /// A color role a cell can carry, resolved to a real color by the render
 /// layer (Milestone 2's palette resolver). Never an actual RGBA/HSLA value.
@@ -365,60 +295,10 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
 mod tests {
     use wows_replay_insights::personal_rating::PersonalRatingResult;
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::test_support::base_row;
     use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 
     use super::*;
-    use crate::replay_inspector::test_support::base_row;
-
-    #[test]
-    fn separate_number_is_reexported_and_groups_by_thousands() {
-        assert_eq!(separate_number(1_234_567i64), "1,234,567");
-    }
-
-    #[test]
-    fn default_columns_always_on_only() {
-        let settings = ReplaySettings {
-            show_raw_xp: false,
-            show_observed_damage: false,
-            show_heals: false,
-            show_received_damage: false,
-            show_distance_traveled: false,
-            ..ReplaySettings::default()
-        };
-
-        let columns = default_columns(&settings);
-
-        assert!(!columns.contains(&ReplayColumn::RawXp));
-        assert!(!columns.contains(&ReplayColumn::Heals));
-        assert!(!columns.contains(&ReplayColumn::ReceivedDamage));
-        assert!(!columns.contains(&ReplayColumn::DistanceTraveled));
-        // ObservedDamage is off by ReplaySettings::default() already, and
-        // stays off here too.
-        assert!(!columns.contains(&ReplayColumn::ObservedDamage));
-        // Always-on columns remain, in declaration order.
-        assert_eq!(columns.first(), Some(&ReplayColumn::Name));
-        assert!(columns.contains(&ReplayColumn::Name));
-        assert!(columns.contains(&ReplayColumn::PersonalRating));
-    }
-
-    #[test]
-    fn default_columns_includes_optional_columns_when_enabled() {
-        let settings = ReplaySettings::default();
-        let columns = default_columns(&settings);
-
-        // ReplaySettings::default() enables heals/received/distance but not
-        // raw_xp/observed_damage.
-        assert!(columns.contains(&ReplayColumn::Heals));
-        assert!(columns.contains(&ReplayColumn::ReceivedDamage));
-        assert!(columns.contains(&ReplayColumn::DistanceTraveled));
-        assert!(!columns.contains(&ReplayColumn::RawXp));
-        assert!(!columns.contains(&ReplayColumn::ObservedDamage));
-
-        // Declaration order is preserved (Heals sits before DistanceTraveled).
-        let heals_ix = columns.iter().position(|c| *c == ReplayColumn::Heals).unwrap();
-        let distance_ix = columns.iter().position(|c| *c == ReplayColumn::DistanceTraveled).unwrap();
-        assert!(heals_ix < distance_ix);
-    }
 
     #[test]
     fn cell_value_name_joins_division_clan_and_display_name() {

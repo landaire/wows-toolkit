@@ -40,7 +40,14 @@
       "warn": "#8a4b00",
       "error": "#ae2230",
       "ok": "#106c34",
-      "notice": "#775800"
+      "notice": "#775800",
+      "text-strong": "#0a0a08",
+      "text-dim": "#78766f",
+      "division": "#775800",
+      "abuser": "#a33270",
+      "chat-division": "#775800",
+      "chat-team": "#106c34",
+      "chat-other": "#8a4b00"
     },
     "dark": {
       "background": "#181816",
@@ -79,7 +86,14 @@
       "warn": "#e8a54a",
       "error": "#e8737b",
       "ok": "#6fd98a",
-      "notice": "#e5c158"
+      "notice": "#e5c158",
+      "text-strong": "#e8e5dc",
+      "text-dim": "#7c7c6e",
+      "division": "#e5c158",
+      "abuser": "#f09bc0",
+      "chat-division": "#e5c158",
+      "chat-team": "#6fd98a",
+      "chat-other": "#e8a54a"
     }
   }
 }

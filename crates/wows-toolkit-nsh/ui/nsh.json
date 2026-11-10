@@ -12,6 +12,7 @@
     },
     "picker": true,
     "clipboard": true,
+    "host": true,
     "network": {
       "http": [
         {

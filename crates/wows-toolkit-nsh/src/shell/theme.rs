@@ -24,7 +24,7 @@ use wows_toolkit_viewmodel::theme::semantic_for;
 const RADIUS: f32 = 4.0;
 
 /// Every token a palette sets, by name, as `0xRRGGBB`.
-fn colors(palette: &Palette) -> [(&'static str, u32); 37] {
+fn colors(palette: &Palette) -> [(&'static str, u32); 44] {
     let semantic: &Semantic = semantic_for(palette.dark);
     let on_accent = accent_foreground(palette.accent);
 
@@ -66,6 +66,13 @@ fn colors(palette: &Palette) -> [(&'static str, u32); 37] {
         ("error", semantic.error),
         ("ok", semantic.ok),
         ("notice", semantic.notice),
+        ("text-strong", semantic.text_strong),
+        ("text-dim", semantic.text_dim),
+        ("division", semantic.division),
+        ("abuser", semantic.abuser),
+        ("chat-division", semantic.chat_division),
+        ("chat-team", semantic.chat_team),
+        ("chat-other", semantic.chat_other),
     ]
 }
 
@@ -150,13 +157,17 @@ mod tests {
     use super::*;
 
     /// The theme file the bundle starts with is the `System` palette pair, so
-    /// the window does not change color when the saved theme is applied.
+    /// the window does not change color when the saved theme is applied. Run
+    /// with `UPDATE_THEME_JSON=1` to rewrite it after a palette changes.
     #[test]
     fn the_startup_theme_file_is_the_system_palettes() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/theme.json");
         let expected = theme_json(ThemeChoice::System);
+        if std::env::var_os("UPDATE_THEME_JSON").is_some() {
+            std::fs::write(&path, &expected).expect("the theme file is written");
+        }
         let found = std::fs::read_to_string(&path).unwrap_or_default();
-        assert!(found == expected, "{} is stale; it should read:\n{expected}", path.display());
+        assert!(found == expected, "{} is stale; run with UPDATE_THEME_JSON=1", path.display());
     }
 
     #[test]

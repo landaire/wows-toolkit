@@ -53,6 +53,17 @@ pub struct ReplayPreferences {
     pub auto_export_path: String,
 }
 
+/// One data-sharing mode as the Settings tab and the first-run question offer
+/// it, worded as the other front ends word it.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct SharingMode {
+    /// `off`, `build_data` or `replays`.
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
 /// What the armor viewer last saved as its defaults. The viewer writes these
 /// itself; the Settings tab only reports them.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
@@ -247,10 +258,7 @@ impl Settings {
     /// Writes the Settings tab's part of the replay row, keeping the rest of it.
     pub async fn save_replay(preferences: ReplayPreferences) -> Result<(), SettingsError> {
         let format = parse_export_format(&preferences.auto_export_format)?;
-        background(async move {
-            let pool = open().await?;
-            let _order = WRITE_ORDER.lock().await;
-            let mut replay = read_or_default::<ReplaySettings>(&pool, keys::REPLAY_SETTINGS).await?;
+        background(update_replay_settings(move |replay| {
             replay.show_raw_xp = preferences.show_raw_xp;
             replay.show_observed_damage = preferences.show_observed_damage;
             replay.show_entity_id = preferences.show_entity_id;
@@ -259,13 +267,10 @@ impl Settings {
             replay.auto_export_data = preferences.auto_export_data;
             replay.auto_export_format = format;
             replay.auto_export_path = preferences.auto_export_path;
-            let encoded = json(keys::REPLAY_SETTINGS, &replay)?;
-            wows_toolkit_config::queries::set_setting_raw(&pool, keys::REPLAY_SETTINGS, &encoded)
-                .await
-                .map_err(|source| SettingsError::Write { key: keys::REPLAY_SETTINGS, source })
-        })
+        }))
         .await
         .map_err(SettingsError::Task)?
+        .map(|_| ())
     }
 
     /// Whether `path` is a directory a game install could be in: one with a
@@ -273,6 +278,42 @@ impl Settings {
     pub fn is_game_directory(path: String) -> bool {
         std::path::Path::new(path.trim()).join("bin").is_dir()
     }
+
+    /// Whether `path` names an existing directory.
+    pub fn is_directory(path: String) -> bool {
+        std::path::Path::new(path.trim()).is_dir()
+    }
+
+    /// The data-sharing modes, in the order every front end lists them.
+    pub fn sharing_modes() -> Vec<SharingMode> {
+        DataSharingMode::ALL
+            .into_iter()
+            .map(|mode| SharingMode {
+                id: sharing_name(mode).to_owned(),
+                label: mode.label().to_owned(),
+                description: mode.description().to_owned(),
+            })
+            .collect()
+    }
+}
+
+/// Reads the replay row, applies `edit` and writes it back, ordered with every
+/// other settings write so two editors of the row (this tab and the Replay
+/// Inspector) cannot interleave and drop each other's fields. Resolves to the
+/// row as written.
+pub(crate) async fn update_replay_settings(
+    edit: impl FnOnce(&mut ReplaySettings) + Send,
+) -> Result<ReplaySettings, SettingsError> {
+    let pool = open().await?;
+    let _order = WRITE_ORDER.lock().await;
+    let mut replay = read_or_default::<ReplaySettings>(&pool, keys::REPLAY_SETTINGS).await?;
+    edit(&mut replay);
+    let encoded = json(keys::REPLAY_SETTINGS, &replay)?;
+    wows_toolkit_config::queries::set_setting_raw(&pool, keys::REPLAY_SETTINGS, &encoded)
+        .await
+        .map_err(|source| SettingsError::Write { key: keys::REPLAY_SETTINGS, source })?;
+
+    Ok(replay)
 }
 
 /// Serializes writes, so two edits of one key land in the order they were made.

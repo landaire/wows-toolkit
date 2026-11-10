@@ -50,6 +50,19 @@ fn configure_test_storage() {
         path
     });
     wows_toolkit_config::storage_override::set(path.clone());
+    // The first-run questions are the shell's tests' to answer; here they
+    // would stand in front of every tab.
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            for key in ["build_consent_window_shown", "replay_consent_prompt_shown", "language_selection_shown"] {
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+            }
+            wows_toolkit_config::queries::set_setting_raw(&pool, "check_for_updates", "false")
+                .await
+                .expect("the startup update check is off");
+        },
+    );
 }
 
 fn registries() -> Vec<nsh_core::element::Registry> {
@@ -210,27 +223,6 @@ fn replay_directory_lists_readable_files_and_reports_failures() {
     app.on_pick_paths(vec![all_invalid.0.clone()]).unwrap();
     app.press("Open Replay Directory...").unwrap();
     app.wait_for("No readable replay files. 1 replay file(s) could not be read.").unwrap();
-}
-
-#[test]
-fn settings_use_the_shared_database_and_nsh_default_theme() {
-    let mut app = app();
-
-    app.press_key("mod+,").unwrap();
-    app.wait_for("NSH default").unwrap();
-    app.wait_for("Save Settings").unwrap();
-    app.clear("label:Collaboration display name").unwrap();
-    app.type_text("label:Collaboration display name", "NSH Tester").unwrap();
-    app.press("Save Settings").unwrap();
-    app.wait_for("Settings saved.").unwrap();
-
-    app.clear("label:Collaboration display name").unwrap();
-    assert_eq!(app.screen().input_text("label:Collaboration display name").unwrap(), Some(""));
-    app.press("Reload").unwrap();
-    app.wait_until("the saved collaboration name returns", std::time::Duration::from_secs(5), |screen| {
-        screen.input_text("label:Collaboration display name").ok().flatten() == Some("NSH Tester")
-    })
-    .unwrap();
 }
 
 #[test]
@@ -512,19 +504,14 @@ fn top_level_navigation_and_application_menu_work() {
     app.press_key("mod+k").unwrap();
     app.wait_for("Command Palette").unwrap();
     app.press("Go to Settings").unwrap();
-    app.wait_for("NSH default").unwrap();
-    app.wait_for("Shared with the egui and GPUI applications").unwrap();
+    app.wait_for("Application Settings").unwrap();
 
     app.press("label:Open application menu").unwrap();
     app.wait_for("Tactics Board").unwrap();
-    app.press("About WoWs Toolkit").unwrap();
-    app.wait_for("Tools for World of Warships replays, game data, statistics, rendering, and collaboration.").unwrap();
-    app.press("Close").unwrap();
-    app.wait_for_gone(
-        "Tools for World of Warships replays, game data, statistics, rendering, and collaboration.",
-        std::time::Duration::from_secs(5),
-    )
-    .unwrap();
+    app.press("About").unwrap();
+    app.wait_for("Made by landaire.").unwrap();
+    app.press("Cancel").unwrap();
+    app.wait_for_gone("Made by landaire.", std::time::Duration::from_secs(5)).unwrap();
 
     app.press("label:Open application menu").unwrap();
     app.press("Tactics Board").unwrap();
@@ -542,8 +529,8 @@ fn command_palette_supports_keyboard_navigation_and_compact_viewports() {
     app.type_text("label:Command palette", "About").unwrap();
     app.press_key("down").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("Tools for World of Warships replays, game data, statistics, rendering, and collaboration.").unwrap();
-    app.press("Close").unwrap();
+    app.wait_for("Made by landaire.").unwrap();
+    app.press("Cancel").unwrap();
 
     app.press_key("mod+k").unwrap();
     app.type_text("label:Command palette", "nomatch").unwrap();
