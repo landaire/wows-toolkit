@@ -812,7 +812,9 @@ export function MinimapPreview(props: { path: string; size?: number }) {
   // when none came. Without game data there is nothing to hold it for.
   const failure = () => (view().expecting ? null : view().failure);
   const held = () => view().hasGameData && (view().expecting || failure() != null);
-  const waiting = () => view().expecting && (!view().drawn || view().stalled);
+  // Only until something is drawn: a spinner put back over the map each time
+  // the bake falls behind the playback flickers.
+  const waiting = () => view().expecting && !view().drawn;
   return (
     <If when={held()}>
       <View accessibilityLabel={t("ui.replay.renderer.preview")} style={{ width: size(), height: size(), backgroundColor: "#06272e", borderRadius: 4, overflow: "hidden" }}>

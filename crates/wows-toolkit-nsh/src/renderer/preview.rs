@@ -39,11 +39,6 @@ use crate::renderer::ids::RendererId;
 use crate::renderer::ids::Revision;
 use crate::renderer::raster;
 
-/// How long a preview goes without a new frame before the bake behind it
-/// reads as stuck rather than busy. Comfortably longer than the gap between
-/// frames, so the spinner never flickers over a preview that is merely slow.
-const STALLED_AFTER: Duration = Duration::from_millis(1500);
-
 /// What a preview occupies before its first frame arrives: the ocean's water,
 /// so a preview that starts as open water and becomes the map does not jump.
 const MAP_PLACEHOLDER: [u8; 3] = [0x06, 0x27, 0x2e];
@@ -67,9 +62,6 @@ pub struct PreviewView {
     pub expecting: bool,
     /// Whether the surface shows a map or a frame yet.
     pub drawn: bool,
-    /// Whether the bake has stopped feeding the preview, which is what a
-    /// spinner over it says.
-    pub stalled: bool,
     /// Why there is no preview, once a bake has said so.
     pub failure: Option<String>,
 }
@@ -79,7 +71,6 @@ pub struct PreviewView {
 struct Progress {
     expecting: bool,
     drawn: bool,
-    stalled: bool,
     failure: Option<String>,
 }
 
@@ -100,7 +91,6 @@ struct Baked {
     /// The still map, standing in for a track that has not arrived.
     map: Option<Arc<RgbImage>>,
     track: Option<PreviewFrames<Arc<RgbImage>>>,
-    last_frame: Option<Instant>,
     done: bool,
     /// Why the bake gave no preview, in the reader's language.
     failure: Option<String>,
@@ -170,7 +160,6 @@ impl Preview {
             has_game_data: self.has_game_data,
             expecting: progress.expecting,
             drawn: progress.drawn,
-            stalled: progress.stalled,
             failure: progress.failure,
         }
     }
@@ -235,15 +224,9 @@ impl Preview {
                     }
                     None => baked.map.clone().map(|map| (Still::Map, map)),
                 };
-                let stalled = !baked.done
-                    && match (&baked.track, baked.last_frame) {
-                        (Some(_), Some(last)) => last.elapsed() > STALLED_AFTER,
-                        _ => true,
-                    };
                 let progress = Progress {
                     expecting: !baked.done || frame.is_some(),
                     drawn: shown.is_some(),
-                    stalled,
                     failure: baked.failure.clone(),
                 };
                 if baked.done && baked.track.is_none() && baked.map.is_none() {
@@ -322,7 +305,6 @@ impl Preview {
                 |frame| {
                     let mut baked = baked.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     baked.track.get_or_insert_with(PreviewFrames::streaming).push(Arc::new(frame));
-                    baked.last_frame = Some(Instant::now());
                 },
             );
             let failure = match &outcome {

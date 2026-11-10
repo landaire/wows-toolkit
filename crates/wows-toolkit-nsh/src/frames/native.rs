@@ -47,6 +47,15 @@ struct Binding {
 
 type SharedBinding = Rc<RefCell<Binding>>;
 
+/// A presented frame's pixels, handed to GDK without a copy.
+struct FramePixels(Arc<super::Frame>);
+
+impl AsRef<[u8]> for FramePixels {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.pixels
+    }
+}
+
 /// Shows a surface's latest frame, polled on the widget's frame clock, and
 /// forwards pointer, wheel, pinch, key and focus input to it.
 struct FrameView {
@@ -125,7 +134,7 @@ impl FrameView {
                         AlphaMode::Premultiplied => gdk::MemoryFormat::R8g8b8a8Premultiplied,
                         AlphaMode::Straight => gdk::MemoryFormat::R8g8b8a8,
                     };
-                    let bytes = glib::Bytes::from(&frame.pixels[..]);
+                    let bytes = glib::Bytes::from_owned(FramePixels(Arc::clone(&frame)));
                     let texture = gdk::MemoryTexture::new(
                         frame.size.width as i32,
                         frame.size.height as i32,
@@ -263,9 +272,15 @@ impl NativeComponent for FrameView {
         if name != "surface" {
             return;
         }
+        let name = value.and_then(JsonValue::as_str);
         let mut binding = self.binding.borrow_mut();
+        // A re-render hands the same name again; binding it afresh would drop
+        // the frame on screen and make the producer draw for a resize.
+        if binding.surface.as_ref().map(|surface| surface.id().as_str()) == name {
+            return;
+        }
         *binding = Binding::default();
-        binding.surface = value.and_then(JsonValue::as_str).map(|name| super::surface(&SurfaceId::new(name)));
+        binding.surface = name.map(|name| super::surface(&SurfaceId::new(name)));
         if binding.surface.is_none() {
             self.picture.set_paintable(gdk::Paintable::NONE);
         }
