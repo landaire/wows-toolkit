@@ -2,6 +2,7 @@ pub mod frames;
 pub mod game_data;
 mod native;
 mod replay;
+mod tactics;
 
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
 pub use replay::{ReplayInspector, ReplayInspectorProps};
@@ -14,4 +15,5 @@ fn native_module(registry: &mut Registry) {
     registry.module::<Toolkit>();
     registry.module::<game_data::GameData>();
     registry.register::<ReplayInspector>();
+    registry.module::<tactics::Tactics>();
 }

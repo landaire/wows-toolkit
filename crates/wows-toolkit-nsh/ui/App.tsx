@@ -3,13 +3,13 @@ import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
 import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
+import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { colors, controlRadius } from "./theme";
 import { GameDataCacheSection, GameDataStatus, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
 const aboutOpen = signal(false);
-const tacticsOpen = signal(false);
 const paletteOpen = signal(false);
 const paletteQuery = signal("");
 const notice = signal<string | null>(null);
@@ -373,7 +373,7 @@ function ApplicationMenu() {
       >
         <Surface style={{ minWidth: 220, padding: 5, backgroundColor: colors.popover }}>
           <MenuRow label="Command Palette" note={keymap.label("mod+k")} onSelect={openPalette}/>
-          <MenuRow label={startup.text.tacticsBoard} onSelect={() => tacticsOpen.set(true)}/>
+          <MenuRow label={startup.text.tacticsBoard} onSelect={openTacticsBoard}/>
           <MenuRow label={startup.text.checkUpdates} onSelect={() => void checkForUpdates()}/>
           <MenuRow label={`${startup.text.about} WoWs Toolkit`} onSelect={() => aboutOpen.set(true)}/>
           <View style={{ height: 1, marginVertical: 4, backgroundColor: colors.border }}/>
@@ -977,23 +977,6 @@ function AboutDialog() {
   );
 }
 
-function TacticsDialog() {
-  return (
-    <Dialog open={tacticsOpen()} onOpenChange={({ open }) => tacticsOpen.set(open)}>
-      <Surface style={{ width: "100%", maxWidth: 720, minHeight: 460, padding: 18, gap: 12, backgroundColor: colors.popover }}>
-        <Text style={{ fontSize: 20, fontWeight: "600", color: colors.popoverForeground }}>{startup.text.tacticsBoard}</Text>
-        <Text style={{ fontSize: 13, color: colors.mutedForeground }}>Plan ship positions, paths, and map annotations.</Text>
-        <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius(), backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: colors.mutedForeground }}>Select a map to start a tactics board.</Text>
-        </View>
-        <View style={{ alignItems: "flex-end" }}>
-          <Button label="Close" onPress={() => tacticsOpen.set(false)}/>
-        </View>
-      </Surface>
-    </Dialog>
-  );
-}
-
 const commandItems = [
   ...startup.tabs.map((tab, index) => ({
     id: `tab:${tab.id}`,
@@ -1012,7 +995,7 @@ function executeCommand(id: string) {
   if (id.startsWith("tab:")) {
     selectTab(id.slice(4));
   } else if (id === "action:tactics") {
-    tacticsOpen.set(true);
+    openTacticsBoard();
   } else if (id === "action:updates") {
     void checkForUpdates();
   } else if (id === "action:about") {
@@ -1082,7 +1065,7 @@ function App() {
       </View>
       <Notice/>
       <AboutDialog/>
-      <TacticsDialog/>
+      <TacticsBoard title={startup.text.tacticsBoard}/>
       <CommandPalette/>
     </View>
   );

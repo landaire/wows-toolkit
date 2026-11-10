@@ -37,6 +37,12 @@ wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+# Tactics board: map art, capture layouts, the session link, and PNG art for
+# peers.
+image = { workspace = true, features = ["png"] }
+wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report"] }
+wt-collab-client = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 #[cfg] The TSX interface runs through QuickJS.
@@ -46,3 +52,5 @@ nsh-platform-linux = { version = "0.4.0", default-features = false, features = [
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
 nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = { version = "0.4.0", features = ["bundle"] }
+# The session state a tactics board test hands a link.
+parking_lot = "0.12"
