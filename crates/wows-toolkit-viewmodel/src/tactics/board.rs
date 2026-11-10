@@ -568,14 +568,14 @@ pub struct BoardTool {
 pub fn tools() -> Vec<BoardTool> {
     let tool = |tool, label_key, shortcut| BoardTool { tool, label_key, shortcut };
     vec![
-        tool(Tool::Freehand, "ui.renderer.annotations.freehand", "2"),
-        tool(Tool::Line, "ui.renderer.annotations.line", "4"),
-        tool(Tool::Arrow, "ui.renderer.annotations.arrow", "1"),
-        tool(Tool::Circle { filled: false }, "ui.renderer.annotations.circle", "5"),
-        tool(Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle", "6"),
-        tool(Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle", "7"),
-        tool(Tool::Measurement, "ui.renderer.annotations.measure", "M"),
-        tool(Tool::Eraser, "ui.renderer.annotations.eraser", "3"),
+        tool(Tool::Freehand, "ui.renderer.annotations.tool_freehand", "2"),
+        tool(Tool::Line, "ui.renderer.annotations.tool_line", "4"),
+        tool(Tool::Arrow, "ui.renderer.annotations.tool_arrow", "1"),
+        tool(Tool::Circle { filled: false }, "ui.renderer.annotations.tool_circle", "5"),
+        tool(Tool::Rectangle { filled: false }, "ui.renderer.annotations.tool_rectangle", "6"),
+        tool(Tool::Triangle { filled: false }, "ui.renderer.annotations.tool_triangle", "7"),
+        tool(Tool::Measurement, "ui.renderer.annotations.tool_measurement", "M"),
+        tool(Tool::Eraser, "ui.renderer.annotations.tool_eraser", "3"),
     ]
 }
 

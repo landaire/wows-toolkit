@@ -38,6 +38,37 @@ fn shared() -> &'static Arc<Shared> {
     &SHARED
 }
 
+/// The task handing the open board each new session link.
+static SESSION_FOLLOWER: std::sync::Mutex<Option<tokio::task::AbortHandle>> = std::sync::Mutex::new(None);
+
+/// Hands the board the current session, if any, then each later link until
+/// the board closes.
+fn follow_session() {
+    let shared = Arc::clone(shared());
+    let mut links = crate::collab::subscribe();
+    let link = links.borrow_and_update().clone();
+    if link.is_active() {
+        shared.set_collab(link);
+    }
+    let runtime = match crate::runtime::shared() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            log::warn!("tactics: the board cannot follow the session: {err}");
+            return;
+        }
+    };
+    let task = runtime.spawn(shared.follow_links(links));
+    if let Some(previous) = SESSION_FOLLOWER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).replace(task.abort_handle()) {
+        previous.abort();
+    }
+}
+
+fn stop_following_session() {
+    if let Some(task) = SESSION_FOLLOWER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
+        task.abort();
+    }
+}
+
 /// Changes the board and answers what it now shows.
 fn change(edit: impl FnOnce(&mut Board)) -> TacticsView {
     let shared = shared();
@@ -81,12 +112,14 @@ impl Tactics {
                 board.resize(viewport);
             }
         });
+        follow_session();
         Ok(current())
     }
 
     /// Closes the board: a replay walk stops, and the session stops offering
     /// it.
     pub fn close() {
+        stop_following_session();
         let shared = shared();
         shared.update(|board| {
             board.close();

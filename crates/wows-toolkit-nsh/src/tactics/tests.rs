@@ -344,3 +344,25 @@ fn a_session_hears_the_board_and_its_caps() {
     let capped = heard.iter().position(|event| matches!(event, LocalEvent::CapPoint { .. }));
     assert!(announced.is_some() && announced < capped, "the map is announced before its caps");
 }
+
+/// A link the session watch is given reaches the board, which announces its
+/// map to that session.
+#[test]
+fn the_board_follows_a_new_session_link() {
+    use wt_collab_client::peer::LocalEvent;
+
+    let shared = board_on_map("tactics-test-follow");
+    let (links, watched) = tokio::sync::watch::channel(wt_collab_client::link::CollabLink::default());
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a runtime");
+    runtime.spawn(Arc::clone(&shared).follow_links(watched));
+
+    let state = Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+    let (link, events) = wt_collab_client::link::CollabLink::with_outbox(state);
+    links.send(link).expect("the follower listens");
+
+    let mut heard = Vec::new();
+    wait_until("the announcement", || {
+        heard.extend(events.try_iter());
+        heard.iter().any(|event| matches!(event, LocalEvent::TacticsMapOpened { .. }))
+    });
+}

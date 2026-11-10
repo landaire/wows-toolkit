@@ -121,6 +121,14 @@ impl Shared {
         let _ = self.wake.send(Message::Redraw);
     }
 
+    /// Hands the board each link `links` is given, until its sender is gone.
+    pub async fn follow_links(self: Arc<Self>, mut links: watch::Receiver<CollabLink>) {
+        while links.changed().await.is_ok() {
+            let link = links.borrow_and_update().clone();
+            self.set_collab(link);
+        }
+    }
+
     /// Reads the map's art for a session to draw from, off the caller's
     /// thread, then finishes the announcement.
     pub fn announce(self: &Arc<Self>, announcement: Option<Announcement>) {

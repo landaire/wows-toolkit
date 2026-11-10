@@ -718,7 +718,7 @@ impl Board {
         wows_toolkit_viewmodel::tactics::save_preset(&saved)
             .map_err(|source| TacticsError::PresetSave { name: name.clone(), source })?;
         self.presets = wows_toolkit_viewmodel::tactics::list_preset_names();
-        self.say(format!("Saved {name}"));
+        self.say(rust_i18n::t!("ui.tactics.preset_saved", name = name).into_owned());
         Ok(())
     }
 
@@ -835,7 +835,7 @@ impl Board {
         }
         self.scanning = None;
         self.adopt_layouts(found);
-        self.say(format!("Read {total} replays and found {added} new layouts"));
+        self.say(rust_i18n::t!("ui.tactics.scan_done", total = total, added = added).into_owned());
     }
 }
 

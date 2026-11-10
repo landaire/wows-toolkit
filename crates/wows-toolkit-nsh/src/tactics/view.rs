@@ -184,7 +184,7 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
     let mode_item = |entry: &crate::tactics::board::ModeEntry| PickerItem {
         value: entry.value(),
         title: match entry {
-            crate::tactics::board::ModeEntry::Blank => "Blank".to_owned(),
+            crate::tactics::board::ModeEntry::Blank => rust_i18n::t!("ui.replay.hover.blank_mode").into_owned(),
             crate::tactics::board::ModeEntry::Layout(mode) => mode.label.clone(),
         },
     };
@@ -196,7 +196,7 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
         CapView {
             letter: cap.letter(),
             radius_km: format!("{:.1}", board::radius_km(cap.radius)),
-            team: team_label(board::team_label_key(cap.team)).to_owned(),
+            team: rust_i18n::t!(board::team_label_key(cap.team)).into_owned(),
             team_color: format!("#{red:02x}{green:02x}{blue:02x}"),
             frozen: cap.frozen,
             can_narrow: cap.radius > board::MIN_CAP_RADIUS,
@@ -211,7 +211,7 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
         .iter()
         .map(|(circle, key)| {
             let enabled = u32::from(circle.is_on(filter)) + ships.iter().filter(|ship| circle.is_on(ship)).count() as u32;
-            RangeView { circle: range_name(*circle), label: range_label(key).to_owned(), checked: enabled == total, enabled, total }
+            RangeView { circle: range_name(*circle), label: rust_i18n::t!(*key).into_owned(), checked: enabled == total, enabled, total }
         })
         .collect();
 
@@ -321,27 +321,5 @@ fn range_name(circle: RangeCircle) -> RangeName {
         RangeCircle::Torpedo => RangeName::Torpedo,
         RangeCircle::Radar => RangeName::Radar,
         RangeCircle::Hydro => RangeName::Hydro,
-    }
-}
-
-/// The English text of a range circle's translation key.
-fn range_label(key: &str) -> &'static str {
-    match key {
-        "ui.renderer.context.detection" => "Detection",
-        "ui.renderer.context.main_battery" => "Main Battery",
-        "ui.renderer.context.secondary" => "Secondary",
-        "ui.renderer.context.torpedo" => "Torpedo",
-        "ui.renderer.context.radar" => "Radar",
-        "ui.renderer.context.hydro" => "Hydro",
-        _ => "Range",
-    }
-}
-
-/// The English text of a team's translation key.
-fn team_label(key: &str) -> &'static str {
-    match key {
-        "ui.tactics.team_one" => "Team 1 (Green)",
-        "ui.tactics.team_two" => "Team 2 (Red)",
-        _ => "Neutral",
     }
 }

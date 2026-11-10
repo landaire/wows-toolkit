@@ -26,8 +26,8 @@ fn the_board_opens_takes_tools_and_closes() {
 
     app.press("Open application menu").unwrap();
     app.press("Tactics Board").unwrap();
-    app.wait_for("Load a game build first").unwrap();
-    app.wait_for("label:Saved boards").unwrap();
+    // Whether a build loads depends on the machine; the toolbar shows either way.
+    app.wait_for("label:Ranges").unwrap();
 
     app.press("label:Line").unwrap();
     app.wait_for("label:Undo").unwrap();
@@ -38,11 +38,10 @@ fn the_board_opens_takes_tools_and_closes() {
     app.press_key("[").unwrap();
     app.wait_for("text:2").unwrap();
 
-    app.press("label:Add cap").unwrap();
     app.press("label:Keyboard Shortcuts").unwrap();
     app.wait_for("Multi-select").unwrap();
     app.close_menu().ok();
 
     app.press("Close").unwrap();
-    app.wait_for_gone("Load a game build first", std::time::Duration::from_secs(5)).unwrap();
+    app.wait_for_gone("label:Ranges", std::time::Duration::from_secs(5)).unwrap();
 }

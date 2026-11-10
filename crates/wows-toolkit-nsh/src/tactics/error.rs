@@ -3,31 +3,31 @@ use wows_toolkit_viewmodel::tactics::PresetError;
 /// Why a tactics board command could not be carried out.
 #[derive(Debug, thiserror::Error)]
 pub enum TacticsError {
-    #[error("Give the board a name first")]
+    #[error("{}", rust_i18n::t!("ui.tactics.preset_needs_a_name"))]
     PresetNeedsName,
-    #[error("Set the board on a map first")]
+    #[error("{}", rust_i18n::t!("ui.tactics.preset_needs_a_map"))]
     PresetNeedsMap,
-    #[error("The board could not be saved: {source}")]
+    #[error("{}", rust_i18n::t!("ui.tactics.preset_save_failed", error = source.to_string()))]
     PresetSave {
         name: String,
         #[source]
         source: PresetError,
     },
-    #[error("The board could not be opened: {source}")]
+    #[error("{}", rust_i18n::t!("ui.tactics.preset_load_failed", error = source.to_string()))]
     PresetLoad {
         name: String,
         #[source]
         source: PresetError,
     },
-    #[error("The board could not be dropped: {source}")]
+    #[error("{}", rust_i18n::t!("ui.tactics.preset_delete_failed", error = source.to_string()))]
     PresetDelete {
         name: String,
         #[source]
         source: PresetError,
     },
-    #[error("World of Warships directory is not set")]
+    #[error("{}", rust_i18n::t!("ui.messages.wows_dir_not_set"))]
     NoReplaysDir,
-    #[error("Load a game build first")]
+    #[error("{}", rust_i18n::t!("ui.tactics.scan_needs_game_data"))]
     NoGameData,
     #[error("there is no map {value:?} to set the board on")]
     UnknownMap { value: String },
