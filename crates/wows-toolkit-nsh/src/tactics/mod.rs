@@ -12,6 +12,9 @@ mod view;
 
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 
 use nsh_core::prelude::*;
 use wows_replay_insights::cap_layout::CapLayoutDb;
@@ -69,6 +72,56 @@ fn stop_following_session() {
     }
 }
 
+/// Orders the board's opens against its closes. An open loads for a while
+/// before it replaces the board, and one the board closed under, or a later
+/// open overtook, must not bring the board back or follow the session.
+struct OpenGate {
+    generation: Mutex<u64>,
+}
+
+impl OpenGate {
+    const fn new() -> Self {
+        Self { generation: Mutex::new(0) }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, u64> {
+        self.generation.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Starts an open, overtaking any still under way.
+    fn begin(&self) -> OpenTicket {
+        let mut generation = self.lock();
+        *generation += 1;
+
+        OpenTicket(*generation)
+    }
+
+    /// Runs `apply` when `ticket` is still the current open, holding the gate
+    /// so no close comes between the check and the change. Whether it ran.
+    fn finish(&self, ticket: OpenTicket, apply: impl FnOnce()) -> bool {
+        let generation = self.lock();
+        if *generation != ticket.0 {
+            return false;
+        }
+        apply();
+
+        true
+    }
+
+    /// Abandons any open under way and runs `apply` under the gate.
+    fn close(&self, apply: impl FnOnce()) {
+        let mut generation = self.lock();
+        *generation += 1;
+        apply();
+    }
+}
+
+/// One started open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenTicket(u64);
+
+static OPENS: OpenGate = OpenGate::new();
+
 /// Changes the board and answers what it now shows.
 fn change(edit: impl FnOnce(&mut Board)) -> TacticsView {
     let shared = shared();
@@ -91,6 +144,7 @@ impl Tactics {
     /// Opens a fresh board on the installed build, with the capture layouts
     /// recorded so far. Loads the build the first time.
     pub async fn open() -> Result<TacticsView, String> {
+        let ticket = OPENS.begin();
         let layouts = blocking(load_layouts).await.map_err(|error| format!("tactics layout task failed: {error}"))?;
         let loaded = blocking(crate::game_data::wait_current_build)
             .await
@@ -103,27 +157,31 @@ impl Tactics {
             Err(error) => return Err(error.to_string()),
         };
         let replays_dir = crate::game_data::replays_dir();
-        let shared = shared();
-        shared.update(|board| {
-            board.close();
-            let viewport = board.viewport();
-            *board = Board::new(game, layouts, replays_dir);
-            if let Some(viewport) = viewport {
-                board.resize(viewport);
-            }
+        // An open the board closed under, or a later open overtook, leaves
+        // the board as it is and answers what it shows.
+        OPENS.finish(ticket, || {
+            shared().update(|board| {
+                board.close();
+                let viewport = board.viewport();
+                *board = Board::new(game, layouts, replays_dir);
+                if let Some(viewport) = viewport {
+                    board.resize(viewport);
+                }
+            });
+            follow_session();
         });
-        follow_session();
         Ok(current())
     }
 
     /// Closes the board: a replay walk stops, and the session stops offering
-    /// it.
+    /// it. An open still loading is abandoned.
     pub fn close() {
-        stop_following_session();
-        let shared = shared();
-        shared.update(|board| {
-            board.close();
-            *board = board.reopened();
+        OPENS.close(|| {
+            stop_following_session();
+            shared().update(|board| {
+                board.close();
+                *board = board.reopened();
+            });
         });
     }
 

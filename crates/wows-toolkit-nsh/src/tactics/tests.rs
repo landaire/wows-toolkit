@@ -366,3 +366,34 @@ fn the_board_follows_a_new_session_link() {
         heard.iter().any(|event| matches!(event, LocalEvent::TacticsMapOpened { .. }))
     });
 }
+
+#[test]
+fn an_open_the_board_closed_under_leaves_the_board_alone() {
+    let gate = crate::tactics::OpenGate::new();
+    let ticket = gate.begin();
+    gate.close(|| {});
+
+    let mut replaced = false;
+    assert!(!gate.finish(ticket, || replaced = true));
+    assert!(!replaced, "a closed board is not replaced by the open it closed under");
+}
+
+#[test]
+fn a_later_open_overtakes_an_earlier_one() {
+    let gate = crate::tactics::OpenGate::new();
+    let earlier = gate.begin();
+    let later = gate.begin();
+
+    assert!(!gate.finish(earlier, || {}), "the overtaken open leaves the board alone");
+    assert!(gate.finish(later, || {}), "the latest open replaces the board");
+}
+
+#[test]
+fn an_open_nothing_interrupted_replaces_the_board() {
+    let gate = crate::tactics::OpenGate::new();
+    let ticket = gate.begin();
+
+    let mut replaced = false;
+    assert!(gate.finish(ticket, || replaced = true));
+    assert!(replaced);
+}
