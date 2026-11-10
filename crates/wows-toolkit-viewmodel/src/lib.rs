@@ -21,6 +21,12 @@ pub fn locale() -> String {
     rust_i18n::locale().to_string()
 }
 
+/// `key`'s text in the language this crate is translating into, for a front
+/// end that reads the shared catalogue without an `i18n!` of its own.
+pub fn translate(key: &str) -> String {
+    rust_i18n::t!(key).into_owned()
+}
+
 pub mod armor;
 pub mod breakdown;
 pub mod bug_report;

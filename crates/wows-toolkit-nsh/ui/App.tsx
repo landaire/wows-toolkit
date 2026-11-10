@@ -1,16 +1,16 @@
-import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
+import { keymap, mount, Scroll, signal, Storage, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
-import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
+import { Checkbox, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
+import { ReplayInspector as NativeReplayInspector, Palette, Toolkit, type PlayerTrackerState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
+import { bindPalette, CommandPalette, openPalette } from "./palette";
+import { bindSearchTab, SearchView } from "./search";
 import { colors, controlRadius } from "./theme";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
 const aboutOpen = signal(false);
 const tacticsOpen = signal(false);
-const paletteOpen = signal(false);
-const paletteQuery = signal("");
 const notice = signal<string | null>(null);
 const settings = signal<SettingsState | null>(null);
 const settingsBaseline = signal<SettingsState | null>(null);
@@ -25,13 +25,6 @@ const playerTrackerLoading = signal(false);
 const playerTrackerError = signal<string | null>(null);
 const playerTrackerPeriod = signal("day");
 const playerTrackerQuery = signal("");
-const searchQuery = signal("");
-const searchState = signal<SearchState | null>(null);
-const searchLoading = signal(false);
-const searchError = signal<string | null>(null);
-const searchHasRun = signal(false);
-const searchSortColumn = signal("date");
-const searchSortDescending = signal(true);
 const replayOpenPath = signal<string | null>(null);
 const replayOpenRequestId = signal(0);
 let settingsRequested = false;
@@ -197,48 +190,6 @@ function updatePlayerTrackerQuery(query: string) {
     }, 200);
   }
 }
-type SearchSort = {
-  column: string;
-  descending: boolean;
-};
-
-async function runSearch(preserveResults = false, rollback?: SearchSort) {
-  if (searchLoading()) return;
-  searchLoading.set(true);
-  if (!preserveResults) searchState.set(null);
-  searchError.set(null);
-  searchHasRun.set(true);
-  try {
-    searchState.set(await Toolkit.searchIndex(searchQuery(), searchSortColumn(), searchSortDescending()));
-  } catch (error) {
-    if (rollback) {
-      searchSortColumn.set(rollback.column);
-      searchSortDescending.set(rollback.descending);
-    }
-    searchError.set(`Search could not be completed: ${errorMessage(error)}`);
-  } finally {
-    searchLoading.set(false);
-  }
-}
-function defaultSearchSortDescending(column: string) {
-  return column !== "map" && column !== "mode";
-}
-
-function selectSearchSort(column: string) {
-  if (searchLoading()) return;
-  const rollback = { column: searchSortColumn(), descending: searchSortDescending() };
-  const defaultDescending = defaultSearchSortDescending(column);
-  if (column !== searchSortColumn()) {
-    searchSortColumn.set(column);
-    searchSortDescending.set(defaultDescending);
-  } else if (searchSortDescending() === defaultDescending) {
-    searchSortDescending.set(!defaultDescending);
-  } else {
-    searchSortColumn.set("date");
-    searchSortDescending.set(true);
-  }
-  void runSearch(true, rollback);
-}
 
 function openReplayPath(path: string) {
   if (!path) {
@@ -268,36 +219,11 @@ function openDroppedReplay(uris: string[]) {
   showNotice("Drop a World of Warships replay file.");
 }
 
-function searchColumnHeader(label: string, column: string, width: number) {
-  const selected = () => searchSortColumn() === column;
-  const sortLabel = () => selected() ? `${label} (${searchSortDescending() ? "desc" : "asc"})` : label;
-  return (
-    <View
-      role="columnheader"
-      accessibilityLabel={selected() ? `${label}, sorted ${searchSortDescending() ? "descending" : "ascending"}` : `Sort by ${label}`}
-      accessibilityState={{ selected: selected() }}
-      onPress={() => selectSearchSort(column)}
-      hoverStyle={{ backgroundColor: colors.accent }}
-      style={{ width, minHeight: 34, justifyContent: "center" }}
-    >
-      <Text style={{ fontSize: 12, fontWeight: "600", color: selected() ? colors.foreground : colors.mutedForeground }}>{sortLabel()}</Text>
-    </View>
-  );
-}
-
-
-
-
 function showNotice(message: string) {
   notice.set(message);
   setTimeout(() => {
     if (notice() === message) notice.set(null);
   }, 4000);
-}
-
-function openPalette() {
-  paletteQuery.set("");
-  paletteOpen.set(true);
 }
 
 type Release = {
@@ -349,7 +275,32 @@ keymap.bind({
   "mod+6": () => selectTab(startup.tabs[5].id),
   "mod+7": () => selectTab(startup.tabs[6].id),
   "mod+,": () => selectTab("settings"),
-  "mod+k": openPalette,
+});
+
+bindSearchTab(() => selectTab("search"));
+bindPalette({
+  tabs: startup.tabs,
+  activeTab: () => activeTab(),
+  shellLabels: {
+    tacticsBoard: startup.text.tacticsBoard,
+    checkUpdates: startup.text.checkUpdates,
+    about: `${startup.text.about} WoWs Toolkit`,
+  },
+  handlers: {
+    goTo: ({ tab }) => selectTab(tab),
+    advancedSearch: () => selectTab("search"),
+    openReplayFile: () => {
+      void Palette.pickReplay().then(
+        (path) => {
+          if (path) openReplayPath(path);
+        },
+        (error) => showNotice(errorMessage(error)),
+      );
+    },
+    tacticsBoard: () => tacticsOpen.set(true),
+    checkUpdates: () => void checkForUpdates(),
+    about: () => aboutOpen.set(true),
+  },
 });
 
 function ApplicationMenu() {
@@ -612,100 +563,6 @@ function PlayerTrackerView() {
   );
 }
 
-function SearchView() {
-  const current = () => searchState();
-  return (
-    <View style={{ flex: 1, minHeight: 0 }}>
-      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Search</Text>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Query the shared replay index</Text>
-        </View>
-        <Button label={searchLoading() ? "Searching..." : "Run Search"} disabled={searchLoading()} onPress={() => void runSearch()}/>
-      </View>
-      <View style={{ flex: 1, minHeight: 0, padding: 18, gap: 12 }}>
-        <Input
-          accessibilityLabel="Replay search query"
-          disabled={searchLoading()}
-          value={searchQuery()}
-          placeholder="map:Ocean and outcome:win"
-          onChange={({ value }) => searchQuery.set(value)}
-          style={inputStyle}
-        />
-        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
-          An empty query matches every indexed replay. Use fields such as map, mode, outcome, player, clan, ship, tier, and damage.
-        </Text>
-        <If when={!searchHasRun()}>
-          <EmptyState title="Search indexed replays" description="Enter a query or run an empty query to list recent indexed battles."/>
-        </If>
-        <If when={searchLoading() && !current()}>
-          <EmptyState title="Searching replays" description="Reading the shared replay index."/>
-        </If>
-        <If when={!searchLoading() && searchError() && !current()}>
-          <EmptyState title="Search unavailable" description={searchError()!} action={<Button label="Try Again" onPress={() => void runSearch()}/>}/>
-        </If>
-        <If when={!searchLoading() && !searchError() && current() && current()!.results.length === 0}>
-          <EmptyState title="No matching replays" description="Change the query and run the search again."/>
-        </If>
-        <If when={current() && current()!.results.length > 0}>
-          <View style={{ flex: 1, minHeight: 0, gap: 6 }}>
-            <If when={searchError()}>
-              <Surface style={{ padding: 12, borderColor: colors.destructive }}>
-                <Text style={{ fontSize: 12, color: colors.destructive }}>{searchError()}</Text>
-              </Surface>
-            </If>
-            <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
-              {current()!.truncated ? "Showing the first 500 matches" : `${current()!.results.length.toFixed(0)} matches`}
-            </Text>
-            <Scroll style={{ flex: 1 }}>
-              <Scroll horizontal style={{ width: "100%" }} contentStyle={{ minWidth: 1070 }}>
-                <Surface style={{ minWidth: 1070, overflow: "hidden" }}>
-                  <View role="table" accessibilityLabel="Replay search results">
-                    <View role="row" style={{ minHeight: 34, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.muted }}>
-                      {searchColumnHeader("Date", "date", 180)}
-                      {searchColumnHeader("Map", "map", 150)}
-                      {searchColumnHeader("Mode", "mode", 150)}
-                      <Text role="columnheader" style={{ width: 150, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Ship</Text>
-                      {searchColumnHeader("Outcome", "outcome", 90)}
-                      {searchColumnHeader("Damage", "damage", 110)}
-                      {searchColumnHeader("Kills", "kills", 80)}
-                      {searchColumnHeader("PR", "pr", 90)}
-                    </View>
-                    <Each of={current()!.results}>
-                      {(result) => (
-                        <View
-                          role="row"
-                          accessibilityLabel={`Open replay ${result().replayPath}`}
-                          onPress={() => openReplayPath(result().replayPath)}
-                          hoverStyle={{ backgroundColor: colors.accent }}
-                          activeStyle={{ opacity: 0.72 }}
-                          style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
-                        >
-                          <Text role="cell" style={{ width: 180, fontSize: 11.5, color: colors.cardForeground }}>{result().timestamp}</Text>
-                          <Text role="cell" style={{ width: 150, fontSize: 12, color: colors.cardForeground }}>{result().map}</Text>
-                          <View role="cell" style={{ width: 150 }}>
-                            <Text style={{ fontSize: 12, color: colors.cardForeground }}>{result().mode}</Text>
-                            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{result().gameType}</Text>
-                          </View>
-                          <Text role="cell" style={{ width: 150, fontSize: 12, color: colors.cardForeground }}>{result().ship}</Text>
-                          <Text role="cell" style={{ width: 90, fontSize: 12, color: colors.cardForeground }}>{result().outcome}</Text>
-                          <Text role="cell" style={{ width: 110, fontSize: 12, color: colors.cardForeground }}>{result().damage}</Text>
-                          <Text role="cell" style={{ width: 80, fontSize: 12, color: colors.cardForeground }}>{result().kills}</Text>
-                          <Text role="cell" style={{ width: 90, fontSize: 12, color: colors.cardForeground }}>{result().pr}</Text>
-                        </View>
-                      )}
-                    </Each>
-                  </View>
-                </Surface>
-              </Scroll>
-            </Scroll>
-          </View>
-        </If>
-      </View>
-    </View>
-  );
-}
-
 const inputStyle = {
   minHeight: 34,
   paddingHorizontal: 9,
@@ -946,7 +803,7 @@ function Content() {
         <PlayerTrackerView/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "search" ? "flex" : "none" }}>
-        <SearchView/>
+        <SearchView onOpenReplay={openReplayPath} onNotice={showNotice}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
@@ -985,73 +842,6 @@ function TacticsDialog() {
         <View style={{ alignItems: "flex-end" }}>
           <Button label="Close" onPress={() => tacticsOpen.set(false)}/>
         </View>
-      </Surface>
-    </Dialog>
-  );
-}
-
-const commandItems = [
-  ...startup.tabs.map((tab, index) => ({
-    id: `tab:${tab.id}`,
-    label: `Go to ${tab.label}`,
-    keywords: [tab.id, tab.description],
-    group: "Navigate",
-    shortcut: index < 7 ? `mod+${index + 1}` : tab.id === "settings" ? "mod+," : undefined,
-  })),
-  { id: "action:tactics", label: startup.text.tacticsBoard, keywords: ["map", "plan"], group: "Actions" },
-  { id: "action:updates", label: startup.text.checkUpdates, keywords: ["release", "version"], group: "Actions" },
-  { id: "action:about", label: `${startup.text.about} WoWs Toolkit`, keywords: ["version"], group: "Actions" },
-];
-
-function executeCommand(id: string) {
-  paletteOpen.set(false);
-  if (id.startsWith("tab:")) {
-    selectTab(id.slice(4));
-  } else if (id === "action:tactics") {
-    tacticsOpen.set(true);
-  } else if (id === "action:updates") {
-    void checkForUpdates();
-  } else if (id === "action:about") {
-    aboutOpen.set(true);
-  }
-}
-
-function CommandPalette() {
-  return (
-    <Dialog open={paletteOpen()} onOpenChange={({ open }) => paletteOpen.set(open)}>
-      <Surface style={{ width: "100%", maxWidth: 640, maxHeight: Math.max(160, windowSize().height - 32), overflow: "hidden", backgroundColor: colors.popover }}>
-        <Command
-          items={commandItems}
-          autoFocus
-          query={paletteQuery()}
-          placeholder="Type a command..."
-          accessibilityLabel="Command palette"
-          onSelect={({ id }) => executeCommand(id)}
-          onQueryChange={({ query }) => paletteQuery.set(query)}
-          onCancel={() => paletteOpen.set(false)}
-          header={
-            <Text style={{ paddingHorizontal: 14, paddingTop: 12, fontSize: 13, fontWeight: "600", color: colors.popoverForeground }}>
-              Command Palette
-            </Text>
-          }
-          empty={
-            <Text style={{ padding: 18, textAlign: "center", fontSize: 13, color: colors.mutedForeground }}>
-              No matching commands.
-            </Text>
-          }
-          footer={
-            <Text style={{ padding: 10, fontSize: 11.5, color: colors.mutedForeground }}>
-              Enter to run. Escape clears, then closes.
-            </Text>
-          }
-          searchBarStyle={{ minHeight: 46, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}
-          searchStyle={{ fontSize: 14, color: colors.popoverForeground, placeholderColor: colors.mutedForeground }}
-          listStyle={{ maxHeight: Math.min(420, Math.max(0, windowSize().height - 180)), padding: 6 }}
-          itemClass="text-popover-foreground hover:bg-accent focus:bg-accent focus:text-accent-foreground"
-          itemStyle={{ minHeight: 34, paddingHorizontal: 10, borderRadius: controlRadius(), fontSize: 13 }}
-          groupStyle={{ paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "600", color: colors.mutedForeground }}
-          separatorStyle={{ height: 1, marginVertical: 4, backgroundColor: colors.border }}
-        />
       </Surface>
     </Dialog>
   );

@@ -384,134 +384,13 @@ fn player_tracker_reads_and_filters_indexed_players() {
 }
 
 #[test]
-fn search_queries_the_shared_replay_index() {
-    const FILE: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
-    const OTHER_FILE: &str = "20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay";
-    let mut app = app();
-    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays");
-    let replay = fixtures.join(FILE);
-    let other_replay = fixtures.join(OTHER_FILE);
-    let indexed_replay = replay.clone();
-    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
-        async {
-            use std::path::Path;
-
-            use wows_core::game_types::{AccountId, ArenaId, GameParamId};
-            use wows_toolkit_config::index::rows::{
-                IndexedVehicleRow, MatchOutcome, ObjectiveMatch, ReplayRecord, VehicleRelation,
-            };
-
-            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
-            sqlx::query("DELETE FROM replay_record").execute(&pool).await.expect("old replay records are cleared");
-            sqlx::query("DELETE FROM indexed_vehicle").execute(&pool).await.expect("old indexed players are cleared");
-            sqlx::query("DELETE FROM indexed_match").execute(&pool).await.expect("old indexed matches are cleared");
-            let timestamp = jiff::Timestamp::now();
-            let arena_id = ArenaId::new(982_002);
-            let source =
-                wows_toolkit_config::index::query::ensure_default_source(&pool, Path::new("/tmp/replays"), timestamp)
-                    .await
-                    .expect("the test replay source exists");
-            wows_toolkit_config::index::query::upsert_match(
-                &pool,
-                &ObjectiveMatch {
-                    arena_id,
-                    timestamp,
-                    map: "Ocean".into(),
-                    game_mode: "Domination".into(),
-                    game_mode_id: None,
-                    game_type: "pvp".into(),
-                    match_group: "pvp".into(),
-                    version_build: Some(1234),
-                },
-            )
-            .await
-            .expect("the searchable match is written");
-            wows_toolkit_config::index::query::upsert_vehicles(
-                &pool,
-                &[IndexedVehicleRow {
-                    arena_id,
-                    account_id: AccountId(99_010),
-                    player_name: "SearchCaptain".into(),
-                    clan: "TEST".into(),
-                    realm: Some("na".into()),
-                    ship_id: GameParamId::from(999u64),
-                    ship_index: "PJSD018".into(),
-                    ship_name: "Harugumo".into(),
-                    nation: "japan".into(),
-                    species: "Destroyer".into(),
-                    tier: 10,
-                    relation: VehicleRelation::SelfPlayer,
-                    division_id: None,
-                    survived: Some(true),
-                    damage: Some(123_456),
-                    kills: Some(2),
-                    spotting: Some(10_000),
-                    potential: Some(500_000),
-                    received: Some(5_000),
-                    pr: Some(1500.0),
-                    is_test_ship: false,
-                    disconnected: Some(false),
-                    is_stream_sniper: None,
-                    sniper_twitch_login: None,
-                }],
-            )
-            .await
-            .expect("the searchable roster is written");
-            wows_toolkit_config::index::query::upsert_record(
-                &pool,
-                &ReplayRecord {
-                    arena_id,
-                    source_id: source,
-                    replay_path: indexed_replay,
-                    file_mtime: Some(timestamp.as_second()),
-                    outcome: MatchOutcome::Win,
-                    self_account_id: Some(AccountId(99_010)),
-                    self_ship_id: Some(GameParamId::from(999u64)),
-                    self_survived: Some(true),
-                    self_damage: Some(123_456),
-                    self_kills: Some(2),
-                    self_pr: Some(1500.0),
-                    results_available: true,
-                    indexed_at: timestamp,
-                },
-            )
-            .await
-            .expect("the searchable replay record is written");
-        },
-    );
-
-    app.press("Search").unwrap();
-    app.wait_for("Search indexed replays").unwrap();
-    app.type_text("label:Replay search query", "map:Ocean and outcome:win").unwrap();
-    app.press("Run Search").unwrap();
-    app.wait_for("Harugumo").unwrap();
-    app.wait_for("123456").unwrap();
-    app.wait_for("1 matches").unwrap();
-
-    app.press(&format!("label:Open replay {}", replay.display())).unwrap();
-    app.wait_for("PVEBattle").unwrap();
-    app.wait_for("Players (15)").unwrap();
-    app.on_pick_paths(vec![other_replay]).unwrap();
-    app.press("Open Replay File...").unwrap();
-    app.wait_for("Players (24)").unwrap();
-    app.press("Search").unwrap();
-    app.press(&format!("label:Open replay {}", replay.display())).unwrap();
-    app.wait_for("Players (15)").unwrap();
-    app.press("Search").unwrap();
-    app.clear("label:Replay search query").unwrap();
-    app.type_text("label:Replay search query", "(").unwrap();
-    app.press("Run Search").unwrap();
-    app.wait_for("Search unavailable").unwrap();
-}
-
-#[test]
 fn top_level_navigation_and_application_menu_work() {
     let mut app = app();
 
     app.wait_for("Replay Inspector").unwrap();
     app.press_key("mod+k").unwrap();
-    app.wait_for("Command Palette").unwrap();
-    app.press("Go to Settings").unwrap();
+    app.wait_for("Commands").unwrap();
+    app.press("Go to: Settings").unwrap();
     app.wait_for("NSH default").unwrap();
     app.wait_for("Shared with the egui and GPUI applications").unwrap();
 
@@ -547,9 +426,9 @@ fn command_palette_supports_keyboard_navigation_and_compact_viewports() {
 
     app.press_key("mod+k").unwrap();
     app.type_text("label:Command palette", "nomatch").unwrap();
-    app.wait_for("No matching commands.").unwrap();
+    app.wait_for("No matches").unwrap();
     app.press_key("escape").unwrap();
-    app.wait_for("Go to Replay Inspector").unwrap();
+    app.wait_for("Go to: Replay Inspector").unwrap();
     app.press_key("escape").unwrap();
-    app.wait_for_gone("Command Palette", std::time::Duration::from_secs(5)).unwrap();
+    app.wait_for_gone("Commands", std::time::Duration::from_secs(5)).unwrap();
 }

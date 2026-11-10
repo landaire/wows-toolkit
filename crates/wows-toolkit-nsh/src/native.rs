@@ -114,31 +114,6 @@ pub struct TrackedPlayer {
     pub encounters: u32,
 }
 
-/// Bounded results from the shared replay index.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct SearchState {
-    pub results: Vec<SearchResult>,
-    pub truncated: bool,
-}
-
-/// One indexed replay search result.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct SearchResult {
-    pub arena_id: String,
-    pub timestamp: String,
-    pub map: String,
-    pub mode: String,
-    pub game_type: String,
-    pub outcome: String,
-    pub ship: String,
-    pub damage: String,
-    pub kills: String,
-    pub pr: String,
-    pub replay_path: String,
-}
-
 #[derive(Debug)]
 struct ShipAccumulator {
     ship_name: String,
@@ -213,12 +188,6 @@ impl Toolkit {
         blocking(move || load_player_tracker(&period, &query))
             .await
             .map_err(|error| format!("player tracker reader task failed: {error}"))?
-    }
-    /// Searches the shared replay index using the common query language.
-    pub async fn search_index(query: String, sort_column: String, descending: bool) -> Result<SearchState, String> {
-        blocking(move || search_index(&query, &sort_column, descending))
-            .await
-            .map_err(|error| format!("search task failed: {error}"))?
     }
 }
 
@@ -341,68 +310,6 @@ fn load_player_tracker(period: &str, query: &str) -> Result<PlayerTrackerState, 
             })
             .collect::<Result<Vec<_>, String>>()?;
         Ok(PlayerTrackerState { players, total_players })
-    })
-}
-
-fn search_index(query: &str, sort_column: &str, descending: bool) -> Result<SearchState, String> {
-    let expression = wows_toolkit_config::index::query_text::parse_query(query)
-        .map_err(|error| format!("invalid query at {}..{}: {}", error.span.start, error.span.end, error.kind))?;
-    let column = match sort_column {
-        "date" => wows_toolkit_config::index::query::SortColumn::Date,
-        "map" => wows_toolkit_config::index::query::SortColumn::Map,
-        "mode" => wows_toolkit_config::index::query::SortColumn::Mode,
-        "outcome" => wows_toolkit_config::index::query::SortColumn::Outcome,
-        "damage" => wows_toolkit_config::index::query::SortColumn::Damage,
-        "kills" => wows_toolkit_config::index::query::SortColumn::Kills,
-        "pr" => wows_toolkit_config::index::query::SortColumn::Pr,
-        _ => return Err(format!("unsupported search sort column: {sort_column}")),
-    };
-    let direction = if descending {
-        wows_toolkit_config::index::query::SortDirection::Descending
-    } else {
-        wows_toolkit_config::index::query::SortDirection::Ascending
-    };
-    let sort = wows_toolkit_config::index::query::SortSpec { column, direction };
-    database_runtime()?.block_on(async {
-        let pool = wows_toolkit_config::open_db()
-            .await
-            .map_err(|error| format!("could not open the replay index: {error}"))?;
-        let mut hits = wows_toolkit_config::index::query::search_by_ast(
-            &pool,
-            &expression,
-            &wows_toolkit_config::index::query_sql::CompileCtx::default(),
-            500,
-            sort,
-        )
-        .await
-        .map_err(|error| format!("could not search indexed replays: {error}"))?;
-        let truncated = hits.len() > 500;
-        hits.truncate(500);
-        let results = hits
-            .into_iter()
-            .map(|hit| {
-                let ship = wows_toolkit_viewmodel::search::ship_display_name_from_parts(
-                    hit.self_ship_id,
-                    hit.self_ship_name.as_deref(),
-                    None,
-                )
-                .unwrap_or_else(|| "Spectator".to_owned());
-                SearchResult {
-                    arena_id: hit.arena_id.raw().to_string(),
-                    timestamp: hit.timestamp.to_string(),
-                    map: hit.map,
-                    mode: hit.game_mode,
-                    game_type: hit.game_type,
-                    outcome: hit.outcome.as_db_str().to_owned(),
-                    ship,
-                    damage: hit.self_damage.map(|damage| damage.to_string()).unwrap_or_else(|| "-".to_owned()),
-                    kills: hit.self_kills.map(|kills| kills.to_string()).unwrap_or_else(|| "-".to_owned()),
-                    pr: hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".to_owned()),
-                    replay_path: hit.replay_path.to_string_lossy().into_owned(),
-                }
-            })
-            .collect();
-        Ok(SearchState { results, truncated })
     })
 }
 
@@ -545,7 +452,7 @@ fn save_settings(mut settings: SettingsState, changed: Vec<String>) -> Result<Se
     })
 }
 
-fn database_runtime() -> Result<tokio::runtime::Runtime, String> {
+pub(crate) fn database_runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
