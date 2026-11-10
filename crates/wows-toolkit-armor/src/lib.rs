@@ -11,6 +11,7 @@ pub mod highlight;
 pub mod hits;
 pub mod load_ship;
 pub mod realtime;
+pub mod scene;
 pub mod splash;
 pub mod trajectory;
 pub mod upload;
