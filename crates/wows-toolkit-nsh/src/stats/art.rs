@@ -17,8 +17,14 @@ use wowsunpack::game_params::translations::translate_achievement_description;
 use wowsunpack::game_params::translations::translate_achievement_name;
 use wowsunpack::game_params::types::GameParamProvider;
 
-/// A build number and the asset key read from it.
-type ArtKey = (u32, String);
+use crate::replay_inspector::constants::BuildNumber;
+
+/// An asset read from one build.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ArtKey {
+    build: BuildNumber,
+    asset: String,
+}
 
 /// `data:` URLs already read, by build and asset. `None` records an asset
 /// the build does not have, so it is not looked for again.
@@ -64,8 +70,8 @@ impl GameArt {
         self.url(format!("class:{species:?}"), "image/svg+xml", GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive })
     }
 
-    fn url(&self, key: String, mime: &str, asset: GuiAsset<'_>) -> Option<Arc<str>> {
-        let cache_key = (self.loaded.build(), key);
+    fn url(&self, asset_key: String, mime: &str, asset: GuiAsset<'_>) -> Option<Arc<str>> {
+        let cache_key = ArtKey { build: BuildNumber(self.loaded.build()), asset: asset_key };
         if let Some(known) = URLS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&cache_key) {
             return known.clone();
         }

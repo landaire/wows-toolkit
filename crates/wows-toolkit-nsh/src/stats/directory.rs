@@ -21,7 +21,9 @@ use wows_toolkit_viewmodel::stats::replay_set::ReplaySetProgress;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetSkips;
 
 use super::ScopeView;
+use super::ids::ScopeName;
 use super::scope::Scope;
+use crate::js_newtype::js_newtype;
 use crate::text::text;
 use crate::text::text_with;
 
@@ -32,17 +34,41 @@ const FOLD_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Names one open directory view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct DirectoryId(pub(crate) u32);
+pub(crate) struct DirectoryId(u32);
 
 impl DirectoryId {
-    pub(crate) fn scope_name(self) -> String {
-        format!("directory-{}", self.0)
+    pub(crate) const FIRST: Self = Self(0);
+
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
     }
 
-    pub(crate) fn parse(scope: &str) -> Option<Self> {
-        scope.strip_prefix("directory-")?.parse().ok().map(Self)
+    pub(crate) fn scope_name(self) -> ScopeName {
+        ScopeName::new(format!("directory-{}", self.0))
+    }
+
+    pub(crate) fn parse(scope: &ScopeName) -> Option<Self> {
+        scope.as_str().strip_prefix("directory-")?.parse().ok().map(Self)
     }
 }
+
+/// Counts the changes to a directory view, so a caller can wait for the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectoryRevision(u32);
+
+js_newtype!(DirectoryRevision, u32);
+
+impl DirectoryRevision {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+/// How far a read has got, in `0..=1`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReadProgress(f64);
+
+js_newtype!(ReadProgress, f64);
 
 /// Where the read of a directory has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +89,7 @@ pub(crate) struct DirectoryRead {
     games: ReplaySetGames,
     /// Set to stop the running read: the view closed or is reading again.
     cancel: Arc<AtomicBool>,
-    revision: tokio::sync::watch::Sender<u32>,
+    revision: tokio::sync::watch::Sender<DirectoryRevision>,
 }
 
 impl DirectoryRead {
@@ -74,7 +100,7 @@ impl DirectoryRead {
             skips: ReplaySetSkips::default(),
             games: ReplaySetGames::new(),
             cancel: Arc::new(AtomicBool::new(false)),
-            revision: tokio::sync::watch::channel(0).0,
+            revision: tokio::sync::watch::channel(DirectoryRevision(0)).0,
         }
     }
 
@@ -86,7 +112,7 @@ impl DirectoryRead {
         self.state == ReadState::Finished
     }
 
-    pub(crate) fn revisions(&self) -> tokio::sync::watch::Receiver<u32> {
+    pub(crate) fn revisions(&self) -> tokio::sync::watch::Receiver<DirectoryRevision> {
         self.revision.subscribe()
     }
 
@@ -107,7 +133,7 @@ impl DirectoryRead {
     }
 
     fn bump(&self) {
-        self.revision.send_modify(|revision| *revision = revision.wrapping_add(1));
+        self.revision.send_modify(|revision| *revision = revision.next());
     }
 
     /// Folds `updates` in. Returns whether games were added.
@@ -130,7 +156,7 @@ impl DirectoryRead {
 
     pub(crate) fn status(&self, view: ScopeView) -> DirectoryStatus {
         let progress = match self.state {
-            ReadState::Scanning(progress) | ReadState::Reading(progress) => Some(f64::from(progress.fraction())),
+            ReadState::Scanning(progress) | ReadState::Reading(progress) => Some(ReadProgress(f64::from(progress.fraction()))),
             ReadState::Walking | ReadState::Finished => None,
         };
         let count = |progress: ReplaySetProgress| [("done", progress.done.to_string()), ("total", progress.total.to_string())];
@@ -179,12 +205,12 @@ impl DirectoryRead {
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct DirectoryStatus {
-    pub revision: u32,
+    pub revision: DirectoryRevision,
     pub root: String,
     /// What the read is doing, while it runs.
     pub status: Option<String>,
-    /// How far it has got, in `0..=1`, while it reads.
-    pub progress: Option<f64>,
+    /// How far it has got, while it reads.
+    pub progress: Option<ReadProgress>,
     pub finished: bool,
     pub skipped: Option<String>,
     /// Why each skipped replay was skipped, by reason.
@@ -208,6 +234,7 @@ pub(crate) fn start(id: DirectoryId, game_data: GameDataCache) {
         scope.set_games(Vec::new());
         Ok((read.root().clone(), cancel))
     });
+    // The view closed before the read began.
     let Ok((root, cancel)) = begun else { return };
 
     let spawned = std::thread::Builder::new().name(format!("directory-stats-{}", id.0)).spawn(move || {
@@ -228,6 +255,7 @@ pub(crate) fn start(id: DirectoryId, game_data: GameDataCache) {
             return;
         }
         fold(id, pending, &cancel);
+        // The view may have closed; it then has nothing to mark finished.
         let _ = super::with_directory(id, |_, read| {
             read.state = ReadState::Finished;
             read.bump();
@@ -236,6 +264,7 @@ pub(crate) fn start(id: DirectoryId, game_data: GameDataCache) {
     });
     if let Err(error) = spawned {
         log::warn!("directory stats: no thread to read on: {error}");
+        // The view may have closed; it then has nothing to mark finished.
         let _ = super::with_directory(id, |_, read| {
             read.state = ReadState::Finished;
             read.bump();
@@ -245,6 +274,7 @@ pub(crate) fn start(id: DirectoryId, game_data: GameDataCache) {
 }
 
 fn fold(id: DirectoryId, updates: Vec<DirectoryStatsUpdate>, cancel: &AtomicBool) {
+    // The view may have closed; its games are then not wanted.
     let _ = super::with_directory(id, |scope, read| {
         // A read stopped while this batch was gathered is not this view's.
         if cancel.load(Ordering::Relaxed) {

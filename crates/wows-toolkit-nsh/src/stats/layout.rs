@@ -17,6 +17,9 @@ use nsh_base::dock::PanelState;
 use nsh_core::geometry::px;
 use wows_toolkit_viewmodel::stats::chart_model::ChartId;
 
+use super::error::LayoutError;
+use super::ids::ViewChartId;
+
 /// The settings row the open charts are kept in.
 pub(crate) const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 
@@ -30,21 +33,10 @@ const OVERVIEW_PANEL_NAME: &str = "StatsOverviewPanel";
 const SHIPS_PANEL_NAME: &str = "StatsShipsPanel";
 const CHART_PANEL_NAME: &str = "StatsChartPanel";
 
-/// Why a layout could not be read or written.
-#[derive(Debug, thiserror::Error)]
-pub enum LayoutError {
-    #[error("the layout names a panel this tab does not have: {panel}")]
-    UnknownPanel { panel: String },
-    #[error("the layout repeats chart {id}")]
-    RepeatedChart { id: usize },
-    #[error("chart {id} has an id too large to show")]
-    ChartIdTooLarge { id: usize },
-}
-
 /// Refuses a chart id the view cannot address: the TSX view numbers charts
 /// with 32 bits.
 pub(crate) fn check_chart_id(id: ChartId) -> Result<ChartId, LayoutError> {
-    u32::try_from(id.0).map(|_| id).map_err(|_| LayoutError::ChartIdTooLarge { id: id.0 })
+    ViewChartId::from_chart(id).map(|_| id).ok_or(LayoutError::ChartIdTooLarge { id })
 }
 
 /// One panel of the Stats tab.
@@ -178,7 +170,7 @@ pub(crate) fn charts(layout: &DockAreaLayout) -> Result<Vec<ChartId>, LayoutErro
         let StatsPanel::Chart(id) = panel else { continue };
         let id = check_chart_id(id)?;
         if charts.contains(&id) {
-            return Err(LayoutError::RepeatedChart { id: id.0 });
+            return Err(LayoutError::RepeatedChart { id });
         }
         charts.push(id);
     }

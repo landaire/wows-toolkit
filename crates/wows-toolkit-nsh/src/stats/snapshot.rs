@@ -3,7 +3,7 @@
 //! Every figure is formatted here, in the reader's locale, so the view only
 //! lays text out.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use nsh_core::prelude::*;
 use wows_replays::types::GameParamId;
@@ -27,6 +27,9 @@ use wows_toolkit_viewmodel::stats::session_personal_rating;
 use wows_toolkit_viewmodel::stats::table as stats_table;
 
 use super::art::GameArt;
+use super::ids::MatchGroup;
+use super::ids::ParamIdText;
+use super::scope::RecentLimit;
 use crate::text::text;
 use crate::text::text_with;
 
@@ -68,14 +71,14 @@ pub struct FilterState {
     pub limit_count: u32,
     pub division: DivisionChoice,
     /// Match groups kept; empty keeps every group.
-    pub game_modes: Vec<String>,
+    pub game_modes: Vec<MatchGroup>,
 }
 
 /// A match group the session holds, with its display name.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ModeOption {
-    pub id: String,
+    pub id: MatchGroup,
     pub label: String,
     pub selected: bool,
 }
@@ -100,7 +103,7 @@ pub struct RatingChip {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct OverviewShip {
-    pub ship_id: String,
+    pub ship_id: ParamIdText,
     pub name: String,
     pub battles: String,
     pub win_rate: String,
@@ -112,7 +115,7 @@ pub struct OverviewShip {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct AchievementTile {
-    pub id: String,
+    pub id: ParamIdText,
     pub name: String,
     pub description: String,
     /// `x3`, as the GPUI tile reads.
@@ -157,7 +160,7 @@ pub struct StatRow {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ShipSection {
-    pub ship_id: String,
+    pub ship_id: ParamIdText,
     pub name: String,
     /// The ship's name folded for search.
     pub search_key: String,
@@ -196,18 +199,19 @@ pub struct StatsSnapshot {
     pub ships: Vec<ShipSection>,
 }
 
-/// The filter bar's state for `filters`, with `last_count` standing for the
+/// The filter bar's state for `filters`, with `last_limit` standing for the
 /// count while the limit is off.
-pub(crate) fn filter_state(filters: &StatsFilters, last_count: usize) -> FilterState {
+pub(crate) fn filter_state(filters: &StatsFilters, last_limit: RecentLimit) -> FilterState {
     let (limit_enabled, count) = match filters.limit {
-        GameLimit::All => (false, last_count),
+        GameLimit::All => (false, last_limit.count()),
         GameLimit::Recent(count) => (true, count),
     };
     FilterState {
         limit_enabled,
+        // A scope's limit is clamped to 999, so saturating never applies.
         limit_count: u32::try_from(count).unwrap_or(u32::MAX),
         division: DivisionChoice::from_filter(filters.division),
-        game_modes: filters.game_modes.iter().cloned().collect(),
+        game_modes: filters.game_modes.iter().cloned().map(MatchGroup::new).collect(),
     }
 }
 
@@ -215,7 +219,7 @@ pub(crate) fn filter_state(filters: &StatsFilters, last_count: usize) -> FilterS
 pub(crate) fn snapshot(
     games: &[PerGameStat],
     filters: &StatsFilters,
-    last_count: usize,
+    last_limit: RecentLimit,
     table: Option<&PersonalRatingData>,
     art: Option<&GameArt>,
 ) -> StatsSnapshot {
@@ -225,7 +229,7 @@ pub(crate) fn snapshot(
         .map(|mode| ModeOption {
             label: match_group_display_name(&mode).to_owned(),
             selected: filters.game_modes.contains(&mode),
-            id: mode,
+            id: MatchGroup::new(mode),
         })
         .collect();
     let chosen: Vec<&str> = modes.iter().filter(|mode| mode.selected).map(|mode| mode.label.as_str()).collect();
@@ -243,8 +247,9 @@ pub(crate) fn snapshot(
     let per_ship = filter_games_per_ship(games, filters);
 
     StatsSnapshot {
+        // A count past u32 reads as the largest the view holds.
         game_count: u32::try_from(games.len()).unwrap_or(u32::MAX),
-        filters: filter_state(filters, last_count),
+        filters: filter_state(filters, last_limit),
         modes,
         mode_label,
         mode_summary,
@@ -271,7 +276,7 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Opt
         .into_iter()
         .map(|achievement| {
             let tile = AchievementTile {
-                id: achievement.game_param_id.raw().to_string(),
+                id: ParamIdText::from_id(achievement.game_param_id),
                 name: art.and_then(|art| art.achievement_name(&achievement.icon_key)).unwrap_or(achievement.display_name),
                 description: art
                     .and_then(|art| art.achievement_description(&achievement.icon_key))
@@ -297,18 +302,21 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Opt
             let damage = wows_toolkit_viewmodel::formatting::separate_number(damage, Some(locale));
             text_with("ui.stats.max_damage", &[("ship", &ship_name(ship)), ("damage", &damage)])
         }),
+        // Every group holds a game, so each has a ship id.
         ships: ships
             .iter()
-            .map(|(name, info)| OverviewShip {
-                ship_id: info.ship_id().map_or_else(String::new, |id| id.raw().to_string()),
-                name: name.clone(),
-                battles: info.total_games().to_string(),
-                win_rate: info.win_rate().map_or_else(|| "-".to_owned(), |rate| format!("{rate:.1}%")),
-                average_damage: info.avg_damage().map_or_else(
-                    || "-".to_owned(),
-                    |damage| wows_toolkit_viewmodel::formatting::separate_number(damage.round() as u64, Some(locale)),
-                ),
-                average_frags: info.avg_frags().map_or_else(|| "-".to_owned(), |frags| format!("{frags:.2}")),
+            .filter_map(|(name, info)| {
+                Some(OverviewShip {
+                    ship_id: ParamIdText::from_id(info.ship_id()?),
+                    name: name.clone(),
+                    battles: info.total_games().to_string(),
+                    win_rate: info.win_rate().map_or_else(|| "-".to_owned(), |rate| format!("{rate:.1}%")),
+                    average_damage: info.avg_damage().map_or_else(
+                        || "-".to_owned(),
+                        |damage| wows_toolkit_viewmodel::formatting::separate_number(damage.round() as u64, Some(locale)),
+                    ),
+                    average_frags: info.avg_frags().map_or_else(|| "-".to_owned(), |frags| format!("{frags:.2}")),
+                })
             })
             .collect(),
         achievements,
@@ -323,9 +331,9 @@ fn ship_sections(
 ) -> Vec<ShipSection> {
     // Grouped by id, not by name: two ships can carry one display name, and a
     // rating is scored against a single ship's expected values.
-    let mut by_ship: BTreeMap<u64, Vec<&PerGameStat>> = BTreeMap::new();
+    let mut by_ship: HashMap<GameParamId, Vec<&PerGameStat>> = HashMap::new();
     for game in games {
-        by_ship.entry(game.ship_id.raw()).or_default().push(game);
+        by_ship.entry(game.ship_id).or_default().push(game);
     }
 
     let column_heading = |column: stats_table::Column| text(column.translation_key());
@@ -350,7 +358,7 @@ fn ship_sections(
             };
             let rows = stats_table::ship_rows(&info, rating.as_ref(), Some(locale));
             let section = ShipSection {
-                ship_id: ship_id.to_string(),
+                ship_id: ParamIdText::from_id(ship_id),
                 search_key: wows_toolkit_viewmodel::search::normalize_ship_search(&ship),
                 markdown: stats_table::to_markdown(&header, &rows, column_heading, stat_heading),
                 csv: stats_table::to_csv(&rows, column_heading, stat_heading),
@@ -377,8 +385,8 @@ fn ship_sections(
                     })
                     .collect(),
                 clear_label: text_with("ui.stats.remove_games_hint", &[("ship", &ship)]),
-                nation_flag: art.and_then(|art| art.nation_flag(GameParamId::from(ship_id))).map(|url| url.to_string()),
-                class_icon: art.and_then(|art| art.class_icon(GameParamId::from(ship_id))).map(|url| url.to_string()),
+                nation_flag: art.and_then(|art| art.nation_flag(ship_id)).map(|url| url.to_string()),
+                class_icon: art.and_then(|art| art.class_icon(ship_id)).map(|url| url.to_string()),
                 header,
                 name: ship,
             };
@@ -440,7 +448,7 @@ mod tests {
             game(1, "Yamato", "2026-01-03", 120_000, true, "pvp"),
         ];
 
-        let snapshot = snapshot(&games, &StatsFilters::default(), 25, None, None);
+        let snapshot = snapshot(&games, &StatsFilters::default(), RecentLimit::DEFAULT, None, None);
 
         assert_eq!(snapshot.game_count, 3);
         assert_eq!(snapshot.overview.record, "2W/1L (66.7%)");
@@ -465,7 +473,7 @@ mod tests {
         ];
         let filters = StatsFilters { limit: GameLimit::Recent(1), ..StatsFilters::default() };
 
-        let snapshot = snapshot(&games, &filters, 25, None, None);
+        let snapshot = snapshot(&games, &filters, RecentLimit::DEFAULT, None, None);
 
         assert_eq!(snapshot.overview.record, "1W/0L (100.0%)");
         assert_eq!(snapshot.ships.len(), 2, "one game of each ship");

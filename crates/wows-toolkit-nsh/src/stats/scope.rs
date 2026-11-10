@@ -2,6 +2,7 @@
 //! drawn from them, and the settings rows the session's are kept in.
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::Arc;
 
 use nsh_base::dock::DockAreaLayout;
@@ -23,62 +24,62 @@ use super::art::GameArt;
 use super::chart::Chart;
 use super::chart::ChartSnapshot;
 use super::chart::surface_id;
+use super::error::LayoutError;
+use super::error::StoreError;
+use super::ids::ScopeName;
 use super::layout;
 use super::layout::CHARTS_DOCK_LAYOUT_KEY;
 use super::layout::CHARTS_SETTINGS_KEY;
-use super::layout::LayoutError;
 use super::snapshot::FilterState;
 use super::snapshot::StatsSnapshot;
 use super::snapshot::snapshot;
 
-/// Games shown when the limit is switched on without a saved count. The egui
-/// drag value opens at this and clamps to 1..=999.
-pub(crate) const DEFAULT_GAME_LIMIT: usize = 25;
-const MIN_GAME_LIMIT: usize = 1;
-const MAX_GAME_LIMIT: usize = 999;
+/// How many of the most recent games the limit keeps, within the egui drag
+/// value's 1..=999.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecentLimit(usize);
 
-/// Why the session's rows could not be read or written.
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error("could not open the settings database: {source}")]
-    Open { source: sqlx::Error },
-    #[error("could not read the recorded games: {source}")]
-    ReadGames { source: sqlx::Error },
-    #[error("could not read setting {key}: {source}")]
-    ReadSetting { key: &'static str, source: queries::SettingError },
-    #[error("could not save setting {key}: {source}")]
-    WriteSetting { key: &'static str, source: sqlx::Error },
-    #[error("could not forget the recorded games: {source}")]
-    Clear { source: sqlx::Error },
-    #[error("could not start the database runtime: {source}")]
-    Runtime { source: std::io::Error },
+impl RecentLimit {
+    /// Shown when the limit is switched on without a saved count, as the egui
+    /// drag value opens.
+    pub(crate) const DEFAULT: Self = Self(25);
+    const MIN: usize = 1;
+    const MAX: usize = 999;
+
+    pub(crate) fn clamped(count: usize) -> Self {
+        Self(count.clamp(Self::MIN, Self::MAX))
+    }
+
+    pub(crate) fn count(self) -> usize {
+        self.0
+    }
 }
 
 /// The games of one view and everything drawn from them.
 pub(crate) struct Scope {
     /// Names the scope's chart surfaces.
-    name: String,
+    name: ScopeName,
     /// Whether the filters, charts and layout are saved and the games can be
     /// cleared. Only the session's are: a directory view is not kept.
     persists: bool,
     /// In `sort_key` order, oldest first.
     games: Vec<PerGameStat>,
     filters: StatsFilters,
-    /// The count the limit returns to when it is switched back on.
-    last_count: usize,
+    /// The limit restored when it is switched back on.
+    last_limit: RecentLimit,
     personal_rating: Option<Arc<PersonalRatingData>>,
     charts: BTreeMap<ChartId, Chart>,
     next_chart: ChartId,
 }
 
 impl Scope {
-    pub(crate) fn new(name: String, persists: bool) -> Self {
+    pub(crate) fn new(name: ScopeName, persists: bool) -> Self {
         Self {
             name,
             persists,
             games: Vec::new(),
             filters: StatsFilters::default(),
-            last_count: DEFAULT_GAME_LIMIT,
+            last_limit: RecentLimit::DEFAULT,
             personal_rating: None,
             charts: BTreeMap::new(),
             next_chart: ChartId(0),
@@ -115,8 +116,8 @@ impl Scope {
     pub(crate) fn set_filters(&mut self, filters: StatsFilters) {
         self.filters = filters;
         if let GameLimit::Recent(count) = self.filters.limit {
-            self.last_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
-            self.filters.limit = GameLimit::Recent(self.last_count);
+            self.last_limit = RecentLimit::clamped(count);
+            self.filters.limit = GameLimit::Recent(self.last_limit.count());
         }
         self.prune_modes();
         self.push_games();
@@ -126,11 +127,12 @@ impl Scope {
     /// slider's range is clamped into it rather than refused, which is what
     /// the GPUI stepper does.
     pub(crate) fn filters_from(state: &FilterState) -> StatsFilters {
-        let count = usize::try_from(state.limit_count).unwrap_or(MAX_GAME_LIMIT).clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
+        // A count too large for usize is above the range, so clamps to its top.
+        let limit = RecentLimit::clamped(usize::try_from(state.limit_count).unwrap_or(RecentLimit::MAX));
         StatsFilters {
-            limit: if state.limit_enabled { GameLimit::Recent(count) } else { GameLimit::All },
+            limit: if state.limit_enabled { GameLimit::Recent(limit.count()) } else { GameLimit::All },
             division: state.division.filter(),
-            game_modes: state.game_modes.iter().cloned().collect(),
+            game_modes: state.game_modes.iter().map(|mode| mode.as_str().to_owned()).collect(),
         }
     }
 
@@ -138,7 +140,7 @@ impl Scope {
     /// filters themselves cannot.
     pub(crate) fn remember_count(&mut self, state: &FilterState) {
         if let Ok(count) = usize::try_from(state.limit_count) {
-            self.last_count = count.clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
+            self.last_limit = RecentLimit::clamped(count);
         }
     }
 
@@ -157,7 +159,7 @@ impl Scope {
     }
 
     pub(crate) fn snapshot(&self) -> StatsSnapshot {
-        snapshot(&self.games, &self.filters, self.last_count, self.personal_rating.as_deref(), GameArt::current().as_ref())
+        snapshot(&self.games, &self.filters, self.last_limit, self.personal_rating.as_deref(), GameArt::current().as_ref())
     }
 
     pub(crate) fn chart_snapshots(&self) -> Vec<ChartSnapshot> {
@@ -168,9 +170,13 @@ impl Scope {
         self.charts.get(&id)
     }
 
+    pub(crate) fn chart_ids(&self) -> Vec<ChartId> {
+        self.charts.keys().copied().collect()
+    }
+
     /// Opens a chart set up the way `settings` says, under the id it names or
     /// the next free one.
-    pub(crate) fn add_chart(&mut self, settings: ChartSettings) -> ChartId {
+    pub(crate) fn add_chart(&mut self, settings: ChartSettings) -> &Chart {
         let id = settings.id.unwrap_or(self.next_chart);
         self.next_chart = self.next_chart.max(id.next());
 
@@ -180,12 +186,18 @@ impl Scope {
         model.apply_settings(ChartSettings { id: Some(id), ..settings });
         model.set_personal_rating(self.personal_rating.clone());
         model.set_games(&self.games, &self.filters);
-        self.charts.insert(id, Chart::start(model, surface_id(&self.name, id)));
-        id
+        let chart = Chart::start(model, surface_id(&self.name, id));
+        match self.charts.entry(id) {
+            Entry::Vacant(vacant) => vacant.insert(chart),
+            Entry::Occupied(mut occupied) => {
+                occupied.insert(chart);
+                occupied.into_mut()
+            }
+        }
     }
 
     /// Opens a chart plotting `stat`, as the Add-chart menu asks.
-    pub(crate) fn add_chart_for(&mut self, stat: ChartableStat) -> ChartId {
+    pub(crate) fn add_chart_for(&mut self, stat: ChartableStat) -> &Chart {
         self.add_chart(ChartSettings { stat, ..ChartSettings::default() })
     }
 
@@ -250,8 +262,11 @@ pub(crate) fn restore(
 
     let mut restored_layout = layout::from_state(state)?;
     let placed = layout::charts(&restored_layout)?;
+    // A layout without a charts row places charts that were never changed.
     let saved = charts.unwrap_or_default();
 
+    // A placed chart without a saved row opens with the default settings, as
+    // GPUI opens it.
     let mut restored: Vec<ChartSettings> = placed
         .iter()
         .map(|id| {
@@ -402,6 +417,8 @@ mod tests {
     use super::*;
     use wows_toolkit_viewmodel::stats::chart::ChartMode;
 
+    use crate::stats::ids::MatchGroup;
+
     #[test]
     fn nothing_saved_opens_one_damage_chart_on_the_right() {
         let restored = restore(None, None).expect("the default restores");
@@ -450,7 +467,7 @@ mod tests {
             limit_enabled: true,
             limit_count: 5_000,
             division: super::super::snapshot::DivisionChoice::Solo,
-            game_modes: vec!["pvp".to_owned()],
+            game_modes: vec![MatchGroup::new("pvp".to_owned())],
         };
 
         let filters = Scope::filters_from(&state);

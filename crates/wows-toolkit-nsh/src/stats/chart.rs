@@ -20,9 +20,13 @@ use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot_image;
 
+use super::error::ChartImageError;
+use super::ids::MatchGroup;
+use super::ids::ParamIdText;
+use super::ids::ScopeName;
+use super::ids::ViewChartId;
 use super::snapshot::DivisionChoice;
 use super::snapshot::ModeOption;
-use crate::text::text_with;
 use crate::frames;
 use crate::frames::AlphaMode;
 use crate::frames::Frame;
@@ -30,6 +34,7 @@ use crate::frames::PixelSize;
 use crate::frames::PointerButton;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
+use crate::text::text_with;
 
 /// How much one wheel step zooms, as the GPUI chart zooms per scroll event.
 const WHEEL_ZOOM: f32 = 1.1;
@@ -100,7 +105,7 @@ pub struct StatOption {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ShipOption {
-    pub ship_id: String,
+    pub ship_id: ParamIdText,
     pub name: String,
     /// The name folded for search.
     pub search_key: String,
@@ -111,7 +116,7 @@ pub struct ShipOption {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ChartSnapshot {
-    pub id: u32,
+    pub id: ViewChartId,
     /// The frame surface the plot is drawn on.
     pub surface: String,
     pub title: String,
@@ -212,10 +217,9 @@ impl Chart {
         let palette = *PALETTE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let snapshot = self.read(PlotSnapshot::of).ok_or(ChartImageError::Empty)?;
-        let (width, height, mut pixels) = snapshot
-            .render(palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale)
-            .ok_or(ChartImageError::Empty)?;
-        plot_image::unpremultiply(&mut pixels);
+        let PlotImage { width, height, mut rgba } =
+            snapshot.render(palette.colors, plot_image::COPY_BACKGROUND, size, scale).ok_or(ChartImageError::Empty)?;
+        plot_image::unpremultiply(&mut rgba);
 
         let mut encoded = Vec::new();
         {
@@ -223,7 +227,7 @@ impl Chart {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().map_err(|source| ChartImageError::Encode { source })?;
-            writer.write_image_data(&pixels).map_err(|source| ChartImageError::Encode { source })?;
+            writer.write_image_data(&rgba).map_err(|source| ChartImageError::Encode { source })?;
         }
 
         Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(encoded)))
@@ -232,20 +236,10 @@ impl Chart {
 
 impl Drop for Chart {
     fn drop(&mut self) {
+        // The producer may already have stopped.
         let _ = self.messages.send(Message::Stop);
         frames::release(&self.surface);
     }
-}
-
-/// Why a chart could not be copied as an image.
-#[derive(Debug, thiserror::Error)]
-pub enum ChartImageError {
-    #[error("the chart is not shown, so it has no size to draw at")]
-    NotShown,
-    #[error("the chart has nothing to plot")]
-    Empty,
-    #[error("the chart image could not be encoded: {source}")]
-    Encode { source: png::EncodingError },
 }
 
 /// Replaces the colours every chart is drawn in and draws them again.
@@ -260,7 +254,7 @@ pub(crate) fn parse_color(css: &str) -> Option<PlotColor> {
 }
 
 /// The surface a chart of `scope` is drawn on.
-pub(crate) fn surface_id(scope: &str, id: ChartId) -> SurfaceId {
+pub(crate) fn surface_id(scope: &ScopeName, id: ChartId) -> SurfaceId {
     SurfaceId::new(format!("stats-{scope}-chart-{}", id.0))
 }
 
@@ -271,7 +265,7 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
     let filters = model.effective_filters();
 
     ChartSnapshot {
-        id: u32::try_from(model.id().0).expect("chart ids are checked to fit when a chart is restored"),
+        id: ViewChartId::from_chart(model.id()).expect("chart ids are checked to fit when a chart is restored"),
         surface: surface.to_owned(),
         title: model.tab_title(),
         value_label: model.value_label(),
@@ -292,13 +286,13 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
             .map(|mode| ModeOption {
                 label: match_group_display_name(&mode).to_owned(),
                 selected: filters.game_modes.contains(&mode),
-                id: mode,
+                id: MatchGroup::new(mode),
             })
             .collect(),
         ships: played
             .iter()
             .map(|(id, name)| ShipOption {
-                ship_id: id.raw().to_string(),
+                ship_id: ParamIdText::from_id(*id),
                 name: name.clone(),
                 search_key: wows_toolkit_viewmodel::search::normalize_ship_search(name),
                 selected: selected.contains(id),
@@ -344,7 +338,8 @@ impl PlotSnapshot {
         })
     }
 
-    fn render(&self, colors: Colors, background: PlotColor, width: u32, height: u32, scale: f32) -> Option<(u32, u32, Vec<u8>)> {
+    /// Premultiplied RGBA, `None` for a size no image can be made at.
+    fn render(&self, colors: Colors, background: PlotColor, size: PixelSize, scale: f32) -> Option<PlotImage> {
         let plot = Plot {
             series: &self.series,
             bars: &self.bars,
@@ -353,8 +348,17 @@ impl PlotSnapshot {
             show_values: self.show_values,
             view: self.view,
         };
-        plot_image::render(&plot, colors, background, width, height, scale)
+        let (width, height, rgba) = plot_image::render(&plot, colors, background, size.width, size.height, scale)?;
+
+        Some(PlotImage { width, height, rgba })
     }
+}
+
+/// A rendered chart's pixels.
+struct PlotImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
 }
 
 enum Message {
@@ -497,14 +501,13 @@ impl Producer {
         };
         // Rasterized after the model is let go, so a slow frame never holds
         // up the calls that change the chart.
-        let rendered =
-            snapshot.and_then(|snapshot| snapshot.render(palette.colors, palette.background, size.width, size.height, scale));
+        let rendered = snapshot.and_then(|snapshot| snapshot.render(palette.colors, palette.background, size, scale));
 
-        let Some((width, height, pixels)) = rendered else {
+        let Some(PlotImage { width, height, rgba }) = rendered else {
             self.surface.clear();
             return;
         };
-        match Frame::new(PixelSize { width, height }, AlphaMode::Premultiplied, pixels) {
+        match Frame::new(PixelSize { width, height }, AlphaMode::Premultiplied, rgba) {
             Ok(frame) => self.surface.present(frame),
             Err(error) => log::warn!("stats: a chart frame was refused: {error}"),
         }
