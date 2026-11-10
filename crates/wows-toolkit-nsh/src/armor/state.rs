@@ -865,6 +865,12 @@ impl State {
         });
     }
 
+    /// Takes the ship waiting for the ship data to open, by its param index.
+    #[cfg(feature = "test-support")]
+    pub fn take_pending_open(&mut self) -> Option<String> {
+        self.pending_open.take().map(|open| open.source.param_index)
+    }
+
     fn finish_ship_load(
         &mut self,
         id: PaneId,
