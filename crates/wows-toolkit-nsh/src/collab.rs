@@ -72,6 +72,11 @@ pub fn link() -> CollabLink {
     SERVICE.lock().controller.link()
 }
 
+/// The battles the session is on, with the art the end that owns each sent.
+pub fn shared_windows() -> Vec<wt_collab_client::controller::SharedWindow> {
+    SERVICE.lock().controller.shared_windows()
+}
+
 /// A watch on the link: replaced each time a session starts or ends.
 pub fn subscribe() -> tokio::sync::watch::Receiver<CollabLink> {
     SERVICE.links.subscribe()
@@ -277,6 +282,9 @@ struct Held {
     controller: SessionController,
     display_name: String,
     token_revealed: bool,
+    /// A start the background runtime could not take, which the controller
+    /// never saw.
+    runtime_failure: Option<String>,
     /// Whether the last published link was a running session's.
     published_active: bool,
 }
@@ -302,7 +310,13 @@ impl Service {
         let (notices, _) = tokio::sync::broadcast::channel(64);
 
         Self {
-            held: Mutex::new(Held { controller, display_name: String::new(), token_revealed: false, published_active: false }),
+            held: Mutex::new(Held {
+                controller,
+                display_name: String::new(),
+                token_revealed: false,
+                runtime_failure: None,
+                published_active: false,
+            }),
             links,
             revisions,
             notices,
@@ -336,9 +350,18 @@ impl Service {
         &self,
         start: impl FnOnce(&mut SessionController, Arc<tokio::runtime::Runtime>, &str) -> Result<(), StartError>,
     ) -> Result<(), String> {
-        let runtime = runtime::shared().map_err(|error| error.to_string())?;
+        let runtime = match runtime::shared() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let reason = error.to_string();
+                self.lock().runtime_failure = Some(reason.clone());
+                self.changed();
+                return Err(reason);
+            }
+        };
         let started = {
             let mut held = self.lock();
+            held.runtime_failure = None;
             let name = held.display_name.clone();
             start(&mut held.controller, runtime, &name)
         };
@@ -389,6 +412,7 @@ impl Held {
             if self.token_revealed { token.clone() } else { "*".repeat(token.chars().count().min(32)) }
         });
         let may_steer = controller.may_steer();
+        let may_promote = controller.may_promote();
         let roster = controller.connected();
         let permissions = controller.permissions();
         let heading =
@@ -415,8 +439,8 @@ impl Held {
                         PeerRole::CoHost => Some(t!("ui.collab.role_cohost").into_owned()),
                         PeerRole::Peer => None,
                     },
-                    // A host can raise a peer, but not itself and not another host.
-                    promotable: may_steer && peer.role == PeerRole::Peer && !peer.is_me,
+                    // Only the original host raises a peer, never itself or another host.
+                    promotable: may_promote && peer.role == PeerRole::Peer && !peer.is_me,
                     is_me: peer.is_me,
                     name: peer.name,
                 })
@@ -433,7 +457,7 @@ impl Held {
             may_steer,
             annotations_locked: permissions.annotations_locked,
             settings_locked: permissions.settings_locked,
-            failure: controller.failure().map(failure_text),
+            failure: self.runtime_failure.clone().or_else(|| controller.failure().map(failure_text)),
         }
     }
 }
@@ -508,6 +532,7 @@ mod tests {
             controller: SessionController::new(),
             display_name: "me".into(),
             token_revealed: false,
+            runtime_failure: None,
             published_active: false,
         };
         held.controller.state().lock().token = Some("toolkit-abcdef".into());

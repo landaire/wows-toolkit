@@ -140,6 +140,7 @@ function autodetectProton() {
 }
 
 function signIn() {
+  if (state()?.account.inProgress) return;
   // The password leaves the field the moment it is used.
   const secret = password();
   password.set("");
@@ -147,6 +148,7 @@ function signIn() {
 }
 
 function submitCode() {
+  if (state()?.account.inProgress) return;
   const entered = code();
   code.set("");
   adopt(session.submitCode(entered, useBackupCode()));

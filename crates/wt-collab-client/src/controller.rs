@@ -345,8 +345,18 @@ impl SessionController {
         held.tactics_boards = boards;
     }
 
-    /// Locks or unlocks what peers may change.
+    /// Whether this app may raise peers to co-host: only the original host.
+    pub fn may_promote(&self) -> bool {
+        self.state.lock().role.is_host()
+    }
+
+    /// Locks or unlocks what peers may change. Held here at once, so a
+    /// reader sees the change before the peer task applies it.
     pub fn set_permissions(&self, permissions: Permissions) {
+        if self.handle.is_none() {
+            return;
+        }
+        self.state.lock().permissions = permissions.clone();
         self.command(SessionCommand::SetPermissions(permissions));
     }
 

@@ -666,6 +666,12 @@ impl LauncherSession {
     }
 }
 
+impl Default for LauncherSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Tone {
     Normal,
