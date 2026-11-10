@@ -17,6 +17,7 @@ pub use db::StartupSettingError;
 pub use db::db_path;
 pub use db::is_migrated;
 pub use db::load_main_window_settings;
+pub use db::load_window_settings;
 pub use db::load_startup_setting;
 pub use db::open_db;
 pub use db::open_db_at;
