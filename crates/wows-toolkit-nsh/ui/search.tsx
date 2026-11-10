@@ -1,5 +1,5 @@
 import { Clipboard, colorScheme, effect, keymap, List, Scroll, signal, Text, untracked, View } from "nsh";
-import { Calendar, type CalendarEntry, Input } from "nsh/base";
+import { Calendar, type CalendarEntry, Input, Menu as PopupMenu, MenuItem as PopupMenuItem } from "nsh/base";
 import { Menu, type MenuItem } from "nsh/desktop";
 import {
   QueryBar,
@@ -668,29 +668,57 @@ function Segment(props: { token: BarToken; index: number; slot: number }) {
         </View>
       </If>
       <If when={!editing()}>
-        <View
-          testID={`search-pill-segment-${props.index}-${props.slot}`}
-          accessibilityLabel={segment().editable ? `Edit value ${segment().text}` : segment().text}
-          onPress={(event) => {
-            const current = segment();
-            if (current.choices.length > 0) {
-              void Menu.popup(
-                current.choices.map((choice) => ({
-                  label: choice.label,
-                  checked: choice.current,
-                  onSelect: () => setQuery(choice.taken),
-                })),
-                event?.pagePosition,
-              );
-            } else if (current.editable) {
-              beginValueEdit(props.token.path);
-            }
-          }}
-          hoverStyle={{ backgroundColor: colors.accent }}
-          style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 }}
+        <If
+          when={segment().choices.length > 0}
+          else={
+            <View
+              testID={`search-pill-segment-${props.index}-${props.slot}`}
+              accessibilityLabel={segment().editable ? `Edit value ${segment().text}` : segment().text}
+              onPress={() => {
+                if (segment().editable) beginValueEdit(props.token.path);
+              }}
+              hoverStyle={{ backgroundColor: colors.accent }}
+              style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 }}
+            >
+              <Text style={{ fontSize: 12, color: colors.foreground }}>{segment().text}</Text>
+            </View>
+          }
         >
-          <Text style={{ fontSize: 12, color: colors.foreground }}>{segment().text}</Text>
-        </View>
+          <PopupMenu
+            offset={4}
+            margin={8}
+            trigger={
+              <View
+                testID={`search-pill-segment-${props.index}-${props.slot}`}
+                accessibilityLabel={segment().text}
+                hoverStyle={{ backgroundColor: colors.accent }}
+                style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 2 }}
+              >
+                <Text style={{ fontSize: 12, color: colors.foreground }}>{segment().text}</Text>
+                <Icon name="chevron-down" size={10} color={colors.mutedForeground}/>
+              </View>
+            }
+          >
+            <Surface style={{ minWidth: 140, padding: 4, backgroundColor: colors.popover }}>
+              <Each of={segment().choices}>
+                {(choice) => (
+                  <PopupMenuItem
+                    onSelect={() => setQuery(choice().taken)}
+                    hoverStyle={{ backgroundColor: colors.accent }}
+                    style={{ height: 28, paddingHorizontal: 8, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 8 }}
+                  >
+                    <View style={{ width: 14, alignItems: "center" }}>
+                      <If when={choice().current}>
+                        <Icon name="check" size={14} color={colors.popoverForeground}/>
+                      </If>
+                    </View>
+                    <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{choice().label}</Text>
+                  </PopupMenuItem>
+                )}
+              </Each>
+            </Surface>
+          </PopupMenu>
+        </If>
       </If>
     </View>
   );
