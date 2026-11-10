@@ -1,7 +1,9 @@
 import { signal } from "nsh";
 import { Shell } from "wows-toolkit/native";
 
-const locale = signal("en");
+// The process's language, not a fixed one: text a module reads before the
+// first applyLocale is in it, and a change from it must be seen as a change.
+const locale = signal(Shell.locale());
 
 /** The language the interface is read in now (reactive). */
 export function currentLocale(): string {

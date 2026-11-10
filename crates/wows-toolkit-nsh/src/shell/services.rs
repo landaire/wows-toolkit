@@ -72,6 +72,12 @@ impl Shell {
         Ok(())
     }
 
+    /// The language catalog strings are read in now. The locale is the
+    /// process's, so another window may have set it before this one started.
+    pub fn locale() -> String {
+        rust_i18n::locale().to_string()
+    }
+
     /// The languages the game, and so the toolkit, is translated into.
     pub fn languages() -> Vec<Language> {
         wt_translations::SUPPORTED_LANGUAGES
