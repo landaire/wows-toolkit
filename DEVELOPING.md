@@ -121,6 +121,22 @@ buck2 build --target-platforms toolchains//platforms:linux_x86_64 //:wgcheck
 
 Platforms are `toolchains//platforms:linux_x86_64`, `:macos_arm64`, and `:windows_x86_64_msvc`.
 
+### The NSH app
+
+The Linux-only [Native Shell](https://nsh.dev) front end is two packages:
+
+- `crates/wows-toolkit-nsh` is the library: the TSX interface under `ui/`, and the Rust services and native components the TSX imports from `wows-toolkit/native`. Its integration tests under `tests/` bundle `ui/App.tsx` and drive it headless with `nsh_testing`.
+- `crates/wows-toolkit-nsh-app` is the binary. It embeds the bundled interface from `NSH_BUNDLE_PATH`. Under Cargo its build script bundles `ui/App.tsx`; under Buck the `//crates/wows-toolkit-nsh:nsh_ui_bundle` rule does.
+
+```bash
+cargo run -p wows-toolkit-nsh-app
+cargo test -p wows-toolkit-nsh
+buck2 run //:wows_toolkit_nsh
+buck2 test //crates/wows-toolkit-nsh/...
+```
+
+Tests never touch your own settings database. A `test-support` build of `wows-toolkit-config` panics if a test reaches the default storage directory before calling `storage_override::set`.
+
 ### The tactics web client
 
 `wt-web` builds for `wasm32-unknown-unknown` whatever platform you ask for, so it needs a Linux or macOS host with the Nix toolchain. `//:wt_web_site` is the directory GitHub Pages serves under `/wows-toolkit/tactics/`:
