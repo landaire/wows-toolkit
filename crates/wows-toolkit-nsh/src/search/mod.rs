@@ -40,7 +40,7 @@ use wows_toolkit_viewmodel::search_settings::SavedSearchError;
 use wows_toolkit_viewmodel::search_settings::SearchField;
 use wows_toolkit_viewmodel::translate;
 
-use crate::native::database_runtime;
+use crate::runtime::RuntimeError;
 use bar::CompletionView;
 
 /// Serializes read-modify-writes of the saved row, so two fields saved at
@@ -171,6 +171,7 @@ pub struct SearchText {
     pub row_actions_hint: String,
     pub render_replay: String,
     pub render_to_clipboard: String,
+    pub copy_replay: String,
     pub copy_path: String,
     pub path_copied: String,
     pub show_in_explorer: String,
@@ -190,8 +191,10 @@ pub struct SearchText {
 /// Why a search or a saved-state read or write failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SearchError {
-    #[error("{reason}")]
-    Runtime { reason: String },
+    #[error("{source}")]
+    Runtime { source: RuntimeError },
+    #[error("could not copy the replay to the clipboard: {source}")]
+    Clipboard { source: arboard::Error },
     #[error("the {task} task did not complete: {source}")]
     Task { task: &'static str, source: tokio::task::JoinError },
     #[error("the replay index is not open: {source}")]
@@ -232,6 +235,7 @@ impl ReplaySearch {
             row_actions_hint: translate("ui.search.row_actions_hint"),
             render_replay: translate("ui.replay.context.render_replay"),
             render_to_clipboard: translate("ui.replay.context.render_to_clipboard"),
+            copy_replay: translate("ui.replay.context.copy_replay"),
             copy_path: translate("ui.replay.context.copy_path"),
             path_copied: translate("ui.search.path_copied"),
             show_in_explorer: translate("ui.replay.context.show_in_explorer"),
@@ -345,11 +349,24 @@ impl ReplaySearch {
     pub async fn reveal_replay(path: String) -> Result<(), String> {
         reveal_path(PathBuf::from(path)).await
     }
+
+    /// Puts the replay at `path` on the clipboard as a file, so a file
+    /// manager or chat client pastes the replay itself.
+    pub async fn copy_replay(path: String) -> Result<(), String> {
+        blocking(move || copy_replay_file(PathBuf::from(path)))
+            .await
+            .map_err(|source| SearchError::Task { task: "replay copy", source }.to_string())?
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn copy_replay_file(path: PathBuf) -> Result<(), SearchError> {
+    crate::renderer::batch::copy_files(&[path]).map_err(|source| SearchError::Clipboard { source })
 }
 
 fn run_search(text: &str, sort: SortSpec) -> Result<SearchPage, SearchError> {
     let expr = query_text::parse_query(text).map_err(|error| SearchError::Parse { reason: error.kind.to_string() })?;
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     let (mut hits, missing) = runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
@@ -428,7 +445,7 @@ fn look_up_values(pending: &str) -> Result<Vec<CompletionView>, SearchError> {
     let Some(request) = suggest::value_request_for(pending) else {
         return Ok(Vec::new());
     };
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     let options = runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
@@ -446,7 +463,7 @@ fn look_up_values(pending: &str) -> Result<Vec<CompletionView>, SearchError> {
 }
 
 fn load_settings() -> Result<SavedSearchState, SearchError> {
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
     let stored = runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
         wows_toolkit_config::queries::try_get_setting::<JsonValue>(&pool, SEARCH_SETTINGS_KEY)
@@ -474,7 +491,7 @@ async fn save_field(field: SearchField, value: JsonValue) -> Result<(), String> 
 
 fn write_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> {
     let _guard = SETTINGS_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
@@ -489,7 +506,7 @@ fn write_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> 
 }
 
 fn load_column_widths() -> Result<Vec<Option<f64>>, SearchError> {
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
     let stored = runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
         wows_toolkit_config::queries::try_get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY)
@@ -503,7 +520,7 @@ fn load_column_widths() -> Result<Vec<Option<f64>>, SearchError> {
 
 fn save_column_widths(widths: &[Option<f64>]) -> Result<(), SearchError> {
     let widths: Vec<Option<f32>> = widths.iter().map(|width| width.map(|width| width as f32)).collect();
-    let runtime = database_runtime().map_err(|reason| SearchError::Runtime { reason })?;
+    let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;

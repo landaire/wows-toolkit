@@ -92,13 +92,6 @@ impl Toolkit {
     }
 }
 
-pub(crate) fn database_runtime() -> Result<tokio::runtime::Runtime, String> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("could not start the settings database runtime: {error}"))
-}
-
 fn selected_locale(requested: Option<String>) -> String {
     requested
         .filter(|locale| wt_translations::SUPPORTED_LANGUAGES.iter().any(|language| language.code == locale))

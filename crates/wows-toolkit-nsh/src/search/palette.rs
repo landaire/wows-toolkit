@@ -13,7 +13,18 @@ use wows_toolkit_viewmodel::palette::rank_ships;
 use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::translate;
 
-use crate::native::database_runtime;
+use crate::runtime::RuntimeError;
+
+/// Why an index-backed layer could not be read.
+#[derive(Debug, thiserror::Error)]
+enum LayerError {
+    #[error("{source}")]
+    Runtime { source: RuntimeError },
+    #[error("the replay index is not open: {source}")]
+    Open { source: sqlx::Error },
+    #[error("{source}")]
+    Rows { source: PaletteError },
+}
 
 /// One of the palette's second layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -170,6 +181,7 @@ impl Palette {
         blocking(move || read_layer(layer, &needle))
             .await
             .map_err(|error| format!("the palette layer task did not complete: {error}"))?
+            .map_err(|error| error.to_string())
     }
 
     /// Shows the open dialog for one replay; its path, or `null` when
@@ -218,19 +230,19 @@ impl ShipSearch {
     }
 }
 
-fn read_layer(layer: PaletteLayer, needle: &str) -> Result<Vec<PaletteRow>, String> {
+fn read_layer(layer: PaletteLayer, needle: &str) -> Result<Vec<PaletteRow>, LayerError> {
     let mode = match layer {
         PaletteLayer::Players => PaletteMode::Players,
         PaletteLayer::MyShips => PaletteMode::MyShips,
-        PaletteLayer::ArmorShips => return Err(PaletteError::NotIndexed { mode: PaletteMode::ArmorShips }.to_string()),
+        PaletteLayer::ArmorShips => {
+            return Err(LayerError::Rows { source: PaletteError::NotIndexed { mode: PaletteMode::ArmorShips } });
+        }
     };
-    let runtime = database_runtime()?;
+    let runtime = crate::runtime::shared().map_err(|source| LayerError::Runtime { source })?;
 
     runtime.block_on(async {
-        let pool = wows_toolkit_config::open_db()
-            .await
-            .map_err(|error| format!("the replay index is not open: {error}"))?;
-        let rows = index_rows(mode, &pool, needle).await.map_err(|error| error.to_string())?;
+        let pool = wows_toolkit_config::open_db().await.map_err(|source| LayerError::Open { source })?;
+        let rows = index_rows(mode, &pool, needle).await.map_err(|source| LayerError::Rows { source })?;
 
         Ok(rows.into_iter().map(|row| PaletteRow { label: row.label, query: row.query }).collect())
     })

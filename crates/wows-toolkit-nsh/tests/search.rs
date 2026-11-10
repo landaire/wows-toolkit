@@ -346,6 +346,23 @@ fn a_row_menu_copies_the_replay_path() {
 }
 
 #[test]
+fn a_row_menu_offers_copy_replay_and_reports_a_clipboard_failure() {
+    let mut app = desktop_app();
+    // With no display to reach, the copy fails instead of writing the
+    // user's clipboard; the test app lock keeps other tests from racing it.
+    unsafe {
+        std::env::remove_var("DISPLAY");
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    app.right_click(&format!("label:Open replay {}", replay().display())).unwrap();
+    app.choose_menu_item("Copy Replay").unwrap();
+    app.wait_for("text:/^could not copy the replay to the clipboard: /").unwrap();
+}
+
+#[test]
 fn hovering_a_row_shows_its_battle() {
     let mut app = desktop_app();
 
@@ -353,8 +370,10 @@ fn hovering_a_row_shows_its_battle() {
     app.wait_for("Harugumo").unwrap();
     app.hover(&format!("label:Open replay {}", replay().display())).unwrap();
     app.wait_for(&format!("label:Preview {}", replay().display())).unwrap();
+    app.wait_for("label:Minimap preview").unwrap();
     app.hover(QUERY).unwrap();
     app.wait_for_gone(&format!("label:Preview {}", replay().display()), GONE).unwrap();
+    app.wait_for_gone("label:Minimap preview", GONE).unwrap();
 }
 
 #[test]

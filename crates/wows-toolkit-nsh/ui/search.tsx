@@ -16,14 +16,21 @@ import {
   type ValueLookup,
 } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
+import { MinimapPreview } from "./renderer";
 import { colors, controlRadius } from "./theme";
 
 // How long a typed edit waits before the results follow it, and how long the
 // caret sits still before its value lookup is sent: the GPUI bar's figures.
 const RERUN_DELAY = 250;
 const VALUE_DEBOUNCE = 150;
-// How long the pointer rests on a row before its battle's facts show.
+// How long the pointer rests on a row before its battle's preview shows.
 const DWELL = 300;
+// The preview's map edge, and how far right of the pointer it sits so it does
+// not cover the row being read: the GPUI listing's figures.
+const PREVIEW_SIZE = 384;
+const PREVIEW_CURSOR_OFFSET = 24;
+const PREVIEW_MARGIN = 8;
+const FACT_HEIGHT = 16;
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 30;
 // The narrowest a dragged column may be made, and the strip on a header's
@@ -72,8 +79,11 @@ const sort = signal<SortState>(ReplaySearch.defaultSort());
 const widths = signal<(number | null)[]>(columns.map(() => null));
 const settingsLoadError = signal<string | null>(null);
 const settingsSaveError = signal<{ message: string; retry: () => void } | null>(null);
-const hovered = signal<{ row: SearchRow; index: number } | null>(null);
+// `x`/`y`: where the pointer entered the row, in the results view.
+const hovered = signal<{ row: SearchRow; index: number; x: number; y: number } | null>(null);
 const listOffset = signal(0);
+const tableOffset = signal(0);
+const resultsSize = signal({ width: 0, height: 0 });
 const rowActions = signal<SearchRowActions>({});
 let lastRunQuery = "";
 let generation = 0;
@@ -417,6 +427,13 @@ function rowMenu(row: SearchRow): MenuItem[] {
   }
   items.push(
     { type: "separator" },
+    {
+      label: text.copyReplay,
+      disabled: !row.exists,
+      onSelect: () => void ReplaySearch.copyReplay(row.replayPath)
+        .then(() => notice(text.copyReplay))
+        .catch((error) => notice(errorMessage(error))),
+    },
     { label: text.copyPath, onSelect: () => void Clipboard.writeText(row.replayPath).then(() => notice(text.pathCopied)) },
     {
       label: text.showInExplorer,
@@ -806,12 +823,14 @@ function ResultRow(props: { row: SearchRow; index: number }) {
       accessibilityLabel={`Open replay ${props.row.replayPath}`}
       onPress={() => openRow(props.row)}
       onContextMenu={(event) => void Menu.popup(rowMenu(props.row), event?.pagePosition)}
-      onMouseEnter={() => {
+      onMouseEnter={(event) => {
         clearTimeout(dwellTimer);
         const row = props.row;
         const index = props.index;
         if (hovered()?.row.replayPath === row.replayPath) return;
-        dwellTimer = setTimeout(() => hovered.set({ row, index }), DWELL);
+        const x = (event?.position.x ?? 0) - tableOffset();
+        const y = HEADER_HEIGHT + index * ROW_HEIGHT - listOffset() + (event?.position.y ?? 0);
+        dwellTimer = setTimeout(() => hovered.set({ row, index, x, y }), DWELL);
       }}
       hoverStyle={{ backgroundColor: colors.accent }}
       activeStyle={{ opacity: 0.72 }}
@@ -856,23 +875,38 @@ function ResultRow(props: { row: SearchRow; index: number }) {
   );
 }
 
-function HoverFacts() {
+/** The dwelled row's battle beside the pointer: its minimap playing, and the facts the columns have no room for. */
+function HoverPreview() {
+  // Kept inside the results, as GPUI snaps its popup to the window.
+  const left = () => {
+    const at = hovered();
+    if (!at) return 0;
+    const widest = resultsSize().width - PREVIEW_SIZE - 2 * PREVIEW_MARGIN - PREVIEW_MARGIN;
+    return Math.max(PREVIEW_MARGIN, Math.min(at.x + PREVIEW_CURSOR_OFFSET, widest));
+  };
   const top = () => {
     const at = hovered();
-    return at ? Math.max(0, HEADER_HEIGHT + at.index * ROW_HEIGHT - listOffset()) : 0;
+    if (!at) return 0;
+    const tallest = PREVIEW_SIZE + at.row.facts.length * FACT_HEIGHT + 4 * PREVIEW_MARGIN;
+    return Math.max(0, Math.min(at.y, resultsSize().height - tallest - PREVIEW_MARGIN));
   };
   return (
     <If when={hovered()}>
-      <Surface style={{ position: "absolute", right: 16, top: top(), width: 360, padding: 8, gap: 2, backgroundColor: colors.background, zIndex: 8 }}>
-        <View testID="search-preview" accessibilityLabel={`Preview ${hovered()!.row.replayPath}`} style={{ gap: 2 }}>
-          <Each of={hovered()!.row.facts}>
-            {(fact) => (
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <Text style={{ width: 64, fontSize: 11.5, color: colors.mutedForeground }}>{fact().label}</Text>
-                <Text style={{ flex: 1, fontSize: 11.5, color: colors.foreground }}>{fact().value}</Text>
-              </View>
-            )}
+      <Surface style={{ position: "absolute", left: left(), top: top(), padding: PREVIEW_MARGIN / 2, gap: 4, backgroundColor: colors.background, zIndex: 8 }}>
+        <View testID="search-preview" accessibilityLabel={`Preview ${hovered()!.row.replayPath}`} style={{ width: PREVIEW_SIZE, gap: 4 }}>
+          <Each of={[hovered()!.row.replayPath]}>
+            {(path) => <MinimapPreview path={path()} size={PREVIEW_SIZE}/>}
           </Each>
+          <View style={{ gap: 2 }}>
+            <Each of={hovered()!.row.facts}>
+              {(fact) => (
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Text style={{ width: 64, fontSize: 11.5, color: colors.mutedForeground }}>{fact().label}</Text>
+                  <Text style={{ flex: 1, fontSize: 11.5, color: colors.foreground }}>{fact().value}</Text>
+                </View>
+              )}
+            </Each>
+          </View>
         </View>
       </Surface>
     </If>
@@ -895,11 +929,16 @@ function statusText(): string | null {
 function Results() {
   const tableWidth = () => columns.reduce((total, _, index) => total + widthOf(index) + GRIP, 0) + ACTIONS_WIDTH + 16;
   return (
-    <View testID="search-results" onMouseLeave={() => {
-      clearTimeout(dwellTimer);
-      hovered.set(null);
-    }} style={{ flex: 1, minHeight: 0 }}>
-      <Scroll horizontal style={{ flex: 1 }} contentStyle={{ minWidth: tableWidth() }}>
+    <View
+      testID="search-results"
+      onLayout={({ bounds }) => resultsSize.set({ width: bounds.size.width, height: bounds.size.height })}
+      onMouseLeave={() => {
+        clearTimeout(dwellTimer);
+        hovered.set(null);
+      }}
+      style={{ flex: 1, minHeight: 0 }}
+    >
+      <Scroll horizontal onScroll={({ offset }) => tableOffset.set(offset.x)} style={{ flex: 1 }} contentStyle={{ minWidth: tableWidth() }}>
         <View role="table" accessibilityLabel="Replay search results" style={{ flex: 1, width: tableWidth() }}>
           <View role="row" style={{ flexDirection: "row", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
             <Each of={columns}>{(_, index) => <HeaderCell index={index()}/>}</Each>
@@ -909,7 +948,7 @@ function Results() {
               each={page()?.rows ?? []}
               keyExtractor={(row: SearchRow) => row.replayPath}
               estimatedItemSize={ROW_HEIGHT}
-              onScroll={({ y }) => listOffset.set(y)}
+              onScroll={({ offset }) => listOffset.set(offset.y)}
               style={{ flex: 1 }}
             >
               {(row, index) => <ResultRow row={row()} index={index()}/>}
@@ -925,7 +964,7 @@ function Results() {
           </If>
         </View>
       </Scroll>
-      <HoverFacts/>
+      <HoverPreview/>
     </View>
   );
 }
