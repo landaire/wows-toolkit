@@ -550,6 +550,37 @@ fn a_rating_table_that_loads_later_rates_the_open_replay() {
     app.wait_for(SAMPLE_TITLE).unwrap();
 }
 
+/// With autoload on, the newest replay of the game's directory opens when the
+/// inspector first lists it.
+#[test]
+fn autoload_opens_the_newest_listed_replay_at_startup() {
+    const OLDER: &str = "20251001_145225_PBSA710-Ocean_28_naval_mission.wowsreplay";
+    const NEWER: &str = "20260127_185500_PASD610-Forrest-Sherman_56_AngelWings.wowsreplay";
+
+    let install = install_with("autoload", &[NEWER, OLDER]);
+    let mut app = app_with_install(&install.0, true);
+    on_linux_desktop(&mut app);
+
+    app.wait_for(SAMPLE_TITLE).unwrap();
+    assert_eq!(app.screen().count(&format!("label:Close {SAMPLE_TITLE}")), Ok(1), "one replay is opened");
+    // The tab's hint names the file it reads.
+    let newest = install.0.join("replays").join(NEWER).display().to_string();
+    app.hover(&format!("label:Close {SAMPLE_TITLE}")).unwrap();
+    app.wait_until("the newest replay's path is shown", GONE, |screen| screen.shows(&newest)).unwrap();
+}
+
+#[test]
+fn without_autoload_nothing_opens_at_startup() {
+    const REPLAY: &str = "20250206_020938_PASD720-Hull_47_Sleeping_Giant.wowsreplay";
+
+    let install = install_with("no-autoload", &[REPLAY]);
+    let mut app = app_with_install(&install.0, false);
+
+    app.wait_for(&format!("label:{REPLAY}")).unwrap();
+    app.idle(Duration::from_millis(500)).unwrap();
+    assert!(app.shows("Select a replay"), "no replay is opened");
+}
+
 /// A finished index pass reads the index again, so a listed replay the index
 /// now holds stops reading as not indexed.
 #[test]

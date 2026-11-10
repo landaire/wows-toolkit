@@ -180,6 +180,9 @@ pub enum ReplayBrowserEvent {
     /// The builds the listing holds, after every scan and watched change.
     #[args(builds)]
     BuildsListed(Vec<ListedBuildEntry>),
+    /// A scan of the directory finished; `newest` is its newest replay.
+    #[args(newest)]
+    ScanFinished(Option<SharedString>),
     #[args(text, level)]
     Notice(SharedString, NoticeLevel),
 }
@@ -410,6 +413,8 @@ impl Browser {
             self.watch(&dir, generation);
             self.load_summaries();
             self.report_builds();
+            let newest = self.listing.with_untracked(|listing| listing.newest().map(shared_path));
+            self.emit(ReplayBrowserEvent::ScanFinished(newest));
         });
     }
 

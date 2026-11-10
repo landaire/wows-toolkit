@@ -130,6 +130,9 @@ const recovering = new Set<number>();
 let pendingDirectory: { path: string; known: Set<string> } | null = null;
 let nextTabId = 1;
 let started = false;
+/** The game directory's newest replay once its listing was first read; `undefined` until then. */
+const firstListedNewest = signal<string | null | undefined>(undefined);
+let autoloadDecided = false;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -476,6 +479,12 @@ async function replayLanded(ws: Workspace, path: string) {
     toast.failed(errorText(error));
   }
   if (appSettings()?.autoLoadLatestReplay) openReplay(ws, path, false);
+}
+
+/** Notes the newest replay of the game directory's first listing, which autoload opens. */
+function listingScanned(ws: Workspace, newest: string | null) {
+  if (ws.key !== MAIN || firstListedNewest() !== undefined) return;
+  firstListedNewest.set(newest);
 }
 
 function replayChanged(ws: Workspace, path: string) {
@@ -1396,6 +1405,7 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
                 void fetchMissingConstants(builds);
                 offerMissingBuilds(builds);
               }}
+              onScanFinished={({ newest }) => listingScanned(ws, newest ?? null)}
               onNotice={({ text, level }) => toast[level as NoticeLevel](text)}
             />
           </View>
@@ -1448,6 +1458,18 @@ export function ReplayInspectorView(props: ReplayInspectorProps) {
     props.openRequestId;
     if (path == null) return;
     untracked(() => openReplay(main, path, false));
+  });
+
+  // With autoload on, the game directory's newest replay opens once its listing is first read.
+  effect(() => {
+    const newest = firstListedNewest();
+    const settings = appSettings();
+    if (newest === undefined || settings === null || autoloadDecided) return;
+    autoloadDecided = true;
+    if (newest === null || !settings.autoLoadLatestReplay) return;
+    untracked(() => {
+      if (Object.keys(main.tabs()).length === 0) openReplay(main, newest, false);
+    });
   });
 
   return (

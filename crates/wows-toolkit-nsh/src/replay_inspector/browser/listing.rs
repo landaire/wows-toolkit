@@ -200,6 +200,12 @@ impl Listing {
         &self.files
     }
 
+    /// The newest replay: the game names each one by when it was recorded,
+    /// which is also the order the listing shows them in.
+    pub(super) fn newest(&self) -> Option<&Path> {
+        self.files.iter().map(|file| file.path.as_path()).max()
+    }
+
     pub(super) fn set_files(&mut self, files: Vec<ScannedReplay>) {
         self.files = files;
         self.rebuild();
@@ -630,6 +636,26 @@ mod tests {
         assert!(listing.selection().is_empty(), "and nothing is selected, since the selection is gone");
         assert_eq!(listing.shown_len(), 1);
         assert!(!listing.forget(Path::new("gone.wowsreplay")), "a replay forgotten once is not there to forget");
+    }
+
+    /// The newest replay is the one the listing shows first, whatever order
+    /// the scan found them in.
+    #[test]
+    fn the_newest_replay_is_the_one_shown_first() {
+        assert_eq!(Listing::default().newest(), None);
+
+        let listing = listing(
+            ReplayGrouping::None,
+            &[
+                ("20260101_100000_A_Map.wowsreplay", "01.01.2026 10:00:00"),
+                ("20260301_100000_C_Map.wowsreplay", "01.03.2026 10:00:00"),
+                ("20260201_100000_B_Map.wowsreplay", "01.02.2026 10:00:00"),
+            ],
+        );
+
+        let newest = Path::new("20260301_100000_C_Map.wowsreplay");
+        assert_eq!(listing.newest(), Some(newest));
+        assert_eq!(shown_at(&listing, "20260301_100000_C_Map.wowsreplay"), ShownIndex(0));
     }
 
     /// Pressing a group closes it and hides its replays; a rebuild (a new
