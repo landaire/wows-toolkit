@@ -1,9 +1,12 @@
 import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
-import { Button, EmptyState, MenuRow, Surface } from "./components";
+import { ReplayInspector as NativeReplayInspector, Toolkit, type SearchState, type SettingsState } from "wows-toolkit/native";
+import { Button, EmptyState, errorMessage, inputStyle, MenuRow, Surface } from "./components";
+import { activatePlayerTracker, PlayerTrackerView } from "./player_tracker";
+import { activateStats, StatsView } from "./stats";
 import { colors, controlRadius } from "./theme";
+import { GameDataCacheSection, GameDataStatus, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -17,14 +20,6 @@ const settingsBaseline = signal<SettingsState | null>(null);
 const settingsLoading = signal(false);
 const settingsSaving = signal(false);
 const settingsError = signal<string | null>(null);
-const statistics = signal<StatisticsState | null>(null);
-const statisticsLoading = signal(false);
-const statisticsError = signal<string | null>(null);
-const playerTracker = signal<PlayerTrackerState | null>(null);
-const playerTrackerLoading = signal(false);
-const playerTrackerError = signal<string | null>(null);
-const playerTrackerPeriod = signal("day");
-const playerTrackerQuery = signal("");
 const searchQuery = signal("");
 const searchState = signal<SearchState | null>(null);
 const searchLoading = signal(false);
@@ -35,12 +30,6 @@ const searchSortDescending = signal(true);
 const replayOpenPath = signal<string | null>(null);
 const replayOpenRequestId = signal(0);
 let settingsRequested = false;
-let statisticsRequested = false;
-let playerTrackerRequested = false;
-let playerTrackerGeneration = 0;
-let playerTrackerFilterTimer: number | undefined;
-let playerTrackerRequestActive = false;
-let playerTrackerRequestPending = false;
 const STORAGE_TAB = "application.active-tab";
 
 Window.setTitle(startup.title);
@@ -53,20 +42,10 @@ function selectTab(id: string) {
     settingsRequested = true;
     void loadSettings();
   }
-  if (id === "statistics" && !statisticsRequested) {
-    statisticsRequested = true;
-    void loadStatistics();
-  }
-  if (id === "player-tracker" && !playerTrackerRequested) {
-    playerTrackerRequested = true;
-    void loadPlayerTracker();
-  }
+  if (id === "statistics") activateStats();
+  if (id === "player-tracker") activatePlayerTracker();
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function loadSettings() {
@@ -133,70 +112,6 @@ async function saveSettings() {
   }
 }
 
-async function loadStatistics() {
-  statisticsLoading.set(true);
-  statisticsError.set(null);
-  try {
-    statistics.set(await Toolkit.loadStatistics());
-  } catch (error) {
-    statisticsError.set(`Statistics could not be loaded: ${errorMessage(error)}`);
-  } finally {
-    statisticsLoading.set(false);
-  }
-}
-async function loadPlayerTracker() {
-  if (playerTrackerRequestActive) {
-    playerTrackerRequestPending = true;
-    return;
-  }
-  playerTrackerRequestActive = true;
-  playerTrackerLoading.set(true);
-  do {
-    playerTrackerRequestPending = false;
-    const generation = ++playerTrackerGeneration;
-    const period = playerTrackerPeriod();
-    const query = playerTrackerQuery();
-    playerTrackerError.set(null);
-    try {
-      const loaded = await Toolkit.loadPlayerTracker(period, query);
-      if (generation === playerTrackerGeneration) playerTracker.set(loaded);
-    } catch (error) {
-      if (generation === playerTrackerGeneration) {
-        playerTrackerError.set(`Player tracker could not be loaded: ${errorMessage(error)}`);
-      }
-    }
-  } while (playerTrackerRequestPending);
-  playerTrackerRequestActive = false;
-  playerTrackerLoading.set(false);
-}
-
-function selectPlayerTrackerPeriod(period: string) {
-  if (period === playerTrackerPeriod()) return;
-  clearTimeout(playerTrackerFilterTimer);
-  playerTrackerFilterTimer = undefined;
-  playerTrackerGeneration += 1;
-  playerTrackerPeriod.set(period);
-  playerTracker.set(null);
-  void loadPlayerTracker();
-}
-
-function updatePlayerTrackerQuery(query: string) {
-  playerTrackerQuery.set(query);
-  playerTrackerGeneration += 1;
-  playerTracker.set(null);
-  playerTrackerError.set(null);
-  playerTrackerLoading.set(true);
-  clearTimeout(playerTrackerFilterTimer);
-  if (playerTrackerRequestActive) {
-    playerTrackerFilterTimer = undefined;
-    playerTrackerRequestPending = true;
-  } else {
-    playerTrackerFilterTimer = setTimeout(() => {
-      playerTrackerFilterTimer = undefined;
-      void loadPlayerTracker();
-    }, 200);
-  }
-}
 type SearchSort = {
   column: string;
   descending: boolean;
@@ -430,188 +345,6 @@ const descriptions: Record<string, string> = {
   "settings": "Configure game paths, replay loading, updates, sharing, collaboration, language, theme, and diagnostics.",
 };
 
-function metric(label: string, value: () => string) {
-  return (
-    <Surface style={{ minWidth: 145, flex: 1, padding: 14, gap: 5 }}>
-      <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{label}</Text>
-      <Text style={{ fontSize: 23, fontWeight: "600", color: colors.cardForeground }}>{value()}</Text>
-    </Surface>
-  );
-}
-
-function StatisticsView() {
-  const current = () => statistics();
-  return (
-    <View disabled={statisticsLoading()} style={{ flex: 1, minHeight: 0 }}>
-      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Stats</Text>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Recorded battles from the shared session database</Text>
-        </View>
-        <Button label={statisticsLoading() ? "Loading..." : "Refresh"} variant="ghost" disabled={statisticsLoading()} onPress={() => void loadStatistics()}/>
-      </View>
-      <If when={statisticsLoading() && !current()}>
-        <EmptyState title="Loading statistics" description="Reading recorded battles."/>
-      </If>
-      <If when={!statisticsLoading() && statisticsError() && (!current() || current()!.games === 0)}>
-        <EmptyState title="Statistics unavailable" description={statisticsError()!} action={<Button label="Try Again" onPress={() => void loadStatistics()}/>}/>
-      </If>
-      <If when={current() && current()!.games === 0 && !statisticsError()}>
-        <EmptyState title="No recorded battles" description="Battle results appear here after replays have been processed." action={<Button label="Refresh" onPress={() => void loadStatistics()}/>}/>
-      </If>
-      <If when={current() && current()!.games > 0}>
-        <Scroll style={{ flex: 1 }}>
-          <View style={{ width: "100%", maxWidth: 1100, alignSelf: "center", padding: 18, gap: 14 }}>
-            <If when={statisticsError()}>
-              <Surface style={{ padding: 12, borderColor: colors.destructive }}>
-                <Text style={{ fontSize: 12, color: colors.destructive }}>{statisticsError()}</Text>
-              </Surface>
-            </If>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-              {metric("Battles", () => current()!.games.toFixed(0))}
-              {metric("Win rate", () => `${current()!.winRate.toFixed(1)}%`)}
-              {metric("Average damage", () => current()!.averageDamage.toFixed(0))}
-              {metric("Average base XP", () => current()!.averageBaseXp.toFixed(0))}
-              {metric("Average frags", () => current()!.averageFrags.toFixed(2))}
-            </View>
-            <Scroll horizontal style={{ width: "100%" }} contentStyle={{ minWidth: 650 }}>
-              <Surface style={{ minWidth: 650, overflow: "hidden" }}>
-                <View role="table" accessibilityLabel="Statistics by ship">
-                <View role="row" style={{ minHeight: 34, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.muted }}>
-                  <Text role="columnheader" style={{ flex: 1, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Ship</Text>
-                  <Text role="columnheader" style={{ width: 90, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Battles</Text>
-                  <Text role="columnheader" style={{ width: 100, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Win rate</Text>
-                  <Text role="columnheader" style={{ width: 130, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Avg damage</Text>
-                  <Text role="columnheader" style={{ width: 110, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Avg XP</Text>
-                </View>
-                <Each of={current()!.ships}>
-                  {(ship) => (
-                    <View role="row" style={{ minHeight: 34, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                      <View role="cell" style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 13, color: colors.cardForeground }}>{ship().shipName}</Text>
-                        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{ship().shipId}</Text>
-                      </View>
-                      <Text role="cell" style={{ width: 90, fontSize: 12, color: colors.cardForeground }}>{ship().games.toFixed(0)}</Text>
-                      <Text role="cell" style={{ width: 100, fontSize: 12, color: colors.cardForeground }}>{ship().winRate.toFixed(1)}%</Text>
-                      <Text role="cell" style={{ width: 130, fontSize: 12, color: colors.cardForeground }}>{ship().averageDamage.toFixed(0)}</Text>
-                      <Text role="cell" style={{ width: 110, fontSize: 12, color: colors.cardForeground }}>{ship().averageBaseXp.toFixed(0)}</Text>
-                    </View>
-                  )}
-                </Each>
-                </View>
-              </Surface>
-            </Scroll>
-          </View>
-        </Scroll>
-      </If>
-    </View>
-  );
-}
-
-const playerTrackerPeriods = [
-  { id: "hour", label: "Past hour" },
-  { id: "six_hours", label: "Past six hours" },
-  { id: "day", label: "Past day" },
-  { id: "week", label: "Past week" },
-  { id: "month", label: "Past month" },
-  { id: "all", label: "All time" },
-];
-
-function PlayerTrackerView() {
-  const current = () => playerTracker();
-  const periodLabel = () => playerTrackerPeriods.find((period) => period.id === playerTrackerPeriod())?.label ?? "Past day";
-  const visiblePlayers = () => current()?.players ?? [];
-  return (
-    <View style={{ flex: 1, minHeight: 0 }}>
-      <View style={{ minHeight: 54, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 19, fontWeight: "600", color: colors.foreground }}>Player Tracker</Text>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Players met in indexed battles</Text>
-        </View>
-        <Menu
-          align="end"
-          offset={5}
-          margin={8}
-          trigger={
-            <View accessibilityLabel="Select player tracker period" hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 32, minWidth: 112, paddingHorizontal: 10, borderRadius: controlRadius(), alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 12.5, color: colors.foreground }}>{periodLabel()}</Text>
-            </View>
-          }
-        >
-          <Surface style={{ minWidth: 190, padding: 5, backgroundColor: colors.popover }}>
-            <Each of={playerTrackerPeriods}>
-              {(period) => <MenuRow label={period().label} note={period().id === playerTrackerPeriod() ? "Selected" : undefined} onSelect={() => selectPlayerTrackerPeriod(period().id)}/>}
-            </Each>
-          </Surface>
-        </Menu>
-        <Button label={playerTrackerLoading() ? "Loading..." : "Refresh"} variant="ghost" disabled={playerTrackerLoading()} onPress={() => void loadPlayerTracker()}/>
-      </View>
-      <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
-        <Input
-          accessibilityLabel="Filter tracked players"
-          value={playerTrackerQuery()}
-          placeholder="Filter by player, clan, or account ID"
-          onChange={({ value }) => updatePlayerTrackerQuery(value)}
-          style={inputStyle}
-        />
-      </View>
-      <If when={playerTrackerLoading() && !current()}>
-        <EmptyState title="Loading player history" description="Reading indexed battles."/>
-      </If>
-      <If when={!playerTrackerLoading() && playerTrackerError() && !current()}>
-        <EmptyState title="Player tracker unavailable" description={playerTrackerError()!} action={<Button label="Try Again" onPress={() => void loadPlayerTracker()}/>}/>
-      </If>
-      <If when={current()}>
-        <View style={{ flex: 1, minHeight: 0, padding: 18, gap: 12 }}>
-          <If when={playerTrackerError()}>
-            <Surface style={{ padding: 12, borderColor: colors.destructive }}>
-              <Text style={{ fontSize: 12, color: colors.destructive }}>{playerTrackerError()}</Text>
-            </Surface>
-          </If>
-          <If when={current()!.players.length === 0}>
-            <EmptyState
-              title={playerTrackerQuery().trim() ? "No matching players" : "No players found"}
-              description={playerTrackerQuery().trim() ? "Change the filter to show tracked players." : "Index replays to build encounter history."}
-            />
-          </If>
-          <If when={visiblePlayers().length > 0}>
-            <View style={{ flex: 1, minHeight: 0, gap: 6 }}>
-              <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
-                Showing {visiblePlayers().length.toFixed(0)} of {current()!.totalPlayers.toFixed(0)} players
-              </Text>
-              <Scroll style={{ flex: 1 }}>
-                <Scroll horizontal style={{ width: "100%" }} contentStyle={{ minWidth: 620 }}>
-                  <Surface style={{ minWidth: 620, overflow: "hidden" }}>
-                  <View role="table" accessibilityLabel="Tracked players">
-                    <View role="row" style={{ minHeight: 34, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.muted }}>
-                      <Text role="columnheader" style={{ flex: 1, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Player</Text>
-                      <Text role="columnheader" style={{ width: 180, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Clan</Text>
-                      <Text role="columnheader" style={{ width: 110, fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>Encounters</Text>
-                    </View>
-                    <Each of={visiblePlayers()}>
-                      {(player) => (
-                        <View role="row" style={{ minHeight: 38, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                          <View role="cell" style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 13, color: colors.cardForeground }}>{player().name}</Text>
-                            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{player().accountId}</Text>
-                          </View>
-                          <Text role="cell" style={{ width: 180, fontSize: 12, color: colors.cardForeground }}>{player().clan || "No clan"}</Text>
-                          <Text role="cell" style={{ width: 110, fontSize: 12, color: colors.cardForeground }}>{player().encounters.toFixed(0)}</Text>
-                        </View>
-                      )}
-                    </Each>
-                  </View>
-                  </Surface>
-                </Scroll>
-              </Scroll>
-            </View>
-          </If>
-        </View>
-      </If>
-    </View>
-  );
-}
-
 function SearchView() {
   const current = () => searchState();
   return (
@@ -705,16 +438,6 @@ function SearchView() {
     </View>
   );
 }
-
-const inputStyle = {
-  minHeight: 34,
-  paddingHorizontal: 9,
-  borderWidth: 1,
-  borderColor: colors.input,
-  borderRadius: controlRadius(),
-  backgroundColor: colors.background,
-  color: colors.foreground,
-};
 
 function SettingsField(props: {
   label: string;
@@ -925,6 +648,9 @@ function SettingsView() {
                 />
               </View>
             </SettingsSection>
+            <GameDataCacheSection/>
+            <ReplayIndexSection/>
+            <ReplayDirectoriesSection/>
           </View>
         </Scroll>
       </If>
@@ -940,7 +666,7 @@ function Content() {
         <NativeReplayInspector openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "statistics" ? "flex" : "none" }}>
-        <StatisticsView/>
+        <StatsView/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "player-tracker" ? "flex" : "none" }}>
         <PlayerTrackerView/>
@@ -1073,7 +799,7 @@ function App() {
       <TabStrip/>
       <View style={{ flex: 1 }}><Content/></View>
       <View style={{ height: 26, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card }}>
-        <Text style={{ flex: 1, fontSize: 11.5, color: colors.mutedForeground }}>Ready</Text>
+        <View style={{ flex: 1 }}><GameDataStatus/></View>
         <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>WoWs Toolkit {startup.version}</Text>
       </View>
       <Notice/>

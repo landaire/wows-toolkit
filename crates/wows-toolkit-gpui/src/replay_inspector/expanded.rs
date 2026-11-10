@@ -42,11 +42,11 @@ use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
 
 use super::columns::NDA;
-use super::columns::ReplayColumn;
 use super::icons::IconCache;
-use super::model::PlayerRow;
-use super::model::separate_number;
 use super::table::text_width;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::fire_chance;
 
@@ -1283,9 +1283,9 @@ mod tests {
     use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
     use super::skill_grid_width;
-    use crate::replay_inspector::test_support::base_row;
-    use crate::replay_inspector::test_support::fire_chance_result;
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::test_support::base_row;
+    use wows_toolkit_replay_data::test_support::fire_chance_result;
 
     /// The block expands under Name, after the damage events, which is where
     /// the egui app puts it; Kills has nothing of its own to show.

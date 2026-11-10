@@ -28,7 +28,7 @@ use wows_toolkit_viewmodel::preview_dwell::Dwell;
 use crate::minimap_preview::FRAME_INTERVAL;
 use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// How long a preview goes without a new frame before the bake behind it
 /// reads as stuck rather than busy.

@@ -1,4 +1,3 @@
-use jiff::ToSpan as _;
 use nsh_core::prelude::*;
 use rust_i18n::Backend as _;
 use wows_toolkit_viewmodel::settings::{DataSharingMode, keys, normalize_proxy_url};
@@ -69,51 +68,6 @@ pub struct SettingsState {
     pub storage_dir: String,
 }
 
-/// Aggregate battle statistics from the shared session database.
-#[derive(Debug, Clone, PartialEq, JsObject)]
-#[non_exhaustive]
-pub struct StatisticsState {
-    pub games: u32,
-    pub wins: u32,
-    pub losses: u32,
-    pub draws: u32,
-    pub win_rate: f64,
-    pub average_damage: f64,
-    pub average_base_xp: f64,
-    pub average_frags: f64,
-    pub ships: Vec<ShipStatistics>,
-}
-
-/// Statistics for one ship.
-#[derive(Debug, Clone, PartialEq, JsObject)]
-#[non_exhaustive]
-pub struct ShipStatistics {
-    pub ship_name: String,
-    pub ship_id: String,
-    pub games: u32,
-    pub win_rate: f64,
-    pub average_damage: f64,
-    pub average_base_xp: f64,
-}
-
-/// Historical players found in the shared replay index.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct PlayerTrackerState {
-    pub players: Vec<TrackedPlayer>,
-    pub total_players: u32,
-}
-
-/// One player shown by the historical player tracker.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct TrackedPlayer {
-    pub account_id: String,
-    pub name: String,
-    pub clan: String,
-    pub encounters: u32,
-}
-
 /// Bounded results from the shared replay index.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
@@ -137,16 +91,6 @@ pub struct SearchResult {
     pub kills: String,
     pub pr: String,
     pub replay_path: String,
-}
-
-#[derive(Debug)]
-struct ShipAccumulator {
-    ship_name: String,
-    ship_id: u64,
-    games: u32,
-    wins: u32,
-    damage: u64,
-    base_xp: i64,
 }
 
 /// Native application services exposed to the TSX interface.
@@ -204,144 +148,12 @@ impl Toolkit {
             .map_err(|error| format!("settings writer task failed: {error}"))?
     }
 
-    /// Aggregates recorded battles from the shared session database.
-    pub async fn load_statistics() -> Result<StatisticsState, String> {
-        blocking(load_statistics).await.map_err(|error| format!("statistics reader task failed: {error}"))?
-    }
-    /// Reads historical encounters from the shared replay index.
-    pub async fn load_player_tracker(period: String, query: String) -> Result<PlayerTrackerState, String> {
-        blocking(move || load_player_tracker(&period, &query))
-            .await
-            .map_err(|error| format!("player tracker reader task failed: {error}"))?
-    }
     /// Searches the shared replay index using the common query language.
     pub async fn search_index(query: String, sort_column: String, descending: bool) -> Result<SearchState, String> {
         blocking(move || search_index(&query, &sort_column, descending))
             .await
             .map_err(|error| format!("search task failed: {error}"))?
     }
-}
-
-fn load_statistics() -> Result<StatisticsState, String> {
-    database_runtime()?.block_on(async {
-        let pool = wows_toolkit_config::open_db()
-            .await
-            .map_err(|error| format!("could not open the statistics database: {error}"))?;
-        let rows = wows_toolkit_config::queries::get_all_session_stats(&pool)
-            .await
-            .map_err(|error| format!("could not read session statistics: {error}"))?;
-        let games = u32::try_from(rows.len()).map_err(|_| "too many session statistics rows".to_owned())?;
-        let wins = u32::try_from(rows.iter().filter(|row| row.is_win).count())
-            .map_err(|_| "too many winning session statistics rows".to_owned())?;
-        let losses = u32::try_from(rows.iter().filter(|row| row.is_loss).count())
-            .map_err(|_| "too many losing session statistics rows".to_owned())?;
-        let draws = u32::try_from(rows.iter().filter(|row| row.is_draw).count())
-            .map_err(|_| "too many drawn session statistics rows".to_owned())?;
-        let total_damage = rows.iter().try_fold(0u64, |total, row| {
-            total
-                .checked_add(row.damage as u64)
-                .ok_or_else(|| "total session damage exceeds the supported range".to_owned())
-        })?;
-        let total_base_xp = rows.iter().try_fold(0i64, |total, row| {
-            total.checked_add(row.base_xp).ok_or_else(|| "total session base XP exceeds the supported range".to_owned())
-        })?;
-        let total_frags = rows.iter().try_fold(0i64, |total, row| {
-            total.checked_add(row.frags).ok_or_else(|| "total session frags exceeds the supported range".to_owned())
-        })?;
-        let mut by_ship = std::collections::BTreeMap::<u64, ShipAccumulator>::new();
-        for row in &rows {
-            let ship_id = row.ship_id as u64;
-            let ship = by_ship.entry(ship_id).or_insert_with(|| ShipAccumulator {
-                ship_name: row.ship_name.clone(),
-                ship_id,
-                games: 0,
-                wins: 0,
-                damage: 0,
-                base_xp: 0,
-            });
-            ship.games += 1;
-            ship.wins += u32::from(row.is_win);
-            ship.damage = ship
-                .damage
-                .checked_add(row.damage as u64)
-                .ok_or_else(|| format!("damage for ship {ship_id} exceeds the supported range"))?;
-            ship.base_xp = ship
-                .base_xp
-                .checked_add(row.base_xp)
-                .ok_or_else(|| format!("base XP for ship {ship_id} exceeds the supported range"))?;
-        }
-        let mut ships = by_ship
-            .into_values()
-            .map(|ship| ShipStatistics {
-                ship_name: ship.ship_name,
-                ship_id: ship.ship_id.to_string(),
-                games: ship.games,
-                win_rate: percentage(ship.wins, ship.games),
-                average_damage: average_u64(ship.damage, ship.games),
-                average_base_xp: average(ship.base_xp, ship.games),
-            })
-            .collect::<Vec<_>>();
-        ships.sort_by(|left, right| {
-            right
-                .games
-                .cmp(&left.games)
-                .then_with(|| left.ship_name.cmp(&right.ship_name))
-                .then_with(|| left.ship_id.cmp(&right.ship_id))
-        });
-
-        Ok(StatisticsState {
-            games,
-            wins,
-            losses,
-            draws,
-            win_rate: percentage(wins, games),
-            average_damage: average_u64(total_damage, games),
-            average_base_xp: average(total_base_xp, games),
-            average_frags: average(total_frags, games),
-            ships,
-        })
-    })
-}
-
-fn load_player_tracker(period: &str, query: &str) -> Result<PlayerTrackerState, String> {
-    let now = jiff::Timestamp::now();
-    let date_from = match period {
-        "hour" => Some(now - 1.hour()),
-        "six_hours" => Some(now - 6.hours()),
-        "day" => Some(now - 24.hours()),
-        "week" => Some(now - (24 * 7).hours()),
-        "month" => Some(now - (24 * 30).hours()),
-        "all" => None,
-        _ => return Err(format!("unsupported player tracker period: {period}")),
-    };
-    database_runtime()?.block_on(async {
-        let pool = wows_toolkit_config::open_db()
-            .await
-            .map_err(|error| format!("could not open the replay index: {error}"))?;
-        let filter = wows_toolkit_config::index::rows::MatchFilter { date_from, ..Default::default() };
-        let limit = std::num::NonZeroU32::new(500).expect("the player tracker page limit is nonzero");
-        let page = wows_toolkit_config::index::query::distinct_players_page(&pool, &filter, query, limit)
-            .await
-            .map_err(|error| format!("could not read indexed players: {error}"))?;
-        let total_players = u32::try_from(page.total_count)
-            .map_err(|_| "the filtered player count exceeds the supported range".to_owned())?;
-        let players = page
-            .players
-            .into_iter()
-            .map(|player| {
-                let encounters = u32::try_from(player.match_count).map_err(|_| {
-                    format!("encounter count for account {} exceeds the supported range", player.account_id.raw())
-                })?;
-                Ok(TrackedPlayer {
-                    account_id: player.account_id.raw().to_string(),
-                    name: player.latest_name,
-                    clan: player.clan,
-                    encounters,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        Ok(PlayerTrackerState { players, total_players })
-    })
 }
 
 fn search_index(query: &str, sort_column: &str, descending: bool) -> Result<SearchState, String> {
@@ -404,18 +216,6 @@ fn search_index(query: &str, sort_column: &str, descending: bool) -> Result<Sear
             .collect();
         Ok(SearchState { results, truncated })
     })
-}
-
-fn percentage(part: u32, total: u32) -> f64 {
-    if total == 0 { 0.0 } else { f64::from(part) * 100.0 / f64::from(total) }
-}
-
-fn average_u64(total: u64, count: u32) -> f64 {
-    if count == 0 { 0.0 } else { total as f64 / f64::from(count) }
-}
-
-fn average(total: i64, count: u32) -> f64 {
-    if count == 0 { 0.0 } else { total as f64 / f64::from(count) }
 }
 
 fn load_settings() -> Result<SettingsState, String> {
@@ -545,7 +345,7 @@ fn save_settings(mut settings: SettingsState, changed: Vec<String>) -> Result<Se
     })
 }
 
-fn database_runtime() -> Result<tokio::runtime::Runtime, String> {
+pub(crate) fn database_runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

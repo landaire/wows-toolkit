@@ -3,7 +3,7 @@
 //! `ui/replay_parser/mod.rs` (`PlayerReport` construction, lines 535-851) and
 //! `ui/replay_parser/models.rs` (`PlayerReport` field list), with
 //! `RichText`/`Color32`/texture fields dropped or replaced by plain
-//! strings/`ColorRole` (colors live in `columns.rs`, resolved by cell, not
+//! strings/`ColorRole` (colors are resolved by the render layer, not
 //! stored per-row). The Dazzle/Incoming Fire Alert skill markers
 //! (`util::colorize_captain_points`'s star/siren glyphs) are kept as plain
 //! `has_dazzle`/`has_ifa` booleans rather than dropped, so the render layer
@@ -55,9 +55,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Species;
 
-use super::columns::ReplayColumn;
-use super::columns::relation_color_rgb;
-use super::links;
+use crate::columns::ReplayColumn;
+use crate::links;
 
 /// One player's presentation-ready row: scalars and formatted strings pulled
 /// from `NormalizedPlayer`/`ServerResults`. Colors are not stored here; they
@@ -196,8 +195,7 @@ pub struct PlayerRow {
     /// loaded at report-construction time, so the egui app computes PR in a
     /// separate step (`UiReport::populate_personal_ratings`) once that data
     /// is available. Call `ReplayReportModel::populate_personal_ratings`
-    /// after loading PR data (a later milestone wires that load into the
-    /// gpui_kit app) to fill this in.
+    /// after loading PR data to fill this in.
     pub personal_rating: Option<PersonalRatingResult>,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
@@ -284,24 +282,29 @@ pub struct ChatMessage {
     /// The sender's clan tag with no surrounding brackets (`Player::clan()`);
     /// `None` when the sender is clanless or has no resolved `Player`.
     pub clan_tag: Option<String>,
-    /// Packed `0xRRGGBB` clan-league color; `Some` exactly when `clan_tag`
-    /// is. Read from the player's raw `clanColor` property, falling back to
-    /// the player's team-relation color for older replays that omit it
-    /// (mirrors `clan_color_for_player`).
-    pub clan_color_rgb: Option<u32>,
+    /// The clan tag's color; `Some` exactly when `clan_tag` is (mirrors
+    /// `clan_color_for_player`).
+    pub clan_color: Option<ClanColor>,
 }
 
-/// Mirrors `clan_color_for_player`: the clan-league color packed as
-/// `0xRRGGBB`, read from the player's raw `clanColor` property. Older
-/// replays omit that property; this falls back to the player's own
-/// team-relation color (via `Player::relation`, not the message's
-/// `sender_relation`, matching the egui original) rather than panicking.
-/// The fallback resolves through `relation_color_rgb`, the single source of
-/// truth for the self/ally/enemy triad.
-fn clan_color_for_player(player: &Player) -> u32 {
+/// What colors a chat sender's clan tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClanColor {
+    /// The clan-league color packed as `0xRRGGBB`, read from the player's raw
+    /// `clanColor` property.
+    League(u32),
+    /// Older replays omit the league color; the tag then takes the player's own
+    /// team-relation color, which the render layer resolves from its palette.
+    Relation(Relation),
+}
+
+/// Mirrors `clan_color_for_player`: the league color when the replay records
+/// one, otherwise the player's own team relation (via `Player::relation`, not
+/// the message's `sender_relation`, matching the egui original).
+fn clan_color_for_player(player: &Player) -> ClanColor {
     match player.initial_state().raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
-        Some(clan_color) => (clan_color & 0xFF_FFFF) as u32,
-        None => relation_color_rgb(player.relation()),
+        Some(clan_color) => ClanColor::League((clan_color & 0xFF_FFFF) as u32),
+        None => ClanColor::Relation(player.relation()),
     }
 }
 
@@ -331,7 +334,7 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
 
     let decoded_text = escaper::decode_html(text.as_str()).unwrap_or_else(|_| text.clone());
 
-    let (clan_tag, clan_color_rgb) = match player {
+    let (clan_tag, clan_color) = match player {
         Some(player) if !player.initial_state().clan().is_empty() => {
             (Some(player.initial_state().clan().to_string()), Some(clan_color_for_player(player)))
         }
@@ -345,7 +348,7 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
         channel: channel.clone(),
         message: translated_text.unwrap_or(decoded_text),
         clan_tag,
-        clan_color_rgb,
+        clan_color,
     }
 }
 
@@ -884,7 +887,7 @@ impl PlayerRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_inspector::test_support;
+    use crate::test_support;
 
     #[test]
     fn separate_number_groups_by_thousands() {
@@ -1093,7 +1096,7 @@ mod tests {
     /// ```text
     /// WOWS_REPLAY_INSPECTOR_TEST_GAME_DIR=G:\wows_builds\13.11.0 \
     /// WOWS_REPLAY_INSPECTOR_TEST_VERSION="13, 11, 0, 12668706" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored from_normalized_resolves_species_text_from_a_real_provider
+    /// cargo test -p wows-toolkit-replay-data -- --ignored from_normalized_resolves_species_text_from_a_real_provider
     /// ```
     ///
     /// See `reference_test_replays_and_builds.md` for the build-directory

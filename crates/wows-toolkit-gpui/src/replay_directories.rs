@@ -1,8 +1,8 @@
 use super::*;
 use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::tooltip::Tooltip;
-
-const PINNED_DIRECTORIES: &str = "gpui.pinned_replay_directories";
+use wows_toolkit_replay_data::directories::canonical_root;
+use wows_toolkit_replay_data::directories::shortened_path;
 
 pub(super) struct DirectoryTab {
     pub root: PathBuf,
@@ -109,9 +109,7 @@ impl App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Canonical paths identify aliases of an existing directory. Keep missing
-        // paths so a pinned removable volume is not discarded on startup.
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = canonical_root(root);
         if let Some(tab) = self.replay_directories.iter_mut().find(|tab| tab.root == root) {
             tab.pinned |= pinned;
             if activate {
@@ -238,10 +236,12 @@ impl App {
         let lock = self.directory_save_lock.clone();
         cx.spawn_in(window, async move |this, cx| {
             let _guard = lock.lock().await;
-            let result = runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::set_setting(&pool, PINNED_DIRECTORIES, &paths).await
-            })
-            .await;
+            let result =
+                runtime::spawn(
+                    cx,
+                    async move { wows_toolkit_replay_data::directories::save_pinned(&pool, &paths).await },
+                )
+                .await;
             if !matches!(result, Ok(Ok(()))) {
                 let _ = this.update_in(cx, |_this, window, cx| {
                     crate::toast::failed("Pinned replay directories could not be saved.", window, cx);
@@ -259,10 +259,9 @@ impl App {
         let Some(pool) = settings_store::pool(cx) else { return };
         self.directories_restoring = true;
         cx.spawn_in(window, async move |this, cx| {
-            let stored = runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::try_get_setting::<Vec<PathBuf>>(&pool, PINNED_DIRECTORIES).await
-            })
-            .await;
+            let stored =
+                runtime::spawn(cx, async move { wows_toolkit_replay_data::directories::load_pinned(&pool).await })
+                    .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.directories_restoring = false;
                 this.directories_loaded = matches!(&stored, Ok(Ok(_)));
@@ -287,32 +286,4 @@ impl App {
             tab.inspector.update(cx, |view, cx| view.update_directory_game_data(context.clone(), cx));
         }
     }
-}
-
-pub(super) fn shortened_path(root: &std::path::Path) -> String {
-    let parts: Vec<_> = root.components().collect();
-    let mut result = PathBuf::new();
-    for (index, component) in parts.iter().enumerate() {
-        match component {
-            std::path::Component::Normal(name) if index + 1 < parts.len() => {
-                if let Some(initial) = name.to_string_lossy().chars().next() {
-                    result.push(initial.to_string());
-                }
-            }
-            std::path::Component::Normal(name) => {
-                let name = name.to_string_lossy();
-                let chars: Vec<_> = name.chars().collect();
-                if chars.len() > 24 {
-                    let head: String = chars[..12].iter().collect();
-                    let tail: String = chars[chars.len() - 12..].iter().collect();
-                    result.push(format!("{head}..{tail}"));
-                } else {
-                    result.push(name.as_ref());
-                }
-            }
-            _ => result.push(component.as_os_str()),
-        }
-    }
-    let path = result.display().to_string();
-    path.strip_prefix(r"\\?\").unwrap_or(&path).to_string()
 }

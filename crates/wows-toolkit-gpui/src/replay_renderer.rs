@@ -84,7 +84,7 @@ use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
 
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// How many frames of a battle the track keeps.
 ///
@@ -5042,7 +5042,7 @@ mod tests {
         let batch = cx.update(|cx| {
             super::batch_export(
                 paths,
-                crate::replay_inspector::load::GameDataCache::new(dir.path().to_path_buf()),
+                wows_toolkit_replay_data::load::GameDataCache::new(dir.path().to_path_buf()),
                 dir.path().to_path_buf(),
                 wows_minimap_renderer::SavedRenderOptions::default(),
                 report,
@@ -5511,7 +5511,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         use super::DrawCommand;
-        use crate::replay_inspector::GameDataCache;
+        use wows_toolkit_replay_data::load::GameDataCache;
 
         let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
         let game_dir =

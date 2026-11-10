@@ -38,7 +38,7 @@ use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_types::WorldPos;
 
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///

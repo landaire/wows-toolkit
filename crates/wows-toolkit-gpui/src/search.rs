@@ -60,9 +60,9 @@ use wows_toolkit_viewmodel::search as search_hint;
 use wows_toolkit_viewmodel::search as ship_display;
 use wows_toolkit_viewmodel::search::ship_display_name;
 
-use crate::replay_inspector::GameDataCache;
 use crate::runtime;
 use crate::ui::selectable;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// A column the results table draws.
 ///

@@ -23,7 +23,8 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 
 use super::columns::relation_color_rgb;
-use super::model::ChatMessage;
+use wows_toolkit_replay_data::model::ChatMessage;
+use wows_toolkit_replay_data::model::ClanColor;
 
 /// No resolvable team relation: the de-emphasised tone, which is what egui's
 /// `Color32::GRAY` fallback amounts to in `build_replay_chat_content`.
@@ -61,6 +62,15 @@ fn sender_color_rgb(relation: Option<Relation>) -> u32 {
     match relation {
         None => no_relation_gray(),
         Some(r) => relation_color_rgb(r),
+    }
+}
+
+/// Clan-tag color packed as `0xRRGGBB`: the league color the replay records,
+/// or the player's own relation color for an older replay that records none.
+fn clan_color_rgb(color: ClanColor) -> u32 {
+    match color {
+        ClanColor::League(rgb) => rgb,
+        ClanColor::Relation(relation) => relation_color_rgb(relation),
     }
 }
 
@@ -122,8 +132,8 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                 .child(
                     h_flex()
                         .gap_1()
-                        .when_some(message.clan_tag.as_ref().zip(message.clan_color_rgb), |this, (tag, color)| {
-                            let clan_color: Hsla = rgb(color).into();
+                        .when_some(message.clan_tag.as_ref().zip(message.clan_color), |this, (tag, color)| {
+                            let clan_color: Hsla = rgb(clan_color_rgb(color)).into();
                             this.child(
                                 div()
                                     .text_color(clan_color)
@@ -261,6 +271,7 @@ mod tests {
     use wows_replays::types::Relation;
 
     use super::ChatMessage;
+    use super::ClanColor;
     use super::ally_color;
     use super::channel_color_rgb;
     use super::copy_text;
@@ -279,7 +290,7 @@ mod tests {
             channel,
             message: "hello".to_string(),
             clan_tag: clan_tag.map(str::to_string),
-            clan_color_rgb: clan_tag.map(|_| 0x3399ff),
+            clan_color: clan_tag.map(|_| ClanColor::League(0x3399ff)),
         }
     }
 
