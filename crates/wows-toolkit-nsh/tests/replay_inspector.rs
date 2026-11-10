@@ -22,6 +22,7 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_nsh::game_data::GameDataState;
 use wows_toolkit_viewmodel::settings::keys;
 
 const FIRST: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
@@ -224,6 +225,15 @@ fn install_with(name: &str, replays: &[&str]) -> TestDirectory {
 /// sample report. The download offer for the replays' builds is declined; a
 /// build is offered once per process, so each test lists builds of its own.
 fn app_with_install(install: &Path, autoload: bool) -> TestApp {
+    let mut app = app_bound_to(install, autoload);
+    app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
+    app.press("Cancel").unwrap();
+    app.wait_for_gone("Download Game Data", GONE).unwrap();
+    app
+}
+
+/// The app over `install`, every replay it opens read as the sample report.
+fn app_bound_to(install: &Path, autoload: bool) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     record_clipboard();
@@ -231,12 +241,7 @@ fn app_with_install(install: &Path, autoload: bool) -> TestApp {
     let settings = InstallSettings::bind(install, autoload);
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    let mut app = TestApp { app, _install: Some(settings), _guard: guard };
-
-    app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
-    app.press("Cancel").unwrap();
-    app.wait_for_gone("Download Game Data", GONE).unwrap();
-    app
+    TestApp { app, _install: Some(settings), _guard: guard }
 }
 
 /// Writes an index row for `replay` in the live source, as a pass that read
@@ -321,6 +326,16 @@ impl Drop for OpenedDirectory {
 fn open_sample(app: &mut TestApp) {
     open_file(app, fixture(FIRST));
     app.wait_for(SAMPLE_TITLE).unwrap();
+}
+
+/// A selector name that matches `text` exactly, read as a regex with its
+/// special characters escaped.
+fn exactly(text: &str) -> String {
+    let escaped: String = text
+        .chars()
+        .flat_map(|c| r"\.+*?()|[]{}^$".contains(c).then_some('\\').into_iter().chain([c]))
+        .collect();
+    format!("/^{escaped}$/")
 }
 
 #[test]
@@ -482,11 +497,7 @@ fn a_directory_lists_its_replays_and_opens_them() {
     // Its label is a path, which a selector would read as a regex, so it is
     // matched as one.
     let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
-    let label: String = wows_toolkit_replay_data::directories::shortened_path(&root)
-        .chars()
-        .flat_map(|c| r"\.+*?()|[]{}^$".contains(c).then_some('\\').into_iter().chain([c]))
-        .collect();
-    let tab = format!("role:tab[/^{label}$/]");
+    let tab = format!("role:tab[{}]", exactly(&wows_toolkit_replay_data::directories::shortened_path(&root)));
     assert!(app.screen().selected(&tab).unwrap(), "the opened directory's tab is shown");
     app.press("role:tab[Replay Inspector]").unwrap();
     app.wait_for_gone(&format!("label:{FIRST}"), GONE).unwrap();
@@ -703,4 +714,32 @@ fn checking_game_data_offers_the_directory_builds() {
         app.press("Cancel").unwrap();
         app.wait_for_gone("Download Game Data", GONE).unwrap();
     }
+}
+
+/// An install whose build does not load says why, once as a notice and
+/// above the listing.
+#[test]
+fn game_data_that_fails_to_load_says_why() {
+    let install = install_with("load-fails", &[]);
+    let mut app = app_bound_to(&install.0, false);
+
+    let failure = || match wows_toolkit_nsh::game_data::status() {
+        GameDataState::Failed { error } => Some(error.to_string()),
+        _ => None,
+    };
+    app.wait_until("the load fails", Duration::from_secs(30), |_| failure().is_some()).unwrap();
+    let reason = failure().expect("the load failed");
+
+    app.wait_for(&format!("role:alert[{}]", exactly(&reason))).unwrap();
+    app.wait_for(&format!("text:{}", exactly(&format!("Game data failed to load: {reason}")))).unwrap();
+}
+
+/// Without a WoWs directory the inspector says so above the listing, and the
+/// listing says why it is empty.
+#[test]
+fn without_a_wows_directory_the_inspector_says_so() {
+    let mut app = app();
+
+    app.wait_for("Game data failed to load: World of Warships directory is not set").unwrap();
+    app.wait_for(&format!("text:{}", exactly("World of Warships directory is not set"))).unwrap();
 }

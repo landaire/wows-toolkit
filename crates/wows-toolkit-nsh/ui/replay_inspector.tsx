@@ -559,8 +559,8 @@ function adoptGameData(next: GameDataSnapshot) {
     }
   }
 
-  if (before === null) return;
   followGameDataEdges(before, next);
+  if (before === null) return;
   if (next.phase === "ready" && before.phase !== "ready") void checkLatestConstants();
   // Rows are named from the game data, so a new install or build lists again.
   if (next.wowsDir !== before.wowsDir || next.phase !== before.phase || next.version !== before.version) {
@@ -613,8 +613,11 @@ async function checkGameData(directory: string) {
 /** Set when game data became ready, until the main listing next reports what it holds. */
 let awaitingListedReplays = false;
 
-/** What GPUI reports when the game data finishes loading, and the open replays rated once the PR table arrives. */
-function followGameDataEdges(before: GameDataSnapshot, next: GameDataSnapshot) {
+/** What GPUI reports when the game data finishes loading or fails to, and the open replays rated once the PR table arrives. */
+function followGameDataEdges(before: GameDataSnapshot | null, next: GameDataSnapshot) {
+  // A load that failed before the first snapshot was read failed all the same.
+  if (next.phase === "failed" && before?.phase !== "failed" && next.reason != null) toast.failed(next.reason);
+  if (before === null) return;
   if (next.phase === "ready" && before.phase !== "ready") {
     toast.ok(t("ui.messages.game_data_loaded"));
     awaitingListedReplays = true;
@@ -1366,7 +1369,13 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
   const render = slots
     ? (request: RenderRequest) => openViewport(ws, { kind: "renderer", path: request.path, alts: request.alts, title: replayStem(request.path) })
     : undefined;
-  const failure = () => (gameData()?.phase === "failed" ? gameData()?.reason ?? null : null);
+  const failure = () => {
+    const status = gameData();
+    if (status?.phase === "failed") return status.reason ?? null;
+    // A settings read that failed says why; otherwise no directory is set.
+    if (status?.phase === "notConfigured") return status.reason ?? t("ui.messages.wows_dir_not_set");
+    return null;
+  };
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <WorkspaceToolbar ws={ws} view={props.view}/>
