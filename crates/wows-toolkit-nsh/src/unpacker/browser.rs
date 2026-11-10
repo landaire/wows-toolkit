@@ -286,8 +286,12 @@ fn folder_row(entry: &TreeEntry) -> AnyElement {
                 .children(folder.then(|| icon(Icon::ChevronRight, px(12.0)))),
         )
         // TreeEntry carries no expansion state, so the row's aria-expanded picks the icon.
-        .child(icon(Icon::Folder, px(14.0)).app_class(class("text-primary group-aria-expanded:hidden")))
-        .child(icon(Icon::FolderOpen, px(14.0)).app_class(class("hidden text-primary group-aria-expanded:flex")))
+        .child(icon(Icon::Folder, px(14.0)).test_id("unpacker-folder").app_class(class("text-primary group-aria-expanded:hidden")))
+        .child(
+            icon(Icon::FolderOpen, px(14.0))
+                .test_id("unpacker-folder-open")
+                .app_class(class("hidden text-primary group-aria-expanded:flex")),
+        )
         .child(text(entry.label.clone()).app_class(class("text-xs text-foreground")))
         .into_element()
 }

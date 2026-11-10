@@ -251,6 +251,14 @@ fn the_unpacker_browses_filters_queues_extracts_searches_views_and_exports() {
     app.wait_for("label:logo.png").unwrap();
     app.wait_for("2 items").unwrap();
 
+    // Each folder row shows one icon: open while expanded, closed otherwise.
+    let screen = app.screen();
+    let rows = screen.count("role:treeitem").unwrap();
+    let closed = screen.count("id:unpacker-folder").unwrap();
+    let open = screen.count("id:unpacker-folder-open").unwrap();
+    assert_eq!(closed + open, rows, "one folder icon per row: {closed} closed, {open} open, {rows} rows");
+    assert!(open > 0 && closed > 0, "the expanded root is open and its collapsed folders closed: {closed} closed, {open} open");
+
     // Queueing from the listing feeds the queue panel and the Extract label.
     app.wait_for("label:Queue this file: notes.txt").unwrap();
     app.press("label:Queue this file: notes.txt").unwrap();
