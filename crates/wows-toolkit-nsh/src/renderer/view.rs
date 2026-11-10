@@ -17,7 +17,6 @@ use wows_toolkit_replay_data::playback::LAYER_TOGGLES;
 use wows_toolkit_replay_data::playback::MAX_NIB;
 use wows_toolkit_replay_data::playback::MIN_NIB;
 use wows_toolkit_replay_data::playback::SPEEDS;
-use wows_toolkit_replay_data::playback::ShipPick;
 use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 use wt_collab_client::drawing::Tool;
 
@@ -25,6 +24,7 @@ use crate::renderer::ids::NoticeId;
 use crate::renderer::ids::RendererId;
 use crate::renderer::ids::Revision;
 use crate::renderer::viewer::Phase;
+use crate::renderer::viewer::ShipMenu;
 use crate::renderer::viewer::Viewer;
 
 /// Where a viewport is in reading its replay.
@@ -165,6 +165,8 @@ pub struct RendererView {
     pub picked_ship: Option<PickedShipView>,
     pub ship_query: String,
     pub ship_matches: Vec<ShipMatchView>,
+    /// The right-clicked ship's menu, open until closed.
+    pub ship_menu: Option<ShipMenuView>,
     pub notice: Option<NoticeView>,
 }
 
@@ -251,8 +253,11 @@ pub struct RangeSwitchView {
 }
 
 /// The menu a right-click on a ship opens.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct ShipMenuView {
+    /// Where the click landed, in points from the frame's top left.
+    pub x: f64,
+    pub y: f64,
     pub player: String,
     /// The ship's entity, in decimal, for the realtime armor request.
     pub entity_id: String,
@@ -301,11 +306,6 @@ pub struct RendererText {
     pub baking: String,
     pub failed: String,
     pub preparing_export: String,
-    pub software_encode_title: String,
-    pub software_encode_body: String,
-    pub software_encode_go: String,
-    pub suppress_warning: String,
-    pub cancel: String,
     pub annotations: String,
     pub undo: String,
     pub nib: String,
@@ -326,7 +326,6 @@ pub struct RendererText {
     pub only_ranges: String,
     pub all_ranges: String,
     pub pop_out: String,
-    pub pop_in: String,
     pub watching: String,
     pub waiting_for_frames: String,
 }
@@ -474,6 +473,7 @@ pub fn of(id: RendererId, surface: &str, viewer: &Viewer, revision: Revision) ->
                 label: format!("{} {}", tier_roman(ship.tier), ship.display_name),
             })
             .collect(),
+        ship_menu: viewer.ship_menu().map(|menu| ship_menu(viewer, menu)),
         notice: viewer.notice().map(|notice| NoticeView { id: notice.id, text: notice.text.clone() }),
     }
 }
@@ -564,8 +564,9 @@ pub fn range_switch(filter: &mut ShipConfigFilter, range: RendererRange) -> &mut
     }
 }
 
-/// The ship menu for `pick`.
-pub fn ship_menu(viewer: &Viewer, pick: &ShipPick) -> ShipMenuView {
+/// The ship menu `menu` shows.
+pub fn ship_menu(viewer: &Viewer, menu: &ShipMenu) -> ShipMenuView {
+    let pick = &menu.pick;
     let mut filter = viewer.ranges_for(&pick.player_name);
     let ranges = [
         (RendererRange::Detection, "ui.renderer.context.detection"),
@@ -580,6 +581,8 @@ pub fn ship_menu(viewer: &Viewer, pick: &ShipPick) -> ShipMenuView {
     .collect();
 
     ShipMenuView {
+        x: f64::from(menu.at.x),
+        y: f64::from(menu.at.y),
         player: pick.player_name.clone(),
         entity_id: pick.entity_id.raw().to_string(),
         realtime_armor: viewer
@@ -635,11 +638,6 @@ pub fn text() -> RendererText {
         baking: tr("ui.replay.renderer.baking"),
         failed: tr("ui.replay.renderer.failed"),
         preparing_export: tr("ui.renderer.preparing_export"),
-        software_encode_title: tr("ui.windows.software_encode"),
-        software_encode_body: tr("ui.dialogs.software_encode_message"),
-        software_encode_go: tr("ui.buttons.continue_"),
-        suppress_warning: tr("ui.labels.suppress_warning"),
-        cancel: tr("ui.buttons.cancel"),
         annotations: tr("ui.renderer.annotations.title"),
         undo: tr("ui.renderer.annotations.undo"),
         nib: tr("ui.renderer.annotations.nib"),
@@ -679,7 +677,6 @@ pub fn text() -> RendererText {
         only_ranges: tr("ui.renderer.context.disable_other_ranges"),
         all_ranges: tr("ui.renderer.context.enable_all_ranges"),
         pop_out: tr("ui.replay.renderer.pop_out"),
-        pop_in: tr("ui.replay.renderer.pop_in"),
         watching: tr("ui.collab.watching"),
         waiting_for_frames: tr("ui.collab.waiting_for_frames"),
     }

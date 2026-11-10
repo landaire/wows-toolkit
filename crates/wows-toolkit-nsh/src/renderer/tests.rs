@@ -3,6 +3,9 @@
 
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::MinimapPos;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::playback::DEFAULT_MAP_ORIGIN;
 use wows_toolkit_replay_data::playback::Track;
@@ -17,14 +20,20 @@ use crate::frames::ScaleFactor;
 use crate::frames::ScrollSteps;
 use crate::frames::SurfaceInput;
 use crate::renderer::geometry::CanvasSize;
+use crate::renderer::geometry::LogicalPoint;
 use crate::renderer::viewer::Viewer;
 
 /// A viewer holding a battle of `clocks.len()` empty frames, shown on a view
 /// of exactly the canvas's size, so a device pixel is a canvas pixel.
 fn ready(clocks: &[f32]) -> Viewer {
+    ready_with(vec![Vec::new(); clocks.len()], clocks)
+}
+
+/// As [`ready`], with `frames` drawn at `clocks`.
+fn ready_with(frames: Vec<Vec<DrawCommand>>, clocks: &[f32]) -> Viewer {
     let mut viewer = Viewer::new("battle.wowsreplay".into(), Vec::new(), CollabLink::default());
     let track = Track {
-        frames: vec![Vec::new(); clocks.len()],
+        frames,
         clocks: clocks.iter().copied().map(GameClock).collect(),
         battle_start: GameClock(0.0),
         battle_end: None,
@@ -152,4 +161,38 @@ fn a_toggled_layer_and_per_ship_ranges_change_what_is_drawn() {
     assert!(viewer.options().show_ship_config, "one ship's range turns the layer on");
     viewer.set_ranges_for("captain", |filter| filter.detection = false);
     assert!(!viewer.options().show_ship_config, "and off again with the last one");
+}
+
+#[test]
+fn the_ship_menu_stays_open_across_toggles_until_closed() {
+    let on_map = MinimapPos { x: 300.0, y: 400.0 };
+    let ship = DrawCommand::DeadShip {
+        entity_id: EntityId::from(7u32),
+        pos: on_map,
+        yaw: 0.0,
+        species: None,
+        color: None,
+        is_self: false,
+        player_name: Some("captain".into()),
+        ship_name: None,
+    };
+    let mut viewer = ready_with(vec![vec![ship]], &[0.0]);
+    let on_screen = viewer.device_point(on_map).expect("the ship is on screen");
+    let at = LogicalPoint { x: on_screen.x, y: on_screen.y };
+
+    viewer.open_ship_menu(at);
+    let menu = viewer.ship_menu().expect("a right-click on a ship opens its menu");
+    assert_eq!(menu.pick.player_name, "captain");
+    assert_eq!(menu.at, at, "the menu stays where the click landed");
+
+    viewer.set_ranges_for("captain", |filter| filter.detection = true);
+    viewer.set_trail_shown("captain", false);
+    assert!(viewer.ship_menu().is_some(), "toggling a switch leaves the menu open");
+
+    viewer.close_ship_menu();
+    assert!(viewer.ship_menu().is_none());
+
+    viewer.open_ship_menu(at);
+    viewer.open_ship_menu(LogicalPoint { x: 2.0, y: CANVAS_HEIGHT as f32 - 2.0 });
+    assert!(viewer.ship_menu().is_none(), "a right-click on open water closes it");
 }

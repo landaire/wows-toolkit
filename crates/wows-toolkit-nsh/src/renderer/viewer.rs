@@ -158,6 +158,14 @@ pub struct Notice {
     pub text: String,
 }
 
+/// The ship a right-click opened the menu for, and where the click landed,
+/// which is where the menu stays until it is closed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShipMenu {
+    pub pick: ShipPick,
+    pub at: LogicalPoint,
+}
+
 /// The work an export needs, taken from the viewer while it starts.
 pub struct ExportJob {
     pub renderer: SharedPreviewRenderer,
@@ -228,6 +236,7 @@ pub struct Viewer {
     layout: SidePanelLayout,
     trail_hidden: HashSet<String>,
     ship_ranges: HashMap<String, ShipConfigFilter>,
+    ship_menu: Option<ShipMenu>,
     export_settings: ExportSettings,
     export: Option<ExportProgress>,
     export_failure: Option<ExportFailure>,
@@ -292,6 +301,7 @@ impl Viewer {
             layout: SidePanelLayout::None,
             trail_hidden: HashSet::new(),
             ship_ranges: HashMap::new(),
+            ship_menu: None,
             export_settings: ExportSettings::default(),
             export: None,
             export_failure: None,
@@ -673,11 +683,14 @@ impl Viewer {
     }
 
     /// What the armor viewer opens on for `entity`, which this viewport then
-    /// keeps up to date.
+    /// keeps up to date. The ship menu that asked for it closes.
     pub fn show_armor(&mut self, entity: EntityId) -> Option<RealtimeShow> {
         let loaded = crate::game_data::newest_loaded();
         let Phase::Ready(track) = &self.phase else { return None };
-        self.armor.show(track, self.at, entity, loaded.as_deref())
+        let shown = self.armor.show(track, self.at, entity, loaded.as_deref())?;
+        self.close_ship_menu();
+
+        Some(shown)
     }
 
     /// What the followed ship had taken by where playback is, when that changed.
@@ -845,6 +858,23 @@ impl Viewer {
         let point = at.to_device(self.viewport?.scale);
         let map = self.map_point(point)?;
         self.track()?.ship_near(self.at.get(), map)
+    }
+
+    /// Opens the menu for the ship under `at`; a click that misses every ship
+    /// closes the menu instead.
+    pub fn open_ship_menu(&mut self, at: LogicalPoint) {
+        self.ship_menu = self.ship_under(at).map(|pick| ShipMenu { pick, at });
+        self.changed = true;
+    }
+
+    pub fn close_ship_menu(&mut self) {
+        if self.ship_menu.take().is_some() {
+            self.changed = true;
+        }
+    }
+
+    pub fn ship_menu(&self) -> Option<&ShipMenu> {
+        self.ship_menu.as_ref()
     }
 
     /// Starts an export of what is on screen: the frames the settings cover,
