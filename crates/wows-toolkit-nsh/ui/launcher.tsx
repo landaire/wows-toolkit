@@ -2,7 +2,7 @@ import type { JSX } from "nsh";
 import { effect, Scroll, signal, Text, View } from "nsh";
 import { Checkbox, Input, Progress } from "nsh/base";
 import { LauncherSession, type AccountState, type DownloadRow, type GameRow, type InstallRow, type LauncherState, type StatusLine } from "wows-toolkit/native";
-import { Button, Surface } from "./components";
+import { Button, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { CheckMark } from "./icons";
 import { applyWowsDir } from "./settings";
@@ -61,7 +61,7 @@ function Line(props: { line: StatusLine }) {
     <View style={{ gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <If when={props.line.busy}>
-          <View style={{ width: 60 }}><Progress value={0} indeterminate accessibilityLabel={props.line.text}/></View>
+          <Spinner label={props.line.text}/>
         </If>
         <Text style={{ fontSize: 12.5, color: toneColor(props.line.tone) }}>{props.line.text}</Text>
       </View>
@@ -154,10 +154,6 @@ function submitCode() {
   const entered = code();
   code.set("");
   adopt(session.submitCode(entered, useBackupCode()));
-}
-
-function Spinner(props: { label: string }) {
-  return <View style={{ width: 60 }}><Progress value={0} indeterminate accessibilityLabel={props.label}/></View>;
 }
 
 function ErrorLine(props: { text: string | null | undefined }) {

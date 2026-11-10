@@ -871,7 +871,7 @@ function OverviewPanel(props: { model: StatsModel }) {
                         </If>
                         <If when={!achievement().icon}>
                           <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 18, color: colors.mutedForeground }}>*</Text>
+                            <Icon name="star" size={22} color={colors.mutedForeground}/>
                           </View>
                         </If>
                         <Text style={{ fontSize: 11, fontWeight: "600", color: colors.foreground }}>{achievement().count}</Text>
