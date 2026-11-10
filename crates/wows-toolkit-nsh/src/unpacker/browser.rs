@@ -40,6 +40,7 @@ use super::ui::ButtonStyle;
 use super::ui::button;
 use super::ui::caption;
 use super::ui::class;
+use super::ui::dim_icon;
 use super::ui::icon_button;
 use super::ui::status;
 use super::ui::text_field;
@@ -226,6 +227,7 @@ fn sidebar(pane: BrowserPane, tab: Tab) -> AnyElement {
             icon_button(Icon::PanelLeftClose, tab.text("ui.unpacker.collapse_folders"))
                 .on_press(move |_: &PressEvent| pane.sidebar_collapsed.set(true)),
         )
+        .child(dim_icon(Icon::Search))
         .child(
             text_field(pane.filter, tab.text("ui.unpacker.filter_files"), tab.text("ui.unpacker.filter_files"))
                 .app_class(class(
@@ -249,8 +251,14 @@ fn sidebar(pane: BrowserPane, tab: Tab) -> AnyElement {
         .app_class(class("gap-1 px-2 py-2 border-t border-border"))
         .child(text(tab.text("ui.unpacker.search_in_files")).app_class(class("text-xs font-semibold text-foreground")))
         .child(
-            text_field(pane.search_query, tab.text("ui.unpacker.search_hint"), tab.text("ui.unpacker.search_hint"))
-                .on_submit(move |_: &str| tab.start_search(pane)),
+            view().app_class(class("flex-row items-center gap-1")).child(dim_icon(Icon::Search)).child(
+                text_field(pane.search_query, tab.text("ui.unpacker.search_hint"), tab.text("ui.unpacker.search_hint"))
+                    .app_class(class(
+                        "flex-1 min-w-0 min-h-7 px-2 rounded-(--radius) border border-input bg-background \
+                             text-xs text-foreground",
+                    ))
+                    .on_submit(move |_: &str| tab.start_search(pane)),
+            ),
         )
         .child(text_field(
             pane.path_filter,

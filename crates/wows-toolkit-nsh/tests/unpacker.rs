@@ -268,6 +268,11 @@ fn the_unpacker_browses_filters_queues_extracts_searches_views_and_exports() {
     app.press("label:Queue this file: notes.txt").unwrap();
     app.wait_for("1 queued").unwrap();
     app.wait_for("res/gui/notes.txt").unwrap();
+    assert_eq!(
+        app.screen().in_selectable_view("text:res/gui/notes.txt"),
+        Ok(true),
+        "a queued path can be selected and copied"
+    );
     app.press("label:Remove from queue: res/gui/notes.txt").unwrap();
     app.wait_for("0 queued").unwrap();
 

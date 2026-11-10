@@ -415,6 +415,7 @@ fn queue_row(queue: QueueState, tab: Tab, at: Position) -> AnyElement {
 
     view()
         .app_class(class("flex-row items-center gap-1 h-6 px-2"))
+        .selectable(true)
         .child(text(label).app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")))
         .child(
             icon_button(Icon::X, tab.text("ui.unpacker.remove_from_queue"))

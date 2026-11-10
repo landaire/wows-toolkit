@@ -26,6 +26,7 @@ use super::ui::ButtonStyle;
 use super::ui::button;
 use super::ui::caption;
 use super::ui::class;
+use super::ui::dim_icon;
 use super::ui::icon_button;
 use super::ui::status;
 use super::ui::tip;
@@ -132,6 +133,7 @@ impl SearchRun {
 pub fn search_view(run: SearchRun, tab: Tab) -> AnyElement {
     let header = view()
         .app_class(class("flex-row items-center gap-2 px-2 py-1 border-b border-border"))
+        .child(dim_icon(Icon::Search))
         .child(text(run.query.get()).app_class(class("text-sm text-foreground")))
         .child(caption(tab.text_with("ui.unpacker.search_in", &[("source", &tab.text(run.source.title_key()))])))
         .child(

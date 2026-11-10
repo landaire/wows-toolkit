@@ -52,7 +52,12 @@ pub fn icon_button(glyph: Icon, label: String) -> View {
         .label(label.clone())
         .tooltip(tip(label))
         .app_class(class(ButtonStyle::Ghost.class()))
-        .child(icon(glyph, px(14.0)).app_class(class("text-muted-foreground")))
+        .child(dim_icon(glyph))
+}
+
+/// `glyph` at the controls' icon size, in the dim text color.
+pub fn dim_icon(glyph: Icon) -> Svg {
+    icon(glyph, px(14.0)).app_class(class("text-muted-foreground"))
 }
 
 /// A one-line text field bound to `value`.
