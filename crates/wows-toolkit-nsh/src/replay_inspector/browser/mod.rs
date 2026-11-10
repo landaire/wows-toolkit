@@ -46,6 +46,8 @@ use wows_toolkit_viewmodel::theme::DARK_SEMANTIC;
 use wows_toolkit_viewmodel::theme::LIGHT_SEMANTIC;
 
 use crate::game_data::GameDataState;
+use crate::icons::Icon;
+use crate::icons::icon;
 use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::settings;
@@ -855,21 +857,16 @@ fn scanning(browser: Browser) -> AnyElement {
         if total == 0 { 0.0 } else { done as f32 / total as f32 * 100.0 }
     };
 
-    // The walk has no total to measure against, so it shows activity alone.
-    let walking = move || browser.progress.with(|progress| progress.total == 0);
-
     view()
         .app_class(class("p-2 gap-1"))
         .child(
             view()
                 .app_class(class("flex-row items-center gap-2"))
-                .child(when(walking, move || {
-                    progress()
-                        .indeterminate(true)
-                        .accessibility_label(move || Some(caption()))
-                        .track_class("w-[60px] h-1.5 rounded-full bg-muted overflow-hidden")
-                        .indicator_class("h-full rounded-full bg-primary")
-                }))
+                .child(
+                    view()
+                        .app_class(class("animate-spin"))
+                        .child(icon(Icon::Loader, Points(14.0)).app_class(class("text-muted-foreground"))),
+                )
                 .child(text(caption).app_class(class("text-sm text-muted-foreground"))),
         )
         .child(when(

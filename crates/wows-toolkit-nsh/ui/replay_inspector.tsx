@@ -9,7 +9,6 @@ import {
   Menu,
   MenuItem,
   Popover,
-  Progress,
   ResizablePanel,
   ResizablePanelGroup,
   Tooltip,
@@ -24,12 +23,12 @@ import {
   type GameDataSnapshot,
   type ReplaySummary,
 } from "wows-toolkit/native";
-import { Button, MenuRow, Surface } from "./components";
+import { Button, MenuRow, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting } from "./settings_store";
 import { debugMode } from "./shell/status";
 import * as toast from "./shell/toast";
-import { Icon, type IconName } from "./icons";
+import { CheckMark, Icon, type IconName } from "./icons";
 import { colors, controlRadius, semantic } from "./theme";
 
 type Grouping = "date" | "ship" | "none";
@@ -658,11 +657,6 @@ function IconButton(props: { label: string; icon: IconName; tooltip?: string; on
   );
 }
 
-/** Activity without a measure, beside the text that names it. */
-function Spinner(props: { label: string }) {
-  return <View style={{ width: 60 }}><Progress value={0} indeterminate accessibilityLabel={props.label}/></View>;
-}
-
 function Hint(props: { text: string }) {
   return (
     <Tooltip style={{ maxWidth: 320, paddingHorizontal: 8, paddingVertical: 5, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}>
@@ -687,7 +681,7 @@ function OptionCheckbox(props: { label: string; accessibilityLabel?: string; too
       tooltip={props.tooltip ? <Hint text={props.tooltip}/> : undefined}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<If when={props.checked}><Icon name="check" size={12} color={colors.primaryForeground}/></If>}
+      indicator={<CheckMark checked={props.checked}/>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
@@ -1034,6 +1028,9 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
         style={{
           height: 26,
           paddingHorizontal: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
           justifyContent: "center",
           borderRadius: controlRadius(),
           borderWidth: 1,
@@ -1042,6 +1039,7 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
           opacity: noChat() ? 0.45 : 1,
         }}
       >
+        <Icon name="panel-right-open" size={14} color={colors.foreground}/>
         <Text style={{ fontSize: 12.5, color: colors.foreground }}>{t("ui.replay.chat")}</Text>
       </BaseButton>
     </View>
@@ -1089,7 +1087,7 @@ function ChatPanel(props: { summary: ReplaySummary }) {
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 6 }}>
       <View style={{ flexDirection: "row", gap: 6, paddingHorizontal: 8 }}>
-        <Button label={t("ui.replay.chat_copy_all")} variant="ghost" onPress={() => copyChat(props.summary)}/>
+        <Button label={t("ui.replay.chat_copy_all")} icon="copy" variant="ghost" onPress={() => copyChat(props.summary)}/>
         <Button label={t("ui.replay.chat_save_to_file")} variant="ghost" onPress={() => void saveChat(props.summary)}/>
       </View>
       <Scroll style={{ flex: 1, minHeight: 0 }}>
