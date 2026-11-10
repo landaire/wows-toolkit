@@ -46,7 +46,6 @@ mod stats;
 mod tactics;
 mod theme;
 mod toast;
-mod twitch;
 mod ui;
 mod unpacker;
 mod update;
@@ -111,7 +110,7 @@ fn main() {
             .unwrap_or(None)
             .unwrap_or(true);
     let _log_guard = logging::init(to_file);
-    logging::install_panic_hook();
+    wows_toolkit_viewmodel::logging::install_panic_hook();
 
     // Before any window exists, which is the only moment these are worth
     // applying: extension points attach as a window is created and overlays hook

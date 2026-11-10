@@ -212,7 +212,7 @@ pub enum StatsError {
     #[error(transparent)]
     Refused(#[from] MatchStatsError),
     #[error(transparent)]
-    Client(#[from] crate::http::HttpError),
+    Client(#[from] wows_toolkit_viewmodel::http::HttpError),
     #[error("could not reach the stats service")]
     Transport(#[source] reqwest::Error),
 }

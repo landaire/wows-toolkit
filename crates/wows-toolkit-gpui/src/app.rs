@@ -1055,7 +1055,7 @@ impl App {
     /// button and a link to file an issue; this reports it and puts it on the
     /// clipboard, which is what a reader does with it next.
     pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(report) = crate::logging::take_crash_report() else { return };
+        let Some(report) = wows_toolkit_viewmodel::logging::take_crash_report() else { return };
         self.recent_crash_report = Some(report.clone());
         let copied = report.clone();
         window.open_alert_dialog(cx, move |alert, _window, _cx| {
@@ -1103,7 +1103,7 @@ impl App {
 
     /// Puts the newest log file on the clipboard, for a bug report.
     pub(crate) fn copy_latest_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = crate::logging::newest_log() else {
+        let Some(path) = wows_toolkit_viewmodel::logging::newest_log() else {
             crate::toast::warn(t!("ui.messages.log_not_found").into_owned(), window, cx);
             return;
         };
@@ -1728,7 +1728,7 @@ impl App {
 
             let session = match crate::runtime::spawn(cx, {
                 let client = client.clone();
-                async move { crate::twitch::Session::open(&token, &channel, client).await }
+                async move { wows_toolkit_viewmodel::twitch_chat::Session::open(&token, &channel, client).await }
             })
             .await
             {
@@ -1767,7 +1767,7 @@ impl App {
                     Err(err) => tracing::warn!("twitch: a chat poll did not complete: {err}"),
                 }
 
-                cx.background_executor().timer(crate::twitch::poll_interval()).await;
+                cx.background_executor().timer(wows_toolkit_viewmodel::twitch_chat::poll_interval()).await;
             }
         }));
     }

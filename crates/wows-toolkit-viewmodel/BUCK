@@ -16,6 +16,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:levenshtein",
     "//third-party/rust:pickled",
     "//third-party/rust:regex",
+    "//third-party/rust:reqwest",
     "//third-party/rust:roxmltree",
     "//third-party/rust:rust-i18n",
     "//third-party/rust:semver",
@@ -24,7 +25,9 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:sqlx",
     "//third-party/rust:thiserror",
     "//third-party/rust:thousands",
+    "//third-party/rust:tokio",
     "//third-party/rust:tracing",
+    "//third-party/rust:twitch_api",
 ]
 
 # The cfg(windows) dependency section of Cargo.toml: the Windows proxy
@@ -68,5 +71,5 @@ workspace_test(
     version = "0.1.0",
     features = ["test-support"],
     deps = TEST_SUPPORT_DEPS + VIEWMODEL_PLATFORM_DEPS,
-    test_deps = ["//third-party/rust:tokio"],
+    test_deps = ["//third-party/rust:tempfile"],
 )

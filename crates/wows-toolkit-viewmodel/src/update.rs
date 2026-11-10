@@ -128,6 +128,45 @@ pub fn select_release(releases: Vec<Release>, running: &str) -> Result<Option<Re
         .map(|(_, release)| release))
 }
 
+/// Why a release check produced no answer.
+#[derive(Debug, Error)]
+pub enum UpdateCheckError {
+    #[error("Could not request the latest release")]
+    Request(#[source] reqwest::Error),
+    #[error("The release server rejected the update check")]
+    Rejected(#[source] reqwest::Error),
+    #[error("Could not read the release information")]
+    Body(#[source] reqwest::Error),
+    #[error("The running app version {running:?} is invalid")]
+    InvalidRunningVersion {
+        running: String,
+        #[source]
+        source: semver::Error,
+    },
+}
+
+/// Asks the release server at `url` for the newest release past `running`.
+pub async fn check_release(
+    client: &reqwest::Client,
+    url: &str,
+    running: &str,
+) -> Result<Option<Release>, UpdateCheckError> {
+    let releases: Vec<Release> = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(UpdateCheckError::Request)?
+        .error_for_status()
+        .map_err(UpdateCheckError::Rejected)?
+        .json()
+        .await
+        .map_err(UpdateCheckError::Body)?;
+
+    select_release(releases, running)
+        .map_err(|source| UpdateCheckError::InvalidRunningVersion { running: running.to_owned(), source })
+}
+
 #[cfg(test)]
 mod release_tests {
     use super::*;
@@ -210,5 +249,68 @@ mod release_tests {
         .map(|asset| asset.name.clone());
         assert_eq!(picked.as_deref(), Some("wows_toolkit_v1.0.2_windows.zip"));
         assert!(release("v1.0.3", &["wows_toolkit.msi"]).asset_for_windows().is_none());
+    }
+
+    fn response(status: &str, body: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::Read as _;
+        use std::io::Write as _;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test HTTP listener");
+        let url = format!("http://{}", listener.local_addr().expect("listener address"));
+        let header = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("HTTP connection");
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("request timeout");
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).expect("HTTP request");
+                request.push(byte[0]);
+            }
+            stream.write_all(header.as_bytes()).expect("HTTP response headers");
+            stream.write_all(&body).expect("HTTP response body");
+        });
+        (url, server)
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("test runtime")
+    }
+
+    const RELEASE: &str = r###"[{
+        "tag_name": "v1.0.2",
+        "draft": false,
+        "prerelease": false,
+        "html_url": "https://github.com/landaire/wows-toolkit/releases/tag/v1.0.2",
+        "body": "## Changes\nUpdate notes",
+        "assets": [
+            {"name": "wows_toolkit_tools_v1.0.2_win64.zip", "browser_download_url": "https://example.invalid/tools.zip"},
+            {"name": "wows_toolkit_v1.0.2_windows.zip", "browser_download_url": "https://example.invalid/app.zip"}
+        ]
+    }]"###;
+
+    #[test]
+    fn checking_an_older_build_finds_the_published_archive() {
+        let (url, server) = response("200 OK", RELEASE.as_bytes().to_vec());
+        let client = reqwest::Client::builder().no_proxy().build().expect("test HTTP client");
+        let release =
+            runtime().block_on(check_release(&client, &url, "1.0.0")).expect("release check").expect("newer release");
+        server.join().expect("HTTP server");
+        assert_eq!(release.tag_name, "v1.0.2");
+        assert_eq!(
+            release.asset_for_windows().expect("application asset").browser_download_url,
+            "https://example.invalid/app.zip"
+        );
+    }
+
+    #[test]
+    fn an_http_failure_is_not_reported_as_a_release() {
+        let (url, server) = response("403 Forbidden", RELEASE.as_bytes().to_vec());
+        let client = reqwest::Client::builder().no_proxy().build().expect("test HTTP client");
+        assert!(matches!(
+            runtime().block_on(check_release(&client, &url, "1.0.0")),
+            Err(UpdateCheckError::Rejected(_))
+        ));
+        server.join().expect("HTTP server");
     }
 }
