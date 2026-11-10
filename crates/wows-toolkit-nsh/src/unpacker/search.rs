@@ -231,7 +231,7 @@ fn hit_row(run: SearchRun, tab: Tab, at: Position) -> AnyElement {
 
     let actions = menu()
         .trigger({
-            let actions_label = move || format!("Actions for {}", label());
+            let actions_label = move || tab.text_with("ui.unpacker.hit_actions", &[("name", &label())]);
             icon_button(Icon::Ellipsis, String::new()).label(actions_label).tooltip(tip(actions_label))
         })
         .popup_class("min-w-48 p-1 rounded-(--radius) border border-border bg-popover")
