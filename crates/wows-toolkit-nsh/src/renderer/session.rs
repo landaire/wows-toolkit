@@ -215,10 +215,7 @@ impl Session {
                 let viewer = self.lock();
                 (viewer.tick_interval(), viewer.collab().is_active())
             };
-            next_tick = match tick {
-                Some(interval) => Some(next_tick.unwrap_or_else(|| Instant::now() + interval)),
-                None => None,
-            };
+            next_tick = tick.map(|interval| next_tick.unwrap_or_else(|| Instant::now() + interval));
             let deadline = [next_tick, following.then(|| Instant::now() + COLLAB_TICK)].into_iter().flatten().min();
             let first = match deadline {
                 Some(deadline) => match messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {

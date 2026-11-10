@@ -886,7 +886,7 @@ fn tree(browser: Browser) -> AnyElement {
         move || browser.listing.with(Listing::shown_len),
         move |at: Position| row(browser, at),
     )
-    .estimated_item_size(move || row_height())
+    .estimated_item_size(row_height)
     .element_ref(&browser.list)
     .app_class(class("flex-1 min-h-0"));
 
@@ -942,7 +942,7 @@ fn row(browser: Browser, at: Position) -> AnyElement {
     // A fixed height: the list places rows by their measured size, and the
     // menu's closed popup must not add to it.
     view()
-        .h(move || row_height())
+        .h(row_height)
         .app_class(class("w-full min-w-0 overflow-hidden"))
         .child(menu)
         .into_element()

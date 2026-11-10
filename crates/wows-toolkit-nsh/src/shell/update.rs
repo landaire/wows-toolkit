@@ -36,7 +36,7 @@ impl ReleaseOffer {
 pub async fn check(url: &str, running: &str, proxy_url: Option<&str>) -> Result<Option<ReleaseOffer>, UpdateError> {
     let client = wows_toolkit_viewmodel::http::client(
         USER_AGENT,
-        proxy_url.as_deref(),
+        proxy_url,
         reqwest::redirect::Policy::default(),
     )?;
     let found = wows_toolkit_viewmodel::update::check_release(&client, url, running).await?;

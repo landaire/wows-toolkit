@@ -93,8 +93,8 @@ pub fn finish(pixmap: Pixmap, size: PixelSize) -> Result<Frame, FrameError> {
 /// An opaque RGB image as a pixmap.
 fn layer(image: &RgbImage) -> Option<Pixmap> {
     let mut layer = Pixmap::new(image.width(), image.height())?;
-    for (pixel, rgb) in layer.data_mut().chunks_exact_mut(4).zip(image.pixels()) {
-        pixel.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+    for (pixel, rgb) in layer.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(image.pixels()) {
+        *pixel = [rgb[0], rgb[1], rgb[2], 0xff];
     }
 
     Some(layer)

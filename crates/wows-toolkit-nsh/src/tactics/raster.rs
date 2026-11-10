@@ -148,8 +148,8 @@ fn compose(map: &RgbImage, job: &RasterJob) -> Result<Frame, FrameError> {
 
 fn map_pixmap(map: &RgbImage) -> Option<Pixmap> {
     let mut layer = Pixmap::new(map.width(), map.height())?;
-    for (pixel, rgb) in layer.data_mut().chunks_exact_mut(4).zip(map.pixels()) {
-        pixel.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+    for (pixel, rgb) in layer.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(map.pixels()) {
+        *pixel = [rgb[0], rgb[1], rgb[2], 0xff];
     }
 
     Some(layer)
