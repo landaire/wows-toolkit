@@ -122,11 +122,13 @@ pub struct ReplayInspectorService;
 #[module]
 impl ReplayInspectorService {
     /// Reads the replay at `path` with the other recordings `alts`, registers
-    /// it, writes the auto-export when it is set, and summarizes it.
-    pub async fn open(path: String, alts: Vec<String>) -> Result<ReplaySummary, InspectorError> {
+    /// it, writes the auto-export when it is set, and summarizes it. `debug`
+    /// is the session's debug mode, which keeps the debug fields in the export.
+    pub async fn open(path: String, alts: Vec<String>, debug: bool) -> Result<ReplaySummary, InspectorError> {
         let path = PathBuf::from(path);
         let alts: Vec<PathBuf> = alts.into_iter().map(PathBuf::from).collect();
-        let (document, export_status) = blocking(move || read_for_tab(&path, &alts)).await.map_err(task_failed)??;
+        let (document, export_status) =
+            blocking(move || read_for_tab(&path, &alts, debug)).await.map_err(task_failed)??;
 
         let id = document::insert(document);
         let Some(document) = document::get(id) else {
@@ -270,9 +272,10 @@ impl ReplayInspectorService {
         Ok(Some(alt.display().to_string()))
     }
 
-    /// Exports, indexes and contributes a replay the watcher saw land.
-    pub async fn process_landed(path: String) -> Result<LandedReport, InspectorError> {
-        landed::process(PathBuf::from(path)).await
+    /// Exports, indexes and contributes a replay the watcher saw land, the
+    /// export in the session's `debug` mode.
+    pub async fn process_landed(path: String, debug: bool) -> Result<LandedReport, InspectorError> {
+        landed::process(PathBuf::from(path), debug).await
     }
 
     /// Fetches the mapping of each listed build that has none and was not
@@ -353,13 +356,12 @@ impl ReplayInspectorService {
 /// Reads a replay for a tab: the document with the Twitch sightings around
 /// its battle applied, and the auto-export written. The second value is why
 /// the auto-export failed, when it did.
-fn read_for_tab(path: &Path, alts: &[PathBuf]) -> Result<(ReplayDocument, Option<String>), InspectorError> {
+fn read_for_tab(path: &Path, alts: &[PathBuf], debug: bool) -> Result<(ReplayDocument, Option<String>), InspectorError> {
     let inspector = settings::load()?;
     let mut document = document::read(path, alts)?;
     flag_twitch_candidates(&mut document);
 
-    let export_status =
-        match auto_export::write(&document.export, &document.export_stem, &inspector.replay, inspector.debug_mode) {
+    let export_status = match auto_export::write(&document.export, &document.export_stem, &inspector.replay, debug) {
             Ok(_) => None,
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "auto-export failed");

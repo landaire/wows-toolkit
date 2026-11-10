@@ -26,10 +26,11 @@ pub struct LandedReport {
 }
 
 /// Exports the battle at `path` and queues an index pass that reads what is
-/// not indexed yet.
-pub async fn process(path: PathBuf) -> Result<LandedReport, InspectorError> {
+/// not indexed yet. `debug` is the session's debug mode, which keeps the
+/// debug fields in the export.
+pub async fn process(path: PathBuf, debug: bool) -> Result<LandedReport, InspectorError> {
     blocking(move || {
-        let report = export(&path)?;
+        let report = export(&path, debug)?;
         // `false` when no WoWs directory is set, and then there is no index to fill.
         crate::game_data::start_indexing(IndexMode::FillGaps);
 
@@ -41,7 +42,7 @@ pub async fn process(path: PathBuf) -> Result<LandedReport, InspectorError> {
 
 /// Writes the battle to the auto-export directory when the setting asks. A
 /// battle that does not parse is logged and not written.
-fn export(path: &Path) -> Result<LandedReport, InspectorError> {
+fn export(path: &Path, debug: bool) -> Result<LandedReport, InspectorError> {
     let inspector = settings::load()?;
     let mut report = LandedReport { exported: None, export_error: None };
     if AutoExport::from_settings(&inspector.replay) == AutoExport::Off {
@@ -62,7 +63,7 @@ fn export(path: &Path) -> Result<LandedReport, InspectorError> {
         return Ok(report);
     }
 
-    match auto_export::write(&parsed.export, &parsed.export_stem, &inspector.replay, inspector.debug_mode) {
+    match auto_export::write(&parsed.export, &parsed.export_stem, &inspector.replay, debug) {
         Ok(written) => report.exported = written.map(|written| written.display().to_string()),
         Err(error) => {
             tracing::warn!(path = %path.display(), %error, "auto-export failed");

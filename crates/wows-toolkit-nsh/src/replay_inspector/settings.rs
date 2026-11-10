@@ -23,7 +23,6 @@ pub const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
 pub struct InspectorSettings {
     /// `None` while the World of Warships directory is unset.
     pub wows_dir: Option<PathBuf>,
-    pub debug_mode: bool,
     pub replay: ReplaySettings,
 }
 
@@ -37,7 +36,6 @@ pub fn load() -> Result<InspectorSettings, InspectorError> {
         // Settings tab shows for it.
         Ok(InspectorSettings {
             wows_dir,
-            debug_mode: optional(&pool, keys::DEBUG_MODE).await?.unwrap_or(false),
             replay: optional(&pool, keys::REPLAY_SETTINGS).await?.unwrap_or_default(),
         })
     })

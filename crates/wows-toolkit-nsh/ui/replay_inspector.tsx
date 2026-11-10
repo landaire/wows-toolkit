@@ -384,7 +384,7 @@ async function readTab(tab: ReplayTab, alts: string[], trialAlt: string | null) 
 
   let summary: ReplaySummary;
   try {
-    summary = await ReplayInspectorService.open(tab.path, alts);
+    summary = await ReplayInspectorService.open(tab.path, alts, debugMode());
   } catch (error) {
     if (tab.closed || generation !== tab.generation) return;
     tab.reparsing.set(false);
@@ -472,7 +472,7 @@ function offerMissingBuilds(builds: ListedBuild[]) {
 /** A replay the game finished writing: exported, indexed and contributed, then opened when autoload is on. */
 async function replayLanded(ws: Workspace, path: string) {
   try {
-    const report = await ReplayInspectorService.processLanded(path);
+    const report = await ReplayInspectorService.processLanded(path, debugMode());
     if (report.exportError != null) toast.stuck(AUTO_EXPORT_FAILED, report.exportError);
     else if (report.exported != null) toast.resolved(AUTO_EXPORT_FAILED);
   } catch (error) {
