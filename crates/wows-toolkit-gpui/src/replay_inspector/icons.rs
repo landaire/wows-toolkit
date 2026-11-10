@@ -31,13 +31,14 @@ use gpui_kit::RenderImage;
 use gpui_kit::SvgRenderer;
 use image::Frame;
 use wowsunpack::game_assets::GuiAsset;
-use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
-use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
+use wows_toolkit_replay_data::cells::player_color_kind;
 use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::row_icons::row_icons;
+use wows_toolkit_replay_data::row_icons::ship_class_svg;
 
 /// Decodes raw image bytes (whatever format `image::load_from_memory` can
 /// sniff; every icon kind except ship-class ships as PNG) into a
@@ -177,57 +178,22 @@ impl IconCache {
     /// Resolves and decodes every icon `rows` references -- one ship-class
     /// icon per distinct `(Species, tint)` pair among them (the same species
     /// can render in several colors: self/ally/enemy/division-mate; see the
-    /// struct doc), plus one keyed icon per distinct
-    /// achievement/ribbon/subribbon/consumable/modernization/signal/
-    /// captain-skill the rows carry -- from `vfs`, caching each one. A
-    /// per-call dedupe set means a 24-player replay reads (and decodes) each
-    /// shared asset -- e.g. every row earning `RIBBON_MAIN_CALIBER`, or every
-    /// same-team row flying the same ship class -- only once, not once per
-    /// row. An asset absent from this build (an older client missing some
-    /// icon, or a key with no matching file) is silently skipped; `get`/
-    /// `get_keyed` returning `None` for it is the render layer's existing
-    /// signal to fall back to text.
+    /// struct doc), plus each keyed icon `row_icons` names once -- from
+    /// `vfs`, caching each one. An asset absent from this build is skipped;
+    /// `get`/`get_keyed` returning `None` for it is the render layer's signal
+    /// to fall back to text.
     pub fn populate_from_rows(&mut self, rows: &[PlayerRow], vfs: &VfsPath, svg_renderer: &SvgRenderer) {
         let mut species_seen: HashSet<(Species, u32)> = HashSet::new();
-        let mut keys_seen: HashSet<String> = HashSet::new();
-
         for row in rows {
             let tint = player_color_kind_rgb(player_color_kind(row));
             if species_seen.insert((row.ship_class, tint)) {
                 self.load_ship_class(row.ship_class, tint, vfs, svg_renderer);
             }
+        }
 
-            for achievement in &row.achievements {
-                let key = format!("achievement:{}", achievement.icon_key);
-                self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::Achievement(&achievement.icon_key));
-            }
-            for ribbon in &row.ribbons {
-                if ribbon.is_subribbon {
-                    let sub_icon_key = format!("sub{}", ribbon.icon_key);
-                    let key = format!("subribbon:{}", ribbon.icon_key);
-                    self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::SubRibbon(&sub_icon_key));
-                } else {
-                    let key = format!("ribbon:{}", ribbon.icon_key);
-                    self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::Ribbon(&ribbon.icon_key));
-                }
-            }
-            for consumable in &row.consumables {
-                let key = format!("consumable:{}", consumable.icon_key);
-                self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::Consumable(&consumable.icon_key));
-            }
-
-            let Some(build) = row.translated_build.as_ref() else { continue };
-            for slot in build.modernization_slots.iter().flatten() {
-                let key = format!("modernization:{}", slot.game_params_name);
-                self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::Modernization(&slot.game_params_name));
-            }
-            for signal in &build.signals {
-                let key = format!("signal:{}", signal.game_params_name);
-                self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::SignalFlag(&signal.game_params_name));
-            }
-            for skill in build.captain_skills.iter().flatten().flat_map(|row| &row.skills) {
-                let key = format!("skill:{}", skill.internal_name.as_str());
-                self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::CrewSkill { name: &skill.internal_name });
+        for icon in row_icons(rows) {
+            if let Some(bytes) = icon.read(vfs) {
+                self.set_keyed(icon.cache_key(), &bytes);
             }
         }
     }
@@ -236,7 +202,7 @@ impl IconCache {
     /// rows (the Player Tracker's live roster) can fill the cache without
     /// going through `populate_from_rows`, which expects replay rows.
     pub fn load_ship_class(&mut self, species: Species, tint: u32, vfs: &VfsPath, svg_renderer: &SvgRenderer) {
-        let Some(bytes) = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.read(vfs, None) else {
+        let Some(bytes) = ship_class_svg(species, vfs) else {
             return;
         };
         if let Ok(image) = decode_ship_class_svg(svg_renderer, &bytes, tint) {
@@ -407,50 +373,6 @@ mod tests {
 
         assert_eq!(cache.ship_class_count(), 0);
         assert_eq!(cache.keyed_count(), 0);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Pins `populate_from_rows`'s subribbon asset path: the game stores
-    /// subribbon icons under a `"sub"`-prefixed filename (e.g.
-    /// `subribbons/submain_caliber.png` for a `main_caliber` subribbon), not
-    /// the bare `icon_key` (`subribbons/main_caliber.png`, which is what
-    /// `GuiAsset::SubRibbon(&ribbon.icon_key)` alone would resolve to). This
-    /// only creates the `"sub"`-prefixed file on disk, so a regression back to
-    /// the un-prefixed lookup makes this test fail with a cache miss.
-    #[test]
-    fn populate_from_rows_resolves_subribbon_icons_under_the_sub_prefixed_filename() {
-        use wows_replay_insights::battle_report::RibbonResult;
-
-        use wows_replays::types::Relation;
-        use wows_toolkit_replay_data::test_support::base_row;
-
-        let dir = std::env::temp_dir().join("wtk-gpui-icons-test-subribbon-prefix");
-        let _ = std::fs::remove_dir_all(&dir);
-        let subribbons_dir = dir.join("gui").join("ribbons").join("subribbons");
-        std::fs::create_dir_all(&subribbons_dir).unwrap();
-        std::fs::write(subribbons_dir.join("submain_caliber.png"), red_png_bytes()).unwrap();
-        let vfs: VfsPath = wowsunpack::vfs::PhysicalFS::new(&dir).into();
-        let svg_renderer = SvgRenderer::new(std::sync::Arc::new(()));
-
-        let mut row = base_row(1, Relation::new(0), true);
-        row.ribbons.push(RibbonResult {
-            name: "main_caliber".to_string(),
-            display_name: "Main Caliber Hit".to_string(),
-            description: String::new(),
-            icon_key: "main_caliber".to_string(),
-            is_subribbon: true,
-            count: 1,
-        });
-        let rows = vec![row];
-
-        let mut cache = IconCache::new();
-        cache.populate_from_rows(&rows, &vfs, &svg_renderer);
-
-        assert!(
-            cache.get_keyed("subribbon:main_caliber").is_some(),
-            "expected the subribbon icon to resolve via its \"sub\"-prefixed filename"
-        );
-
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -8,11 +8,8 @@
 //! `available_builds`/`latest_build` selection dropped -- this module only
 //! needs the replays directory, not a loaded game build).
 //! `wows_toolkit_replay_data::load::resolve_replays_dir` ports that lookup;
-//! `scan_replay_files` then lists `*.wowsreplay` files
-//! (skipping `temp.wowsreplay`, matching `task/replays.rs::replay_filepaths`)
-//! and reads each one's header via `ReplayFile::meta_from_file` -- plaintext
-//! metadata only, no packet decryption/decompression, so this is safe to run
-//! for every file in the directory on every scan.
+//! `wows_toolkit_replay_data::replay_scan::scan_replay_files` then lists the
+//! finished `*.wowsreplay` files and reads each one's plaintext header.
 //!
 //! **What a row says.** The scan reads only a replay's plaintext header, into
 //! the shared [`ListedReplay`]; `rebuild_tree` then assembles both of a row's
@@ -51,7 +48,6 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
-use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
@@ -60,7 +56,6 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
-use wows_toolkit_viewmodel::listing_row::ListedReplay;
 use wows_toolkit_viewmodel::listing_row::hover_facts;
 use wows_toolkit_viewmodel::listing_row::listed_row_identity;
 use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
@@ -70,11 +65,19 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_map_name;
 
-use super::browser::BrowserNode;
-use super::browser::ReplayLite;
-use super::browser::build_browser_tree;
-use super::columns::BattleOutcome;
-use super::columns::ColorRole;
+use wows_toolkit_replay_data::browser_tree::BrowserNode;
+use wows_toolkit_replay_data::browser_tree::ReplayLite;
+use wows_toolkit_replay_data::browser_tree::build_browser_tree;
+use wows_toolkit_replay_data::replay_scan::MissingBuild;
+use wows_toolkit_replay_data::replay_scan::ScanProgress;
+use wows_toolkit_replay_data::replay_scan::ScannedReplay;
+use wows_toolkit_replay_data::replay_scan::is_finished_replay;
+use wows_toolkit_replay_data::replay_scan::listed_builds;
+use wows_toolkit_replay_data::replay_scan::missing_builds;
+use wows_toolkit_replay_data::replay_scan::read_scanned;
+use wows_toolkit_replay_data::replay_scan::scan_replay_files;
+use wows_toolkit_replay_data::cells::BattleOutcome;
+use wows_toolkit_replay_data::cells::ColorRole;
 use crate::preview_hover::PreviewHover;
 
 use super::table::resolve_color;
@@ -89,20 +92,6 @@ use wows_toolkit_replay_data::load::GameDataStatus;
 /// no resolvable translation, once game data is loaded -- mirroring
 /// `Replay::vehicle_name`'s own fallback (`mod.rs:2580`).
 const SPECTATOR_LABEL: &str = "Spectator";
-
-/// One replay's header-only scan result, before ship/map translation (see the
-/// module doc). `ship_id` is the relation-0 vehicle's `shipId`, mirroring
-/// `Replay::player_vehicle` (`mod.rs:2576`); `raw_ship`/`raw_map` are the
-/// untranslated fallbacks `translate_replay` uses while `game_data` is not
-/// yet loaded.
-struct RawReplay {
-    path: PathBuf,
-    listed: ListedReplay,
-    /// The `major.minor.patch` the replay names, kept because a build number
-    /// alone does not identify data to fetch: build numbers are per server, so a
-    /// download falls back on the version to find the nearest published build.
-    version: Option<String>,
-}
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
 /// looked up by tree-item id during rendering. Groups need no side table:
@@ -172,26 +161,10 @@ fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &
 /// Best effort: a file manager that is not there, or refuses, leaves a log
 /// line rather than an error the listing would have to carry.
 pub(crate) fn reveal_in_file_manager(path: &std::path::Path) {
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("explorer");
-        command.arg(format!("/select,{}", path.display()));
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg("-R").arg(path);
-        command
-    };
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let mut command = {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path.parent().unwrap_or(path));
-        command
-    };
-
-    if let Err(err) = crate::child_process::prepare(&mut command).spawn() {
+    let revealed = wows_toolkit_viewmodel::file_manager::reveal(path, |command| {
+        crate::child_process::prepare(command);
+    });
+    if let Err(err) = revealed {
         tracing::warn!("replay listing: {} could not be shown in the file manager: {err}", path.display());
     }
 }
@@ -230,24 +203,6 @@ enum ScanStatus {
     Empty,
     Failed(ScanError),
 }
-
-/// How far the directory scan has got.
-///
-/// The walk that finds the candidate files is a single cheap pass, so `total`
-/// is known before the first meta is read; `done` then climbs through it.
-/// A total of zero means the walk itself is still running, which reads as
-/// "scanning" with no denominator to state.
-#[derive(Clone, Copy, Default)]
-struct ScanProgress {
-    done: usize,
-    total: usize,
-}
-
-/// Files read between one progress report and the next.
-///
-/// Reporting every file would post a message and a repaint per meta read,
-/// which is more work than the read itself on a warm directory.
-const SCAN_REPORT_EVERY: usize = 16;
 
 /// Reasons `start_scan` can fail before it ever reaches the background
 /// thread. Only the case `start_scan` actually produces is represented; the
@@ -302,20 +257,8 @@ pub enum ReplayBrowserEvent {
     },
 }
 
-/// A build the listing needs and nothing on this machine has.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingBuild {
-    pub build: u32,
-    /// The version its replays name, for the cross-server fallback when the
-    /// repository has no exact build.
-    pub version: Option<String>,
-    /// How many listed replays were recorded on it, so the reader can judge
-    /// whether the download is worth it.
-    pub replays: usize,
-}
-
 pub struct ReplayBrowser {
-    files: Vec<RawReplay>,
+    files: Vec<ScannedReplay>,
     /// A directory the reader opened instead of the install's, if any.
     chosen_directory: Option<PathBuf>,
     /// How far the running scan has got. `None` when none is running.
@@ -406,7 +349,7 @@ impl ReplayBrowser {
     /// Seeds the listing with a replay at `path`, as a scan would. Test-only.
     #[cfg(test)]
     pub(crate) fn seed_listing_for_test(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
-        self.files.push(RawReplay {
+        self.files.push(ScannedReplay {
             version: None,
             path,
             listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
@@ -606,7 +549,11 @@ impl ReplayBrowser {
         let (reports, mut progress_rx) = futures::channel::mpsc::unbounded();
         cx.spawn(async move |this, cx| {
             let scanned = directory.clone();
-            let scan = cx.background_spawn(async move { scan_replay_files(&scanned, &reports) });
+            let scan = cx.background_spawn(async move {
+                scan_replay_files(&scanned, |progress| {
+                    let _ = reports.unbounded_send(progress);
+                })
+            });
             let listen = {
                 let this = this.clone();
                 let mut cx = cx.clone();
@@ -653,15 +600,7 @@ impl ReplayBrowser {
     /// (`missing_builds`) and the result mapping the battle results are read
     /// through.
     pub fn listed_builds(&self) -> Vec<(u32, Option<String>)> {
-        let mut builds: std::collections::BTreeMap<u32, Option<String>> = std::collections::BTreeMap::new();
-        for file in &self.files {
-            let Some(build) = file.listed.build else { continue };
-            let entry = builds.entry(build).or_default();
-            if entry.is_none() {
-                *entry = file.version.clone();
-            }
-        }
-        builds.into_iter().collect()
+        listed_builds(&self.files).into_iter().map(|listed| (listed.build, listed.version)).collect()
     }
 
     /// Every replay the listing holds, in the order it walked them.
@@ -708,7 +647,11 @@ impl ReplayBrowser {
         cx.spawn(async move |this, cx| {
             let replays_dir = wows_toolkit_replay_data::load::resolve_replays_dir(Path::new(&wows_dir));
             let scanned = replays_dir.clone();
-            let scan = cx.background_spawn(async move { scan_replay_files(&scanned, &reports) });
+            let scan = cx.background_spawn(async move {
+                scan_replay_files(&scanned, |progress| {
+                    let _ = reports.unbounded_send(progress);
+                })
+            });
 
             let listen = {
                 let this = this.clone();
@@ -781,14 +724,9 @@ impl ReplayBrowser {
     pub(super) fn missing_builds(&self) -> Vec<MissingBuild> {
         match self.build_cache.as_ref() {
             Some(cache) => missing_builds(&self.files, cache),
-            None => self
-                .listed_builds()
+            None => listed_builds(&self.files)
                 .into_iter()
-                .map(|(build, version)| MissingBuild {
-                    build,
-                    version,
-                    replays: self.files.iter().filter(|file| file.listed.build == Some(build)).count(),
-                })
+                .map(|listed| MissingBuild { build: listed.build, version: listed.version, replays: listed.replays })
                 .collect(),
         }
     }
@@ -1491,7 +1429,7 @@ impl Render for ReplayBrowser {
                             PopupMenuItem::new(t!("ui.replay.context.show_replay_controls").into_owned()).on_click(
                                 move |_event, window, cx| {
                                     let Some(build) = cache.newest_loaded() else { return };
-                                    match super::controls::read_scheme(build.vfs()) {
+                                    match wows_toolkit_viewmodel::controls::read_scheme(build.vfs()) {
                                         Some(groups) => super::controls::open(groups, window, cx),
                                         None => crate::toast::warn(
                                             t!("ui.replay.controls.unavailable").into_owned(),
@@ -1665,60 +1603,6 @@ impl Render for ReplayBrowser {
     }
 }
 
-/// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
-/// reads each one's header-only metadata. Ports
-/// `task/replays.rs::replay_filepaths`'s filter (minus the creation-time
-/// sort, which `build_browser_tree` redoes by path anyway) plus a per-file
-/// `ReplayFile::meta_from_file` read. A file that fails to parse (corrupt,
-/// mid-write, or from a format this parser does not understand) is logged
-/// and skipped rather than aborting the whole scan.
-fn scan_replay_files(
-    replays_dir: &Path,
-    reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
-) -> Vec<RawReplay> {
-    let Ok(entries) = std::fs::read_dir(replays_dir) else {
-        return Vec::new();
-    };
-
-    // The walk is separated from the meta reads so the listing can say how
-    // many files there are to read before it starts reading them.
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(file_type) = entry.file_type() else { continue };
-        if !file_type.is_file() {
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("wowsreplay") {
-            continue;
-        }
-        if path.file_name().is_some_and(|name| name == "temp.wowsreplay") {
-            continue;
-        }
-        candidates.push(path);
-    }
-    let total = candidates.len();
-    let _ = reports.unbounded_send(ScanProgress { done: 0, total });
-
-    let mut out = Vec::with_capacity(total);
-    for (read, path) in candidates.into_iter().enumerate() {
-        match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => out.push(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
-                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
-                listed: ListedReplay::from_meta(&meta),
-                path,
-            }),
-            Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
-        }
-        let done = read + 1;
-        if done % SCAN_REPORT_EVERY == 0 || done == total {
-            let _ = reports.unbounded_send(ScanProgress { done, total });
-        }
-    }
-    out
-}
-
 /// What the listing says while it waits for the game data.
 ///
 /// The version comes from the install's own `preferences.xml`, so the line names
@@ -1733,34 +1617,6 @@ fn loading_said(game_data: &GameData) -> String {
     }
 }
 
-/// The listed builds nothing on this machine can read, with how many replays
-/// each one accounts for.
-///
-/// Ports the set the egui app offers to download after a directory scan
-/// (`app.rs`'s `DirectoryScanned` arm). A replay whose header names no build is
-/// not counted: nothing could be fetched for it.
-fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuild> {
-    let mut counted: std::collections::BTreeMap<u32, MissingBuild> = std::collections::BTreeMap::new();
-    for file in files {
-        let Some(build) = file.listed.build else { continue };
-        let entry = counted.entry(build).or_insert_with(|| MissingBuild { build, version: None, replays: 0 });
-        entry.replays += 1;
-        if entry.version.is_none() {
-            entry.version = file.version.clone();
-        }
-    }
-
-    counted.into_values().filter(|missing| !cache.can_read_build(missing.build, missing.version.as_deref())).collect()
-}
-
-/// The build the most listed replays were recorded on.
-///
-/// The most common one rather than the newest: a directory holding one
-/// replay from a build nobody plays any more should not have the session
-/// spend a second loading it.
-/// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
-/// match in progress: it has no container or metadata until the battle ends,
-/// and the game renames it into place then.
 /// Why the replays directory is not being watched.
 ///
 /// The two are separate messages in the catalogue, and separate causes: no
@@ -1801,11 +1657,6 @@ impl DirChange {
     }
 }
 
-fn is_finished_replay(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
-        && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
-}
-
 /// How long to keep retrying a replay the watcher has just reported, and how
 /// long to wait between attempts. The file appears before the game has
 /// finished writing its header, so the first read usually fails.
@@ -1820,20 +1671,15 @@ const APPEARED_REPLAY_RETRY: std::time::Duration = std::time::Duration::from_mil
 /// background executor for it would serialise every other background job
 /// behind one replay, and would stall the single-threaded test executor
 /// outright.
-async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawReplay> {
+async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<ScannedReplay> {
     for attempt in 0..APPEARED_REPLAY_ATTEMPTS {
         if attempt > 0 {
             cx.background_executor().timer(APPEARED_REPLAY_RETRY).await;
         }
         let read = path.clone();
-        let parsed = cx.background_spawn(async move { ReplayFile::meta_from_file(&read).ok() }).await;
-        if let Some(meta) = parsed {
-            return Some(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
-                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
-                listed: ListedReplay::from_meta(&meta),
-                path,
-            });
+        let scanned = cx.background_spawn(async move { read_scanned(&read).ok() }).await;
+        if scanned.is_some() {
+            return scanned;
         }
     }
     tracing::warn!(path = %path.display(), "replay browser: a new replay never became readable");
@@ -1963,49 +1809,6 @@ mod tests {
         assert!(!unnamed.contains("0.10.5.0"));
     }
 
-    /// A build nothing on this machine can read is reported once, with how many
-    /// of the listed replays are waiting on it, so the offer to fetch it can say
-    /// what it is for. A build the cache holds is not reported at all.
-    #[test]
-    fn the_listing_reports_only_the_builds_nothing_can_read() {
-        use std::path::PathBuf;
-
-        let cache_dir = tempfile::tempdir().expect("a temp directory");
-        std::fs::create_dir_all(cache_dir.path().join("0.10.5_100")).expect("the dump directory is created");
-        std::fs::write(cache_dir.path().join("0.10.5_100").join("metadata.toml"), "").expect("the dump is marked");
-
-        let listed = |build: Option<u32>, version: &str| super::RawReplay {
-            path: PathBuf::from(format!("{}-{version}.wowsreplay", build.unwrap_or_default())),
-            version: (!version.is_empty()).then(|| version.to_owned()),
-            listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
-                ship_id: None,
-                map_name: String::new(),
-                game_type: String::new(),
-                scenario: String::new(),
-                date_time: String::new(),
-                build,
-            },
-        };
-
-        let files = vec![
-            listed(Some(100), "0.10.5"),
-            listed(Some(200), "0.11.0"),
-            listed(Some(200), "0.11.0"),
-            // A header naming no build: nothing could be fetched for it.
-            listed(None, ""),
-        ];
-
-        // A directory that is not an install, so only the cache can answer.
-        let cache = super::GameDataCache::new(PathBuf::from("G:/does-not-exist"))
-            .with_cache_dir(&cache_dir.path().to_string_lossy());
-
-        let missing = super::missing_builds(&files, &cache);
-        assert_eq!(missing.len(), 1, "the cached build is not offered, got {missing:?}");
-        assert_eq!(missing[0].build, 200);
-        assert_eq!(missing[0].version.as_deref(), Some("0.11.0"));
-        assert_eq!(missing[0].replays, 2, "both replays of that build are counted");
-    }
-
     /// A replay the directory no longer holds leaves the listing, and its
     /// marking and highlight go with it: the egui app drops the row on the same
     /// event (`tab_state.rs`'s `NotifyFileEvent::Removed` arm).
@@ -2096,17 +1899,5 @@ mod tests {
             assert!(window.try_find("replay-preview-placeholder").is_some(), "still held while the bake runs");
         })
         .expect("the test window stays open");
-    }
-
-    use super::is_finished_replay;
-    use std::path::Path;
-
-    #[test]
-    fn the_watcher_ignores_everything_but_a_finished_replay() {
-        assert!(is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland.wowsreplay")));
-        // The match in progress, which has no metadata until it ends.
-        assert!(!is_finished_replay(Path::new("replays/temp.wowsreplay")));
-        assert!(!is_finished_replay(Path::new("replays/tempArenaInfo.json")));
-        assert!(!is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland")));
     }
 }

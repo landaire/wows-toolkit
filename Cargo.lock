@@ -18952,7 +18952,6 @@ dependencies = [
  "bytemuck",
  "ciborium",
  "clap",
- "csv",
  "dhat",
  "escaper",
  "filetime",
@@ -19049,6 +19048,7 @@ dependencies = [
  "base64 0.22.1",
  "jiff",
  "log",
+ "notify",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
@@ -19073,7 +19073,10 @@ dependencies = [
  "url",
  "wows-core",
  "wows-data-mgr",
+ "wows-replay-insights",
  "wows-toolkit-config",
+ "wows-toolkit-launcher",
+ "wows-toolkit-nsh",
  "wows-toolkit-replay-data",
  "wows-toolkit-viewmodel",
  "wows_replays",
@@ -19085,11 +19088,14 @@ dependencies = [
 name = "wows-toolkit-replay-data"
 version = "0.1.0"
 dependencies = [
+ "ciborium",
+ "csv",
  "escaper",
  "filetime",
  "gettext",
  "jiff",
  "reqwest 0.12.28",
+ "rust-i18n 3.1.5",
  "serde_json",
  "sqlx",
  "tempfile",
@@ -19103,6 +19109,7 @@ dependencies = [
  "wows-toolkit-viewmodel",
  "wows_replays",
  "wowsunpack",
+ "wt-translations",
 ]
 
 [[package]]

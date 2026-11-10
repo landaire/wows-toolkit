@@ -25,6 +25,7 @@ pub mod armor;
 pub mod breakdown;
 pub mod bug_report;
 pub mod controls;
+pub mod file_manager;
 pub mod fire_chance;
 pub mod formatting;
 pub mod glyphs;

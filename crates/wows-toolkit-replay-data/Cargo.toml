@@ -16,11 +16,15 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+ciborium = { workspace = true }
+csv = "1"
 escaper = "0.1.1"
 gettext = { workspace = true }
 jiff = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 serde_json = { workspace = true }
+# The player table's cell tooltips are user-facing strings.
+rust-i18n = { workspace = true }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt"] }
@@ -32,6 +36,7 @@ wows_replays = { path = "../wows-replays", default-features = false, features = 
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+wt-translations = { workspace = true }
 
 [dev-dependencies]
 filetime = "0.2"

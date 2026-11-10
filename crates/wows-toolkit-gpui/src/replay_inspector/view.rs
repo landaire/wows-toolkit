@@ -39,14 +39,14 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::replay_scan::MissingBuild;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
-use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
 use super::load::spawn_parse;
 use super::load::spawn_startup_preload;
-use super::panel::AutoExport;
+use wows_toolkit_replay_data::export::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::RenderRequested;
 use super::panel::ReplayPanel;
@@ -1223,10 +1223,12 @@ impl ReplayInspectorView {
                 tracing::debug!(path = %named.display(), "auto-export: no battle results, so nothing is written");
                 return;
             }
-            let out = directory.join(&parsed.export_stem).with_extension(format.extension());
+            let out = directory.join(wows_toolkit_replay_data::export::file_name(&parsed.export_stem, format));
 
             let export = if debug { parsed.export } else { parsed.export.stripped() };
-            let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
+            let written = cx
+                .background_spawn(async move { wows_toolkit_replay_data::export::write_export(&export, &out, format) })
+                .await;
             match written {
                 Ok(()) => {
                     tracing::info!(path = %named.display(), "auto-export: the battle was written");

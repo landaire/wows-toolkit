@@ -15,10 +15,8 @@
 //! The row grows to the tallest column cell (flex), matching egui.
 //!
 //! Icons come from `IconCache::get_keyed` (see that module's key-convention
-//! doc). Nothing calls `set_keyed` until a later milestone's replay-loading
-//! pipeline resolves real `GameAsset` bytes, so every icon lookup here
-//! currently returns `None` and falls back to a text label, matching the
-//! egui app's own icon-texture-missing fallback branches.
+//! doc); a missing one falls back to a text label, as the egui app does. The
+//! labels, ordering and widths are `wows_toolkit_replay_data::row_detail`.
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Sizable as _;
@@ -33,20 +31,49 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
-use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
-use wowsunpack::game_types::ChargeCount;
 
-use super::columns::NDA;
 use super::icons::IconCache;
-use super::table::text_width;
+use wows_toolkit_replay_data::cells::NDA;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
+use wows_toolkit_replay_data::row_detail::BREAKDOWN_GAP;
+use wows_toolkit_replay_data::row_detail::CONSUMABLE_COUNT_WIDTH;
+use wows_toolkit_replay_data::row_detail::CONSUMABLE_ICON_SIZE;
+use wows_toolkit_replay_data::row_detail::CONSUMABLE_NAME_WIDTH;
+use wows_toolkit_replay_data::row_detail::DamageDirection;
+use wows_toolkit_replay_data::row_detail::FIRE_CHANCE_SHIP_WIDTH;
+use wows_toolkit_replay_data::row_detail::ICON_LABEL_GAP;
+use wows_toolkit_replay_data::row_detail::LARGE_ICON_SIZE;
+use wows_toolkit_replay_data::row_detail::MODULE_ICON_SIZE;
+use wows_toolkit_replay_data::row_detail::SKILL_COST_WIDTH;
+use wows_toolkit_replay_data::row_detail::TALLY_COUNT_WIDTH;
+use wows_toolkit_replay_data::row_detail::TALLY_INDENT;
+use wows_toolkit_replay_data::row_detail::UNLEARNED_SKILL_OPACITY;
+use wows_toolkit_replay_data::row_detail::achievement_label;
+use wows_toolkit_replay_data::row_detail::consumable_counts;
+use wows_toolkit_replay_data::row_detail::damage_breakdown;
+use wows_toolkit_replay_data::row_detail::damage_event_rows;
+use wows_toolkit_replay_data::row_detail::damage_target_rows;
+use wows_toolkit_replay_data::row_detail::fit_dims;
+use wows_toolkit_replay_data::row_detail::has_damage_events;
+use wows_toolkit_replay_data::row_detail::has_name_section;
+use wows_toolkit_replay_data::row_detail::module_text;
+use wows_toolkit_replay_data::row_detail::nda_hidden;
+use wows_toolkit_replay_data::row_detail::raw_ship_name;
+use wows_toolkit_replay_data::row_detail::raw_source;
+use wows_toolkit_replay_data::row_detail::ribbon_icon_box;
+use wows_toolkit_replay_data::row_detail::ribbon_label;
+use wows_toolkit_replay_data::row_detail::skill_fallback_label;
+use wows_toolkit_replay_data::row_detail::skill_tier_label;
+use wows_toolkit_replay_data::row_detail::skill_tooltip;
+use wows_toolkit_replay_data::row_detail::sorted_ribbons;
+use wows_toolkit_replay_data::row_icons::RowIcon;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::fire_chance;
 
@@ -59,21 +86,6 @@ use wows_toolkit_viewmodel::fire_chance;
 /// single row is not expected to carry anywhere near this many entries in one
 /// list.
 const DETAIL_ID_STRIDE: usize = 256;
-
-/// Icon size, in pixels, for the two icon kinds the egui app renders larger
-/// than the rest: achievements and non-subribbon ribbons.
-const LARGE_ICON_SIZE: f32 = 32.0;
-const RIBBON_ICON_SIZE: f32 = 64.0;
-const MODULE_ICON_SIZE: f32 = 28.0;
-const CONSUMABLE_ICON_SIZE: f32 = 20.0;
-
-/// Whether a damage-interaction line describes damage this row dealt to, or
-/// received from, the other player.
-#[derive(Clone, Copy)]
-enum DamageDirection {
-    Dealt,
-    Received,
-}
 
 /// One column's expanded detail for `row` at list index `ix`, or `None` when
 /// that column has nothing to show (so `table.rs` leaves the column's cell at
@@ -111,306 +123,12 @@ pub fn render_column_detail(
     }
 }
 
-/// One column's expanded-detail content width for `row`, measured (not
-/// rendered) so `table.rs`'s `measure_column_widths` can grow that column to
-/// fit an expanded row instead of clipping it at the collapsed width. Kept
-/// structurally aligned with `render_column_detail` above -- same match arms,
-/// same per-section gating -- so the two stay in sync as either one changes;
-/// each arm below carries a terse note on which `render_*` it mirrors.
-/// Deliberately does not take `all_rows`: unlike `render_damage_section`, this
-/// only measures the ActualDamage/ReceivedDamage ammo-type breakdown
-/// paragraph, not the per-victim interaction lines (those need another row's
-/// `ship_name` to size, and the breakdown paragraph is already the wider of
-/// the two in practice). Modernizations and signals are excluded everywhere:
-/// `modernization_slots_view`/`signals_view` both use `h_flex().flex_wrap()`,
-/// which wraps onto new lines instead of pushing the column wider, so they
-/// must never drive a column's measured width.
-pub(super) fn expanded_detail_width(col: ReplayColumn, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
-    match col {
-        ReplayColumn::Name => name_section_width(row, debug, window),
-        ReplayColumn::Skills => build_section_width(row, debug, window),
-        ReplayColumn::ActualDamage => {
-            nda_gated_breakdown_width(row.actual_damage_breakdown.as_deref(), row, debug, window)
-        }
-        ReplayColumn::ReceivedDamage => {
-            nda_gated_breakdown_width(row.received_damage_breakdown.as_deref(), row, debug, window)
-        }
-        ReplayColumn::PotentialDamage => {
-            nda_gated_breakdown_width(row.potential_damage_breakdown.as_deref(), row, debug, window)
-        }
-        ReplayColumn::Hits => nda_gated_breakdown_width(row.hits_breakdown.as_deref(), row, debug, window),
-        ReplayColumn::SpottingDamage => {
-            row.spotting_damage_breakdown.as_deref().map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0)
-        }
-        _ => 0.0,
-    }
-}
-
-/// Widest line of a newline-separated block.
-fn multiline_width(text: &str, window: &mut Window) -> f32 {
-    text.split('\n').map(|line| text_width(line.into(), window, false)).fold(0.0_f32, f32::max)
-}
-
-/// Mirrors `render_nda_gated_breakdown` (Potential/Hits) and the NDA gate at
-/// the top of `render_damage_section` (ActualDamage/ReceivedDamage): the NDA
-/// placeholder's width when stats are hidden, otherwise the grid's.
-fn nda_gated_breakdown_width(rows: Option<&[BreakdownRow]>, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
-    if row.should_hide_stats() && !debug {
-        return text_width(NDA.into(), window, false);
-    }
-    rows.map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0)
-}
-
-/// Mirrors `breakdown_grid`: the widest label, the 8px gap between the two
-/// columns, and the widest value.
-fn breakdown_grid_width(rows: &[BreakdownRow], window: &mut Window) -> f32 {
-    if rows.is_empty() {
-        return 0.0;
-    }
-    let mut labels = 0.0_f32;
-    let mut values = 0.0_f32;
-    for row in rows {
-        labels = labels.max(text_width(row.label.clone().into(), window, false));
-        values = values.max(text_width(row.value.clone().into(), window, false));
-    }
-    labels + BREAKDOWN_GAP + values
-}
-
-/// Mirrors `render_name_section`: the section headings, each achievement/
-/// ribbon row's icon-box-plus-label width (`icon_label_row_width`), the
-/// damage-event grid (or the NDA placeholder when hidden), and the
-/// fire-chance block.
-fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
-    let has_achievements = !row.achievements.is_empty();
-    let has_ribbons = !row.ribbons.is_empty();
-    let has_damage_events =
-        row.fires.is_some() || row.floods.is_some() || row.citadels.is_some() || row.crits.is_some();
-    if !has_achievements && !has_ribbons && !has_damage_events && row.fire_chance.is_none() {
-        return 0.0;
-    }
-
-    let mut max_w: f32 = 0.0;
-
-    if has_achievements {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.achievements").into_owned().into(), window, true));
-        for achievement in &row.achievements {
-            let label = if achievement.count > 1 {
-                format!("{} ({}x)", achievement.display_name, achievement.count)
-            } else {
-                achievement.display_name.clone()
-            };
-            let label_w = text_width(label.into(), window, false);
-            // Achievements always render at LARGE_ICON_SIZE (`achievement_row`).
-            max_w = max_w.max(icon_label_row_width(LARGE_ICON_SIZE, label_w));
-        }
-    }
-
-    if has_ribbons {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.ribbons").into_owned().into(), window, true));
-        for ribbon in &row.ribbons {
-            // `ribbon_row`: subribbons render at LARGE_ICON_SIZE, others at
-            // RIBBON_ICON_SIZE; a fitted wide ribbon's width tops out at its
-            // box size (`fit_within_box`), so the box size is a safe bound.
-            let icon_box = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
-            let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
-            let label_w = text_width(label.into(), window, false);
-            max_w = max_w.max(icon_label_row_width(icon_box, label_w));
-        }
-    }
-
-    if has_damage_events {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.damage_events").into_owned().into(), window, true));
-        if row.should_hide_stats() && !debug {
-            max_w = max_w.max(text_width(NDA.into(), window, false));
-        } else {
-            max_w = max_w.max(breakdown_grid_width(&damage_event_rows(row), window));
-        }
-    }
-
-    max_w.max(fire_chance_width(row, debug, window))
-}
-
-/// Mirrors `render_fire_chance_section`: its heading, the line it stands down
-/// to when there is nothing to state, the headline (the fire glyph, the counts,
-/// the expected figure and the copy button), the formula lines, the tally rows
-/// and the per-ship rows.
-fn fire_chance_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
-    let Some(fire_chance) = row.fire_chance.as_ref() else { return 0.0 };
-
-    let mut max_w = text_width(t!("ui.replay.sections.fire_chance").into_owned().into(), window, true);
-    if row.should_hide_stats() && !debug {
-        return max_w.max(text_width(NDA.into(), window, false));
-    }
-    if fire_chance.eligible_hits == 0 {
-        return max_w.max(text_width(
-            t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned().into(),
-            window,
-            false,
-        ));
-    }
-
-    let counts =
-        text_width(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits).into(), window, true);
-    let expected = fire_chance::expected_fires_text(fire_chance)
-        .map(|text| text_width(text.into(), window, false))
-        .unwrap_or_default();
-    max_w = max_w.max(HEADLINE_CHROME + counts + expected);
-    max_w = max_w.max(text_width(fire_chance::ships_text(fire_chance).into_owned().into(), window, false));
-
-    for line in fire_chance::fire_chance_formula_lines(fire_chance, &raw_source) {
-        max_w = max_w.max(text_width(line.into(), window, false));
-    }
-
-    let mut tally_width = |rows: &[fire_chance::TallyRow]| {
-        for row in rows {
-            let label = text_width(row.label.to_string().into(), window, false);
-            max_w = max_w.max(TALLY_COUNT_WIDTH.as_f32() + BREAKDOWN_GAP + row.depth as f32 * 12.0 + label);
-        }
-    };
-    tally_width(&fire_chance::fire_chance_battle_tally_rows(fire_chance));
-    tally_width(&fire_chance::fire_chance_ribbon_rows(fire_chance));
-
-    for ship in fire_chance::sorted_per_ship(fire_chance) {
-        let counts = text_width(fire_chance::counts_text(ship.fires, ship.eligible_hits).into(), window, false);
-        max_w = max_w.max(FIRE_CHANCE_SHIP_WIDTH.as_f32() + BREAKDOWN_GAP + counts);
-    }
-    if let Some(line) = fire_chance::no_target_ship_line(fire_chance) {
-        max_w = max_w.max(text_width(line.into(), window, false));
-    }
-
-    max_w
-}
-
-/// The fire glyph, the copy button and the gaps around them, which is what the
-/// fire-chance headline holds besides its two figures.
-const HEADLINE_CHROME: f32 = 56.0;
-
-/// Pure width formula for `icon_label_row`: the icon box, the 8px icon-to-
-/// label gap (`icon_label_row`'s `gap(px(8.))`), then the label text.
-fn icon_label_row_width(icon_box: f32, label_width: f32) -> f32 {
-    icon_box + 8.0 + label_width
-}
-
-/// Mirrors `render_build_section`: the loadout/skill-tier hover text, the
-/// sub-section headings, the loadout entries, the captain-skill grid
-/// (`skill_grid_width`), and the consumables table (`consumables_width`).
-/// Modernizations and signals are intentionally excluded (see
-/// `expanded_detail_width`'s doc).
-fn build_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
-    if row.relation.is_enemy() && !debug {
-        return 0.0;
-    }
-
-    let rem = window.rem_size().as_f32();
-    let gap_1 = rem * 0.25;
-    let gap_2 = rem * 0.5;
-
-    let mut max_w: f32 = 0.0;
-    let mut has_content = false;
-
-    if let Some(hover) = row.skill_hover_text.as_ref() {
-        max_w = max_w.max(multiline_width(hover, window));
-        has_content = true;
-    }
-
-    if let Some(build) = row.translated_build.as_ref() {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.modules").into_owned().into(), window, true));
-        if build.modernization_slots.is_empty() {
-            max_w = max_w.max(text_width(t!("ui.replay.sections.modules_none").into_owned().into(), window, false));
-        }
-        has_content = true;
-
-        if !build.signals.is_empty() {
-            max_w = max_w.max(text_width(t!("ui.replay.sections.signals").into_owned().into(), window, true));
-        }
-
-        max_w = max_w.max(text_width(t!("ui.replay.sections.loadout").into_owned().into(), window, true));
-        if build.loadout.is_empty() {
-            max_w = max_w.max(text_width(t!("ui.replay.sections.loadout_none").into_owned().into(), window, false));
-        } else {
-            for module in &build.loadout {
-                if let Some(name) = module.name.as_ref() {
-                    max_w = max_w.max(text_width(name.clone().into(), window, false));
-                }
-            }
-        }
-
-        match build.captain_skills.as_ref() {
-            Some(skills) => {
-                max_w =
-                    max_w.max(text_width(t!("ui.replay.sections.captain_skills").into_owned().into(), window, true));
-                if skills.is_empty() {
-                    max_w = max_w.max(text_width(
-                        t!("ui.replay.sections.captain_skills_none").into_owned().into(),
-                        window,
-                        false,
-                    ));
-                } else {
-                    max_w = max_w.max(skill_grid_width(skills, gap_1));
-                }
-            }
-            None => {
-                max_w = max_w.max(text_width(
-                    t!("ui.replay.sections.captain_skills_none").into_owned().into(),
-                    window,
-                    false,
-                ));
-            }
-        }
-    }
-
-    if !row.consumables.is_empty() {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.consumables").into_owned().into(), window, true));
-        max_w = max_w.max(consumables_width(gap_2));
-        has_content = true;
-    } else if let Some(build) = row.translated_build.as_ref()
-        && !build.abilities.is_empty()
-    {
-        max_w = max_w.max(text_width(t!("ui.replay.sections.consumables").into_owned().into(), window, true));
-        for ability in &build.abilities {
-            if let Some(name) = ability.name.as_ref() {
-                max_w = max_w.max(text_width(name.clone().into(), window, false));
-            }
-        }
-        has_content = true;
-    }
-
-    if has_content { max_w } else { 0.0 }
-}
-
-/// Pure per-tier width for `captain_skill_grid_view`: the 14px cost-label
-/// cell, `gap_1` before it and after each skill cell (matching the line's
-/// `h_flex().gap_1()` across its `1 + skill_count` children), and one
-/// `MODULE_ICON_SIZE` cell per skill -- a resolved icon renders at exactly
-/// that size, and an unresolved text-fallback cell is assumed to be no wider
-/// (a small overshoot beats clipping, per the column's overall 500px clamp).
-/// Returns the widest tier, since the tiers stack vertically.
-fn skill_grid_width(rows: &[SkillGridRow], gap_1: f32) -> f32 {
-    rows.iter()
-        .map(|row| {
-            let skill_count = row.skills.len() as f32;
-            14.0 + gap_1 + skill_count * (MODULE_ICON_SIZE + gap_1)
-        })
-        .fold(0.0_f32, f32::max)
-}
-
-/// Pure width for `consumables_view`'s fixed 3-column layout: `NAME_COL` +
-/// `gap_2` + `COUNT_COL` + `gap_2` + `COUNT_COL`, matching the header/row's
-/// `h_flex().gap_2()` across its three fixed-width cells (`consumable_row`'s
-/// leading icon renders inside the fixed `NAME_COL` box, so it never widens
-/// the row beyond `NAME_COL`).
-fn consumables_width(gap_2: f32) -> f32 {
-    const NAME_COL: f32 = 170.0;
-    const COUNT_COL: f32 = 64.0;
-    NAME_COL + gap_2 + COUNT_COL + gap_2 + COUNT_COL
-}
-
 /// Potential-damage / Hits expanded content: the column's own breakdown shown
 /// inline, NDA-gated exactly like the egui arms (`mod.rs:1983-1989, 2077-2082`)
 /// -- an NDA placeholder when the row's stats are hidden and debug is off,
 /// otherwise the grid (or nothing when there is no breakdown).
 fn render_nda_gated_breakdown(rows: Option<&[BreakdownRow]>, row: &PlayerRow, debug: bool) -> Option<AnyElement> {
-    if row.should_hide_stats() && !debug {
+    if nda_hidden(row, debug) {
         return Some(nda_text());
     }
     rows.map(|rows| breakdown_grid(rows))
@@ -442,9 +160,6 @@ fn breakdown_grid(rows: &[BreakdownRow]) -> AnyElement {
         )
         .into_any_element()
 }
-
-/// Between a breakdown grid's two columns.
-const BREAKDOWN_GAP: f32 = 8.0;
 
 #[track_caller]
 fn detail_text(text: impl Into<SharedString>) -> impl IntoElement {
@@ -511,16 +226,6 @@ fn fit_within_box(image: &RenderImage, max: f32) -> (f32, f32) {
     fit_dims(size.width.0 as f32, size.height.0 as f32, max)
 }
 
-/// Scales native `(w, h)` to fit within a `max` by `max` box preserving aspect
-/// ratio. Degenerate (non-positive) dimensions fall back to a `max` square.
-fn fit_dims(w: f32, h: f32, max: f32) -> (f32, f32) {
-    if w <= 0.0 || h <= 0.0 {
-        return (max, max);
-    }
-    let scale = (max / w).min(max / h);
-    (w * scale, h * scale)
-}
-
 /// An `[icon | label]` row shared by achievements and ribbons: an icon when
 /// `icons.get_keyed(key)` has one (no fallback text in its place, matching the
 /// egui app's `ui.horizontal` which only conditionally adds the image), then
@@ -546,7 +251,7 @@ fn icon_label_row(
     icons: &IconCache,
 ) -> AnyElement {
     let tooltip: SharedString = tooltip_text.into();
-    let mut row = h_flex().w_full().gap(px(8.)).items_center();
+    let mut row = h_flex().w_full().gap(px(ICON_LABEL_GAP)).items_center();
     if let Some(image) = icons.get_keyed(key) {
         let (w, h) = fit_within_box(&image, size);
         row = row.child(img(image).w(px(w)).h(px(h)).flex_none());
@@ -566,7 +271,7 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
     let fire_chance = row.fire_chance.as_ref()?;
 
     let mut col = v_flex().gap(px(3.)).child(section_heading(t!("ui.replay.sections.fire_chance").into_owned()));
-    if row.should_hide_stats() && !debug {
+    if nda_hidden(row, debug) {
         return Some(
             col.child(div().text_xs().child(detail_text(t!("ui.replay.nda").into_owned()))).into_any_element(),
         );
@@ -643,7 +348,10 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
                     .items_center()
                     .text_xs()
                     .child(
-                        div().flex_none().w(FIRE_CHANCE_SHIP_WIDTH).child(detail_text(ship.victim_ship_name.clone())),
+                        div()
+                            .flex_none()
+                            .w(px(FIRE_CHANCE_SHIP_WIDTH))
+                            .child(detail_text(ship.victim_ship_name.clone())),
                     )
                     .child(
                         div()
@@ -675,11 +383,15 @@ fn tally_block(rows: &[fire_chance::TallyRow]) -> AnyElement {
                 .items_start()
                 .text_xs()
                 .child(
-                    div().flex_none().w(TALLY_COUNT_WIDTH).text_right().child(detail_text(separate_number(row.count))),
+                    div()
+                        .flex_none()
+                        .w(px(TALLY_COUNT_WIDTH))
+                        .text_right()
+                        .child(detail_text(separate_number(row.count))),
                 )
                 .child(
                     div()
-                        .pl(px(row.depth as f32 * 12.))
+                        .pl(px(row.depth as f32 * TALLY_INDENT))
                         .when(row.depth > 0, |cell| cell.text_color(crate::theme::text_dim()))
                         .child(detail_text(row.label.to_string())),
                 )
@@ -704,27 +416,6 @@ fn copy_breakdown_button(row_ix: usize, fire_chance: &EffectiveFireChance) -> An
         .into_any_element()
 }
 
-/// A modifier's raw source identifier, unresolved.
-///
-/// The egui block resolves it against the build's own upgrade, signal and
-/// skill names; that lookup needs the metadata provider, which the expanded
-/// renderer is not handed.
-fn raw_source(source: &str) -> String {
-    source.to_owned()
-}
-
-/// A victim's internal ship name, which is what the per-ship rows above
-/// already show for the same reason.
-fn raw_ship_name(ship: &wows_replay_insights::fire_chance::analysis::PerShipFireChance) -> String {
-    ship.victim_ship_name.clone()
-}
-
-/// Room for the widest count a tally row states.
-const TALLY_COUNT_WIDTH: Pixels = px(44.);
-
-/// Room for a ship name beside its counts, so the two columns line up.
-const FIRE_CHANCE_SHIP_WIDTH: Pixels = px(160.);
-
 /// Keeps one row's per-ship element ids clear of the next row's.
 const FIRE_CHANCE_SHIP_STRIDE: usize = 64;
 
@@ -734,13 +425,13 @@ const FIRE_CHANCE_SHIP_STRIDE: usize = 64;
 /// damage-event counts, NDA-gated, and then the effective fire chance.
 /// Mirrors `mod.rs`'s `ReplayColumn::Name` expanded arm.
 fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &IconCache) -> Option<AnyElement> {
-    let has_achievements = !row.achievements.is_empty();
-    let has_ribbons = !row.ribbons.is_empty();
-    let has_damage_events =
-        row.fires.is_some() || row.floods.is_some() || row.citadels.is_some() || row.crits.is_some();
-    if !has_achievements && !has_ribbons && !has_damage_events && row.fire_chance.is_none() {
+    if !has_name_section(row) {
         return None;
     }
+
+    let has_achievements = !row.achievements.is_empty();
+    let has_ribbons = !row.ribbons.is_empty();
+    let has_damage_events = has_damage_events(row);
 
     // 3px matches egui's default `Spacing::item_spacing.y`: the section
     // heading, each achievement/ribbon row, the separators, and the damage
@@ -760,10 +451,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
             col = col.child(Separator::horizontal());
         }
         col = col.child(section_heading(t!("ui.replay.sections.ribbons").into_owned()));
-        let mut ribbons: Vec<&RibbonResult> = row.ribbons.iter().collect();
-        ribbons.sort_by(|a, b| a.name.cmp(&b.name));
-        reorder_bulge_after_main_caliber(&mut ribbons);
-        col = col.child(ribbons_view(row_ix, ribbons, icons));
+        col = col.child(ribbons_view(row_ix, sorted_ribbons(row), icons));
     }
 
     if has_damage_events {
@@ -771,7 +459,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
             col = col.child(Separator::horizontal());
         }
         col = col.child(section_heading(t!("ui.replay.sections.damage_events").into_owned()));
-        if row.should_hide_stats() && !debug {
+        if nda_hidden(row, debug) {
             col = col.child(nda_text());
         } else {
             col = col.child(breakdown_grid(&damage_event_rows(row)));
@@ -788,37 +476,6 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     }
 
     Some(col.into_any_element())
-}
-
-/// The damage events a row records, as a breakdown: one line per event kind
-/// the battle produced.
-fn damage_event_rows(row: &PlayerRow) -> Vec<BreakdownRow> {
-    let events = [
-        (t!("ui.replay.column.fires"), row.fires),
-        (t!("ui.replay.column.floods"), row.floods),
-        (t!("ui.replay.column.citadels"), row.citadels),
-        (t!("ui.replay.column.crits"), row.crits),
-    ];
-    events
-        .into_iter()
-        .filter_map(|(label, count)| {
-            count.map(|count| BreakdownRow { label: label.into_owned(), value: separate_number(count) })
-        })
-        .collect()
-}
-
-/// One-off fix ported verbatim from the egui app: insert RIBBON_BULGE (torp
-/// protection) immediately after RIBBON_MAIN_CALIBER, if both are present.
-fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
-    let Some(main_caliber_idx) = ribbons.iter().position(|r| r.name == "RIBBON_MAIN_CALIBER") else {
-        return;
-    };
-    let Some(bulge_idx) = ribbons.iter().position(|r| r.name == "RIBBON_BULGE") else {
-        return;
-    };
-    let bulge = ribbons.remove(bulge_idx);
-    let insert_idx = if bulge_idx < main_caliber_idx { main_caliber_idx } else { main_caliber_idx + 1 };
-    ribbons.insert(insert_idx, bulge);
 }
 
 /// A tight vertical list of achievement rows (icon + label side by side),
@@ -849,18 +506,13 @@ fn ribbons_view(row_ix: usize, ribbons: Vec<&RibbonResult>, icons: &IconCache) -
 }
 
 fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
-    let key = format!("achievement:{}", achievement.icon_key);
-    let label = if achievement.count > 1 {
-        format!("{} ({}x)", achievement.display_name, achievement.count)
-    } else {
-        achievement.display_name.clone()
-    };
+    let key = RowIcon::achievement(&achievement.icon_key).cache_key();
     icon_label_row(
         "replay-achievement",
         row_ix,
         idx,
         &key,
-        label,
+        achievement_label(achievement),
         achievement.description.clone(),
         LARGE_ICON_SIZE,
         icons,
@@ -868,14 +520,17 @@ fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, i
 }
 
 fn ribbon_row(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCache) -> AnyElement {
-    let key = if ribbon.is_subribbon {
-        format!("subribbon:{}", ribbon.icon_key)
-    } else {
-        format!("ribbon:{}", ribbon.icon_key)
-    };
-    let size = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
-    let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
-    icon_label_row("replay-ribbon", row_ix, idx, &key, label, ribbon.description.clone(), size, icons)
+    let key = RowIcon::ribbon(ribbon.is_subribbon, &ribbon.icon_key).cache_key();
+    icon_label_row(
+        "replay-ribbon",
+        row_ix,
+        idx,
+        &key,
+        ribbon_label(ribbon),
+        ribbon.description.clone(),
+        ribbon_icon_box(ribbon),
+        icons,
+    )
 }
 
 /// Skills-column expanded content: the skill-tier hover text, then (when this
@@ -973,18 +628,14 @@ fn modernization_slots_view(row_ix: usize, slots: &[Option<TranslatedModule>], i
     for (idx, slot) in slots.iter().enumerate() {
         row = row.child(match slot {
             Some(module) => {
-                let display_name = module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
-                let tooltip = match module.description.as_deref() {
-                    Some(d) if !d.is_empty() => format!("{display_name}\n\n{d}"),
-                    _ => display_name.clone(),
-                };
+                let text = module_text(module);
                 icon_or_text_cell(
                     "replay-modernization",
                     row_ix,
                     idx,
-                    &format!("modernization:{}", module.game_params_name),
-                    display_name,
-                    tooltip,
+                    &RowIcon::Modernization(module.game_params_name.clone()).cache_key(),
+                    text.name,
+                    text.tooltip,
                     MODULE_ICON_SIZE,
                     icons,
                 )
@@ -1011,18 +662,14 @@ fn empty_slot_box() -> AnyElement {
 fn signals_view(row_ix: usize, signals: &[TranslatedModule], icons: &IconCache) -> AnyElement {
     let mut row = h_flex().flex_wrap().gap_1();
     for (idx, signal) in signals.iter().enumerate() {
-        let display_name = signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
-        let tooltip = match signal.description.as_deref() {
-            Some(d) if !d.is_empty() => format!("{display_name}\n\n{d}"),
-            _ => display_name.clone(),
-        };
+        let text = module_text(signal);
         row = row.child(icon_or_text_cell(
             "replay-signal",
             row_ix,
             idx,
-            &format!("signal:{}", signal.game_params_name),
-            display_name,
-            tooltip,
+            &RowIcon::Signal(signal.game_params_name.clone()).cache_key(),
+            text.name,
+            text.tooltip,
             MODULE_ICON_SIZE,
             icons,
         ));
@@ -1054,9 +701,13 @@ fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCac
     let mut skill_idx = 0usize;
     for row in rows {
         let mut line = h_flex().gap_1().items_center();
-        let cost_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
         line = line.child(
-            div().w(px(14.)).flex_none().text_xs().text_color(crate::theme::text_dim()).child(detail_text(cost_label)),
+            div()
+                .w(px(SKILL_COST_WIDTH))
+                .flex_none()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(detail_text(skill_tier_label(row))),
         );
         for skill in &row.skills {
             line = line.child(skill_cell(row_ix, skill_idx, skill, icons));
@@ -1068,30 +719,18 @@ fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCac
 }
 
 fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCache) -> AnyElement {
-    let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.as_str().to_string());
-    let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
-    let tooltip_text: SharedString = match skill.description.as_deref() {
-        Some(desc) if !desc.is_empty() => format!("{display_name}{cost}\n\n{desc}"),
-        _ => format!("{display_name}{cost}"),
-    }
-    .into();
+    let tooltip_text: SharedString = skill_tooltip(skill).into();
 
-    let key = format!("skill:{}", skill.internal_name.as_str());
+    let key = RowIcon::Skill(skill.internal_name.clone()).cache_key();
     let el = match icons.get_keyed(&key) {
         Some(image) => {
-            let opacity = if skill.learned { 1.0 } else { 0.35 };
+            let opacity = if skill.learned { 1.0 } else { UNLEARNED_SKILL_OPACITY };
             div().opacity(opacity).child(img(image).w(px(MODULE_ICON_SIZE)).h(px(MODULE_ICON_SIZE)))
         }
-        None => {
-            let label = match skill.point_cost {
-                Some(c) => format!("({}) {display_name}", c.get()),
-                None => display_name,
-            };
-            div()
-                .text_xs()
-                .when(!skill.learned, |this| this.text_color(crate::theme::text_faint()))
-                .child(detail_text(label))
-        }
+        None => div()
+            .text_xs()
+            .when(!skill.learned, |this| this.text_color(crate::theme::text_faint()))
+            .child(detail_text(skill_fallback_label(skill))),
     };
     el.id(("replay-skill", row_ix * DETAIL_ID_STRIDE + idx))
         .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
@@ -1104,14 +743,11 @@ fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCac
 /// remaining-charges concept for an unlimited consumable) and "total" reads
 /// "Unlimited" instead of a number.
 fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &IconCache) -> AnyElement {
-    const NAME_COL: f32 = 170.0;
-    const COUNT_COL: f32 = 64.0;
-
     let header = h_flex()
         .gap_2()
         .child(
             div()
-                .w(px(NAME_COL))
+                .w(px(CONSUMABLE_NAME_WIDTH))
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
@@ -1119,7 +755,7 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
         )
         .child(
             div()
-                .w(px(COUNT_COL))
+                .w(px(CONSUMABLE_COUNT_WIDTH))
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
@@ -1127,7 +763,7 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
         )
         .child(
             div()
-                .w(px(COUNT_COL))
+                .w(px(CONSUMABLE_COUNT_WIDTH))
                 .flex_none()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
@@ -1142,22 +778,11 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
 }
 
 fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icons: &IconCache) -> AnyElement {
-    const NAME_COL: f32 = 170.0;
-    const COUNT_COL: f32 = 64.0;
+    let counts = consumable_counts(consumable);
+    let hover: SharedString = counts.hover.into();
 
-    let (remaining_text, total_text, hover_text) = match consumable.total_charges {
-        ChargeCount::Unlimited => {
-            (consumable.charges_used.to_string(), "Unlimited".to_string(), format!("Used: {}", consumable.charges_used))
-        }
-        ChargeCount::Finite(total) => {
-            let remaining = total.saturating_sub(consumable.charges_used);
-            (remaining.to_string(), total.to_string(), format!("Remaining: {remaining} / Total: {total}"))
-        }
-    };
-    let hover: SharedString = hover_text.into();
-
-    let key = format!("consumable:{}", consumable.icon_key);
-    let mut name_cell = h_flex().w(px(NAME_COL)).flex_none().gap_1().items_center();
+    let key = RowIcon::Consumable(consumable.icon_key.clone()).cache_key();
+    let mut name_cell = h_flex().w(px(CONSUMABLE_NAME_WIDTH)).flex_none().gap_1().items_center();
     if let Some(image) = icons.get_keyed(&key) {
         name_cell = name_cell.child(img(image).w(px(CONSUMABLE_ICON_SIZE)).h(px(CONSUMABLE_ICON_SIZE)));
     }
@@ -1168,8 +793,8 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
         .gap_2()
         .items_center()
         .child(name_cell)
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(remaining_text)))
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(total_text)))
+        .child(div().w(px(CONSUMABLE_COUNT_WIDTH)).flex_none().text_xs().child(detail_text(counts.remaining)))
+        .child(div().w(px(CONSUMABLE_COUNT_WIDTH)).flex_none().text_xs().child(detail_text(counts.total)))
         .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
         .into_any_element()
 }
@@ -1189,14 +814,11 @@ fn render_damage_section(
     direction: DamageDirection,
     alt_held: bool,
 ) -> Option<AnyElement> {
-    if row.should_hide_stats() && !debug {
+    if nda_hidden(row, debug) {
         return Some(nda_text());
     }
 
-    let breakdown = match direction {
-        DamageDirection::Dealt => row.actual_damage_breakdown.as_deref(),
-        DamageDirection::Received => row.received_damage_breakdown.as_deref(),
-    };
+    let breakdown = damage_breakdown(row, direction);
     let interactions = row.damage_interactions.as_ref();
     if breakdown.is_none() && interactions.is_none() {
         return None;
@@ -1211,47 +833,11 @@ fn render_damage_section(
         }
     }
 
-    if let Some(interactions) = interactions {
-        let mut entries: Vec<_> = interactions.iter().collect();
-        entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
-        let per_ship: Vec<BreakdownRow> = entries
-            .into_iter()
-            .filter_map(|(account_id, interaction)| {
-                let amount = interaction_amount(interaction, direction);
-                if amount == 0 {
-                    return None;
-                }
-                let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
-                let pct = interaction_percentage(interaction, direction, alt_held);
-                Some(BreakdownRow {
-                    label: other.ship_name.clone(),
-                    value: format!("{} ({pct:.0}%)", separate_number(amount)),
-                })
-            })
-            .collect();
-        col = col.child(breakdown_grid(&per_ship));
+    if interactions.is_some() {
+        col = col.child(breakdown_grid(&damage_target_rows(row, all_rows, direction, alt_held)));
     }
 
     Some(col.into_any_element())
-}
-
-fn interaction_amount(interaction: &DamageInteraction, direction: DamageDirection) -> u64 {
-    match direction {
-        DamageDirection::Dealt => interaction.damage_dealt,
-        DamageDirection::Received => interaction.damage_received,
-    }
-}
-
-/// The share this line is of a total. Normally of this row's own total; with
-/// alt down, of the other player's, which answers "how much of what they took
-/// was me" rather than "how much of my damage went there".
-fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDirection, alt_held: bool) -> f64 {
-    match (direction, alt_held) {
-        (DamageDirection::Dealt, false) => interaction.damage_dealt_percentage,
-        (DamageDirection::Dealt, true) => interaction.damage_dealt_inverse_percentage,
-        (DamageDirection::Received, false) => interaction.damage_received_percentage,
-        (DamageDirection::Received, true) => interaction.damage_received_inverse_percentage,
-    }
 }
 
 // `use super::*` here would also pull in `gpui_kit::*` (glob-reexported at the
@@ -1262,27 +848,9 @@ fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDire
 // Import only the specific pure-logic items these tests exercise instead.
 #[cfg(test)]
 mod tests {
-    use wows_replay_insights::battle_report::DamageInteraction;
-    use wows_replay_insights::battle_report::RibbonResult;
-    use wowsunpack::game_params::skill_grid_data::SkillGridRow;
-    use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
-    use wowsunpack::game_params::types::CrewSkillName;
-    use wowsunpack::game_params::types::CrewSkillType;
-    use wowsunpack::game_params::types::SkillPointCost;
-
-    use super::DamageDirection;
     use super::IconCache;
-    use super::MODULE_ICON_SIZE;
     use super::ReplayColumn;
-    use super::consumables_width;
-    use super::damage_event_rows;
-    use super::fit_dims;
-    use super::icon_label_row_width;
-    use super::interaction_amount;
-    use super::interaction_percentage;
     use super::render_column_detail;
-    use super::reorder_bulge_after_main_caliber;
-    use super::skill_grid_width;
     use wows_replays::types::Relation;
     use wows_toolkit_replay_data::test_support::base_row;
     use wows_toolkit_replay_data::test_support::fire_chance_result;
@@ -1303,183 +871,5 @@ mod tests {
             render_column_detail(0, ReplayColumn::Kills, &row, &[], &icons, false, false).is_none(),
             "and the Kills column does not"
         );
-    }
-
-    /// A breakdown lists what a battle produced and leaves out what it did
-    /// not, so the grid draws a line per kind that has something behind it.
-    #[test]
-    fn the_damage_event_grid_lists_only_the_events_a_row_recorded() {
-        let mut row = base_row(1, Relation::new(1), false);
-        row.fires = Some(4);
-        row.citadels = Some(2);
-
-        let rows = damage_event_rows(&row);
-
-        assert_eq!(rows.len(), 2, "got {rows:?}");
-        assert_eq!(rows[1].value, "2", "the counts read as numbers: {rows:?}");
-    }
-
-    #[test]
-    fn fit_dims_keeps_a_wide_ribbon_short() {
-        // A 220x60 ribbon fitted into a 64 box: 64 wide, proportionally short.
-        let (w, h) = fit_dims(220.0, 60.0, 64.0);
-        assert!((w - 64.0).abs() < 1e-4, "width should hit the box: {w}");
-        assert!((h - 64.0 * 60.0 / 220.0).abs() < 1e-4, "height should scale with aspect: {h}");
-        assert!(h < 20.0, "a wide ribbon must render short, got {h}");
-    }
-
-    #[test]
-    fn fit_dims_leaves_a_square_icon_square() {
-        assert_eq!(fit_dims(32.0, 32.0, 32.0), (32.0, 32.0));
-        let (w, h) = fit_dims(128.0, 128.0, 32.0);
-        assert!((w - 32.0).abs() < 1e-4 && (h - 32.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn fit_dims_falls_back_to_a_square_for_degenerate_sizes() {
-        assert_eq!(fit_dims(0.0, 10.0, 64.0), (64.0, 64.0));
-        assert_eq!(fit_dims(10.0, 0.0, 64.0), (64.0, 64.0));
-    }
-
-    fn ribbon(name: &str) -> RibbonResult {
-        RibbonResult {
-            name: name.to_string(),
-            display_name: name.to_string(),
-            description: String::new(),
-            icon_key: name.to_string(),
-            is_subribbon: false,
-            count: 1,
-        }
-    }
-
-    #[test]
-    fn reorder_bulge_after_main_caliber_moves_bulge_when_it_precedes_main_caliber() {
-        let bulge = ribbon("RIBBON_BULGE");
-        let main_caliber = ribbon("RIBBON_MAIN_CALIBER");
-        let other = ribbon("RIBBON_CITADEL");
-        let mut ribbons = vec![&bulge, &main_caliber, &other];
-
-        reorder_bulge_after_main_caliber(&mut ribbons);
-
-        let names: Vec<&str> = ribbons.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, vec!["RIBBON_MAIN_CALIBER", "RIBBON_BULGE", "RIBBON_CITADEL"]);
-    }
-
-    #[test]
-    fn reorder_bulge_after_main_caliber_moves_bulge_when_it_follows_main_caliber() {
-        let main_caliber = ribbon("RIBBON_MAIN_CALIBER");
-        let other = ribbon("RIBBON_CITADEL");
-        let bulge = ribbon("RIBBON_BULGE");
-        let mut ribbons = vec![&main_caliber, &other, &bulge];
-
-        reorder_bulge_after_main_caliber(&mut ribbons);
-
-        let names: Vec<&str> = ribbons.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, vec!["RIBBON_MAIN_CALIBER", "RIBBON_BULGE", "RIBBON_CITADEL"]);
-    }
-
-    #[test]
-    fn reorder_bulge_after_main_caliber_is_a_no_op_when_either_ribbon_is_absent() {
-        let main_caliber = ribbon("RIBBON_MAIN_CALIBER");
-        let other = ribbon("RIBBON_CITADEL");
-        let mut ribbons = vec![&other, &main_caliber];
-
-        reorder_bulge_after_main_caliber(&mut ribbons);
-
-        let names: Vec<&str> = ribbons.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, vec!["RIBBON_CITADEL", "RIBBON_MAIN_CALIBER"]);
-    }
-
-    fn interaction(
-        damage_dealt: u64,
-        damage_dealt_pct: f64,
-        damage_received: u64,
-        damage_received_pct: f64,
-    ) -> DamageInteraction {
-        DamageInteraction {
-            damage_dealt,
-            damage_dealt_percentage: damage_dealt_pct,
-            damage_received,
-            damage_received_percentage: damage_received_pct,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn interaction_amount_and_percentage_read_the_direction_specific_fields() {
-        let i = interaction(42_000, 56.4, 12_000, 38.1);
-
-        assert_eq!(interaction_amount(&i, DamageDirection::Dealt), 42_000);
-        assert_eq!(interaction_amount(&i, DamageDirection::Received), 12_000);
-        assert!((interaction_percentage(&i, DamageDirection::Dealt, false) - 56.4).abs() < 1e-9);
-        assert!((interaction_percentage(&i, DamageDirection::Received, false) - 38.1).abs() < 1e-9);
-    }
-
-    #[test]
-    fn alt_swaps_a_percentage_for_the_share_of_the_other_player_total() {
-        let mut i = interaction(42_000, 56.4, 12_000, 38.1);
-        i.damage_dealt_inverse_percentage = 71.2;
-        i.damage_received_inverse_percentage = 9.4;
-
-        assert!((interaction_percentage(&i, DamageDirection::Dealt, true) - 71.2).abs() < 1e-9);
-        assert!((interaction_percentage(&i, DamageDirection::Received, true) - 9.4).abs() < 1e-9);
-    }
-
-    fn skill_tier(skill_count: usize) -> SkillGridRow {
-        SkillGridRow {
-            point_cost: Some(SkillPointCost::new(1)),
-            skills: (0..skill_count)
-                .map(|i| SkillGridSkill {
-                    internal_name: CrewSkillName::from(format!("Skill{i}").as_str()),
-                    skill_type: CrewSkillType::new(0),
-                    name: None,
-                    description: None,
-                    point_cost: Some(SkillPointCost::new(1)),
-                    learned: i % 2 == 0,
-                })
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn skill_grid_width_matches_the_cost_label_plus_gap_plus_icon_formula() {
-        let rows = [skill_tier(7)];
-        let width = skill_grid_width(&rows, 4.0);
-        // 14 (cost label) + gap_1 + 7 skills * (MODULE_ICON_SIZE + gap_1).
-        let expected = 14.0 + 4.0 + 7.0 * (MODULE_ICON_SIZE + 4.0);
-        assert!((width - expected).abs() < 1e-4, "width {width} != expected {expected}");
-    }
-
-    #[test]
-    fn skill_grid_width_takes_the_widest_tier() {
-        let rows = [skill_tier(1), skill_tier(7), skill_tier(3)];
-        let width = skill_grid_width(&rows, 4.0);
-        assert!((width - skill_grid_width(&[skill_tier(7)], 4.0)).abs() < 1e-4);
-    }
-
-    #[test]
-    fn skill_grid_width_of_a_full_tier_far_exceeds_a_typical_collapsed_skills_width() {
-        // The collapsed Skills cell is a short label ("Fine 12pt" and change);
-        // a 7-skill tier at MODULE_ICON_SIZE per icon must dwarf it, which is
-        // the whole point of re-measuring on expand.
-        let collapsed_skills_column_width = 90.0;
-        let width = skill_grid_width(&[skill_tier(7)], 4.0);
-        assert!(
-            width > collapsed_skills_column_width,
-            "grid width {width} should exceed {collapsed_skills_column_width}"
-        );
-    }
-
-    #[test]
-    fn consumables_width_matches_the_fixed_three_column_layout() {
-        // NAME_COL(170) + gap_2 + COUNT_COL(64) + gap_2 + COUNT_COL(64), with
-        // gap_2 = 8 at the default 16px rem.
-        assert!((consumables_width(8.0) - 314.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn icon_label_row_width_adds_the_8px_gap_between_icon_and_label() {
-        assert!((icon_label_row_width(64.0, 40.0) - 112.0).abs() < 1e-4);
-        assert!((icon_label_row_width(0.0, 40.0) - 48.0).abs() < 1e-4);
     }
 }

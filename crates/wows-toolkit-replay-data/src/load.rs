@@ -1671,6 +1671,9 @@ dumped_at = "2026-01-01T00:00:00Z"
 
     impl EmptyGameDir {
         fn new(unique: &str) -> Self {
+            // The cache's dump directory lives under the storage directory,
+            // which a test must never resolve to the user's own.
+            wows_toolkit_config::storage_override::set(std::env::temp_dir().join("wt-replay-data-tests"));
             let dir = std::env::temp_dir().join(format!("wt-gpui-load-test-{unique}"));
             std::fs::create_dir_all(dir.join("bin")).expect("failed to create empty test bin/ dir");
             Self(dir)

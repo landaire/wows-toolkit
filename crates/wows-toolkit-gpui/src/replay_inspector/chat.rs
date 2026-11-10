@@ -19,100 +19,20 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
-use wows_replays::analyzer::battle_controller::ChatChannel;
-use wows_replays::types::Relation;
-
-use super::columns::relation_color_rgb;
+use wows_toolkit_replay_data::chat::channel_color;
+use wows_toolkit_replay_data::chat::clan_color;
+use wows_toolkit_replay_data::chat::copy_text;
+use wows_toolkit_replay_data::chat::sender_color;
 use wows_toolkit_replay_data::model::ChatMessage;
-use wows_toolkit_replay_data::model::ClanColor;
-
-/// No resolvable team relation: the de-emphasised tone, which is what egui's
-/// `Color32::GRAY` fallback amounts to in `build_replay_chat_content`.
-fn no_relation_gray() -> u32 {
-    crate::theme::semantic().text_dim
-}
-
-fn self_color() -> u32 {
-    crate::theme::semantic().text_strong
-}
-
-fn ally_color() -> u32 {
-    crate::theme::semantic().chat_team
-}
-
-fn enemy_color() -> u32 {
-    crate::theme::semantic().loss
-}
-
-fn division_color() -> u32 {
-    crate::theme::semantic().chat_division
-}
-
-fn system_color() -> u32 {
-    crate::theme::semantic().chat_other
-}
-
-/// Sender-name color packed as `0xRRGGBB`: the self/ally/enemy triad via
-/// `relation_color_rgb` (the single source of truth for those three values),
-/// plus the gray fallback for a message with no resolvable `sender_relation`.
-/// Split out from `sender_color` (which resolves this to an `Hsla`) so the
-/// palette mapping is unit-testable by plain `u32` equality; `Hsla` itself
-/// carries no `PartialEq` impl to test against directly.
-fn sender_color_rgb(relation: Option<Relation>) -> u32 {
-    match relation {
-        None => no_relation_gray(),
-        Some(r) => relation_color_rgb(r),
-    }
-}
-
-/// Clan-tag color packed as `0xRRGGBB`: the league color the replay records,
-/// or the player's own relation color for an older replay that records none.
-fn clan_color_rgb(color: ClanColor) -> u32 {
-    match color {
-        ClanColor::League(rgb) => rgb,
-        ClanColor::Relation(relation) => relation_color_rgb(relation),
-    }
-}
-
-fn sender_color(relation: Option<Relation>) -> Hsla {
-    rgb(sender_color_rgb(relation)).into()
-}
-
-/// Message-body color packed as `0xRRGGBB`, by chat channel. Mirrors
-/// `build_replay_chat_content`'s `match channel { Division => GOLD, Global =>
-/// WHITE, Team => LIGHT_GREEN, _ => ORANGE }`. See `sender_color_rgb` for why
-/// this is split from the `Hsla`-returning `channel_color`.
-fn channel_color_rgb(channel: &ChatChannel) -> u32 {
-    match channel {
-        ChatChannel::Division => division_color(),
-        ChatChannel::Global => self_color(),
-        ChatChannel::Team => ally_color(),
-        ChatChannel::System | ChatChannel::Unknown(_) => system_color(),
-    }
-}
-
-fn channel_color(channel: &ChatChannel) -> Hsla {
-    rgb(channel_color_rgb(channel)).into()
-}
-
-/// The clipboard text for one message: `"[clan] sender (Channel): message"`,
-/// or without the clan segment when the sender is clanless. Mirrors the
-/// format string `build_replay_chat_content`'s copy button and
-/// `show_game_chat_window`'s copy-all handler both use.
-fn copy_text(message: &ChatMessage) -> String {
-    match &message.clan_tag {
-        Some(clan) => format!("[{clan}] {} ({:?}): {}", message.sender_name, message.channel, message.message),
-        None => format!("{} ({:?}): {}", message.sender_name, message.channel, message.message),
-    }
-}
 
 /// One chat message: a two-line block (colored sender/clan line, colored
 /// message line) reproducing the egui `LayoutJob`'s name-then-newline-then-
 /// message layout, plus a copy button revealed on row hover via a gpui_kit
 /// element group (egui reveals the same button on `rect_contains_pointer`).
 fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoElement {
-    let name_color = sender_color(message.sender_relation);
-    let body_color = channel_color(&message.channel);
+    let semantic = crate::theme::semantic();
+    let name_color: Hsla = rgb(sender_color(message.sender_relation, semantic)).into();
+    let body_color: Hsla = rgb(channel_color(&message.channel, semantic)).into();
     let group_name = SharedString::from(format!("chat-row-{ix}"));
     let copy_payload = copy_text(message);
 
@@ -133,10 +53,10 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                     h_flex()
                         .gap_1()
                         .when_some(message.clan_tag.as_ref().zip(message.clan_color), |this, (tag, color)| {
-                            let clan_color: Hsla = rgb(clan_color_rgb(color)).into();
+                            let tag_color: Hsla = rgb(clan_color(color, semantic)).into();
                             this.child(
                                 div()
-                                    .text_color(clan_color)
+                                    .text_color(tag_color)
                                     .child(crate::ui::selectable_text(("chat-clan", ix), format!("[{tag}]"))),
                             )
                         })
@@ -187,7 +107,7 @@ impl ChatPanel {
     /// The whole log as one block of text, in the same per-message format the
     /// copy button beside each line writes.
     fn transcript(&self) -> String {
-        self.messages.iter().map(copy_text).collect::<Vec<_>>().join("\n")
+        wows_toolkit_replay_data::chat::transcript(&self.messages)
     }
 
     fn copy_all(&self, cx: &mut Context<Self>) {
@@ -255,80 +175,5 @@ impl Render for ChatPanel {
             .size_full()
             .child(toolbar)
             .child(div().relative().flex_1().min_h(px(0.)).child(rows).child(Scrollbar::vertical(&self.scroll)))
-    }
-}
-
-// Deliberately not `use super::*;`: that glob also pulls in `render_message`
-// and `ChatPanel`, whose `impl IntoElement` return type and gpui_kit builder
-// chains blow rustc's macro-expansion recursion tracking sky-high once
-// re-monomorphized into a `#[cfg(test)]` module (observed: several thousand
-// deep before it just stack-overflows the compiler). Only the plain
-// functions/types the tests actually touch are imported.
-#[cfg(test)]
-mod tests {
-    use wows_replays::analyzer::battle_controller::ChatChannel;
-    use wows_replays::types::GameClock;
-    use wows_replays::types::Relation;
-
-    use super::ChatMessage;
-    use super::ClanColor;
-    use super::ally_color;
-    use super::channel_color_rgb;
-    use super::copy_text;
-    use super::division_color;
-    use super::no_relation_gray;
-    use super::relation_color_rgb;
-    use super::self_color;
-    use super::sender_color_rgb;
-    use super::system_color;
-
-    fn message(sender_relation: Option<Relation>, channel: ChatChannel, clan_tag: Option<&str>) -> ChatMessage {
-        ChatMessage {
-            clock: GameClock(0.0),
-            sender_relation,
-            sender_name: "Player".to_string(),
-            channel,
-            message: "hello".to_string(),
-            clan_tag: clan_tag.map(str::to_string),
-            clan_color: clan_tag.map(|_| ClanColor::League(0x3399ff)),
-        }
-    }
-
-    #[test]
-    fn sender_color_matches_relation_palette() {
-        // A sender is coloured by relation, from the table the player list
-        // shares; only a message with no relation at all falls back here.
-        assert_eq!(sender_color_rgb(None), no_relation_gray());
-        for relation in [0, 1, 2] {
-            let relation = Relation::new(relation);
-            assert_eq!(sender_color_rgb(Some(relation)), relation_color_rgb(relation));
-        }
-    }
-
-    #[test]
-    fn channel_color_matches_palette() {
-        assert_eq!(channel_color_rgb(&ChatChannel::Division), division_color());
-        assert_eq!(channel_color_rgb(&ChatChannel::Global), self_color());
-        assert_eq!(channel_color_rgb(&ChatChannel::Team), ally_color());
-        assert_eq!(channel_color_rgb(&ChatChannel::System), system_color());
-        assert_eq!(channel_color_rgb(&ChatChannel::Unknown("x".to_string())), system_color());
-    }
-
-    #[test]
-    fn copy_text_includes_clan_tag_when_present() {
-        let msg = message(Some(Relation::new(1)), ChatChannel::Team, Some("WTK"));
-        assert_eq!(copy_text(&msg), "[WTK] Player (Team): hello");
-    }
-
-    #[test]
-    fn copy_text_omits_clan_segment_when_clanless() {
-        let msg = message(Some(Relation::new(1)), ChatChannel::Team, None);
-        assert_eq!(copy_text(&msg), "Player (Team): hello");
-    }
-
-    #[test]
-    fn copy_text_formats_unknown_channel_with_its_payload() {
-        let msg = message(None, ChatChannel::Unknown("weird".to_string()), None);
-        assert_eq!(copy_text(&msg), "Player (Unknown(\"weird\")): hello");
     }
 }

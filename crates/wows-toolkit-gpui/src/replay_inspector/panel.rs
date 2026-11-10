@@ -44,7 +44,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_config::ReplayExportFormat;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -77,8 +77,8 @@ use wowsunpack::vfs::VfsPath;
 use crate::icons;
 
 use super::chat::ChatPanel;
-use super::columns::BattleOutcome;
-use super::columns::ColorRole;
+use wows_toolkit_replay_data::cells::BattleOutcome;
+use wows_toolkit_replay_data::cells::ColorRole;
 use super::debug_view::RawJsonPanel;
 use super::load::spawn_parse;
 use super::load::spawn_parse_with_alts;
@@ -94,7 +94,12 @@ use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::separate_number;
-use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
+use wows_toolkit_replay_data::export::AutoExport;
+use wows_toolkit_replay_data::export::MENU_FORMATS;
+use wows_toolkit_replay_data::export::menu_label;
+use wows_toolkit_replay_data::export::write_export;
+use wows_toolkit_replay_data::summary;
+use wows_toolkit_replay_data::summary::TeamDamage;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::twitch;
 
@@ -447,7 +452,7 @@ impl ReplayPanel {
             tracing::warn!(path = %self.path.display(), "auto-export: the replay has no name to write under");
             return;
         };
-        let path = directory.join(stem).with_extension(format.extension());
+        let path = directory.join(wows_toolkit_replay_data::export::file_name(&stem, *format));
         let format = *format;
 
         cx.spawn(async move |this, cx| {
@@ -463,7 +468,7 @@ impl ReplayPanel {
         .detach();
     }
 
-    fn export_match(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
+    fn export_match(&mut self, format: ReplayExportFormat, cx: &mut Context<Self>) {
         let Some(export) = self.export.clone() else {
             return;
         };
@@ -480,7 +485,7 @@ impl ReplayPanel {
         };
         let asked = crate::dialog::save_file(
             Some(&t!("ui.replay.export_results_title")),
-            &format!("{name}.{}", format.extension()),
+            &wows_toolkit_replay_data::export::file_name(&name, format),
             None,
         );
 
@@ -649,9 +654,7 @@ impl ReplayPanel {
         if let Some(table) = self.personal_rating.as_ref() {
             model.populate_personal_ratings(table);
         }
-        let ship_name = model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
-        let title: SharedString =
-            if ship_name.is_empty() { model.map.clone() } else { format!("{ship_name} - {}", model.map) }.into();
+        let title: SharedString = summary::title(&model).into();
         let battle_result = model.battle_result;
         let chat = std::mem::take(&mut model.chat);
         let chat_title = title.to_string();
@@ -872,123 +875,8 @@ pub struct PanelSetup {
     pub auto_export: AutoExport,
 }
 
-/// Whether a finished parse writes itself out, and where.
-///
-/// A directory that is not there is not one: the setting is read at open
-/// time, so a directory removed since then simply turns the writing off
-/// rather than failing once per battle.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum AutoExport {
-    #[default]
-    Off,
-    To {
-        directory: PathBuf,
-        format: ExportFormat,
-    },
-}
-
-impl From<wows_toolkit_config::ReplayExportFormat> for ExportFormat {
-    fn from(format: wows_toolkit_config::ReplayExportFormat) -> ExportFormat {
-        match format {
-            wows_toolkit_config::ReplayExportFormat::Json => ExportFormat::Json,
-            wows_toolkit_config::ReplayExportFormat::Cbor => ExportFormat::Cbor,
-            wows_toolkit_config::ReplayExportFormat::Csv => ExportFormat::Csv,
-        }
-    }
-}
-
-impl AutoExport {
-    /// Reads the setting, refusing a directory that is not one.
-    pub fn from_settings(settings: &ReplaySettings) -> AutoExport {
-        if !settings.auto_export_data {
-            return AutoExport::Off;
-        }
-        let directory = PathBuf::from(&settings.auto_export_path);
-        if !directory.is_dir() {
-            return AutoExport::Off;
-        }
-        AutoExport::To { directory, format: ExportFormat::from(settings.auto_export_format) }
-    }
-}
-
-/// What the Export menu writes.
-///
-/// JSON and CBOR carry the whole match; CSV carries one flattened row per
-/// vehicle, which is what a spreadsheet can read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExportFormat {
-    Json,
-    Cbor,
-    Csv,
-}
-
-impl ExportFormat {
-    const ALL: [ExportFormat; 3] = [Self::Json, Self::Cbor, Self::Csv];
-
-    fn label(self) -> String {
-        match self {
-            Self::Json => t!("ui.replay.export_results_json").into_owned(),
-            Self::Cbor => t!("ui.replay.export_results_cbor").into_owned(),
-            Self::Csv => t!("ui.replay.export_results_csv").into_owned(),
-        }
-    }
-
-    pub(super) fn extension(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::Cbor => "cbor",
-            Self::Csv => "csv",
-        }
-    }
-
-    fn id(self) -> &'static str {
-        match self {
-            Self::Json => "replay-export-json",
-            Self::Cbor => "replay-export-cbor",
-            Self::Csv => "replay-export-csv",
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(super) enum ExportError {
-    #[error("could not create {path}")]
-    Create {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("could not write {path}: {reason}")]
-    Write { path: PathBuf, reason: String },
-}
-
-/// Writes `match_data` to `path`.
-pub(super) fn write_export(match_data: &ExportedMatch, path: &Path, format: ExportFormat) -> Result<(), ExportError> {
-    let file = std::io::BufWriter::new(
-        std::fs::File::create(path).map_err(|source| ExportError::Create { path: path.to_path_buf(), source })?,
-    );
-    let failed = |reason: String| ExportError::Write { path: path.to_path_buf(), reason };
-
-    match format {
-        ExportFormat::Json => serde_json::to_writer(file, match_data).map_err(|err| failed(err.to_string())),
-        ExportFormat::Cbor => ciborium::into_writer(match_data, file).map_err(|err| failed(err.to_string())),
-        ExportFormat::Csv => {
-            let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
-            for vehicle in match_data.vehicles.iter().cloned() {
-                writer.serialize(FlattenedVehicle::from(vehicle)).map_err(|err| failed(err.to_string()))?;
-            }
-            writer.flush().map_err(|err| failed(err.to_string()))
-        }
-    }
-}
-
 /// The PR badge's element id, so a test can assert on its presence and label.
 const PR_BADGE_ID: &str = "replay-personal-rating-badge";
-
-/// The badge's text, verbatim the egui `pr_chip` call's format string.
-fn personal_rating_label(rating: &PersonalRatingResult) -> String {
-    format!("PR: {:.0} ({})", rating.pr, rating.category.name())
-}
 
 /// The chip tint the egui `pr_chip` paints behind its text.
 const PR_CHIP_TINT: f32 = personal_rating::CHIP_TINT_ALPHA as f32 / 255.;
@@ -1000,7 +888,7 @@ const PR_CHIP_TINT: f32 = personal_rating::CHIP_TINT_ALPHA as f32 / 255.;
 /// `if let Some(pr_result)` gate.
 fn personal_rating_badge(rating: PersonalRatingResult) -> AnyElement {
     let color = resolve_color(ColorRole::PrTier(rating.category));
-    let text = personal_rating_label(&rating);
+    let text = summary::personal_rating_label(&rating);
     let mut tint = resolve_color(ColorRole::PrTierTint(rating.category));
     tint.a = PR_CHIP_TINT;
 
@@ -1090,34 +978,19 @@ struct HeaderState {
 ///
 /// Mirrors the egui app's Row 2, down to the interpunct between the fields
 /// and the win/loss tones on the two damage figures.
-fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyElement {
-    let (friendly, enemy) = team_damage;
+fn match_context_line(context: &MatchContext, team_damage: TeamDamage) -> AnyElement {
     let dim = crate::theme::text_dim();
     let separator = || div().flex_none().text_xs().text_color(dim).child(SEPARATOR);
     let field = |index: usize, text: String| {
         div().flex_none().text_xs().text_color(dim).child(crate::ui::selectable_text(("match-field", index), text))
     };
 
-    // The clan tag reads as part of the name, so it sits against it rather
-    // than as a field of its own.
-    let who = match context.clan_tag.as_ref() {
-        Some(clan) => format!("{clan} {}", context.player_name),
-        None => context.player_name.clone(),
-    };
-
     let mut line = h_flex().id("replay-match-context").test_support().flex_none().items_center().gap_1().px_2().pb_1();
-    let mut drawn = 0usize;
-    for (index, text) in
-        [&who, &context.game_type, &context.version, &context.game_mode, &context.map].into_iter().enumerate()
-    {
-        if text.is_empty() {
-            continue;
-        }
-        if drawn > 0 {
+    for (index, text) in summary::match_context_fields(context).into_iter().enumerate() {
+        if index > 0 {
             line = line.child(separator());
         }
-        line = line.child(field(index, text.clone()));
-        drawn += 1;
+        line = line.child(field(index, text));
     }
 
     line.child(separator())
@@ -1127,7 +1000,7 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
                 .flex_none()
                 .text_xs()
                 .text_color(rgb(crate::theme::semantic().win))
-                .child(crate::ui::selectable_text("friendly-damage", separate_number(friendly))),
+                .child(crate::ui::selectable_text("friendly-damage", separate_number(team_damage.friendly))),
         )
         .child(field(6, " : ".to_string()))
         .child(
@@ -1135,9 +1008,9 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
                 .flex_none()
                 .text_xs()
                 .text_color(rgb(crate::theme::semantic().loss))
-                .child(crate::ui::selectable_text("enemy-damage", separate_number(enemy))),
+                .child(crate::ui::selectable_text("enemy-damage", separate_number(team_damage.enemy))),
         )
-        .child(field(7, format!(" ({})", separate_number(friendly + enemy))))
+        .child(field(7, format!(" ({})", separate_number(team_damage.total()))))
         .into_any_element()
 }
 
@@ -1227,9 +1100,9 @@ fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoEle
             };
 
             let menu = menu.separator().label(t!("ui.replay.section_export").into_owned());
-            let menu = ExportFormat::ALL.into_iter().fold(menu, |menu, format| {
+            let menu = MENU_FORMATS.into_iter().fold(menu, |menu, format| {
                 let panel = panel.clone();
-                menu.item(PopupMenuItem::new(format.label()).disabled(!can_export).on_click(
+                menu.item(PopupMenuItem::new(menu_label(format)).disabled(!can_export).on_click(
                     move |_event, _window, cx| {
                         panel.update(cx, |this, cx| this.export_match(format, cx));
                     },
@@ -1535,19 +1408,15 @@ mod tests {
     use gpui_kit::size;
     use gpui_kit::test::TestWindowExt;
     use std::sync::Arc;
-    use wows_replay_insights::personal_rating::PersonalRatingCategory;
-    use wows_replay_insights::personal_rating::PersonalRatingResult;
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::Relation;
     use wows_replays::types::TeamId;
     use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
-    use super::ExportFormat;
-    use super::ExportedMatch;
+    use super::MENU_FORMATS;
+    use super::menu_label;
     use super::PR_BADGE_ID;
     use super::ReplayPanel;
-    use super::personal_rating_label;
-    use super::write_export;
     use wows_toolkit_replay_data::columns::ReplayColumn;
     use wows_toolkit_replay_data::model::PlayerRow;
     use wows_toolkit_replay_data::model::ReplayReportModel;
@@ -1597,15 +1466,15 @@ mod tests {
                     .collect()
             };
             assert!(
-                !offered(window).iter().any(|label| *label == ExportFormat::ALL[0].label()),
+                !offered(window).iter().any(|label| *label == menu_label(MENU_FORMATS[0])),
                 "the formats live behind the menu"
             );
 
             window.click("replay-actions", cx);
             window.render_frame(cx);
             let offered = offered(window);
-            for format in ExportFormat::ALL {
-                assert!(offered.iter().any(|label| *label == format.label()), "{} is offered", format.label());
+            for format in MENU_FORMATS {
+                assert!(offered.iter().any(|label| *label == menu_label(format)), "{} is offered", menu_label(format));
             }
         })
         .expect("the window is open");
@@ -1706,34 +1575,6 @@ mod tests {
 
     /// Dragging a column header's grip widens that column, and every row
     /// follows it. A column nobody dragged keeps fitting its content.
-    #[test]
-    fn the_auto_export_setting_refuses_a_directory_that_is_not_one() {
-        use super::AutoExport;
-        use wows_toolkit_config::ReplayExportFormat;
-        use wows_toolkit_config::ReplaySettings;
-
-        let off = ReplaySettings { auto_export_data: false, ..ReplaySettings::default() };
-        assert_eq!(AutoExport::from_settings(&off), AutoExport::Off, "the setting is what turns it on");
-
-        let nowhere = ReplaySettings {
-            auto_export_data: true,
-            auto_export_path: "G:/does-not-exist".to_string(),
-            ..ReplaySettings::default()
-        };
-        assert_eq!(AutoExport::from_settings(&nowhere), AutoExport::Off, "a missing directory is not one to write to");
-
-        let here = ReplaySettings {
-            auto_export_data: true,
-            auto_export_path: std::env::temp_dir().to_string_lossy().into_owned(),
-            auto_export_format: ReplayExportFormat::Csv,
-            ..ReplaySettings::default()
-        };
-        assert!(
-            matches!(AutoExport::from_settings(&here), AutoExport::To { format, .. } if format == ExportFormat::Csv),
-            "the chosen format carries through"
-        );
-    }
-
     #[gpui_kit::test]
     fn dragging_a_header_grip_widens_that_column(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
@@ -1779,7 +1620,7 @@ mod tests {
         assert!(
             !ReplayColumn::ALL
                 .iter()
-                .any(|col| crate::replay_inspector::table::column_label_key(*col) == "ui.replay.actions"),
+                .any(|col| wows_toolkit_replay_data::player_table::column_label_key(*col) == "ui.replay.actions"),
             "no column carries the egui app's Actions heading, so no width is charged for one"
         );
 
@@ -1985,38 +1826,6 @@ mod tests {
         .expect("the window is open");
     }
 
-    /// Every format writes a file the caller can read back, and CSV carries a
-    /// header row plus one row per vehicle.
-    #[test]
-    fn each_export_format_writes_its_own_shape() {
-        use wows_toolkit_replay_data::test_support::fixture_empty_battle_report;
-
-        let normalized = fixture_empty_battle_report();
-        let export = ExportedMatch::new(&normalized, &[], &[], true);
-        let dir = std::env::temp_dir().join(format!("wt-gpui-export-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("the test directory is creatable");
-
-        for format in ExportFormat::ALL {
-            let path = dir.join(format!("match.{}", format.extension()));
-            write_export(&export, &path, format).expect("the export writes");
-
-            assert!(path.is_file(), "{} wrote no file", format.label());
-        }
-
-        // CSV writes one row per vehicle and the fixture has none to zip raw
-        // players against, so an empty file is the honest result there; the
-        // whole-document formats always carry the metadata.
-        assert!(!std::fs::read(dir.join("match.cbor")).expect("the CBOR exists").is_empty());
-
-        let json: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.join("match.json")).expect("the JSON exists"))
-                .expect("the JSON parses back");
-        assert!(json.get("metadata").is_some(), "the document keeps its metadata");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[gpui_kit::test]
     fn the_pr_badge_reports_the_self_rows_rating(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
@@ -2088,13 +1897,5 @@ mod tests {
             assert!(window.try_find(PR_BADGE_ID).is_none(), "an empty table rates nothing");
         })
         .expect("the window is open");
-    }
-
-    #[test]
-    fn the_badge_label_matches_the_egui_chips_wording() {
-        let rating = PersonalRatingResult::new(1150.0);
-        assert_eq!(rating.category, PersonalRatingCategory::Average);
-        assert_eq!(personal_rating_label(&rating), "PR: 1150 (Average)");
-        assert_eq!(personal_rating_label(&PersonalRatingResult::new(2456.4)), "PR: 2456 (Super Unicum)");
     }
 }

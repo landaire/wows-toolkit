@@ -34,7 +34,6 @@ GPUI_DEPS = [
     "//third-party/rust:ciborium",
     "//third-party/rust:clap",
     "//third-party/rust:windows-sys",
-    "//third-party/rust:csv",
     "//third-party/rust:escaper",
     "//third-party/rust:fontdb",
     "//third-party/rust:futures",
