@@ -266,6 +266,10 @@ fn a_replay_on_a_build_nothing_has_is_offered_for_download() {
     let mut app = app_with(Some(&install.0));
 
     app.press("Settings").unwrap();
+    // The inspector's listing may already be asking what is published for
+    // the replays it found; the button takes a press once that is done.
+    app.wait_for_gone("Working out what needs fetching...", Duration::from_secs(90)).unwrap();
+    app.wait_for_gone("Asking what game data is published", Duration::from_secs(90)).unwrap();
     app.press("Check Game Data for Replays").unwrap();
     app.wait_for("Download Game Data").unwrap();
     app.wait_for("text:/needed by 1 replay\\(s\\)/").unwrap();
