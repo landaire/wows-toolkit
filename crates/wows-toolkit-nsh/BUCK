@@ -44,6 +44,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:jiff",
     "//third-party/rust:nsh-base",
     "//third-party/rust:nsh-core",
+    "//third-party/rust:notify",
     "//third-party/rust:png",
     "//third-party/rust:serde_json",
     "//third-party/rust:serde",

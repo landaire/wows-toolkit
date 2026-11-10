@@ -223,6 +223,32 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
     wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
 }
 
+/// Without a WoWs directory the bound cache still reads the builds dumped into
+/// the configured cache directory, which is what renders a replay with no
+/// install. The installed build still needs one.
+#[test]
+fn without_a_game_directory_the_configured_cache_reads_dumped_builds() {
+    let _guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    configure_test_storage();
+    let cache_dir = TestDirectory::new("cache-only");
+    let dump = cache_dir.0.join("14.1.0_12345");
+    std::fs::create_dir_all(&dump).expect("the dump directory is created");
+    std::fs::write(dump.join("metadata.toml"), "").expect("the dump metadata is written");
+    save_setting(keys::WOWS_DIR, &String::new());
+    save_setting(keys::GAME_DATA_CACHE_DIR, &cache_dir.0.display().to_string());
+    wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
+
+    let cache = wows_toolkit_nsh::game_data::cache().expect("a cache is bound without an install");
+    assert_eq!(cache.dump_dir_for(12345, None), Some(dump));
+    assert!(matches!(
+        wows_toolkit_nsh::game_data::wait_current_build(),
+        Err(wows_toolkit_nsh::game_data::GameDataError::NotConfigured)
+    ));
+
+    save_setting(keys::GAME_DATA_CACHE_DIR, &String::new());
+    wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
+}
+
 #[test]
 fn an_install_without_builds_fails_the_load_and_indexes_nothing() {
     let install = install_without_builds("index");

@@ -19049,6 +19049,7 @@ dependencies = [
  "image",
  "jiff",
  "log",
+ "notify",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",

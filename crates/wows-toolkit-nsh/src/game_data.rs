@@ -1,8 +1,8 @@
 //! The process-wide game-data service: the loaded game data bound to the WoWs
 //! directory and locale in the shared settings database, the startup preload of
-//! the installed build, replay parsing, the replay index pass, the game-data
-//! cache maintenance, missing-build detection and the replay directory
-//! registry.
+//! the installed build, replay parsing, the replay index pass and the watch
+//! that queues one when a battle lands, the game-data cache maintenance,
+//! missing-build detection and the replay directory registry.
 //!
 //! The work itself is `wows_toolkit_replay_data`, shared with the GPUI app.
 //! What is here is the state one process keeps of it, and the `GameData`
@@ -24,6 +24,9 @@ use std::time::SystemTime;
 
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
+use notify::EventKind;
+use notify::Watcher as _;
+use notify::event::ModifyKind;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::download_repo::RemoteAvailability;
 use wows_toolkit_replay_data::cache;
@@ -42,6 +45,7 @@ use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_config::index::query as index_query;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
@@ -72,6 +76,8 @@ pub enum GameDataState {
 pub enum GameDataError {
     #[error("the World of Warships directory is not set")]
     NotConfigured,
+    #[error("the settings database could not be read, so no game data is bound")]
+    Unbound,
     #[error(transparent)]
     Load(#[from] ReplayLoadError),
     #[error(transparent)]
@@ -106,6 +112,15 @@ struct Binding {
     /// started does not overwrite its status.
     generation: u64,
 }
+
+/// The watch on the game's replay directory, and the binding it was made for.
+struct ReplayWatch {
+    generation: u64,
+    /// `None` when the binding names no directory or it could not be watched.
+    _watcher: Option<notify::RecommendedWatcher>,
+}
+
+static REPLAY_WATCH: Mutex<Option<ReplayWatch>> = Mutex::new(None);
 
 #[derive(Default)]
 struct IndexState {
@@ -199,16 +214,15 @@ fn update<R>(change: impl FnOnce(&mut State) -> R) -> R {
     result
 }
 
-/// The loaded game data's cache, bound to the settings. `None` when the
-/// settings name no WoWs directory. The first call of the process reads the
-/// settings database and starts the preload; it never waits for the load.
+/// The game data cache bound to the settings: the install's when a WoWs
+/// directory is set, otherwise one that reads only the builds already in the
+/// configured cache directory. `None` when the settings could not be read.
+/// The first call of the process reads the settings database and starts the
+/// preload; it never waits for the load.
 pub fn cache() -> Option<GameDataCache> {
     ensure_started();
-    let state = state();
-    let binding = state.binding.as_ref()?;
-    binding.settings.wows_dir.as_ref()?;
 
-    Some(binding.cache.clone())
+    state().binding.as_ref().map(|binding| binding.cache.clone())
 }
 
 /// The newest build already loaded, without loading anything.
@@ -241,15 +255,15 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
 /// The installed build's game data, waiting for the load when it is still
 /// running. Blocking: run it off the UI thread.
 pub fn wait_current_build() -> Result<Arc<LoadedGameData>, GameDataError> {
-    let cache = cache().ok_or(GameDataError::NotConfigured)?;
     let wows_dir = wows_dir().ok_or(GameDataError::NotConfigured)?;
+    let cache = cache().ok_or(GameDataError::Unbound)?;
 
     Ok(wows_toolkit_replay_data::load::preload_current_build(&wows_dir, &cache)?)
 }
 
 /// Parses one replay against the build it was recorded on. Blocking.
 pub fn parse_replay(path: &Path) -> Result<ParsedReplay, GameDataError> {
-    let cache = cache().ok_or(GameDataError::NotConfigured)?;
+    let cache = cache().ok_or(GameDataError::Unbound)?;
     let rating = personal_rating();
 
     Ok(wows_toolkit_replay_data::load::parse_replay(path, &cache, rating.as_deref())?)
@@ -333,10 +347,11 @@ fn rebind() -> Result<(), String> {
         }
     });
 
-    if let Some((cache, generation)) = restart
-        && let Some(wows_dir) = settings.wows_dir.clone()
-    {
-        spawn("game-data-preload", move || preload(wows_dir, cache, generation));
+    if let Some((cache, generation)) = restart {
+        watch_replays(settings.wows_dir.as_deref(), generation);
+        if let Some(wows_dir) = settings.wows_dir.clone() {
+            spawn("game-data-preload", move || preload(wows_dir, cache, generation));
+        }
     }
     if first_start {
         spawn("game-data-startup", startup_work);
@@ -414,6 +429,49 @@ fn startup_work() {
     update(|state| state.personal_rating = rating.map(Arc::new));
 }
 
+/// Watches the game's replay directory for binding `generation`, replacing
+/// the watch an older binding made. A battle that lands there queues a pass,
+/// which is what contributes it.
+fn watch_replays(wows_dir: Option<&Path>, generation: u64) {
+    let watcher = wows_dir.and_then(|dir| {
+        let replays = wows_toolkit_replay_data::load::resolve_replays_dir(dir);
+        let root = replays.clone();
+        let watched = watch_landings(&replays, move || queue_index(root.clone(), IndexMode::FillGaps));
+        watched.map_err(|error| log::warn!("replay watch: {} is not watched: {error}", replays.display())).ok()
+    });
+
+    // Dropped outside the lock: an old watcher may be mid-delivery.
+    let replaced = {
+        let mut current = REPLAY_WATCH.lock().unwrap_or_else(PoisonError::into_inner);
+        if current.as_ref().is_some_and(|watch| watch.generation > generation) {
+            return;
+        }
+        current.replace(ReplayWatch { generation, _watcher: watcher })
+    };
+    drop(replaced);
+}
+
+/// Calls `landed` whenever a finished replay appears in `dir`.
+fn watch_landings(dir: &Path, landed: impl Fn() + Send + 'static) -> notify::Result<notify::RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if event.is_ok_and(|event| lands_replay(&event)) {
+            landed();
+        }
+    })?;
+    watcher.watch(dir, notify::RecursiveMode::NonRecursive)?;
+
+    Ok(watcher)
+}
+
+/// Whether `event` puts a finished replay in place: the game renames its live
+/// recording to the battle's name when the battle ends, and a copy creates it.
+fn lands_replay(event: &notify::Event) -> bool {
+    let placed = matches!(event.kind, EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)));
+
+    // A rename names its source too, which no longer exists.
+    placed && event.paths.iter().any(|path| replay_index::is_finished_replay(path) && path.exists())
+}
+
 /// Queues a pass over `root`, starting it now when nothing else runs.
 fn queue_index(root: PathBuf, mode: IndexMode) {
     let start = update(|state| {
@@ -443,15 +501,14 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
     });
     let built = match cache {
         Some(cache) => with_database(|runtime, pool| {
-            let before = if live { indexed_paths(runtime, pool, &root) } else { HashSet::new() };
+            let before = live.then(|| indexed_paths(runtime, pool, &root));
             let progress = replay_index::build_index(runtime, pool, &root, &cache, &cancel, mode, |step| {
                 update(|state| state.index.progress = Some(step));
             })
             .map_err(|error| error.to_string())?;
-            let landed = if live {
-                newly_landed(&before, &indexed_paths(runtime, pool, &root), *SESSION_START)
-            } else {
-                Vec::new()
+            let landed = match before {
+                Some(before) => landed_in_pass(before, || indexed_paths(runtime, pool, &root), *SESSION_START),
+                None => Vec::new(),
             };
             let sharing = sharing_mode(runtime, pool);
             Ok((progress, landed, sharing))
@@ -501,18 +558,16 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
 /// the toolkit ran, which is what GPUI's directory watch reports.
 static SESSION_START: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
 
-/// The replay paths the index holds. Empty when it cannot be read, which makes
-/// every replay the pass writes count as new; the ledger still stops a repeat.
-fn indexed_paths(runtime: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool, root: &Path) -> HashSet<String> {
-    runtime
-        .block_on(async {
-            let source = index_query::ensure_default_source(pool, root, jiff::Timestamp::now()).await?;
-            index_query::record_paths_in_source(pool, source).await
-        })
-        .unwrap_or_else(|error| {
-            log::warn!("replay index: the indexed paths could not be read: {error}");
-            HashSet::new()
-        })
+/// The replay paths the index holds under `root`.
+fn indexed_paths(
+    runtime: &tokio::runtime::Runtime,
+    pool: &sqlx::SqlitePool,
+    root: &Path,
+) -> Result<HashSet<String>, IndexError> {
+    runtime.block_on(async {
+        let source = index_query::ensure_default_source(pool, root, jiff::Timestamp::now()).await?;
+        index_query::record_paths_in_source(pool, source).await
+    })
 }
 
 /// The data-sharing setting, `None` when it cannot be read.
@@ -523,7 +578,25 @@ fn sharing_mode(runtime: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool) -> O
     read.map_err(|error| log::warn!("sharing: the data-sharing setting could not be read: {error}")).ok()
 }
 
-/// The replays the pass newly indexed that were written since `since`.
+/// The replays a pass newly indexed that were written since `since`. Nothing
+/// when either snapshot of the index could not be read: a missing snapshot
+/// would count replays the pass did not discover as new.
+fn landed_in_pass(
+    before: Result<HashSet<String>, IndexError>,
+    after: impl FnOnce() -> Result<HashSet<String>, IndexError>,
+    since: SystemTime,
+) -> Vec<PathBuf> {
+    let snapshots = before.and_then(|before| after().map(|after| (before, after)));
+    match snapshots {
+        Ok((before, after)) => newly_landed(&before, &after, since),
+        Err(error) => {
+            log::warn!("replay index: the indexed paths could not be read, so this pass contributes nothing: {error}");
+            Vec::new()
+        }
+    }
+}
+
+/// The replays in `after` and not in `before` that were written since `since`.
 fn newly_landed(before: &HashSet<String>, after: &HashSet<String>, since: SystemTime) -> Vec<PathBuf> {
     after
         .difference(before)
@@ -789,7 +862,7 @@ fn measure_cache_if_wanted() {
 /// grouped by the builds nothing on this machine can read. Blocking: reads
 /// every replay's header.
 fn find_missing_builds() -> Result<Vec<MissingBuild>, GameDataError> {
-    let cache = cache().ok_or(GameDataError::NotConfigured)?;
+    let cache = cache().ok_or(GameDataError::Unbound)?;
     let mut roots: Vec<PathBuf> = replays_dir().into_iter().collect();
     roots.extend(state().directories.directories().iter().map(|directory| directory.root.clone()));
 
@@ -1097,7 +1170,11 @@ impl GameData {
         let mut changes = SERVICE.changed.subscribe();
         loop {
             measure_cache_if_wanted();
-            on_change.post(snapshot());
+            // Awaited rather than posted: a callback whose engine is gone
+            // fails here, which ends the feed.
+            if on_change.call_async(snapshot()).await.is_err() {
+                return Ok(());
+            }
             if changes.changed().await.is_err() {
                 return Ok(());
             }
@@ -1374,7 +1451,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory can be made");
         let (before, after, fresh) = pass(dir.path());
         let mut sent = Vec::new();
-        contribute_landed(newly_landed(&before, &after, since), sharing, |path| sent.push(path));
+        contribute_landed(landed_in_pass(Ok(before), || Ok(after), since), sharing, |path| sent.push(path));
         (sent, fresh, dir)
     }
 
@@ -1399,5 +1476,72 @@ mod tests {
     fn a_replay_written_before_the_session_is_not_contributed() {
         let later = SystemTime::now() + std::time::Duration::from_secs(60);
         assert!(sent(DataSharingMode::Replays, later).0.is_empty());
+    }
+
+    fn unreadable() -> IndexError {
+        IndexError::Sqlx(sqlx::Error::PoolClosed)
+    }
+
+    #[test]
+    fn an_unread_snapshot_before_the_pass_contributes_nothing() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let (_, after, _) = pass(dir.path());
+
+        assert!(landed_in_pass(Err(unreadable()), || Ok(after), a_minute_ago()).is_empty());
+    }
+
+    #[test]
+    fn an_unread_snapshot_after_the_pass_contributes_nothing() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let (before, _, _) = pass(dir.path());
+
+        assert!(landed_in_pass(Ok(before), || Err(unreadable()), a_minute_ago()).is_empty());
+    }
+
+    fn event(kind: EventKind, paths: &[&Path]) -> notify::Event {
+        paths.iter().fold(notify::Event::new(kind), |event, path| event.add_path(path.to_path_buf()))
+    }
+
+    #[test]
+    fn a_finished_replay_put_in_place_lands() {
+        use notify::event::CreateKind;
+        use notify::event::DataChange;
+        use notify::event::RenameMode;
+
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let battle = dir.path().join("20260101_000000_PASB001-Battle_01_solomon_islands.wowsreplay");
+        let live = dir.path().join("temp.wowsreplay");
+        let info = dir.path().join("tempArenaInfo.json");
+        for path in [&battle, &live, &info] {
+            std::fs::write(path, b"replay").expect("the file can be written");
+        }
+        let gone = dir.path().join("gone.wowsreplay");
+
+        assert!(lands_replay(&event(EventKind::Create(CreateKind::File), &[&battle])));
+        assert!(lands_replay(&event(EventKind::Modify(ModifyKind::Name(RenameMode::To)), &[&battle])));
+        assert!(lands_replay(&event(EventKind::Modify(ModifyKind::Name(RenameMode::Both)), &[&live, &battle])));
+
+        assert!(!lands_replay(&event(EventKind::Create(CreateKind::File), &[&live])), "the live recording");
+        assert!(!lands_replay(&event(EventKind::Create(CreateKind::File), &[&info])), "not a replay");
+        assert!(!lands_replay(&event(EventKind::Modify(ModifyKind::Name(RenameMode::From)), &[&gone])), "moved away");
+        assert!(!lands_replay(&event(EventKind::Modify(ModifyKind::Data(DataChange::Content)), &[&battle])));
+    }
+
+    #[test]
+    fn the_watch_reports_a_battle_renamed_into_place() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let (landed, heard) = std::sync::mpsc::channel();
+        let _watcher = watch_landings(dir.path(), move || {
+            let _ = landed.send(());
+        })
+        .expect("the directory is watched");
+
+        let live = dir.path().join("temp.wowsreplay");
+        std::fs::write(&live, b"replay").expect("the live recording is written");
+        assert!(heard.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the live recording has not landed");
+
+        std::fs::rename(&live, dir.path().join("20260101_000000_PASB001-Battle_01_solomon_islands.wowsreplay"))
+            .expect("the battle is renamed into place");
+        heard.recv_timeout(std::time::Duration::from_secs(5)).expect("the landed battle is reported");
     }
 }

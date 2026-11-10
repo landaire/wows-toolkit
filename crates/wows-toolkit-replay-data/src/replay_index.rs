@@ -56,13 +56,7 @@ pub fn replays_under(root: &Path) -> Vec<PathBuf> {
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some(REPLAY_EXTENSION) {
-                return None;
-            }
-            // The live recording, which grows for as long as the battle runs: it
-            // has no results yet and is rewritten as the next battle's. Counting
-            // it as a failure is how the port used to report an open battle.
-            if path.file_name().is_some_and(|name| name == LIVE_REPLAY) {
+            if !is_finished_replay(&path) {
                 return None;
             }
             // A file whose time cannot be read still indexes; it simply sorts
@@ -76,8 +70,15 @@ pub fn replays_under(root: &Path) -> Vec<PathBuf> {
     found.into_iter().map(|(_, path)| path).collect()
 }
 
-/// The file the game writes the battle in progress into.
-const LIVE_REPLAY: &str = "temp.wowsreplay";
+/// Whether `path` names a replay a pass reads: a `.wowsreplay` other than the
+/// live recording, which grows for as long as the battle runs, has no results
+/// yet and is rewritten as the next battle's.
+pub fn is_finished_replay(path: &Path) -> bool {
+    const LIVE_REPLAY: &str = "temp.wowsreplay";
+
+    path.extension().and_then(|ext| ext.to_str()) == Some(REPLAY_EXTENSION)
+        && path.file_name().is_none_or(|name| name != LIVE_REPLAY)
+}
 
 /// How much of the directory a pass re-reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
