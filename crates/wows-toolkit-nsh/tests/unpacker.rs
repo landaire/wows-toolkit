@@ -199,6 +199,14 @@ fn configure_settings(wows_dir: Option<&Path>, output_dir: Option<&Path>) -> Mut
         let output_dir = output_dir.map(|dir| dir.display().to_string()).unwrap_or_default();
         wows_toolkit_config::queries::set_setting(&pool, "wows_dir", &wows_dir).await.expect("wows_dir is saved");
         wows_toolkit_config::queries::set_setting(&pool, "output_dir", &output_dir).await.expect("output_dir is saved");
+        // The first-run questions and the startup update check are the
+        // shell's tests' to exercise; here they would stand over the tab.
+        for key in ["build_consent_window_shown", "replay_consent_prompt_shown", "language_selection_shown"] {
+            wows_toolkit_config::queries::set_setting_raw(&pool, key, "true").await.expect("a question is answered");
+        }
+        wows_toolkit_config::queries::set_setting_raw(&pool, "check_for_updates", "false")
+            .await
+            .expect("the startup update check is off");
     });
 
     turn

@@ -301,6 +301,7 @@ fn statistics_aggregate_the_shared_session_database() {
 
 /// Runs `work` against the test database.
 fn with_test_database<T>(work: impl AsyncFnOnce(&sqlx::SqlitePool) -> T) -> T {
+    configure_test_storage();
     tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
         async {
             let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
@@ -341,6 +342,7 @@ fn seed_player_tracker() {
     use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
     use wows_toolkit_viewmodel::player_tracker::tracked::ViewModes;
 
+    configure_test_storage();
     const PLAYERS: &[SeededPlayer] = &[
         SeededPlayer {
             account: 99_001,
@@ -737,9 +739,9 @@ fn top_level_navigation_and_application_menu_work() {
 
     app.press("label:Open application menu").unwrap();
     app.press("Tactics Board").unwrap();
-    app.wait_for("Select a map to start a tactics board.").unwrap();
+    app.wait_for("label:Ranges").unwrap();
     app.press("Close").unwrap();
-    app.wait_for_gone("Select a map to start a tactics board.", std::time::Duration::from_secs(5)).unwrap();
+    app.wait_for_gone("label:Ranges", std::time::Duration::from_secs(5)).unwrap();
 }
 
 #[test]
