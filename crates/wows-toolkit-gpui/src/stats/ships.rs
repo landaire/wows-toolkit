@@ -344,12 +344,13 @@ impl Render for StatsShipsPanel {
         let border = cx.theme().border;
         let entity = cx.entity();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
+        let normalized_query = wows_toolkit_viewmodel::search::normalize_ship_search(&ship_query);
         let visible_sections: Vec<_> = self
             .sections
             .iter()
             .filter(|section| {
-                normalized_query.is_empty() || super::normalize_ship_search(&section.ship).contains(&normalized_query)
+                normalized_query.is_empty()
+                    || wows_toolkit_viewmodel::search::normalize_ship_search(&section.ship).contains(&normalized_query)
             })
             .collect();
         let visible_count = visible_sections.len();

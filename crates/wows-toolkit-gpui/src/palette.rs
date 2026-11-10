@@ -141,7 +141,7 @@ pub struct PaletteEntry {
 pub struct ArmorShipRow {
     param_index: String,
     display_name: String,
-    /// The name as `stats::normalize_ship_search` folds it.
+    /// The name as `wows_toolkit_viewmodel::search::normalize_ship_search` folds it.
     search_name: String,
     /// The name with tier, class and nation, which is what the row shows.
     label: String,
@@ -149,7 +149,7 @@ pub struct ArmorShipRow {
 
 impl ArmorShipRow {
     pub fn new(param_index: String, display_name: String, tier: u32, species: Species, nation: &str) -> Self {
-        let search_name = crate::stats::normalize_ship_search(&display_name);
+        let search_name = wows_toolkit_viewmodel::search::normalize_ship_search(&display_name);
         let label = t!(
             "ui.palette.armor_ship_row",
             name = display_name,
@@ -216,7 +216,7 @@ fn ship_match(name: &str, needle: &str) -> Option<ShipMatch> {
 /// The ship layer's rows for `query`: every ship when it is empty, else the
 /// matches, best first.
 pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntry> {
-    let needle = crate::stats::normalize_ship_search(query);
+    let needle = wows_toolkit_viewmodel::search::normalize_ship_search(query);
     let mut matched: Vec<(ShipMatch, &ArmorShipRow)> = if needle.is_empty() {
         rows.iter().map(|row| (ShipMatch::Exact, row)).collect()
     } else {

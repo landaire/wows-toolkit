@@ -51,6 +51,8 @@ wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }
 sqlx = { workspace = true }
 wows-toolkit-config = { workspace = true }
+# Folding ship names for the palette's and the stats tab's ship searches.
+unidecode = "0.3"
 
 # The Windows proxy configuration, which `proxy::resolve_proxy` reads when
 # neither a manual setting nor the environment names one.

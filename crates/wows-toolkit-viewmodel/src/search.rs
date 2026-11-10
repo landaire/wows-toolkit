@@ -1,4 +1,4 @@
-//! Naming a search result's ship.
+//! Naming a search result's ship, and folding ship names for a search.
 //!
 //! Which name a result row carries is the same decision in both front ends;
 //! where the loaded game data comes from is not.
@@ -12,6 +12,12 @@ use wows_toolkit_config::index::rows::MatchHit;
 use wowsunpack::data::ResourceLoader as _;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
+
+/// A ship name or query folded for matching: diacritics and case dropped, so
+/// `smal` finds `Sm\u{e5}land`.
+pub fn normalize_ship_search(text: &str) -> String {
+    unidecode::unidecode(text.trim()).to_lowercase()
+}
 
 /// The name stored with the match, if it is one.
 ///
