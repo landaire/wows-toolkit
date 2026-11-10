@@ -1965,6 +1965,9 @@ impl App {
                 content.child(
                     Command::new(&palette)
                         .bordered(false)
+                        // The command paints its own square background, which
+                        // would show past the dialog's rounded corners.
+                        .rounded(cx.theme().radius_lg)
                         .placeholder(t!("ui.palette.placeholder").to_string())
                         .max_h(px(400.))
                         .items(crate::palette::items(&entries))

@@ -428,6 +428,9 @@ impl Render for ModeDialog {
 
         let command = Command::new(&self.command)
             .bordered(false)
+            // Matches the dialog's corners, which the command's own square
+            // background would otherwise show past.
+            .rounded(cx.theme().radius_lg)
             .filterable(false)
             .placeholder(t!(self.mode.placeholder_key()).to_string())
             .max_h(px(400.))
