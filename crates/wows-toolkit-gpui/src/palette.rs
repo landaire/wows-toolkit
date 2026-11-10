@@ -47,6 +47,10 @@ use crate::armor_viewer::catalog::tier_roman;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::runtime;
 use crate::settings_store;
+use wows_toolkit_viewmodel::palette;
+use wows_toolkit_viewmodel::palette::PaletteMode;
+use wows_toolkit_viewmodel::palette::ShipRow;
+use wows_toolkit_viewmodel::palette::rank_ships;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 /// What confirming an entry asks the window to do.
@@ -85,50 +89,6 @@ pub enum PaletteAction {
     ImportConstants,
 }
 
-/// Which cascading list the palette is showing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteMode {
-    /// Players the index has seen, most met first.
-    Players,
-    /// Ships the reader has played, most played first.
-    MyShips,
-    /// Every ship in the loaded build, to open in the Armor Viewer.
-    ArmorShips,
-}
-
-impl PaletteMode {
-    pub const ALL: [PaletteMode; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
-
-    /// What the root entry that enters this mode is called.
-    pub const fn label_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.search_players",
-            Self::MyShips => "ui.palette.my_matches_in_ship",
-            Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
-        }
-    }
-
-    /// What the layer is called in its header, after the root's name.
-    pub const fn title_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_title",
-            Self::MyShips => "ui.palette.my_ships_title",
-            Self::ArmorShips => "ui.palette.armor_ships_title",
-        }
-    }
-
-    pub const fn placeholder_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_placeholder",
-            Self::MyShips => "ui.palette.my_ships_placeholder",
-            Self::ArmorShips => "ui.palette.armor_ships_placeholder",
-        }
-    }
-}
-
-/// Maximum rows returned by one cascading index query.
-pub const MODE_LIMIT: i64 = 50;
-
 /// One entry: what it is called and what it does.
 #[derive(Clone)]
 pub struct PaletteEntry {
@@ -136,39 +96,18 @@ pub struct PaletteEntry {
     pub action: PaletteAction,
 }
 
-/// One ship the ship layer lists.
-#[derive(Clone, Debug)]
-pub struct ArmorShipRow {
-    param_index: String,
-    display_name: String,
-    /// The name as `wows_toolkit_viewmodel::search::normalize_ship_search` folds it.
-    search_name: String,
-    /// The name with tier, class and nation, which is what the row shows.
-    label: String,
-}
-
-impl ArmorShipRow {
-    pub fn new(param_index: String, display_name: String, tier: u32, species: Species, nation: &str) -> Self {
-        let search_name = wows_toolkit_viewmodel::search::normalize_ship_search(&display_name);
-        let label = t!(
-            "ui.palette.armor_ship_row",
-            name = display_name,
-            tier = tier_roman(tier),
-            class = species_name(&species),
-            nation = nation
-        )
-        .into_owned();
-        Self { param_index, display_name, search_name, label }
-    }
+/// One ship of the ship layer, read with its tier, class and nation.
+pub fn armor_ship_row(param_index: String, display_name: String, tier: u32, species: Species, nation: &str) -> ShipRow {
+    ShipRow::new(param_index, display_name, tier_roman(tier), species_name(&species), nation)
 }
 
 /// Every ship in `catalog`, in its nation, class and tier order.
-pub fn armor_ship_rows(catalog: &ShipCatalog) -> Vec<ArmorShipRow> {
+pub fn armor_ship_rows(catalog: &ShipCatalog) -> Vec<ShipRow> {
     let mut rows = Vec::new();
     for nation in &catalog.nations {
         for class in &nation.classes {
             for ship in &class.ships {
-                rows.push(ArmorShipRow::new(
+                rows.push(armor_ship_row(
                     ship.param_index.clone(),
                     ship.display_name.clone(),
                     ship.tier,
@@ -181,52 +120,12 @@ pub fn armor_ship_rows(catalog: &ShipCatalog) -> Vec<ArmorShipRow> {
     rows
 }
 
-/// How closely a folded ship name matches the folded query. Ordered best
-/// first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ShipMatch {
-    Exact,
-    Prefix,
-    /// The query starts a later word of the name ("moines" in "des moines").
-    WordPrefix,
-    Contains,
-    /// The query's letters appear in order ("dsmns" in "des moines").
-    Subsequence,
-}
-
-fn ship_match(name: &str, needle: &str) -> Option<ShipMatch> {
-    if name == needle {
-        return Some(ShipMatch::Exact);
-    }
-    if name.starts_with(needle) {
-        return Some(ShipMatch::Prefix);
-    }
-    let mut found = name.match_indices(needle).peekable();
-    if found.peek().is_some() {
-        let word_start =
-            found.any(|(at, _)| name[..at].chars().next_back().is_some_and(|before| !before.is_alphanumeric()));
-        return Some(if word_start { ShipMatch::WordPrefix } else { ShipMatch::Contains });
-    }
-    let mut rest = name.chars();
-    let subsequence =
-        needle.chars().filter(|c| !c.is_whitespace()).all(|wanted| rest.by_ref().any(|have| have == wanted));
-    subsequence.then_some(ShipMatch::Subsequence)
-}
-
 /// The ship layer's rows for `query`: every ship when it is empty, else the
 /// matches, best first.
-pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntry> {
-    let needle = wows_toolkit_viewmodel::search::normalize_ship_search(query);
-    let mut matched: Vec<(ShipMatch, &ArmorShipRow)> = if needle.is_empty() {
-        rows.iter().map(|row| (ShipMatch::Exact, row)).collect()
-    } else {
-        rows.iter().filter_map(|row| ship_match(&row.search_name, &needle).map(|rank| (rank, row))).collect()
-    };
-    // Stable, so equal matches keep the catalogue's order.
-    matched.sort_by_key(|(rank, _)| *rank);
-    matched
+pub fn armor_ship_entries(rows: &[ShipRow], query: &str) -> Vec<PaletteEntry> {
+    rank_ships(rows, query)
         .into_iter()
-        .map(|(_, row)| PaletteEntry {
+        .map(|row| PaletteEntry {
             label: row.label.clone(),
             action: PaletteAction::ViewArmor {
                 param_index: row.param_index.clone(),
@@ -240,7 +139,7 @@ pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntr
 pub enum ShipList {
     /// Still loading; the layer fills in once it lands.
     Pending,
-    Ready(Rc<[ArmorShipRow]>),
+    Ready(Rc<[ShipRow]>),
     /// Why there is no catalogue to list.
     Unavailable(String),
 }
@@ -258,7 +157,7 @@ pub enum ModeSource {
 #[cfg(test)]
 #[derive(Default)]
 pub struct TestArmorShips {
-    pub rows: Vec<ArmorShipRow>,
+    pub rows: Vec<ShipRow>,
     pub opened: Vec<String>,
 }
 
@@ -611,58 +510,19 @@ pub async fn mode_entries(
     pool: &sqlx::sqlite::SqlitePool,
     needle: &str,
 ) -> Result<Vec<PaletteEntry>, String> {
-    use wows_toolkit_config::index::query;
-    use wows_toolkit_viewmodel::query_bar::seed;
+    let rows = palette::index_rows(mode, pool, needle).await.map_err(|error| error.to_string())?;
 
-    match mode {
-        PaletteMode::Players => query::search_players(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|player| {
-                        let named = match player.clan.as_str() {
-                            "" => player.latest_name.clone(),
-                            clan => format!("[{clan}] {}", player.latest_name),
-                        };
-                        PaletteEntry {
-                            label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
-                            action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                                &seed::matches_with_player(player.account_id),
-                            )),
-                        }
-                    })
-                    .collect()
-            })
-            .map_err(|err| format!("The indexed players could not be read: {err}")),
-        PaletteMode::MyShips => query::search_self_ships(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|ship| PaletteEntry {
-                        label: format!(
-                            "{} -- {}",
-                            ship.ship_name,
-                            t!("ui.palette.matches_found", count = ship.match_count)
-                        ),
-                        action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                            &seed::my_matches_in_ship(ship.ship_id),
-                        )),
-                    })
-                    .collect()
-            })
-            .map_err(|err| format!("The indexed ships could not be read: {err}")),
-        // Read from the loaded build rather than the index: armor is a property of
-        // the ship, not of anything the reader has played.
-        PaletteMode::ArmorShips => Ok(Vec::new()),
-    }
+    Ok(rows
+        .into_iter()
+        .map(|row| PaletteEntry { label: row.label, action: PaletteAction::SearchFor(row.query) })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
+    use wows_toolkit_viewmodel::palette::PaletteMode;
+
     use super::PaletteAction;
-    use super::PaletteMode;
     use super::entries;
     use super::mode_entries;
     use crate::app::AppTab;
@@ -779,18 +639,18 @@ mod tests {
         }
     }
 
-    /// The ship search folds diacritics, lists the name's own prefix ahead of a
-    /// later word's, and still finds a name typed with letters left out.
+    /// The ship layer opens the ship a row names, in the order the shared
+    /// ranking lists them.
     #[test]
-    fn ship_search_folds_and_ranks_names() {
-        use super::ArmorShipRow;
+    fn a_ship_row_opens_its_ship() {
         use super::armor_ship_entries;
+        use super::armor_ship_row;
         use wowsunpack::game_params::types::Species;
 
-        let rows: Vec<ArmorShipRow> = ["Musashi", "Yamato", "Sm\u{e5}land", "Des Moines", "Moskva"]
-            .into_iter()
-            .map(|name| ArmorShipRow::new(name.to_lowercase(), name.to_owned(), 10, Species::Cruiser, "Nation"))
-            .collect();
+        let rows = vec![
+            armor_ship_row("musashi".into(), "Musashi".into(), 10, Species::Battleship, "Japan"),
+            armor_ship_row("moskva".into(), "Moskva".into(), 10, Species::Cruiser, "U.S.S.R."),
+        ];
         let found = |query: &str| -> Vec<String> {
             armor_ship_entries(&rows, query)
                 .into_iter()
@@ -801,10 +661,7 @@ mod tests {
                 .collect()
         };
 
-        assert_eq!(found("").len(), rows.len(), "an empty search lists every ship");
-        assert_eq!(found("smal"), ["Sm\u{e5}land"]);
-        assert_eq!(found(" MO "), ["Moskva", "Des Moines", "Yamato"]);
-        assert_eq!(found("dsmns"), ["Des Moines"]);
-        assert!(found("zzz").is_empty());
+        assert_eq!(found(""), ["Musashi", "Moskva"], "an empty search lists every ship");
+        assert_eq!(found("mos"), ["Moskva"]);
     }
 }

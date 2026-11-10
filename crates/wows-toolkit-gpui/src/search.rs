@@ -33,29 +33,39 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use crate::search_pills::StructuralEdit;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
-use wows_toolkit_config::index::query_ast::Expr;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_viewmodel::query_bar::pills;
+use wows_toolkit_viewmodel::query_bar::pills::Completion;
+use wows_toolkit_viewmodel::query_bar::pills::StructuralEdit;
+use wows_toolkit_viewmodel::query_bar::pills::UNDO_DEPTH;
 use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::select::Selection;
 use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::suggest::ValueOption;
 use wows_toolkit_viewmodel::query_bar::suggest::ValueRequest;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
+use wows_toolkit_viewmodel::search_results;
+use wows_toolkit_viewmodel::search_results::RESULT_LIMIT;
+use wows_toolkit_viewmodel::search_results::cell_text;
+use wows_toolkit_viewmodel::search_settings;
+use wows_toolkit_viewmodel::search_settings::COLUMN_WIDTHS_KEY;
+use wows_toolkit_viewmodel::search_settings::HISTORY_DEPTH;
+use wows_toolkit_viewmodel::search_settings::SEARCH_SETTINGS_KEY;
+use wows_toolkit_viewmodel::search_settings::SavedSearch;
+use wows_toolkit_viewmodel::search_settings::SearchField;
 
 use std::collections::HashMap;
 
 use wows_replays::types::GameParamId;
-use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::search as search_hint;
 use wows_toolkit_viewmodel::search as ship_display;
 use wows_toolkit_viewmodel::search::ship_display_name;
@@ -103,16 +113,6 @@ impl ResultColumn {
     }
 }
 
-/// The path of `path`'s parent. The root's parent is the root.
-fn parent_of(path: &[usize]) -> NodePath {
-    path.iter().copied().take(path.len().saturating_sub(1)).collect()
-}
-
-/// How many structural edits can be stepped back through. Deep enough to
-/// cover a session's worth of reshaping, bounded so a long one does not grow
-/// without limit.
-const UNDO_DEPTH: usize = 64;
-
 /// A column as the current frame lays it out.
 #[derive(Clone, Copy)]
 struct DrawnColumn {
@@ -134,12 +134,6 @@ const COLUMN_DRAG_MIN: Pixels = px(28.);
 
 /// The width of the strip on a header's trailing edge that starts a drag.
 const RESIZE_GRIP: Pixels = px(6.);
-
-/// The settings row the dragged column widths are kept in.
-///
-/// The port's own row: the egui results table has fixed widths and nothing to
-/// share.
-const COLUMN_WIDTHS_KEY: &str = "search_column_widths";
 
 /// Raised for the app to act on.
 #[derive(Clone, Debug)]
@@ -167,13 +161,6 @@ enum Offer {
     Nothing,
 }
 
-/// The settings row both front ends keep the query bar's state in.
-const SEARCH_SETTINGS_KEY: &str = "search";
-
-/// Results asked for per run. The egui table pages the same way rather than
-/// pulling an unbounded set into memory.
-const RESULT_LIMIT: i64 = 500;
-
 /// The preview's edge length. Square, as the minimap is, and the same figure the
 /// listing's own popup draws at so a hovered battle looks the same on either.
 const PREVIEW_WIDTH: f32 = 384.;
@@ -189,10 +176,6 @@ const LIST_OVERDRAW: Pixels = px(200.);
 /// its actions used, so only it shows them.
 const ACTIONS_COLUMN_WIDTH: Pixels = px(52.);
 
-/// Queries the bar remembers. Older ones fall off the end rather than the
-/// row growing without bound.
-const HISTORY_DEPTH: usize = 50;
-
 /// How long a typed edit waits before the results follow it.
 const RERUN_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -200,8 +183,6 @@ const RERUN_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 /// `YYYY-MM-DD` as local midnight on that day.
 const CALENDAR_DATE_FORMAT: &str = "%Y-%m-%d";
 
-/// Rows a value lookup offers, matching the egui bar's own limit.
-const VALUE_LIMIT: i64 = 50;
 /// How tall the completions dropdown grows before it scrolls, matching the
 /// egui bar's own cap, and the width it is kept between so it neither reads
 /// as a strip nor spans the window.
@@ -210,133 +191,6 @@ const COMPLETIONS_MIN_WIDTH: f32 = 260.0;
 const COMPLETIONS_MAX_WIDTH: f32 = 460.0;
 /// How long the caret sits still before its value lookup is sent.
 const VALUE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
-
-fn sort_from_value(value: &serde_json::Value) -> Option<SortSpec> {
-    let pair = value.as_array()?;
-    if pair.len() != 2 {
-        return None;
-    }
-    let column = match pair.first()?.as_str()? {
-        "Date" => SortColumn::Date,
-        "Map" => SortColumn::Map,
-        "Mode" => SortColumn::Mode,
-        "Outcome" => SortColumn::Outcome,
-        "Damage" => SortColumn::Damage,
-        "Kills" => SortColumn::Kills,
-        "Pr" => SortColumn::Pr,
-        _ => return None,
-    };
-    let direction = match pair.get(1)?.as_str()? {
-        "Ascending" => SortDirection::Ascending,
-        "Descending" => SortDirection::Descending,
-        _ => return None,
-    };
-    Some(SortSpec { column, direction })
-}
-
-fn sort_value(sort: SortSpec) -> serde_json::Value {
-    let column = match sort.column {
-        SortColumn::Date => "Date",
-        SortColumn::Map => "Map",
-        SortColumn::Mode => "Mode",
-        SortColumn::Outcome => "Outcome",
-        SortColumn::Damage => "Damage",
-        SortColumn::Kills => "Kills",
-        SortColumn::Pr => "Pr",
-    };
-    let direction = match sort.direction {
-        SortDirection::Ascending => "Ascending",
-        SortDirection::Descending => "Descending",
-    };
-    serde_json::json!([column, direction])
-}
-
-fn parse_saved_settings(
-    stored: Option<serde_json::Value>,
-) -> Result<(String, Vec<String>, SortSpec, OperatorPreferences), String> {
-    let Some(stored) = stored else {
-        return Ok((String::new(), Vec::new(), SortSpec::default(), OperatorPreferences::default()));
-    };
-    let object = stored.as_object().ok_or_else(|| "Search settings must be a JSON object".to_string())?;
-    let query = match object.get("query") {
-        None => String::new(),
-        Some(value) => value
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "Search settings field 'query' must be a string".to_string())?,
-    };
-    let history = match object.get("history") {
-        None => Vec::new(),
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|error| format!("Search settings field 'history' is invalid: {error}"))?,
-    };
-    let sort = match object.get("sort") {
-        None => SortSpec::default(),
-        Some(value) => sort_from_value(value).ok_or_else(|| "Search settings field 'sort' is invalid".to_string())?,
-    };
-    let operator_preferences = match object.get("op_prefs") {
-        None => OperatorPreferences::default(),
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|error| format!("Search settings field 'op_prefs' is invalid: {error}"))?,
-    };
-    Ok((query, history, sort, operator_preferences))
-}
-
-/// The values `request` asks the index for.
-///
-/// Ships and players are searched by what has been typed so far; maps and
-/// sources are whole catalogues, which are small enough to offer entire.
-async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<ValueOption> {
-    match request {
-        ValueRequest::Players { needle } => match query::search_players(pool, needle, VALUE_LIMIT).await {
-            Ok(rows) => rows
-                .iter()
-                .map(|facet| ValueOption {
-                    label: if facet.clan.is_empty() {
-                        facet.latest_name.clone()
-                    } else {
-                        format!("[{}] {}", facet.clan, facet.latest_name)
-                    },
-                    token: facet.account_id.raw().to_string(),
-                })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the player lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Ships { needle } => match query::search_ships(pool, needle, VALUE_LIMIT).await {
-            Ok(rows) => rows
-                .iter()
-                .map(|facet| ValueOption { label: facet.ship_name.clone(), token: facet.ship_id.raw().to_string() })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the ship lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Maps => match query::distinct_maps(pool, VALUE_LIMIT).await {
-            Ok(names) => names
-                .iter()
-                .map(|name| ValueOption { label: name.clone(), token: query_text::quote_if_needed(name) })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the map lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Sources => match query::list_sources(pool).await {
-            Ok(sources) => sources
-                .iter()
-                .map(|source| ValueOption { label: source.name.clone(), token: source.id.0.to_string() })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the source lookup failed: {err}");
-                Vec::new()
-            }
-        },
-    }
-}
 
 /// Where the tab is in running a query.
 enum SearchState {
@@ -382,7 +236,7 @@ pub struct SearchView {
     /// were built from. Refreshed in `render` when the two disagree rather
     /// than from an input event: a completion taken by click changes the text
     /// too, and one path that notices covers both.
-    completions: Vec<crate::search_pills::Completion>,
+    completions: Vec<Completion>,
     completion_source: String,
     /// The committed query, which is what the pills read back. Rewritten by
     /// every edit that lands on a pill and by a term the box commits; typing
@@ -506,7 +360,7 @@ pub struct SearchView {
     sort_settings_dirty: bool,
     operator_preferences_dirty: bool,
     settings_save_error: Option<SharedString>,
-    settings_failed_write: Option<(&'static str, serde_json::Value)>,
+    settings_failed_write: Option<(SearchField, serde_json::Value)>,
     /// Whether a count is in flight, so concurrent searches do not each start
     /// another scan.
     gap_lookup_running: bool,
@@ -644,32 +498,8 @@ impl SearchView {
             return;
         }
 
-        let Some(mut expr) = self.reading.clone() else { return };
-        // A menu item acts on the selection where there is one and on the
-        // pill it was opened from where there is not, so a right-click on an
-        // unselected pill still does the obvious thing.
-        let target = if self.selection.is_empty() {
-            let mut one = Selection::default();
-            one.set_one(path.clone());
-            one
-        } else {
-            self.selection.clone()
-        };
-
-        match edit {
-            StructuralEdit::ToggleSelected => unreachable!("handled above"),
-            StructuralEdit::Group { is_or } => select::group(&mut expr, &target, is_or),
-            StructuralEdit::Ungroup => {
-                select::ungroup(&mut expr, &path);
-            }
-            StructuralEdit::Negate => select::negate(&mut expr, &path),
-            StructuralEdit::Delete => select::delete(&mut expr, &target),
-            StructuralEdit::FlipConnector => {
-                let is_or = matches!(select::node_at(&expr, &parent_of(&path)), Some(Expr::Any(_)));
-                select::set_connector(&mut expr, &path, !is_or);
-            }
-        }
-        select::canonicalise(&mut expr);
+        let Some(reading) = self.reading.as_ref() else { return };
+        let Some(expr) = pills::apply_structural_edit(reading, &path, edit, &self.selection) else { return };
 
         // Recorded before the rewrite lands, so undo restores what was there.
         self.remember_for_undo(cx);
@@ -1044,42 +874,35 @@ impl SearchView {
 
     /// Writes the history back into the shared row beside the query.
     fn save_history(&self, cx: &mut Context<Self>) {
-        self.save_search_value("history", serde_json::json!(self.history), cx);
+        self.save_search_value(SearchField::History, serde_json::json!(self.history), cx);
     }
 
-    fn save_search_value(&self, field: &'static str, value: serde_json::Value, cx: &mut Context<Self>) {
+    fn save_search_value(&self, field: SearchField, value: serde_json::Value, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         let write_lock = self.settings_write_lock.clone();
         let retry_value = value.clone();
         cx.spawn(async move |this, cx| {
             let _guard = write_lock.lock().await;
             let written = runtime::spawn(cx, async move {
-                let mut stored = match wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(
+                let key = field.key();
+                let stored = wows_toolkit_config::queries::try_get_setting::<serde_json::Value>(
                     &pool,
                     SEARCH_SETTINGS_KEY,
                 )
                 .await
-                {
-                    Ok(Some(value)) => value,
-                    Ok(None) => serde_json::json!({}),
-                    Err(error) => {
-                        return Err(format!("Could not read Search settings before saving {field}: {error}"));
-                    }
-                };
-                let Some(object) = stored.as_object_mut() else {
-                    return Err(format!("Search settings are not an object; {field} was not saved"));
-                };
-                object.insert(field.to_string(), value);
+                .map_err(|error| format!("Could not read Search settings before saving {key}: {error}"))?;
+                let stored = search_settings::with_field(stored, field, value)
+                    .map_err(|error| format!("{error}; {key} was not saved"))?;
                 let json = stored.to_string();
                 wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json)
                     .await
-                    .map_err(|error| format!("Search {field} could not be saved: {error}"))
+                    .map_err(|error| format!("Search {key} could not be saved: {error}"))
             })
             .await;
             let message = match written {
                 Ok(Ok(())) => None,
                 Ok(Err(error)) => Some(error),
-                Err(error) => Some(format!("Search settings update for {field} did not complete: {error}")),
+                Err(error) => Some(format!("Search settings update for {} did not complete: {error}", field.key())),
             };
             if let Some(message) = &message {
                 tracing::warn!("{message}");
@@ -1096,19 +919,12 @@ impl SearchView {
     /// What the dropdown is offering: the values the caret's own field takes
     /// once the index has answered, and otherwise the vocabulary a new term
     /// may start with.
-    fn offered_completions(&self) -> Vec<crate::search_pills::Completion> {
+    fn offered_completions(&self) -> Vec<Completion> {
         if self.value_options.is_empty() {
             return self.completions.clone();
         }
-        let text = self.completion_source.clone();
-        self.value_options
-            .iter()
-            .map(|option| crate::search_pills::Completion {
-                label: option.label.clone(),
-                context: "value".to_string(),
-                replacement: suggest::replace_active_value(&text, &option.token),
-            })
-            .collect()
+
+        pills::value_completions(&self.completion_source, &self.value_options)
     }
 
     /// Puts `query` in the bar as pills and runs it.
@@ -1231,7 +1047,7 @@ impl SearchView {
         if text == self.completion_source {
             return;
         }
-        self.completions = crate::search_pills::completions(&text);
+        self.completions = pills::completions(&text);
         self.completion_source = text.clone();
         // Typing moves the caret off whatever row was highlighted, and an
         // edit made in the box is what reopens a dropdown Escape closed.
@@ -1269,15 +1085,18 @@ impl SearchView {
         self._value_lookup = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(VALUE_DEBOUNCE).await;
             let asked = request.clone();
-            let found = runtime::spawn(cx, async move { look_up_values(&pool, &asked).await }).await;
+            let found =
+                runtime::spawn(cx, async move { search_results::look_up_values(&pool, &asked).await }).await;
             let _ = this.update(cx, |this, cx| {
                 // The caret has moved on to another field since.
                 if this.value_request.as_ref() != Some(&request) {
                     return;
                 }
                 this.value_lookup_running = false;
-                if let Ok(options) = found {
-                    this.value_options = options;
+                match found {
+                    Ok(Ok(options)) => this.value_options = options,
+                    Ok(Err(error)) => tracing::warn!("search: {error}"),
+                    Err(error) => tracing::warn!("search: the value lookup did not complete: {error}"),
                 }
                 cx.notify();
             });
@@ -1487,9 +1306,10 @@ impl SearchView {
                     return;
                 }
             };
-            let (query, history, sort, operator_preferences) = match parse_saved_settings(stored) {
+            let SavedSearch { query, history, sort, operator_preferences } = match SavedSearch::parse(stored) {
                 Ok(settings) => settings,
-                Err(message) => {
+                Err(error) => {
+                    let message = error.to_string();
                     let _ = this.update(cx, |this, cx| {
                         this.settings_load_error = Some(message.clone().into());
                         if !this.query_settings_dirty
@@ -1537,7 +1357,7 @@ impl SearchView {
     /// Writes the query text back into the shared row, keeping every other
     /// field the egui tab stores beside it.
     fn save_query(&self, text: String, cx: &mut Context<Self>) {
-        self.save_search_value("query", serde_json::Value::String(text), cx);
+        self.save_search_value(SearchField::Query, serde_json::Value::String(text), cx);
     }
 
     /// Adopts the game data the replay inspector opened, so results can be
@@ -1625,7 +1445,7 @@ impl SearchView {
         if self.operator_preferences != prior_preferences {
             self.operator_preferences_dirty = true;
             match serde_json::to_value(&self.operator_preferences) {
-                Ok(value) => self.save_search_value("op_prefs", value, cx),
+                Ok(value) => self.save_search_value(SearchField::OperatorPreferences, value, cx),
                 Err(error) => tracing::warn!("search: operator preferences could not be serialized: {error}"),
             }
         }
@@ -1686,7 +1506,7 @@ impl SearchView {
     fn sort_by(&mut self, column: SortColumn, cx: &mut Context<Self>) {
         self.sort_settings_dirty = true;
         self.sort = self.sort.after_click(column);
-        self.save_search_value("sort", sort_value(self.sort), cx);
+        self.save_search_value(SearchField::Sort, search_settings::sort_value(self.sort), cx);
         if matches!(self.state, SearchState::Done | SearchState::Running) {
             self.run(cx);
         } else {
@@ -1714,17 +1534,6 @@ fn column_width(column: SortColumn) -> Pixels {
     }
 }
 
-fn outcome_label(outcome: MatchOutcome) -> String {
-    match outcome {
-        MatchOutcome::Win => t!("ui.search.outcome_win").into_owned(),
-        MatchOutcome::Loss => t!("ui.search.outcome_loss").into_owned(),
-        MatchOutcome::Draw => t!("ui.search.outcome_draw").into_owned(),
-        MatchOutcome::Unknown => "-".to_string(),
-    }
-}
-
-/// What a hit shows in `column`. An absent value reads as a dash rather than
-/// a zero, which would sort and scan as a real result.
 /// One result's actions: open the replay in the inspector, and copy its
 /// path. A replay the index knows about but that is no longer on disk cannot
 /// be opened, and says so rather than failing on click.
@@ -1818,20 +1627,6 @@ fn row_actions(ix: usize, path: PathBuf, exists: bool, search: Entity<SearchView
         .child(clipboard)
         .child(trigger.dropdown_menu(move |menu, _window, _cx| build_row_menu(menu, &path, exists, &search)))
         .into_any_element()
-}
-
-fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
-    match column {
-        SortColumn::Date => hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string(),
-        SortColumn::Map => hit.map.clone(),
-        SortColumn::Mode => hit.game_mode.clone(),
-        SortColumn::Outcome => outcome_label(hit.outcome).to_string(),
-        // Grouped: a six-figure damage number is unreadable as a bare run of
-        // digits, and every other surface groups it.
-        SortColumn::Damage => hit.self_damage.map(|d| separate_number(d, None)).unwrap_or_else(|| "-".into()),
-        SortColumn::Kills => hit.self_kills.map(|k| k.to_string()).unwrap_or_else(|| "-".into()),
-        SortColumn::Pr => hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".into()),
-    }
 }
 
 /// One labelled fact per line, as the listing's own popup draws them.
@@ -2392,22 +2187,12 @@ impl Render for SearchView {
         let settings_error_needs_banner = status.is_none();
         let search_entity = cx.entity();
 
-        // Singular at exactly one, so it never reads "1 indexed matches".
         let gap_hint = self
             .expr
             .as_ref()
             .zip(self.game_mode_gap)
             .filter(|(expr, missing)| search_hint::game_mode_gap_applies(*missing, expr))
-            .map(|(_, missing)| {
-                if missing == 1 {
-                    "1 indexed match has no recorded game mode and cannot match this query. Re-index to fill it in."
-                        .to_string()
-                } else {
-                    format!(
-                        "{missing} indexed matches have no recorded game mode and cannot match this query.                          Re-index to fill them in."
-                    )
-                }
-            });
+            .map(|(_, missing)| search_results::game_mode_gap_hint(missing));
 
         let body: AnyElement = match status {
             Some(status) => v_flex()

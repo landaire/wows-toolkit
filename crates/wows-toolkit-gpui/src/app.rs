@@ -1878,7 +1878,12 @@ impl App {
     }
 
     /// Fills the palette with one of the cascading modes and reopens it.
-    fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+    fn enter_palette_mode(
+        &mut self,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let _ = owner.update(cx, |this, cx| this.open_palette_mode(mode, window, cx));
@@ -1888,15 +1893,16 @@ impl App {
     /// Opens the palette on one of its second-layer lists.
     pub(crate) fn open_palette_mode(
         &mut self,
-        mode: crate::palette::PaletteMode,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let source = match mode {
-            crate::palette::PaletteMode::ArmorShips => {
+            wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips => {
                 crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
             }
-            crate::palette::PaletteMode::Players | crate::palette::PaletteMode::MyShips => {
+            wows_toolkit_viewmodel::palette::PaletteMode::Players
+            | wows_toolkit_viewmodel::palette::PaletteMode::MyShips => {
                 crate::palette::ModeSource::Index
             }
         };
@@ -4114,7 +4120,7 @@ impl Render for App {
                     // Both, as the egui app takes both. On the Armor Viewer,
                     // ctrl+p goes straight to the ship list.
                     (false, "p") if this.active_tab == AppTab::ArmorViewer => {
-                        this.open_palette_mode(crate::palette::PaletteMode::ArmorShips, window, cx)
+                        this.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips, window, cx)
                     }
                     (false, "p") | (false, "k") => this.open_palette(window, cx),
                     _ => {}
