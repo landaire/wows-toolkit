@@ -179,17 +179,31 @@ pub(crate) fn relation_color_rgb(relation: Relation) -> u32 {
     }
 }
 
-/// Packed `0xRRGGBB` color for a `PlayerColorKind`. The single source of
-/// truth `table.rs::resolve_color`'s `ColorRole::Player` arm resolves
-/// through; `icons.rs` also reads it directly to tint the Name cell's
-/// ship-class icon by the same color the name text and stat cells use.
+/// Packed `0xRRGGBB` color for a `PlayerColorKind` in the palette on screen.
+/// `table.rs::resolve_color`'s `ColorRole::Player` arm resolves through it
+/// for the name text and stat cells.
 pub(crate) fn player_color_kind_rgb(kind: PlayerColorKind) -> u32 {
+    player_tone(kind, crate::theme::semantic())
+}
+
+/// The tint a ship-class icon takes for `kind`, in either theme: the dark
+/// theme's tones. The tint multiplies the icon's white body, so a dark tone
+/// leaves the body the shade of its outline and the icon reads as a solid
+/// shape; a bright one keeps the body and the outline apart.
+pub(crate) fn class_icon_tint(kind: PlayerColorKind) -> u32 {
+    player_tone(kind, &crate::theme::DARK_SEMANTIC)
+}
+
+/// The tone `kind` takes in `tones`: self is emphasised body text, an ally
+/// reads as a win and an enemy as a loss, as `relation_color_rgb` colours
+/// them.
+fn player_tone(kind: PlayerColorKind, tones: &crate::theme::Semantic) -> u32 {
     match kind {
-        PlayerColorKind::SelfPlayer => relation_color_rgb(Relation::new(0)),
-        PlayerColorKind::Ally => relation_color_rgb(Relation::new(1)),
-        PlayerColorKind::Enemy => relation_color_rgb(Relation::new(2)),
-        PlayerColorKind::DivisionMate => crate::theme::semantic().division,
-        PlayerColorKind::Abuser => crate::theme::semantic().abuser,
+        PlayerColorKind::SelfPlayer => tones.text_strong,
+        PlayerColorKind::Ally => tones.win,
+        PlayerColorKind::Enemy => tones.loss,
+        PlayerColorKind::DivisionMate => tones.division,
+        PlayerColorKind::Abuser => tones.abuser,
     }
 }
 

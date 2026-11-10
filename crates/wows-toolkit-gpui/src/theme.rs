@@ -8,6 +8,8 @@ use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::component::theme::ThemeTokens;
 use gpui_kit::px;
 use gpui_kit::rgb;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
@@ -222,6 +224,11 @@ static CURRENT_ACCENT: AtomicU32 = AtomicU32::new(DARK.accent);
 static CURRENT_SURFACE: AtomicU32 = AtomicU32::new(DARK.surface);
 static CURRENT_BORDER_BRIGHT: AtomicU32 = AtomicU32::new(DARK.border_bright);
 static CURRENT_TEXT_DIM: AtomicU32 = AtomicU32::new(DARK.text_dim);
+static CURRENT_PANEL: AtomicU32 = AtomicU32::new(DARK.panel);
+static CURRENT_FAINT: AtomicU32 = AtomicU32::new(DARK.faint);
+
+/// The WCAG contrast a colour the app does not choose is lifted to.
+const CONTRAST_FLOOR: f32 = 4.5;
 
 /// A light panel must be lighter than the text on it, and the other way round
 /// in dark. Checked at compile time, so a palette whose fields were filled in
@@ -275,7 +282,7 @@ pub struct Semantic {
 
 pub const DARK_SEMANTIC: Semantic = Semantic {
     win: 0x6fd98a,
-    loss: 0xea7078,
+    loss: 0xf28389,
     draw: 0xe9e5dd,
     warn: 0xe8a54a,
     error: 0xe8737b,
@@ -299,8 +306,11 @@ pub const DARK_SEMANTIC: Semantic = Semantic {
 };
 
 pub const LIGHT_SEMANTIC: Semantic = Semantic {
-    win: 0x0c5027,
-    loss: 0x601118,
+    // Mid tones rather than near-black ones: at these the two read as green and
+    // red at a glance instead of as body text, and both still clear 4.5:1 on
+    // the panel and the striped rows.
+    win: 0x16703a,
+    loss: 0xb42318,
     draw: 0x5c5950,
     warn: 0x8a4b00,
     error: 0xae2230,
@@ -351,6 +361,8 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     CURRENT_SURFACE.store(palette.surface, Ordering::Relaxed);
     CURRENT_BORDER_BRIGHT.store(palette.border_bright, Ordering::Relaxed);
     CURRENT_TEXT_DIM.store(palette.text_dim, Ordering::Relaxed);
+    CURRENT_PANEL.store(palette.panel, Ordering::Relaxed);
+    CURRENT_FAINT.store(palette.faint, Ordering::Relaxed);
     let semantic = semantic_for(dark);
     Theme::change(palette.mode, Some(window), cx);
 
@@ -539,6 +551,80 @@ pub fn text_faint() -> Hsla {
     rgb(semantic().text_faint).into()
 }
 
+/// `color` (`0xRRGGBB`), moved in lightness until it reads on both row grounds
+/// of the current palette. For colours the app does not choose, such as the
+/// game's clan colours, which include pale tones made for a dark client.
+///
+/// Hue and saturation are kept, and the smaller of the two lightness moves
+/// that clears the floor wins, so the colour changes as little as it must.
+/// Memoised per colour and pair of grounds, since every clan row asks on
+/// every frame.
+pub fn readable_on_rows(color: u32) -> u32 {
+    thread_local! {
+        static READABLE: RefCell<HashMap<(u32, [u32; 2]), u32>> = RefCell::new(HashMap::new());
+    }
+
+    let grounds = [CURRENT_PANEL.load(Ordering::Relaxed), CURRENT_FAINT.load(Ordering::Relaxed)];
+
+    READABLE.with(|cache| *cache.borrow_mut().entry((color, grounds)).or_insert_with(|| readable_on(color, &grounds)))
+}
+
+/// `color` moved in lightness until it clears the floor on every one of
+/// `grounds`, when any lightness can. Two grounds on either side of a
+/// relative luminance of about 0.18 defeat both black and white; then the
+/// result is whichever of the two reads better on its worse ground.
+fn readable_on(color: u32, grounds: &[u32]) -> u32 {
+    let worst =
+        |candidate: u32| grounds.iter().map(|ground| contrast_ratio(candidate, *ground)).fold(f32::MAX, f32::min);
+    if worst(color) >= CONTRAST_FLOOR {
+        return color;
+    }
+
+    const STEPS: u16 = 128;
+    let hsla: Hsla = rgb(color).into();
+    let mut winner: Option<(f32, u32)> = None;
+    for lighten in [true, false] {
+        for step in 1..=STEPS {
+            let t = f32::from(step) / f32::from(STEPS);
+            let l = if lighten { hsla.l + (1. - hsla.l) * t } else { hsla.l * (1. - t) };
+            let candidate = pack(Hsla { l, ..hsla });
+            if worst(candidate) >= CONTRAST_FLOOR {
+                let moved = (l - hsla.l).abs();
+                if winner.is_none_or(|(least, _)| moved < least) {
+                    winner = Some((moved, candidate));
+                }
+                break;
+            }
+        }
+    }
+
+    match winner {
+        Some((_, candidate)) => candidate,
+        None if worst(0xffffff) >= worst(0x000000) => 0xffffff,
+        None => 0x000000,
+    }
+}
+
+fn pack(color: Hsla) -> u32 {
+    let rgba = gpui_kit::Rgba::from(color);
+    let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u32;
+    (channel(rgba.r) << 16) | (channel(rgba.g) << 8) | channel(rgba.b)
+}
+
+/// WCAG 2.1 contrast ratio between two `0xRRGGBB` colours.
+fn contrast_ratio(a: u32, b: u32) -> f32 {
+    let (la, lb) = (relative_luminance(a), relative_luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+fn relative_luminance(color: u32) -> f32 {
+    let linear = |shift: u32| {
+        let channel = ((color >> shift) & 0xff) as f32 / 255.;
+        if channel <= 0.04045 { channel / 12.92 } else { ((channel + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)
+}
+
 /// Whether what is on screen right now is the dark palette.
 ///
 /// Read at draw time by the surfaces that pick a colour themselves rather
@@ -559,6 +645,7 @@ mod tests {
     use super::DARK_SEMANTIC;
     use super::LIGHT;
     use super::LIGHT_SEMANTIC;
+    use super::ThemeChoice;
 
     /// Distinct surface tiers preserve panel and control boundaries.
     #[test]
@@ -582,5 +669,46 @@ mod tests {
         }
         assert_ne!(DARK_SEMANTIC.win, LIGHT_SEMANTIC.win);
         assert_ne!(DARK_SEMANTIC.text_dim, LIGHT_SEMANTIC.text_dim);
+    }
+
+    /// The result tones are read as text on the panel and the striped rows,
+    /// in every palette.
+    #[test]
+    fn the_battle_results_clear_the_contrast_floor_on_every_row() {
+        for choice in ThemeChoice::ALL {
+            for system_dark in [true, false] {
+                let palette = super::palette_for(choice, system_dark);
+                let semantic = super::semantic_for(palette.mode.is_dark());
+                for tone in [semantic.win, semantic.loss] {
+                    for ground in [palette.panel, palette.faint] {
+                        let ratio = super::contrast_ratio(tone, ground);
+                        assert!(
+                            ratio >= super::CONTRAST_FLOOR,
+                            "{choice:?}: {tone:#08x} on {ground:#08x} is only {ratio:.2}:1"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A colour the app does not choose is lifted only as far as the floor,
+    /// keeps its hue, and is left alone when it already reads.
+    #[test]
+    fn a_pale_clan_colour_is_darkened_on_a_light_panel_and_kept_on_a_dark_one() {
+        let pale_green = 0xa0e8a0;
+        let light = [LIGHT.panel, LIGHT.faint];
+        let lifted = super::readable_on(pale_green, &light);
+        for ground in light {
+            assert!(super::contrast_ratio(lifted, ground) >= super::CONTRAST_FLOOR);
+        }
+        let hue = |color: u32| gpui_kit::Hsla::from(gpui_kit::rgb(color)).h;
+        assert!((hue(lifted) - hue(pale_green)).abs() < 0.01, "the clan's hue is kept");
+        assert!(
+            super::contrast_ratio(lifted, LIGHT.panel) < super::CONTRAST_FLOOR + 0.5,
+            "lifted no further than needed"
+        );
+
+        assert_eq!(super::readable_on(pale_green, &[DARK.panel, DARK.faint]), pale_green, "already readable");
     }
 }

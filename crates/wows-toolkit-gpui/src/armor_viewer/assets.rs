@@ -41,7 +41,7 @@ use crate::replay_inspector::load::LoadedGameData;
 use super::catalog::ShipCatalog;
 
 /// Class-icon tint: the replay table tints ship-class icons by team/division
-/// color (`replay_inspector::columns::player_color_kind_rgb`), but the armor
+/// color (`replay_inspector::columns::class_icon_tint`), but the armor
 /// sidebar has no per-row team context, so this renders the icon undyed
 /// (`0xffffff` leaves every channel at full intensity in `decode_ship_class_svg`'s
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.

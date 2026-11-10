@@ -44,6 +44,7 @@ use super::columns::ColorRole;
 use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
 use super::columns::cell_value;
+use super::columns::class_icon_tint;
 use super::columns::name_color_kind;
 use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
@@ -671,9 +672,12 @@ impl PlayerTable {
         self.width_overrides[col as usize].unwrap_or(self.column_widths[col as usize])
     }
 
-    /// Starts a width drag on `col` from the pointer's current position.
+    /// Starts a width drag on `col` from the pointer's current position, at
+    /// the width the column is drawn at, which the frozen cap may have
+    /// narrowed below its stored width.
     fn start_column_drag(&mut self, col: ReplayColumn, at: Pixels, cx: &mut Context<Self>) {
-        self.resizing = Some(ColumnDrag { column: col, pointer_start: at, width_start: self.width_of(col) });
+        self.resizing =
+            Some(ColumnDrag { column: col, pointer_start: at, width_start: self.drawn_widths[col as usize] });
         cx.notify();
     }
 
@@ -681,9 +685,23 @@ impl PlayerTable {
     /// every pointer move outside one.
     fn drag_column(&mut self, at: Pixels, cx: &mut Context<Self>) {
         let Some(drag) = self.resizing else { return };
-        let width = (drag.width_start + (at - drag.pointer_start)).max(COLUMN_DRAG_MIN);
+
+        let mut width = (drag.width_start + (at - drag.pointer_start)).max(COLUMN_DRAG_MIN);
+        // A frozen column may not push the frozen section past its cap: the
+        // section is clipped at that edge, and the grips sit on it.
+        let frozen = self.frozen_columns();
+        if let Some(cap) = self.sticky_cap()
+            && frozen.contains(&drag.column)
+        {
+            width = width.min(frozen_room(&frozen, &self.drawn_widths, cap, drag.column).max(COLUMN_DRAG_MIN));
+        }
         self.width_overrides[drag.column as usize] = Some(width);
         cx.notify();
+    }
+
+    /// The columns that stay put while the rest scroll.
+    fn frozen_columns(&self) -> Vec<ReplayColumn> {
+        self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect()
     }
 
     /// Ends a width drag, keeping where it got to.
@@ -869,6 +887,48 @@ impl PlayerTable {
 
 impl EventEmitter<PlayerTableEvent> for PlayerTable {}
 
+/// The order the frozen columns give way in when they overrun their cap:
+/// Name first, then the rest from the right.
+fn give_way_order(frozen: &[ReplayColumn]) -> Vec<ReplayColumn> {
+    let name = frozen.iter().copied().filter(|col| *col == ReplayColumn::Name);
+    let rest = frozen.iter().copied().rev().filter(|col| *col != ReplayColumn::Name);
+
+    name.chain(rest).collect()
+}
+
+/// Narrows the drawn widths of the frozen columns until they fit `cap`, each
+/// no narrower than `COLUMN_DRAG_MIN`, so every frozen grip stays inside the
+/// clipped section.
+fn fit_frozen_widths(widths: &mut [Pixels], frozen: &[ReplayColumn], cap: Pixels) {
+    let total: Pixels = frozen.iter().map(|col| widths[*col as usize]).sum();
+    let mut excess = total - cap;
+
+    for col in give_way_order(frozen) {
+        if excess <= px(0.) {
+            break;
+        }
+        let width = &mut widths[col as usize];
+        let give = (*width - COLUMN_DRAG_MIN).max(px(0.)).min(excess);
+        *width -= give;
+        excess -= give;
+    }
+}
+
+/// The widest `col` may be dragged to before the frozen section passes
+/// `cap`. Columns that give way before `col` count at their minimum, the
+/// rest at their drawn width.
+fn frozen_room(frozen: &[ReplayColumn], widths: &[Pixels], cap: Pixels, col: ReplayColumn) -> Pixels {
+    let order = give_way_order(frozen);
+    let rank = |of: ReplayColumn| order.iter().position(|other| *other == of);
+    let held: Pixels = frozen
+        .iter()
+        .filter(|other| **other != col)
+        .map(|other| if rank(*other) < rank(col) { COLUMN_DRAG_MIN } else { widths[*other as usize] })
+        .sum();
+
+    cap - held
+}
+
 /// Builds the `.tooltip()` callback for a cell's hover text: one line per
 /// `\n`-separated entry, monospace, matching the egui app's
 /// `RichText::monospace` breakdown tooltips (`breakdown_hover_string`) and
@@ -918,8 +978,27 @@ fn cell_element(
         .whitespace_nowrap()
         .overflow_hidden()
         .text_ellipsis()
-        .when_some(cell.color, |el, role| el.text_color(resolve_color(role)))
-        .child(crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text));
+        .when_some(cell.color, |el, role| el.text_color(resolve_color(role)));
+    let text = crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text);
+    let base = match cell.color {
+        // A rating is the band's chip, as on every other surface that shows
+        // one: the band's hue behind the band's own text colour. In a narrow
+        // column the chip narrows with it and its text ends in an ellipsis.
+        Some(ColorRole::PrTier(category)) => base.flex().child(
+            div()
+                .flex_shrink_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .px_1()
+                .rounded(px(3.))
+                .bg(resolve_color(ColorRole::PrTierTint(category))
+                    .opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
+                .child(text),
+        ),
+        _ => base.child(text),
+    };
 
     match cell.hover {
         Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
@@ -963,7 +1042,7 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> An
 /// separate `ui.add`/`ui.label` call per segment.
 fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
-    let icon_tint = player_color_kind_rgb(player_color_kind(row));
+    let icon_tint = class_icon_tint(player_color_kind(row));
 
     let container = h_flex()
         .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Name as usize))
@@ -1263,7 +1342,7 @@ struct MenuHeading {
 fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
     let clan: Option<SharedString> = row.clan_tag.as_deref().filter(|clan| !clan.is_empty()).map(SharedString::from);
     let ship: Option<SharedString> = (!row.ship_name.is_empty()).then(|| row.ship_name.clone().into());
-    let icon = icons.get(row.ship_class, player_color_kind_rgb(player_color_kind(row)));
+    let icon = icons.get(row.ship_class, class_icon_tint(player_color_kind(row)));
     let species: Option<SharedString> = icon
         .is_none()
         .then(|| row.ship_species_text.clone())
@@ -1297,7 +1376,8 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
 /// that carries no clan color, as the egui table does.
 fn clan_tag_color(row: &PlayerRow) -> Hsla {
     let rgb = match row.clan_color_rgb {
-        Some(rgb) => rgb,
+        // The game's colours are pale tones made for its dark client.
+        Some(rgb) => crate::theme::readable_on_rows(rgb),
         None => relation_color_rgb(row.relation),
     };
     resolve_color(ColorRole::Fixed(rgb))
@@ -1750,6 +1830,9 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .flex_1()
                 .min_w(px(0.))
                 .overflow_x_scroll()
+                // A vertical wheel belongs to the list around the row, not to
+                // the columns scrolling sideways inside it.
+                .restrict_scroll_to_axis()
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
@@ -1778,7 +1861,7 @@ impl Render for PlayerTable {
         let border = cx.theme().border;
         let hover_bg = cx.theme().muted;
 
-        let sticky_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect();
+        let sticky_columns = self.frozen_columns();
         let scroll_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().skip(STICKY_COLUMN_COUNT).collect();
         if !std::mem::replace(&mut self.widths_loaded, true) {
             self.load_column_widths(cx);
@@ -1789,8 +1872,7 @@ impl Render for PlayerTable {
         self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
         let sticky_cap = self.sticky_cap().map(f32::from);
         if let Some(cap) = sticky_cap {
-            self.drawn_widths[ReplayColumn::Name as usize] =
-                self.drawn_widths[ReplayColumn::Name as usize].min(px(cap));
+            fit_frozen_widths(&mut self.drawn_widths, &sticky_columns, px(cap));
         }
         let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
         // Where the scrolling portion starts, which is where its own bar
@@ -1815,6 +1897,7 @@ impl Render for PlayerTable {
                     .flex_1()
                     .min_w(px(0.))
                     .overflow_x_scroll()
+                    .restrict_scroll_to_axis()
                     .track_scroll(&self.h_scroll)
                     .child(
                         h_flex()
@@ -2070,6 +2153,37 @@ mod tests {
         .expect("the window is open");
     }
 
+    /// On a panel too narrow for the frozen pair, the name gives way rather
+    /// than the ship column: the frozen section is clipped at its right edge,
+    /// and the grip that sizes the ship column against the scrolling ones sits
+    /// on that edge.
+    #[gpui_kit::test]
+    fn the_last_frozen_column_keeps_its_grip_on_a_narrow_panel(cx: &mut TestAppContext) {
+        let panel = px(420.);
+        let window = open_table_at(cx, panel);
+        let table = window.entity(cx).expect("the window has a root view");
+        let ship = ReplayColumn::ShipName;
+
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        let (wanted, ship_before) = cx.update(|cx| {
+            let table = table.read(cx);
+            (table.width_of(ReplayColumn::Name) + table.width_of(ship), table.width_of(ship))
+        });
+        assert!(wanted > panel * super::STICKY_MAX_FRACTION, "the frozen pair must exceed the cap for this to test it");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let grip = window.find(("replay-header-grip", ship as usize)).bounds().center();
+            window.drag(grip, gpui_kit::point(grip.x + px(20.), grip.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        assert!(
+            cx.update(|cx| table.read(cx).width_of(ship)) > ship_before,
+            "the ship column's grip was in reach and the drag widened it"
+        );
+    }
+
     /// A column follows its content until the reader sets its width, and then
     /// keeps what they set even when the content later measures wider.
     #[gpui_kit::test]
@@ -2159,5 +2273,32 @@ mod tests {
         .expect("the window is open");
 
         assert_eq!(cx.update(|cx| table.read(cx).sort.column()), SortColumn::ShipName);
+    }
+
+    /// A frozen column dragged past the cap keeps every frozen grip inside
+    /// the clipped section: Name gives way first, and the dragged column
+    /// stops where Name has reached its minimum.
+    #[test]
+    fn a_frozen_column_is_held_inside_the_cap() {
+        let frozen = [ReplayColumn::Name, ReplayColumn::ShipName];
+        let cap = px(300.);
+        let mut widths = vec![px(100.); ReplayColumn::ALL.len()];
+        widths[ReplayColumn::ShipName as usize] = px(400.);
+
+        super::fit_frozen_widths(&mut widths, &frozen, cap);
+
+        let total: gpui_kit::Pixels = frozen.iter().map(|col| widths[*col as usize]).sum();
+        assert!(total <= cap, "the frozen section is {total:?}, past its cap");
+        assert_eq!(widths[ReplayColumn::Name as usize], super::COLUMN_DRAG_MIN, "Name gives way first");
+        assert_eq!(
+            super::frozen_room(&frozen, &widths, cap, ReplayColumn::ShipName),
+            cap - super::COLUMN_DRAG_MIN,
+            "a drag of ShipName stops where Name is at its minimum"
+        );
+        assert_eq!(
+            super::frozen_room(&frozen, &widths, cap, ReplayColumn::Name),
+            cap - widths[ReplayColumn::ShipName as usize],
+            "a drag of Name stops at what ShipName leaves"
+        );
     }
 }

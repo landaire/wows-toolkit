@@ -35,8 +35,8 @@ use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
+use super::columns::class_icon_tint;
 use super::columns::player_color_kind;
-use super::columns::player_color_kind_rgb;
 use super::model::PlayerRow;
 
 /// Decodes raw image bytes (whatever format `image::load_from_memory` can
@@ -101,7 +101,7 @@ fn tint_bgra_pixels(buffer: &mut image::RgbaImage, tint: u32) {
 
 /// Id-keyed cache of decoded icons: ship-class icons keyed by `(Species,
 /// tint)` -- `tint` is the row's packed `0xRRGGBB` team/division color (see
-/// `columns::player_color_kind_rgb`), since the same species renders in a
+/// `columns::class_icon_tint`), since the same species renders in a
 /// different color per row (egui's `Image::tint(report.color)`) -- and every
 /// other icon kind (achievement, ribbon, subribbon, consumable,
 /// modernization, signal, captain-skill, nation flag) keyed by a
@@ -198,7 +198,7 @@ impl IconCache {
         let mut keys_seen: HashSet<String> = HashSet::new();
 
         for row in rows {
-            let tint = player_color_kind_rgb(player_color_kind(row));
+            let tint = class_icon_tint(player_color_kind(row));
             if species_seen.insert((row.ship_class, tint)) {
                 self.load_ship_class(row.ship_class, tint, vfs, svg_renderer);
             }

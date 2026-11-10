@@ -103,7 +103,7 @@ use crate::replay_inspector::IconCache;
 use crate::replay_inspector::LoadedGameData;
 use crate::replay_inspector::columns::ColorRole;
 use crate::replay_inspector::columns::PlayerColorKind;
-use crate::replay_inspector::columns::player_color_kind_rgb;
+use crate::replay_inspector::columns::class_icon_tint;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
@@ -2213,9 +2213,9 @@ fn tint_color(tint: PlayerTint) -> Hsla {
     resolve_color(ColorRole::Player(tint_kind(tint)))
 }
 
-/// The same colour packed, which is how an icon is tinted.
+/// The tint this row's class icon takes (`class_icon_tint`).
 fn tint_rgb(tint: PlayerTint) -> u32 {
-    player_color_kind_rgb(tint_kind(tint))
+    class_icon_tint(tint_kind(tint))
 }
 
 /// Why a note could not be saved.

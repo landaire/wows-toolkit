@@ -123,7 +123,7 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                     h_flex()
                         .gap_1()
                         .when_some(message.clan_tag.as_ref().zip(message.clan_color_rgb), |this, (tag, color)| {
-                            let clan_color: Hsla = rgb(color).into();
+                            let clan_color: Hsla = rgb(crate::theme::readable_on_rows(color)).into();
                             this.child(
                                 div()
                                     .text_color(clan_color)
