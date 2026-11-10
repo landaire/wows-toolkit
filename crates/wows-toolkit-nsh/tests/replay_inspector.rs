@@ -201,6 +201,28 @@ fn a_plain_open_replaces_the_shown_replay_and_a_closed_tab_goes() {
 }
 
 #[test]
+fn rendering_a_replay_docks_one_renderer_beside_it() {
+    const STEM: &str = "20260223_115252_PZSC718-Narai_s06_Atoll";
+    let mut app = app();
+    open_sample(&mut app);
+
+    app.press("label:Actions").unwrap();
+    app.press("Render Replay").unwrap();
+    app.wait_for(STEM).unwrap();
+    app.wait_for(&format!("label:Close {SAMPLE_TITLE}")).unwrap();
+
+    // Asking again brings the open renderer forward rather than docking a second one.
+    app.press(SAMPLE_TITLE).unwrap();
+    app.press("label:Actions").unwrap();
+    app.press("Render Replay").unwrap();
+    assert_eq!(app.screen().count(&format!("label:Close {STEM}")), Ok(1));
+
+    app.press(&format!("label:Close {STEM}")).unwrap();
+    app.wait_for_gone(&format!("label:Close {STEM}"), GONE).unwrap();
+    app.wait_for(&format!("label:Close {SAMPLE_TITLE}")).unwrap();
+}
+
+#[test]
 fn debug_mode_offers_the_raw_metadata() {
     let mut app = app();
     open_sample(&mut app);

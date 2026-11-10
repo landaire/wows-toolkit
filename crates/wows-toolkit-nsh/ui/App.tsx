@@ -1,7 +1,6 @@
 import { keymap, mount, signal, Storage, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
-import { Dialog } from "nsh/base";
-import { GameData, Palette, Shell, Toolkit } from "wows-toolkit/native";
+import { Collab, GameData, Palette, Shell, Toolkit } from "wows-toolkit/native";
 import { EmptyState, errorMessage } from "./components";
 import { colors } from "./theme";
 import { applyLocale, t } from "./i18n";
@@ -20,24 +19,27 @@ import { checkForUpdate, UpdateDialog } from "./shell/update";
 import { GameDataStatus } from "./game_data";
 import { SessionButton } from "./collab";
 import { LauncherView } from "./launcher";
-import { activateStats, StatsView } from "./stats";
+import { activateStats, openDirectoryStats, StatsView } from "./stats";
 import { activatePlayerTracker, PlayerTrackerView, setPlayerTrackerShown } from "./player_tracker";
 import { bindSearchRowActions, bindSearchTab, searchFor, SearchView } from "./search";
 import { bindPalette, CommandPalette, openPalette } from "./palette";
 import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { UnpackerView } from "./unpacker";
-import { BatchRenderStatus, followForcedWindows, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
+import { BatchRenderStatus, followForcedWindows, MinimapPreview, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
 import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
-import { importConstants, ReplayInspectorView } from "./replay_inspector";
+import { importConstants, renderInInspector, ReplayInspectorView, watchSharedWindow } from "./replay_inspector";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
 const replayOpenPath = signal<string | null>(null);
 const replayOpenRequestId = signal(0);
-/** The replay shown in the renderer window, when one is open. */
-const rendererPath = signal<string | null>(null);
-/** The session window being watched, when one is open. */
-const watchedReplay = signal<string | null>(null);
+
+/** Docks a session window in the inspector and brings the inspector forward. */
+function watchWindow(replayId: string) {
+  const shared = Collab.state().sharedWindows.find((window) => window.replayId === replayId);
+  watchSharedWindow(replayId, shared?.replayName ?? replayId);
+  selectTab("replay-inspector");
+}
 const STORAGE_TAB = "application.active-tab";
 
 Window.setTitle(`${startup.title} v${startup.version}`);
@@ -57,7 +59,7 @@ void loadAppSettings().then((loaded) => {
   debugMode.set(loaded.debugMode);
   if (loaded.checkForUpdates) void checkForUpdate("startup");
   void restartTwitch();
-  if (!loaded.disableAutoOpenSessionWindows) void followForcedWindows((replayId) => watchedReplay.set(replayId));
+  if (!loaded.disableAutoOpenSessionWindows) void followForcedWindows(watchWindow);
 });
 
 function selectTab(id: string) {
@@ -124,7 +126,10 @@ keymap.bind({
 
 bindSearchTab(() => selectTab("search"));
 bindSearchRowActions({
-  renderReplay: (path) => rendererPath.set(path),
+  renderReplay: (path) => {
+    renderInInspector(path);
+    selectTab("replay-inspector");
+  },
   renderReplayToClipboard: (path) => void renderToClipboard(path),
 });
 bindPalette({
@@ -171,7 +176,25 @@ function Content() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
-        <ReplayInspectorView openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
+        <ReplayInspectorView
+          openPath={replayOpenPath()}
+          openRequestId={replayOpenRequestId()}
+          viewports={{
+            renderer: (path, alts) => <ReplayRendererView path={path} alts={alts}/>,
+            watched: (replayId) => <WatchedPlaybackView replayId={replayId}/>,
+          }}
+          onRenderMany={(paths, target) => {
+            void renderReplaysToVideo(paths, target === "clipboard").then((failure) => {
+              if (failure) toast.warn(failure);
+            });
+          }}
+          previewSlot={(path) => <MinimapPreview path={path}/>}
+          sessionControl={() => <SessionButton onOpenTacticsBoard={openTacticsBoard} onWatchSharedWindow={(window) => watchWindow(window.replayId)}/>}
+          onDirectoryStats={(path) => {
+            selectTab("statistics");
+            void openDirectoryStats(path);
+          }}
+        />
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "launcher" ? "flex" : "none" }}>
         <LauncherView visible={tab().id === "launcher"}/>
@@ -201,28 +224,6 @@ function Content() {
   );
 }
 
-/** The renderer and watched playback fill the window, as GPUI's separate windows do. */
-function ViewportWindows() {
-  return (
-    <>
-      <Dialog open={rendererPath() !== null} onOpenChange={({ open }) => { if (!open) rendererPath.set(null); }}>
-        <View style={{ width: "100%", height: "100%", backgroundColor: colors.background }}>
-          <If when={rendererPath()}>
-            <ReplayRendererView path={rendererPath()!}/>
-          </If>
-        </View>
-      </Dialog>
-      <Dialog open={watchedReplay() !== null} onOpenChange={({ open }) => { if (!open) watchedReplay.set(null); }}>
-        <View style={{ width: "100%", height: "100%", backgroundColor: colors.background }}>
-          <If when={watchedReplay()}>
-            <WatchedPlaybackView replayId={watchedReplay()!}/>
-          </If>
-        </View>
-      </Dialog>
-    </>
-  );
-}
-
 function App() {
   return (
     <View
@@ -236,12 +237,7 @@ function App() {
         active={activeTab()}
         attention={(id) => id === "settings" && wowsDirInvalid()}
         onSelect={selectTab}
-        menu={
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <SessionButton onOpenTacticsBoard={openTacticsBoard} onWatchSharedWindow={(window) => watchedReplay.set(window.replayId)}/>
-            <ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsBoard}/>
-          </View>
-        }
+        menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsBoard}/>}
       />
       <View style={{ flex: 1, minHeight: 0 }}><Content/></View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}>
@@ -259,7 +255,6 @@ function App() {
       <CrashDialog/>
       <FirstRunDialog/>
       <TacticsBoard title={startup.text.tacticsBoard}/>
-      <ViewportWindows/>
       <CommandPalette/>
     </View>
   );

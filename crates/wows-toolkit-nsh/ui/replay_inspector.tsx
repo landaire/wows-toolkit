@@ -68,12 +68,18 @@ type ReplayTab = {
   exportStatus: Signal<string | null>;
 };
 
+/** A viewport docked beside the replays, as GPUI docks its renderer and watched-playback panels. */
+type ViewportPanel =
+  | { kind: "renderer"; path: string; alts: string[]; title: string }
+  | { kind: "watched"; replayId: string; title: string };
+
 /** A replay listing with its own dock of replays: the game's replays, or one opened directory. */
 type Workspace = {
   key: string;
   directory: string | null;
   layout: Signal<DockLayout>;
   tabs: Signal<Record<string, ReplayTab>>;
+  viewports: Signal<Record<string, ViewportPanel>>;
   current: Signal<string | null>;
   hover: Signal<PreviewHover | null>;
   rescan: Signal<number>;
@@ -81,10 +87,16 @@ type Workspace = {
 
 export type RenderRequest = { path: string; alts: string[] };
 
+/** What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays. */
+export type ViewportSlots = {
+  renderer: (path: string, alts: string[]) => JSX.Element;
+  watched: (replayId: string) => JSX.Element;
+};
+
 export type ReplayInspectorProps = {
   openPath: string | null;
   openRequestId: number;
-  onRender?: (request: RenderRequest) => void;
+  viewports?: ViewportSlots;
   onRenderMany?: (paths: string[], target: "video" | "clipboard") => void;
   previewSlot?: (path: string, mapName: string) => JSX.Element;
   sessionControl?: () => JSX.Element;
@@ -125,6 +137,7 @@ function makeWorkspace(key: string, directory: string | null): Workspace {
     directory,
     layout: signal<DockLayout>({ center: { type: "split", axis: "horizontal", children: [], sizes: [] } }),
     tabs: signal<Record<string, ReplayTab>>({}),
+    viewports: signal<Record<string, ViewportPanel>>({}),
     current: signal<string | null>(null),
     hover: signal<PreviewHover | null>(null),
     rescan: signal(0),
@@ -265,8 +278,14 @@ function closeTab(ws: Workspace, id: string) {
   discardTab(ws, id);
 }
 
-/** Forgets a tab that left the dock and the document it showed. */
+/** Forgets a tab or viewport that left the dock, and the document a tab showed. */
 function discardTab(ws: Workspace, id: string) {
+  if (ws.viewports()[id]) {
+    const { [id]: _closed, ...open } = ws.viewports();
+    ws.viewports.set(open);
+    if (ws.current() === id) ws.current.set(null);
+    return;
+  }
   const tab = ws.tabs()[id];
   if (!tab) return;
   tab.closed = true;
@@ -275,6 +294,55 @@ function discardTab(ws: Workspace, id: string) {
   const { [id]: _gone, ...rest } = ws.tabs();
   ws.tabs.set(rest);
   if (ws.current() === id) ws.current.set(null);
+}
+
+function sameViewport(left: ViewportPanel, right: ViewportPanel): boolean {
+  if (left.kind === "renderer" && right.kind === "renderer") return left.path === right.path;
+  if (left.kind === "watched" && right.kind === "watched") return left.replayId === right.replayId;
+  return false;
+}
+
+/**
+ * Docks `panel` beside the replay on screen. A viewport already open for the
+ * same replay or window is brought forward; a renderer asked for with other
+ * recordings than it baked is replaced, since those are not on its map.
+ */
+function openViewport(ws: Workspace, panel: ViewportPanel) {
+  const existing = Object.entries(ws.viewports()).find(([, open]) => sameViewport(open, panel));
+  if (existing) {
+    const [id, open] = existing;
+    const stale = open.kind === "renderer" && panel.kind === "renderer" && open.alts.join("\n") !== panel.alts.join("\n");
+    if (stale) {
+      const fresh = `viewport-${nextTabId++}`;
+      ws.viewports.set({ ...ws.viewports(), [fresh]: panel });
+      ws.layout.set(withPanelReplaced(ws.layout(), id, fresh));
+      discardTab(ws, id);
+      ws.current.set(fresh);
+    } else {
+      selectTab(ws, id);
+    }
+    return;
+  }
+  const id = `viewport-${nextTabId++}`;
+  ws.viewports.set({ ...ws.viewports(), [id]: panel });
+  ws.layout.set(withPanelAdded(ws.layout(), ws.current(), id));
+  ws.current.set(id);
+}
+
+function replayStem(path: string): string {
+  return (path.split(/[\\/]/).pop() ?? path).replace(/\.wowsreplay$/i, "");
+}
+
+/** Docks a session window another end is playing in the game's own workspace. */
+export function watchSharedWindow(replayId: string, title: string) {
+  activeWorkspace.set(MAIN);
+  openViewport(main, { kind: "watched", replayId, title });
+}
+
+/** Docks a renderer for `path` in the game's own workspace, for search results and the palette. */
+export function renderInInspector(path: string) {
+  activeWorkspace.set(MAIN);
+  openViewport(main, { kind: "renderer", path, alts: [], title: replayStem(path) });
 }
 
 /**
@@ -693,13 +761,20 @@ function ListingRail() {
 
 function DockTabLabel(props: { ws: Workspace; id: string }) {
   const tab = () => props.ws.tabs()[props.id];
+  const viewport = () => props.ws.viewports()[props.id];
   const title = () => {
     const shown = tab();
-    return shown ? tabTitle(shown) : props.id;
+    if (shown) return tabTitle(shown);
+    return viewport()?.title ?? props.id;
+  };
+  const hint = () => {
+    const shown = viewport();
+    if (tab()) return tab()!.path;
+    return shown?.kind === "renderer" ? shown.path : title();
   };
   return (
     <View
-      tooltip={<Hint text={tab()?.path ?? title()}/>}
+      tooltip={<Hint text={hint()}/>}
       style={{ maxWidth: 300, flexDirection: "row", alignItems: "center", gap: 6 }}
     >
       <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12.5 }}>{title()}</Text>
@@ -1076,7 +1151,7 @@ function ReplayPanel(props: { ws: Workspace; id: string; onRender?: (request: Re
   );
 }
 
-function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) => void }) {
+function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) => void; viewports?: ViewportSlots }) {
   const ws = props.ws;
   return (
     <DockArea
@@ -1087,7 +1162,17 @@ function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) 
         if (active) ws.current.set(panel);
       }}
       onPanelRemove={({ panel }) => discardTab(ws, panel)}
-      renderPanel={(panel) => <ReplayPanel ws={ws} id={panel.id} onRender={props.onRender}/>}
+      renderPanel={(panel) => {
+        const viewport = ws.viewports()[panel.id];
+        if (viewport && props.viewports) {
+          return (
+            <View style={{ flex: 1, minHeight: 0 }}>
+              {viewport.kind === "renderer" ? props.viewports.renderer(viewport.path, viewport.alts) : props.viewports.watched(viewport.replayId)}
+            </View>
+          );
+        }
+        return <ReplayPanel ws={ws} id={panel.id} onRender={props.onRender}/>;
+      }}
       renderTab={(tab) => <DockTabLabel ws={ws} id={tab.panel}/>}
       renderEmpty={() => (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -1163,6 +1248,10 @@ function WorkspaceToolbar(props: { ws: Workspace; view: ReplayInspectorProps }) 
 
 function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
   const ws = props.ws;
+  const slots = props.view.viewports;
+  const render = slots
+    ? (request: RenderRequest) => openViewport(ws, { kind: "renderer", path: request.path, alts: request.alts, title: replayStem(request.path) })
+    : undefined;
   const failure = () => (gameData()?.phase === "failed" ? gameData()?.reason ?? null : null);
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
@@ -1188,10 +1277,10 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
               directory={ws.directory}
               grouping={grouping()}
               rescan={ws.rescan()}
-              canRender={props.view.onRender !== undefined}
+              canRender={render !== undefined}
               onOpen={({ path }) => openReplay(ws, path, false)}
               onOpenInNewTab={({ path }) => openReplay(ws, path, true)}
-              onRender={({ path }) => props.view.onRender?.({ path, alts: [] })}
+              onRender={({ path }) => render?.({ path, alts: [] })}
               onRenderMany={({ paths, target }) => props.view.onRenderMany?.(paths, target)}
               onPreviewHover={({ hover }) => ws.hover.set(hover)}
               onPreviewLeave={() => ws.hover.set(null)}
@@ -1210,7 +1299,7 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
             <If when={listingCollapsed()}>
               <ListingRail/>
             </If>
-            <ReplayDock ws={ws} onRender={props.view.onRender}/>
+            <ReplayDock ws={ws} onRender={render} viewports={slots}/>
           </View>
         </ResizablePanel>
       </ResizablePanelGroup>
