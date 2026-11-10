@@ -8,6 +8,5 @@ pub mod directory;
 pub mod load;
 pub mod overview;
 pub mod plot;
-pub mod plot_image;
 pub mod ships;
 pub mod view;

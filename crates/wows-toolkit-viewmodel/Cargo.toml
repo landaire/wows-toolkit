@@ -53,6 +53,11 @@ sqlx = { workspace = true }
 wows-toolkit-config = { workspace = true }
 # Folding ship names for the palette's and the stats tab's ship searches.
 unidecode = "0.3"
+# Drawing a stats chart into pixels: tiny-skia for the geometry, ab_glyph for
+# the glyphs, and fontdb to find a system face that covers each character.
+tiny-skia = "0.12"
+ab_glyph = "0.2"
+fontdb = "0.23"
 
 # The Windows proxy configuration, which `proxy::resolve_proxy` reads when
 # neither a manual setting nor the environment names one.
