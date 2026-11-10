@@ -5,6 +5,7 @@ import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerSt
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
 import { GameDataCacheSection, GameDataStatus, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
+import { UnpackerView } from "./unpacker";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -427,7 +428,6 @@ const descriptions: Record<string, string> = {
   "player-tracker": "Track selected players and refresh their recent battle records.",
   "search": "Search ships, upgrades, consumables, maps, and other game parameters.",
   "armor-viewer": "Select a ship and inspect its armor model, sections, thicknesses, and visibility controls.",
-  "unpacker": "Browse game packages, preview files, and extract selected content.",
   "settings": "Configure game paths, replay loading, updates, sharing, collaboration, language, theme, and diagnostics.",
 };
 
@@ -955,7 +955,10 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
       </View>
-      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings"}>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "unpacker" ? "flex" : "none" }}>
+        <UnpackerView active={tab().id === "unpacker"} locale={startup.locale}/>
+      </View>
+      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings" && tab().id !== "unpacker"}>
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>

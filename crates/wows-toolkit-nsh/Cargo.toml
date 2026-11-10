@@ -35,7 +35,7 @@ wows-toolkit-config = { path = "../wows-toolkit-config" }
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
-wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv", "models", "json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -2,9 +2,11 @@ pub mod frames;
 pub mod game_data;
 mod native;
 mod replay;
+mod unpacker;
 
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
 pub use replay::{ReplayInspector, ReplayInspectorProps};
+pub use unpacker::{Unpacker, UnpackerProps};
 
 use nsh_core::prelude::{Registry, native_module};
 
@@ -14,4 +16,5 @@ fn native_module(registry: &mut Registry) {
     registry.module::<Toolkit>();
     registry.module::<game_data::GameData>();
     registry.register::<ReplayInspector>();
+    registry.register::<Unpacker>();
 }
