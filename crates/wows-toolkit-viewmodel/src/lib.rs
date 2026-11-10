@@ -21,6 +21,12 @@ pub fn locale() -> String {
     rust_i18n::locale().to_string()
 }
 
+/// `key`'s text in the language this crate is translating into, for a front
+/// end that reads the shared catalogue without an `i18n!` of its own.
+pub fn translate(key: &str) -> String {
+    rust_i18n::t!(key).into_owned()
+}
+
 pub mod armor;
 pub mod breakdown;
 pub mod bug_report;
@@ -28,9 +34,12 @@ pub mod controls;
 pub mod fire_chance;
 pub mod formatting;
 pub mod glyphs;
+pub mod http;
 pub mod index_rows;
 pub mod listing_row;
+pub mod logging;
 pub mod match_stats;
+pub mod palette;
 pub mod personal_rating;
 pub mod player_tracker;
 pub mod preview_dwell;
@@ -38,10 +47,15 @@ pub mod proxy;
 pub mod query_bar;
 pub mod replay_export;
 pub mod search;
+pub mod search_results;
+pub mod search_settings;
 pub mod settings;
+pub mod ship_catalog;
 pub mod stats;
 pub mod tactics;
+pub mod theme;
 pub mod twitch;
+pub mod twitch_chat;
 pub mod unpacker;
 pub mod update;
 pub mod upload;

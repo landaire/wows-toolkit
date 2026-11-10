@@ -24,12 +24,13 @@ use wowsunpack::game_params::types::SkillPointCost;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::ChargeCount;
 
-use super::columns::ReplayColumn;
-use super::model::ChatMessage;
-use super::model::MatchContext;
-use super::model::PlayerRow;
-use super::model::ReplayReportModel;
-use super::model::SkillWarning;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::ChatMessage;
+use wows_toolkit_replay_data::model::ClanColor;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::SkillWarning;
 
 /// A `PlayerRow` with every field at its absent/zero default, mirroring the
 /// test-only `base_row` fixture so the sample rows below can override just the
@@ -173,7 +174,7 @@ fn stat_row(
 }
 
 fn separate(n: u64) -> String {
-    super::model::separate_number(n)
+    wows_toolkit_replay_data::model::separate_number(n)
 }
 
 /// Sample achievements for the self row's expanded Name-column content, so
@@ -528,7 +529,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Division,
             message: "focus the Yamato".to_string(),
             clan_tag: Some("WTK".to_string()),
-            clan_color_rgb: Some(0x3399ff),
+            clan_color: Some(ClanColor::League(0x3399ff)),
         },
         ChatMessage {
             clock: GameClock(45.0),
@@ -537,7 +538,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Team,
             message: "cap is contested".to_string(),
             clan_tag: None,
-            clan_color_rgb: None,
+            clan_color: None,
         },
         ChatMessage {
             clock: GameClock(90.0),
@@ -546,7 +547,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Global,
             message: "gg well played".to_string(),
             clan_tag: Some("RED".to_string()),
-            clan_color_rgb: Some(0xff3333),
+            clan_color: Some(ClanColor::League(0xff3333)),
         },
         ChatMessage {
             clock: GameClock(150.0),
@@ -555,7 +556,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::System,
             message: "IDS_BATTLE_MESSAGE_REINFORCEMENT".to_string(),
             clan_tag: None,
-            clan_color_rgb: None,
+            clan_color: None,
         },
     ]
 }

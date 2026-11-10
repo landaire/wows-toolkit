@@ -4028,29 +4028,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
-dependencies = [
- "anstream",
- "anstyle",
- "env_filter",
- "jiff",
- "log",
-]
-
-[[package]]
 name = "epaint"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18969,7 +18946,6 @@ dependencies = [
 name = "wows-toolkit-gpui"
 version = "1.0.3"
 dependencies = [
- "ab_glyph",
  "anyhow",
  "arboard",
  "bytemuck",
@@ -18979,7 +18955,6 @@ dependencies = [
  "dhat",
  "escaper",
  "filetime",
- "fontdb",
  "futures",
  "gettext",
  "gpui-kit",
@@ -19003,12 +18978,10 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "thiserror 2.0.20",
- "tiny-skia 0.12.0",
  "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "twitch_api",
  "unidecode",
  "walkdir",
  "web-time",
@@ -19025,6 +18998,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-launcher",
+ "wows-toolkit-replay-data",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",
@@ -19069,8 +19043,10 @@ dependencies = [
 name = "wows-toolkit-nsh"
 version = "1.0.3"
 dependencies = [
+ "arboard",
  "base64 0.22.1",
- "env_logger",
+ "humansize",
+ "image",
  "jiff",
  "log",
  "nsh-base",
@@ -19079,8 +19055,11 @@ dependencies = [
  "nsh-engine",
  "nsh-platform-linux",
  "nsh-testing",
+ "parking_lot",
  "png 0.18.1",
+ "reqwest 0.12.28",
  "rust-i18n 3.1.5",
+ "rustls",
  "serde",
  "serde_json",
  "sqlx",
@@ -19089,20 +19068,64 @@ dependencies = [
  "thiserror 2.0.20",
  "tiny-skia 0.12.0",
  "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "url",
+ "wgc-auth",
+ "wgc-catalog",
+ "wgc-download",
+ "wgc-install",
  "wows-core",
+ "wows-data-mgr",
+ "wows-replay-insights",
+ "wows-toolkit-config",
+ "wows-toolkit-hardening",
+ "wows-toolkit-launcher",
+ "wows-toolkit-replay-data",
+ "wows-toolkit-viewmodel",
+ "wows_minimap_renderer",
+ "wows_replays",
+ "wowsunpack",
+ "wt-collab-client",
+ "wt-translations",
+]
+
+[[package]]
+name = "wows-toolkit-replay-data"
+version = "0.1.0"
+dependencies = [
+ "escaper",
+ "filetime",
+ "gettext",
+ "image",
+ "jiff",
+ "reqwest 0.12.28",
+ "rootcause",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wows-battle-world",
+ "wows-data-mgr",
+ "wows-replay-insights",
  "wows-toolkit-config",
  "wows-toolkit-viewmodel",
+ "wows_minimap_renderer",
  "wows_replays",
- "wt-translations",
+ "wowsunpack",
 ]
 
 [[package]]
 name = "wows-toolkit-viewmodel"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "ciborium",
  "escaper",
+ "fontdb",
  "glob",
  "jiff",
  "language-tags",
@@ -19110,19 +19133,26 @@ dependencies = [
  "nalgebra",
  "pickled",
  "regex",
+ "reqwest 0.12.28",
+ "rkyv",
  "roxmltree 0.21.1",
  "rust-i18n 3.1.5",
  "semver",
  "serde",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.20",
  "thousands",
+ "tiny-skia 0.12.0",
  "tokio",
  "tracing",
+ "twitch_api",
+ "unidecode",
  "windows-registry 0.6.1",
  "wows-replay-insights",
  "wows-toolkit-config",
+ "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
  "wt-collab-protocol",
@@ -19386,6 +19416,7 @@ dependencies = [
  "rand 0.10.3",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "web-time",

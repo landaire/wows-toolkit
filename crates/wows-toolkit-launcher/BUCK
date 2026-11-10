@@ -24,6 +24,16 @@ workspace_library(
     deps = LAUNCHER_DEPS,
 )
 
+# The same library with its test constructors, for front ends' tests.
+workspace_library(
+    name = "wows_toolkit_launcher_test_support",
+    crate = "wows_toolkit_launcher",
+    package = "wows-toolkit-launcher",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = LAUNCHER_DEPS,
+)
+
 workspace_test(
     name = "wows_toolkit_launcher_test",
     crate = "wows_toolkit_launcher",

@@ -33,26 +33,21 @@ use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::PerGameStat;
-use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::StatsFilters;
-use wows_toolkit_viewmodel::stats::all_match_groups;
 use wows_toolkit_viewmodel::stats::chart::ChartBar;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSeries;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
-use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
-use wows_toolkit_viewmodel::stats::chart::line_chart_series;
-use wows_toolkit_viewmodel::stats::chart::ships_played;
-use wows_toolkit_viewmodel::stats::filter_games;
-use wows_toolkit_viewmodel::stats::filter_games_per_ship;
+use wows_toolkit_viewmodel::stats::chart_model::ChartId;
+use wows_toolkit_viewmodel::stats::chart_model::ChartModel;
+use wows_toolkit_viewmodel::stats::chart_model::ChartSettings;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
-use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
+use wows_toolkit_viewmodel::stats::plot::PlotPoint;
+use wows_toolkit_viewmodel::stats::plot_image;
 
 use crate::ui::selectable;
 
 use super::plot;
-use super::plot::PlotView;
-use super::plot_image;
 
 /// The settings menu's box. Wide enough for a ship name, and no wider than a
 /// menu needs to be; a session spanning dozens of ships scrolls rather than
@@ -61,81 +56,16 @@ const SETTINGS_MIN_WIDTH: Pixels = px(240.);
 const SETTINGS_MAX_WIDTH: Pixels = px(320.);
 const SETTINGS_MAX_HEIGHT: Pixels = px(420.);
 
-/// Distinguishes one chart pane's element ids from another's.
-pub type ChartId = usize;
-
-/// One chart pane as a settings row remembers it.
-///
-/// The games themselves are not here: they come from the session, and a
-/// chart is a way of looking at them rather than a copy.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ChartSettings {
-    #[serde(default)]
-    pub id: Option<ChartId>,
-    #[serde(default)]
-    pub stat: ChartableStat,
-    #[serde(default)]
-    pub mode: ChartMode,
-    #[serde(default)]
-    pub running: bool,
-    #[serde(default)]
-    pub combined: bool,
-    #[serde(default)]
-    pub show_values: bool,
-    /// The chart's own narrowing, when it was taken off the tab's.
-    #[serde(default)]
-    pub own_filters: Option<StatsFilters>,
-    /// The ships plotted, when the reader picked them. Empty follows the
-    /// session in older settings rows.
-    #[serde(default)]
-    pub selected_ships: Vec<u64>,
-    /// Distinguishes an explicit empty selection from an older empty list.
-    #[serde(default)]
-    pub selection_touched: bool,
-}
-
 pub struct StatsChartPanel {
-    id: ChartId,
-    stat: ChartableStat,
-    mode: ChartMode,
-    /// Whether each point is the average of everything up to it, which is the
-    /// egui pane's "rolling average".
-    running: bool,
-    /// Whether every selected ship is drawn as one line instead of one each.
-    combined: bool,
-    /// Whether each point carries its own value.
-    show_values: bool,
-    games: Vec<PerGameStat>,
-    /// Every recorded game, before any narrowing, so an override can select
-    /// from the whole session rather than from the tab's selection.
-    all_games: Vec<PerGameStat>,
-    /// What the tab's filter bar currently says, followed unless this chart
-    /// has been taken off it.
-    tab_filters: StatsFilters,
-    /// This chart's own narrowing. `None` follows the tab, which is what a
-    /// new chart does; `Some` is an override the reader set here.
-    own_filters: Option<StatsFilters>,
-    ships: Vec<(String, PerformanceInfo)>,
-    /// The ships the games were played in, in the order first played: what
-    /// the settings menu lists.
-    played: Vec<(GameParamId, String)>,
+    /// What the chart plots and every rule between its controls.
+    model: ChartModel,
     ship_search: Entity<InputState>,
     _ship_search_subscription: Subscription,
-    selected_ships: Vec<GameParamId>,
-    /// Until the selection is touched, it follows the games: a session that
-    /// gains a ship plots it rather than leaving it out of a selection made
-    /// before it was played.
-    selection_touched: bool,
-    view: PlotView,
     /// Where the plot last drew, so a copy is the size it is on screen.
     /// `None` before the first frame, which is when there is nothing to copy.
     plot_bounds: Option<Bounds<Pixels>>,
-    /// Where the pointer went down and where it was last seen, while a drag
-    /// is panning the plot.
+    /// Where the pointer was last seen while a drag is panning the plot.
     drag: Option<Point<Pixels>>,
-    /// Absent until the expected values are cached, which is what decides
-    /// whether personal rating is offered at all.
-    personal_rating: Option<Arc<PersonalRatingData>>,
     /// The tab's dock, for the header control that collapses the chart dock.
     dock: WeakEntity<DockArea>,
     focus_handle: FocusHandle,
@@ -153,26 +83,11 @@ impl StatsChartPanel {
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.stats.search_ships").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |_this, _state, _event: &InputEvent, cx| cx.notify());
         Self {
-            id,
-            stat: ChartableStat::default(),
-            mode: ChartMode::default(),
-            running: false,
-            combined: false,
-            show_values: false,
-            games: Vec::new(),
-            all_games: Vec::new(),
-            tab_filters: StatsFilters::default(),
-            own_filters: None,
-            ships: Vec::new(),
-            played: Vec::new(),
+            model: ChartModel::new(id),
             ship_search,
             _ship_search_subscription: ship_search_subscription,
-            selected_ships: Vec::new(),
-            selection_touched: false,
-            view: PlotView::default(),
             plot_bounds: None,
             drag: None,
-            personal_rating: None,
             dock,
             focus_handle: cx.focus_handle(),
         }
@@ -182,202 +97,70 @@ impl StatsChartPanel {
     /// the table turns out to be unavailable falls back rather than plotting
     /// a run of zeroes.
     pub fn set_personal_rating(&mut self, table: Option<Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
-        self.personal_rating = table;
-        if self.stat.requires_personal_rating() && !self.can_plot_personal_rating() {
-            self.stat = ChartableStat::Damage;
-        }
+        self.model.set_personal_rating(table);
         cx.notify();
     }
 
-    fn can_plot_personal_rating(&self) -> bool {
-        self.personal_rating.is_some()
-    }
-
-    /// Adopts the games the filter bar selected. Both shapes are kept so
-    /// switching mode does not need the tab to push the data again.
     /// Says the chart is set up differently now, so the tab remembers it.
     fn settings_changed(&self, cx: &mut Context<Self>) {
         cx.emit(ChartSettingsChanged);
+        cx.notify();
     }
 
     /// How this chart is currently set up.
     pub fn settings(&self) -> ChartSettings {
-        ChartSettings {
-            id: Some(self.id),
-            stat: self.stat,
-            mode: self.mode,
-            running: self.running,
-            combined: self.combined,
-            show_values: self.show_values,
-            own_filters: self.own_filters.clone(),
-            selected_ships: if self.selection_touched {
-                self.selected_ships.iter().map(|id| id.raw()).collect()
-            } else {
-                Vec::new()
-            },
-            selection_touched: self.selection_touched,
-        }
+        self.model.settings()
     }
 
     /// Puts `settings` back on this chart.
-    ///
-    /// Called before the session is handed over, so the narrowing is in place
-    /// the first time the games are filtered.
     pub fn apply_settings(&mut self, settings: ChartSettings, cx: &mut Context<Self>) {
-        if let Some(id) = settings.id {
-            self.id = id;
-        }
-        self.stat = settings.stat;
-        self.mode = settings.mode;
-        self.running = settings.running;
-        self.combined = settings.combined;
-        self.show_values = settings.show_values;
-        self.own_filters = settings.own_filters;
-        if settings.selection_touched || !settings.selected_ships.is_empty() {
-            self.selected_ships = settings.selected_ships.into_iter().map(GameParamId::from).collect();
-            self.selection_touched = true;
-        }
+        self.model.apply_settings(settings);
         cx.notify();
     }
 
     pub fn id(&self) -> ChartId {
-        self.id
+        self.model.id()
     }
 
     /// Adopts the whole session and the tab's filters.
-    ///
-    /// Both, not just the selection the tab made: a chart the reader has
-    /// taken off the tab's filters narrows the session itself, and one that
-    /// has not needs the tab's answer.
     pub fn set_games(&mut self, all_games: &[PerGameStat], tab_filters: &StatsFilters, cx: &mut Context<Self>) {
-        self.all_games = all_games.to_vec();
-        self.tab_filters = tab_filters.clone();
-        self.rebuild(cx);
-    }
-
-    /// Every match group the session holds, which is what an override can
-    /// narrow to.
-    fn offered_modes(&self) -> Vec<String> {
-        all_match_groups(&self.all_games).into_iter().collect()
-    }
-
-    /// The filters this chart is drawn under: its own if it has any, the
-    /// tab's otherwise.
-    fn active_filters(&self) -> &StatsFilters {
-        self.own_filters.as_ref().unwrap_or(&self.tab_filters)
-    }
-
-    fn effective_filters(&self) -> StatsFilters {
-        let mut filters = self.active_filters().clone();
-        filters.limit = self.tab_filters.limit;
-        filters
-    }
-
-    /// Whether this chart narrows the session itself rather than following
-    /// the tab's filter bar.
-    fn overrides_tab(&self) -> bool {
-        self.own_filters.is_some()
-    }
-
-    /// Takes this chart off the tab's filters, or puts it back on them.
-    ///
-    /// Taking it off starts from what the tab currently says, so the plot
-    /// does not jump the moment the override is turned on.
-    fn set_overrides_tab(&mut self, overrides: bool, cx: &mut Context<Self>) {
-        self.own_filters = overrides.then(|| self.tab_filters.clone());
-        self.settings_changed(cx);
-        self.rebuild(cx);
-    }
-
-    fn set_own_division(&mut self, division: DivisionFilter, cx: &mut Context<Self>) {
-        let Some(filters) = self.own_filters.as_mut() else { return };
-        filters.division = division;
-        self.settings_changed(cx);
-        self.rebuild(cx);
-    }
-
-    fn toggle_own_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
-        let Some(filters) = self.own_filters.as_mut() else { return };
-        if !filters.game_modes.remove(mode) {
-            filters.game_modes.insert(mode.to_string());
-        }
-        self.settings_changed(cx);
-        self.rebuild(cx);
-    }
-
-    fn clear_own_modes(&mut self, cx: &mut Context<Self>) {
-        let Some(filters) = self.own_filters.as_mut() else { return };
-        if filters.game_modes.is_empty() {
-            return;
-        }
-        filters.game_modes.clear();
-        self.settings_changed(cx);
-        self.rebuild(cx);
-    }
-
-    /// Re-narrows the session and rebuilds everything drawn from it.
-    fn rebuild(&mut self, cx: &mut Context<Self>) {
-        // Per ship, as the egui charts count it (`ui/stats_tab.rs:541`): a chart
-        // of ten ships under "last 25" plots 25 battles in each.
-        let games = filter_games_per_ship(&self.all_games, &self.effective_filters());
-        self.ships = per_ship_performance_by_id(&games);
-        self.games = games.iter().map(|game| (*game).clone()).collect();
-        // The chart keeps up to N games per ship, but its picker follows the
-        // tab's last N games for the session. Otherwise old ships remain
-        // offered after the recent-games limit is enabled.
-        let recent_games = filter_games(&self.all_games, &self.effective_filters());
-        self.played = ships_played(&recent_games);
-        // Listed by name: a long session's picker has no other order anyone
-        // could look a ship up in.
-        self.played.sort_by(|left, right| left.1.cmp(&right.1));
-        if !self.selection_touched {
-            self.selected_ships = self.played.iter().map(|(id, _)| *id).collect();
-        }
+        self.model.set_games(all_games, tab_filters);
         cx.notify();
     }
 
-    /// Statistics this pane can plot.
-    ///
-    /// Personal rating is offered only once the expected-values table is
-    /// cached; without it there is nothing to rate against. Win rate and
-    /// personal rating carry no meaning for a single game, so a line plots
-    /// them only as a running figure -- the same rule the egui pane applies.
-    fn selectable_stats(&self) -> Vec<ChartableStat> {
-        ChartableStat::ALL
-            .into_iter()
-            .filter(|stat| !stat.requires_personal_rating() || self.can_plot_personal_rating())
-            .filter(|stat| self.mode == ChartMode::Bar || stat.is_per_game() || self.running || self.combined)
-            .collect()
+    fn set_overrides_tab(&mut self, overrides: bool, cx: &mut Context<Self>) {
+        self.model.set_overrides_tab(overrides);
+        self.settings_changed(cx);
+    }
+
+    fn set_own_division(&mut self, division: DivisionFilter, cx: &mut Context<Self>) {
+        if self.model.set_own_division(division) {
+            self.settings_changed(cx);
+        }
+    }
+
+    fn toggle_own_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
+        if self.model.toggle_own_mode(mode) {
+            self.settings_changed(cx);
+        }
+    }
+
+    fn clear_own_modes(&mut self, cx: &mut Context<Self>) {
+        if self.model.clear_own_modes() {
+            self.settings_changed(cx);
+        }
     }
 
     /// The lines to draw, empty in bar mode.
     fn series(&self) -> Vec<ChartSeries> {
-        if self.mode == ChartMode::Bar {
-            return Vec::new();
-        }
-        let games: Vec<&PerGameStat> = self.games.iter().collect();
-        line_chart_series(
-            &games,
-            self.stat,
-            &self.selected_ships,
-            self.personal_rating.as_deref(),
-            self.running || self.combined,
-            self.combined,
-        )
+        self.model.series()
     }
 
     /// The bars to draw, empty in line mode.
     fn bars(&self) -> Vec<ChartBar> {
-        if self.mode == ChartMode::Line {
-            return Vec::new();
-        }
-        let mut ships = self.ships.clone();
-        ships.sort_by(|left, right| left.0.cmp(&right.0));
-        bar_chart_series(&ships, self.stat, &self.selected_ships, self.personal_rating.as_deref())
+        self.model.bars()
     }
 
-    /// What the value axis is called: the statistic, plus how it is being
-    /// read when that is not the raw per-game figure.
     /// Draws the chart again into an image and puts it on the clipboard.
     ///
     /// Drawn rather than captured: GPUI will not hand back a rendered window
@@ -398,28 +181,24 @@ impl StatsChartPanel {
         if series.is_empty() && bars.is_empty() {
             return;
         }
-        let x_label = if self.mode == ChartMode::Bar {
-            t!("ui.stats.column_ship").into_owned()
-        } else {
-            t!("ui.stats.axis_game").into_owned()
-        };
-        let value_label = self.value_label();
-        let plot = plot::Plot {
+        let x_label = self.model.x_label();
+        let value_label = self.model.value_label();
+        let plot = wows_toolkit_viewmodel::stats::plot::Plot {
             series: &series,
             bars: &bars,
             x_label: &x_label,
             y_label: &value_label,
-            show_values: self.show_values,
-            view: self.view,
+            show_values: self.model.show_values(),
+            view: self.model.view(),
         };
 
-        let theme = cx.theme();
-        let colors = plot::Colors { axis: theme.border, grid: theme.border.opacity(0.4), text: theme.muted_foreground };
-
-        let Some((width, height, pixels)) = plot_image::render(&plot, colors, width, height) else {
+        let rendered =
+            plot_image::render(&plot, plot::colors(cx), plot_image::COPY_BACKGROUND, width, height, 1.0);
+        let Some((width, height, mut pixels)) = rendered else {
             crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
             return;
         };
+        plot_image::unpremultiply(&mut pixels);
 
         // GPUI's clipboard carries no image format, so this goes through
         // `arboard` directly, as the file-list copy in the replay browser
@@ -434,109 +213,41 @@ impl StatsChartPanel {
         }
     }
 
-    fn value_label(&self) -> String {
-        if self.mode == ChartMode::Bar {
-            return t!("ui.stats.series_average", stat = self.stat.label()).into_owned();
-        }
-        if self.running || self.combined {
-            return t!("ui.stats.series_running", stat = self.stat.label()).into_owned();
-        }
-        self.stat.label().to_string()
-    }
-
-    fn tab_title(&self) -> String {
-        let stat = self.stat.label();
-        match self.mode {
-            ChartMode::Bar if self.stat != ChartableStat::WinRate => t!("stat.avg_prefix", name = stat).into_owned(),
-            ChartMode::Bar => stat,
-            ChartMode::Line if self.combined => {
-                format!("{stat} {}", t!("chart.combined_suffix"))
-            }
-            ChartMode::Line if self.running => {
-                format!("{stat} {}", t!("chart.rolling_average_suffix"))
-            }
-            ChartMode::Line => stat,
-        }
-    }
-
     fn set_mode(&mut self, mode: ChartMode, cx: &mut Context<Self>) {
-        if self.mode == mode {
-            return;
+        if self.model.set_mode(mode) {
+            self.settings_changed(cx);
         }
-        self.mode = mode;
-        self.settle_stat();
-        self.view.reset();
-        self.settings_changed(cx);
-        cx.notify();
     }
 
     pub(crate) fn set_stat(&mut self, stat: ChartableStat, cx: &mut Context<Self>) {
-        if self.stat == stat {
-            return;
+        if self.model.set_stat(stat) {
+            self.settings_changed(cx);
         }
-        self.stat = stat;
-        self.view.reset();
-        self.settings_changed(cx);
-        cx.notify();
     }
 
     fn set_combined(&mut self, combined: bool, cx: &mut Context<Self>) {
-        self.combined = combined;
-        // One line over every ship is a line, whatever the mode said.
-        if combined {
-            self.mode = ChartMode::Line;
-        }
-        self.settle_stat();
-        self.view.reset();
+        self.model.set_combined(combined);
         self.settings_changed(cx);
-        cx.notify();
     }
 
     fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
-        self.running = running;
-        self.settle_stat();
-        self.view.reset();
+        self.model.set_running(running);
         self.settings_changed(cx);
-        cx.notify();
     }
 
     fn set_show_values(&mut self, show: bool, cx: &mut Context<Self>) {
-        self.show_values = show;
+        self.model.set_show_values(show);
         self.settings_changed(cx);
-        cx.notify();
-    }
-
-    /// Falls back to a statistic the current mode can actually plot.
-    fn settle_stat(&mut self) {
-        if !self.selectable_stats().contains(&self.stat) {
-            self.stat = ChartableStat::Damage;
-        }
     }
 
     fn toggle_ship(&mut self, ship: GameParamId, cx: &mut Context<Self>) {
-        self.selection_touched = true;
-        if let Some(at) = self.selected_ships.iter().position(|selected| *selected == ship) {
-            self.selected_ships.remove(at);
-        } else {
-            self.selected_ships.push(ship);
-        }
+        self.model.toggle_ship(ship);
         self.settings_changed(cx);
-        cx.notify();
     }
 
     fn set_ships_selected(&mut self, ships: &[GameParamId], selected: bool, cx: &mut Context<Self>) {
-        self.selection_touched = true;
-        if selected {
-            for ship in ships {
-                if !self.selected_ships.contains(ship) {
-                    self.selected_ships.push(*ship);
-                }
-            }
-        } else {
-            self.selected_ships.retain(|ship| !ships.contains(ship));
-        }
+        self.model.set_ships_selected(ships, selected);
         self.settings_changed(cx);
-        cx.notify();
     }
 
     fn start_drag(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -545,7 +256,7 @@ impl StatsChartPanel {
         }
         if event.click_count >= 2 {
             self.drag = None;
-            self.view.reset();
+            self.model.view_mut().reset();
             cx.notify();
             return;
         }
@@ -554,7 +265,7 @@ impl StatsChartPanel {
 
     fn drag_view(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(last) = self.drag else { return };
-        self.view.drag(event.position.x - last.x, event.position.y - last.y);
+        self.model.view_mut().drag((event.position.x - last.x).as_f32(), (event.position.y - last.y).as_f32());
         self.drag = Some(event.position);
         cx.notify();
     }
@@ -570,19 +281,25 @@ impl StatsChartPanel {
         if delta == 0.0 {
             return;
         }
-        self.view.zoom_about(if delta > 0.0 { 1.1 } else { 1.0 / 1.1 }, event.position);
+        let cursor = PlotPoint::new(event.position.x.as_f32(), event.position.y.as_f32());
+        self.model.view_mut().zoom_about(if delta > 0.0 { 1.1 } else { 1.0 / 1.1 }, cursor);
         cx.notify();
     }
 
     fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let id = self.id;
+        let id = self.model.id().0;
         let entity = cx.entity();
-        let stats = self.selectable_stats();
-        let (stat, mode, running, combined, show_values) =
-            (self.stat, self.mode, self.running, self.combined, self.show_values);
-        let overrides = self.overrides_tab();
-        let active = self.effective_filters();
-        let modes = self.offered_modes();
+        let stats = self.model.selectable_stats();
+        let (stat, mode, running, combined, show_values) = (
+            self.model.stat(),
+            self.model.mode(),
+            self.model.running(),
+            self.model.combined(),
+            self.model.show_values(),
+        );
+        let overrides = self.model.overrides_tab();
+        let active = self.model.effective_filters();
+        let modes = self.model.offered_modes();
 
         let trigger = Button::new(("chart-settings", id))
             .child(crate::icons::icon(crate::icons::GEAR_FINE))
@@ -753,13 +470,13 @@ impl StatsChartPanel {
     }
 
     fn ship_filter_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let id = self.id;
+        let id = self.model.id().0;
         let entity = cx.entity();
-        let played = self.played.clone();
+        let played = self.model.played().to_vec();
         let ship_search = self.ship_search.clone();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
-        let selected = self.selected_ships.clone();
+        let normalized_query = wows_toolkit_viewmodel::search::normalize_ship_search(&ship_query);
+        let selected = self.model.selected_ships().to_vec();
         let selected_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
         let total_count = played.len();
         let selection_count = t!("ui.stats.ship_selection_count", selected = selected_count, total = total_count);
@@ -778,7 +495,8 @@ impl StatsChartPanel {
             let visible: Vec<_> = played
                 .iter()
                 .filter(|(_, name)| {
-                    normalized_query.is_empty() || super::normalize_ship_search(name).contains(&normalized_query)
+                    normalized_query.is_empty()
+                        || wows_toolkit_viewmodel::search::normalize_ship_search(name).contains(&normalized_query)
                 })
                 .cloned()
                 .collect();
@@ -895,7 +613,7 @@ impl BasePanel for StatsChartPanel {
         gpui_kit::component::dock::PanelState {
             panel_name: "StatsChartPanel".to_string(),
             children: Vec::new(),
-            info: gpui_kit::component::dock::PanelInfo::panel(serde_json::json!({ "id": self.id })),
+            info: gpui_kit::component::dock::PanelInfo::panel(serde_json::json!({ "id": self.model.id() })),
         }
     }
 }
@@ -905,17 +623,17 @@ impl Panel for StatsChartPanel {
         h_flex()
             .gap_1()
             .items_center()
-            .child(crate::icons::icon(if self.mode == ChartMode::Line {
+            .child(crate::icons::icon(if self.model.mode() == ChartMode::Line {
                 crate::icons::CHART_LINE
             } else {
                 crate::icons::CHART_BAR
             }))
-            .child(self.tab_title())
+            .child(self.model.tab_title())
     }
 
     fn toolbar_buttons(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
         let collapse = crate::ui::dock_collapse_button(
-            ("chart-collapse-dock", self.id),
+            ("chart-collapse-dock", self.model.id().0),
             &self.dock,
             PanelId::from(cx.entity_id()),
             cx,
@@ -928,7 +646,7 @@ impl Panel for StatsChartPanel {
 impl Render for StatsChartPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
-        let id = self.id;
+        let id = self.model.id().0;
         let series = self.series();
         let bars = self.bars();
         let empty = series.is_empty() && bars.is_empty();
@@ -953,27 +671,23 @@ impl Render for StatsChartPanel {
                         .on_click(cx.listener(|this, _event, window, cx| this.copy_as_image(window, cx))),
                 )
             })
-            .when(!self.view.is_default(), |this| {
+            .when(!self.model.view().is_default(), |this| {
                 this.child(
                     Button::new(("chart-reset-view", id))
                         .label(t!("ui.stats.reset_view").to_string())
                         .compact()
                         .xsmall()
                         .on_click(cx.listener(|this, _event, _window, cx| {
-                            this.view.reset();
+                            this.model.view_mut().reset();
                             cx.notify();
                         })),
                 )
             });
 
-        let x_label = if self.mode == ChartMode::Bar {
-            t!("ui.stats.column_ship").into_owned()
-        } else {
-            t!("ui.stats.axis_game").into_owned()
-        };
-        let value_label = self.value_label();
-        let view = self.view;
-        let show_values = self.show_values;
+        let x_label = self.model.x_label();
+        let value_label = self.model.value_label();
+        let view = self.model.view();
+        let show_values = self.model.show_values();
         let measured = cx.entity();
         let surface = canvas(
             move |bounds, _window, cx| {
@@ -986,7 +700,7 @@ impl Render for StatsChartPanel {
             },
             move |bounds, _prepaint, window, cx| {
                 plot::paint(
-                    &plot::Plot {
+                    &wows_toolkit_viewmodel::stats::plot::Plot {
                         series: &series,
                         bars: &bars,
                         x_label: &x_label,
@@ -1018,7 +732,7 @@ impl Render for StatsChartPanel {
             // A bar chart is a comparison of whole bars, not a curve to be
             // read into: the egui bar plot refuses drag, zoom and scroll for
             // the same reason (`ui/session_stats_chart.rs`).
-            let pannable = self.mode == ChartMode::Line;
+            let pannable = self.model.mode() == ChartMode::Line;
             div()
                 .id(("chart-surface", id))
                 .size_full()
@@ -1046,47 +760,8 @@ impl Render for StatsChartPanel {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .text_center()
-                    .child(self.value_label()),
+                    .child(self.model.value_label()),
             )
             .child(div().flex_1().min_h(px(0.)).p_2().child(body))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ChartSettings;
-    use wows_toolkit_viewmodel::stats::DivisionFilter;
-    use wows_toolkit_viewmodel::stats::GameLimit;
-    use wows_toolkit_viewmodel::stats::StatsFilters;
-    use wows_toolkit_viewmodel::stats::chart::ChartMode;
-    use wows_toolkit_viewmodel::stats::chart::ChartableStat;
-
-    /// A chart comes back set up the way it was left, override and ship
-    /// selection included.
-    #[test]
-    fn a_chart_round_trips_through_the_settings_row() {
-        let saved = ChartSettings {
-            id: Some(7),
-            stat: ChartableStat::Frags,
-            mode: ChartMode::Bar,
-            running: true,
-            combined: true,
-            show_values: true,
-            own_filters: Some(StatsFilters {
-                limit: GameLimit::Recent(25),
-                division: DivisionFilter::DivOnly,
-                game_modes: ["RandomBattle".to_string()].into_iter().collect(),
-            }),
-            selected_ships: vec![4288575440, 3541279184],
-            selection_touched: true,
-        };
-
-        let json = serde_json::to_string(&saved).expect("a chart serializes");
-        let read: ChartSettings = serde_json::from_str(&json).expect("and reads back");
-        assert_eq!(read, saved);
-
-        // A row written before a field existed still reads, on the defaults.
-        let older: ChartSettings = serde_json::from_str("{}").expect("an empty row reads");
-        assert_eq!(older, ChartSettings::default());
     }
 }

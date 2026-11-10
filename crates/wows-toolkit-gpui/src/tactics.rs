@@ -6,7 +6,6 @@
 //! renderer, with the capture points of one of the ship's own game modes on it
 //! rather than a battle's.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
@@ -29,46 +28,48 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::MINIMAP_SIZE;
-use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_replay_insights::cap_layout::CapLayout;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
+use wows_toolkit_viewmodel::tactics::board;
+use wows_toolkit_viewmodel::tactics::board::BoardCapPoint;
+use wows_toolkit_viewmodel::tactics::board::BoardState;
+use wows_toolkit_viewmodel::tactics::board::CapDrag;
+use wows_toolkit_viewmodel::tactics::board::DEFAULT_INK;
+use wows_toolkit_viewmodel::tactics::board::DEFAULT_NIB;
+use wows_toolkit_viewmodel::tactics::board::HISTORY_DEPTH;
+use wows_toolkit_viewmodel::tactics::board::INKS;
+use wows_toolkit_viewmodel::tactics::board::Letterbox;
+use wows_toolkit_viewmodel::tactics::board::MAX_CAP_RADIUS;
+use wows_toolkit_viewmodel::tactics::board::MAX_NIB;
+use wows_toolkit_viewmodel::tactics::board::MIN_CAP_RADIUS;
+use wows_toolkit_viewmodel::tactics::board::MIN_NIB;
+use wows_toolkit_viewmodel::tactics::board::MapChoice;
+use wows_toolkit_viewmodel::tactics::board::MapChoiceKey;
+use wows_toolkit_viewmodel::tactics::board::ModeChoice;
+use wows_toolkit_viewmodel::tactics::board::NEW_CAP_RADIUS;
+use wows_toolkit_viewmodel::tactics::board::PlacedShip;
+use wows_toolkit_viewmodel::tactics::board::RADIUS_STEP_KM;
+use wows_toolkit_viewmodel::tactics::board::RANGE_CIRCLES;
+use wows_toolkit_viewmodel::tactics::board::RangeCircle;
+use wows_toolkit_viewmodel::tactics::board::SHAPE_REACH_PX;
+use wows_toolkit_viewmodel::tactics::board::ScanProgress;
+use wows_toolkit_viewmodel::tactics::board::WORLD_UNITS_PER_KM;
+use wows_toolkit_viewmodel::tactics::board::ZOOM_PER_NOTCH;
+use wows_toolkit_viewmodel::tactics::board::caps_of;
+use wows_toolkit_viewmodel::tactics::board::halo;
+use wows_toolkit_viewmodel::tactics::board::radius_km;
+use wows_toolkit_viewmodel::tactics::board::team_color;
+use wows_toolkit_viewmodel::tactics::board::unique_map_for_space;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
-use wowsunpack::game_types::WorldPos;
 
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///
 /// Raised to the app, which holds the copy a board opened later starts from.
 pub struct LayoutsFound(pub CapLayoutDb);
-
-/// One map the board can be set on.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MapChoice {
-    /// The id the cap layouts are keyed by. `None` for a map found in the game's
-    /// own art with no layout recorded for it yet, which can still be drawn on
-    /// and which a later scan can give an id to.
-    pub map_id: Option<u32>,
-    /// The space name, such as `spaces/16_OC_bees_to_honey`.
-    pub space: String,
-    /// What the reader is shown.
-    pub label: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MapChoiceKey {
-    map_id: Option<u32>,
-    space: String,
-}
-
-impl From<&MapChoice> for MapChoiceKey {
-    fn from(map: &MapChoice) -> Self {
-        Self { map_id: map.map_id, space: map.space.clone() }
-    }
-}
 
 #[derive(Clone)]
 struct MapItem {
@@ -77,16 +78,12 @@ struct MapItem {
     title: String,
 }
 
-impl MapItem {
-    fn new(choice: MapChoice, disambiguate: bool) -> Self {
-        let key = MapChoiceKey::from(&choice);
-        let title = if disambiguate {
-            format!("{} ({})", choice.label, choice.map_id.map_or_else(|| choice.space.clone(), |id| id.to_string()))
-        } else {
-            choice.label.clone()
-        };
-        Self { choice, key, title }
-    }
+fn map_items_for_picker(maps: &[MapChoice]) -> Vec<MapItem> {
+    maps.iter()
+        .cloned()
+        .zip(board::map_titles(maps))
+        .map(|(choice, title)| MapItem { key: MapChoiceKey::from(&choice), choice, title })
+        .collect()
 }
 
 impl SearchableListItem for MapItem {
@@ -101,19 +98,8 @@ impl SearchableListItem for MapItem {
     }
 
     fn matches(&self, query: &str) -> bool {
-        let query = query.trim().to_lowercase();
-        self.title.to_lowercase().contains(&query)
-            || self.choice.label.to_lowercase().contains(&query)
-            || self.choice.space.to_lowercase().contains(&query)
-            || self.choice.map_id.is_some_and(|id| id.to_string().contains(&query))
+        self.choice.matches(&self.title, query)
     }
-}
-
-/// One game mode the chosen map has a recorded layout for.
-#[derive(Clone, Debug)]
-pub struct ModeChoice {
-    pub key: CapLayoutKey,
-    pub label: String,
 }
 
 #[derive(Clone)]
@@ -138,349 +124,14 @@ impl SearchableListItem for ModeItem {
     }
 }
 
-/// A capture point on the board.
-///
-/// Editable, unlike the layout it was seeded from: moving a cap and widening
-/// its zone is the question the board exists to ask.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoardCapPoint {
-    /// What a session calls this zone. Its place in the list is not that: a
-    /// peer's list is its own, and a zone moved by one has to be the same zone
-    /// on every board.
-    pub id: crate::collab::CapPointId,
-    /// Its place in the alphabet: A, B, C.
-    pub index: usize,
-    /// Where it sits, in the world's own coordinates.
-    pub world_x: f32,
-    pub world_z: f32,
-    /// How wide the zone is, in world units.
-    pub radius: f32,
-    /// Which team holds it at the start. `None` for a neutral one.
-    pub team: Option<wows_replays::types::TeamId>,
-    /// Whether it came from a recorded layout rather than from the reader.
-    ///
-    /// A frozen cap is where the game put it, so it is not dragged or deleted:
-    /// the egui board holds its own the same way.
-    pub frozen: bool,
-}
-
-impl BoardCapPoint {
-    fn from_layout(point: &wows_replay_insights::cap_layout::CapPointLayout) -> Self {
-        Self {
-            index: point.index,
-            world_x: point.position.x,
-            world_z: point.position.z,
-            radius: point.radius.value(),
-            // The layout states a neutral cap as a negative team, which is an
-            // absence rather than a team.
-            team: (point.team_id >= 0).then(|| wows_replays::types::TeamId::new(point.team_id)),
-            frozen: true,
-            id: crate::collab::CapPointId::fresh(),
-        }
-    }
-
-    fn from_preset(saved: &preset::PresetCapPoint) -> Self {
-        Self {
-            index: saved.index,
-            world_x: saved.world_x,
-            world_z: saved.world_z,
-            radius: saved.radius,
-            team: (saved.team_id >= 0).then(|| wows_replays::types::TeamId::new(saved.team_id)),
-            frozen: saved.frozen,
-            id: crate::collab::CapPointId::fresh(),
-        }
-    }
-
-    fn to_preset(&self) -> preset::PresetCapPoint {
-        preset::PresetCapPoint {
-            index: self.index,
-            world_x: self.world_x,
-            world_z: self.world_z,
-            radius: self.radius,
-            // A cap nobody holds is stated as a negative team, which is the
-            // form the egui board writes and reads.
-            team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
-            frozen: self.frozen,
-        }
-    }
-
-    /// This zone as a session states it.
-    fn to_wire(&self) -> wt_collab_client::protocol::WireCapPoint {
-        wt_collab_client::protocol::WireCapPoint {
-            id: self.id.raw(),
-            index: self.index as u32,
-            world_x: self.world_x,
-            world_z: self.world_z,
-            radius: self.radius,
-            // A zone nobody holds is stated as a negative team, which is the
-            // form the wire and the egui board both use.
-            team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
-            frozen: self.frozen,
-        }
-    }
-
-    /// The same, read back.
-    fn from_wire(wire: &wt_collab_client::protocol::WireCapPoint) -> Self {
-        Self {
-            id: crate::collab::CapPointId::new(wire.id),
-            index: wire.index as usize,
-            world_x: wire.world_x,
-            world_z: wire.world_z,
-            radius: wire.radius,
-            team: (wire.team_id >= 0).then(|| wows_replays::types::TeamId::new(wire.team_id)),
-            frozen: wire.frozen,
-        }
-    }
-
-    /// The letter this cap is labelled with.
-    fn letter(&self) -> String {
-        char::from(b'A' + (self.index.min(25) as u8)).to_string()
-    }
-
-    /// What the renderer draws it as.
-    fn command(&self, map: &wows_minimap_renderer::MapInfo) -> DrawCommand {
-        let at = map.world_to_minimap(WorldPos::new(self.world_x, 0.0, self.world_z), MINIMAP_SIZE);
-        DrawCommand::CapturePoint {
-            pos: MinimapPos { x: at.x, y: at.y },
-            radius: map.world_distance_to_minimap(self.radius, MINIMAP_SIZE).round() as i32,
-            color: team_color(self.team),
-            alpha: CAP_FILL_ALPHA,
-            label: self.letter(),
-            progress: 0.0,
-            invader_color: None,
-            // No flag: a board's capture points are the reader's to place, and
-            // a base's flag belongs to the battle that had one.
-            flag_icon: None,
-        }
-    }
-}
-
-/// How solid a capture zone's fill is drawn, as the battle draws its own.
-const CAP_FILL_ALPHA: f32 = 0.25;
-
-/// What a team's capture zone is coloured: the reader's own team, the enemy, and
-/// one nobody holds.
-///
-/// The same two the renderer paints a friendly and an enemy marker
-/// (`wt_collab_client::geometry`), so one side reads as one colour whether it is
-/// a zone or a ship.
-const FRIENDLY_COLOR: [u8; 3] = [76, 232, 170];
-const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
-const NEUTRAL_COLOR: [u8; 3] = [255, 255, 255];
-
-/// The board reads team zero as the reader's own, which is the team a replay
-/// records the recording player on.
-fn team_color(team: Option<wows_replays::types::TeamId>) -> [u8; 3] {
-    match team.map(|team| team.raw()) {
-        None => NEUTRAL_COLOR,
-        Some(0) => FRIENDLY_COLOR,
-        Some(_) => ENEMY_COLOR,
-    }
-}
-
-/// How wide a world unit is: the game measures in 30-metre units, so a zone
-/// stated in kilometres is that many thirty-metre steps.
-const WORLD_UNITS_PER_KM: f32 = 1000.0 / 30.0;
-
-/// How far one press moves a zone's width, in kilometres.
-const RADIUS_STEP_KM: f32 = 0.5;
-
-/// A zone's width in the units it is talked about in.
-fn radius_km(radius: f32) -> f32 {
-    radius / WORLD_UNITS_PER_KM
-}
-
-/// The same shape, drawn wider and dimmer: what sits under a picked one to say
-/// it is picked.
-fn halo(annotation: &wt_collab_client::types::Annotation) -> wt_collab_client::types::Annotation {
-    use wt_collab_client::types::Annotation;
-
-    let mut halo = annotation.clone();
-    let widened = |width: &mut f32| *width = (*width + HALO_WIDTH).max(HALO_WIDTH);
-    let tinted = |color: &mut [u8; 4]| *color = HALO_INK;
-    match &mut halo {
-        // A ship marker is drawn from its species rather than stroked, so it
-        // has no width to widen; it reads as picked by the handles on it.
-        Annotation::Ship { .. } => {}
-        Annotation::FreehandStroke { color, width, .. }
-        | Annotation::Line { color, width, .. }
-        | Annotation::Arrow { color, width, .. }
-        | Annotation::Measurement { color, width, .. } => {
-            tinted(color);
-            widened(width);
-        }
-        Annotation::Circle { color, width, filled, .. }
-        | Annotation::Rectangle { color, width, filled, .. }
-        | Annotation::Triangle { color, width, filled, .. } => {
-            tinted(color);
-            widened(width);
-            // Hollow, so the shape it is under is still read through it.
-            *filled = false;
-        }
-    }
-    halo
-}
-
-/// How much wider a picked shape's halo is drawn, and in what.
-const HALO_WIDTH: f32 = 4.0;
-const HALO_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0x80];
-
-/// Where the drawn map landed in the element that painted it, and how much it
-/// was scaled to fit.
-///
-/// The frame is drawn to fit without stretching, so it is letterboxed: its top
-/// left corner is not the element's own. Held apart from the board so the two
-/// directions cannot drift: a handle placed by one and pressed by the other has
-/// to agree to the pixel.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Letterbox {
-    left: f32,
-    top: f32,
-    scale: f32,
-    /// The frame's own size, which is what a point is held inside.
-    frame: (f32, f32),
-}
-
-impl Letterbox {
-    /// `None` for a frame with no extent, which nothing can be placed against.
-    fn fitting(bounds: Bounds<Pixels>, frame: (f32, f32)) -> Option<Self> {
-        if frame.0 <= 0.0 || frame.1 <= 0.0 {
-            return None;
-        }
-        let scale = (bounds.size.width.as_f32() / frame.0).min(bounds.size.height.as_f32() / frame.1);
-        Some(Self {
-            left: bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - frame.0 * scale) / 2.0,
-            top: bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - frame.1 * scale) / 2.0,
-            scale,
-            frame,
-        })
-    }
-
-    /// An element position as a point in the frame. `None` for one in the
-    /// margin beside a map that does not fill its element.
-    fn to_frame(self, at: (f32, f32)) -> Option<(f32, f32)> {
-        let (x, y) = ((at.0 - self.left) / self.scale, (at.1 - self.top) / self.scale);
-        (x >= 0.0 && x < self.frame.0 && y >= 0.0 && y < self.frame.1).then_some((x, y))
-    }
-
-    /// A point in the frame as an element position. `None` for one the frame
-    /// does not show, which has nowhere on screen to be.
-    fn to_element(self, at: (f32, f32)) -> Option<(f32, f32)> {
-        (at.0 >= 0.0 && at.0 < self.frame.0 && at.1 >= 0.0 && at.1 < self.frame.1)
-            .then_some((self.left + at.0 * self.scale, self.top + at.1 * self.scale))
-    }
-}
-
 /// How big a turning handle is drawn, how far above the shape it sits, and in
 /// what. The egui board's own figures, in screen pixels at any zoom.
 const HANDLE_RADIUS: Pixels = px(5.);
 const HANDLE_DISTANCE: Pixels = px(25.);
 const HANDLE_COLOR: u32 = 0xFFFF64;
 
-/// How near a drawn shape a press has to land to pick it out, in map pixels.
-/// A line is one pixel wide and nobody presses one exactly.
-const SHAPE_REACH_PX: f32 = 10.0;
-
-/// How much one notch of the wheel changes the zoom.
-const ZOOM_PER_NOTCH: f32 = 0.004;
-
-/// [`RESIZE_BAND_PX`] in world units, at this map's scale.
-///
-/// A zone's edge is a line on screen; the press that grabs it is measured in the
-/// world, so the tolerance has to cross over.
-fn band_in_world(map: &wows_minimap_renderer::MapInfo) -> f32 {
-    let per_unit = map.world_distance_to_minimap(1.0, MINIMAP_SIZE);
-    if per_unit > f32::EPSILON { RESIZE_BAND_PX / per_unit } else { RESIZE_BAND_PX }
-}
-
 fn shortcut_modifier_name() -> &'static str {
     if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" }
-}
-
-/// Every map the board can be set on.
-///
-/// The recorded layouts first, then whatever else the loaded build ships art
-/// for: a map nobody has a replay of can still be drawn on, it simply starts
-/// with no capture points.
-pub fn maps(layouts: &CapLayoutDb, game_data: Option<&GameDataCache>) -> Vec<MapChoice> {
-    let metadata = game_data.and_then(|data| data.newest_loaded()).map(|loaded| loaded.provider().clone());
-    let metadata = metadata.as_deref();
-
-    let mut maps: Vec<MapChoice> = layouts
-        .maps()
-        .into_iter()
-        .map(|(map_id, space)| {
-            let label = naming::map_label(&space, metadata);
-            MapChoice { map_id: Some(map_id), space, label }
-        })
-        .collect();
-
-    if let Some(loaded) = game_data.and_then(|data| data.newest_loaded()) {
-        for space in drawable_spaces(loaded.vfs()) {
-            if maps.iter().any(|map| map.space == space) {
-                continue;
-            }
-            let label = naming::map_label(&space, metadata);
-            maps.push(MapChoice { map_id: None, space, label });
-        }
-    }
-
-    maps.sort_by(|a, b| a.label.cmp(&b.label));
-    maps
-}
-
-fn map_items_for_picker(maps: &[MapChoice]) -> Vec<MapItem> {
-    let mut label_counts = HashMap::new();
-    for map in maps {
-        *label_counts.entry(map.label.to_lowercase()).or_insert(0usize) += 1;
-    }
-    maps.iter()
-        .cloned()
-        .map(|map| {
-            let disambiguate = label_counts.get(&map.label.to_lowercase()).is_some_and(|count| *count > 1);
-            MapItem::new(map, disambiguate)
-        })
-        .collect()
-}
-
-fn unique_map_for_space(maps: &[MapChoice], space: &str) -> Option<MapChoice> {
-    let mut matches = maps.iter().filter(|map| map.space == space);
-    let map = matches.next()?.clone();
-    matches.next().is_none().then_some(map)
-}
-
-/// The spaces the build ships a minimap for.
-///
-/// A dock scene is not a map anyone plays on, and a space with no minimap art
-/// has nothing to draw, so neither is offered.
-fn drawable_spaces(vfs: &wowsunpack::vfs::VfsPath) -> Vec<String> {
-    let Ok(spaces) = vfs.join("spaces") else { return Vec::new() };
-    let Ok(entries) = spaces.read_dir() else { return Vec::new() };
-    entries
-        .filter(|entry| entry.is_dir().unwrap_or(false))
-        .filter_map(|entry| {
-            let name = entry.filename();
-            if name.starts_with("Dock") {
-                return None;
-            }
-            let has_art = ["minimap.png", "minimap_water.png"]
-                .into_iter()
-                .any(|art| entry.join(art).map(|path| path.exists().unwrap_or(false)).unwrap_or(false));
-            has_art.then(|| format!("spaces/{name}"))
-        })
-        .collect()
-}
-
-/// The modes a map has recorded layouts for, named apart where two read alike.
-///
-/// A map with no id has no recorded layout and so no modes, which is what a scan
-/// can change.
-pub fn modes(layouts: &CapLayoutDb, map_id: Option<u32>, game_data: Option<&GameDataCache>) -> Vec<ModeChoice> {
-    let Some(map_id) = map_id else { return Vec::new() };
-    let metadata = game_data.and_then(|data| data.newest_loaded()).map(|loaded| loaded.provider().clone());
-    let found: Vec<CapLayout> = layouts.modes_for_map(map_id).into_iter().cloned().collect();
-    let labels = naming::mode_labels(&found, metadata.as_deref());
-    found.into_iter().zip(labels).map(|(layout, label)| ModeChoice { key: layout.key.clone(), label }).collect()
 }
 
 fn mode_items(modes: &[ModeChoice]) -> Vec<ModeItem> {
@@ -489,161 +140,25 @@ fn mode_items(modes: &[ModeChoice]) -> Vec<ModeItem> {
         .collect()
 }
 
-/// The capture points a mode puts on the map.
-pub fn caps_of(layouts: &CapLayoutDb, key: &CapLayoutKey) -> Vec<BoardCapPoint> {
-    layouts.get(key).map(|layout| layout.points.iter().map(BoardCapPoint::from_layout).collect()).unwrap_or_default()
-}
-
-/// What a drag on a capture point is doing to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CapDrag {
-    /// Picked out, and nothing more: a frozen cap is where the game put it.
-    None,
-    /// Moving it across the map.
-    Move,
-    /// Widening or narrowing its zone.
-    Resize,
-}
-
-/// How near a zone's drawn edge a press has to land to widen it rather than move
-/// it, in map pixels. A tolerance rather than a fraction of the radius: the
-/// reader is aiming at a line on screen, and that line is the same thickness
-/// whatever the zone is.
-const RESIZE_BAND_PX: f32 = 8.0;
-
-/// The smallest a zone can be made, in world units, so one cannot be shrunk to
-/// nothing and lost. The egui board holds its own to the same floor.
-const MIN_CAP_RADIUS: f32 = 0.1 * WORLD_UNITS_PER_KM;
-const MAX_CAP_RADIUS: f32 = 10.0 * WORLD_UNITS_PER_KM;
-
-/// What a capture point added by hand starts as. A cap circle is about 5 km,
-/// which is about 167 world units; the egui board starts one at 150.
-const NEW_CAP_RADIUS: f32 = 150.0;
-
-/// What a board draws in until the reader picks otherwise, matching the ink and
-/// nib the replay viewport starts with.
-const DEFAULT_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0xff];
-const DEFAULT_NIB: f32 = 2.0;
-
-/// The inks the board offers, which are the replay viewport's own.
-const INKS: [([u8; 4], &str); 6] = [
-    ([0xff, 0xd7, 0x3a, 0xff], "ui.tactics.ink_yellow"),
-    ([0xe8, 0x73, 0x7b, 0xff], "ui.tactics.ink_red"),
-    ([0x6f, 0xd9, 0x8a, 0xff], "ui.tactics.ink_green"),
-    ([0x7f, 0xb4, 0xe8, 0xff], "ui.tactics.ink_blue"),
-    ([0xe9, 0xe5, 0xdd, 0xff], "ui.tactics.ink_white"),
-    ([0x1a, 0x1a, 0x18, 0xff], "ui.tactics.ink_black"),
-];
-
-/// How wide the nib can be drawn, which is the span the replay viewport holds
-/// its own to.
-const MIN_NIB: f32 = 1.0;
-const MAX_NIB: f32 = 8.0;
-
-/// The tools the board offers, in the order the egui board takes them up.
-///
-/// The shapes are drawn hollow: a board is read through, and a filled one hides
-/// the map it is about.
+/// The tools the board offers, with the icon and shortcut each is shown with.
 fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str, &'static str, &'static str)> {
     use wt_collab_client::drawing::Tool;
-    vec![
-        (Tool::Freehand, "ui.renderer.annotations.freehand", crate::icons::PAINT_BRUSH, "2"),
-        (Tool::Line, "ui.renderer.annotations.line", crate::icons::LINE_SEGMENT, "4"),
-        (Tool::Arrow, "ui.renderer.annotations.arrow", crate::icons::ARROW_BEND_UP_RIGHT, "1"),
-        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle", crate::icons::CIRCLE, "5"),
-        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle", crate::icons::SQUARE, "6"),
-        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle", crate::icons::TRIANGLE, "7"),
-        (Tool::Measurement, "ui.renderer.annotations.measure", crate::icons::RULER, "M"),
-        (Tool::Eraser, "ui.renderer.annotations.eraser", crate::icons::ERASER, "3"),
-    ]
-}
-
-/// Which range circles a placed ship shows.
-///
-/// Chosen once and carried by every ship placed afterwards: a reader comparing
-/// two ships' detection ranges wants the same circles on both.
-const RANGE_CIRCLES: [(RangeCircle, &str); 6] = [
-    (RangeCircle::Detection, "ui.renderer.context.detection"),
-    (RangeCircle::MainBattery, "ui.renderer.context.main_battery"),
-    (RangeCircle::SecondaryBattery, "ui.renderer.context.secondary"),
-    (RangeCircle::Torpedo, "ui.renderer.context.torpedo"),
-    (RangeCircle::Radar, "ui.renderer.context.radar"),
-    (RangeCircle::Hydro, "ui.renderer.context.hydro"),
-];
-
-/// One of the circles a placed ship can show.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RangeCircle {
-    Detection,
-    MainBattery,
-    SecondaryBattery,
-    Torpedo,
-    Radar,
-    Hydro,
-}
-
-impl RangeCircle {
-    /// Whether this circle is on, in a filter.
-    fn is_on(self, filter: &wt_collab_client::types::AnnotationRangeFilter) -> bool {
-        match self {
-            Self::Detection => filter.detection,
-            Self::MainBattery => filter.main_battery,
-            Self::SecondaryBattery => filter.secondary_battery,
-            Self::Torpedo => filter.torpedo,
-            Self::Radar => filter.radar,
-            Self::Hydro => filter.hydro,
-        }
-    }
-
-    /// Turns this circle on or off in a filter.
-    fn set(self, filter: &mut wt_collab_client::types::AnnotationRangeFilter, on: bool) {
-        match self {
-            Self::Detection => filter.detection = on,
-            Self::MainBattery => filter.main_battery = on,
-            Self::SecondaryBattery => filter.secondary_battery = on,
-            Self::Torpedo => filter.torpedo = on,
-            Self::Radar => filter.radar = on,
-            Self::Hydro => filter.hydro = on,
-        }
-    }
-}
-
-/// What is on the board, as an undo step holds it.
-#[derive(Clone, Debug, PartialEq)]
-struct BoardState {
-    caps: Vec<BoardCapPoint>,
-    /// With the ids the shapes are known by, so putting a step back is the same
-    /// change to a session as it is to a board nobody else can see.
-    annotations: Vec<wt_collab_client::drawing::Held>,
-}
-
-/// How many changes can be taken back.
-///
-/// A board is edited in small steps and the whole of what is on it is kept per
-/// step, so the stack is held to a depth rather than growing with the session.
-const HISTORY_DEPTH: usize = 50;
-
-/// A ship waiting to be placed on the board.
-#[derive(Clone, Debug)]
-pub struct PlacedShip {
-    /// The param the ranges are read from.
-    param_id: u64,
-    name: String,
-    species: wowsunpack::game_params::types::Species,
-    /// Whether it is on the reader's side, which is what colours the marker.
-    friendly: bool,
-}
-
-/// How many ship matches the search offers at once.
-const SHIP_MATCHES: usize = 10;
-
-/// How far a walk of the replay directory has got.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ScanProgress {
-    pub read: usize,
-    /// How many there are to read. `None` until the directory has been walked,
-    /// which is not the same as a directory holding none.
-    pub total: Option<usize>,
+    board::tools()
+        .into_iter()
+        .map(|entry| {
+            let icon = match entry.tool {
+                Tool::Freehand => crate::icons::PAINT_BRUSH,
+                Tool::Line => crate::icons::LINE_SEGMENT,
+                Tool::Arrow => crate::icons::ARROW_BEND_UP_RIGHT,
+                Tool::Circle { .. } => crate::icons::CIRCLE,
+                Tool::Rectangle { .. } => crate::icons::SQUARE,
+                Tool::Triangle { .. } => crate::icons::TRIANGLE,
+                Tool::Measurement => crate::icons::RULER,
+                _ => crate::icons::ERASER,
+            };
+            (entry.tool, entry.label_key, icon, entry.shortcut)
+        })
+        .collect()
 }
 
 /// The board itself.
@@ -670,10 +185,10 @@ pub struct TacticsBoard {
     drawing: wt_collab_client::drawing::Drawing,
     /// This board's end of a collab session, which also holds what has been
     /// drawn on it when there is no session to hold it.
-    collab: crate::collab::CollabLink,
+    collab: wt_collab_client::link::CollabLink,
     /// What this board is called in a session. A board is one window of several
     /// a session can be on, and every message about it carries this.
-    board_id: crate::collab::BoardId,
+    board_id: wt_collab_client::ids::BoardId,
     /// The art a peer sent for this board, for a map this build has none of.
     /// `None` for a board drawn from art this build ships.
     peer_art: Option<Arc<image::RgbImage>>,
@@ -683,7 +198,7 @@ pub struct TacticsBoard {
     peer_map_info: Option<wows_minimap_renderer::MapInfo>,
     /// Who opened the board in the session. `None` for one nobody has shared,
     /// which is every board outside a session.
-    owner: Option<crate::collab::UserId>,
+    owner: Option<wt_collab_client::ids::UserId>,
     /// Which version of the session's capture points and shapes this board has
     /// taken, so a change made by a peer is noticed without comparing lists
     /// every tick.
@@ -699,7 +214,7 @@ pub struct TacticsBoard {
     /// Anything sent for a board the session does not hold is dropped by the
     /// peer task, so the board draws on its own end until the announcement has
     /// gone over and only then starts speaking to the session.
-    joining: Option<crate::collab::CollabLink>,
+    joining: Option<wt_collab_client::link::CollabLink>,
     /// Kept alive while a session is running, to notice what peers change.
     _collab_tick: Option<Task<()>>,
     /// The window this board is drawn in, remembered so the menu can bring it
@@ -729,7 +244,7 @@ pub struct TacticsBoard {
     /// What is typed into the ship search, and what it matched. Placing a ship
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
-    matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
+    matched_ships: Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)>,
     map_select: Entity<SelectState<SearchableVec<MapItem>>>,
     _map_select_subscription: Subscription,
     map_picker_sync_needed: bool,
@@ -740,7 +255,7 @@ pub struct TacticsBoard {
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
     /// Every ship the build knows, built the first time one is looked up.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_catalog: Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>>,
     /// Which circles a placed ship shows. Every ship already on the board is
     /// given the same set, so two ships are compared on the same terms.
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
@@ -785,7 +300,12 @@ impl TacticsBoard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let maps = maps(&layouts, game_data.as_ref());
+        let loaded = game_data.as_ref().and_then(|data| data.newest_loaded());
+        let maps = board::maps(
+            &layouts,
+            loaded.as_ref().map(|loaded| loaded.provider().as_ref()),
+            loaded.as_ref().map(|loaded| loaded.vfs()),
+        );
         let map_items = SearchableVec::new(map_items_for_picker(&maps));
         let map_select = cx.new(|cx| SelectState::new(map_items, None, window, cx).searchable(true));
         let map_select_subscription = cx.subscribe_in(
@@ -866,8 +386,8 @@ impl TacticsBoard {
             dragging: None,
             adding: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
-            collab: crate::collab::CollabLink::default(),
-            board_id: crate::collab::BoardId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            board_id: wt_collab_client::ids::BoardId::fresh(),
             peer_art: None,
             peer_map_info: None,
             owner: None,
@@ -942,34 +462,21 @@ impl TacticsBoard {
 
         cx.spawn_in(window, async move |this, cx| {
             let walk = cx.background_spawn(async move {
-                let mut found = known;
-                let files = replay_files(&dir);
-                let total = files.len();
-                let _ = reports.unbounded_send(ScanProgress { read: 0, total: Some(total) });
-                let mut fresh = Vec::new();
-                for (read, path) in files.iter().enumerate() {
-                    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    if let Some(layout) = layout_of(path, provider.as_ref(), &constants, &found) {
-                        let kept = layout.clone();
-                        if found.insert(layout) {
-                            fresh.push(kept);
-                        }
-                    }
-                    let _ = reports.unbounded_send(ScanProgress { read: read + 1, total: Some(total) });
-                }
+                let outcome = board::scan_layouts(&dir, provider.as_ref(), &constants, known, &cancelled, |step| {
+                    let _ = reports.unbounded_send(step);
+                });
                 // Each new layout on its own rather than the whole cache: this
                 // walk holds a copy taken when the board opened, and writing all
                 // of it would put those rows back over anything written since.
-                for layout in &fresh {
-                    if let Err(err) =
-                        runtime.handle().block_on(crate::cap_layout_store::save_layout_to_db(&pool, layout))
+                for layout in &outcome.fresh {
+                    if let Err(err) = runtime
+                        .handle()
+                        .block_on(wows_toolkit_viewmodel::tactics::layout_store::save_layout_to_db(&pool, layout))
                     {
                         tracing::warn!("tactics: a capture layout was not saved: {err}");
                     }
                 }
-                (found, fresh.len(), total)
+                (outcome.found, outcome.fresh.len(), outcome.total)
             });
 
             let listen = {
@@ -1002,7 +509,9 @@ impl TacticsBoard {
                 this.layouts = found;
                 // The map list grows with what the walk turned up, and the
                 // modes of whichever map the board is on.
-                this.maps = maps(&this.layouts, this.game_data.as_ref());
+                let loaded = this.game_data.as_ref().and_then(|data| data.newest_loaded());
+                let metadata = loaded.as_ref().map(|loaded| loaded.provider().as_ref());
+                this.maps = board::maps(&this.layouts, metadata, loaded.as_ref().map(|loaded| loaded.vfs()));
                 if let Some(map) = this.map.as_mut() {
                     // A map the walk has just recorded a layout for now has an
                     // id, which is what its modes are looked up by: without
@@ -1011,7 +520,7 @@ impl TacticsBoard {
                         map.map_id = unique_map_for_space(&this.maps, &map.space).and_then(|found| found.map_id);
                     }
                     let map_id = map.map_id;
-                    this.modes = modes(&this.layouts, map_id, this.game_data.as_ref());
+                    this.modes = board::modes(&this.layouts, map_id, metadata);
                     this.mode_picker_sync_needed = true;
                 }
                 this.sync_map_picker(window, cx);
@@ -1105,7 +614,8 @@ impl TacticsBoard {
         if !self.maps.iter().any(|candidate| MapChoiceKey::from(candidate) == MapChoiceKey::from(&map)) {
             self.maps.push(map.clone());
         }
-        self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
+        let loaded = self.game_data.as_ref().and_then(|data| data.newest_loaded());
+        self.modes = board::modes(&self.layouts, map.map_id, loaded.as_ref().map(|loaded| loaded.provider().as_ref()));
         // The saved capture points stand, whatever mode the map has: they are
         // what the reader put there.
         self.mode = None;
@@ -1129,14 +639,7 @@ impl TacticsBoard {
 
         let caps = self.mode.as_ref().map(|key| caps_of(&self.layouts, key)).unwrap_or_default();
         let caps_match = self.caps.len() == caps.len()
-            && self.caps.iter().zip(&caps).all(|(current, default)| {
-                current.index == default.index
-                    && current.world_x == default.world_x
-                    && current.world_z == default.world_z
-                    && current.radius == default.radius
-                    && current.team == default.team
-                    && current.frozen == default.frozen
-            });
+            && self.caps.iter().zip(&caps).all(|(current, default)| current.same_layout(default));
         if caps_match && self.collab.annotation_count() == 0 {
             return;
         }
@@ -1206,7 +709,11 @@ impl TacticsBoard {
     fn letterbox(&self) -> Option<Letterbox> {
         let bounds = self.painted.get()?;
         let size = self.drawn.as_ref()?.size(0);
-        Letterbox::fitting(bounds, (size.width.0 as f32, size.height.0 as f32))
+        Letterbox::fitting(
+            (bounds.origin.x.as_f32(), bounds.origin.y.as_f32()),
+            (bounds.size.width.as_f32(), bounds.size.height.as_f32()),
+            (size.width.0 as f32, size.height.0 as f32),
+        )
     }
 
     /// Where a window position falls in the drawn frame, before the window is
@@ -1347,23 +854,7 @@ impl TacticsBoard {
     /// it; anywhere else inside moves it. The topmost one wins, which is the
     /// last drawn.
     fn cap_under(&self, position: Point<Pixels>) -> Option<(usize, CapDrag)> {
-        let (x, z) = self.world_point(position)?;
-        let map = self.map_info()?;
-        // The band is a screen tolerance, so it is measured where the reader is
-        // aiming: converted from pixels into the world at this map's scale.
-        let band = band_in_world(&map);
-        self.caps.iter().enumerate().rev().find_map(|(index, cap)| {
-            let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
-            // A frozen cap is still pickable, so its figures can be read; it is
-            // simply not dragged.
-            if cap.frozen {
-                return (away < cap.radius).then_some((index, CapDrag::None));
-            }
-            if (away - cap.radius).abs() <= band {
-                return Some((index, CapDrag::Resize));
-            }
-            (away < cap.radius).then_some((index, CapDrag::Move))
-        })
+        board::cap_under(&self.caps, self.world_point(position)?, &self.map_info()?)
     }
 
     /// Whether a capture point is the reader's to move.
@@ -1474,7 +965,7 @@ impl TacticsBoard {
     /// What was drawn stays on the board either way: a session starting under an
     /// open board hears about it, and one ending leaves it where the reader can
     /// still see it.
-    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         self.announced = false;
         self.adopted_caps = None;
         self.adopted_shapes = None;
@@ -1483,7 +974,7 @@ impl TacticsBoard {
             // end, where the reader can still see it.
             let carried = self.collab.annotations_held();
             self.joining = None;
-            self.collab = crate::collab::CollabLink::default().on_board(self.board_id);
+            self.collab = wt_collab_client::link::CollabLink::default().on_board(self.board_id);
             self.collab.adopt(carried);
             self.follow_collab(cx);
             self.redraw(cx);
@@ -1501,7 +992,7 @@ impl TacticsBoard {
     ///
     /// The art comes with it: the peer who opened the board may be on a build
     /// this one does not have, and a board nobody can draw is not shared.
-    pub fn adopt_session_board(&mut self, board: crate::collab::SessionBoard, cx: &mut Context<Self>) {
+    pub fn adopt_session_board(&mut self, board: wt_collab_client::link::SessionBoard, cx: &mut Context<Self>) {
         self.board_id = board.board_id;
         self.owner = Some(board.owner_user_id);
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
@@ -1516,7 +1007,12 @@ impl TacticsBoard {
         }
         self.map = Some(map);
         self.map_picker_sync_needed = true;
-        self.modes = modes(&self.layouts, self.map.as_ref().and_then(|map| map.map_id), self.game_data.as_ref());
+        let loaded = self.game_data.as_ref().and_then(|data| data.newest_loaded());
+        self.modes = board::modes(
+            &self.layouts,
+            self.map.as_ref().and_then(|map| map.map_id),
+            loaded.as_ref().map(|loaded| loaded.provider().as_ref()),
+        );
         self.mode = None;
         self.mode_picker_sync_needed = true;
         // Already in the session by definition, so nothing is announced back.
@@ -1576,7 +1072,7 @@ impl TacticsBoard {
                 // Both absent where no build is open, which is a board a peer
                 // can still draw from the map name if it has that build.
                 let (art_png, info) = art.unwrap_or((None, None));
-                session.announce_board(crate::collab::BoardMap {
+                session.announce_board(wt_collab_client::link::BoardMap {
                     space: map.space,
                     label: map.label,
                     // The wire states a map with no recorded layout as the id
@@ -1714,7 +1210,7 @@ impl TacticsBoard {
     /// points by id, and re-sending an unchanged one would have every peer
     /// redraw its board for nothing.
     fn set_caps(&mut self, caps: Vec<BoardCapPoint>) {
-        let was: Vec<crate::collab::CapPointId> = self.caps.iter().map(|cap| cap.id).collect();
+        let was: Vec<wt_collab_client::ids::CapPointId> = self.caps.iter().map(|cap| cap.id).collect();
         for gone in was.iter().filter(|id| !caps.iter().any(|cap| cap.id == **id)) {
             self.collab.remove_cap(*gone);
         }
@@ -1766,11 +1262,9 @@ impl TacticsBoard {
             return;
         }
         self.remember();
-        // Lettered past the highest already there, so a cap taken off does not
-        // hand its letter to the next one placed.
-        let index = self.caps.iter().map(|cap| cap.index + 1).max().unwrap_or(0);
+        let index = board::next_cap_index(&self.caps);
         self.caps.push(BoardCapPoint {
-            id: crate::collab::CapPointId::fresh(),
+            id: wt_collab_client::ids::CapPointId::fresh(),
             index,
             world_x: world.0,
             world_z: world.1,
@@ -1836,11 +1330,7 @@ impl TacticsBoard {
         }
         self.remember();
         let Some(cap) = self.caps.get_mut(at) else { return };
-        cap.team = match cap.team.map(|team| team.raw()) {
-            None => Some(wows_replays::types::TeamId::new(0)),
-            Some(0) => Some(wows_replays::types::TeamId::new(1)),
-            Some(_) => None,
-        };
+        cap.team = board::next_team(cap.team);
         self.report_cap(at);
         self.redraw(cx);
     }
@@ -1892,12 +1382,12 @@ impl TacticsBoard {
     }
 
     /// Every ship the build knows, built the first time one is looked up.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+    fn ships(&mut self) -> Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>> {
         if let Some(catalog) = &self.ship_catalog {
             return Some(std::rc::Rc::clone(catalog));
         }
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        let catalog = std::rc::Rc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider()));
         self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
         Some(catalog)
     }
@@ -1908,33 +1398,16 @@ impl TacticsBoard {
     fn matching_ships(
         &mut self,
         typed: &str,
-    ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
-        let query = unidecode::unidecode(typed.trim()).to_lowercase();
-        if query.is_empty() {
-            return Vec::new();
-        }
+    ) -> Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)> {
         let Some(catalog) = self.ships() else { return Vec::new() };
-        let mut found = Vec::new();
-        for nation in &catalog.nations {
-            for class in &nation.classes {
-                for ship in &class.ships {
-                    if ship.search_name.contains(&query) {
-                        found.push((class.species, ship.clone()));
-                        if found.len() >= SHIP_MATCHES {
-                            return found;
-                        }
-                    }
-                }
-            }
-        }
-        found
+        board::matching_ships(&catalog, typed)
     }
 
     /// Takes up the ship the reader picked, so the next click places it.
     fn pick_ship(
         &mut self,
         species: wowsunpack::game_params::types::Species,
-        ship: &crate::armor_viewer::catalog::ShipEntry,
+        ship: &wows_toolkit_viewmodel::ship_catalog::ShipEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1947,13 +1420,9 @@ impl TacticsBoard {
         let Some(param) = loaded.provider().game_param_by_index(&ship.param_index) else { return };
 
         let friendly = self.placing.as_ref().map(|placed| placed.friendly).unwrap_or(true);
-        self.placing =
-            Some(PlacedShip { param_id: param.id().raw(), name: ship.display_name.clone(), species, friendly });
-        self.drawing.set_tool(wt_collab_client::drawing::Tool::Ship {
-            species: format!("{species:?}"),
-            friendly,
-            yaw: 0.0,
-        });
+        let placed = PlacedShip { param_id: param.id().raw(), name: ship.display_name.clone(), species, friendly };
+        self.drawing.set_tool(placed.tool());
+        self.placing = Some(placed);
         self.adding = false;
         self.selected = None;
         self.matched_ships.clear();
@@ -1968,8 +1437,7 @@ impl TacticsBoard {
         }
         let Some(placed) = self.placing.as_mut() else { return };
         placed.friendly = friendly;
-        let species = format!("{:?}", placed.species);
-        self.drawing.set_tool(wt_collab_client::drawing::Tool::Ship { species, friendly, yaw: 0.0 });
+        self.drawing.set_tool(placed.tool());
         cx.notify();
     }
 
@@ -2353,7 +1821,8 @@ impl TacticsBoard {
         if self.map.as_ref() == Some(&map) {
             return;
         }
-        self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
+        let loaded = self.game_data.as_ref().and_then(|data| data.newest_loaded());
+        self.modes = board::modes(&self.layouts, map.map_id, loaded.as_ref().map(|loaded| loaded.provider().as_ref()));
         // The first mode the map has, so a board opens with capture points on
         // it rather than empty.
         self.mode = self.modes.first().map(|mode| mode.key.clone());
@@ -2482,56 +1951,6 @@ impl TacticsBoard {
     }
 }
 
-/// Every replay under `dir`, in a stable order.
-///
-/// Symbolic links are not followed: a directory the reader picked may link back
-/// into its own ancestry, which would walk for ever. A subdirectory that cannot
-/// be read is skipped rather than losing the rest.
-fn replay_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut found = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return found };
-    let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let Ok(kind) = entry.file_type() else { continue };
-        if kind.is_symlink() {
-            continue;
-        }
-        let path = entry.path();
-        if kind.is_dir() {
-            found.extend(replay_files(&path));
-            continue;
-        }
-        // The battle in progress has no results and no layout to read; it is
-        // also being written to while this reads it.
-        if path.extension().is_some_and(|ext| ext == "wowsreplay")
-            && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
-        {
-            found.push(path);
-        }
-    }
-    found
-}
-
-/// The capture layout `path` was played on, when it is one nothing has yet.
-///
-/// The replay's own metadata says which layout it used, so a battle on a layout
-/// already recorded is not parsed at all: that is the difference between a walk
-/// that takes seconds and one that takes an hour.
-fn layout_of(
-    path: &std::path::Path,
-    provider: &wowsunpack::game_params::provider::GameMetadataProvider,
-    constants: &wows_replays::game_constants::GameConstants,
-    known: &CapLayoutDb,
-) -> Option<wows_replay_insights::cap_layout::CapLayout> {
-    let replay = wows_replays::ReplayFile::from_file(path).ok()?;
-    let key = CapLayoutKey { map_id: replay.meta.mapId, scenario_config_id: replay.meta.scenarioConfigId };
-    if known.contains(&key) {
-        return None;
-    }
-    wows_replay_insights::cap_layout::extract_cap_layout_from_replay(path, provider, Some(constants))
-}
-
 /// Draws `space` with `caps` on it.
 ///
 /// `None` when the loaded build ships no art for that map, which the board says
@@ -2602,26 +2021,8 @@ fn ship_ranges(
     version: Option<wowsunpack::data::Version>,
     space_size: f32,
 ) -> Vec<DrawCommand> {
-    use wowsunpack::game_params::types::GameParamProvider;
-
-    // Without a version there is no saying what a ship's ranges are: they are
-    // gated on it, and a circle drawn at the wrong one reads as a fact.
-    let Some(version) = version else { return Vec::new() };
     let Some(loaded) = game_data.newest_loaded() else { return Vec::new() };
-    let provider = loaded.provider();
-
-    let mut circles = Vec::new();
-    for annotation in annotations {
-        let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else { continue };
-        let Some(param) = GameParamProvider::game_param_by_id(provider.as_ref(), config.param_id.into()) else {
-            continue;
-        };
-        let Some(vehicle) = param.vehicle() else { continue };
-        let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
-        let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
-        circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
-    }
-    circles
+    board::ship_ranges(annotations, loaded.provider().as_ref(), version, space_size)
 }
 
 impl EventEmitter<LayoutsFound> for TacticsBoard {}
@@ -3214,7 +2615,7 @@ impl TacticsBoard {
                                 Button::new(("tactics-ship-match", index))
                                     .label(format!(
                                         "{} {}",
-                                        crate::armor_viewer::catalog::tier_roman(ship.tier),
+                                        wows_toolkit_viewmodel::ship_catalog::tier_roman(ship.tier),
                                         ship.display_name
                                     ))
                                     .compact()
@@ -3432,11 +2833,7 @@ impl TacticsBoard {
                 if has_cap_actions {
                     menu = menu.separator();
                     if let Some(cap) = selected_cap {
-                        let team_label_key = match cap.team.map(|team| team.raw()) {
-                            None => "ui.tactics.team_neutral",
-                            Some(0) => "ui.tactics.team_one",
-                            Some(_) => "ui.tactics.team_two",
-                        };
+                        let team_label_key = board::team_label_key(cap.team);
                         let team_board = board.clone();
                         menu = menu.item(
                             PopupMenuItem::new(format!("{}: {}", t!("ui.tactics.cap_team"), t!(team_label_key)))
@@ -3545,11 +2942,7 @@ impl TacticsBoard {
                     }),
             ))
             .when_some(selected, |this, cap| {
-                let team_label_key = match cap.team.map(|team| team.raw()) {
-                    None => "ui.tactics.team_neutral",
-                    Some(0) => "ui.tactics.team_one",
-                    Some(_) => "ui.tactics.team_two",
-                };
+                let team_label_key = board::team_label_key(cap.team);
                 let cap_color = team_color(cap.team);
                 let cap_team_label = t!(team_label_key).into_owned();
                 this.child(
@@ -3660,154 +3053,8 @@ impl TacticsBoard {
 }
 
 #[cfg(test)]
-mod tests {
-    // Named rather than glob-imported: this module glob-imports gpui, whose own
-    // `test` attribute would otherwise stand in for the one these want.
-    use super::BoardCapPoint;
-    use super::CapDrag;
-    use super::ENEMY_COLOR;
-    use super::FRIENDLY_COLOR;
-    use super::NEUTRAL_COLOR;
-    use super::team_color;
-
-    fn cap(index: usize, x: f32, z: f32, radius: f32) -> BoardCapPoint {
-        BoardCapPoint {
-            id: crate::collab::CapPointId::new(index as u64 + 1),
-            index,
-            world_x: x,
-            world_z: z,
-            radius,
-            team: None,
-            frozen: false,
-        }
-    }
-
-    /// A press inside a zone moves it; one near its edge widens it. The band is
-    /// measured against that zone's own radius, so a wide zone has a wide band.
-    #[test]
-    fn a_press_near_the_edge_widens_rather_than_moves() {
-        let zone = cap(0, 0.0, 0.0, 1000.0);
-        let band = 8.0;
-        let what = |away: f32| {
-            if (away - zone.radius).abs() <= band {
-                return Some(CapDrag::Resize);
-            }
-            (away < zone.radius).then_some(CapDrag::Move)
-        };
-
-        assert_eq!(what(0.0), Some(CapDrag::Move));
-        assert_eq!(what(500.0), Some(CapDrag::Move));
-        assert_eq!(what(995.0), Some(CapDrag::Resize), "just inside the edge widens it");
-        assert_eq!(what(1005.0), Some(CapDrag::Resize), "and so does just outside");
-        assert_eq!(what(1100.0), None, "a press well past the zone is not on it");
-    }
-
-    /// A cap taken off the board leaves the letters running in order, so what
-    /// is left reads A, B rather than A, C.
-    #[test]
-    fn the_letters_close_up_when_one_is_removed() {
-        let mut caps = vec![cap(0, 0.0, 0.0, 100.0), cap(1, 1.0, 1.0, 100.0), cap(2, 2.0, 2.0, 100.0)];
-        caps.remove(1);
-        for (index, cap) in caps.iter_mut().enumerate() {
-            cap.index = index;
-        }
-        assert_eq!(caps.iter().map(BoardCapPoint::letter).collect::<Vec<_>>(), ["A", "B"]);
-    }
-
-    /// A cap circle is talked about in kilometres, and the model holds it in the
-    /// game's own thirty-metre units.
-    #[test]
-    fn a_zone_reads_in_kilometres() {
-        // The default a placed cap starts at is about the 5 km a cap circle is.
-        assert!((super::radius_km(super::NEW_CAP_RADIUS) - 4.5).abs() < 0.01);
-        assert!((super::radius_km(super::WORLD_UNITS_PER_KM) - 1.0).abs() < 0.001);
-    }
-
-    /// A zone reads by the team that holds it, and by nobody's colour when it
-    /// is neutral.
-    #[test]
-    fn a_zone_is_coloured_by_who_holds_it() {
-        assert_eq!(team_color(None), NEUTRAL_COLOR);
-        assert_eq!(team_color(Some(wows_replays::types::TeamId::new(0))), FRIENDLY_COLOR);
-        assert_eq!(team_color(Some(wows_replays::types::TeamId::new(1))), ENEMY_COLOR);
-    }
-
-    /// A layout's neutral cap is stated as a negative team, which is an absence
-    /// rather than a team to colour by.
-    #[test]
-    fn a_layouts_negative_team_reads_as_nobody() {
-        let point = wows_replay_insights::cap_layout::CapPointLayout {
-            index: 0,
-            position: wowsunpack::game_types::WorldPos2D { x: 1.0, z: 2.0 },
-            radius: wowsunpack::game_params::types::BigWorldDistance::from(600.0),
-            cp_type: wowsunpack::game_types::ControlPointType::Control,
-            team_id: -1,
-            initially_enabled: true,
-        };
-        assert_eq!(BoardCapPoint::from_layout(&point).team, None);
-
-        let held = wows_replay_insights::cap_layout::CapPointLayout { team_id: 1, ..point };
-        assert_eq!(BoardCapPoint::from_layout(&held).team, Some(wows_replays::types::TeamId::new(1)));
-    }
-}
-
-#[cfg(test)]
 mod coordinate_tests {
-    // Named rather than glob-imported, for the reason the other test module
-    // names its imports.
-    use super::BoardCapPoint;
     use super::MINIMAP_SIZE;
-    use super::RESIZE_BAND_PX;
-    use super::band_in_world;
-    use wows_minimap_renderer::MapInfo;
-
-    fn map(space_size: i32) -> MapInfo {
-        MapInfo { space_size }
-    }
-
-    /// A press has to land on the zone it looks like it lands on: the position a
-    /// pointer is read at goes through the inverse of what the zone is drawn
-    /// with, at the same output size.
-    #[test]
-    fn a_map_pixel_round_trips_to_the_world_and_back() {
-        let map = map(1200);
-        for at in [(0.0, 0.0), (100.0, 40.0), (383.5, 383.5), (767.0, 767.0)] {
-            let world = map.minimap_to_world_f32(at.0, at.1, MINIMAP_SIZE);
-            let back = map.world_to_minimap(world, MINIMAP_SIZE);
-            assert!(
-                (back.x - at.0).abs() < 0.01 && (back.y - at.1).abs() < 0.01,
-                "{at:?} came back as ({}, {})",
-                back.x,
-                back.y
-            );
-        }
-    }
-
-    /// A zone drawn at the centre of the map is hit by a press at the centre of
-    /// the map, which is the failure a wrong coordinate space produces.
-    #[test]
-    fn a_press_at_the_centre_lands_on_a_zone_drawn_there() {
-        let map = map(1200);
-        let centre = map.minimap_to_world_f32(MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE);
-        let cap = BoardCapPoint {
-            id: crate::collab::CapPointId::new(1),
-            index: 0,
-            world_x: centre.x,
-            world_z: centre.z,
-            radius: 150.0,
-            team: None,
-            frozen: false,
-        };
-
-        let drawn =
-            map.world_to_minimap(wowsunpack::game_types::WorldPos::new(cap.world_x, 0.0, cap.world_z), MINIMAP_SIZE);
-        assert!((drawn.x - MINIMAP_SIZE as f32 / 2.0).abs() < 0.01);
-        assert!((drawn.y - MINIMAP_SIZE as f32 / 2.0).abs() < 0.01);
-
-        let pressed = map.minimap_to_world_f32(drawn.x, drawn.y, MINIMAP_SIZE);
-        let away = ((pressed.x - cap.world_x).powi(2) + (pressed.z - cap.world_z).powi(2)).sqrt();
-        assert!(away < 1.0, "the press is {away} units from the zone it was aimed at");
-    }
 
     /// A press is read against the part of the map on screen, so a zoomed board
     /// still lands where it looks like it lands.
@@ -3829,71 +3076,5 @@ mod coordinate_tests {
         // is on screen, which is what being zoomed in means.
         let (x, _y) = zoomed.to_map(middle + 100.0, middle);
         assert!(x > middle && x < middle + 100.0, "a point 100px right of centre reads as {x}");
-    }
-
-    /// The resize tolerance is a screen distance, so it is the same handful of
-    /// pixels on a small map and a large one.
-    #[test]
-    fn the_resize_band_is_the_same_on_screen_whatever_the_map() {
-        for space in [800i32, 1200, 1600] {
-            let map = map(space);
-            let band = band_in_world(&map);
-            let on_screen = map.world_distance_to_minimap(band, MINIMAP_SIZE);
-            assert!(
-                (on_screen - RESIZE_BAND_PX).abs() < 0.01,
-                "a {space}-unit map gives a {on_screen}px band, not {RESIZE_BAND_PX}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod letterbox_tests {
-    use super::Letterbox;
-    use gpui_kit::Bounds;
-    use gpui_kit::Pixels;
-    use gpui_kit::Point;
-    use gpui_kit::Size;
-    use gpui_kit::px;
-
-    fn element(width: f32, height: f32) -> Bounds<Pixels> {
-        Bounds { origin: Point { x: px(10.), y: px(20.) }, size: Size { width: px(width), height: px(height) } }
-    }
-
-    /// A frame narrower than its element is centred in it rather than stretched.
-    #[test]
-    fn a_frame_is_centred_in_the_element() {
-        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
-        assert_eq!(fit.scale, 2.0, "held to the tighter direction");
-        assert_eq!(fit.top, 20.0, "filling it top to bottom");
-        assert_eq!(fit.left, 110.0, "and centred across it");
-    }
-
-    /// The two directions agree to the pixel, which is what lets a handle be
-    /// placed by one and pressed by the other.
-    #[test]
-    fn the_two_directions_are_each_others_inverse() {
-        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
-        for at in [(0.0, 0.0), (50.0, 50.0), (99.0, 1.0)] {
-            let on_screen = fit.to_element(at).expect("a point the frame shows");
-            let back = fit.to_frame(on_screen).expect("and it is over the map");
-            assert!((back.0 - at.0).abs() < 1e-3 && (back.1 - at.1).abs() < 1e-3, "{at:?} -> {back:?}");
-        }
-    }
-
-    /// A press in the margin beside the map is not on it, and a point the frame
-    /// does not show has nowhere on screen to be.
-    #[test]
-    fn a_point_outside_is_refused_both_ways() {
-        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
-        assert!(fit.to_frame((20.0, 100.0)).is_none(), "in the left margin");
-        assert!(fit.to_element((-1.0, 50.0)).is_none(), "off the frame");
-        assert!(fit.to_element((100.0, 50.0)).is_none(), "and past its far edge");
-    }
-
-    /// A frame with no extent cannot be placed against at all.
-    #[test]
-    fn a_frame_with_no_extent_is_refused() {
-        assert!(Letterbox::fitting(element(400., 200.), (0., 100.)).is_none());
     }
 }

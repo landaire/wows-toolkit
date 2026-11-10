@@ -79,21 +79,21 @@ use crate::icons;
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
-use super::columns::ReplayColumn;
 use super::debug_view::RawJsonPanel;
-use super::load::GameDataCache;
-use super::load::ParsedReplay;
-use super::load::ReplayLoadError;
 use super::load::spawn_parse;
 use super::load::spawn_parse_with_alts;
-use super::model::MatchContext;
-use super::model::ReplayReportModel;
-use super::model::separate_number;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_toolkit_config::index::query;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::ParsedReplay;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::twitch;
@@ -680,7 +680,7 @@ impl ReplayPanel {
     fn load_title_icons(
         &mut self,
         model: &ReplayReportModel,
-        game_data: &super::load::LoadedGameData,
+        game_data: &wows_toolkit_replay_data::load::LoadedGameData,
         cx: &mut Context<Self>,
     ) {
         self.title_icons = None;
@@ -738,7 +738,12 @@ impl ReplayPanel {
             personal_rating,
             // Stands in for the document the parse builds: the Export menu's
             // gate is that there is one, not what is in it.
-            export: Some(ExportedMatch::new(&super::test_support::fixture_empty_battle_report(), &[], &[], true)),
+            export: Some(ExportedMatch::new(
+                &wows_toolkit_replay_data::test_support::fixture_empty_battle_report(),
+                &[],
+                &[],
+                true,
+            )),
             export_status: None,
             auto_export: AutoExport::Off,
             path: PathBuf::from("test.wowsreplay"),
@@ -1543,12 +1548,12 @@ mod tests {
     use super::ReplayPanel;
     use super::personal_rating_label;
     use super::write_export;
-    use crate::replay_inspector::columns::ReplayColumn;
-    use crate::replay_inspector::model::PlayerRow;
-    use crate::replay_inspector::model::ReplayReportModel;
-    use crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
-    use crate::replay_inspector::test_support::base_row;
-    use crate::replay_inspector::test_support::fixture_personal_rating_data;
+    use wows_toolkit_replay_data::columns::ReplayColumn;
+    use wows_toolkit_replay_data::model::PlayerRow;
+    use wows_toolkit_replay_data::model::ReplayReportModel;
+    use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+    use wows_toolkit_replay_data::test_support::base_row;
+    use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 
     /// A won battle whose self row dealt exactly the fixture's expected
     /// damage and frags. The win carries the win-rate term to twice expected,
@@ -1893,7 +1898,7 @@ mod tests {
     /// else's does: the statistic is about the shells this client fired.
     #[test]
     fn the_fire_chance_block_is_on_the_recording_player_s_row() {
-        let fire_chance = crate::replay_inspector::test_support::fire_chance_result();
+        let fire_chance = wows_toolkit_replay_data::test_support::fire_chance_result();
 
         let mut model = model_at_expected_values();
         model.set_fire_chance(Some(fire_chance));
@@ -1984,7 +1989,7 @@ mod tests {
     /// header row plus one row per vehicle.
     #[test]
     fn each_export_format_writes_its_own_shape() {
-        use crate::replay_inspector::test_support::fixture_empty_battle_report;
+        use wows_toolkit_replay_data::test_support::fixture_empty_battle_report;
 
         let normalized = fixture_empty_battle_report();
         let export = ExportedMatch::new(&normalized, &[], &[], true);

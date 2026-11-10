@@ -643,7 +643,7 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
 #[gpui_kit::test]
 fn the_session_rating_table_reaches_the_replay_inspector(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    let table = Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+    let table = Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
     let session = SessionData { personal_rating: Some(table), ..SessionData::default() };
 
     window
@@ -1747,7 +1747,12 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             app.search().clone().update(cx, |search, cx| {
-                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+                search.apply_structural_edit(
+                    pill,
+                    wows_toolkit_viewmodel::query_bar::pills::StructuralEdit::Negate,
+                    window,
+                    cx,
+                );
             });
         })
         .expect("the test window stays open");
@@ -1774,7 +1779,12 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             app.search().clone().update(cx, |search, cx| {
-                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+                search.apply_structural_edit(
+                    pill,
+                    wows_toolkit_viewmodel::query_bar::pills::StructuralEdit::Negate,
+                    window,
+                    cx,
+                );
             });
         })
         .expect("the test window stays open");
@@ -1865,7 +1875,12 @@ fn the_query_bar_steps_back_and_forward_through_structural_edits(cx: &mut TestAp
         .update(cx, |app, window, cx| {
             app.search().clone().update(cx, |search, cx| {
                 assert!(!search.can_redo(), "nothing has been stepped back from yet");
-                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+                search.apply_structural_edit(
+                    pill,
+                    wows_toolkit_viewmodel::query_bar::pills::StructuralEdit::Negate,
+                    window,
+                    cx,
+                );
                 assert!(search.can_undo(), "the edit is on the stack");
             });
         })
@@ -2036,7 +2051,12 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
         .into_iter()
         .next()
         .expect("the query draws one pill");
-    let wanted = crate::search_pills::choices(&expr, &pill, crate::search_pills::EditablePart::Operator)
+    let wanted = wows_toolkit_viewmodel::query_bar::pills::choices(
+        &expr,
+        &pill,
+        wows_toolkit_viewmodel::query_bar::pills::EditablePart::Operator,
+        &wows_toolkit_config::index::query_ast::OperatorPreferences::default(),
+    )
         .into_iter()
         .find(|choice| !choice.current)
         .expect("the term takes more than one operator");
@@ -2489,7 +2509,7 @@ fn settle(cx: &mut TestAppContext, window: WindowHandle<gpui_kit::component::Roo
 /// Escape or Backspace in its empty field goes back to the root list.
 #[gpui_kit::test]
 fn the_palette_opens_any_ship_in_the_armor_viewer(cx: &mut TestAppContext) {
-    use crate::palette::ArmorShipRow;
+    use crate::palette::armor_ship_row;
     use crate::palette::TestArmorShips;
     use wowsunpack::game_params::types::Species;
 
@@ -2497,9 +2517,9 @@ fn the_palette_opens_any_ship_in_the_armor_viewer(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(TestArmorShips {
             rows: vec![
-                ArmorShipRow::new("PASB018".into(), "Montana".into(), 10, Species::Battleship, "U.S.A."),
-                ArmorShipRow::new("PJSB018".into(), "Yamato".into(), 10, Species::Battleship, "Japan"),
-                ArmorShipRow::new("PZSD109".into(), "Sm\u{e5}land".into(), 10, Species::Destroyer, "Europe"),
+                armor_ship_row("PASB018".into(), "Montana".into(), 10, Species::Battleship, "U.S.A."),
+                armor_ship_row("PJSB018".into(), "Yamato".into(), 10, Species::Battleship, "Japan"),
+                armor_ship_row("PZSD109".into(), "Sm\u{e5}land".into(), 10, Species::Destroyer, "Europe"),
             ],
             opened: Vec::new(),
         })
@@ -2591,7 +2611,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(replays.path().to_path_buf(), game_data, window, cx);
         })
         .expect("the test window stays open");
@@ -2605,7 +2625,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(alias.clone(), game_data, window, cx);
         })
         .expect("the test window stays open");

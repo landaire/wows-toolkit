@@ -11,6 +11,12 @@ pub mod table;
 
 pub mod chart;
 
+pub mod chart_model;
+
+pub mod plot;
+
+pub mod plot_image;
+
 pub mod replay_set;
 
 use serde::Deserialize;

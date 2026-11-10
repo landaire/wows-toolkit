@@ -62,6 +62,29 @@ pub fn met_only_in_division(player: &TrackedPlayer, since: Option<Timestamp>) ->
     encounters_in_range(player, since, false) == 0 && encounters_in_range(player, since, true) > 0
 }
 
+/// What a historical row shows once it is opened, beyond its columns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerDetail {
+    /// Every other name this account has been seen under, sorted.
+    pub aliases: Vec<String>,
+    /// The most recent encounter the division-mate toggle leaves visible.
+    pub last_seen: Option<Timestamp>,
+    /// Battles the player was met in, all time, as the toggle counts them.
+    pub total_encounters: usize,
+}
+
+/// Reads one tracked player's detail.
+pub fn player_detail(player: &TrackedPlayer, show_division_mates: bool) -> PlayerDetail {
+    let mut aliases: Vec<String> = player.names.iter().filter(|name| **name != player.last_name).cloned().collect();
+    aliases.sort();
+
+    PlayerDetail {
+        aliases,
+        last_seen: player.last_visible_timestamp(show_division_mates),
+        total_encounters: player.visible_arena_ids(show_division_mates).count(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +150,22 @@ mod tests {
     fn an_absent_last_encounter_reads_as_nothing_rather_than_a_guess() {
         assert!(last_seen_text(None, Timestamp::now()).is_empty());
         assert!(last_seen_timestamp_text(None).is_empty());
+    }
+
+    #[test]
+    fn a_detail_lists_the_other_names_and_follows_the_division_toggle() {
+        let now = Timestamp::now();
+        let mut tracked = player(&[(now - 1.hour(), true), (now - 2.hours(), false)]);
+        tracked.last_name = "Harvey635".to_string();
+        tracked.names = ["Harvey635".to_string(), "Zed".to_string(), "Harvey42".to_string()].into_iter().collect();
+
+        let hidden = player_detail(&tracked, false);
+        assert_eq!(hidden.aliases, vec!["Harvey42".to_string(), "Zed".to_string()]);
+        assert_eq!(hidden.total_encounters, 1);
+        assert_eq!(hidden.last_seen, Some(now - 2.hours()));
+
+        let shown = player_detail(&tracked, true);
+        assert_eq!(shown.total_encounters, 2);
+        assert_eq!(shown.last_seen, Some(now - 1.hour()));
     }
 }

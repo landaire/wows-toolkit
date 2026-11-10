@@ -48,13 +48,21 @@ use crate::palette::PaletteAction;
 use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
-use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
+use wows_toolkit_replay_data::cache;
+use wows_toolkit_replay_data::cache::CacheJob;
+use wows_toolkit_replay_data::cache::CacheOutcome;
+use wows_toolkit_replay_data::cache::CacheState;
+use wows_toolkit_replay_data::constants::Checked;
+use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_replay_data::replay_index;
+use wows_toolkit_replay_data::replay_index::IndexMode;
+use wows_toolkit_replay_data::replay_index::IndexProgress;
 
 /// Where the menu's links go, as the egui menu bar sends them.
 const ISSUES_URL: &str = "https://github.com/landaire/wows-toolkit/issues/new/choose";
@@ -563,7 +571,7 @@ pub struct App {
     cache_dir_input: Entity<InputState>,
     /// The game-data cache: what is there, what is stale, and what job is
     /// running against it.
-    cache: game_data_cache::CacheState,
+    cache: CacheState,
     /// What finished jobs have to say, until a draw says it. A list rather than
     /// one message: two jobs can finish between draws, and the first of them is
     /// not worth less than the second.
@@ -601,7 +609,7 @@ pub struct App {
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
     /// How far an index build has got, while one is running.
-    index_progress: Option<crate::replay_index::IndexProgress>,
+    index_progress: Option<IndexProgress>,
     /// What an index build reported when it stopped. Cleared when the next
     /// one starts.
     index_outcome: Option<String>,
@@ -817,7 +825,7 @@ impl App {
             wows_dir_input,
             proxy_input,
             cache_dir_input,
-            cache: game_data_cache::CacheState::default(),
+            cache: CacheState::default(),
             pending_missing_builds: Vec::new(),
             download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
@@ -963,10 +971,10 @@ impl App {
 
         if let Some(job) = self.cache.running {
             let named = match job {
-                game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
-                game_data_cache::CacheJob::Validating => t!("ui.app.status_cache_validating"),
-                game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
-                game_data_cache::CacheJob::Planning => t!("ui.app.status_cache_planning"),
+                CacheJob::Checking => t!("ui.app.status_cache_checking"),
+                CacheJob::Validating => t!("ui.app.status_cache_validating"),
+                CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
+                CacheJob::Planning => t!("ui.app.status_cache_planning"),
             };
             jobs.push(status_job(named.into_owned(), self.cache.progress.map(|at| (at.done, at.total))));
         }
@@ -1055,7 +1063,7 @@ impl App {
     /// button and a link to file an issue; this reports it and puts it on the
     /// clipboard, which is what a reader does with it next.
     pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(report) = crate::logging::take_crash_report() else { return };
+        let Some(report) = wows_toolkit_viewmodel::logging::take_crash_report() else { return };
         self.recent_crash_report = Some(report.clone());
         let copied = report.clone();
         window.open_alert_dialog(cx, move |alert, _window, _cx| {
@@ -1103,7 +1111,7 @@ impl App {
 
     /// Puts the newest log file on the clipboard, for a bug report.
     pub(crate) fn copy_latest_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = crate::logging::newest_log() else {
+        let Some(path) = wows_toolkit_viewmodel::logging::newest_log() else {
             crate::toast::warn(t!("ui.messages.log_not_found").into_owned(), window, cx);
             return;
         };
@@ -1168,11 +1176,11 @@ impl App {
             cx,
             move |this, outcome, cx| {
                 let plan = match outcome {
-                    game_data_cache::CacheOutcome::Planned { plan } => Some(plan),
+                    CacheOutcome::Planned { plan } => Some(plan),
                     // Failed planning leaves every build disabled until a retry
                     // can establish which downloads are available.
                     outcome => {
-                        if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
+                        if let CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
                         }
                         this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
@@ -1361,8 +1369,7 @@ impl App {
             &cx.entity(),
             cx,
             |this, outcome, cx| {
-                let fetched =
-                    matches!(&outcome, game_data_cache::CacheOutcome::Downloaded { fetched, .. } if *fetched > 0);
+                let fetched = matches!(&outcome, CacheOutcome::Downloaded { fetched, .. } if *fetched > 0);
                 this.cache_job_finished(outcome, cx);
                 // What the listing could not read, it can now: which replays
                 // have a preview and which builds are missing are both decided as
@@ -1466,8 +1473,7 @@ impl App {
                 .await;
             match stale {
                 Ok(true) => {
-                    let _ = this
-                        .update(cx, |this, cx| this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx));
+                    let _ = this.update(cx, |this, cx| this.build_replay_index(IndexMode::FillGaps, cx));
                 }
                 Ok(false) => {}
                 Err(error) => tracing::warn!(%error, "replay index revision could not be checked"),
@@ -1492,7 +1498,7 @@ impl App {
         cx.spawn_in(window, async move |this, cx| {
             let outcome = checked.await;
             let _ = this.update_in(cx, |this, window, cx| match outcome {
-                crate::constants::Checked::Written { build, commit } => {
+                Checked::Written { build, commit } => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
                     );
@@ -1509,12 +1515,12 @@ impl App {
                         tab.inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
                     }
                 }
-                crate::constants::Checked::UpToDate => {
+                Checked::UpToDate => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
                     );
                 }
-                crate::constants::Checked::Failed(reason) => {
+                Checked::Failed(reason) => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(reason.clone()),
                     );
@@ -1552,7 +1558,9 @@ impl App {
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_spawn(async move {
-                    runtime.handle().block_on(async move { crate::cap_layout_store::load_from_db(&pool).await })
+                    runtime.handle().block_on(async move {
+                        wows_toolkit_viewmodel::tactics::layout_store::load_from_db(&pool).await
+                    })
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -1728,7 +1736,7 @@ impl App {
 
             let session = match crate::runtime::spawn(cx, {
                 let client = client.clone();
-                async move { crate::twitch::Session::open(&token, &channel, client).await }
+                async move { wows_toolkit_viewmodel::twitch_chat::Session::open(&token, &channel, client).await }
             })
             .await
             {
@@ -1767,7 +1775,7 @@ impl App {
                     Err(err) => tracing::warn!("twitch: a chat poll did not complete: {err}"),
                 }
 
-                cx.background_executor().timer(crate::twitch::poll_interval()).await;
+                cx.background_executor().timer(wows_toolkit_viewmodel::twitch_chat::poll_interval()).await;
             }
         }));
     }
@@ -1792,7 +1800,7 @@ impl App {
         if wows_dir.is_empty() {
             return None;
         }
-        Some(crate::replay_inspector::browser_view::resolve_replays_dir(std::path::Path::new(&wows_dir)))
+        Some(wows_toolkit_replay_data::load::resolve_replays_dir(std::path::Path::new(&wows_dir)))
     }
 
     /// The version the install is on, which is what a ship's ranges are read
@@ -1802,7 +1810,7 @@ impl App {
         if wows_dir.is_empty() {
             return None;
         }
-        crate::replay_inspector::load::installed_version(std::path::Path::new(&wows_dir))
+        wows_toolkit_replay_data::load::installed_version(std::path::Path::new(&wows_dir))
     }
 
     /// Opens a tactics board in a window of its own.
@@ -1864,7 +1872,7 @@ impl App {
     /// Nothing is opened here: a board with no map of its own takes up a peer's
     /// as it follows the session, which is where the boards a joiner is sent
     /// after the handshake turn up.
-    fn share_session_with_board(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    fn share_session_with_board(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         if let Some(board) = self.tactics_board.as_ref().and_then(|handle| handle.upgrade()) {
             board.update(cx, |board, cx| board.set_collab(link, cx));
         }
@@ -1878,7 +1886,12 @@ impl App {
     }
 
     /// Fills the palette with one of the cascading modes and reopens it.
-    fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+    fn enter_palette_mode(
+        &mut self,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let _ = owner.update(cx, |this, cx| this.open_palette_mode(mode, window, cx));
@@ -1888,15 +1901,16 @@ impl App {
     /// Opens the palette on one of its second-layer lists.
     pub(crate) fn open_palette_mode(
         &mut self,
-        mode: crate::palette::PaletteMode,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let source = match mode {
-            crate::palette::PaletteMode::ArmorShips => {
+            wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips => {
                 crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
             }
-            crate::palette::PaletteMode::Players | crate::palette::PaletteMode::MyShips => {
+            wows_toolkit_viewmodel::palette::PaletteMode::Players
+            | wows_toolkit_viewmodel::palette::PaletteMode::MyShips => {
                 crate::palette::ModeSource::Index
             }
         };
@@ -2011,7 +2025,7 @@ impl App {
             PaletteAction::RefreshPersistedData => {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
-            PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
+            PaletteAction::IndexAllReplays => self.build_replay_index(IndexMode::FillGaps, cx),
             PaletteAction::ImportConstants => {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.import_constants(window, cx));
@@ -2561,7 +2575,7 @@ impl App {
     /// The whole directory rather than what changed: this is the control for
     /// building an index that is not there, or rebuilding one whose rows an
     /// older parse got wrong.
-    pub(crate) fn build_replay_index(&mut self, mode: crate::replay_index::IndexMode, cx: &mut Context<Self>) {
+    pub(crate) fn build_replay_index(&mut self, mode: IndexMode, cx: &mut Context<Self>) {
         if self.index_cancel.is_some() {
             return;
         }
@@ -2578,7 +2592,7 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         self.index_cancel = Some(Arc::clone(&cancel));
         self.index_outcome = None;
-        self.index_progress = Some(crate::replay_index::IndexProgress::default());
+        self.index_progress = Some(IndexProgress::default());
         cx.notify();
 
         let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded();
@@ -2601,7 +2615,7 @@ impl App {
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let built = cx
                 .background_spawn(async move {
-                    crate::replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, mode, |step| {
+                    replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, mode, |step| {
                         let _ = progress_tx.unbounded_send(step);
                     })
                 })
@@ -2673,7 +2687,7 @@ impl App {
     /// Where the cache is, as the settings currently point.
     fn cache_base(&self) -> Option<PathBuf> {
         let settings = self.settings()?;
-        game_data_cache::base(&settings.game_data_cache_dir)
+        cache::base(&settings.game_data_cache_dir)
     }
 
     fn proxy_url(&self) -> String {
@@ -2685,9 +2699,9 @@ impl App {
     /// A clean check or validation is what lets the next check stop at the
     /// tip, so the commit is saved only when nothing needs doing; saving it
     /// after a run that found work would skip the re-check.
-    fn cache_job_finished(&mut self, outcome: game_data_cache::CacheOutcome, cx: &mut Context<Self>) {
+    fn cache_job_finished(&mut self, outcome: CacheOutcome, cx: &mut Context<Self>) {
         match outcome {
-            game_data_cache::CacheOutcome::Checked { tip, updates } => {
+            CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
                 // A clean result said nothing at all before: the spinner stopped
                 // and the reader was left to guess. The egui app reports both
@@ -2702,7 +2716,7 @@ impl App {
                     self.remember_cache_tip(tip, cx);
                 }
             }
-            game_data_cache::CacheOutcome::Validated { tip, repair } => {
+            CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
                 self.job_said.push(if clean {
                     JobReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
@@ -2714,7 +2728,7 @@ impl App {
                     self.remember_cache_tip(tip, cx);
                 }
             }
-            game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
+            CacheOutcome::Downloaded { fetched, failed } => {
                 if fetched > 0 {
                     // What was fetched is no longer stale or damaged, and the
                     // cache is a different size than it was.
@@ -2733,8 +2747,8 @@ impl App {
             }
             // The offer that asked for a plan reads it itself; nothing else asks
             // for one.
-            game_data_cache::CacheOutcome::Planned { .. } => {}
-            game_data_cache::CacheOutcome::Failed(reason) => {
+            CacheOutcome::Planned { .. } => {}
+            CacheOutcome::Failed(reason) => {
                 self.job_said.push(JobReport::failed(reason));
             }
         }
@@ -2777,7 +2791,7 @@ impl App {
                                         .compact()
                                         .disabled(!has_dir || running)
                                         .on_click(cx.listener(|this, _event, _window, cx| {
-                                            this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx)
+                                            this.build_replay_index(IndexMode::FillGaps, cx)
                                         })),
                                 )
                                 // For rows an older parse decoded through
@@ -2790,7 +2804,7 @@ impl App {
                                         .disabled(!has_dir || running)
                                         .tooltip(t!("ui.settings.index.rebuild_hint").to_string())
                                         .on_click(cx.listener(|this, _event, _window, cx| {
-                                            this.build_replay_index(crate::replay_index::IndexMode::RefreshAll, cx)
+                                            this.build_replay_index(IndexMode::RefreshAll, cx)
                                         })),
                                 )
                                 .when(running, |this| {
@@ -4114,7 +4128,7 @@ impl Render for App {
                     // Both, as the egui app takes both. On the Armor Viewer,
                     // ctrl+p goes straight to the ship list.
                     (false, "p") if this.active_tab == AppTab::ArmorViewer => {
-                        this.open_palette_mode(crate::palette::PaletteMode::ArmorShips, window, cx)
+                        this.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips, window, cx)
                     }
                     (false, "p") | (false, "k") => this.open_palette(window, cx),
                     _ => {}

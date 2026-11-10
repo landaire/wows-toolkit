@@ -62,8 +62,8 @@ use wowsunpack::game_params::types::Species;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
-use super::catalog::species_name;
-use super::catalog::tier_roman;
+use wows_toolkit_viewmodel::ship_catalog::species_name;
+use wows_toolkit_viewmodel::ship_catalog::tier_roman;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
 /// starts the ship's background armor load in response.

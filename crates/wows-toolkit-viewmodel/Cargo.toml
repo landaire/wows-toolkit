@@ -21,6 +21,12 @@ nalgebra = "0.34"
 # The annotations a saved tactics board holds, in the shape the session
 # protocol already names them.
 wt-collab-protocol = { workspace = true }
+# A tactics board's zones as draw commands, and the map measurements a
+# pointer is read against. `rendering` because a capture point's command
+# carries a flag field only under it, and every front end enables it.
+wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+# The capture layouts recorded in the settings database.
+rkyv = { workspace = true }
 # The game's own commands.scheme.xml, for the replay keyboard reference.
 roxmltree = { workspace = true }
 ciborium.workspace = true
@@ -46,11 +52,28 @@ serde_json.workspace = true
 semver = "1.0"
 thiserror.workspace = true
 thousands = "0.2.0"
+# ASCII-folded ship names, so a search for "Konig" finds "Koenig".
+unidecode = "0.3"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }
 sqlx = { workspace = true }
+# The release check, the ShipBuilds contribution and the Twitch chat poll.
+# Same features as the front ends, so all resolve one client.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+twitch_api = { version = "0.7.2", features = [
+    "helix",
+    "client",
+    "reqwest",
+] }
+# Reading a replay file for a raw contribution.
+tokio = { version = "1", features = ["fs"] }
 wows-toolkit-config = { workspace = true }
+# Drawing a stats chart into pixels: tiny-skia for the geometry, ab_glyph for
+# the glyphs, and fontdb to find a system face that covers each character.
+tiny-skia = "0.12"
+ab_glyph = "0.2"
+fontdb = "0.23"
 
 # The Windows proxy configuration, which `proxy::resolve_proxy` reads when
 # neither a manual setting nor the environment names one.
@@ -58,6 +81,7 @@ wows-toolkit-config = { workspace = true }
 windows-registry = "0.6"
 
 [dev-dependencies]
+tempfile = "3"
 # The store's tests drive a real in-memory database, which needs an executor.
 tokio = { version = "1.53", features = ["rt", "macros"] }
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }

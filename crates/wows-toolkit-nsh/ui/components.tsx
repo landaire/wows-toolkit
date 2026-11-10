@@ -3,6 +3,20 @@ import { Text, View } from "nsh";
 import { Button as BaseButton, MenuItem } from "nsh/base";
 import { colors, controlRadius } from "./theme";
 
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export const inputStyle = {
+  minHeight: 34,
+  paddingHorizontal: 9,
+  borderWidth: 1,
+  borderColor: colors.input,
+  borderRadius: controlRadius(),
+  backgroundColor: colors.background,
+  color: colors.foreground,
+};
+
 export function Button(props: {
   label: string;
   variant?: "primary" | "secondary" | "ghost" | "danger";

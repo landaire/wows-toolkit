@@ -1,4 +1,7 @@
 #[cfg(target_os = "linux")]
+mod desktop;
+
+#[cfg(target_os = "linux")]
 use nsh_platform_linux as platform;
 
 #[cfg(target_os = "linux")]
@@ -16,7 +19,19 @@ fn main() -> platform::gtk4::glib::ExitCode {
 fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
     const APP_ID: &str = "dev.landaire.wows-toolkit-nsh";
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Ring is installed because both rustls providers are in the graph, and
+    // the first TLS client panics unless one is chosen.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    // The log file is what a bug report is copied from, so it starts before
+    // anything that could fail. An unreadable database reads as logging on,
+    // the default every front end uses.
+    let to_file = wows_toolkit_config::load_startup_setting::<bool>(
+        wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING,
+    )
+    .unwrap_or(None)
+    .unwrap_or(true);
+    let _log_guard = wows_toolkit_nsh::shell::logging::init(to_file);
+    wows_toolkit_viewmodel::logging::install_panic_hook();
 
     // Scripted runs: WTN_EXIT_AFTER_SECS bounds the run for measurements. The
     // quit runs on the GTK main loop; process::exit from another thread races
@@ -44,12 +59,13 @@ fn run() -> Result<platform::gtk4::glib::ExitCode, Box<dyn std::error::Error>> {
         .with_app_id(Some(APP_ID))
         .with_capabilities_json(capabilities.as_deref())
         .map_err(std::io::Error::other)?;
-    Ok(platform::run_app(
-        platform::AppSource::Bundle(bundle),
+    Ok(desktop::run(
+        bundle,
         platform::AppOptions {
-            title: "WoWs Toolkit".to_owned(),
+            // Named and versioned as the other front ends' windows are, so a
+            // bug report names a build.
+            title: format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION")),
             app_id: APP_ID.to_owned(),
-            size: (1400, 1000),
             fps: std::env::var_os("WTN_FPS").is_some(),
             components,
             ..Default::default()

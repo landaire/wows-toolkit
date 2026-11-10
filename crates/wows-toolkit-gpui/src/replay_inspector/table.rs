@@ -42,17 +42,12 @@ use super::columns::CaptainPointsTier;
 use super::columns::CellValue;
 use super::columns::ColorRole;
 use super::columns::PlayerColorKind;
-use super::columns::ReplayColumn;
 use super::columns::cell_value;
 use super::columns::name_color_kind;
 use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
 use super::expanded;
 use super::icons::IconCache;
-use super::model::MatchContext;
-use super::model::PlayerRow;
-use super::model::ReplayReportModel;
-use super::model::SkillWarning;
 use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
@@ -60,6 +55,11 @@ use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -1916,13 +1916,13 @@ mod tests {
     use wowsunpack::vfs::MemoryFS;
     use wowsunpack::vfs::VfsPath;
 
-    use super::super::columns::ReplayColumn;
-    use super::super::model::MatchContext;
-    use super::super::model::ReplayReportModel;
     use super::super::sort::SortColumn;
-    use super::super::test_support::base_row;
     use super::PlayerTable;
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::columns::ReplayColumn;
+    use wows_toolkit_replay_data::model::MatchContext;
+    use wows_toolkit_replay_data::model::ReplayReportModel;
+    use wows_toolkit_replay_data::test_support::base_row;
 
     fn two_row_model() -> ReplayReportModel {
         ReplayReportModel {

@@ -11,7 +11,6 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 mod app;
 mod armor_viewer;
-mod cap_layout_store;
 mod child_process;
 mod cli;
 mod collab;
@@ -30,11 +29,9 @@ mod logging;
 mod minimap_preview;
 mod notices;
 mod palette;
-mod personal_rating;
 mod player_tracker;
 mod preview_hover;
 mod render_defaults;
-mod replay_index;
 mod replay_inspector;
 mod replay_renderer;
 mod runtime;
@@ -46,7 +43,6 @@ mod stats;
 mod tactics;
 mod theme;
 mod toast;
-mod twitch;
 mod ui;
 mod unpacker;
 mod update;
@@ -70,6 +66,9 @@ fn main() {
     heap_profile::start();
     // The zero every later mark is read against.
     heap_profile::mark("main.begin");
+    // The game-data load samples at its own steps, through the shared crate.
+    #[cfg(feature = "dhat-heap")]
+    wows_toolkit_replay_data::profiling::install(heap_profile::mark);
 
     // Before anything is opened: an argument this build does not take is
     // reported and the process exits, rather than a window appearing as though
@@ -111,7 +110,7 @@ fn main() {
             .unwrap_or(None)
             .unwrap_or(true);
     let _log_guard = logging::init(to_file);
-    logging::install_panic_hook();
+    wows_toolkit_viewmodel::logging::install_panic_hook();
 
     // Before any window exists, which is the only moment these are worth
     // applying: extension points attach as a window is created and overlays hook
@@ -229,7 +228,7 @@ fn main() {
             .await;
             let render_defaults = runtime::spawn(cx, {
                 let pool = pool.clone();
-                async move { render_defaults::load(&pool).await }
+                async move { wows_toolkit_replay_data::render_defaults::load(&pool).await }
             })
             .await;
             if let Err(err) = cx.update_window(window.into(), |_root, window, cx| {

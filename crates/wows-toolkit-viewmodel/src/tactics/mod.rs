@@ -1,6 +1,8 @@
 //! A tactics board: what is on it, what it is saved as, and what it calls the
 //! maps and modes it offers.
 
+pub mod board;
+pub mod layout_store;
 pub mod naming;
 pub mod preset;
 

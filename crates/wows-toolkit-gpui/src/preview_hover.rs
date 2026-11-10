@@ -25,10 +25,10 @@ use gpui_kit::Task;
 use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
 
-use crate::minimap_preview::FRAME_INTERVAL;
-use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
-use crate::replay_inspector::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::minimap::FRAME_INTERVAL;
+use wows_toolkit_replay_data::minimap::PreviewEdge;
 
 /// How long a preview goes without a new frame before the bake behind it
 /// reads as stuck rather than busy.
@@ -274,7 +274,7 @@ impl PreviewHover {
 
         // A battle walked recently plays without the dwell, as the egui popup
         // plays a cached track: what the dwell holds back is the walk.
-        if crate::minimap_preview::is_walked(&path) {
+        if wows_toolkit_replay_data::minimap::is_walked(&path) {
             self.bake(path, map_name, game_data, cx, field);
             return;
         }
@@ -437,11 +437,11 @@ impl PreviewHover {
             let failed = match &baked {
                 Err(err) => {
                     tracing::debug!("no preview for {}: {err}", path.display());
-                    err.said().map(SharedString::from)
+                    crate::minimap_preview::said(err).map(SharedString::from)
                 }
                 Ok(()) => None,
             };
-            let superseded = matches!(baked, Err(crate::minimap_preview::PreviewError::Cancelled));
+            let superseded = matches!(baked, Err(wows_toolkit_replay_data::minimap::PreviewError::Cancelled));
 
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);

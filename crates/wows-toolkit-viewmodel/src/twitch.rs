@@ -175,8 +175,9 @@ pub fn potential_stream_snipers<'a>(
 /// One chat login that plausibly names a player, and when it was seen.
 ///
 /// `minutes` is each sighting measured from the battle start, so a negative
-/// figure is someone who was in chat before the battle began. Both front ends
-/// show these in the chip's hover text; the wording is each one's own.
+/// figure is someone who was in chat before the battle began. The GPUI and NSH
+/// front ends word the chip's hover with [`sniper_hover_text`]; the egui app
+/// words its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SniperCandidate {
     pub login: String,
@@ -212,6 +213,24 @@ pub fn sniper_candidates<'a>(
         .collect();
     candidates.sort_by(|a, b| a.login.cmp(&b.login));
     candidates
+}
+
+/// The chip's hover text: each candidate login and how many minutes from the
+/// battle start it was seen, matching what the egui chip says.
+pub fn sniper_hover_text(candidates: &[SniperCandidate]) -> String {
+    let mut out = String::new();
+    for candidate in candidates {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        let minutes: Vec<String> = candidate.minutes.iter().map(|minute| minute.to_string()).collect();
+        out.push_str(&rust_i18n::t!("ui.twitch.possible_name", name = candidate.login));
+        out.push('\n');
+        out.push_str(&rust_i18n::t!("ui.twitch.seen_minutes", minutes = minutes.join(", ")));
+    }
+    out.push_str("\n\n");
+    out.push_str(&rust_i18n::t!("ui.twitch.click_to_copy"));
+    out
 }
 
 /// Whether an observation at `seen_at` is close enough to a battle that
@@ -360,5 +379,20 @@ mod tests {
     fn a_player_nobody_matched_gets_no_chip() {
         let observations = [("stranger", at(1))];
         assert!(potential_stream_snipers(observations.iter().map(|(l, t)| (*l, *t)), "harvey635", at(0)).is_none());
+    }
+
+    #[test]
+    fn the_chip_hover_names_each_login_and_its_sightings() {
+        let hover = sniper_hover_text(&[
+            SniperCandidate { login: "harvey635".to_string(), minutes: vec![-1, 5] },
+            SniperCandidate { login: "harvey_635".to_string(), minutes: vec![3] },
+        ]);
+
+        // The catalogue's wording, which is what the replay table's own chip
+        // says for the same candidate.
+        assert!(hover.contains("Possible stream name: harvey635"), "got {hover:?}");
+        assert!(hover.contains("Seen: -1, 5 minutes after match start"), "got {hover:?}");
+        assert!(hover.contains("Possible stream name: harvey_635"), "got {hover:?}");
+        assert!(hover.ends_with(rust_i18n::t!("ui.twitch.click_to_copy").as_ref()), "got {hover:?}");
     }
 }

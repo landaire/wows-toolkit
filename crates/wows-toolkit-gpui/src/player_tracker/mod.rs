@@ -69,10 +69,13 @@ use wows_toolkit_viewmodel::player_tracker::PlayerRow;
 use wows_toolkit_viewmodel::player_tracker::Sort;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortOrder;
+use wows_toolkit_viewmodel::player_tracker::TRACKER_SETTINGS_KEY;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
+use wows_toolkit_viewmodel::player_tracker::TrackerSettings;
 use wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown;
 use wows_toolkit_viewmodel::player_tracker::clans::visible_clans;
 use wows_toolkit_viewmodel::player_tracker::history;
+use wows_toolkit_viewmodel::player_tracker::history::PlayerDetail;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
@@ -87,6 +90,7 @@ use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::live::win_rate_hover;
+use wows_toolkit_viewmodel::player_tracker::live_source::LiveSource;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
@@ -98,15 +102,15 @@ use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
 
-use crate::replay_inspector::GameDataCache;
 use crate::replay_inspector::IconCache;
-use crate::replay_inspector::LoadedGameData;
 use crate::replay_inspector::columns::ColorRole;
 use crate::replay_inspector::columns::PlayerColorKind;
 use crate::replay_inspector::columns::player_color_kind_rgb;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 const ROW_HEIGHT: Pixels = px(24.);
 const NAME_COLUMN_WIDTH: Pixels = px(220.);
@@ -247,26 +251,6 @@ enum LoadState {
     Loading,
     Failed(String),
     Loaded,
-}
-
-/// The settings row the tracker keeps its view in.
-const TRACKER_SETTINGS_KEY: &str = "player_tracker";
-
-/// What the tracker remembers between sessions: the window of time it looks
-/// back over, how each table is ordered, and what the filter box holds.
-///
-/// The egui tracker keeps none of this, so this row is the port's own rather
-/// than one the two apps share.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct TrackerSettings {
-    #[serde(default)]
-    period: TimePeriod,
-    #[serde(default)]
-    sort: Sort,
-    #[serde(default)]
-    clan_sort: ClanSort,
-    #[serde(default)]
-    filter: String,
 }
 
 pub struct PlayerTrackerView {
@@ -1159,7 +1143,7 @@ impl PlayerTrackerView {
         cx.notify();
 
         self._live_scan = Some(cx.spawn(async move |this, cx| {
-            let source = live::LiveSource::in_dir(&replay_dir);
+            let source = LiveSource::in_dir(&replay_dir);
             let deadline = Instant::now() + live::SCAN_RETRY_BUDGET;
 
             let state = loop {
@@ -1496,7 +1480,10 @@ impl PlayerTrackerView {
         let expanded = self.expanded_players.clone();
         let details: HashMap<AccountId, PlayerDetail> = expanded
             .iter()
-            .map(|account| (*account, player_detail(self.tracked.get(account), self.show_division_mates)))
+            .filter_map(|account| {
+                let player = self.tracked.get(account)?;
+                Some((*account, history::player_detail(player, self.show_division_mates)))
+            })
             .collect();
         let expanded_clans = self.expanded_clans.clone();
         // The name each member is known by, which the clan aggregate holds
@@ -1968,31 +1955,6 @@ struct OpenNote {
     error: Option<String>,
 }
 
-/// What a historical row shows once it is opened.
-struct PlayerDetail {
-    /// Every other name this account has been seen under, sorted.
-    aliases: Vec<String>,
-    /// When the player was last met, spelled out in local time. Empty when
-    /// the tracker has no encounter recorded.
-    last_seen_exact: String,
-    /// Battles the player was met in, all time.
-    total_encounters: usize,
-}
-
-/// Reads one player's detail out of the tracker.
-fn player_detail(player: Option<&TrackedPlayer>, show_division_mates: bool) -> PlayerDetail {
-    let Some(player) = player else {
-        return PlayerDetail { aliases: Vec::new(), last_seen_exact: String::new(), total_encounters: 0 };
-    };
-    let mut aliases: Vec<String> = player.names.iter().filter(|name| **name != player.last_name).cloned().collect();
-    aliases.sort();
-    PlayerDetail {
-        aliases,
-        last_seen_exact: history::last_seen_timestamp_text(player.last_visible_timestamp(show_division_mates)),
-        total_encounters: player.visible_arena_ids(show_division_mates).count(),
-    }
-}
-
 /// The block under an opened historical row: what the tracker knows beyond
 /// the columns, and the note editor when this is the row being written about.
 fn player_detail_block(
@@ -2033,10 +1995,14 @@ fn player_detail_block(
                     .child(t!("ui.player_tracker.aliases_hover", names = detail.aliases.join(", ")).into_owned()),
             );
         }
-        if !detail.last_seen_exact.is_empty() {
-            block = block.child(div().text_xs().text_color(dim).child(
-                t!("ui.player_tracker.last_encountered_exact", timestamp = detail.last_seen_exact).into_owned(),
-            ));
+        if let Some(last_seen) = detail.last_seen {
+            let timestamp = history::exact_timestamp_text(last_seen);
+            block = block.child(
+                div()
+                    .text_xs()
+                    .text_color(dim)
+                    .child(t!("ui.player_tracker.last_encountered_exact", timestamp = timestamp).into_owned()),
+            );
         }
         block = block.child(
             div()
@@ -2604,7 +2570,7 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
         return slot.into_any_element();
     };
 
-    let hover = SharedString::from(sniper_hover_text(candidates));
+    let hover = SharedString::from(twitch::sniper_hover_text(candidates));
     let trigger = Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
         .child(crate::icons::icon(crate::icons::TWITCH_LOGO))
         .compact()
@@ -2641,24 +2607,6 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
         ),
     )
     .into_any_element()
-}
-
-/// The chip's hover text: each candidate login and how many minutes from the
-/// battle start it was seen, matching what the egui chip says.
-fn sniper_hover_text(candidates: &[SniperCandidate]) -> String {
-    let mut out = String::new();
-    for candidate in candidates {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        let minutes: Vec<String> = candidate.minutes.iter().map(|minute| minute.to_string()).collect();
-        out.push_str(&t!("ui.twitch.possible_name", name = candidate.login));
-        out.push('\n');
-        out.push_str(&t!("ui.twitch.seen_minutes", minutes = minutes.join(", ")));
-    }
-    out.push_str("\n\n");
-    out.push_str(&t!("ui.twitch.click_to_copy"));
-    out
 }
 
 /// The row's ship-class glyph, tinted like its name. A fixed-width slot
@@ -2874,9 +2822,9 @@ mod tests {
 
     use super::PlayerTrackerView;
     use super::SubTab;
-    use crate::replay_inspector::GameDataCache;
     use jiff::Timestamp;
     use wows_replays::types::AccountId;
+    use wows_toolkit_replay_data::load::GameDataCache;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
     use wows_toolkit_viewmodel::match_stats::Region;
@@ -2884,6 +2832,7 @@ mod tests {
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
     use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
+    use wows_toolkit_viewmodel::player_tracker::live_source::ARENA_INFO_FILE;
 
     /// A `tempArenaInfo.json` naming two players on opposite teams.
     const ARENA_INFO: &str = r#"{
@@ -2957,7 +2906,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_some()
@@ -3026,7 +2975,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
             .expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
@@ -3105,25 +3054,6 @@ mod tests {
         .expect("the window is open");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The hover names every candidate and when each was seen, which is what
-    /// the egui chip says.
-    #[test]
-    fn the_chip_hover_names_each_login_and_its_sightings() {
-        use wows_toolkit_viewmodel::twitch::SniperCandidate;
-
-        let hover = super::sniper_hover_text(&[
-            SniperCandidate { login: "harvey635".to_string(), minutes: vec![-1, 5] },
-            SniperCandidate { login: "harvey_635".to_string(), minutes: vec![3] },
-        ]);
-
-        // The catalogue's wording, which is what the replay table's own chip
-        // says for the same candidate (`replay_inspector/table.rs`).
-        assert!(hover.contains("Possible stream name: harvey635"), "got {hover:?}");
-        assert!(hover.contains("Seen: -1, 5 minutes after match start"), "got {hover:?}");
-        assert!(hover.contains("Possible stream name: harvey_635"), "got {hover:?}");
-        assert!(hover.ends_with(rust_i18n::t!("ui.twitch.click_to_copy").as_ref()), "got {hover:?}");
     }
 
     /// A win-rate cell says both scopes, whichever one it is showing: a reader
@@ -3378,7 +3308,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_some()
@@ -3432,7 +3362,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
 
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
@@ -3448,7 +3378,7 @@ mod tests {
         .expect("the window is open");
 
         // The battle ending removes the file, and the roster goes with it.
-        std::fs::remove_file(dir.join(super::live::ARENA_INFO_FILE)).expect("the arena info is removable");
+        std::fs::remove_file(dir.join(ARENA_INFO_FILE)).expect("the arena info is removable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_none()
@@ -3456,32 +3386,6 @@ mod tests {
         .await;
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The view the tracker was left in comes back, including a period that
-    /// is not the default.
-    #[test]
-    fn the_saved_view_round_trips_through_the_settings_row() {
-        use super::ClanSort;
-        use super::Sort;
-        use super::TrackerSettings;
-        use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
-        use wows_toolkit_viewmodel::player_tracker::SortColumn;
-        use wows_toolkit_viewmodel::player_tracker::TimePeriod;
-
-        let saved = TrackerSettings {
-            period: TimePeriod::LastWeek,
-            sort: Sort::default().toggled(SortColumn::Name),
-            clan_sort: ClanSort::default().toggled(ClanSortColumn::Members),
-            filter: "RAIN".to_string(),
-        };
-        let json = serde_json::to_string(&saved).expect("the view serializes");
-        let read: TrackerSettings = serde_json::from_str(&json).expect("and reads back");
-        assert_eq!(read, saved);
-
-        // A row written before a field existed still reads, on the defaults.
-        let older: TrackerSettings = serde_json::from_str("{}").expect("an empty row reads");
-        assert_eq!(older, TrackerSettings::default());
     }
 
     /// A battle's stats lookup waits until the tab is displayed with its

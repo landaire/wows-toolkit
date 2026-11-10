@@ -37,7 +37,7 @@ use wowsunpack::vfs::VfsPath;
 
 use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
-use super::model::PlayerRow;
+use wows_toolkit_replay_data::model::PlayerRow;
 
 /// Decodes raw image bytes (whatever format `image::load_from_memory` can
 /// sniff; every icon kind except ship-class ships as PNG) into a
@@ -385,8 +385,8 @@ mod tests {
         // out to them for keys a row actually carries, and `base_row` (see
         // `test_support.rs`) carries none. This exercises the "nothing to
         // resolve" path without needing a real game install.
-        use crate::replay_inspector::test_support::base_row;
         use wows_replays::types::Relation;
+        use wows_toolkit_replay_data::test_support::base_row;
 
         let mut cache = IconCache::new();
         let rows = vec![base_row(1, Relation::new(0), true)];
@@ -421,8 +421,8 @@ mod tests {
     fn populate_from_rows_resolves_subribbon_icons_under_the_sub_prefixed_filename() {
         use wows_replay_insights::battle_report::RibbonResult;
 
-        use crate::replay_inspector::test_support::base_row;
         use wows_replays::types::Relation;
+        use wows_toolkit_replay_data::test_support::base_row;
 
         let dir = std::env::temp_dir().join("wtk-gpui-icons-test-subribbon-prefix");
         let _ = std::fs::remove_dir_all(&dir);

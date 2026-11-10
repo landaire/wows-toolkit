@@ -1,0 +1,45 @@
+[package]
+name = "wows-toolkit-replay-data"
+description = "Game-data loading, replay parsing, the replay index pass and game-data cache maintenance shared by the desktop front ends"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_replay_data"
+path = "src/lib.rs"
+
+[features]
+# Row and battle-report fixtures for the tests of crates that render the model.
+test-support = []
+
+[dependencies]
+escaper = "0.1.1"
+gettext = { workspace = true }
+# The minimap previews and playback exports rasterise and encode through the
+# minimap renderer, and hand the front ends RGB images.
+image = { workspace = true }
+jiff = { workspace = true }
+rootcause = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+serde_json = { workspace = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt"] }
+tempfile = "3"
+tracing = { workspace = true }
+wows-battle-world = { path = "../wows-battle-world", default-features = false }
+wows-data-mgr = { workspace = true, features = ["constants", "download"] }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
+wows_minimap_renderer = { path = "../minimap-renderer", default-features = false, features = ["rendering"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
+wows-toolkit-config = { path = "../wows-toolkit-config" }
+wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+
+[dev-dependencies]
+filetime = "0.2"
+wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
+wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel", features = ["test-support"] }

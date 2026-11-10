@@ -6,6 +6,7 @@
 
 pub mod drawing;
 pub mod geometry;
+pub mod ids;
 pub mod protocol;
 pub mod types;
 pub mod validation;

@@ -42,6 +42,8 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::queries;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
+use wows_toolkit_viewmodel::stats::chart_model::ChartId;
+use wows_toolkit_viewmodel::stats::chart_model::ChartSettings;
 
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
@@ -55,8 +57,6 @@ use wows_toolkit_viewmodel::stats::setting_keys;
 
 use crate::ui::selectable;
 
-use super::chart_panel::ChartId;
-use super::chart_panel::ChartSettings;
 use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
 use super::directory::DirectoryScope;
@@ -99,7 +99,7 @@ pub struct StatsView {
     charts: Vec<Entity<StatsChartPanel>>,
     /// Ids are never reused, so a closed chart's element ids cannot collide
     /// with a later one's.
-    next_chart_id: usize,
+    next_chart_id: ChartId,
     /// Why the last clear did not go through, if it did not.
     clear_error: Option<SharedString>,
     /// Handed to every panel so the rating is computed against one table.
@@ -367,7 +367,7 @@ impl StatsView {
         });
         let chart_registry_for_build = chart_registry.clone();
         gpui_kit::component::dock::register_panel(cx, "StatsChartPanel", move |context, window, cx| {
-            let id = chart_id_from_state(context.state()).unwrap_or(0);
+            let id = chart_id_from_state(context.state()).unwrap_or_default();
             let panel = chart_registry_for_build
                 .lock()
                 .expect("Stats chart restore registry lock is not poisoned")
@@ -380,7 +380,7 @@ impl StatsView {
         self.charts = chart_ids.iter().filter_map(|id| chart_entities.get(id).cloned()).collect();
         self._chart_subscriptions =
             self.charts.iter().map(|chart| cx.subscribe(chart, Self::on_chart_settings_changed)).collect();
-        self.next_chart_id = chart_ids.iter().copied().max().map_or(0, |id| id.saturating_add(1));
+        self.next_chart_id = chart_ids.iter().copied().max().map_or(ChartId(0), ChartId::next);
 
         let loaded = self.dock_area.update(cx, |dock, cx| dock.load(state, window, cx));
         match loaded {
@@ -502,7 +502,7 @@ impl StatsView {
                         }
                     } else {
                         let saved_ids: Vec<_> =
-                            saved.iter().enumerate().map(|(index, settings)| settings.id.unwrap_or(index)).collect();
+                            saved.iter().enumerate().map(|(index, settings)| settings.id.unwrap_or(ChartId(index))).collect();
                         for (id, settings) in saved_ids.into_iter().zip(saved) {
                             if let Some(chart) = this.charts.iter().find(|chart| chart.read(cx).id() == id).cloned() {
                                 chart.update(cx, |panel, cx| panel.apply_settings(settings, cx));
@@ -521,7 +521,7 @@ impl StatsView {
                 }
                 if !restored_layout {
                     this.next_chart_id =
-                        this.charts.iter().map(|chart| chart.read(cx).id()).max().map_or(0, |id| id.saturating_add(1));
+                        this.charts.iter().map(|chart| chart.read(cx).id()).max().map_or(ChartId(0), ChartId::next);
                 }
                 this.push_filtered(cx);
                 this.charts_restoring = false;
@@ -569,7 +569,7 @@ impl StatsView {
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
-        let first_chart = cx.new(|cx| StatsChartPanel::new(0, dock_area.downgrade(), window, cx));
+        let first_chart = cx.new(|cx| StatsChartPanel::new(ChartId(0), dock_area.downgrade(), window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Right, Some(px(500.)), window, cx);
             // Overview and Ships share the main tab group; Charts opens beside them.
@@ -618,7 +618,7 @@ impl StatsView {
             overview,
             ships,
             charts: vec![first_chart],
-            next_chart_id: 1,
+            next_chart_id: ChartId(1),
             clear_error: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
@@ -878,7 +878,7 @@ impl StatsView {
     /// Opens a chart already set up the way `settings` says.
     fn add_chart_with(&mut self, settings: ChartSettings, window: &mut Window, cx: &mut Context<Self>) {
         let id = settings.id.unwrap_or(self.next_chart_id);
-        self.next_chart_id = self.next_chart_id.max(id.saturating_add(1));
+        self.next_chart_id = self.next_chart_id.max(id.next());
 
         let dock = self.dock_area.downgrade();
         let chart = cx.new(|cx| StatsChartPanel::new(id, dock, window, cx));
@@ -1027,7 +1027,7 @@ impl Focusable for StatsView {
 
 fn chart_id_from_state(state: &gpui_kit::component::dock::PanelState) -> Option<ChartId> {
     let gpui_kit::component::dock::PanelInfo::Panel(value) = &state.info else { return None };
-    usize::try_from(value.get("id")?.as_u64()?).ok()
+    usize::try_from(value.get("id")?.as_u64()?).ok().map(ChartId)
 }
 
 fn collect_chart_ids(state: &gpui_kit::component::dock::PanelState, chart_ids: &mut Vec<ChartId>) -> bool {

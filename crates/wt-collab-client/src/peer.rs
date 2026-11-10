@@ -91,7 +91,7 @@ pub enum LocalAnnotationEvent {
 /// them naming something at the same moment must not land on the same number.
 /// What a board, a capture point and an annotation are all known by.
 pub fn fresh_id() -> u64 {
-    rand::random()
+    wt_collab_protocol::ids::fresh_raw()
 }
 
 impl LocalAnnotationEvent {

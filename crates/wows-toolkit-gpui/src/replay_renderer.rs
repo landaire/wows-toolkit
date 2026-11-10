@@ -24,8 +24,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::armor_viewer::catalog::ShipEntry;
-use crate::minimap_preview::SharedPreviewRenderer;
+use wows_toolkit_viewmodel::ship_catalog::ShipEntry;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -61,7 +60,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
-use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
@@ -84,36 +82,46 @@ use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
 
-use crate::replay_inspector::GameDataCache;
-
-/// How many frames of a battle the track keeps.
-///
-/// Past this the sink halves what it holds and samples half as often, so a
-/// twenty-minute battle costs what a five-minute one does. Twelve hundred
-/// frames is two minutes of game time at the bake rate below, and a whole
-/// twenty-minute battle once the stride has doubled four times.
-const TRACK_BUDGET: usize = 1200;
-
-/// How much game time one baked frame covers.
-const BAKE_INTERVAL: f32 = 0.5;
-
-/// How often the viewport advances while playing, before the speed
-/// multiplier. One frame of game time per tick at 1x.
-const TICK: Duration = Duration::from_millis(500);
-
-/// The speeds the transport offers, which are the egui renderer's own
-/// (`PLAYBACK_SPEEDS`). A battle runs twenty minutes, so the useful range is
-/// well above real time.
-const SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
-
-/// The speed a viewport opens at, as the egui renderer opens at
-/// (`SharedRendererState::speed`). Real time is too slow to watch a battle
-/// through.
-const DEFAULT_SPEED: f32 = 20.0;
-
-/// How far the skip controls and the left and right keys move, in seconds of
-/// game time. The egui renderer's own step.
-const SEEK_STEP: f32 = 10.0;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::minimap::SharedPreviewRenderer;
+use wows_toolkit_replay_data::playback::ALL_RANGES;
+use wows_toolkit_replay_data::playback::BatchStep;
+use wows_toolkit_replay_data::playback::DEFAULT_INK;
+use wows_toolkit_replay_data::playback::DEFAULT_MAP_ORIGIN;
+use wows_toolkit_replay_data::playback::DEFAULT_NIB;
+use wows_toolkit_replay_data::playback::DEFAULT_SPEED;
+use wows_toolkit_replay_data::playback::ENEMY_TINT;
+use wows_toolkit_replay_data::playback::ExportError;
+use wows_toolkit_replay_data::playback::ExportProgress;
+use wows_toolkit_replay_data::playback::ExportSettings;
+use wows_toolkit_replay_data::playback::ExportStage;
+use wows_toolkit_replay_data::playback::FRIENDLY_TINT;
+use wows_toolkit_replay_data::playback::HISTORY_DEPTH;
+use wows_toolkit_replay_data::playback::INKS;
+use wows_toolkit_replay_data::playback::LAYER_TOGGLES;
+use wows_toolkit_replay_data::playback::MAX_NIB;
+use wows_toolkit_replay_data::playback::MIN_NIB;
+use wows_toolkit_replay_data::playback::NO_RANGES;
+use wows_toolkit_replay_data::playback::PING_RADIUS;
+use wows_toolkit_replay_data::playback::PING_SECONDS;
+use wows_toolkit_replay_data::playback::SEEK_STEP;
+use wows_toolkit_replay_data::playback::SHIP_MATCHES;
+use wows_toolkit_replay_data::playback::SPECIES;
+use wows_toolkit_replay_data::playback::SPEEDS;
+use wows_toolkit_replay_data::playback::TICK;
+use wows_toolkit_replay_data::playback::Track;
+use wows_toolkit_replay_data::playback::ZOOM_PER_PIXEL;
+use wows_toolkit_replay_data::playback::bake;
+use wows_toolkit_replay_data::playback::encode_track;
+use wows_toolkit_replay_data::playback::encoder_status;
+use wows_toolkit_replay_data::playback::export_settings_of;
+use wows_toolkit_replay_data::playback::mmss;
+use wows_toolkit_replay_data::playback::must_use_cpu;
+use wows_toolkit_replay_data::playback::per_ship_allows;
+use wows_toolkit_replay_data::playback::playback_options_hidden;
+use wows_toolkit_replay_data::playback::speed_index;
+use wows_toolkit_replay_data::playback::speed_label;
+use wows_toolkit_replay_data::playback::temporary_output;
 
 /// What the viewport is doing.
 enum State {
@@ -121,60 +129,6 @@ enum State {
     Baking,
     Ready(Track),
     Failed(String),
-}
-
-/// A baked battle: the commands of every kept frame, and when each was drawn.
-struct Track {
-    frames: Vec<Vec<DrawCommand>>,
-    clocks: Vec<GameClock>,
-    /// When the battle proper began. Recording starts at the loading screen,
-    /// so the clock a frame carries runs ahead of the one the game showed by
-    /// this much.
-    battle_start: GameClock,
-    /// When the battle ended, if the replay ran that far.
-    battle_end: Option<GameClock>,
-    /// How wide the map is in the game's own world units, which is what
-    /// turns a ship's range in metres into a distance on the minimap.
-    space_size: f32,
-    /// The build this was recorded on, which some of a ship's ranges are
-    /// gated on.
-    version: wowsunpack::data::Version,
-    /// Where the map's top-left corner sits in these frames.
-    map_origin: (f32, f32),
-    /// The map's space name, which a peer watching this playback loads art by.
-    space: String,
-}
-
-impl Track {
-    fn len(&self) -> usize {
-        self.frames.len()
-    }
-
-    /// The game time `index` was drawn at, in seconds.
-    fn seconds_at(&self, index: usize) -> f32 {
-        self.clocks.get(index).map(|clock| clock.seconds()).unwrap_or(0.0)
-    }
-
-    /// How far into the battle `index` is, which is the clock the game showed.
-    fn elapsed_at(&self, index: usize) -> f32 {
-        self.seconds_at(index) - self.battle_start.seconds()
-    }
-
-    /// The last frame drawn at or before `seconds` of game time.
-    ///
-    /// Clocks ascend, so this is a partition point. A time before the first
-    /// frame lands on that frame rather than nowhere.
-    fn frame_at(&self, seconds: f32) -> usize {
-        self.clocks.partition_point(|clock| clock.seconds() <= seconds).saturating_sub(1)
-    }
-
-    /// Where a clock sits along the track, as a fraction of its length.
-    ///
-    /// `None` when the track is too short to have a length to sit along.
-    fn position_of(&self, clock: GameClock) -> Option<f32> {
-        let last = self.len().checked_sub(1).filter(|last| *last > 0)?;
-        Some((self.frame_at(clock.seconds()) as f32 / last as f32).clamp(0.0, 1.0))
-    }
 }
 
 /// A replay played back on its own minimap.
@@ -253,10 +207,10 @@ pub struct ReplayRendererPanel {
     /// not sent again.
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
-    collab: crate::collab::CollabLink,
+    collab: wt_collab_client::link::CollabLink,
     /// What this playback is called in a session, so a peer can ask to watch
     /// this one rather than another window.
-    replay_id: crate::collab::ReplayId,
+    replay_id: wt_collab_client::ids::ReplayId,
     /// Whether the session has been told this playback is open. Said once, and
     /// again if a session starts after it was opened.
     shared: bool,
@@ -282,7 +236,7 @@ pub struct ReplayRendererPanel {
     ship_query: String,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
     /// Every ship the loaded build knows, built once when first asked for.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_catalog: Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>>,
     /// What the session held before each change this viewport made, newest
     /// last. Bounded: a session left open all evening must not grow a
     /// history of every stroke in it.
@@ -340,35 +294,6 @@ pub struct ReplayRendererPanel {
 struct ConsumableHover {
     player: String,
     lines: wows_minimap_renderer::draw_command::ConsumableLines,
-}
-
-/// How far an export has got, in frames.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ExportProgress {
-    pub done: u64,
-    pub total: u64,
-    pub stage: ExportStage,
-}
-
-/// Which part of an export is running.
-///
-/// Muxing happens after the last frame and can take a noticeable while on a
-/// long battle, so saying so is the difference between a bar that has
-/// stopped and one that is nearly done.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExportStage {
-    Encoding,
-    Muxing,
-}
-
-impl ExportStage {
-    /// What the overlay calls it, worded as the egui renderer words it.
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Encoding => "ui.renderer.encoding",
-            Self::Muxing => "ui.renderer.muxing",
-        }
-    }
 }
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
@@ -506,8 +431,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            replay_id: wt_collab_client::ids::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -646,8 +571,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            replay_id: wt_collab_client::ids::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -721,7 +646,7 @@ impl ReplayRendererPanel {
     fn start_event_scan(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
         self._events = Some(cx.spawn(async move |this, cx| {
             let read =
-                cx.background_spawn(async move { crate::minimap_preview::extract_events(&path, &game_data) }).await;
+                cx.background_spawn(async move { wows_toolkit_replay_data::minimap::extract_events(&path, &game_data) }).await;
             let _ = this.update(cx, |this, cx| {
                 match read {
                     Ok((read, shots)) => {
@@ -754,13 +679,13 @@ impl ReplayRendererPanel {
     }
 
     /// Hands a viewport being built its end of the session.
-    pub fn seed_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn seed_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
         self.follow_collab(cx);
     }
 
     /// Hands this viewport a session to talk to, or takes one away.
-    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         // What was drawn before stays on the map: a session starting under an
         // open viewport hears about it as though it had just been drawn, and one
         // ending leaves it where the reader can still see it.
@@ -878,7 +803,7 @@ impl ReplayRendererPanel {
                     let mut png = Vec::new();
                     art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok().map(|()| png)
                 });
-            link.announce_replay(crate::collab::SharedReplay {
+            link.announce_replay(wt_collab_client::link::SharedReplay {
                 replay_id,
                 replay_name,
                 map_label: wows_toolkit_viewmodel::tactics::naming::pretty_map_name(&space),
@@ -1089,21 +1014,17 @@ impl ReplayRendererPanel {
     /// no element of its own to rest a pointer on; the strip it sits in is
     /// what the reader hovers instead.
     pub(crate) fn advantage_hover(&self) -> Option<Vec<String>> {
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        let breakdown = commands.iter().find_map(|command| match command {
-            DrawCommand::TeamAdvantage { level: Some(_), breakdown, .. } => Some(breakdown),
-            _ => None,
-        })?;
+        use wows_toolkit_replay_data::playback::AdvantageReading;
 
+        let reading = self.track()?.advantage_reading(self.at)?;
         let mut lines = vec![t!("ui.renderer.advantage.breakdown").into_owned()];
-        match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
-            None => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
-            Some(rows) => {
-                for row in rows {
-                    lines.push(format!("{}  {}", t!(row.label_key), row.contribution));
+        match reading {
+            AdvantageReading::TeamEliminated => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
+            AdvantageReading::Rows { rows, hp_incomplete } => {
+                for (label_key, contribution) in rows {
+                    lines.push(format!("{}  {}", t!(label_key), contribution));
                 }
-                if !breakdown.hp_data_reliable {
+                if hp_incomplete {
                     lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
                 }
             }
@@ -1160,32 +1081,13 @@ impl ReplayRendererPanel {
         self.menu_for.as_ref()
     }
 
-    /// The ship drawn nearest `at`, if one is close enough to have been meant.
-    ///
-    /// Reads the frame on screen rather than the whole track: a right-click
-    /// picks what the reader can see.
+    /// The ship drawn nearest `at` in the frame on screen, if one is close
+    /// enough to have been meant.
     fn ship_at(&self, at: (f32, f32)) -> Option<ShipMenu> {
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        let mut best: Option<(f32, ShipMenu)> = None;
-        for command in commands {
-            let (pos, player_name, entity_id) = match command {
-                DrawCommand::Ship { pos, player_name, entity_id, .. }
-                | DrawCommand::DeadShip { pos, player_name, entity_id, .. } => (pos, player_name, entity_id),
-                _ => continue,
-            };
-            let Some(name) = player_name.clone() else { continue };
-            let away = ((pos.x - at.0).powi(2) + (pos.y - at.1).powi(2)).sqrt();
-            if away > PICK_RADIUS {
-                continue;
-            }
-            if best.as_ref().is_none_or(|(nearest, _)| away < *nearest) {
-                // The caller puts the menu where the pointer was; a pick has
-                // no position of its own.
-                best = Some((away, ShipMenu { entity_id: *entity_id, player_name: name, at: Point::default() }));
-            }
-        }
-        best.map(|(_, menu)| menu)
+        let pick = self.track()?.ship_near(self.at, at)?;
+        // The caller puts the menu where the pointer was; a pick has no
+        // position of its own.
+        Some(ShipMenu { entity_id: pick.entity_id, player_name: pick.player_name, at: Point::default() })
     }
 
     /// Which ship the menu's entity was in, and what it is called, when the
@@ -1412,17 +1314,7 @@ impl ReplayRendererPanel {
 
     /// The ships drawn in the frame on screen, by player name.
     fn drawn_ships(&self) -> Vec<String> {
-        let Some(track) = self.track() else { return Vec::new() };
-        let Some(commands) = track.frames.get(self.at) else { return Vec::new() };
-        commands
-            .iter()
-            .filter_map(|command| match command {
-                DrawCommand::Ship { player_name, .. } | DrawCommand::DeadShip { player_name, .. } => {
-                    player_name.clone()
-                }
-                _ => None,
-            })
-            .collect()
+        self.track().map(|track| track.drawn_ships(self.at)).unwrap_or_default()
     }
 
     /// The events the filter admits, newest last.
@@ -1548,16 +1440,8 @@ impl ReplayRendererPanel {
     }
 
     /// The frames an export covers.
-    ///
-    /// A replay records the loading screen and the countdown before the battle
-    /// proper; unless the reader asked for them, an export starts where the
-    /// battle did.
     fn frames_to_export<'a>(&self, track: &'a Track) -> &'a [Vec<DrawCommand>] {
-        if self.export_settings.include_pre_battle {
-            return &track.frames;
-        }
-        let from = track.frame_at(track.battle_start.seconds());
-        track.frames.get(from..).unwrap_or(&track.frames)
+        wows_toolkit_replay_data::playback::frames_to_export(track, &self.export_settings)
     }
 
     /// Opens this viewport showing what the reader last saved as the defaults.
@@ -1631,7 +1515,7 @@ impl ReplayRendererPanel {
     /// is not a layer but a wider canvas. The renderer for one is kept, so
     /// switching back and forth costs nothing after the first time.
     fn follow_layout(&mut self, cx: &mut Context<Self>) {
-        let wanted = crate::minimap_preview::layout_for(&self.options);
+        let wanted = wows_toolkit_replay_data::minimap::layout_for(&self.options);
         if wanted == self.layout {
             return;
         }
@@ -1641,7 +1525,7 @@ impl ReplayRendererPanel {
             self.options.show_stats_panel = false;
             return;
         };
-        match crate::minimap_preview::renderer_for_replay(&self.path, &game_data, wanted) {
+        match wows_toolkit_replay_data::minimap::renderer_for_replay(&self.path, &game_data, wanted) {
             Ok((renderer, origin)) => {
                 self.layout = wanted;
                 self.renderer = Some(renderer);
@@ -1823,7 +1707,7 @@ impl ReplayRendererPanel {
                 let (image, regions) = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     let (frame, regions) = drawing.render_regions(view, &shown);
-                    (to_image(frame), regions)
+                    (crate::minimap_preview::to_image(&frame), regions)
                 };
                 (renderer, image, regions)
             });
@@ -1883,21 +1767,13 @@ impl ReplayRendererPanel {
         // should not come back in the file. The overlays drawn over a battle --
         // trails, annotations, the ranges placed on the map -- are derived at
         // draw time and are not written.
-        let frames: Vec<Vec<DrawCommand>> = self
-            .frames_to_export(track)
-            .iter()
-            .map(|frame| {
-                frame
-                    .iter()
-                    .filter(|command| should_draw_command(command, &self.options, self.show_dead_ships))
-                    .filter(|command| per_ship_allows(command, &self.trail_hidden, &self.ship_ranges))
-                    .cloned()
-                    .collect()
-            })
-            .collect();
-        // What the video covers, which is not the whole track when the
-        // pre-battle phase is left out.
-        let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
+        let frames = wows_toolkit_replay_data::playback::filtered_frames(
+            self.frames_to_export(track),
+            &self.options,
+            self.show_dead_ships,
+            &self.trail_hidden,
+            &self.ship_ranges,
+        );
         let suggested = format!("{}.mp4", self.title);
         // The clipboard needs a file, not a place to put one, so it is not
         // asked for.
@@ -1948,7 +1824,9 @@ impl ReplayRendererPanel {
             let written = output.clone();
             let (renderer, outcome) = cx
                 .background_spawn(async move {
-                    let outcome = encode_track(&renderer, &frames, duration, &written, settings, progress_tx);
+                    let outcome = encode_track(&renderer, &frames, &written, settings, |step| {
+                        let _ = progress_tx.unbounded_send(step);
+                    });
                     (renderer, outcome)
                 })
                 .await;
@@ -1965,7 +1843,7 @@ impl ReplayRendererPanel {
                         }
                     }
                     Ok(()) => {}
-                    Err(reason) => this.export_failure = Some(reason),
+                    Err(reason) => this.export_failure = Some(export_failure_text(&reason)),
                 }
                 cx.notify();
             });
@@ -2330,12 +2208,12 @@ impl ReplayRendererPanel {
 
     /// Every ship the loaded build knows, built the first time one is
     /// looked up rather than when the viewport opens.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+    fn ships(&mut self) -> Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>> {
         if let Some(catalog) = &self.ship_catalog {
             return Some(std::rc::Rc::clone(catalog));
         }
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        let catalog = std::rc::Rc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider()));
         self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
         Some(catalog)
     }
@@ -2641,7 +2519,7 @@ impl ReplayRendererPanel {
     fn seed_frame_for_test(&mut self) {
         let width = wows_minimap_renderer::MINIMAP_SIZE;
         let height = wows_minimap_renderer::CANVAS_HEIGHT;
-        self.frame = Some(to_image(image::RgbImage::new(width, height)));
+        self.frame = Some(crate::minimap_preview::to_image(&image::RgbImage::new(width, height)));
         self.set_drawn_for_test(gpui_kit::Bounds {
             origin: gpui_kit::point(px(0.), px(0.)),
             size: gpui_kit::size(px(width as f32), px(height as f32)),
@@ -2716,27 +2594,6 @@ impl gpui_kit::component::searchable_list::SearchableListItem for SpeedItem {
     fn value(&self) -> &Self::Value {
         &self.0
     }
-}
-
-/// Where `speed` sits in the ladder.
-fn speed_index(speed: f32) -> usize {
-    SPEEDS.iter().position(|offered| (offered - speed).abs() < f32::EPSILON).unwrap_or_default()
-}
-
-/// A speed as the transport labels it: no trailing zero on a whole one.
-fn speed_label(speed: f32) -> String {
-    if (speed - speed.round()).abs() < f32::EPSILON {
-        format!("{}x", speed.round() as i32)
-    } else {
-        format!("{speed}x")
-    }
-}
-
-/// Seconds of game time as the clock the game shows, zero-padded as the egui
-/// renderer pads it.
-fn mmss(seconds: f32) -> String {
-    let seconds = seconds.max(0.0) as u32;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 impl Drop for ReplayRendererPanel {
@@ -3245,83 +3102,18 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
     )
 }
 
-/// Whether the reader has asked for this ship's trail or this range.
-///
-/// The global switches decide whether a layer is drawn at all; this decides
-/// whose, which is what the per-ship menu changes.
-fn per_ship_allows(
-    command: &DrawCommand,
-    trail_hidden: &HashSet<String>,
-    ship_ranges: &HashMap<String, ShipConfigFilter>,
-) -> bool {
-    match command {
-        DrawCommand::PositionTrail { player_name, .. } => {
-            player_name.as_ref().is_none_or(|name| !trail_hidden.contains(name))
-        }
-        DrawCommand::ShipConfigCircle { player_name, kind, .. } => {
-            ship_ranges.get(player_name).is_some_and(|filter| filter.is_enabled(kind))
-        }
-        _ => true,
-    }
-}
-
-/// How many ships a search offers at once.
-const SHIP_MATCHES: usize = 10;
-
-/// How many changes back an undo can reach.
-const HISTORY_DEPTH: usize = 32;
-
 /// How big a rotation handle is drawn, and how far above the shape it sits.
 /// The egui renderer's own figures, in screen pixels at any zoom.
-const HANDLE_RADIUS: Pixels = px(5.);
-const HANDLE_DISTANCE: Pixels = px(25.);
-
-/// What a tool draws with until the reader says otherwise: the white and the
-/// width the egui toolbar opens on.
-const DEFAULT_INK: [u8; 4] = [255, 255, 255, 255];
-const DEFAULT_NIB: f32 = 2.0;
-
-/// What the bracket keys hold the nib between, as the egui board does.
-const MIN_NIB: f32 = 1.0;
-const MAX_NIB: f32 = 8.0;
-
-/// How long a ping stays on the map, in seconds.
-const PING_SECONDS: f32 = 1.0;
+const HANDLE_RADIUS: Pixels = px(wows_toolkit_replay_data::playback::HANDLE_RADIUS);
+const HANDLE_DISTANCE: Pixels = px(wows_toolkit_replay_data::playback::HANDLE_DISTANCE);
 
 /// How often a running session redraws, which is what moves a peer's cursor
 /// and carries a ping through its ripple.
 const COLLAB_TICK: Duration = Duration::from_millis(33);
 
-/// How wide a ping's ring grows, in element pixels.
-const PING_RADIUS: f32 = 26.0;
-
 /// The strip the renderer reserves above the map, which is where the score
 /// bar and the advantage label are drawn.
 const HUD_STRIP_HEIGHT: f32 = wows_minimap_renderer::HUD_HEIGHT as f32;
-
-/// How near a right-click has to land to have meant a ship, in map pixels.
-/// A ship icon is about this wide.
-const PICK_RADIUS: f32 = 14.0;
-
-/// A ship showing none of its ranges.
-const NO_RANGES: ShipConfigFilter = ShipConfigFilter {
-    detection: false,
-    main_battery: false,
-    secondary_battery: false,
-    torpedo: false,
-    radar: false,
-    hydro: false,
-};
-
-/// A ship showing all of them.
-const ALL_RANGES: ShipConfigFilter = ShipConfigFilter {
-    detection: true,
-    main_battery: true,
-    secondary_battery: true,
-    torpedo: true,
-    radar: true,
-    hydro: true,
-};
 
 /// The ship a context menu is open for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3337,120 +3129,13 @@ pub(crate) struct ShipMenu {
 /// mostly for, and it takes whatever is left.
 const ZOOM_WIDTH: Pixels = px(90.);
 
-/// Where the map's corner sits before a track says otherwise.
-///
-/// The renderer reserves a strip above the map for the score bar and the
-/// timer; a side panel would also move the map right, which is why a baked
-/// track carries its own origin rather than every caller assuming this one.
-const DEFAULT_MAP_ORIGIN: (f32, f32) = (0.0, wows_minimap_renderer::HUD_HEIGHT as f32);
-
 /// How much one line of wheel travel is worth, for a wheel that reports lines
 /// rather than pixels.
 const SCROLL_LINE: Pixels = px(20.);
 
-/// How much of a zoom one pixel of wheel travel is. The egui renderer's own
-/// rate, so the wheel feels the same in both.
-const ZOOM_PER_PIXEL: f32 = 0.01;
-
-/// What a playback viewport draws when it opens.
-///
-/// Everything it baked except the layers that are asked for rather than
-/// assumed: the rosters take a gutter either side of the map, and the ranges
-/// would cover it.
-fn playback_options_hidden() -> RenderOptions {
-    RenderOptions { show_ship_config: false, show_team_rosters: false, ..playback_options() }
-}
-
-/// What a playback viewport bakes.
-///
-/// The hover preview's set plus every ship's range circles. They are per-frame
-/// and small, so keeping them costs little, and a viewport that did not bake
-/// them could not offer them at all. Trails are still left out: a trail
-/// command carries every point so far, so baking one per frame would cost the
-/// square of the track's length.
-fn playback_options() -> RenderOptions {
-    RenderOptions {
-        show_ship_config: true,
-        // The rosters' own commands carry fixed coordinates, so baking them
-        // costs a roster per frame and nothing else; the canvas they need is
-        // the target's business, not the bake's.
-        show_team_rosters: true,
-        // Every ship's, so the reader can choose whose to look at afterwards
-        // rather than re-baking to change their mind.
-        ship_config_visibility: wows_minimap_renderer::draw_command::ShipConfigVisibility::Filtered(
-            std::sync::Arc::new(|_entity| {
-                Some(wows_minimap_renderer::draw_command::ShipConfigFilter {
-                    detection: true,
-                    main_battery: true,
-                    secondary_battery: true,
-                    torpedo: true,
-                    radar: true,
-                    hydro: true,
-                })
-            }),
-        ),
-        ..wows_minimap_renderer::frame_track::bake_options()
-    }
-}
-
-/// Why a battle could not be played back.
-#[derive(Debug, thiserror::Error)]
-pub enum RenderError {
-    #[error(transparent)]
-    Preview(#[from] crate::minimap_preview::PreviewError),
-}
-
-/// Walks `path`'s battle once, keeping every frame's draw commands and the
-/// renderer they are drawn through.
-///
-/// `alts` are other recordings of the same battle, read alongside it: the map
-/// then shows what the primary's team could not see.
-fn bake(
-    path: &std::path::Path,
-    alts: &[PathBuf],
-    game_data: &GameDataCache,
-    cancel: &AtomicBool,
-) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked = crate::minimap_preview::bake_track(
-        path,
-        alts,
-        game_data,
-        cancel,
-        TRACK_BUDGET,
-        BAKE_INTERVAL,
-        playback_options(),
-    )?;
-    let track = Track {
-        frames: baked.frames,
-        clocks: baked.clocks,
-        battle_start: baked.battle_start,
-        battle_end: baked.battle_end,
-        space_size: baked.space_size,
-        version: baked.version,
-        map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
-        space: baked.map_name,
-    };
-    Ok((track, baked.renderer))
-}
-
 /// Renders each replay in `paths` to its own file under `out_dir`, without
-/// opening a viewport for any of them.
-///
-/// This is what the listing's "Render N Replays to Video" is for: the egui app
-/// runs one background batch into a chosen folder
-/// (`replay/renderer/video_export.rs:458`), where opening N viewports would bake
-/// N tracks that nobody watches and leave the reader to save each one.
-///
-/// Sequential, because each encode holds a GPU device and the machine has one:
-/// two at once would contend for it and finish no sooner. A replay that fails is
-/// reported and the rest still run, since one unreadable file in a marked set
-/// should not lose the other forty.
-///
-/// `defaults` is what the reader saved as what a renderer opens with, so a
-/// batch writes what a viewport would have shown rather than the built-in set.
-///
-/// `report` is told which replay the batch has reached before it is read, so the
-/// reader is not left watching a still line for forty files.
+/// opening a viewport for any of them: the listing's "Render N Replays to
+/// Video" (`wows_toolkit_replay_data::playback::batch_export`).
 ///
 /// Returns the files written and the replays that failed.
 pub fn batch_export(
@@ -3461,71 +3146,23 @@ pub fn batch_export(
     report: futures::channel::mpsc::UnboundedSender<BatchStep>,
     cx: &App,
 ) -> Task<(Vec<PathBuf>, Vec<PathBuf>)> {
-    let settings = export_settings_of(&defaults);
-    let (options, show_dead_ships) = batch_options(&defaults);
-
     cx.background_spawn(async move {
-        let mut written = Vec::new();
-        let mut failed = Vec::new();
+        // Nothing stops a batch once it is under way, as in the egui app.
         let cancel = AtomicBool::new(false);
-        let total = paths.len();
-
-        for (index, path) in paths.into_iter().enumerate() {
-            let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
-            let _ = report.unbounded_send(BatchStep { done: index, total, replay: named });
-            let Some(stem) = path.file_stem() else {
-                failed.push(path);
-                continue;
-            };
-            let output = out_dir.join(stem).with_extension("mp4");
-
-            let baked = match bake(&path, &[], &game_data, &cancel) {
-                Ok(baked) => baked,
-                Err(err) => {
-                    tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");
-                    failed.push(path);
-                    continue;
-                }
-            };
-            let (track, renderer) = baked;
-            let covered: &[Vec<DrawCommand>] = if settings.include_pre_battle {
-                &track.frames
-            } else {
-                let from = track.frame_at(track.battle_start.seconds());
-                track.frames.get(from..).unwrap_or(&track.frames)
-            };
-            // The bake holds every layer it could; which of them are drawn is
-            // what the saved defaults decide, as they do in a viewport.
-            let frames: Vec<Vec<DrawCommand>> = covered
-                .iter()
-                .map(|frame| {
-                    frame
-                        .iter()
-                        .filter(|command| should_draw_command(command, &options, show_dead_ships))
-                        .cloned()
-                        .collect()
-                })
-                .collect();
-            if frames.is_empty() {
-                failed.push(path);
-                continue;
-            }
-            let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
-
-            // The progress channel is per encode; nothing reads it here, since
-            // the batch reports per replay rather than per frame.
-            let (progress, _ignored) = futures::channel::mpsc::unbounded();
-            match encode_track(&renderer, &frames, duration, &output, settings, progress) {
-                Ok(()) => written.push(output),
-                Err(reason) => {
-                    tracing::warn!(path = %path.display(), %reason, "batch render: the encode failed");
-                    failed.push(path);
-                }
-            }
-        }
-
-        (written, failed)
+        let outcome =
+            wows_toolkit_replay_data::playback::batch_export(paths, &game_data, &out_dir, &defaults, &cancel, |step| {
+                let _ = report.unbounded_send(step);
+            });
+        (outcome.written, outcome.failed)
     })
+}
+
+/// What an export's failure says.
+fn export_failure_text(error: &ExportError) -> String {
+    match error {
+        ExportError::PathUnusable { .. } => t!("ui.replay.renderer.export_path_unusable").into_owned(),
+        ExportError::Encoder(_) | ExportError::NoFrames => error.to_string(),
+    }
 }
 
 /// The tool a digit takes up, in the order the egui board numbers them
@@ -3545,18 +3182,6 @@ fn tool_for_key(key: &str) -> Option<Tool> {
     })
 }
 
-/// One rasterised frame, as an image gpui can draw.
-fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
-    let (width, height) = frame.dimensions();
-    let mut bgra = Vec::with_capacity((width * height * 4) as usize);
-    for pixel in frame.pixels() {
-        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-    }
-    let buffer = image::RgbaImage::from_raw(width, height, bgra)
-        .expect("the buffer is four bytes per pixel of the size it was built at");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
-}
-
 /// Where a render goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExportTarget {
@@ -3566,317 +3191,8 @@ enum ExportTarget {
     Clipboard,
 }
 
-/// A place to render to that outlives this process, for the clipboard.
-///
-/// `None` when no temporary directory could be made, which is the only way
-/// this fails.
-fn temporary_output(name: &str) -> Option<PathBuf> {
-    let dir = tempfile::Builder::new().prefix("wt-gpui-render-").tempdir().ok()?;
-    let path = dir.path().join(name);
-    // Kept: the clipboard will hold this path, and a directory removed on
-    // drop would leave it pointing at nothing.
-    let _ = dir.keep();
-    Some(path)
-}
-
 /// The file an export writes.
 const MP4: crate::dialog::Filter = crate::dialog::Filter { label: "MP4", extensions: &["mp4"] };
-
-/// Rasterises a baked track and encodes it to `output`.
-///
-/// Runs on a background thread: it draws every frame and blocks on the
-/// encoder. The renderer is the viewport's own, which is why the caller hands
-/// it over for the duration rather than sharing it.
-/// What an export is encoded with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ExportSettings {
-    /// Encode in software even where the GPU could do it.
-    pub prefer_cpu: bool,
-    /// Start the video at the loading screen rather than at the battle.
-    pub include_pre_battle: bool,
-    /// The codec to encode with. `None` lets the encoder pick the best one it
-    /// can, which is what most readers want.
-    pub codec: Option<VideoCodec>,
-}
-
-/// What this machine can encode with, probed once.
-///
-/// The probe builds a GPU device to ask it, which costs long enough to notice,
-/// and the answer cannot change while the app runs.
-fn encoder_status() -> &'static wows_minimap_renderer::encoder::EncoderStatus {
-    static STATUS: std::sync::OnceLock<wows_minimap_renderer::encoder::EncoderStatus> = std::sync::OnceLock::new();
-    STATUS.get_or_init(wows_minimap_renderer::check_encoder)
-}
-
-/// Which replay of how many a batch has reached.
-///
-/// `done` counts the ones behind it, so the first report reads as none done of
-/// however many there are.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BatchStep {
-    pub done: usize,
-    pub total: usize,
-    /// The replay being read, by its file stem.
-    pub replay: String,
-}
-
-/// A directory a batch can write into that outlives this process, for the
-/// clipboard.
-///
-/// `None` when no temporary directory could be made, which is the only way this
-/// fails.
-pub fn temporary_batch_dir() -> Option<PathBuf> {
-    let dir = tempfile::Builder::new().prefix("wt-gpui-batch-").tempdir().ok()?;
-    let path = dir.path().to_path_buf();
-    // Kept: the clipboard will hold paths under it, and a directory removed on
-    // drop would leave them pointing at nothing.
-    let _ = dir.keep();
-    Some(path)
-}
-
-/// What a batch draws of what it baked, and whether dead ships are among it.
-///
-/// The reader's saved layers, less the two a viewport holds off for the same
-/// reasons: the stats panel's ship silhouettes are a load the bake skips, so its
-/// gutter would be empty and the kill feed and the chat that share it would go
-/// unfilmed; and which ships have their range circles drawn is a per-ship choice
-/// a batch is never given, so drawing every ship's would bury the map.
-fn batch_options(defaults: &wows_minimap_renderer::SavedRenderOptions) -> (RenderOptions, bool) {
-    let mut options = playback_options();
-    defaults.apply_to(&mut options);
-    options.show_stats_panel = false;
-    options.show_ship_config = false;
-    (options, defaults.show_dead_ships)
-}
-
-/// What an export is encoded with, as the reader last saved it.
-fn export_settings_of(saved: &wows_minimap_renderer::SavedRenderOptions) -> ExportSettings {
-    ExportSettings {
-        prefer_cpu: saved.prefer_cpu_encoder,
-        codec: saved.video_codec,
-        include_pre_battle: saved.include_pre_battle,
-    }
-}
-
-/// Whether an export has to be encoded in software.
-///
-/// A codec the GPU cannot encode falls back rather than failing: picking AV1
-/// is a choice of codec, not a demand for the GPU.
-fn must_use_cpu(settings: &ExportSettings, status: &wows_minimap_renderer::encoder::EncoderStatus) -> bool {
-    if settings.prefer_cpu || !status.gpu_available() {
-        return true;
-    }
-    match settings.codec {
-        Some(codec) => !status.supports(wows_minimap_renderer::EncoderKind::Gpu, codec),
-        None => false,
-    }
-}
-
-fn encode_track(
-    renderer: &SharedPreviewRenderer,
-    frames: &[Vec<DrawCommand>],
-    duration_seconds: f32,
-    output: &std::path::Path,
-    settings: ExportSettings,
-    progress: futures::channel::mpsc::UnboundedSender<ExportProgress>,
-) -> Result<(), String> {
-    let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (width, height) = drawing.canvas_size();
-
-    let Some(path) = output.to_str() else {
-        return Err(t!("ui.replay.renderer.export_path_unusable").into_owned());
-    };
-    let mut encoder =
-        wows_minimap_renderer::VideoEncoder::new(Some(path), None, false, duration_seconds, width, height);
-    encoder.set_prefer_cpu(must_use_cpu(&settings, encoder_status()));
-    encoder.set_codec(match settings.codec {
-        Some(codec) => wows_minimap_renderer::video::CodecChoice::Explicit(codec),
-        None => wows_minimap_renderer::video::CodecChoice::Auto,
-    });
-    encoder.init().map_err(|err| err.to_string())?;
-
-    let total = frames.len() as u64;
-    for (index, commands) in frames.iter().enumerate() {
-        let image = drawing.render(commands);
-        encoder.submit_frame(&image).map_err(|err| err.to_string())?;
-        let _ = progress.unbounded_send(ExportProgress { done: index as u64 + 1, total, stage: ExportStage::Encoding });
-    }
-    // Said before rather than after, because finishing is the part that
-    // takes a while with nothing else to show for it.
-    let _ = progress.unbounded_send(ExportProgress { done: total, total, stage: ExportStage::Muxing });
-    encoder.finish_submitted().map_err(|err| err.to_string())
-}
-
-/// One toggle in the settings popover: what it says, what it reads, and what
-/// it sets.
-struct Toggle {
-    id: &'static str,
-    label: &'static str,
-    read: fn(&RenderOptions, bool) -> bool,
-    write: fn(&mut RenderOptions, &mut bool, bool),
-}
-
-/// What the viewport can be told to draw.
-///
-/// Only the commands the track actually holds. A playback bake adds the team
-/// rosters and every ship's range circles to `bake_options`; the stats panel
-/// is still left out, because its silhouettes are one of the loads a bake
-/// skips to stay cheap, so a switch for it would draw an empty gutter and is
-/// not offered. Position trails are derived at raster time rather than baked.
-const TOGGLES: &[Toggle] = &[
-    Toggle {
-        id: "renderer-opt-hp-bars",
-        label: "ui.renderer.settings.hp_bars",
-        read: |o, _| o.show_hp_bars,
-        write: |o, _, v| o.show_hp_bars = v,
-    },
-    Toggle {
-        id: "renderer-opt-tracers",
-        label: "ui.renderer.settings.tracers",
-        read: |o, _| o.show_tracers,
-        write: |o, _, v| o.show_tracers = v,
-    },
-    Toggle {
-        id: "renderer-opt-torpedoes",
-        label: "ui.renderer.settings.torpedoes",
-        read: |o, _| o.show_torpedoes,
-        write: |o, _, v| o.show_torpedoes = v,
-    },
-    Toggle {
-        id: "renderer-opt-planes",
-        label: "ui.renderer.settings.planes",
-        read: |o, _| o.show_planes,
-        write: |o, _, v| o.show_planes = v,
-    },
-    Toggle {
-        id: "renderer-opt-smoke",
-        label: "ui.renderer.settings.smoke",
-        read: |o, _| o.show_smoke,
-        write: |o, _, v| o.show_smoke = v,
-    },
-    Toggle {
-        id: "renderer-opt-consumables",
-        label: "ui.renderer.settings.consumables",
-        read: |o, _| o.show_consumables,
-        write: |o, _, v| o.show_consumables = v,
-    },
-    Toggle {
-        id: "renderer-opt-capture-points",
-        label: "ui.renderer.settings.capture_points",
-        read: |o, _| o.show_capture_points,
-        write: |o, _, v| o.show_capture_points = v,
-    },
-    Toggle {
-        id: "renderer-opt-buildings",
-        label: "ui.renderer.settings.buildings",
-        read: |o, _| o.show_buildings,
-        write: |o, _, v| o.show_buildings = v,
-    },
-    Toggle {
-        id: "renderer-opt-player-names",
-        label: "ui.renderer.settings.player_names",
-        read: |o, _| o.show_player_names,
-        write: |o, _, v| o.show_player_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-ship-names",
-        label: "ui.renderer.settings.ship_names",
-        read: |o, _| o.show_ship_names,
-        write: |o, _, v| o.show_ship_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-dead-ships",
-        label: "ui.renderer.settings.dead_ships",
-        read: |_, dead| dead,
-        write: |_, dead, v| *dead = v,
-    },
-    Toggle {
-        id: "renderer-opt-dead-ship-names",
-        label: "ui.renderer.settings.dead_ship_names",
-        read: |o, _| o.show_dead_ship_names,
-        write: |o, _, v| o.show_dead_ship_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-camera-direction",
-        label: "ui.renderer.settings.camera_direction",
-        read: |o, _| o.show_camera_direction,
-        write: |o, _, v| o.show_camera_direction = v,
-    },
-    Toggle {
-        id: "renderer-opt-armament",
-        label: "ui.renderer.settings.armament",
-        read: |o, _| o.show_armament,
-        write: |o, _, v| o.show_armament = v,
-    },
-    Toggle {
-        id: "renderer-opt-score",
-        label: "ui.renderer.settings.score_label",
-        read: |o, _| o.show_score,
-        write: |o, _, v| o.show_score = v,
-    },
-    Toggle {
-        id: "renderer-opt-timer",
-        label: "ui.renderer.settings.timer",
-        read: |o, _| o.show_timer,
-        write: |o, _, v| o.show_timer = v,
-    },
-    Toggle {
-        id: "renderer-opt-kill-feed",
-        label: "ui.renderer.settings.kill_feed",
-        read: |o, _| o.show_kill_feed,
-        write: |o, _, v| o.show_kill_feed = v,
-    },
-    Toggle {
-        id: "renderer-opt-chat",
-        label: "ui.renderer.settings.chat_label",
-        read: |o, _| o.show_chat,
-        write: |o, _, v| o.show_chat = v,
-    },
-    Toggle {
-        id: "renderer-opt-battle-result",
-        label: "ui.renderer.settings.battle_result",
-        read: |o, _| o.show_battle_result,
-        write: |o, _, v| o.show_battle_result = v,
-    },
-    Toggle {
-        id: "renderer-opt-buffs",
-        label: "ui.renderer.settings.buff_counters",
-        read: |o, _| o.show_buffs,
-        write: |o, _, v| o.show_buffs = v,
-    },
-    Toggle {
-        id: "renderer-opt-trails",
-        label: "ui.renderer.settings.heat_trail",
-        read: |o, _| o.show_trails,
-        write: |o, _, v| o.show_trails = v,
-    },
-    Toggle {
-        id: "renderer-opt-ship-ranges",
-        label: "ui.renderer.settings.ship_ranges",
-        read: |o, _| o.show_ship_config,
-        write: |o, _, v| o.show_ship_config = v,
-    },
-    Toggle {
-        id: "renderer-opt-advantage",
-        label: "ui.renderer.settings.team_advantage",
-        read: |o, _| o.show_advantage,
-        write: |o, _, v| o.show_advantage = v,
-    },
-    Toggle {
-        id: "renderer-opt-team-rosters",
-        label: "ui.renderer.settings.team_rosters",
-        read: |o, _| o.show_team_rosters,
-        // The rosters sit in gutters either side of the map, which the
-        // stats panel wants for itself, so turning one on clears the other
-        // as the egui checkboxes do.
-        write: |o, _, v| {
-            o.show_team_rosters = v;
-            if v {
-                o.show_stats_panel = false;
-            }
-        },
-    },
-];
 
 /// The tools the toolbar offers, in the order the egui toolbar offers them.
 ///
@@ -3969,15 +3285,6 @@ const ANNOTATION_ACTIONS: &[(&str, &str)] = &[
     ("Esc", "ui.renderer.annotations.action_cancel"),
 ];
 
-/// The ships that can be placed on the map, as the egui toolbar offers
-/// them, short name first.
-const SPECIES: &[(&str, &str)] =
-    &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
-
-/// What a placed ship is tinted by which side it is on.
-const FRIENDLY_TINT: u32 = 0x4CE8AA;
-const ENEMY_TINT: u32 = 0xFE4D2A;
-
 /// A row of ships to place, for one side.
 fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: bool) -> AnyElement {
     let tint = if friendly { FRIENDLY_TINT } else { ENEMY_TINT };
@@ -4007,19 +3314,6 @@ fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: boo
         }))
         .into_any_element()
 }
-
-/// What a tool draws with, as the egui toolbar offers it.
-const INKS: &[(&str, [u8; 4])] = &[
-    ("replay-renderer-ink-white", [255, 255, 255, 255]),
-    ("replay-renderer-ink-gray", [160, 160, 160, 255]),
-    ("replay-renderer-ink-red", [230, 50, 50, 255]),
-    ("replay-renderer-ink-orange", [240, 140, 30, 255]),
-    ("replay-renderer-ink-yellow", [240, 230, 50, 255]),
-    ("replay-renderer-ink-green", [50, 200, 50, 255]),
-    ("replay-renderer-ink-blue", [50, 120, 230, 255]),
-    ("replay-renderer-ink-purple", [180, 60, 230, 255]),
-    ("replay-renderer-ink-pink", [255, 130, 180, 255]),
-];
 
 /// The drawing tools, on the transport beside the gear.
 ///
@@ -4095,12 +3389,12 @@ fn tools_popover(
                 })
                 .child(crate::ui::rule_h(_cx))
                 .child(nib_row(&owner, nib))
-                .child(h_flex().gap_1().flex_wrap().children(INKS.iter().map(|(id, color)| {
+                .child(h_flex().gap_1().flex_wrap().children(INKS.iter().map(|(name, color)| {
                     let owner = owner.clone();
                     let color = *color;
                     let on = ink == color;
                     div()
-                        .id(*id)
+                        .id(SharedString::from(format!("replay-renderer-ink-{name}")))
                         .test_support()
                         .size(px(18.))
                         .rounded(px(3.))
@@ -4238,7 +3532,7 @@ fn ship_chooser(
         .children(matches.into_iter().map(|(species, ship)| {
             let owner = panel.clone();
             Button::new(gpui_kit::SharedString::from(format!("replay-renderer-ship-{}", ship.param_index)))
-                .label(format!("{} {}", crate::armor_viewer::catalog::tier_roman(ship.tier), ship.display_name))
+                .label(format!("{} {}", wows_toolkit_viewmodel::ship_catalog::tier_roman(ship.tier), ship.display_name))
                 .compact()
                 .on_click(move |_event, window, cx: &mut App| {
                     let ship = ship.clone();
@@ -4305,7 +3599,7 @@ fn render_options_popover(
                 .test_support()
                 .overflow_y_scroll()
                 .p_2()
-                .child(v_flex().gap_0().children(TOGGLES.iter().map(|toggle| {
+                .child(v_flex().gap_0().children(LAYER_TOGGLES.iter().map(|toggle| {
                     let owner = owner.clone();
                     let on = (toggle.read)(&options, dead);
                     let write = toggle.write;
@@ -5042,7 +4336,7 @@ mod tests {
         let batch = cx.update(|cx| {
             super::batch_export(
                 paths,
-                crate::replay_inspector::load::GameDataCache::new(dir.path().to_path_buf()),
+                wows_toolkit_replay_data::load::GameDataCache::new(dir.path().to_path_buf()),
                 dir.path().to_path_buf(),
                 wows_minimap_renderer::SavedRenderOptions::default(),
                 report,
@@ -5083,7 +4377,7 @@ mod tests {
             show_dead_ships: false,
             ..SavedRenderOptions::default()
         };
-        let (options, show_dead_ships) = super::batch_options(&saved);
+        let (options, show_dead_ships) = wows_toolkit_replay_data::playback::batch_options(&saved);
 
         assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
         assert!(!show_dead_ships);
@@ -5511,7 +4805,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         use super::DrawCommand;
-        use crate::replay_inspector::GameDataCache;
+        use wows_toolkit_replay_data::load::GameDataCache;
 
         let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
         let game_dir =
@@ -5519,14 +4813,14 @@ mod tests {
 
         let cache = GameDataCache::new(PathBuf::from(game_dir));
         let cancel = AtomicBool::new(false);
-        let baked = crate::minimap_preview::bake_track(
+        let baked = wows_toolkit_replay_data::minimap::bake_track(
             std::path::Path::new(&replay),
             &[],
             &cache,
             &cancel,
-            super::TRACK_BUDGET,
-            super::BAKE_INTERVAL,
-            super::playback_options(),
+            wows_toolkit_replay_data::playback::TRACK_BUDGET,
+            wows_toolkit_replay_data::playback::BAKE_INTERVAL,
+            wows_toolkit_replay_data::playback::playback_options(),
         )
         .expect("the replay bakes");
 
@@ -5596,46 +4890,6 @@ mod tests {
                 assert!(!panel.options().show_trails);
             })
             .expect("the window is open");
-    }
-
-    /// The per-ship filters decide whose trail and whose ranges are drawn.
-    #[test]
-    fn the_per_ship_filters_decide_whose_layers_are_drawn() {
-        use std::collections::HashMap;
-        use std::collections::HashSet;
-
-        use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
-        use wows_minimap_renderer::map_data::MinimapPos;
-
-        use super::DrawCommand;
-
-        let mut hidden = HashSet::new();
-        hidden.insert("hidden_player".to_string());
-        let mut ranges = HashMap::new();
-        ranges.insert("ranged_player".to_string(), super::ALL_RANGES);
-
-        let trail = |name: &str| DrawCommand::PositionTrail {
-            entity_id: wows_replays::types::EntityId::from(1u32),
-            player_name: Some(name.to_string()),
-            points: Vec::new(),
-        };
-        let circle = |name: &str| DrawCommand::ShipConfigCircle {
-            entity_id: wows_replays::types::EntityId::from(1u32),
-            pos: MinimapPos { x: 0.0, y: 0.0 },
-            radius_px: 10.0,
-            color: [0, 0, 0],
-            alpha: 1.0,
-            dashed: false,
-            label: None,
-            kind: ShipConfigCircleKind::Detection,
-            player_name: name.to_string(),
-            is_self: false,
-        };
-
-        assert!(super::per_ship_allows(&trail("shown_player"), &hidden, &ranges));
-        assert!(!super::per_ship_allows(&trail("hidden_player"), &hidden, &ranges));
-        assert!(super::per_ship_allows(&circle("ranged_player"), &hidden, &ranges));
-        assert!(!super::per_ship_allows(&circle("unranged_player"), &hidden, &ranges), "a ship nobody asked for");
     }
 
     /// The advantage hover reads the breakdown out of the frame on screen.
@@ -5860,7 +5114,7 @@ mod tests {
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
         crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_secs(5));
         crate::collab::push_ping_aged(&state, [20.0, 20.0], Duration::ZERO);
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -5882,7 +5136,7 @@ mod tests {
         // must not sit redrawing for nothing.
         window
             .update(cx, |panel, _window, cx| {
-                panel.set_collab(crate::collab::CollabLink::default(), cx);
+                panel.set_collab(wt_collab_client::link::CollabLink::default(), cx);
             })
             .expect("the window is open");
         crate::collab::push_ping_aged(&state, [30.0, 30.0], Duration::from_secs(5));
@@ -5988,11 +5242,11 @@ mod tests {
     /// turning one on clears the other, as the egui checkboxes do.
     #[test]
     fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
-        let toggle = super::TOGGLES
+        let toggle = super::LAYER_TOGGLES
             .iter()
             .find(|toggle| toggle.id == "renderer-opt-team-rosters")
             .expect("the rosters have a switch");
-        let mut options = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..super::playback_options() };
+        let mut options = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..wows_toolkit_replay_data::playback::playback_options() };
         let mut dead = true;
 
         (toggle.write)(&mut options, &mut dead, true);
@@ -6011,20 +5265,20 @@ mod tests {
         use wows_minimap_renderer::drawing::SidePanelLayout;
 
         let plain = super::playback_options_hidden();
-        assert_eq!(crate::minimap_preview::layout_for(&plain), SidePanelLayout::None);
+        assert_eq!(wows_toolkit_replay_data::minimap::layout_for(&plain), SidePanelLayout::None);
 
         let rosters = wows_minimap_renderer::RenderOptions { show_team_rosters: true, ..plain.clone() };
-        assert_eq!(crate::minimap_preview::layout_for(&rosters), SidePanelLayout::TeamRosters);
+        assert_eq!(wows_toolkit_replay_data::minimap::layout_for(&rosters), SidePanelLayout::TeamRosters);
 
         let stats = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..plain };
-        assert_eq!(crate::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
+        assert_eq!(wows_toolkit_replay_data::minimap::layout_for(&stats), SidePanelLayout::StatsPanel);
     }
 
     /// A playback bake carries the rosters, or the switch would have nothing
     /// to show.
     #[test]
     fn a_playback_bake_carries_the_rosters() {
-        assert!(super::playback_options().show_team_rosters);
+        assert!(wows_toolkit_replay_data::playback::playback_options().show_team_rosters);
         assert!(!super::playback_options_hidden().show_team_rosters, "but a viewport opens without them");
     }
 
@@ -6048,7 +5302,7 @@ mod tests {
             }],
             ..Default::default()
         });
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6088,7 +5342,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6200,7 +5454,7 @@ mod tests {
             ids: vec![4242],
             owners: vec![7],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6280,7 +5534,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6362,7 +5616,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6424,7 +5678,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6482,7 +5736,7 @@ mod tests {
             ids: vec![11],
             owners: vec![3],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6505,7 +5759,7 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                let ship = crate::armor_viewer::catalog::ShipEntry {
+                let ship = wows_toolkit_viewmodel::ship_catalog::ShipEntry {
                     param_index: "PRSC610".to_string(),
                     display_name: "Moskva".to_string(),
                     search_name: "moskva".to_string(),
@@ -6751,7 +6005,7 @@ mod tests {
 
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
         crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wt_collab_client::link::CollabLink::with_outbox(std::sync::Arc::clone(&state));
 
         link.drop_stale_pings(Duration::from_secs_f32(super::PING_SECONDS));
         assert_eq!(state.lock().pings.len(), 1, "a fifth of a second into a one-second ripple");

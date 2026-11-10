@@ -830,6 +830,52 @@ async fn login_result(result: rootcause::Result<wgc_auth::StoredSession, wgc_aut
     }
 }
 
+/// Events a front end's tests apply to put a [`Launcher`] in a state that
+/// otherwise needs the network: a discovery result, a check, a download, a
+/// sign-in answer.
+#[cfg(feature = "test-support")]
+impl LauncherEvent {
+    pub fn installs(installs: Vec<GameInstall>) -> Self {
+        Self(Event::Installs(installs))
+    }
+
+    pub fn catalog(install: PathBuf, state: CatalogCheckState) -> Self {
+        Self(Event::Catalog(install, state))
+    }
+
+    pub fn available_game(game: &KnownGame, state: CatalogCheckState) -> Self {
+        Self(Event::AvailableGame(game.game_id, state))
+    }
+
+    pub fn download(key: PathBuf, state: DownloadState) -> Self {
+        Self(Event::Download(key, state))
+    }
+
+    /// The sign-in under way needs a two-factor code.
+    pub fn two_factor_required(twofactor_token: String) -> Self {
+        Self(Event::Login(LoginMsg::TwoFactorRequired { twofactor_token }))
+    }
+
+    /// The code was rejected and the challenge is still open.
+    pub fn two_factor_retry(error: String) -> Self {
+        Self(Event::Login(LoginMsg::TwoFactorRetry(error)))
+    }
+
+    pub fn captcha_required() -> Self {
+        Self(Event::Login(LoginMsg::CaptchaRequired))
+    }
+
+    pub fn login_failed(error: String) -> Self {
+        Self(Event::Login(LoginMsg::Failed(error)))
+    }
+
+    /// The sign-in succeeded. `persisted`: whether the session reached the
+    /// OS keyring.
+    pub fn signed_in(session: wgc_auth::StoredSession, persisted: bool) -> Self {
+        Self(Event::Login(LoginMsg::Success { session: Box::new(session), persisted }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
