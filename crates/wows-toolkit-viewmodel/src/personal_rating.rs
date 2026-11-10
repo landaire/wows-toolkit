@@ -176,6 +176,7 @@ mod tests {
 
     #[test]
     fn the_cache_sits_under_the_storage_directory_when_there_is_one() {
+        wows_toolkit_config::storage_override::set(std::env::temp_dir().join("wows-toolkit-viewmodel-tests"));
         let path = expected_values_path();
         assert!(path.ends_with(EXPECTED_VALUES_FILENAME));
         if let Some(dir) = wows_toolkit_config::storage_dir() {

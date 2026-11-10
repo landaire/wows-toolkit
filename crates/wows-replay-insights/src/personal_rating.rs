@@ -28,11 +28,44 @@ pub struct ExpectedValuesData {
 }
 
 /// Entry in the expected values data - can be either actual values or an empty array
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum ShipExpectedValuesEntry {
     Values(ShipExpectedValues),
     Empty(Vec<()>),
+}
+
+/// Read by the JSON shape rather than `#[serde(untagged)]`: untagged buffers
+/// the entry first, and with serde_json's `arbitrary_precision` (which a
+/// dependency of the NSH front end turns on for the whole graph) buffered
+/// numbers no longer read back as `f64`, so every entry failed to parse.
+impl<'de> Deserialize<'de> for ShipExpectedValuesEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EntryVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for EntryVisitor {
+            type Value = ShipExpectedValuesEntry;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a ship's expected values or an empty array")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                ShipExpectedValues::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(ShipExpectedValuesEntry::Values)
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut empty = Vec::new();
+                while let Some(unit) = seq.next_element::<()>()? {
+                    empty.push(unit);
+                }
+                Ok(ShipExpectedValuesEntry::Empty(empty))
+            }
+        }
+
+        deserializer.deserialize_any(EntryVisitor)
+    }
 }
 
 impl ShipExpectedValuesEntry {
