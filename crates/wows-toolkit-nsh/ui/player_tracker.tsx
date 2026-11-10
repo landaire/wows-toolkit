@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
-import { Clipboard, colorScheme, Image, List, openUrl, Scroll, signal, Text, View } from "nsh";
-import { AlertDialog, Checkbox, DockArea, Input, Menu, Popover, Tooltip } from "nsh/base";
+import { Clipboard, colorScheme, effect, Image, List, openUrl, Scroll, signal, Text, untracked, View } from "nsh";
+import { AlertDialog, Checkbox, DockArea, Input, Menu, MenuItem, Popover, Tooltip } from "nsh/base";
 import {
   PlayerTracker,
   type ClanColumn,
@@ -24,6 +24,8 @@ import {
   type ViewMode,
 } from "wows-toolkit/native";
 import { Button, errorMessage, inputStyle, MenuRow, Surface } from "./components";
+import { currentLocale, t } from "./i18n";
+import { Icon, type IconName } from "./icons";
 import { colors, controlRadius } from "./theme";
 
 /** What the tracker asks of the shell around it. */
@@ -63,11 +65,25 @@ const FILTER_DEBOUNCE_MS = 200;
 
 /** Opens the tracker the first time its tab is shown, and on every showing
  * restarts the battle watch if the WoWs directory has changed since. */
-export function activatePlayerTracker(locale: string) {
+export function activatePlayerTracker() {
   if (!opened) {
     opened = true;
-    void open(locale);
+    void open(untracked(currentLocale));
     setInterval(pollLive, LIVE_POLL_MS);
+    // A language change words the labels and every table again.
+    let shownLocale = untracked(currentLocale);
+    effect(() => {
+      const locale = currentLocale();
+      if (locale === shownLocale) return;
+      shownLocale = locale;
+      untracked(() => {
+        if (!labels()) return;
+        const relabelled = PlayerTracker.relabel(locale);
+        labels.set(relabelled.labels);
+        controls.set(relabelled.controls);
+        void reloadPlayers().then(reloadClans).then(reloadLive);
+      });
+    });
   }
   void PlayerTracker.syncLive().catch((error) => failure.set(errorMessage(error)));
 }
@@ -87,7 +103,9 @@ function syncCurrentMatchShown() {
 async function open(locale: string) {
   try {
     const first = await PlayerTracker.open(locale);
-    labels.set(first.labels);
+    // A language chosen while the tracker opened words it in that one.
+    const now = untracked(currentLocale);
+    labels.set(now === locale ? first.labels : PlayerTracker.relabel(now).labels);
     controls.set(first.controls);
     filterDraft.set(first.controls.filter);
     await refresh();
@@ -298,7 +316,7 @@ function Hint(props: { text: string }) {
 }
 
 /** A small text control: a caret, a find button, a chip. */
-function Chip(props: { label: string; accessibilityLabel: string; hint?: string; color?: string; onPress: () => void }) {
+function Chip(props: { label?: string; icon?: IconName; accessibilityLabel: string; hint?: string; color?: string; onPress: () => void }) {
   return (
     <View
       role="button"
@@ -308,7 +326,12 @@ function Chip(props: { label: string; accessibilityLabel: string; hint?: string;
       tooltip={props.hint ? <Hint text={props.hint}/> : undefined}
       style={{ minWidth: 20, height: 22, paddingHorizontal: 5, borderRadius: 4, alignItems: "center", justifyContent: "center" }}
     >
-      <Text style={{ fontSize: 12, color: props.color ?? colors.mutedForeground }}>{props.label}</Text>
+      <If when={props.icon}>
+        <Icon name={props.icon!} size={14} color={props.color ?? colors.mutedForeground}/>
+      </If>
+      <If when={!props.icon}>
+        <Text style={{ fontSize: 12, color: props.color ?? colors.mutedForeground }}>{props.label}</Text>
+      </If>
     </View>
   );
 }
@@ -352,11 +375,14 @@ function SortHeader(props: { label: string; active: boolean; descending: boolean
       accessibilityState={{ selected: props.active }}
       onPress={props.onPress}
       hoverStyle={{ backgroundColor: colors.accent }}
-      style={{ width: props.width, minHeight: 30, justifyContent: "center", paddingHorizontal: 4, borderRadius: 4 }}
+      style={{ width: props.width, minHeight: 30, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 4, borderRadius: 4 }}
     >
-      <Text style={{ fontSize: 12, fontWeight: "600", color: props.active ? colors.foreground : colors.mutedForeground }}>
-        {props.active ? `${props.label} (${props.descending ? "desc" : "asc"})` : props.label}
-      </Text>
+      <Text style={{ fontSize: 12, fontWeight: "600", color: props.active ? colors.foreground : colors.mutedForeground }}>{props.label}</Text>
+      <If when={props.active}>
+        <View testID={props.descending ? "sort-descending" : "sort-ascending"}>
+          <Icon name={props.descending ? "chevron-down" : "chevron-up"} size={12} color={colors.foreground}/>
+        </View>
+      </If>
     </View>
   );
 }
@@ -383,11 +409,17 @@ function TrackerToolbar() {
         <Surface style={{ minWidth: 190, padding: 5, backgroundColor: colors.popover }}>
           <Each of={current().periods}>
             {(option) => (
-              <MenuRow
-                label={option().label}
-                note={option().period === current().period ? "x" : undefined}
+              <MenuItem
                 onSelect={() => void selectPeriod(option().period)}
-              />
+                hoverStyle={{ backgroundColor: colors.accent }}
+                activeStyle={{ opacity: 0.72 }}
+                style={{ height: 30, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 12 }}
+              >
+                <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{option().label}</Text>
+                <If when={option().period === current().period}>
+                  <Icon name="check" size={12} color={colors.mutedForeground}/>
+                </If>
+              </MenuItem>
             )}
           </Each>
         </Surface>
@@ -412,7 +444,7 @@ function TrackerToolbar() {
           checked={current().showDivisionMates}
           class="group flex-row items-center gap-2"
           indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-          indicator={<Text class="text-[10px] text-primary-foreground">{current().showDivisionMates ? "x" : ""}</Text>}
+          indicator={<If when={current().showDivisionMates}><Icon name="check" size={12} color={colors.primaryForeground}/></If>}
           onChange={({ checked }) => toggleDivisionMates(checked)}
         >
           <Text style={{ fontSize: 12.5, color: colors.foreground }}>{text().showDivisionMates}</Text>
@@ -476,7 +508,7 @@ function PlayerRow(props: { row: () => PlayerRowView; index: () => number; track
     <View testID={`player-row-${props.index()}`} style={{ backgroundColor: props.index() % 2 === 1 ? colors.muted : "transparent" }}>
       <View role="row" accessibilityLabel={row().name} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
         <View style={{ width: PLAYER_WIDTHS.name, flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <Chip label={open() ? "v" : ">"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().name}`} onPress={() => togglePlayer(row().accountId)}/>
+          <Chip icon={open() ? "chevron-down" : "chevron-right"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().name}`} onPress={() => togglePlayer(row().accountId)}/>
           <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: colors.foreground }}>{row().name}</Text>
         </View>
         <Text numberOfLines={1} style={{ width: PLAYER_WIDTHS.clan, fontSize: 13, color: colors.mutedForeground }}>{row().clan}</Text>
@@ -550,7 +582,7 @@ function ClanRow(props: { row: () => ClanRowView; index: () => number; tracker: 
     <View style={{ backgroundColor: props.index() % 2 === 1 ? colors.muted : "transparent" }}>
       <View role="row" accessibilityLabel={row().clan} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
         <View style={{ width: CLAN_WIDTHS.clan, flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <Chip label={open() ? "v" : ">"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().clan}`} onPress={() => toggleClan(row().clan)}/>
+          <Chip icon={open() ? "chevron-down" : "chevron-right"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().clan}`} onPress={() => toggleClan(row().clan)}/>
           <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: tone() ?? colors.foreground }}>{row().clan}</Text>
         </View>
         <Text style={{ width: CLAN_WIDTHS.members, fontSize: 13, color: colors.foreground }}>{row().members}</Text>
@@ -660,7 +692,7 @@ function RosterMenu(props: { row: RosterRowView; tracker: PlayerTrackerProps }) 
   return (
     <View style={{ width: 24 }}>
       <If when={props.row.wowsNumbersUrl && props.row.shipbuildsUrl && props.row.accountId}>
-        <Menu align="end" offset={4} margin={8} trigger={<Chip label="..." accessibilityLabel={`Actions ${props.row.name}`} onPress={() => undefined}/>}>
+        <Menu align="end" offset={4} margin={8} trigger={<Chip icon="ellipsis" accessibilityLabel={`Actions ${props.row.name}`} onPress={() => undefined}/>}>
           <Surface style={{ minWidth: 220, padding: 5, backgroundColor: colors.popover }}>
             <MenuRow label={text().openWowsNumbers} onSelect={() => void openUrl(props.row.wowsNumbersUrl!)}/>
             <MenuRow label={text().openShipbuilds} onSelect={() => void openUrl(props.row.shipbuildsUrl!)}/>
@@ -682,11 +714,11 @@ const CHIP_TINT = "38";
 const ROW_TINT = "14";
 const STAT_WIDTH = 64;
 
-function markGlyph(mark: StatsMark): string {
+function markIcon(mark: StatsMark): IconName {
   switch (mark) {
-    case "hidden": return "x";
-    case "unavailable": return "!";
-    case "unknown": return "i";
+    case "hidden": return "eye-off";
+    case "unavailable": return "triangle-alert";
+    case "unknown": return "info";
   }
 }
 
@@ -700,7 +732,7 @@ function ScopeCells(props: { cells: ScopeCellsView }) {
     <View style={{ flexDirection: "row", gap: 8 }}>
       <If when={cells().mark}>
         <View accessibilityLabel={cells().markHover!} tooltip={<Hint text={cells().markHover!}/>} style={{ width: STAT_WIDTH }}>
-          <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{markGlyph(cells().mark!)}</Text>
+          <Icon name={markIcon(cells().mark!)} size={12} color={colors.mutedForeground}/>
         </View>
       </If>
       <If when={!cells().mark}>
@@ -792,7 +824,9 @@ function TeamColumn(props: { team: TeamView; view: LiveView; tracker: PlayerTrac
           >
             <ClassIcon row={row()}/>
             <View style={{ width: 16 }} tooltip={row().note ? <Hint text={row().note!}/> : undefined}>
-              <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{row().note ? "*" : ""}</Text>
+              <If when={row().note}>
+                <Icon name="pencil" size={12} color={colors.mutedForeground}/>
+              </If>
             </View>
             <TwitchChip row={row()} tracker={props.tracker}/>
             <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: tintColor(row().tint) }}>{row().name}</Text>
@@ -918,7 +952,7 @@ export function PlayerTrackerView(props: PlayerTrackerProps) {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <If when={!labels() || !controls()}>
-        <Status text={failure() ?? ""}/>
+        <Status text={failure() ?? t("ui.player_tracker.loading_players")}/>
       </If>
       <If when={labels() && controls()}>
         <TrackerToolbar/>

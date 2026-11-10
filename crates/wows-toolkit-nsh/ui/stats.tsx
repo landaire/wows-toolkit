@@ -1,12 +1,23 @@
 import type { JSX } from "nsh";
-import { Clipboard, colorScheme, effect, Image, Scroll, signal, Text, View } from "nsh";
+import { Clipboard, colorScheme, effect, Image, Scroll, signal, Text, untracked, View } from "nsh";
 import { Checkbox, Dialog, DockArea, Input, Menu, NumberInput, Popover, Toolbar, type DockAreaApi, type DockAreaLayout, type DockTab } from "nsh/base";
-import { Stats, type ChartSnapshot, type DirectoryOpened, type DirectoryStatus, type FilterState, type RatingChip, type ScopeView, type ShipSection } from "wows-toolkit/native";
-import { Button, EmptyState, errorMessage, inputStyle, MenuRow, Surface } from "./components";
+import { Stats, type ChartSnapshot, type DirectoryOpened, type DirectoryStatus, type FilterState, type RatingChip, type ScopeView, type ShipSection, type StatsText } from "wows-toolkit/native";
+import { Button, EmptyState, errorMessage, Hint, inputStyle, MenuRow, Surface } from "./components";
 import { Frame } from "./frame";
+import { currentLocale, t } from "./i18n";
+import { Icon, type IconName } from "./icons";
 import { colors, controlRadius } from "./theme";
 
-const text = Stats.text();
+// The catalog text, read again after a language change; a read inside a render
+// follows the locale.
+let textCache: { locale: string; value: StatsText } | null = null;
+const text = new Proxy({} as StatsText, {
+  get: (_target, key) => {
+    const locale = currentLocale();
+    if (textCache?.locale !== locale) textCache = { locale, value: Stats.text() };
+    return textCache.value[key as keyof StatsText];
+  },
+});
 
 // The GPUI app's win and loss colours, per theme.
 const semantic = {
@@ -49,7 +60,7 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
   const charts = signal<ChartSnapshot[]>([]);
   const saveError = signal<string | null>(null);
   const layout = signal<DockAreaLayout | null>(null);
-  let current: DockAreaLayout | null = null;
+  const current = signal<DockAreaLayout | null>(null);
   let dock: DockAreaApi | undefined;
   const latest = new Map<number | undefined, number>();
   let requests = 0;
@@ -91,11 +102,11 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
     setSaveError: (error) => saveError.set(error),
     layout,
     setLayout: (next) => {
-      current = next;
+      current.set(next);
       layout.set(next);
     },
-    current: () => current,
-    setCurrent: (next) => { current = next; },
+    current,
+    setCurrent: (next) => current.set(next),
     dock: () => dock,
     setDock: (api) => { dock = api; },
     begin: (chart) => {
@@ -116,7 +127,10 @@ const activeScope = signal("session");
 const directoryError = signal<string | null>(null);
 const sessionLoading = signal(false);
 const sessionError = signal<string | null>(null);
-const layoutError = signal<string | null>(null);
+/// A saved chart layout that could not be read (`save` false) or written.
+type LayoutFailure = { message: string; save: boolean };
+const layoutError = signal<LayoutFailure | null>(null);
+const clearError = signal<string | null>(null);
 const notice = signal<string | null>(null);
 const clearConfirmOpen = signal(false);
 let sessionRequested = false;
@@ -130,6 +144,23 @@ effect(() => {
   } catch (error) {
     console.warn(`Chart colours could not be read from the theme: ${errorMessage(error)}`);
   }
+});
+
+// A language change words every figure and label again, as GPUI rebuilds the tab.
+let shownLocale: string | null = null;
+effect(() => {
+  const locale = currentLocale();
+  if (shownLocale === null || shownLocale === locale) {
+    shownLocale = locale;
+    return;
+  }
+  shownLocale = locale;
+  untracked(() => {
+    for (const model of [session, ...directories().map((view) => view.model)]) {
+      // Outside the request numbering, so a filter change still in flight keeps its answer.
+      if (model.view()) void Stats.relabel(model.scope).then(model.setView, (error) => showNotice(errorMessage(error)));
+    }
+  });
 });
 
 /// Opens the session the first time the tab shows, and reads its games again
@@ -150,7 +181,7 @@ async function openSession() {
     const opened = await Stats.openSession();
     session.setView(opened.view);
     session.setLayout(opened.layout);
-    layoutError.set(opened.layoutError ?? null);
+    layoutError.set(opened.layoutError ? { message: opened.layoutError, save: false } : null);
   } catch (error) {
     sessionError.set(errorMessage(error));
   } finally {
@@ -265,8 +296,8 @@ function layoutChanged(model: StatsModel, layout: DockAreaLayout) {
   layoutTimer = setTimeout(() => {
     layoutTimer = undefined;
     Stats.saveLayout(layout).then(
-      () => { if (layoutError()) layoutError.set(null); },
-      (error) => layoutError.set(`Chart layout could not be saved: ${errorMessage(error)}`),
+      () => { if (layoutError()?.save) layoutError.set(null); },
+      (error) => layoutError.set({ message: `Chart layout could not be saved: ${errorMessage(error)}`, save: true }),
     );
   }, LAYOUT_SAVE_DELAY_MS);
 }
@@ -312,7 +343,7 @@ async function keepCurrentLayout() {
     layoutError.set(null);
     session.setSaveError(null);
   } catch (error) {
-    layoutError.set(errorMessage(error));
+    layoutError.set({ message: errorMessage(error), save: true });
   }
 }
 
@@ -339,10 +370,10 @@ export function StatsView() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <If when={sessionLoading() && !session.view()}>
-        <EmptyState title="Loading statistics" description="Reading recorded battles."/>
+        <EmptyState title={text.overview} description={text.noGames}/>
       </If>
       <If when={!sessionLoading() && sessionError() && !session.view()}>
-        <EmptyState title="Statistics unavailable" description={sessionError()!} action={<Button label={text.retry} onPress={() => void openSession()}/>}/>
+        <EmptyState title={text.overview} description={sessionError()!} action={<Button label={text.retry} onPress={() => void openSession()}/>}/>
       </If>
       <ScopeBar/>
       <View style={{ flex: 1, minHeight: 0, display: activeScope() === "session" ? "flex" : "none" }}>
@@ -380,7 +411,7 @@ function ScopeBar() {
               selected={activeScope() === view().model.scope}
               onPress={() => activeScope.set(view().model.scope)}
             />
-            <Chip label="x" accessibilityLabel={`Close directory stats ${view().status().root}`} selected={false} onPress={() => closeDirectory(view().model.scope)}/>
+            <Chip icon="x" accessibilityLabel={`Close directory stats ${view().status().root}`} selected={false} onPress={() => closeDirectory(view().model.scope)}/>
           </View>
         )}
       </Each>
@@ -407,6 +438,7 @@ function DirectoryHeader(props: { view: DirectoryView }) {
           <Button
             label={text.directoryReload}
             variant="ghost"
+            tooltip={t("ui.stats.directory_reload_tooltip")}
             onPress={() => {
               try {
                 Stats.reloadDirectory(props.view.model.scope);
@@ -442,6 +474,9 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
       {props.header}
       <FilterBar model={model}/>
       <View style={{ flex: 1, minHeight: 0 }}>
+       <View style={{ flex: 1, minHeight: 0, flexDirection: "row" }}>
+        <ExpandRail model={model} side="left"/>
+        <View style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
         <Each of={model.layout() ? [model.layout()!] : []}>
           {(opened) => (
           <DockArea
@@ -471,8 +506,71 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
           />
           )}
         </Each>
+        </View>
+        <ExpandRail model={model} side="right"/>
+       </View>
+       <ExpandRail model={model} side="bottom"/>
       </View>
     </View>
+  );
+}
+
+type DockSide = "left" | "right" | "bottom";
+const DOCK_SIDES: DockSide[] = ["left", "right", "bottom"];
+
+function panelsOf(node: DockAreaLayout["center"]): string[] {
+  return node.type === "split" ? node.children.flatMap(panelsOf) : node.panels;
+}
+
+/// The open dock holding `panel`, which its collapse button closes; none in the center.
+function openDockOf(layout: DockAreaLayout | null, panel: string): DockSide | null {
+  if (!layout) return null;
+  return DOCK_SIDES.find((side) => {
+    const region = layout[side];
+    return region && region.open !== false && panelsOf(region.layout).includes(panel);
+  }) ?? null;
+}
+
+/// A dock's collapse (`open`) or expand icon, as GPUI's `panel_collapse_button` and `panel_expand_rail`.
+function dockIcon(side: DockSide, open: boolean): IconName {
+  switch (side) {
+    case "left": return open ? "panel-left-close" : "panel-left-open";
+    case "right": return open ? "panel-right-close" : "panel-right-open";
+    case "bottom": return open ? "panel-bottom" : "panel-bottom-open";
+  }
+}
+
+function DockToggle(props: { label: string; icon: IconName; onPress: () => void }) {
+  return (
+    <View
+      role="button"
+      accessibilityLabel={props.label}
+      tooltip={<Hint text={props.label}/>}
+      hoverStyle={{ backgroundColor: colors.muted }}
+      onPress={props.onPress}
+      style={{ width: 22, height: 22, borderRadius: 4, alignItems: "center", justifyContent: "center" }}
+    >
+      <Icon name={props.icon} size={14} color={colors.mutedForeground}/>
+    </View>
+  );
+}
+
+/// The strip a closed dock leaves on its edge, which opens it again.
+function ExpandRail(props: { model: StatsModel; side: DockSide }) {
+  const closed = () => {
+    const region = props.model.current()?.[props.side];
+    return Boolean(region && region.open === false && panelsOf(region.layout).length > 0);
+  };
+  return (
+    <If when={closed()}>
+      <View style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+        <DockToggle
+          label={t("ui.buttons.expand_panel")}
+          icon={dockIcon(props.side, false)}
+          onPress={() => props.model.dock()?.setDockOpen(props.side, true)}
+        />
+      </View>
+    </If>
   );
 }
 
@@ -510,8 +608,18 @@ function PanelTab(props: { model: StatsModel; tab: DockTab }) {
           onPress={() => closeChart(props.model, id()!)}
           style={{ width: 16, height: 16, borderRadius: 4, alignItems: "center", justifyContent: "center" }}
         >
-          <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
+          <Icon name="x" size={11} color={colors.mutedForeground}/>
         </View>
+      </If>
+      <If when={props.tab.active && openDockOf(props.model.current(), props.tab.panel)}>
+        <DockToggle
+          label={t("ui.buttons.collapse_panel")}
+          icon={dockIcon(openDockOf(props.model.current(), props.tab.panel)!, true)}
+          onPress={() => {
+            const side = openDockOf(props.model.current(), props.tab.panel);
+            if (side) props.model.dock()?.setDockOpen(side, false);
+          }}
+        />
       </If>
     </View>
   );
@@ -525,9 +633,11 @@ function StatsPanel(props: { model: StatsModel; id: string }) {
   return <View/>;
 }
 
-function Chip(props: { label: string; accessibilityLabel?: string; selected: boolean; disabled?: boolean; onPress: () => void }) {
+function Chip(props: { label?: string; icon?: IconName; accessibilityLabel?: string; tooltip?: string; selected: boolean; disabled?: boolean; onPress: () => void }) {
+  const tint = () => (props.selected ? colors.primaryForeground : colors.secondaryForeground);
   return (
     <View
+      tooltip={props.tooltip ? <Hint text={props.tooltip}/> : undefined}
       role="button"
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       accessibilityState={{ selected: props.selected, disabled: props.disabled ?? false }}
@@ -545,7 +655,12 @@ function Chip(props: { label: string; accessibilityLabel?: string; selected: boo
         opacity: props.disabled ? 0.45 : 1,
       }}
     >
-      <Text style={{ fontSize: 12, color: props.selected ? colors.primaryForeground : colors.secondaryForeground }}>{props.label}</Text>
+      <If when={props.icon}>
+        <Icon name={props.icon!} size={12} color={tint()}/>
+      </If>
+      <If when={!props.icon}>
+        <Text style={{ fontSize: 12, color: tint() }}>{props.label}</Text>
+      </If>
     </View>
   );
 }
@@ -559,7 +674,7 @@ function Check(props: { label: string; checked: boolean; disabled?: boolean; too
       tooltip={props.tooltip}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<If when={props.checked}><Icon name="check" size={12} color={colors.primaryForeground}/></If>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 12.5, color: colors.foreground, opacity: props.disabled ? 0.5 : 1 }}>{props.label}</Text>
@@ -622,7 +737,13 @@ function FilterBar(props: { model: StatsModel }) {
             placement="bottom"
             align="start"
             offset={4}
-            trigger={<Chip label={stats()!.modeLabel} accessibilityLabel={`${text.mode} ${stats()!.modeSummary}`} selected={stats()!.modes.some((mode) => mode.selected)} onPress={() => {}}/>}
+            trigger={<Chip
+              label={stats()!.modeLabel}
+              accessibilityLabel={`${text.mode} ${stats()!.modeSummary}`}
+              tooltip={stats()!.modes.some((mode) => mode.selected) ? stats()!.modes.filter((mode) => mode.selected).map((mode) => mode.label).join(", ") : text.all}
+              selected={stats()!.modes.some((mode) => mode.selected)}
+              onPress={() => {}}
+            />}
           >
             <Surface style={{ minWidth: 220, padding: 8, gap: 6, backgroundColor: colors.popover }}>
               <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{text.mode}</Text>
@@ -659,21 +780,28 @@ function FilterBar(props: { model: StatsModel }) {
         <View style={{ flex: 1 }}/>
         <If when={model.persists && layoutError()}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={{ fontSize: 12, color: semantic.error }}>{layoutError()}</Text>
-            <Button label={text.retry} variant="ghost" onPress={() => void openSession()}/>
+            <Text style={{ fontSize: 12, color: semantic.error }}>{layoutError()!.message}</Text>
+            <Button label={text.retry} variant="ghost" onPress={() => void (layoutError()?.save ? keepCurrentLayout() : openSession())}/>
             <Button label={text.keepCurrentLayout} variant="ghost" onPress={() => void keepCurrentLayout()}/>
           </View>
         </If>
         <If when={model.saveError()}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Text style={{ fontSize: 12, color: semantic.error }}>{model.saveError()}</Text>
-            <Button label={text.keepCurrentLayout} variant="ghost" onPress={() => void keepCurrentLayout()}/>
+            <If when={model.persists}>
+              <Button label={text.retry} variant="ghost" onPress={() => void keepCurrentLayout()}/>
+              <Button label={text.keepCurrentLayout} variant="ghost" onPress={() => void keepCurrentLayout()}/>
+            </If>
           </View>
+        </If>
+        <If when={model.persists && clearError()}>
+          <Text style={{ fontSize: 12, color: semantic.error }}>{clearError()}</Text>
         </If>
         <If when={model.persists}>
           <Button
             label={text.clear}
             variant="ghost"
+            tooltip={text.clearTooltip}
             disabled={(stats()?.gameCount ?? 0) === 0}
             onPress={() => clearConfirmOpen.set(true)}
           />
@@ -692,13 +820,14 @@ function ClearSessionDialog() {
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
           <Button label={text.cancel} variant="ghost" onPress={() => clearConfirmOpen.set(false)}/>
           <Button
-            label={`${text.clear} all`}
+            label={text.clear}
+            testID="stats-clear-confirm"
             variant="danger"
             onPress={() => {
               clearConfirmOpen.set(false);
               void Stats.clearSession().then(
-                (view) => { session.setView(view); session.setSaveError(null); },
-                (error) => session.setSaveError(`Not cleared: ${errorMessage(error)}`),
+                (view) => { session.setView(view); clearError.set(null); },
+                (error) => clearError.set(t("ui.stats.clear_failed", { reason: errorMessage(error) })),
               );
             }}
           />
@@ -756,7 +885,7 @@ function OverviewPanel(props: { model: StatsModel }) {
               onPress={() => achievementsOpen.set(!achievementsOpen())}
               style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
             >
-              <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{achievementsOpen() ? "v" : ">"}</Text>
+              <Icon name={achievementsOpen() ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
               <Text style={{ flex: 1, fontSize: 12, fontWeight: "600", color: colors.foreground }}>{text.achievements}</Text>
               <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{overview()!.achievements.length.toFixed(0)}</Text>
             </View>
@@ -839,7 +968,10 @@ function ShipsPanel(props: { model: StatsModel }) {
       return;
     }
     armed.set(null);
-    void run(props.model, () => Stats.clearShip(section.shipId));
+    void Stats.clearShip(section.shipId).then(
+      (view) => { props.model.setView(view); clearError.set(null); },
+      (error) => clearError.set(t("ui.stats.clear_failed", { reason: errorMessage(error) })),
+    );
   };
 
   return (
@@ -883,7 +1015,9 @@ function ShipsPanel(props: { model: StatsModel }) {
                       onPress={() => expanded.set(open() ? expanded().filter((id) => id !== section().shipId) : [...expanded(), section().shipId])}
                       style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2, borderRadius: controlRadius() }}
                     >
-                      <Text style={{ width: 12, fontSize: 12, color: colors.mutedForeground }}>{open() ? "v" : ">"}</Text>
+                      <View style={{ width: 12 }}>
+                        <Icon name={open() ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
+                      </View>
                       <If when={section().nationFlag}>
                         <Image source={{ uri: section().nationFlag! }} style={{ width: 23, height: 16 }}/>
                       </If>
@@ -913,7 +1047,17 @@ function ShipsPanel(props: { model: StatsModel }) {
                       align="end"
                       offset={4}
                       margin={8}
-                      trigger={<Chip label="Copy" accessibilityLabel={`${text.copyTable}: ${section().name}`} selected={false} onPress={() => {}}/>}
+                      trigger={
+                        <View
+                          role="button"
+                          accessibilityLabel={`${text.copyTable}: ${section().name}`}
+                          tooltip={<Hint text={text.copyTable}/>}
+                          hoverStyle={{ backgroundColor: colors.muted }}
+                          style={{ padding: 5, borderRadius: controlRadius() }}
+                        >
+                          <Icon name="copy" size={14} color={colors.mutedForeground}/>
+                        </View>
+                      }
                     >
                       <Surface style={{ minWidth: 180, padding: 5, backgroundColor: colors.popover }}>
                         <MenuRow label={text.copyMarkdown} onSelect={() => void copyText(section().markdown)}/>
@@ -1093,7 +1237,7 @@ function ChartPanel(props: { model: StatsModel; id: number }) {
                     style={{ ...inputStyle, flex: 1, minHeight: 28 }}
                   />
                   <If when={shipQuery()}>
-                    <Chip label="x" accessibilityLabel={text.clear} selected={false} onPress={() => shipQuery.set("")}/>
+                    <Chip icon="x" accessibilityLabel={text.clear} selected={false} onPress={() => shipQuery.set("")}/>
                   </If>
                 </View>
                 <View style={{ flexDirection: "row", gap: 4 }}>

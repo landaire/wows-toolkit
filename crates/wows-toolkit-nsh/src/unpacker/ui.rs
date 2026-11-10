@@ -4,6 +4,9 @@ use nsh_core::element::Input;
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 
+use crate::icons::Icon;
+use crate::icons::icon;
+
 /// How a button reads against its surroundings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonStyle {
@@ -39,6 +42,17 @@ pub fn button(label: impl IntoReactive<SharedString>, style: ButtonStyle) -> Vie
         .role(AccessibilityRole::Button)
         .app_class(class(style.class()))
         .child(text(label).app_class(class("text-xs")))
+}
+
+/// A ghost button showing `glyph`, named and hinted by `label`.
+pub fn icon_button(glyph: Icon, label: String) -> View {
+    view()
+        .accessible(true)
+        .role(AccessibilityRole::Button)
+        .label(label.clone())
+        .tooltip(tip(label))
+        .app_class(class(ButtonStyle::Ghost.class()))
+        .child(icon(glyph, px(14.0)).app_class(class("text-muted-foreground")))
 }
 
 /// A one-line text field bound to `value`.

@@ -8,6 +8,8 @@ use nsh_base::SelectValue;
 use nsh_base::TreeEntry;
 use nsh_base::TreeItem;
 use nsh_base::checkbox;
+use nsh_base::h_resizable;
+use nsh_base::resizable_panel;
 use nsh_base::context_menu;
 use nsh_base::menu_item;
 use nsh_base::tree;
@@ -18,6 +20,9 @@ use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wows_toolkit_viewmodel::unpacker::listing::file_type_label;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 use wowsunpack::vfs::VfsPath;
+
+use crate::icons::Icon;
+use crate::icons::icon;
 
 use super::Tab;
 use super::error::UnpackerError;
@@ -35,9 +40,15 @@ use super::ui::ButtonStyle;
 use super::ui::button;
 use super::ui::caption;
 use super::ui::class;
+use super::ui::icon_button;
 use super::ui::status;
 use super::ui::text_field;
 use super::ui::tip;
+
+/// The folder sidebar's width at first and the range a drag keeps it in, as GPUI's.
+const SIDEBAR_WIDTH: Points = px(260.0);
+const SIDEBAR_MIN_WIDTH: Points = px(160.0);
+const SIDEBAR_MAX_WIDTH: Points = px(520.0);
 
 /// The state of one pane. `Copy`: a bundle of signal handles.
 #[derive(Clone, Copy)]
@@ -53,6 +64,8 @@ pub struct BrowserPane {
     /// Whether the folder tree is put away behind its rail. Session state:
     /// the Unpacker persists no layout.
     pub sidebar_collapsed: Signal<bool>,
+    /// The folder tree's dragged width, so a remade view keeps it.
+    pub sidebar_width: Stored<Points>,
     pub search_query: Signal<String>,
     pub path_filter: Signal<String>,
     /// The rows the listing draws, rebuilt only when the VFS, the selected
@@ -88,6 +101,7 @@ impl BrowserPane {
             expanded: signal(vec![SharedString::from(ROOT_PATH)]),
             tree_items: signal(Shared::new(Vec::new())),
             sidebar_collapsed: signal(false),
+            sidebar_width: stored(SIDEBAR_WIDTH),
             search_query: signal(String::new()),
             path_filter: signal(String::new()),
             rows,
@@ -175,8 +189,22 @@ pub fn browser_view(pane: BrowserPane, tab: Tab) -> AnyElement {
             view()
                 .app_class(class("flex-1 min-h-0 flex-row"))
                 .child(when(move || pane.sidebar_collapsed.get(), move || sidebar_rail(pane, tab)))
-                .child(when(move || !pane.sidebar_collapsed.get(), move || sidebar(pane, tab)))
-                .child(listing(pane, tab))
+                .child(
+                    h_resizable()
+                        .app_class(class("flex-1 min-w-0 min-h-0"))
+                        .handle_class("bg-border")
+                        .child(
+                            resizable_panel()
+                                .size(pane.sidebar_width.get())
+                                .on_resize(move |size: &Points| {
+                                    pane.sidebar_width.replace(*size);
+                                })
+                                .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                                .visible(move || !pane.sidebar_collapsed.get())
+                                .child(when(move || !pane.sidebar_collapsed.get(), move || sidebar(pane, tab))),
+                        )
+                        .child(resizable_panel().child(listing(pane, tab))),
+                )
         }))
         .into_element()
 }
@@ -185,9 +213,7 @@ fn sidebar_rail(pane: BrowserPane, tab: Tab) -> AnyElement {
     view()
         .app_class(class("w-7 border-r border-border items-center pt-1"))
         .child(
-            button(">", ButtonStyle::Ghost)
-                .label(tab.text("ui.unpacker.expand_folders"))
-                .tooltip(tip(tab.text("ui.unpacker.expand_folders")))
+            icon_button(Icon::PanelLeftOpen, tab.text("ui.unpacker.expand_folders"))
                 .on_press(move |_: &PressEvent| pane.sidebar_collapsed.set(false)),
         )
         .into_element()
@@ -197,9 +223,7 @@ fn sidebar(pane: BrowserPane, tab: Tab) -> AnyElement {
     let filter_row = view()
         .app_class(class("flex-row items-center gap-1 px-2 py-1 border-b border-border"))
         .child(
-            button("<", ButtonStyle::Ghost)
-                .label(tab.text("ui.unpacker.collapse_folders"))
-                .tooltip(tip(tab.text("ui.unpacker.collapse_folders")))
+            icon_button(Icon::PanelLeftClose, tab.text("ui.unpacker.collapse_folders"))
                 .on_press(move |_: &PressEvent| pane.sidebar_collapsed.set(true)),
         )
         .child(
@@ -240,7 +264,7 @@ fn sidebar(pane: BrowserPane, tab: Tab) -> AnyElement {
         );
 
     view()
-        .app_class(class("w-64 min-h-0 border-r border-border"))
+        .app_class(class("flex-1 min-h-0 border-r border-border"))
         .child(filter_row)
         .child(folders)
         .child(search_box)
@@ -251,13 +275,19 @@ fn sidebar(pane: BrowserPane, tab: Tab) -> AnyElement {
 /// children, the directory name.
 fn folder_row(entry: &TreeEntry) -> AnyElement {
     let indent = px(entry.depth as f32 * 14.0);
-    let chevron = if entry.folder { ">" } else { " " };
+    let folder = entry.folder;
 
     view()
         .app_class(class("flex-row items-center gap-1"))
         .child(view().w(indent))
-        .child(text(chevron).app_class(class("w-3 text-xs text-muted-foreground group-aria-expanded:rotate-90")))
-        .child(text(Glyph::Folder.mark()).app_class(class("text-xs text-primary")))
+        .child(
+            view()
+                .app_class(class("w-3 text-muted-foreground group-aria-expanded:rotate-90"))
+                .children(folder.then(|| icon(Icon::ChevronRight, px(12.0)))),
+        )
+        // TreeEntry carries no expansion state, so the row's aria-expanded picks the icon.
+        .child(icon(Icon::Folder, px(14.0)).app_class(class("text-primary group-aria-expanded:hidden")))
+        .child(icon(Icon::FolderOpen, px(14.0)).app_class(class("hidden text-primary group-aria-expanded:flex")))
         .child(text(entry.label.clone()).app_class(class("text-xs text-foreground")))
         .into_element()
 }
@@ -378,11 +408,15 @@ fn listing_row(pane: BrowserPane, tab: Tab, at: Position) -> AnyElement {
                 tab.open_viewer(path);
             }
         })
-        .child(view().w(px(20.0)).child(queue_toggle))
         .child(
-            text(move || data.with(|row| row.as_ref().map(|row| Glyph::of(&row.label, row.is_dir).mark()).unwrap_or("")))
-                .app_class(class("w-6 text-xs text-primary")),
+            view()
+                .w(px(20.0))
+                .tooltip(tip(move || tab.text(if is_dir() { "ui.unpacker.queue_folder" } else { "ui.unpacker.queue_file" })))
+                .child(queue_toggle),
         )
+        .child(view().app_class(class("w-6 text-primary")).child(dynamic(move || {
+            data.with(|row| row.as_ref().map(|row| icon(Glyph::of(&row.label, row.is_dir).icon(), px(14.0))).into_iter().collect::<Vec<_>>())
+        })))
         .child(text(field(|row| row.label.clone())).app_class(class("flex-1 min-w-0 text-xs text-foreground truncate")))
         .child(
             // A directory has no size to show.

@@ -305,14 +305,15 @@ impl Glyph {
         }
     }
 
-    /// A short ASCII mark: the app ships no icon font.
-    pub fn mark(self) -> &'static str {
+    /// The Lucide icon GPUI shows for it.
+    pub fn icon(self) -> crate::icons::Icon {
+        use crate::icons::Icon;
         match self {
-            Self::Folder => "[D]",
-            Self::Image => "[I]",
-            Self::Text => "[T]",
-            Self::Audio => "[A]",
-            Self::File => "[F]",
+            Self::Folder => Icon::Folder,
+            Self::Image => Icon::Image,
+            Self::Text => Icon::FileText,
+            Self::Audio => Icon::Music,
+            Self::File => Icon::File,
         }
     }
 }

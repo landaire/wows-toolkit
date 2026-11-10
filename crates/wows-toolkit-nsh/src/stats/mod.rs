@@ -390,6 +390,11 @@ impl Stats {
         .await
     }
 
+    /// The scope's view again in the current locale; nothing is changed or saved.
+    pub async fn relabel(scope: ScopeName) -> Result<ScopeView, StatsError> {
+        off_thread(move || with_scope(&scope, |opened| Ok(scope_view(opened, None)))).await
+    }
+
     /// Forgets every recorded game.
     pub async fn clear_session() -> Result<ScopeView, StatsError> {
         off_thread(|| {

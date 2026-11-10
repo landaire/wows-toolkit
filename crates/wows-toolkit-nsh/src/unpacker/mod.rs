@@ -41,6 +41,8 @@ use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 use wowsunpack::vfs::VfsPath;
 
+use crate::icons::Icon;
+
 use self::browser::BrowserPane;
 use self::browser::browser_view;
 use self::dump::DumpSource;
@@ -55,10 +57,9 @@ use self::queue::queue_view;
 use self::search::SearchRun;
 use self::search::search_view;
 use self::text::Text;
-use self::ui::ButtonStyle;
-use self::ui::button;
 use self::ui::caption;
 use self::ui::class;
+use self::ui::icon_button;
 use self::viewer::ViewerDocument;
 use self::viewer::viewer_view;
 
@@ -109,7 +110,8 @@ impl LoadGeneration {
 /// closure in the view can hold it.
 #[derive(Clone, Copy)]
 pub struct Tab {
-    text: Stored<Text>,
+    /// The catalog in the shown locale; a change remakes the tab's view.
+    text: Signal<Text>,
     /// The directory and build whose VFS the panes hold, so applying the
     /// same settings twice does not reload it.
     wows_dir: Stored<Option<PathBuf>>,
@@ -133,7 +135,7 @@ pub struct Tab {
 impl Tab {
     fn new(locale: Option<&str>) -> Self {
         Self {
-            text: stored(Text::new(locale)),
+            text: signal_with(Text::new(locale), SignalEquals::Never),
             wows_dir: stored(None),
             builds: signal(Vec::new()),
             selected_build: signal(None),
@@ -460,8 +462,7 @@ impl Tab {
         let title = self.panel_title(&dock_tab.panel);
         let panel = dock_tab.panel.clone();
         let close = dock_tab.closable.then(|| {
-            button("x", ButtonStyle::Ghost)
-                .label(format!("Close {title}"))
+            icon_button(Icon::X, format!("Close {title}"))
                 .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.close_panel(panel.clone())))
         });
 
@@ -476,11 +477,15 @@ impl Tab {
     fn render_dock(&self, info: &DockInfo) -> AnyElement {
         let tab = *self;
         let placement = info.placement;
+        let glyph = match placement {
+            DockPlacement::Left => Icon::PanelLeftClose,
+            DockPlacement::Bottom => Icon::PanelBottom,
+            DockPlacement::Right | DockPlacement::Center => Icon::PanelRightClose,
+        };
         view()
             .app_class(class("flex-row justify-end px-1"))
             .child(
-                button(if placement == DockPlacement::Bottom { "v" } else { ">" }, ButtonStyle::Ghost)
-                    .label(format!("Collapse {} dock", placement_name(placement)))
+                icon_button(glyph, self.text("ui.buttons.collapse_panel"))
                     .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.set_dock_open(placement, false))),
             )
             .into_element()
@@ -507,15 +512,6 @@ impl Tab {
             return;
         };
         self.select_build(build);
-    }
-}
-
-fn placement_name(placement: DockPlacement) -> &'static str {
-    match placement {
-        DockPlacement::Left => "left",
-        DockPlacement::Right => "right",
-        DockPlacement::Bottom => "bottom",
-        DockPlacement::Center => "center",
     }
 }
 
@@ -548,8 +544,9 @@ fn fixed_panels() -> Vec<DockPanelOptions> {
 
 #[component]
 pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
-    let locale = props.locale.get_untracked();
-    let tab = Tab::new(locale.as_deref());
+    let initial = props.locale.get_untracked();
+    let tab = Tab::new(initial.as_deref());
+    let shown_locale = stored(initial);
 
     effect(move || {
         if props.active.get() {
@@ -557,6 +554,23 @@ pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
         }
     });
 
+    effect(move || {
+        let locale = props.locale.get();
+        if shown_locale.with(|shown| *shown != locale) {
+            tab.text.set(Text::new(locale.as_deref()));
+            shown_locale.replace(locale);
+        }
+    });
+
+    view().app_class(class("flex-1 min-h-0")).child(dynamic(move || {
+        tab.text.with(|_| ());
+        untracked(|| tab_view(tab))
+    }))
+}
+
+/// The tab's view; made again when the locale changes, as GPUI words every
+/// frame in the current one. Its state lives in `tab`, so nothing is lost.
+fn tab_view(tab: Tab) -> AnyElement {
     // The version bar shows only when there is a choice to make.
     let version_bar = when(
         move || tab.builds.with(|builds| builds.len() > 1),
@@ -606,12 +620,11 @@ pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
         .on_layout_change(move |next: &DockAreaLayout| tab.layout.set(next.clone()))
         .on_panel_remove(move |panel: &PanelId| tab.panel_removed(panel));
 
-    let rail = |placement: DockPlacement, label: &'static str, mark: &'static str| {
+    let rail = |placement: DockPlacement, glyph: Icon| {
         when(
             move || tab.dock_closed(placement),
             move || {
-                button(mark, ButtonStyle::Ghost)
-                    .label(format!("Expand {label} dock"))
+                icon_button(glyph, tab.text("ui.buttons.expand_panel"))
                     .on_press(move |_: &PressEvent| tab.with_dock(|dock| dock.set_dock_open(placement, true)))
             },
         )
@@ -623,9 +636,11 @@ pub fn Unpacker(props: UnpackerProps) -> impl IntoElement {
         .child(
             view()
                 .app_class(class("flex-1 min-h-0 flex-row"))
+                .child(view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Left, Icon::PanelLeftOpen)))
                 .child(view().app_class(class("flex-1 min-w-0 min-h-0")).child(area).child(
-                    view().app_class(class("flex-row justify-center")).child(rail(DockPlacement::Bottom, "bottom", "^")),
+                    view().app_class(class("flex-row justify-center")).child(rail(DockPlacement::Bottom, Icon::PanelBottomOpen)),
                 ))
-                .child(view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Right, "right", "<"))),
+                .child(view().app_class(class("items-center pt-1")).child(rail(DockPlacement::Right, Icon::PanelRightOpen))),
         )
+        .into_element()
 }

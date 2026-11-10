@@ -3,7 +3,7 @@ import { Window } from "nsh/desktop";
 import { Collab, GameData, Palette, Shell, Toolkit } from "wows-toolkit/native";
 import { EmptyState, errorMessage } from "./components";
 import { colors } from "./theme";
-import { applyLocale, t } from "./i18n";
+import { applyLocale, currentLocale, t } from "./i18n";
 import { loadAppSettings } from "./settings_store";
 import { SettingsView } from "./settings";
 import { AboutDialog, openAbout } from "./shell/about";
@@ -64,7 +64,7 @@ void loadAppSettings().then((loaded) => {
 
 function selectTab(id: string) {
   if (id === "statistics") activateStats();
-  if (id === "player-tracker") activatePlayerTracker(startup.locale);
+  if (id === "player-tracker") activatePlayerTracker();
   setPlayerTrackerShown(id === "player-tracker");
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
@@ -209,7 +209,7 @@ function Content() {
         <SearchView onOpenReplay={openReplayPath} onNotice={showNotice}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "unpacker" ? "flex" : "none" }}>
-        <UnpackerView active={tab().id === "unpacker"} locale={startup.locale}/>
+        <UnpackerView active={tab().id === "unpacker"} locale={currentLocale()}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "armor-viewer" ? "flex" : "none" }}>
         <ArmorView shown={tab().id === "armor-viewer"}/>

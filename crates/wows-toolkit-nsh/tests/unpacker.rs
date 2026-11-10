@@ -292,9 +292,9 @@ fn the_unpacker_browses_filters_queues_extracts_searches_views_and_exports() {
     app.wait_for("label:Filter files...").unwrap();
 
     // The queue dock collapses to a rail and comes back.
-    app.press("label:Collapse right dock").unwrap();
+    app.press("label:Collapse Panel").unwrap();
     app.wait_for_gone("Clear All", GONE).unwrap();
-    app.press("label:Expand right dock").unwrap();
+    app.press("label:Expand Panel").unwrap();
     app.wait_for("Clear All").unwrap();
 
     // A content search opens its own results panel; a hit opens the file,

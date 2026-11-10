@@ -1,8 +1,9 @@
-import { effect, keymap, signal, Text, View, windowSize } from "nsh";
+import { effect, keymap, signal, Text, untracked, View, windowSize } from "nsh";
 import { Command, Dialog } from "nsh/base";
 import { Palette, type AppTab, type PaletteLayer, type ShipSearch } from "wows-toolkit/native";
 import { Surface } from "./components";
 import { searchFor } from "./search";
+import { Icon } from "./icons";
 import { colors, controlRadius } from "./theme";
 
 // How long typing rests before an index-backed layer asks the index.
@@ -73,6 +74,15 @@ export function bindPalette(options: {
   activeTab = options.activeTab;
   armorShips = options.armorShips ?? null;
   shellLabels = options.shellLabels;
+  // The ship layer fills once the catalogue lands, without waiting for a keystroke.
+  const ships = armorShips;
+  if (ships) {
+    effect(() => {
+      if (layer()?.layer !== "armorShips") return;
+      ships();
+      untracked(() => searchLayer(query()));
+    });
+  }
 }
 
 function text() {
@@ -222,11 +232,12 @@ function LayerHeader(props: { title: string }) {
         accessibilityLabel={`Back to ${words.title}`}
         onPress={openPalette}
         hoverStyle={{ backgroundColor: colors.accent }}
-        style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: controlRadius() }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: controlRadius() }}
       >
-        <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{`< ${words.title}`}</Text>
+        <Icon name="chevron-left" size={12} color={colors.popoverForeground}/>
+        <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{words.title}</Text>
       </View>
-      <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{">"}</Text>
+      <Icon name="chevron-right" size={12} color={colors.mutedForeground}/>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.title}</Text>
       <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{words.backHint}</Text>
     </View>

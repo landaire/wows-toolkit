@@ -9,6 +9,7 @@ pub mod collab;
 pub mod desktop;
 pub mod frames;
 pub mod game_data;
+pub mod icons;
 mod js_newtype;
 mod launcher;
 mod native;
@@ -76,4 +77,5 @@ fn native_module(registry: &mut Registry) {
     registry.register::<replay_inspector::table::PlayerTable>();
     registry.register::<replay_inspector::browser::ReplayBrowser>();
     registry.register::<Unpacker>();
+    registry.register::<icons::IconView>();
 }

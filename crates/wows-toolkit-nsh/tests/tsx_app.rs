@@ -316,8 +316,54 @@ fn stats_session_clears_only_after_confirmation() {
     app.wait_for("2W/1L (66.7%)").unwrap();
 
     app.press("Clear").unwrap();
-    app.press("Clear all").unwrap();
+    app.press("id:stats-clear-confirm").unwrap();
     app.wait_for("No games recorded for the current filters").unwrap();
+}
+
+#[test]
+fn stats_chart_dock_collapses_to_a_rail_and_expands() {
+    let mut app = app();
+    seed_stats();
+    open_stats(&mut app);
+    app.wait_for("label:Settings: Damage").unwrap();
+
+    app.press("label:Collapse Panel").unwrap();
+    app.wait_for_gone("label:Settings: Damage", std::time::Duration::from_secs(5)).unwrap();
+    wait_for_setting(&mut app, "stats_charts_dock_layout", |value| value.contains(r#""open":false"#));
+
+    app.press("label:Expand Panel").unwrap();
+    app.wait_for("label:Settings: Damage").unwrap();
+    assert!(!app.shows("label:Expand Panel"), "the rail goes once the dock is open");
+}
+
+#[test]
+fn a_language_change_rewords_stats_tracker_and_search() {
+    let mut app = app();
+    seed_stats();
+    open_stats(&mut app);
+    app.wait_for("label:Limit to recent games").unwrap();
+    app.press("label:Division: Division").unwrap();
+    wait_for_setting(&mut app, "session_stats_division_filter", |value| value == r#""DivOnly""#);
+    app.press("Player Tracker").unwrap();
+    app.wait_for("label:Player Filter").unwrap();
+
+    app.press("Settings").unwrap();
+    app.press("label:Language").unwrap();
+    app.press("Deutsch").unwrap();
+
+    app.press("text:/^(Stats|Statistiken)$/").unwrap();
+    app.wait_for("label:Auf letzte Gefechte begrenzen").unwrap();
+    // Rewording reads the scope again; it neither changes nor saves the filters.
+    assert_eq!(saved_setting("session_stats_division_filter").as_deref(), Some(r#""DivOnly""#));
+    app.press("text:/^(Player Tracker|Spieler-Tracker)$/").unwrap();
+    app.wait_for("label:Spielerfilter").unwrap();
+    app.press("text:/^(Search|Suche)$/").unwrap();
+    app.wait_for("id:search-run >> text:Suche").unwrap();
+
+    // The next test starts in English.
+    with_test_database(async |pool| {
+        wows_toolkit_config::queries::set_setting_raw(pool, "locale", r#""en""#).await.expect("the locale is reset");
+    });
 }
 
 /// Runs `work` against the test database.
@@ -526,18 +572,18 @@ fn player_tracker_changes_period_filters_and_cycles_the_sort() {
     assert!(!app.shows("AncientFoe"), "a player met three days ago is outside the past day");
     assert!(!app.shows("DivisionMate"), "a player met only in division is hidden");
     wait_for_order(&mut app, "OtherOpponent", "TrackedCaptain");
-    app.wait_for("Encounters in Time Range (desc)").unwrap();
+    app.wait_for("role:columnheader[Encounters in Time Range] >> id:sort-descending").unwrap();
 
     // A new column opens on its own order, the same one flips, a third press
     // puts the table back the way it opened.
     app.press("role:columnheader[Player Name]").unwrap();
-    app.wait_for("Player Name (asc)").unwrap();
+    app.wait_for("role:columnheader[Player Name] >> id:sort-ascending").unwrap();
     wait_for_order(&mut app, "OtherOpponent", "TrackedCaptain");
     app.press("role:columnheader[Player Name]").unwrap();
-    app.wait_for("Player Name (desc)").unwrap();
+    app.wait_for("role:columnheader[Player Name] >> id:sort-descending").unwrap();
     wait_for_order(&mut app, "TrackedCaptain", "OtherOpponent");
     app.press("role:columnheader[Player Name]").unwrap();
-    app.wait_for("Encounters in Time Range (desc)").unwrap();
+    app.wait_for("role:columnheader[Encounters in Time Range] >> id:sort-descending").unwrap();
     wait_for_order(&mut app, "OtherOpponent", "TrackedCaptain");
 
     app.type_text("label:Player Filter", "Other").unwrap();
@@ -657,7 +703,7 @@ fn player_tracker_view_round_trips_through_the_shared_settings_row() {
     seed_player_tracker();
     open_player_tracker(&mut app);
     app.press("role:columnheader[Player Name]").unwrap();
-    app.wait_for("Player Name (asc)").unwrap();
+    app.wait_for("role:columnheader[Player Name] >> id:sort-ascending").unwrap();
     app.press("label:Time period").unwrap();
     app.press("All Time").unwrap();
     app.wait_for("AncientFoe").unwrap();
@@ -683,7 +729,7 @@ fn player_tracker_view_round_trips_through_the_shared_settings_row() {
     let mut app = app.restart();
     app.press("Player Tracker").unwrap();
     app.wait_for("AncientFoe").unwrap();
-    app.wait_for("Player Name (asc)").unwrap();
+    app.wait_for("role:columnheader[Player Name] >> id:sort-ascending").unwrap();
     assert_eq!(app.screen().input_text("label:Player Filter").unwrap(), Some("Foe"));
     assert!(!app.shows("TrackedCaptain"));
 }
