@@ -26,6 +26,7 @@ use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 use wows_toolkit_viewmodel::stats::session_personal_rating;
 use wows_toolkit_viewmodel::stats::table as stats_table;
 
+use super::art::GameArt;
 use crate::text::text;
 use crate::text::text_with;
 
@@ -116,6 +117,8 @@ pub struct AchievementTile {
     pub description: String,
     /// `x3`, as the GPUI tile reads.
     pub count: String,
+    /// The build's icon as a `data:` URL; absent before game data loads.
+    pub icon: Option<String>,
 }
 
 /// The Overview panel.
@@ -169,6 +172,10 @@ pub struct ShipSection {
     pub markdown: String,
     pub csv: String,
     pub clear_label: String,
+    /// The nation's flag as a `data:` URL, once game data has loaded.
+    pub nation_flag: Option<String>,
+    /// The class icon as an SVG `data:` URL, once game data has loaded.
+    pub class_icon: Option<String>,
 }
 
 /// Everything the tab shows outside its charts.
@@ -210,6 +217,7 @@ pub(crate) fn snapshot(
     filters: &StatsFilters,
     last_count: usize,
     table: Option<&PersonalRatingData>,
+    art: Option<&GameArt>,
 ) -> StatsSnapshot {
     let locale = wows_toolkit_viewmodel::locale();
     let modes: Vec<ModeOption> = all_match_groups(games)
@@ -240,13 +248,13 @@ pub(crate) fn snapshot(
         modes,
         mode_label,
         mode_summary,
-        overview: overview(&filtered, table, &locale),
+        overview: overview(&filtered, table, art, &locale),
         columns: stats_table::COLUMNS.iter().map(|column| text(column.translation_key())).collect(),
-        ships: ship_sections(&per_ship, table, &locale),
+        ships: ship_sections(&per_ship, table, art, &locale),
     }
 }
 
-fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, locale: &str) -> OverviewSnapshot {
+fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, art: Option<&GameArt>, locale: &str) -> OverviewSnapshot {
     let summary = SessionSummary::from_games(games);
     let ships = per_ship_performance_by_id(games);
     let ship_name = |ship: GameParamId| {
@@ -257,8 +265,25 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, locale: 
         Some(rate) => format!("{} ({rate:.1}%)", summary.record_label()),
         None => summary.record_label(),
     };
-    let mut achievements = aggregate_achievements(games);
-    achievements.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.display_name.cmp(&b.display_name)));
+    // Named in the build's language when it is loaded, which is also the
+    // name the tiles are ordered by.
+    let mut achievements: Vec<(usize, AchievementTile)> = aggregate_achievements(games)
+        .into_iter()
+        .map(|achievement| {
+            let tile = AchievementTile {
+                id: achievement.game_param_id.raw().to_string(),
+                name: art.and_then(|art| art.achievement_name(&achievement.icon_key)).unwrap_or(achievement.display_name),
+                description: art
+                    .and_then(|art| art.achievement_description(&achievement.icon_key))
+                    .unwrap_or(achievement.description),
+                count: format!("x{}", achievement.count),
+                icon: art.and_then(|art| art.achievement_icon(&achievement.icon_key)).map(|url| url.to_string()),
+            };
+            (achievement.count, tile)
+        })
+        .collect();
+    achievements.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+    let achievements: Vec<AchievementTile> = achievements.into_iter().map(|(_, tile)| tile).collect();
 
     OverviewSnapshot {
         has_games: summary.games_played() > 0 || !ships.is_empty(),
@@ -286,19 +311,16 @@ fn overview(games: &[&PerGameStat], table: Option<&PersonalRatingData>, locale: 
                 average_frags: info.avg_frags().map_or_else(|| "-".to_owned(), |frags| format!("{frags:.2}")),
             })
             .collect(),
-        achievements: achievements
-            .into_iter()
-            .map(|achievement| AchievementTile {
-                id: achievement.game_param_id.raw().to_string(),
-                name: achievement.display_name,
-                description: achievement.description,
-                count: format!("x{}", achievement.count),
-            })
-            .collect(),
+        achievements,
     }
 }
 
-fn ship_sections(games: &[&PerGameStat], table: Option<&PersonalRatingData>, locale: &str) -> Vec<ShipSection> {
+fn ship_sections(
+    games: &[&PerGameStat],
+    table: Option<&PersonalRatingData>,
+    art: Option<&GameArt>,
+    locale: &str,
+) -> Vec<ShipSection> {
     // Grouped by id, not by name: two ships can carry one display name, and a
     // rating is scored against a single ship's expected values.
     let mut by_ship: BTreeMap<u64, Vec<&PerGameStat>> = BTreeMap::new();
@@ -355,6 +377,8 @@ fn ship_sections(games: &[&PerGameStat], table: Option<&PersonalRatingData>, loc
                     })
                     .collect(),
                 clear_label: text_with("ui.stats.remove_games_hint", &[("ship", &ship)]),
+                nation_flag: art.and_then(|art| art.nation_flag(GameParamId::from(ship_id))).map(|url| url.to_string()),
+                class_icon: art.and_then(|art| art.class_icon(GameParamId::from(ship_id))).map(|url| url.to_string()),
                 header,
                 name: ship,
             };
@@ -416,7 +440,7 @@ mod tests {
             game(1, "Yamato", "2026-01-03", 120_000, true, "pvp"),
         ];
 
-        let snapshot = snapshot(&games, &StatsFilters::default(), 25, None);
+        let snapshot = snapshot(&games, &StatsFilters::default(), 25, None, None);
 
         assert_eq!(snapshot.game_count, 3);
         assert_eq!(snapshot.overview.record, "2W/1L (66.7%)");
@@ -441,7 +465,7 @@ mod tests {
         ];
         let filters = StatsFilters { limit: GameLimit::Recent(1), ..StatsFilters::default() };
 
-        let snapshot = snapshot(&games, &filters, 25, None);
+        let snapshot = snapshot(&games, &filters, 25, None, None);
 
         assert_eq!(snapshot.overview.record, "1W/0L (100.0%)");
         assert_eq!(snapshot.ships.len(), 2, "one game of each ship");

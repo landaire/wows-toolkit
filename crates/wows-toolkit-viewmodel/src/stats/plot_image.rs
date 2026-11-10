@@ -215,7 +215,7 @@ pub fn render(
 /// Premultiplied RGBA rows to straight alpha, which is what a PNG or a
 /// clipboard image holds.
 pub fn unpremultiply(pixels: &mut [u8]) {
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         let alpha = pixel[3];
         if alpha == 0 || alpha == 255 {
             continue;
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!((width, height), (400, 300));
         assert_eq!(pixels.len(), 400 * 300 * 4);
         let background = [24u8, 24, 27];
-        let drawn = pixels.chunks_exact(4).filter(|px| px[..3] != background).count();
+        let drawn = pixels.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count();
         assert!(drawn > 0, "the plot left nothing on the image");
     }
 
@@ -381,7 +381,7 @@ mod tests {
         let marked = |scale: f32, size: u32| {
             let (_, _, pixels) = render(&plot(&series), colors(), COPY_BACKGROUND, size, size * 3 / 4, scale)
                 .expect("a pixmap of this size is made");
-            pixels.chunks_exact(4).filter(|px| px[..3] != background).count() as f64 / f64::from(size * size * 3 / 4)
+            pixels.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count() as f64 / f64::from(size * size * 3 / 4)
         };
 
         let single = marked(1.0, 400);

@@ -533,7 +533,7 @@ mod tests {
         surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: 2.0 });
         let first = wait_for_frame(&surface, None);
         assert_eq!(first.size, PixelSize { width: 640, height: 400 });
-        assert!(first.pixels.chunks_exact(4).any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
+        assert!(first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
 
         let mut moved = chart.view_moved();
         let modifiers = Modifiers::default();

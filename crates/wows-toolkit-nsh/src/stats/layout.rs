@@ -97,7 +97,8 @@ impl StatsPanel {
 /// The layout a tab opens with: Overview and Ships share the center, and
 /// each chart sits in the right dock.
 pub(crate) fn default_layout(charts: &[ChartId]) -> DockAreaLayout {
-    let center = DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key());
+    let center =
+        DockLayout::tabs().panel(StatsPanel::Overview.key()).panel(StatsPanel::Ships.key()).active_index(0);
     let mut layout = DockAreaLayout::new(DockLayout::h_split().child(center, None));
     for id in charts {
         layout = with_chart(layout, *id);
@@ -137,29 +138,6 @@ pub(crate) fn with_chart(mut layout: DockAreaLayout, id: ChartId) -> DockAreaLay
     // A dock whose tree holds no tab group gets one.
     region.layout = DockLayout::tabs().panel(key).into();
     layout
-}
-
-/// `layout` without chart `id`, its emptied containers folded away.
-pub(crate) fn without_chart(mut layout: DockAreaLayout, id: ChartId) -> DockAreaLayout {
-    let key = StatsPanel::Chart(id).key();
-    let mut pending: Vec<&mut DockNode> = vec![&mut layout.center];
-    for region in [&mut layout.left, &mut layout.right, &mut layout.bottom].into_iter().flatten() {
-        pending.push(&mut region.layout);
-    }
-    while let Some(node) = pending.pop() {
-        match node {
-            DockNode::Tabs { panels, active_index, .. } => {
-                let Some(at) = panels.iter().position(|panel| *panel == key) else { continue };
-                panels.remove(at);
-                if *active_index >= at && *active_index > 0 {
-                    *active_index -= 1;
-                }
-            }
-            DockNode::Split { children, .. } => pending.extend(children.iter_mut()),
-        }
-    }
-
-    layout.normalized()
 }
 
 /// Every panel the layout places, center first, then the left, right and
@@ -252,16 +230,6 @@ mod tests {
         let right = layout.right.as_ref().expect("the charts have a dock");
         assert_eq!(right.size, Some(px(500.0)));
         assert_eq!(charts(&layout).expect("the charts are known"), [ChartId(0), ChartId(3)]);
-    }
-
-    #[test]
-    fn closing_a_chart_leaves_the_other_panels() {
-        let layout = default_layout(&[ChartId(0), ChartId(1)]);
-
-        let layout = without_chart(layout, ChartId(0));
-
-        assert_eq!(charts(&layout).expect("charts"), [ChartId(1)]);
-        assert!(panels(&layout).contains(&StatsPanel::Overview.key()));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import type { JSX } from "nsh";
-import { Clipboard, colorScheme, effect, Scroll, signal, Text, View } from "nsh";
-import { Checkbox, Dialog, DockArea, Input, Menu, NumberInput, Popover, Toolbar, type DockAreaLayout, type DockTab } from "nsh/base";
-import { Stats, type ChartSnapshot, type FilterState, type RatingChip, type ScopeView, type ShipSection, type StatsSnapshot } from "wows-toolkit/native";
+import { Clipboard, colorScheme, effect, Image, Scroll, signal, Text, View } from "nsh";
+import { Checkbox, Dialog, DockArea, Input, Menu, NumberInput, Popover, Toolbar, type DockAreaApi, type DockAreaLayout, type DockTab } from "nsh/base";
+import { Stats, type ChartSnapshot, type DirectoryOpened, type DirectoryStatus, type FilterState, type RatingChip, type ScopeView, type ShipSection } from "wows-toolkit/native";
 import { Button, EmptyState, errorMessage, inputStyle, MenuRow, Surface } from "./components";
 import { Frame } from "./frame";
 import { colors, controlRadius } from "./theme";
@@ -30,8 +30,14 @@ export type StatsModel = {
   dropChart: (id: number) => void;
   saveError: () => string | null;
   setSaveError: (error: string | null) => void;
+  /// The layout the dock area opens with; a new one rebuilds the area.
   layout: () => DockAreaLayout | null;
   setLayout: (layout: DockAreaLayout) => void;
+  /// The arrangement shown, as the area last reported it.
+  current: () => DockAreaLayout | null;
+  setCurrent: (layout: DockAreaLayout) => void;
+  dock: () => DockAreaApi | undefined;
+  setDock: (api: DockAreaApi) => void;
 };
 
 export function createStatsModel(scope: string, persists: boolean): StatsModel {
@@ -39,6 +45,8 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
   const charts = signal<ChartSnapshot[]>([]);
   const saveError = signal<string | null>(null);
   const layout = signal<DockAreaLayout | null>(null);
+  let current: DockAreaLayout | null = null;
+  let dock: DockAreaApi | undefined;
   const watched = new Set<number>();
 
   const watchView = async (id: number) => {
@@ -76,12 +84,24 @@ export function createStatsModel(scope: string, persists: boolean): StatsModel {
     saveError,
     setSaveError: (error) => saveError.set(error),
     layout,
-    setLayout: (next) => layout.set(next),
+    setLayout: (next) => {
+      current = next;
+      layout.set(next);
+    },
+    current: () => current,
+    setCurrent: (next) => { current = next; },
+    dock: () => dock,
+    setDock: (api) => { dock = api; },
   };
   return model;
 }
 
 const session = createStatsModel("session", true);
+
+type DirectoryView = { model: StatsModel; status: () => DirectoryStatus; setStatus: (status: DirectoryStatus) => void };
+const directories = signal<DirectoryView[]>([]);
+const activeScope = signal("session");
+const directoryError = signal<string | null>(null);
 const sessionLoading = signal(false);
 const sessionError = signal<string | null>(null);
 const layoutError = signal<string | null>(null);
@@ -134,6 +154,65 @@ async function refreshSession() {
   }
 }
 
+function adoptDirectory(opened: DirectoryOpened) {
+  const known = directories().find((view) => view.model.scope === opened.scope);
+  if (known) {
+    activeScope.set(opened.scope);
+    return;
+  }
+  const model = createStatsModel(opened.scope, false);
+  model.setView(opened.status.view);
+  model.setLayout(opened.layout);
+  const status = signal(opened.status);
+  directories.set([...directories(), { model, status, setStatus: (next) => status.set(next) }]);
+  activeScope.set(opened.scope);
+  void followDirectory(model, status);
+}
+
+async function followDirectory(model: StatsModel, status: { (): DirectoryStatus; set: (value: DirectoryStatus) => void }) {
+  for (;;) {
+    let next: DirectoryStatus;
+    try {
+      next = await Stats.directoryStatus(model.scope, status().revision);
+    } catch {
+      return;
+    }
+    status.set(next);
+    model.setView(next.view);
+  }
+}
+
+/// Opens a stats view over every replay below `path`, as a replay listing's
+/// Directory Stats action asks.
+export async function openDirectoryStats(path: string) {
+  directoryError.set(null);
+  try {
+    adoptDirectory(await Stats.openDirectory(path));
+  } catch (error) {
+    directoryError.set(errorMessage(error));
+  }
+}
+
+async function pickDirectoryStats() {
+  directoryError.set(null);
+  try {
+    const opened = await Stats.pickDirectory();
+    if (opened) adoptDirectory(opened);
+  } catch (error) {
+    directoryError.set(errorMessage(error));
+  }
+}
+
+function closeDirectory(scope: string) {
+  try {
+    Stats.closeDirectory(scope);
+  } catch (error) {
+    console.warn(`The directory view could not be closed: ${errorMessage(error)}`);
+  }
+  directories.set(directories().filter((view) => view.model.scope !== scope));
+  if (activeScope() === scope) activeScope.set("session");
+}
+
 function showNotice(message: string) {
   clearTimeout(noticeTimer);
   notice.set(message);
@@ -165,7 +244,7 @@ function setFilters(model: StatsModel, change: Partial<FilterState>) {
 }
 
 function layoutChanged(model: StatsModel, layout: DockAreaLayout) {
-  model.setLayout(layout);
+  model.setCurrent(layout);
   if (!model.persists) return;
   clearTimeout(layoutTimer);
   layoutTimer = setTimeout(() => {
@@ -181,18 +260,23 @@ async function addChart(model: StatsModel, stat: string) {
   try {
     const update = await Stats.addChart(model.scope, stat);
     model.setChart(update.chart);
-    const layout = model.layout();
-    if (layout) layoutChanged(model, Stats.layoutWithChart(layout, update.chart.id));
+    // Where GPUI puts a new chart: the right dock, opened, 500 wide.
+    const dock = model.dock();
+    if (dock) {
+      dock.addPanel(`chart-${update.chart.id}`, "right", 500);
+      layoutChanged(model, dock.layout());
+    }
     if (update.saveError) model.setSaveError(update.saveError);
   } catch (error) {
     model.setSaveError(errorMessage(error));
   }
 }
 
-async function closeChart(model: StatsModel, id: number) {
-  const layout = model.layout();
-  if (layout) layoutChanged(model, Stats.layoutWithoutChart(layout, id));
-  await chartRemoved(model, id);
+function closeChart(model: StatsModel, id: number) {
+  // The area then reports the panel removed, which lets the chart go.
+  const dock = model.dock();
+  if (!dock) return;
+  dock.removePanel(`chart-${id}`);
 }
 
 async function chartRemoved(model: StatsModel, id: number) {
@@ -206,7 +290,7 @@ async function chartRemoved(model: StatsModel, id: number) {
 }
 
 async function keepCurrentLayout() {
-  const layout = session.layout();
+  const layout = session.current();
   if (!layout) return;
   try {
     await Stats.keepCurrentLayout(layout);
@@ -245,14 +329,91 @@ export function StatsView() {
       <If when={!sessionLoading() && sessionError() && !session.view()}>
         <EmptyState title="Statistics unavailable" description={sessionError()!} action={<Button label={text.retry} onPress={() => void openSession()}/>}/>
       </If>
-      <If when={session.view()}>
-        <StatsScopeView model={session} header={null}/>
-      </If>
+      <ScopeBar/>
+      <View style={{ flex: 1, minHeight: 0, display: activeScope() === "session" ? "flex" : "none" }}>
+        <If when={session.view()}>
+          <StatsScopeView model={session} header={null}/>
+        </If>
+      </View>
+      <Each of={directories()}>
+        {(view) => (
+          <View style={{ flex: 1, minHeight: 0, display: activeScope() === view().model.scope ? "flex" : "none" }}>
+            <StatsScopeView model={view().model} header={<DirectoryHeader view={view()}/>}/>
+          </View>
+        )}
+      </Each>
       <ClearSessionDialog/>
       <If when={notice()}>
         <Surface style={{ position: "absolute", right: 16, bottom: 16, minWidth: 220, maxWidth: 420, padding: 12, backgroundColor: colors.popover }}>
           <Text accessibilityLiveRegion="polite" style={{ fontSize: 13, color: colors.popoverForeground }}>{notice()}</Text>
         </Surface>
+      </If>
+    </View>
+  );
+}
+
+function ScopeBar() {
+  return (
+    <View style={{ minHeight: 36, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 6, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card }}>
+      <Chip label="Session" accessibilityLabel="Session stats" selected={activeScope() === "session"} onPress={() => activeScope.set("session")}/>
+      <Each of={directories()}>
+        {(view) => (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+            <Chip
+              label={view().status().root.split(/[\\/]/).filter(Boolean).pop() ?? view().status().root}
+              accessibilityLabel={`Directory stats ${view().status().root}`}
+              selected={activeScope() === view().model.scope}
+              onPress={() => activeScope.set(view().model.scope)}
+            />
+            <Chip label="x" accessibilityLabel={`Close directory stats ${view().status().root}`} selected={false} onPress={() => closeDirectory(view().model.scope)}/>
+          </View>
+        )}
+      </Each>
+      <View style={{ flex: 1 }}/>
+      <If when={directoryError()}>
+        <Text style={{ fontSize: 12, color: semantic.error }}>{directoryError()}</Text>
+      </If>
+      <Button label={text.openDirectoryStats} variant="ghost" onPress={() => void pickDirectoryStats()}/>
+    </View>
+  );
+}
+
+function DirectoryHeader(props: { view: DirectoryView }) {
+  const status = () => props.view.status();
+  return (
+    <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
+      <View style={{ minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12.5, color: colors.foreground }}>{status().root}</Text>
+        <Rule/>
+        <If when={status().status}>
+          <Text accessibilityLiveRegion="polite" style={{ fontSize: 12, color: colors.mutedForeground }}>{status().status}</Text>
+        </If>
+        <If when={status().finished}>
+          <Button
+            label={text.directoryReload}
+            variant="ghost"
+            onPress={() => {
+              try {
+                Stats.reloadDirectory(props.view.model.scope);
+              } catch (error) {
+                directoryError.set(errorMessage(error));
+              }
+            }}
+          />
+        </If>
+        <If when={status().skipped}>
+          <Rule/>
+          <Text tooltip={status().skippedDetail ?? undefined} accessibilityLabel={`${status().skipped}: ${status().skippedDetail}`} style={{ fontSize: 12, color: colors.mutedForeground }}>{status().skipped}</Text>
+        </If>
+        <If when={status().noGames}>
+          <Rule/>
+          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{status().noGames}</Text>
+        </If>
+      </View>
+      <If when={status().progress !== null && status().progress !== undefined}>
+        <View accessibilityRole="progressbar" accessibilityLabel={status().status ?? ""} style={{ height: 3, backgroundColor: colors.muted }}>
+          <View style={{ height: 3, width: `${Math.round((status().progress ?? 0) * 100)}%`, backgroundColor: colors.primary }}/>
+        </View>
       </If>
     </View>
   );
@@ -266,11 +427,18 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
       {props.header}
       <FilterBar model={model}/>
       <View style={{ flex: 1, minHeight: 0 }}>
-        <If when={model.layout()}>
+        <Each of={model.layout() ? [model.layout()!] : []}>
+          {(opened) => (
           <DockArea
-            layout={model.layout()!}
+            class="flex-1"
+            ref={(api: DockAreaApi) => model.setDock(api)}
+            defaultLayout={opened()}
             onLayoutChange={({ layout }) => layoutChanged(model, layout)}
             onPanelRemove={({ panel }) => {
+              // The arrangement to save is the last one known without the
+              // removed panel, which the area may not have reported yet.
+              const current = model.current();
+              if (current) layoutChanged(model, withoutPanel(current, panel));
               const id = chartId(panel);
               if (id !== null && model.charts().some((chart) => chart.id === id)) void chartRemoved(model, id);
             }}
@@ -286,10 +454,22 @@ export function StatsScopeView(props: { model: StatsModel; header: JSX.Element |
             handleClass="bg-border group-hover:bg-primary"
             handleAccessibilityLabel="Resize panels"
           />
-        </If>
+          )}
+        </Each>
       </View>
     </View>
   );
+}
+
+/// `layout` with `panel` taken out of every tab group.
+function withoutPanel(layout: DockAreaLayout, panel: string): DockAreaLayout {
+  const prune = (node: DockAreaLayout["center"]): DockAreaLayout["center"] => {
+    if (node.type === "split") return { ...node, children: node.children.map(prune) };
+    const panels = node.panels.filter((key) => key !== panel);
+    return { ...node, panels, activeIndex: Math.max(0, Math.min(node.activeIndex, panels.length - 1)) };
+  };
+  const region = (dock: DockAreaLayout["right"]) => dock ? { ...dock, layout: prune(dock.layout) } : dock;
+  return { ...layout, center: prune(layout.center), left: region(layout.left), right: region(layout.right), bottom: region(layout.bottom) };
 }
 
 function chartId(panel: string): number | null {
@@ -312,7 +492,7 @@ function PanelTab(props: { model: StatsModel; tab: DockTab }) {
           role="button"
           accessibilityLabel={`Close ${title()}`}
           hoverStyle={{ backgroundColor: colors.muted }}
-          onPress={() => void closeChart(props.model, id()!)}
+          onPress={() => closeChart(props.model, id()!)}
           style={{ width: 16, height: 16, borderRadius: 4, alignItems: "center", justifyContent: "center" }}
         >
           <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
@@ -386,7 +566,7 @@ function FilterBar(props: { model: StatsModel }) {
   const filters = () => stats()?.filters;
   const divisions = ["all", "solo", "division"] as const;
   return (
-    <Toolbar accessibilityLabel="Stats filters">
+    <Toolbar accessibilityLabel="Stats filters" class="w-full">
       <View style={{ minHeight: 44, paddingHorizontal: 10, paddingVertical: 6, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card }}>
         <Check
           label={text.limitToRecent}
@@ -575,9 +755,14 @@ function OverviewPanel(props: { model: StatsModel }) {
                         accessibilityLabel={`${achievement().name} ${achievement().count}`}
                         style={{ width: 84, alignItems: "center", paddingVertical: 4 }}
                       >
-                        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }}>
-                          <Text style={{ fontSize: 14, color: colors.mutedForeground }}>*</Text>
-                        </View>
+                        <If when={achievement().icon}>
+                          <Image source={{ uri: achievement().icon! }} accessibilityLabel={achievement().name} style={{ width: 48, height: 48 }}/>
+                        </If>
+                        <If when={!achievement().icon}>
+                          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: 18, color: colors.mutedForeground }}>*</Text>
+                          </View>
+                        </If>
                         <Text style={{ fontSize: 11, fontWeight: "600", color: colors.foreground }}>{achievement().count}</Text>
                         <Text style={{ fontSize: 11, textAlign: "center", color: colors.mutedForeground }}>{achievement().name}</Text>
                       </View>
@@ -684,6 +869,12 @@ function ShipsPanel(props: { model: StatsModel }) {
                       style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2, borderRadius: controlRadius() }}
                     >
                       <Text style={{ width: 12, fontSize: 12, color: colors.mutedForeground }}>{open() ? "v" : ">"}</Text>
+                      <If when={section().nationFlag}>
+                        <Image source={{ uri: section().nationFlag! }} style={{ width: 23, height: 16 }}/>
+                      </If>
+                      <If when={section().classIcon}>
+                        <Image source={{ uri: section().classIcon! }} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
+                      </If>
                       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                         <Text numberOfLines={1} style={{ fontSize: 13, color: colors.foreground }}>{section().name}</Text>
                         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>

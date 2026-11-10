@@ -19,6 +19,7 @@ use wows_toolkit_viewmodel::stats::chart_model::ChartModel;
 use wows_toolkit_viewmodel::stats::chart_model::ChartSettings;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
+use super::art::GameArt;
 use super::chart::Chart;
 use super::chart::ChartSnapshot;
 use super::chart::surface_id;
@@ -156,7 +157,7 @@ impl Scope {
     }
 
     pub(crate) fn snapshot(&self) -> StatsSnapshot {
-        snapshot(&self.games, &self.filters, self.last_count, self.personal_rating.as_deref())
+        snapshot(&self.games, &self.filters, self.last_count, self.personal_rating.as_deref(), GameArt::current().as_ref())
     }
 
     pub(crate) fn chart_snapshots(&self) -> Vec<ChartSnapshot> {
