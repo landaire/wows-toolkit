@@ -85,4 +85,9 @@ pub enum InspectorError {
     },
     #[error("World of Warships directory is not set")]
     WowsDirMissing,
+    #[error("{source}")]
+    Launch {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }

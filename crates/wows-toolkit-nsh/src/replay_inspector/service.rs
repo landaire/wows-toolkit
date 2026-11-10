@@ -28,6 +28,7 @@ use wows_toolkit_replay_data::export::write_export;
 use crate::replay_inspector::auto_export;
 use crate::replay_inspector::columns::visible_column_keys;
 use crate::replay_inspector::constants;
+use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::constants::ConstantsBuild;
 use crate::replay_inspector::document;
 use crate::replay_inspector::document::ReplayDocId;
@@ -122,28 +123,27 @@ pub struct ReplayInspectorService;
 impl ReplayInspectorService {
     /// Reads the replay at `path` with the other recordings `alts`, registers
     /// it, writes the auto-export when it is set, and summarizes it.
-    pub async fn open(path: String, alts: Vec<String>) -> Result<ReplaySummary, String> {
+    pub async fn open(path: String, alts: Vec<String>) -> Result<ReplaySummary, InspectorError> {
         let path = PathBuf::from(path);
         let alts: Vec<PathBuf> = alts.into_iter().map(PathBuf::from).collect();
-        let (document, export_status) =
-            blocking(move || read_for_tab(&path, &alts)).await.map_err(task_failed)?.map_err(say)?;
+        let (document, export_status) = blocking(move || read_for_tab(&path, &alts)).await.map_err(task_failed)??;
 
         let id = document::insert(document);
         let Some(document) = document::get(id) else {
-            return Err(say(InspectorError::UnknownDocument { id }));
+            return Err(InspectorError::UnknownDocument { id });
         };
 
         Ok(summary::summarize(id, &document, dark(), export_status))
     }
 
     /// Forgets a closed replay.
-    pub fn close(document: u32) {
-        document::remove(ReplayDocId::from_js(document));
+    pub fn close(document: ReplayDocId) {
+        document::remove(document);
     }
 
     /// One of the replay's debug payloads; `None` when the replay has none.
-    pub fn raw_json(document: u32, which: RawJson) -> Result<Option<String>, String> {
-        let document = open_document(document).map_err(say)?;
+    pub fn raw_json(document: ReplayDocId, which: RawJson) -> Result<Option<String>, InspectorError> {
+        let document = open_document(document)?;
 
         Ok(match which {
             RawJson::Metadata => Some(document.raw_metadata_json.clone()),
@@ -155,41 +155,42 @@ impl ReplayInspectorService {
     /// Asks where to write the match and writes it there: the debug form in
     /// debug mode, the stripped one otherwise. The written path, or `None`
     /// when the dialog was cancelled.
-    pub async fn export_results(document: u32, format: ExportFormat, debug: bool) -> Result<Option<String>, String> {
-        let document = open_document(document).map_err(say)?;
+    pub async fn export_results(
+        document: ReplayDocId,
+        format: ExportFormat,
+        debug: bool,
+    ) -> Result<Option<String>, InspectorError> {
+        let document = open_document(document)?;
         let format = format.stored();
         let dialog = SaveDialog::new()
             .title(rust_i18n::t!("ui.replay.export_results_title"))
             .file_name(wows_toolkit_replay_data::export::file_name(&document.export_stem, format));
-        let Some(path) = save_path(dialog).await.map_err(say)? else {
+        let Some(path) = save_path(dialog).await? else {
             return Ok(None);
         };
 
         let export = if debug { document.export.clone() } else { document.export.clone().stripped() };
         let target = path.clone();
-        blocking(move || write_export(&export, &target, format))
-            .await
-            .map_err(task_failed)?
-            .map_err(|error| say(InspectorError::Export(error)))?;
+        blocking(move || write_export(&export, &target, format)).await.map_err(task_failed)??;
 
         Ok(Some(path.display().to_string()))
     }
 
     /// The whole chat log, one `[clan] sender (Channel): message` per line.
-    pub fn chat_transcript(document: u32) -> Result<String, String> {
-        let document = open_document(document).map_err(say)?;
+    pub fn chat_transcript(document: ReplayDocId) -> Result<String, InspectorError> {
+        let document = open_document(document)?;
 
         Ok(wows_toolkit_replay_data::chat::transcript(&document.model.chat))
     }
 
     /// Asks where to save the chat log, offering `<title> - Game Chat.txt`,
     /// and writes it there. The written path, or `None` when cancelled.
-    pub async fn save_chat(document: u32, title: String) -> Result<Option<String>, String> {
-        let transcript = wows_toolkit_replay_data::chat::transcript(&open_document(document).map_err(say)?.model.chat);
+    pub async fn save_chat(document: ReplayDocId, title: String) -> Result<Option<String>, InspectorError> {
+        let transcript = wows_toolkit_replay_data::chat::transcript(&open_document(document)?.model.chat);
         let dialog = SaveDialog::new()
             .title(rust_i18n::t!("ui.replay.chat_save_title"))
             .file_name(format!("{title} - Game Chat.txt"));
-        let Some(path) = save_path(dialog).await.map_err(say)? else {
+        let Some(path) = save_path(dialog).await? else {
             return Ok(None);
         };
 
@@ -197,27 +198,27 @@ impl ReplayInspectorService {
         blocking(move || std::fs::write(&target, transcript))
             .await
             .map_err(task_failed)?
-            .map_err(|source| say(InspectorError::Write { path: path.clone(), source }))?;
+            .map_err(|source| InspectorError::Write { path: path.clone(), source })?;
 
         Ok(Some(path.display().to_string()))
     }
 
     /// Asks for a replay file and remembers it as the one the reader opened.
-    pub async fn pick_replay_file() -> Result<Option<String>, String> {
-        let Some(path) = pick_one(OpenDialog::files().filter(replays_filter())).await.map_err(say)? else {
+    pub async fn pick_replay_file() -> Result<Option<String>, InspectorError> {
+        let Some(path) = pick_one(OpenDialog::files().filter(replays_filter())).await? else {
             return Ok(None);
         };
 
         let remembered = path.clone();
-        blocking(move || settings::save_current_replay_path(&remembered)).await.map_err(task_failed)?.map_err(say)?;
+        blocking(move || settings::save_current_replay_path(&remembered)).await.map_err(task_failed)??;
 
         Ok(Some(path.display().to_string()))
     }
 
     /// Asks for a directory of replays to list.
-    pub async fn pick_replay_directory() -> Result<Option<String>, String> {
+    pub async fn pick_replay_directory() -> Result<Option<String>, InspectorError> {
         let dialog = OpenDialog::folders().title(rust_i18n::t!("ui.replay.open_directory"));
-        let picked = pick_one(dialog).await.map_err(say)?;
+        let picked = pick_one(dialog).await?;
 
         Ok(picked.map(|path| path.display().to_string()))
     }
@@ -226,15 +227,15 @@ impl ReplayInspectorService {
     /// one. The recording to read the battle through, or `None` when the
     /// dialog was cancelled or the recording is already read. Refused past
     /// eleven recordings, and for a recording of another battle.
-    pub async fn pick_alt_perspective(document: u32) -> Result<Option<String>, String> {
-        let document = open_document(document).map_err(say)?;
+    pub async fn pick_alt_perspective(document: ReplayDocId) -> Result<Option<String>, InspectorError> {
+        let document = open_document(document)?;
         if document.alts.len() >= MAX_ALTS {
-            return Err(say(InspectorError::AltLimit { limit: MAX_ALTS }));
+            return Err(InspectorError::AltLimit { limit: MAX_ALTS });
         }
 
         let dialog =
             OpenDialog::files().title(rust_i18n::t!("ui.replay.load_alt_perspective")).filter(replays_filter());
-        let Some(alt) = pick_one(dialog).await.map_err(say)? else {
+        let Some(alt) = pick_one(dialog).await? else {
             return Ok(None);
         };
         if document.alts.iter().any(|kept| same_file(kept, &alt)) {
@@ -243,47 +244,47 @@ impl ReplayInspectorService {
 
         let primary = document.path.clone();
         let checking = alt.clone();
-        blocking(move || check_alt(&primary, &checking)).await.map_err(task_failed)?.map_err(say)?;
+        blocking(move || check_alt(&primary, &checking)).await.map_err(task_failed)??;
 
         Ok(Some(alt.display().to_string()))
     }
 
     /// Exports, indexes and contributes a replay the watcher saw land.
-    pub async fn process_landed(path: String) -> Result<LandedReport, String> {
-        landed::process(PathBuf::from(path)).await.map_err(say)
+    pub async fn process_landed(path: String) -> Result<LandedReport, InspectorError> {
+        landed::process(PathBuf::from(path)).await
     }
 
     /// Fetches the mapping of each listed build that has none and was not
     /// asked about this session. Returns how many were written.
-    pub async fn fetch_missing_constants(builds: Vec<ConstantsBuild>) -> Result<u32, String> {
+    pub async fn fetch_missing_constants(builds: Vec<ConstantsBuild>) -> Result<u32, InspectorError> {
         blocking(move || constants::fetch_missing(builds)).await.map_err(task_failed)
     }
 
     /// Fetches `build`'s mapping again after a battle was read through one
     /// that does not fit it. Returns how many were written; `0` when this build
     /// was already recovered this session.
-    pub async fn recover_constants(build: u32, version: Option<String>) -> Result<u32, String> {
-        blocking(move || constants::recover(build, version)).await.map_err(task_failed)?.map_err(say)
+    pub async fn recover_constants(build: BuildNumber, version: Option<String>) -> Result<u32, InspectorError> {
+        blocking(move || constants::recover(build, version)).await.map_err(task_failed)?
     }
 
     /// Checks for a newer published mapping for the installed build, once a
     /// session. `true` when one was written.
-    pub async fn check_latest_constants() -> Result<bool, String> {
-        blocking(constants::check_latest).await.map_err(task_failed)?.map_err(say)
+    pub async fn check_latest_constants() -> Result<bool, InspectorError> {
+        blocking(constants::check_latest).await.map_err(task_failed)?
     }
 
     /// Asks for a `constants.json` and takes it as the loaded build's mapping.
     /// The confirmation to show, or `None` when the dialog was cancelled.
-    pub async fn import_constants() -> Result<Option<String>, String> {
-        let build = constants::loaded_build().map_err(say)?;
+    pub async fn import_constants() -> Result<Option<String>, InspectorError> {
+        let build = constants::loaded_build()?;
         let dialog = OpenDialog::files()
             .title(rust_i18n::t!("ui.replay.constants_import_title"))
             .filter(FileFilter::new("JSON", ["json"]));
-        let Some(path) = pick_one(dialog).await.map_err(say)? else {
+        let Some(path) = pick_one(dialog).await? else {
             return Ok(None);
         };
 
-        blocking(move || constants::import(&path, build)).await.map_err(task_failed)?.map_err(say)?;
+        blocking(move || constants::import(&path, build)).await.map_err(task_failed)??;
 
         Ok(Some(rust_i18n::t!("ui.replay.constants_imported", build = build).into_owned()))
     }
@@ -295,18 +296,18 @@ impl ReplayInspectorService {
     }
 
     /// Stores how the listing groups its rows.
-    pub async fn set_grouping(grouping: Grouping) -> Result<(), String> {
+    pub async fn set_grouping(grouping: Grouping) -> Result<(), InspectorError> {
         edit_replay_row(move |row| row.grouping = grouping.stored()).await
     }
 
     /// Stores whether the listing is collapsed to its rail.
-    pub async fn set_listing_collapsed(collapsed: bool) -> Result<(), String> {
+    pub async fn set_listing_collapsed(collapsed: bool) -> Result<(), InspectorError> {
         edit_replay_row(move |row| row.listing_collapsed = collapsed).await
     }
 
     /// The listing's stored grouping, collapse and visible columns.
-    pub async fn listing_state() -> Result<ListingState, String> {
-        let inspector = blocking(settings::load).await.map_err(task_failed)?.map_err(say)?;
+    pub async fn listing_state() -> Result<ListingState, InspectorError> {
+        let inspector = blocking(settings::load).await.map_err(task_failed)??;
         let state = listing_state_of(&inspector.replay);
         remember_row(inspector.replay);
 
@@ -315,9 +316,9 @@ impl ReplayInspectorService {
 
     /// The visible columns for the Settings tab's `preferences` over the row
     /// `listingState` last read, without reading the database again.
-    pub fn columns_for(preferences: ReplayPreferences) -> Result<Vec<String>, String> {
+    pub fn columns_for(preferences: ReplayPreferences) -> Result<Vec<String>, InspectorError> {
         let Some(mut row) = lock_row().clone() else {
-            return Err(say(InspectorError::ListingNotRead));
+            return Err(InspectorError::ListingNotRead);
         };
         row.show_raw_xp = preferences.show_raw_xp;
         row.show_observed_damage = preferences.show_observed_damage;
@@ -401,9 +402,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn open_document(id: u32) -> Result<std::rc::Rc<ReplayDocument>, InspectorError> {
-    let id = ReplayDocId::from_js(id);
-
+fn open_document(id: ReplayDocId) -> Result<std::rc::Rc<ReplayDocument>, InspectorError> {
     document::get(id).ok_or(InspectorError::UnknownDocument { id })
 }
 
@@ -423,11 +422,8 @@ async fn save_path(dialog: SaveDialog) -> Result<Option<PathBuf>, InspectorError
 
 /// Reads the replay row, applies `edit` and writes it back, ordered with the
 /// Settings tab's writes of the same row.
-async fn edit_replay_row(edit: impl FnOnce(&mut ReplaySettings) + Send + 'static) -> Result<(), String> {
-    let written = nsh_core::prelude::background(crate::shell::update_replay_settings(edit))
-        .await
-        .map_err(task_failed)?
-        .map_err(|error| say(InspectorError::Settings(error)))?;
+async fn edit_replay_row(edit: impl FnOnce(&mut ReplaySettings) + Send + 'static) -> Result<(), InspectorError> {
+    let written = nsh_core::prelude::background(crate::shell::update_replay_settings(edit)).await.map_err(task_failed)??;
     remember_row(written);
 
     Ok(())
@@ -449,13 +445,8 @@ fn lock_row() -> std::sync::MutexGuard<'static, Option<ReplaySettings>> {
     REPLAY_ROW.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn task_failed(source: tokio::task::JoinError) -> String {
-    say(InspectorError::Task { source })
-}
-
-/// The error as the TSX shows it.
-fn say(error: InspectorError) -> String {
-    error.to_string()
+fn task_failed(source: tokio::task::JoinError) -> InspectorError {
+    InspectorError::Task { source }
 }
 
 #[cfg(test)]

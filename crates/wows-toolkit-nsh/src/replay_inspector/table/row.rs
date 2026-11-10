@@ -10,9 +10,7 @@ use nsh_base::menu_item;
 use nsh_core::prelude::*;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
-use wows_toolkit_replay_data::cells::CaptainPointsTier;
 use wows_toolkit_replay_data::cells::CellValue;
-use wows_toolkit_replay_data::cells::ColorRole;
 use wows_toolkit_replay_data::cells::cell_value;
 use wows_toolkit_replay_data::cells::name_color_kind;
 use wows_toolkit_replay_data::cells::player_color_kind;
@@ -336,7 +334,10 @@ impl RowLayout<'_> {
             return self.plain_cell(ReplayColumn::Skills, cell);
         }
 
-        let color = colors::role(cell.color.unwrap_or(ColorRole::CaptainPoints(CaptainPointsTier::Good)));
+        let Some(role) = cell.color else {
+            return self.plain_cell(ReplayColumn::Skills, cell);
+        };
+        let color = colors::role(role);
         let mut marks = Vec::new();
         if row.has_dazzle {
             marks.push(Glyph::StarFill);

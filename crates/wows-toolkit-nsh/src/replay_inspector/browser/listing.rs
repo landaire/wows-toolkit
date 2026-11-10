@@ -107,13 +107,22 @@ impl Node {
     }
 }
 
+/// A row's position among the shown rows: a collapsed group's replays are
+/// left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ShownIndex(pub(super) usize);
+
+/// A row's position in the flattened tree, every replay included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TreeIndex(usize);
+
 /// A node of the flattened tree.
 #[derive(Debug, Clone)]
 struct TreeRow {
     node: Node,
     depth: u32,
     /// The index past its subtree.
-    end: usize,
+    end: TreeIndex,
 }
 
 /// What one shown row draws.
@@ -179,9 +188,8 @@ pub(super) struct Listing {
     naming: Naming,
 
     tree: Vec<TreeRow>,
-    /// The tree indices of the rows shown: a collapsed group's replays are
-    /// left out.
-    shown: Vec<usize>,
+    /// The rows shown, in order.
+    shown: Vec<TreeIndex>,
 
     /// Groups the reader closed, by label.
     collapsed: HashSet<Rc<str>>,
@@ -258,8 +266,9 @@ impl Listing {
         self.shown.len()
     }
 
-    pub(super) fn shown_row(&self, at: usize) -> Option<ShownRow> {
-        let row = &self.tree[*self.shown.get(at)?];
+    pub(super) fn shown_row(&self, at: ShownIndex) -> Option<ShownRow> {
+        let index = *self.shown.get(at.0)?;
+        let row = &self.tree[index.0];
         let (selected, expanded) = match &row.node {
             Node::Group(group) => (
                 self.selected.as_ref() == Some(&RowKey::Group(Rc::clone(&group.label))),
@@ -276,26 +285,26 @@ impl Listing {
             depth: row.depth,
             selected,
             expanded,
-            stripe: matches!(row.node, Node::Leaf(_)) && at % 2 == 1,
+            stripe: matches!(row.node, Node::Leaf(_)) && at.0 % 2 == 1,
         })
     }
 
     /// The shown index of the selected row.
-    pub(super) fn selected_at(&self) -> Option<usize> {
+    pub(super) fn selected_at(&self) -> Option<ShownIndex> {
         let selected = self.selected.as_ref()?;
-        self.shown.iter().position(|&index| self.tree[index].node.key() == *selected)
+        self.shown.iter().position(|index| self.tree[index.0].node.key() == *selected).map(ShownIndex)
     }
 
     /// A pointer press on the shown row `at`. A plain press selects and
     /// replaces the marked set, a second press opens; the secondary
     /// modifier marks or unmarks a replay instead. A press on a group
     /// selects it and opens or closes it.
-    pub(super) fn press(&mut self, at: usize, secondary: bool, clicks: u32) -> Pressed {
-        let Some(&index) = self.shown.get(at) else {
+    pub(super) fn press(&mut self, at: ShownIndex, secondary: bool, clicks: u32) -> Pressed {
+        let Some(&index) = self.shown.get(at.0) else {
             return Pressed::Nothing;
         };
 
-        let path = match &self.tree[index].node {
+        let path = match &self.tree[index.0].node {
             Node::Group(group) => {
                 let label = Rc::clone(&group.label);
                 self.selected = Some(RowKey::Group(Rc::clone(&label)));
@@ -333,7 +342,7 @@ impl Listing {
 
     /// Moves the selection between the shown rows, and returns where it
     /// went.
-    pub(super) fn step(&mut self, step: Step) -> Option<usize> {
+    pub(super) fn step(&mut self, step: Step) -> Option<ShownIndex> {
         if self.shown.is_empty() {
             return None;
         }
@@ -343,40 +352,40 @@ impl Listing {
         let target = match (step, current) {
             (Step::First, _) | (Step::Next, None) => 0,
             (Step::Last, _) | (Step::Previous, None) => last,
-            (Step::Next, Some(at)) => (at + 1).min(last),
-            (Step::Previous, Some(at)) => at.saturating_sub(1),
+            (Step::Next, Some(at)) => (at.0 + 1).min(last),
+            (Step::Previous, Some(at)) => at.0.saturating_sub(1),
             (Step::Out | Step::In, None) => return None,
             (Step::Out, Some(at)) => {
-                let index = self.shown[at];
-                match &self.tree[index].node {
+                let index = self.shown[at.0];
+                match &self.tree[index.0].node {
                     Node::Group(group) if !self.collapsed.contains(&group.label) => {
                         let label = Rc::clone(&group.label);
                         self.collapsed.insert(label);
                         self.reshow();
                         return self.selected_at();
                     }
-                    _ => self.parent_shown(at)?,
+                    _ => self.parent_shown(at)?.0,
                 }
             }
             (Step::In, Some(at)) => {
-                let index = self.shown[at];
-                match &self.tree[index].node {
+                let index = self.shown[at.0];
+                match &self.tree[index.0].node {
                     Node::Group(group) if self.collapsed.contains(&group.label) => {
                         let label = Rc::clone(&group.label);
                         self.collapsed.remove(&label);
                         self.reshow();
                         return self.selected_at();
                     }
-                    Node::Group(_) if self.tree[index].end > index + 1 => at + 1,
-                    _ => at,
+                    Node::Group(_) if self.tree[index.0].end.0 > index.0 + 1 => at.0 + 1,
+                    _ => at.0,
                 }
             }
         };
 
         let index = self.shown[target];
-        self.selected = Some(self.tree[index].node.key());
+        self.selected = Some(self.tree[index.0].node.key());
 
-        Some(target)
+        Some(ShownIndex(target))
     }
 
     /// Every replay the reader has marked, in path order. A single selected
@@ -420,14 +429,14 @@ impl Listing {
     }
 
     /// The shown index of the group the shown row `at` is in.
-    fn parent_shown(&self, at: usize) -> Option<usize> {
-        let index = self.shown[at];
-        let depth = self.tree[index].depth;
+    fn parent_shown(&self, at: ShownIndex) -> Option<ShownIndex> {
+        let index = self.shown[at.0];
+        let depth = self.tree[index.0].depth;
         if depth == 0 {
             return None;
         }
 
-        self.shown[..at].iter().rposition(|&before| self.tree[before].depth < depth)
+        self.shown[..at.0].iter().rposition(|before| self.tree[before.0].depth < depth).map(ShownIndex)
     }
 
     fn rebuild(&mut self) {
@@ -458,12 +467,15 @@ impl Listing {
                     Node::Group(Rc::new(Group { label: label.into(), paths: Vec::new() }))
                 }
                 BrowserNode::Leaf { label, stats, path, map_name, outcome, in_division } => {
+                    // Every leaf comes from `translated`, which `hover` was built from.
                     let hover = hover.remove(path.as_path()).unwrap_or_default();
+                    // A scanned replay is a file, so its path always ends in a name.
                     let file_name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
                     Node::Leaf(Rc::new(Leaf { path, file_name, label, stats, outcome, in_division, map_name, hover }))
                 }
             };
-            tree.push(TreeRow { node, depth, end: 0 });
+            // `close_subtrees` sets the end once every row is placed.
+            tree.push(TreeRow { node, depth, end: TreeIndex(0) });
         }
 
         close_subtrees(&mut tree);
@@ -482,12 +494,12 @@ impl Listing {
 
     fn reshow(&mut self) {
         let mut shown = Vec::with_capacity(self.tree.len());
-        let mut index = 0;
-        while index < self.tree.len() {
+        let mut index = TreeIndex(0);
+        while index.0 < self.tree.len() {
             shown.push(index);
-            index = match &self.tree[index].node {
-                Node::Group(group) if self.collapsed.contains(&group.label) => self.tree[index].end,
-                _ => index + 1,
+            index = match &self.tree[index.0].node {
+                Node::Group(group) if self.collapsed.contains(&group.label) => self.tree[index.0].end,
+                _ => TreeIndex(index.0 + 1),
             };
         }
 
@@ -502,12 +514,12 @@ fn close_subtrees(tree: &mut [TreeRow]) {
         let depth = tree[index].depth;
         while open.last().is_some_and(|&top| tree[top].depth >= depth) {
             let Some(top) = open.pop() else { break };
-            tree[top].end = index;
+            tree[top].end = TreeIndex(index);
         }
         open.push(index);
     }
     for top in open {
-        tree[top].end = tree.len();
+        tree[top].end = TreeIndex(tree.len());
     }
 
     for index in 0..tree.len() {
@@ -515,7 +527,7 @@ fn close_subtrees(tree: &mut [TreeRow]) {
             continue;
         }
 
-        let paths: Vec<PathBuf> = tree[index + 1..tree[index].end]
+        let paths: Vec<PathBuf> = tree[index + 1..tree[index].end.0]
             .iter()
             .filter_map(|row| match &row.node {
                 Node::Leaf(leaf) => Some(leaf.path.clone()),
@@ -554,8 +566,9 @@ mod tests {
         listing
     }
 
-    fn shown_at(listing: &Listing, path: &str) -> usize {
+    fn shown_at(listing: &Listing, path: &str) -> ShownIndex {
         (0..listing.shown_len())
+            .map(ShownIndex)
             .find(|&at| {
                 matches!(listing.shown_row(at).map(|row| row.node), Some(Node::Leaf(leaf)) if leaf.path == Path::new(path))
             })
@@ -592,9 +605,9 @@ mod tests {
     fn a_second_press_opens_and_a_ctrl_double_press_does_not() {
         let mut listing = listing(ReplayGrouping::None, &[("a.wowsreplay", "01.01.2026 00:00:00")]);
 
-        assert_eq!(listing.press(0, false, 1), Pressed::Nothing);
-        assert_eq!(listing.press(0, false, 2), Pressed::Open(PathBuf::from("a.wowsreplay")));
-        assert_eq!(listing.press(0, true, 2), Pressed::Nothing);
+        assert_eq!(listing.press(ShownIndex(0), false, 1), Pressed::Nothing);
+        assert_eq!(listing.press(ShownIndex(0), false, 2), Pressed::Open(PathBuf::from("a.wowsreplay")));
+        assert_eq!(listing.press(ShownIndex(0), true, 2), Pressed::Nothing);
     }
 
     /// A replay the directory no longer holds leaves the listing, and its
@@ -628,7 +641,7 @@ mod tests {
         assert_eq!(listing.shown_len(), 4, "two groups of one replay each");
 
         listing.press(shown_at(&listing, "a.wowsreplay"), false, 1);
-        let newest_group = 0;
+        let newest_group = ShownIndex(0);
         listing.press(newest_group, false, 1);
         assert_eq!(listing.shown_len(), 3, "the closed group's replay is hidden");
         assert!(!listing.shown_row(newest_group).expect("the group is shown").expanded);
@@ -647,7 +660,7 @@ mod tests {
             &[("b.wowsreplay", "01.01.2026 11:00:00"), ("a.wowsreplay", "01.01.2026 10:00:00")],
         );
 
-        let Some(Node::Group(group)) = listing.shown_row(0).map(|row| row.node) else {
+        let Some(Node::Group(group)) = listing.shown_row(ShownIndex(0)).map(|row| row.node) else {
             panic!("the first row is the date group");
         };
         assert_eq!(group.paths, vec![PathBuf::from("b.wowsreplay"), PathBuf::from("a.wowsreplay")]);
@@ -660,14 +673,14 @@ mod tests {
             &[("b.wowsreplay", "02.01.2026 10:00:00"), ("a.wowsreplay", "01.01.2026 10:00:00")],
         );
 
-        assert_eq!(listing.step(Step::Next), Some(0), "nothing selected: Down starts at the top");
-        assert_eq!(listing.step(Step::Out), Some(0), "Left closes the group");
+        assert_eq!(listing.step(Step::Next), Some(ShownIndex(0)), "nothing selected: Down starts at the top");
+        assert_eq!(listing.step(Step::Out), Some(ShownIndex(0)), "Left closes the group");
         assert_eq!(listing.shown_len(), 3);
-        assert_eq!(listing.step(Step::Next), Some(1), "Down passes over the closed group's replay");
-        assert_eq!(listing.step(Step::In), Some(2), "Right on an open group goes to its first replay");
+        assert_eq!(listing.step(Step::Next), Some(ShownIndex(1)), "Down passes over the closed group's replay");
+        assert_eq!(listing.step(Step::In), Some(ShownIndex(2)), "Right on an open group goes to its first replay");
         assert_eq!(listing.activate(), Pressed::Open(PathBuf::from("a.wowsreplay")), "Return opens it");
-        assert_eq!(listing.step(Step::Out), Some(1), "Left on a replay goes to its group");
-        assert_eq!(listing.step(Step::First), Some(0));
+        assert_eq!(listing.step(Step::Out), Some(ShownIndex(1)), "Left on a replay goes to its group");
+        assert_eq!(listing.step(Step::First), Some(ShownIndex(0)));
         assert_eq!(listing.activate(), Pressed::Nothing, "Return on a group opens it");
         assert_eq!(listing.shown_len(), 4);
     }
@@ -676,7 +689,7 @@ mod tests {
     fn rows_without_game_data_carry_the_raw_names() {
         let listing = listing(ReplayGrouping::None, &[("a.wowsreplay", "01.01.2026 10:00:00")]);
 
-        let Some(Node::Leaf(leaf)) = listing.shown_row(0).map(|row| row.node) else {
+        let Some(Node::Leaf(leaf)) = listing.shown_row(ShownIndex(0)).map(|row| row.node) else {
             panic!("the row is the replay");
         };
         assert_eq!(leaf.file_name, "a.wowsreplay");

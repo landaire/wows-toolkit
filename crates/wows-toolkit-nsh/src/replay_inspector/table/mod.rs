@@ -52,7 +52,7 @@ use crate::replay_inspector::table::parts::class;
 pub struct PlayerTableProps {
     /// The open replay to show, by the id `ReplayInspectorService.open`
     /// gave. None shows nothing.
-    pub document: Prop<Option<u32>>,
+    pub document: Prop<Option<ReplayDocId>>,
     /// Lifts the NDA and the enemy build gate, and offers the raw player
     /// metadata.
     #[prop(default)]
@@ -205,8 +205,7 @@ impl Table {
     fn new(props: PlayerTableProps, cx: Scope<PlayerTableEvent>) -> Self {
         let debug = computed(move || props.debug.get());
         let document = computed(move || {
-            let id = ReplayDocId::from_js(props.document.get()?);
-            document::get(id).map(DocHandle)
+            document::get(props.document.get()?).map(DocHandle)
         });
         let columns = computed(move || {
             props

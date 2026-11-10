@@ -10,7 +10,6 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use wows_toolkit_config::ReplaySettings;
-use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::keys;
 
 use crate::replay_inspector::error::InspectorError;
@@ -25,23 +24,12 @@ pub struct InspectorSettings {
     /// `None` while the World of Warships directory is unset.
     pub wows_dir: Option<PathBuf>,
     pub debug_mode: bool,
-    pub auto_load_latest_replay: bool,
-    pub data_sharing: DataSharingMode,
-    pub proxy_url: String,
     pub replay: ReplaySettings,
 }
 
 /// Reads the inspector's settings.
 pub fn load() -> Result<InspectorSettings, InspectorError> {
     with_pool(|pool| async move {
-        let mode = optional::<DataSharingMode>(&pool, keys::DATA_SHARING_MODE).await?;
-        let compatibility = optional::<bool>(&pool, keys::SEND_REPLAY_DATA).await?;
-        let data_sharing = match (mode, compatibility) {
-            (Some(mode), Some(shared)) => mode.reconcile_with_compat_bool(shared),
-            (Some(mode), None) => mode,
-            (None, Some(shared)) => DataSharingMode::from_send_replay_data_bool(shared),
-            (None, None) => DataSharingMode::default(),
-        };
         let wows_dir = optional::<String>(&pool, keys::WOWS_DIR)
             .await?
             .filter(|dir| !dir.trim().is_empty())
@@ -52,9 +40,6 @@ pub fn load() -> Result<InspectorSettings, InspectorError> {
         Ok(InspectorSettings {
             wows_dir,
             debug_mode: optional(&pool, keys::DEBUG_MODE).await?.unwrap_or(false),
-            auto_load_latest_replay: optional(&pool, keys::AUTO_LOAD_LATEST_REPLAY).await?.unwrap_or(true),
-            data_sharing,
-            proxy_url: optional::<Option<String>>(&pool, keys::PROXY_URL).await?.flatten().unwrap_or_default(),
             replay: optional(&pool, keys::REPLAY_SETTINGS).await?.unwrap_or_default(),
         })
     })

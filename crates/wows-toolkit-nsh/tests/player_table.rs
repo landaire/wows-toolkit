@@ -40,7 +40,7 @@ fn Host() -> impl IntoElement {
         .child(text(move || format!("notice: {}", notice.get())))
         .child(
             player_table()
-                .document(Some(id.to_js()))
+                .document(Some(id))
                 .columns(columns)
                 .on_notice(move |text: &SharedString| notice.set(text.to_string())),
         )
