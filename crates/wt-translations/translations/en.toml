@@ -538,6 +538,10 @@ timeline_kind_cap_being_captured = "Cap Being Captured"
 timeline_kind_radar = "Radar Used"
 timeline_kind_advantage = "Advantage Change"
 timeline_kind_disconnected = "Disconnected"
+close_replay_tab = "Close %{title}"
+match_context = "Match context"
+chat_messages = "Chat messages"
+resize_listing = "Resize the replay listing"
 
 [ui.replay.context]
 open_in_new_tab = "Open in New Tab"

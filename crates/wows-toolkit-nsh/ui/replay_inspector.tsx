@@ -875,7 +875,7 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
       <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12.5 }}>{title()}</Text>
       <View
         role="button"
-        accessibilityLabel={`Close ${title()}`}
+        accessibilityLabel={t("ui.replay.close_replay_tab", { title: title() })}
         onPress={() => closeTab(props.ws, props.id)}
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
@@ -1085,7 +1085,7 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
 function MatchContext(props: { summary: ReplaySummary }) {
   const damage = () => props.summary.teamDamage;
   return (
-    <View selectable accessibilityLabel="Match context" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
+    <View selectable accessibilityLabel={t("ui.replay.match_context")} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
       <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
         {[...props.summary.matchContext, t("ui.replay.team_damage")].join(" - ")}
         <Text style={{ color: semantic.win }}>{damage().friendly}</Text>
@@ -1127,7 +1127,7 @@ function ChatPanel(props: { summary: ReplaySummary }) {
         <Button label={t("ui.replay.chat_save_to_file")} variant="ghost" onPress={() => void saveChat(props.summary)}/>
       </View>
       <Scroll style={{ flex: 1, minHeight: 0 }}>
-        <View selectable accessibilityLabel="Chat messages">
+        <View selectable accessibilityLabel={t("ui.replay.chat_messages")}>
           <Each of={props.summary.chat}>
             {(line) => (
               <View class="group" style={{ paddingHorizontal: 8, paddingVertical: 5, gap: 2, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -1316,7 +1316,7 @@ function PreviewCard(props: { ws: Workspace; previewSlot?: (path: string, mapNam
             style={{ width: 392, padding: 4, gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius(), backgroundColor: colors.popover }}
           >
             {props.previewSlot ? props.previewSlot(hover().path, hover().mapName) : null}
-            <View accessibilityLabel="Replay preview facts" style={{ gap: 2, padding: 4 }}>
+            <View accessibilityLabel={t("ui.replay.renderer.preview_facts")} style={{ gap: 2, padding: 4 }}>
               <Each of={hover().facts}>
                 {(fact) => (
                   <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
@@ -1390,7 +1390,7 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
         axis="horizontal"
         style={{ flex: 1, minHeight: 0 }}
         handleStyle={{ backgroundColor: colors.border }}
-        handleAccessibilityLabel="Resize the replay listing"
+        handleAccessibilityLabel={t("ui.replay.resize_listing")}
       >
         <ResizablePanel size={280} minSize={180} maxSize={520} fixed visible={!listingCollapsed()}>
           <View style={{ flex: 1, minHeight: 0 }}>
