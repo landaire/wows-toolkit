@@ -18,6 +18,7 @@ import { restartTwitch } from "./shell/twitch";
 import { checkForUpdate, UpdateDialog } from "./shell/update";
 import { contributeAll } from "./shell/uploads";
 import { GameDataStatus } from "./game_data";
+import { ArmorShipPalette, ArmorView, onArmorReveal, openArmorShipPalette } from "./armor";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -80,6 +81,8 @@ function selectTab(id: string) {
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
 }
+
+onArmorReveal(() => selectTab("armor-viewer"));
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -262,7 +265,7 @@ keymap.bind({
   "mod+7": () => selectTab(startup.tabs[6].id),
   "mod+,": () => selectTab("settings"),
   "mod+k": openPalette,
-  "mod+p": openPalette,
+  "mod+p": () => activeTab() === "armor-viewer" ? openArmorShipPalette() : openPalette(),
   // Flips debug detail for this session only, as the other front ends do.
   "mod+shift+d": () => debugMode.set(!debugMode()),
 });
@@ -580,10 +583,13 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "search" ? "flex" : "none" }}>
         <SearchView/>
       </View>
+      <View style={{ flex: 1, minHeight: 0, display: tab().id === "armor-viewer" ? "flex" : "none" }}>
+        <ArmorView shown={tab().id === "armor-viewer"}/>
+      </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
       </View>
-      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "settings"}>
+      <If when={tab().id !== "replay-inspector" && tab().id !== "statistics" && tab().id !== "player-tracker" && tab().id !== "search" && tab().id !== "armor-viewer" && tab().id !== "settings"}>
         <EmptyState title={tab().label} description={descriptions[tab().id] ?? tab().description}/>
       </If>
     </View>
@@ -616,6 +622,7 @@ const commandItems = [
     shortcut: index < 7 ? `mod+${index + 1}` : tab.id === "settings" ? "mod+," : undefined,
   })),
   { id: "action:tactics", label: startup.text.tacticsBoard, keywords: ["map", "plan"], group: "Actions" },
+  { id: "action:armor-ship", label: t("ui.palette.open_ship_in_armor_viewer"), keywords: ["armor", "ship", "model"], group: "Actions" },
   { id: "action:updates", label: startup.text.checkUpdates, keywords: ["release", "version"], group: "Actions" },
   { id: "action:about", label: `${startup.text.about} WoWs Toolkit`, keywords: ["version"], group: "Actions" },
   { id: "action:copy-log", label: t("ui.replay.copy_latest_log"), keywords: ["log", "bug", "report"], group: "Actions" },
@@ -629,6 +636,8 @@ function executeCommand(id: string) {
     selectTab(id.slice(4));
   } else if (id === "action:tactics") {
     tacticsOpen.set(true);
+  } else if (id === "action:armor-ship") {
+    openArmorShipPalette();
   } else if (id === "action:updates") {
     void checkForUpdate("byHand");
   } else if (id === "action:about") {
@@ -714,6 +723,7 @@ function App() {
       <FirstRunDialog/>
       <TacticsDialog/>
       <CommandPalette/>
+      <ArmorShipPalette onBack={openPalette}/>
     </View>
   );
 }
