@@ -19099,6 +19099,7 @@ dependencies = [
  "wgc-catalog",
  "wgc-download",
  "wgc-install",
+ "wgc-launch",
  "wows-core",
  "wows-data-mgr",
  "wows-replay-insights",

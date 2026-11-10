@@ -24,8 +24,21 @@ use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::proton::Severity;
 use wows_toolkit_viewmodel::settings::keys;
 
+use crate::js_newtype::js_newtype;
 use crate::runtime;
 use crate::settings_store;
+
+/// A game's place in the catalog's list of known games.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownGameIndex(u32);
+
+js_newtype!(KnownGameIndex, u32);
+
+/// A realm's place in [`LauncherSession::realms`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RealmIndex(u32);
+
+js_newtype!(RealmIndex, u32);
 
 /// What the Launcher tab shows.
 #[derive(Debug, Clone, PartialEq, JsObject)]
@@ -68,7 +81,7 @@ pub struct InstallRow {
 #[non_exhaustive]
 pub struct GameRow {
     /// Its place in the catalog's list, which names it in the row's actions.
-    pub index: u32,
+    pub index: KnownGameIndex,
     pub name: String,
     pub version: Option<StatusLine>,
     /// Whether its check failed and may be retried.
@@ -82,12 +95,29 @@ pub struct GameRow {
 #[non_exhaustive]
 pub struct StatusLine {
     pub text: String,
-    /// `normal`, `dim`, `success`, `warning` or `danger`.
-    pub tone: String,
+    pub tone: StatusTone,
     /// Whether work is under way, for a spinner.
     pub busy: bool,
     /// A second, quieter line.
     pub detail: Option<String>,
+}
+
+/// How a status line is colored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum StatusTone {
+    Normal,
+    Dim,
+    Success,
+    Warning,
+    Danger,
+}
+
+/// Where a download stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum DownloadRowPhase {
+    Running,
+    Paused,
+    Ended,
 }
 
 /// A download's progress, or how it ended.
@@ -96,8 +126,7 @@ pub struct StatusLine {
 pub struct DownloadRow {
     /// Names the download in pause, cancel and resume.
     pub key: String,
-    /// `running`, `paused` or `ended`.
-    pub phase: String,
+    pub phase: DownloadRowPhase,
     /// Done over total, once the total is known.
     pub fraction: Option<f64>,
     /// `done / total` in bytes, once the total is known.
@@ -106,12 +135,20 @@ pub struct DownloadRow {
     pub status: StatusLine,
 }
 
+/// Where the sign-in stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum AccountKind {
+    SignedIn,
+    TwoFactor,
+    Captcha,
+    SignedOut,
+}
+
 /// The account section.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct AccountState {
-    /// `signedIn`, `twoFactor`, `captcha` or `signedOut`.
-    pub kind: String,
+    pub kind: AccountKind,
     pub nickname: Option<String>,
     /// `Region: EU`, signed in.
     pub region: Option<String>,
@@ -136,14 +173,46 @@ pub struct LaunchOptions {
     pub proton_prefix: Option<String>,
 }
 
+/// How a Proton auto-detect went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum ProtonLevel {
+    Success,
+    Warning,
+    Error,
+}
+
 /// The result of a Proton auto-detect.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct ProtonOutcome {
     pub state: LauncherState,
     pub message: String,
-    /// `success`, `warning` or `error`.
-    pub level: String,
+    pub level: ProtonLevel,
+}
+
+/// Why a launcher request was refused.
+#[derive(Debug, thiserror::Error)]
+pub enum LauncherSessionError {
+    #[error("the launcher is already running")]
+    AlreadyRunning,
+    #[error("{}", t!("ui.collab.no_runtime"))]
+    NoRuntime(#[source] runtime::RuntimeError),
+    #[error(transparent)]
+    Launcher(#[from] LauncherError),
+    #[error("no known game at {}", index.0)]
+    NoKnownGame { index: KnownGameIndex },
+    #[error("no realm at {}", index.0)]
+    NoRealm { index: RealmIndex },
+    #[error("{}", t!("ui.launcher.launch_failed", error = key))]
+    NoInstall { key: String },
+    #[error("{}", t!("ui.launcher.launch_failed", error = source.to_string()))]
+    Launch {
+        #[source]
+        source: wgc_launch::LaunchError,
+    },
+    /// The platform's dialog failed; nsh reports only its message.
+    #[error("{reason}")]
+    Dialog { reason: String },
 }
 
 /// The Launcher tab's state and the work behind it.
@@ -168,21 +237,29 @@ impl LauncherSession {
 
     /// The realms the sign-in form offers, by label, in order.
     pub fn realms() -> Vec<String> {
-        wows_toolkit_launcher::REALMS.iter().map(|realm| wows_toolkit_launcher::realm_label(*realm).to_owned()).collect()
+        wows_toolkit_launcher::REALMS
+            .iter()
+            .map(|realm| wows_toolkit_launcher::realm_label(*realm).to_owned())
+            .collect()
     }
 
     /// Reads the settings, restores the saved session and scans for
     /// installs, then calls `listener` after every change background work
     /// makes. Runs while the app does.
-    pub async fn run(this: Instance<Self>, #[args(state)] listener: Callback<LauncherState>) -> Result<(), String> {
+    pub async fn run(
+        this: Instance<Self>,
+        #[args(state)] listener: Callback<LauncherState>,
+    ) -> Result<(), LauncherSessionError> {
         let Some(mut events) = this.with_mut(|session| session.events.take()) else {
-            return Err("the launcher is already running".to_owned());
+            return Err(LauncherSessionError::AlreadyRunning);
         };
 
+        // An unreadable proxy row runs without a manual proxy; the system's
+        // proxy still applies.
         let proxy = match settings_store::load::<Option<String>>(keys::PROXY_URL).await {
             Ok(proxy) => proxy.flatten(),
             Err(error) => {
-                log::warn!("launcher: {error}");
+                log::warn!("launcher: {}", crate::shell::chain(&error));
                 None
             }
         };
@@ -192,12 +269,12 @@ impl LauncherSession {
         let settings = match settings_store::load::<LauncherSettings>(wows_toolkit_launcher::SETTINGS_KEY).await {
             Ok(settings) => settings.unwrap_or_default(),
             Err(error) => {
-                log::warn!("launcher: {error}");
+                log::warn!("launcher: {}", crate::shell::chain(&error));
                 LauncherSettings::default()
             }
         };
         let state = this.with_mut(|session| {
-            session.set_proxy(proxy.unwrap_or_default());
+            session.set_proxy(proxy);
             session.adopt_settings(settings);
             session.state()
         });
@@ -249,9 +326,9 @@ impl LauncherSession {
     }
 
     /// The proxy the launcher's own requests go through, from the app's
-    /// setting. Empty is no manual proxy.
-    pub fn set_proxy(&mut self, proxy_url: String) {
-        self.proxy_url = wows_toolkit_viewmodel::proxy::resolve_proxy(Some(&proxy_url)).map(|proxy| proxy.url);
+    /// setting. `None` is no manual proxy.
+    pub fn set_proxy(&mut self, proxy_url: Option<String>) {
+        self.proxy_url = wows_toolkit_viewmodel::proxy::resolve_proxy(proxy_url.as_deref()).map(|proxy| proxy.url);
     }
 
     /// Scans for installs again.
@@ -301,8 +378,8 @@ impl LauncherSession {
     }
 
     /// Resumes the paused download under `key`.
-    pub fn resume(&mut self, key: String) -> Result<LauncherState, String> {
-        let key = self.download_key(&key).ok_or_else(|| LauncherError::NothingToResume.to_string())?;
+    pub fn resume(&mut self, key: String) -> Result<LauncherState, LauncherSessionError> {
+        let key = self.download_key(&key).ok_or(LauncherError::NothingToResume)?;
         self.try_op(|launcher, env| launcher.resume_download(&key, env))?;
 
         Ok(self.state())
@@ -329,7 +406,7 @@ impl LauncherSession {
                 return ProtonOutcome {
                     state: self.state(),
                     message: t!("ui.launcher.loading").into_owned(),
-                    level: "warning".to_owned(),
+                    level: ProtonLevel::Warning,
                 };
             }
         };
@@ -337,16 +414,16 @@ impl LauncherSession {
             self.save();
         }
         let level = match result.severity() {
-            Severity::Success => "success",
-            Severity::Warning => "warning",
-            Severity::Error => "error",
+            Severity::Success => ProtonLevel::Success,
+            Severity::Warning => ProtonLevel::Warning,
+            Severity::Error => ProtonLevel::Error,
         };
 
-        ProtonOutcome { state: self.state(), message: result.to_string(), level: level.to_owned() }
+        ProtonOutcome { state: self.state(), message: result.to_string(), level }
     }
 
     /// Picks the Proton binary.
-    pub async fn browse_proton_binary(this: Instance<Self>) -> Result<LauncherState, String> {
+    pub async fn browse_proton_binary(this: Instance<Self>) -> Result<LauncherState, LauncherSessionError> {
         let dialog = OpenDialog::files().title(t!("ui.launcher.proton.binary").into_owned());
         if let Some(path) = pick_one(dialog).await? {
             this.with_mut(|session| session.edit_settings(|settings| settings.proton_binary = Some(path)));
@@ -356,7 +433,7 @@ impl LauncherSession {
     }
 
     /// Picks the Proton prefix.
-    pub async fn browse_proton_prefix(this: Instance<Self>) -> Result<LauncherState, String> {
+    pub async fn browse_proton_prefix(this: Instance<Self>) -> Result<LauncherState, LauncherSessionError> {
         let dialog = OpenDialog::folders().title(t!("ui.launcher.proton.prefix").into_owned());
         if let Some(path) = pick_one(dialog).await? {
             this.with_mut(|session| session.edit_settings(|settings| settings.proton_prefix = Some(path)));
@@ -366,7 +443,7 @@ impl LauncherSession {
     }
 
     /// Picks an install directory to add, and scans again.
-    pub async fn add_install(this: Instance<Self>) -> Result<LauncherState, String> {
+    pub async fn add_install(this: Instance<Self>) -> Result<LauncherState, LauncherSessionError> {
         let dialog = OpenDialog::folders().title(t!("ui.launcher.add_install_title").into_owned());
         if let Some(dir) = pick_one(dialog).await? {
             this.with_mut(|session| {
@@ -383,7 +460,7 @@ impl LauncherSession {
 
     /// Picks where to put the newest build of the install at `key`, and
     /// downloads it there.
-    pub async fn download(this: Instance<Self>, key: String) -> Result<LauncherState, String> {
+    pub async fn download(this: Instance<Self>, key: String) -> Result<LauncherState, LauncherSessionError> {
         let Some(install) = this.with(|session| session.install(&key).cloned()) else {
             return Ok(this.with(LauncherSession::state));
         };
@@ -400,9 +477,12 @@ impl LauncherSession {
     }
 
     /// Picks where to install the known game at `index`, and installs it.
-    pub async fn install_game(this: Instance<Self>, index: u32) -> Result<LauncherState, String> {
+    pub async fn install_game(
+        this: Instance<Self>,
+        index: KnownGameIndex,
+    ) -> Result<LauncherState, LauncherSessionError> {
         let Some(game) = known_game(index) else {
-            return Err(format!("no known game at {index}"));
+            return Err(LauncherSessionError::NoKnownGame { index });
         };
         let dialog = OpenDialog::folders()
             .title(t!("ui.launcher.install_title").into_owned())
@@ -416,21 +496,27 @@ impl LauncherSession {
     }
 
     /// Starts the install at `key` for online play.
-    pub fn launch(&self, key: String, safe_mode: bool) -> Result<(), String> {
+    pub fn launch(&self, key: String, safe_mode: bool) -> Result<(), LauncherSessionError> {
         let (Some(settings), Some(install)) = (&self.settings, self.install(&key)) else {
-            return Err(t!("ui.launcher.launch_failed", error = key).into_owned());
+            return Err(LauncherSessionError::NoInstall { key });
         };
         self.launcher
             .launch(install, settings, safe_mode, |command| {
                 wows_toolkit_hardening::prepare_child(command, &[]);
             })
-            .map_err(|error| t!("ui.launcher.launch_failed", error = error.to_string()).into_owned())
+            .map_err(|source| LauncherSessionError::Launch { source })
     }
 
     /// Signs in to the realm at `realm` of [`LauncherSession::realms`].
-    pub fn sign_in(&mut self, realm: u32, username: String, password: String) -> Result<LauncherState, String> {
-        let Some(realm) = usize::try_from(realm).ok().and_then(|index| wows_toolkit_launcher::REALMS.get(index)) else {
-            return Err(format!("no realm at {realm}"));
+    pub fn sign_in(
+        &mut self,
+        realm: RealmIndex,
+        username: String,
+        password: String,
+    ) -> Result<LauncherState, LauncherSessionError> {
+        let Some(realm) = usize::try_from(realm.0).ok().and_then(|index| wows_toolkit_launcher::REALMS.get(index))
+        else {
+            return Err(LauncherSessionError::NoRealm { index: realm });
         };
         let realm = *realm;
         let username = username.trim().to_owned();
@@ -474,16 +560,10 @@ impl LauncherSession {
         self.op(|launcher, settings, env| launcher.apply(event, settings, env));
     }
 
-    fn env(&self) -> Option<LauncherEnv> {
-        let runtime = match runtime::shared() {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                log::warn!("launcher: {error}");
-                return None;
-            }
-        };
+    fn env(&self) -> Result<LauncherEnv, runtime::RuntimeError> {
+        let runtime = runtime::shared()?;
 
-        Some(LauncherEnv {
+        Ok(LauncherEnv {
             runtime: runtime.handle().clone(),
             proxy_url: self.proxy_url.clone(),
             // Events are awaited by `run`, which needs no other wake-up.
@@ -494,8 +574,12 @@ impl LauncherSession {
     /// Runs a launcher operation against the settings, saving them when it
     /// reports a change. Nothing before the settings are read.
     fn op(&mut self, op: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> bool) {
-        let Some(env) = self.env() else {
-            return;
+        let env = match self.env() {
+            Ok(env) => env,
+            Err(error) => {
+                log::warn!("launcher: {error}");
+                return;
+            }
         };
         let Some(settings) = self.settings.as_mut() else {
             return;
@@ -506,10 +590,13 @@ impl LauncherSession {
     }
 
     /// Runs an operation that can refuse to start, with its reason.
-    fn try_op(&mut self, op: impl FnOnce(&mut Launcher, &LauncherEnv) -> Result<(), LauncherError>) -> Result<(), String> {
-        let env = self.env().ok_or_else(|| t!("ui.collab.no_runtime").into_owned())?;
+    fn try_op(
+        &mut self,
+        op: impl FnOnce(&mut Launcher, &LauncherEnv) -> Result<(), LauncherError>,
+    ) -> Result<(), LauncherSessionError> {
+        let env = self.env().map_err(LauncherSessionError::NoRuntime)?;
 
-        op(&mut self.launcher, &env).map_err(|error| error.to_string())
+        Ok(op(&mut self.launcher, &env)?)
     }
 
     fn edit_settings(&mut self, edit: impl FnOnce(&mut LauncherSettings)) {
@@ -549,8 +636,8 @@ impl LauncherSession {
         let launcher = &self.launcher;
         let error = launcher.login_error().map(str::to_owned);
         let in_progress = launcher.login_in_progress();
-        let signed_out = |kind: &str| AccountState {
-            kind: kind.to_owned(),
+        let signed_out = |kind: AccountKind| AccountState {
+            kind,
             nickname: None,
             region: None,
             expiry: None,
@@ -567,14 +654,14 @@ impl LauncherSession {
                             "ui.launcher.account.expires_in",
                             duration = wows_toolkit_launcher::format_duration(remaining)
                         ),
-                        Tone::Dim,
+                        StatusTone::Dim,
                     ),
-                    Err(_) => line(t!("ui.launcher.account.expired"), Tone::Danger),
+                    Err(_) => line(t!("ui.launcher.account.expired"), StatusTone::Danger),
                 },
-                wgc_auth::TokenExpiry::Unknown => line(t!("ui.launcher.account.expiry_unknown"), Tone::Dim),
+                wgc_auth::TokenExpiry::Unknown => line(t!("ui.launcher.account.expiry_unknown"), StatusTone::Dim),
             };
             return AccountState {
-                kind: "signedIn".to_owned(),
+                kind: AccountKind::SignedIn,
                 nickname: Some(session.nickname.as_str().to_owned()),
                 region: Some(
                     t!("ui.launcher.account.region", region = wows_toolkit_launcher::realm_label(session.realm))
@@ -587,13 +674,13 @@ impl LauncherSession {
             };
         }
         if launcher.two_factor_pending() {
-            return signed_out("twoFactor");
+            return signed_out(AccountKind::TwoFactor);
         }
         if launcher.captcha_blocked() {
-            return signed_out("captcha");
+            return signed_out(AccountKind::Captcha);
         }
 
-        signed_out("signedOut")
+        signed_out(AccountKind::SignedOut)
     }
 
     fn install_row(&self, install: &GameInstall, settings: &LauncherSettings) -> InstallRow {
@@ -608,8 +695,7 @@ impl LauncherSession {
         let (catalog, download, can_download) = if managed_by_steam {
             (None, None, false)
         } else {
-            let can_download =
-                launcher.has_downloads(&install.path) && !state.is_some_and(DownloadState::is_active);
+            let can_download = launcher.has_downloads(&install.path) && !state.is_some_and(DownloadState::is_active);
             (
                 catalog_line(launcher.catalog_status(&install.path)),
                 state.map(|state| download_row(&install.path, state)),
@@ -634,27 +720,30 @@ impl LauncherSession {
         let launcher = &self.launcher;
         let games = wgc_catalog::known_games::known_games();
 
-        games
-            .iter()
-            .enumerate()
+        // Counted in `u32` from the start, the type the view hands back to
+        // `install_game`.
+        (0u32..)
+            .zip(games)
             .map(|(index, game)| {
                 let checked = launcher.available_game(game);
                 let version = match checked {
                     Some(CatalogCheckState::Checking) => {
-                        Some(StatusLine { busy: true, ..line(t!("ui.launcher.checking_version"), Tone::Dim) })
+                        Some(StatusLine { busy: true, ..line(t!("ui.launcher.checking_version"), StatusTone::Dim) })
                     }
-                    Some(CatalogCheckState::Ready(build)) => Some(match wows_toolkit_launcher::fresh_install_version(build) {
-                        Some(version) => line(t!("ui.launcher.version", version = version), Tone::Normal),
-                        None => line(t!("ui.launcher.version_unreported"), Tone::Dim),
-                    }),
+                    Some(CatalogCheckState::Ready(build)) => {
+                        Some(match wows_toolkit_launcher::fresh_install_version(build) {
+                            Some(version) => line(t!("ui.launcher.version", version = version), StatusTone::Normal),
+                            None => line(t!("ui.launcher.version_unreported"), StatusTone::Dim),
+                        })
+                    }
                     Some(CatalogCheckState::Error(detail)) => {
-                        Some(line(t!("ui.launcher.unavailable", error = detail), Tone::Dim))
+                        Some(line(t!("ui.launcher.unavailable", error = detail), StatusTone::Dim))
                     }
                     Some(CatalogCheckState::NoUpdateHost) | None => None,
                 };
 
                 GameRow {
-                    index: u32::try_from(index).unwrap_or(u32::MAX),
+                    index: KnownGameIndex(index),
                     name: game.display_name.to_owned(),
                     version,
                     retry: matches!(checked, Some(CatalogCheckState::Error(_))),
@@ -672,49 +761,28 @@ impl Default for LauncherSession {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Tone {
-    Normal,
-    Dim,
-    Success,
-    Warning,
-    Danger,
-}
-
-impl Tone {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Normal => "normal",
-            Self::Dim => "dim",
-            Self::Success => "success",
-            Self::Warning => "warning",
-            Self::Danger => "danger",
-        }
-    }
-}
-
-fn line(text: impl Into<String>, tone: Tone) -> StatusLine {
-    StatusLine { text: text.into(), tone: tone.name().to_owned(), busy: false, detail: None }
+fn line(text: impl Into<String>, tone: StatusTone) -> StatusLine {
+    StatusLine { text: text.into(), tone, busy: false, detail: None }
 }
 
 fn catalog_line(state: Option<&CatalogCheckState>) -> Option<StatusLine> {
     match state? {
         CatalogCheckState::Checking => {
-            Some(StatusLine { busy: true, ..line(t!("ui.launcher.checking_updates"), Tone::Dim) })
+            Some(StatusLine { busy: true, ..line(t!("ui.launcher.checking_updates"), StatusTone::Dim) })
         }
         CatalogCheckState::Ready(build) => {
             let summary = CatalogSummary::of(build);
             let headline = if summary.updates.is_empty() {
-                line(t!("ui.launcher.up_to_date"), Tone::Normal)
+                line(t!("ui.launcher.up_to_date"), StatusTone::Normal)
             } else {
-                line(t!("ui.launcher.update_available", parts = summary.updates.join(", ")), Tone::Warning)
+                line(t!("ui.launcher.update_available", parts = summary.updates.join(", ")), StatusTone::Warning)
             };
             let detail = (!summary.not_installed.is_empty())
                 .then(|| t!("ui.launcher.not_installed", parts = summary.not_installed.join(", ")).into_owned());
 
             Some(StatusLine { detail, ..headline })
         }
-        CatalogCheckState::Error(detail) => Some(line(t!("ui.launcher.check_failed", error = detail), Tone::Dim)),
+        CatalogCheckState::Error(detail) => Some(line(t!("ui.launcher.check_failed", error = detail), StatusTone::Dim)),
         CatalogCheckState::NoUpdateHost => None,
     }
 }
@@ -723,7 +791,7 @@ fn download_row(key: &Path, state: &DownloadState) -> DownloadRow {
     let key = display_path(key);
     let ended = |status: StatusLine| DownloadRow {
         key: key.clone(),
-        phase: "ended".to_owned(),
+        phase: DownloadRowPhase::Ended,
         fraction: None,
         sizes: None,
         status,
@@ -734,7 +802,7 @@ fn download_row(key: &Path, state: &DownloadState) -> DownloadRow {
             let known = *total_bytes > 0;
             DownloadRow {
                 key,
-                phase: "running".to_owned(),
+                phase: DownloadRowPhase::Running,
                 fraction: known.then(|| (*done_bytes as f64 / *total_bytes as f64).clamp(0.0, 1.0)),
                 sizes: known.then(|| {
                     format!(
@@ -743,27 +811,29 @@ fn download_row(key: &Path, state: &DownloadState) -> DownloadRow {
                         humansize::format_size(*total_bytes, humansize::BINARY)
                     )
                 }),
-                status: StatusLine { busy: !known, ..line(format!("{phase}: {current}"), Tone::Normal) },
+                status: StatusLine { busy: !known, ..line(format!("{phase}: {current}"), StatusTone::Normal) },
             }
         }
         DownloadState::Paused => DownloadRow {
             key,
-            phase: "paused".to_owned(),
+            phase: DownloadRowPhase::Paused,
             fraction: None,
             sizes: None,
-            status: line(t!("ui.launcher.paused"), Tone::Dim),
+            status: line(t!("ui.launcher.paused"), StatusTone::Dim),
         },
-        DownloadState::Done { skipped_deltas: 0 } => ended(line(t!("ui.launcher.installed"), Tone::Success)),
+        DownloadState::Done { skipped_deltas: 0 } => ended(line(t!("ui.launcher.installed"), StatusTone::Success)),
         DownloadState::Done { skipped_deltas } => {
-            ended(line(t!("ui.launcher.installed_skipped", count = skipped_deltas), Tone::Warning))
+            ended(line(t!("ui.launcher.installed_skipped", count = skipped_deltas), StatusTone::Warning))
         }
-        DownloadState::Failed(detail) => ended(line(t!("ui.launcher.download_failed", error = detail), Tone::Danger)),
-        DownloadState::Cancelled => ended(line(t!("ui.launcher.cancelled"), Tone::Dim)),
+        DownloadState::Failed(detail) => {
+            ended(line(t!("ui.launcher.download_failed", error = detail), StatusTone::Danger))
+        }
+        DownloadState::Cancelled => ended(line(t!("ui.launcher.cancelled"), StatusTone::Dim)),
     }
 }
 
-fn known_game(index: u32) -> Option<&'static wgc_catalog::known_games::KnownGame> {
-    wgc_catalog::known_games::known_games().get(usize::try_from(index).ok()?)
+fn known_game(index: KnownGameIndex) -> Option<&'static wgc_catalog::known_games::KnownGame> {
+    wgc_catalog::known_games::known_games().get(usize::try_from(index.0).ok()?)
 }
 
 fn display_path(path: &Path) -> String {
@@ -771,8 +841,8 @@ fn display_path(path: &Path) -> String {
 }
 
 /// The one path a dialog answered, `None` when cancelled.
-async fn pick_one(dialog: OpenDialog) -> Result<Option<PathBuf>, String> {
-    let picked = pick_paths(dialog).await?;
+async fn pick_one(dialog: OpenDialog) -> Result<Option<PathBuf>, LauncherSessionError> {
+    let picked = pick_paths(dialog).await.map_err(|reason| LauncherSessionError::Dialog { reason })?;
 
     Ok(picked.and_then(|paths| paths.into_iter().next()))
 }
@@ -786,12 +856,8 @@ mod tests {
         // reaches the network and the events below decide the state.
         let runtime = tokio::runtime::Builder::new_current_thread().build().expect("a runtime");
         let (launcher, _events) = Launcher::new();
-        let session = LauncherSession {
-            launcher,
-            events: None,
-            settings: Some(LauncherSettings::default()),
-            proxy_url: None,
-        };
+        let session =
+            LauncherSession { launcher, events: None, settings: Some(LauncherSettings::default()), proxy_url: None };
 
         (session, runtime)
     }
@@ -851,7 +917,7 @@ mod tests {
         let state = session.state();
         let catalog = state.installs[0].catalog.as_ref().expect("a check result");
 
-        assert_eq!(catalog.tone, "dim");
+        assert_eq!(catalog.tone, StatusTone::Dim);
         assert!(catalog.text.contains("offline"), "{}", catalog.text);
         assert!(!state.installs[0].can_download);
     }
@@ -878,7 +944,7 @@ mod tests {
         let state = session.state();
         let download = state.installs[0].download.as_ref().expect("a download");
 
-        assert_eq!(download.phase, "running");
+        assert_eq!(download.phase, DownloadRowPhase::Running);
         assert_eq!(download.fraction, Some(0.25));
         assert_eq!(download.sizes.as_deref(), Some("1 KiB / 4 KiB"));
         assert_eq!(download.status.text, "Downloading: client.pkg");
@@ -892,17 +958,17 @@ mod tests {
         apply(&mut session, &runtime, LauncherEvent::installs(vec![GameInstall::manual(path.clone())]));
 
         apply(&mut session, &runtime, LauncherEvent::download(path.clone(), DownloadState::Paused));
-        assert_eq!(session.state().installs[0].download.as_ref().map(|row| row.phase.as_str()), Some("paused"));
+        assert_eq!(session.state().installs[0].download.as_ref().map(|row| row.phase), Some(DownloadRowPhase::Paused));
 
         apply(&mut session, &runtime, LauncherEvent::download(path.clone(), DownloadState::Done { skipped_deltas: 2 }));
         let state = session.state();
         let download = state.installs[0].download.as_ref().expect("a download");
-        assert_eq!(download.phase, "ended");
-        assert_eq!(download.status.tone, "warning");
+        assert_eq!(download.phase, DownloadRowPhase::Ended);
+        assert_eq!(download.status.tone, StatusTone::Warning);
 
         apply(&mut session, &runtime, LauncherEvent::download(path, DownloadState::Failed("disk full".into())));
         let state = session.state();
-        assert_eq!(state.installs[0].download.as_ref().map(|row| row.status.tone.as_str()), Some("danger"));
+        assert_eq!(state.installs[0].download.as_ref().map(|row| row.status.tone), Some(StatusTone::Danger));
     }
 
     #[test]
@@ -912,11 +978,11 @@ mod tests {
         assert!(session.state().account.in_progress);
 
         apply(&mut session, &runtime, LauncherEvent::two_factor_required("token".into()));
-        assert_eq!(session.state().account.kind, "twoFactor");
+        assert_eq!(session.state().account.kind, AccountKind::TwoFactor);
 
         apply(&mut session, &runtime, LauncherEvent::two_factor_retry("wrong code".into()));
         let account = session.state().account;
-        assert_eq!(account.kind, "twoFactor");
+        assert_eq!(account.kind, AccountKind::TwoFactor);
         assert_eq!(account.error.as_deref(), Some("wrong code"));
     }
 
@@ -925,10 +991,10 @@ mod tests {
         let (mut session, runtime) = session();
         start_login(&mut session, &runtime);
         apply(&mut session, &runtime, LauncherEvent::captcha_required());
-        assert_eq!(session.state().account.kind, "captcha");
+        assert_eq!(session.state().account.kind, AccountKind::Captcha);
 
         let state = session.dismiss_captcha();
-        assert_eq!(state.account.kind, "signedOut");
+        assert_eq!(state.account.kind, AccountKind::SignedOut);
     }
 
     #[test]
@@ -948,11 +1014,11 @@ mod tests {
         apply(&mut session, &runtime, LauncherEvent::signed_in(stored, false));
 
         let account = session.state().account;
-        assert_eq!(account.kind, "signedIn");
+        assert_eq!(account.kind, AccountKind::SignedIn);
         assert_eq!(account.nickname.as_deref(), Some("Captain"));
         assert_eq!(account.region.as_deref(), Some("Region: NA"));
         assert!(account.not_persisted);
-        assert_eq!(account.expiry.map(|expiry| expiry.tone), Some("dim".to_owned()));
+        assert_eq!(account.expiry.map(|expiry| expiry.tone), Some(StatusTone::Dim));
     }
 
     #[test]

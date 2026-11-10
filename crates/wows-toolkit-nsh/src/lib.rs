@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod collab;
 pub mod frames;
 pub mod game_data;
+mod js_newtype;
 mod launcher;
 mod native;
 mod player_tracker;
@@ -23,12 +24,19 @@ mod unpacker;
 
 pub use collab::Collab;
 pub use launcher::LauncherSession;
-pub use native::{AppTab, ShellText, StartupState, Toolkit};
+pub use native::AppTab;
+pub use native::ShellText;
+pub use native::StartupState;
+pub use native::Toolkit;
 pub use player_tracker::PlayerTracker;
 pub use renderer::ReplayRenderer;
-pub use search::{Palette, QueryBar, ReplaySearch, ShipSearch};
+pub use search::Palette;
+pub use search::QueryBar;
+pub use search::ReplaySearch;
+pub use search::ShipSearch;
 pub use stats::Stats;
-pub use unpacker::{Unpacker, UnpackerProps};
+pub use unpacker::Unpacker;
+pub use unpacker::UnpackerProps;
 
 /// Points this test process's settings database at a temporary directory, so
 /// a unit test never reads or writes the user's own data.
@@ -39,7 +47,8 @@ pub(crate) fn isolate_test_storage() {
     );
 }
 
-use nsh_core::prelude::{Registry, native_module};
+use nsh_core::prelude::Registry;
+use nsh_core::prelude::native_module;
 
 /// The native services imported by the TSX application.
 #[native_module("wows-toolkit/native")]

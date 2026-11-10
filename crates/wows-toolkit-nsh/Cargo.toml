@@ -58,6 +58,7 @@ wgc-auth = { path = "../wgc-auth" }
 wgc-catalog = { path = "../wgc-catalog" }
 wgc-download = { path = "../wgc-download" }
 wgc-install = { path = "../wgc-install" }
+wgc-launch = { path = "../wgc-launch" }
 humansize = "2.1.3"
 # Battles landing in the game's replay directory queue an index pass.
 notify = "8.2.0"

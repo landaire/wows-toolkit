@@ -16,10 +16,20 @@ static WRITER: LazyLock<Option<tokio::sync::mpsc::UnboundedSender<Write>>> = Laz
 pub enum SettingsError {
     #[error(transparent)]
     Runtime(#[from] runtime::RuntimeError),
-    #[error("could not open the settings database: {reason}")]
-    Open { reason: String },
-    #[error("could not read setting {key:?}: {reason}")]
-    Read { key: &'static str, reason: String },
+    #[error("could not open the settings database")]
+    Open(#[source] sqlx::Error),
+    #[error("could not read setting {key:?}")]
+    Read {
+        key: &'static str,
+        #[source]
+        source: wows_toolkit_config::queries::SettingError,
+    },
+    #[error("the read of setting {key:?} did not complete")]
+    Task {
+        key: &'static str,
+        #[source]
+        source: tokio::task::JoinError,
+    },
 }
 
 struct Write {
@@ -34,17 +44,15 @@ where
 {
     let runtime = runtime::shared()?;
     let task = runtime.spawn(async move {
-        let pool = wows_toolkit_config::open_db()
-            .await
-            .map_err(|error| SettingsError::Open { reason: error.to_string() })?;
+        let pool = wows_toolkit_config::open_db().await.map_err(SettingsError::Open)?;
         wows_toolkit_config::queries::try_get_setting::<T>(&pool, key)
             .await
-            .map_err(|error| SettingsError::Read { key, reason: error.to_string() })
+            .map_err(|source| SettingsError::Read { key, source })
     });
 
     match task.await {
         Ok(read) => read,
-        Err(error) => Err(SettingsError::Read { key, reason: error.to_string() }),
+        Err(source) => Err(SettingsError::Task { key, source }),
     }
 }
 
