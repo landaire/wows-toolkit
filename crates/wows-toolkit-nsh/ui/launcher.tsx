@@ -4,7 +4,8 @@ import { Checkbox, Input, Progress } from "nsh/base";
 import { LauncherSession, type AccountState, type DownloadRow, type GameRow, type InstallRow, type LauncherState, type StatusLine } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
 import { t } from "./i18n";
-import { appSettings, editSetting } from "./settings_store";
+import { applyWowsDir } from "./settings";
+import { appSettings } from "./settings_store";
 import * as toast from "./shell/toast";
 import { colors, controlRadius, semantic } from "./theme";
 
@@ -357,7 +358,7 @@ function Install(props: { row: InstallRow }) {
       </If>
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Button label={t("ui.launcher.launch")} variant="primary" onPress={launch}/>
-        <Button label={t("ui.launcher.use_for_toolkit")} onPress={() => void editSetting("wowsDir", props.row.path)}/>
+        <Button label={t("ui.launcher.use_for_toolkit")} onPress={() => applyWowsDir(props.row.path)}/>
       </View>
     </Card>
   );

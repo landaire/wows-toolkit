@@ -4,7 +4,7 @@
 mod error;
 pub mod logging;
 mod services;
-mod settings;
+pub(crate) mod settings;
 mod theme;
 mod twitch;
 pub mod upload;

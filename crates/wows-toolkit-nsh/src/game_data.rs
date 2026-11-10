@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use std::sync::MutexGuard;
 use std::sync::PoisonError;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::SystemTime;
 
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
@@ -39,7 +41,11 @@ use wows_toolkit_replay_data::replay_index;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_config::index::query as index_query;
+use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
+use wows_toolkit_viewmodel::upload::contribute::Outcome;
 use wowsunpack::data::Version;
 
 /// Identifies this front end to the services it reaches.
@@ -270,6 +276,7 @@ fn ensure_started() {
     if state().started {
         return;
     }
+    LazyLock::force(&SESSION_START);
     if let Err(reason) = rebind() {
         log::warn!("game data: the settings could not be read: {reason}");
     }
@@ -396,7 +403,9 @@ fn startup_work() {
                 state.directories.open(root, true);
             }
         }
-        Err(reason) => state.directories_error = Some(format!("Pinned replay directories could not be read: {reason}")),
+        Err(reason) => {
+            state.directories_error = Some(rust_i18n::t!("ui.game_data.pinned_read_failed", reason = reason).into_owned())
+        }
     });
 
     let rating = job_runtime().ok().and_then(|runtime| {
@@ -427,32 +436,52 @@ fn queue_index(root: PathBuf, mode: IndexMode) {
 
 fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
     let cache = state().binding.as_ref().map(|binding| binding.cache.clone());
+    // Only the game's own directory receives battles as they are played; the
+    // others hold replays the reader opened, which are not contributed unasked.
+    let live = wows_dir().is_some_and(|dir| {
+        root == dir.join("replays") || root == wows_toolkit_replay_data::load::resolve_replays_dir(&dir)
+    });
     let built = match cache {
         Some(cache) => with_database(|runtime, pool| {
-            replay_index::build_index(runtime, pool, &root, &cache, &cancel, mode, |step| {
+            let before = if live { indexed_paths(runtime, pool, &root) } else { HashSet::new() };
+            let progress = replay_index::build_index(runtime, pool, &root, &cache, &cancel, mode, |step| {
                 update(|state| state.index.progress = Some(step));
             })
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+            let landed = if live {
+                newly_landed(&before, &indexed_paths(runtime, pool, &root), *SESSION_START)
+            } else {
+                Vec::new()
+            };
+            let sharing = sharing_mode(runtime, pool);
+            Ok((progress, landed, sharing))
         }),
-        None => Err("the settings database could not be read".to_owned()),
+        None => Err(rust_i18n::t!("ui.game_data.settings_unreadable").into_owned()),
     };
 
     let next = update(|state| {
         state.index.cancel = None;
         state.index.progress = None;
         state.index.outcome = Some(match &built {
-            Ok(progress) if progress.skipped > 0 => IndexOutcome {
-                text: format!(
-                    "Indexed {} replays, skipped {} already indexed, {} could not be read.",
-                    progress.indexed, progress.skipped, progress.failed
-                ),
+            Ok((progress, _, _)) if progress.skipped > 0 => IndexOutcome {
+                text: rust_i18n::t!(
+                    "ui.settings.index.built_with_skipped",
+                    indexed = progress.indexed,
+                    skipped = progress.skipped,
+                    failed = progress.failed
+                )
+                .into_owned(),
                 failed: progress.failed > 0,
             },
-            Ok(progress) => IndexOutcome {
-                text: format!("Indexed {} replays, {} could not be read.", progress.indexed, progress.failed),
+            Ok((progress, _, _)) => IndexOutcome {
+                text: rust_i18n::t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
+                    .into_owned(),
                 failed: progress.failed > 0,
             },
-            Err(reason) => IndexOutcome { text: format!("The index could not be built: {reason}"), failed: true },
+            Err(reason) => IndexOutcome {
+                text: rust_i18n::t!("ui.game_data.index_failed", reason = reason.as_str()).into_owned(),
+                failed: true,
+            },
         });
         if cancel.load(Ordering::Relaxed) {
             state.index.queued.clear();
@@ -460,8 +489,81 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
         }
         (!state.index.queued.is_empty()).then(|| state.index.queued.remove(0))
     });
+    if let Ok((_, landed, Some(sharing))) = built {
+        contribute_landed(landed, sharing, |path| spawn("replay-contribute", move || contribute_one(path)));
+    }
     if let Some((root, mode)) = next {
         queue_index(root, mode);
+    }
+}
+
+/// When this process started: a replay written since is a battle played while
+/// the toolkit ran, which is what GPUI's directory watch reports.
+static SESSION_START: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
+
+/// The replay paths the index holds. Empty when it cannot be read, which makes
+/// every replay the pass writes count as new; the ledger still stops a repeat.
+fn indexed_paths(runtime: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool, root: &Path) -> HashSet<String> {
+    runtime
+        .block_on(async {
+            let source = index_query::ensure_default_source(pool, root, jiff::Timestamp::now()).await?;
+            index_query::record_paths_in_source(pool, source).await
+        })
+        .unwrap_or_else(|error| {
+            log::warn!("replay index: the indexed paths could not be read: {error}");
+            HashSet::new()
+        })
+}
+
+/// The data-sharing setting, `None` when it cannot be read.
+fn sharing_mode(runtime: &tokio::runtime::Runtime, pool: &sqlx::SqlitePool) -> Option<DataSharingMode> {
+    let read = runtime.block_on(crate::shell::settings::load_from(pool)).and_then(|settings| {
+        crate::shell::settings::parse_sharing(&settings.data_sharing)
+    });
+    read.map_err(|error| log::warn!("sharing: the data-sharing setting could not be read: {error}")).ok()
+}
+
+/// The replays the pass newly indexed that were written since `since`.
+fn newly_landed(before: &HashSet<String>, after: &HashSet<String>, since: SystemTime) -> Vec<PathBuf> {
+    after
+        .difference(before)
+        .map(PathBuf::from)
+        .filter(|path| {
+            std::fs::metadata(path).and_then(|meta| meta.modified()).is_ok_and(|modified| modified >= since)
+        })
+        .collect()
+}
+
+/// Hands each landed battle to `send`, unless the reader shares nothing.
+fn contribute_landed(landed: Vec<PathBuf>, sharing: DataSharingMode, send: impl FnMut(PathBuf)) {
+    if sharing == DataSharingMode::Off {
+        return;
+    }
+    landed.into_iter().for_each(send);
+}
+
+/// Reads one replay and contributes it, consulting the ledger. Blocking.
+fn contribute_one(path: PathBuf) {
+    let parsed = match parse_replay(&path) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            log::warn!("sharing: {} did not parse: {error}", path.display());
+            return;
+        }
+    };
+    let runtime = match job_runtime() {
+        Ok(runtime) => runtime,
+        Err(reason) => {
+            log::warn!("sharing: {reason}");
+            return;
+        }
+    };
+    let named = path.display().to_string();
+    match runtime.block_on(crate::shell::upload::contribute(path, parsed.shareable, LedgerUse::Consult)) {
+        Ok(Outcome::Sent) => log::info!("sharing: {named} was contributed"),
+        Ok(Outcome::Failed(reason)) => log::warn!("sharing: {named} was not contributed: {reason}"),
+        Ok(other) => log::debug!("sharing: nothing sent for {named}: {other:?}"),
+        Err(error) => log::warn!("sharing: {named} was not contributed: {error}"),
     }
 }
 
@@ -544,7 +646,8 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 fn cache_target() -> Result<(PathBuf, String, Option<String>), String> {
     ensure_started();
     let state = state();
-    let binding = state.binding.as_ref().ok_or_else(|| "the settings database could not be read".to_owned())?;
+    let binding =
+        state.binding.as_ref().ok_or_else(|| rust_i18n::t!("ui.game_data.settings_unreadable").into_owned())?;
     let base = cache::base(&binding.settings.cache_dir)
         .ok_or_else(|| "there is no storage directory for the game data cache".to_owned())?;
 
@@ -600,9 +703,9 @@ fn cache_job_finished(outcome: CacheOutcome) {
             CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
                 state.cache_message = Some(if clean {
-                    "Game data is up to date.".to_owned()
+                    rust_i18n::t!("ui.messages.game_data_up_to_date").into_owned()
                 } else {
-                    format!("Updates are available for {} cached builds.", updates.len())
+                    rust_i18n::t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned()
                 });
                 state.cache.updates = updates;
                 clean.then_some(tip)
@@ -610,9 +713,9 @@ fn cache_job_finished(outcome: CacheOutcome) {
             CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
                 state.cache_message = Some(if clean {
-                    "The game data cache is valid.".to_owned()
+                    rust_i18n::t!("ui.messages.game_data_cache_valid").into_owned()
                 } else {
-                    format!("{} cached builds need repair.", repair.len())
+                    rust_i18n::t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned()
                 });
                 state.cache.repair = repair;
                 clean.then_some(tip)
@@ -624,10 +727,13 @@ fn cache_job_finished(outcome: CacheOutcome) {
                     state.cache.forget_stats();
                 }
                 if failed.is_empty() {
-                    state.cache_message = Some(format!("Downloaded {fetched} builds."));
+                    state.cache_message =
+                        Some(rust_i18n::t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned());
                 } else {
                     let failed: Vec<String> = failed.iter().map(u32::to_string).collect();
-                    state.cache.failure = Some(format!("Some builds could not be downloaded: {}", failed.join(", ")));
+                    state.cache.failure = Some(
+                        rust_i18n::t!("ui.game_data.builds_download_failed", builds = failed.join(", ")).into_owned(),
+                    );
                 }
                 None
             }
@@ -644,7 +750,8 @@ fn cache_job_finished(outcome: CacheOutcome) {
             CacheOutcome::Failed(reason) => {
                 if state.offer.planning {
                     state.offer.planning = false;
-                    state.offer.failure = Some(format!("What the repository publishes could not be read: {reason}"));
+                    state.offer.failure =
+                        Some(rust_i18n::t!("ui.game_data.plan_failed", reason = reason.as_str()).into_owned());
                 }
                 state.cache.failure = Some(reason);
                 None
@@ -705,12 +812,15 @@ fn find_missing_builds() -> Result<Vec<MissingBuild>, GameDataError> {
 
 fn availability_text(availability: Option<&RemoteAvailability>) -> String {
     match availability {
-        Some(RemoteAvailability::Exact) => "available".to_owned(),
-        Some(RemoteAvailability::Nearest { version, build }) => format!("nearest available: {version} ({build})"),
-        Some(RemoteAvailability::Unpublished) => "not published".to_owned(),
-        Some(RemoteAvailability::Unreachable) => "repository unreachable".to_owned(),
-        None => "checking".to_owned(),
+        Some(RemoteAvailability::Exact) => rust_i18n::t!("ui.dialogs.download_availability_exact"),
+        Some(RemoteAvailability::Nearest { version, build }) => {
+            rust_i18n::t!("ui.dialogs.download_availability_nearest", version = version, build = build)
+        }
+        Some(RemoteAvailability::Unpublished) => rust_i18n::t!("ui.dialogs.download_availability_unpublished"),
+        Some(RemoteAvailability::Unreachable) => rust_i18n::t!("ui.dialogs.download_availability_unreachable"),
+        None => rust_i18n::t!("ui.dialogs.download_availability_resolving"),
     }
+    .into_owned()
 }
 
 fn eligible(availability: Option<&RemoteAvailability>) -> bool {
@@ -987,11 +1097,7 @@ impl GameData {
         let mut changes = SERVICE.changed.subscribe();
         loop {
             measure_cache_if_wanted();
-            // Awaited rather than posted: a callback whose engine is gone
-            // fails here, which ends the feed.
-            if on_change.call_async(snapshot()).await.is_err() {
-                return Ok(());
-            }
+            on_change.post(snapshot());
             if changes.changed().await.is_err() {
                 return Ok(());
             }
@@ -1057,7 +1163,8 @@ impl GameData {
             if deleted > 0 {
                 update(|state| {
                     state.cache.forget_stats();
-                    state.cache_message = Some(format!("Removed {deleted} old builds."));
+                    state.cache_message =
+                        Some(rust_i18n::t!("ui.game_data.old_builds_removed", count = deleted).into_owned());
                 });
             }
             Ok(deleted as u32)
@@ -1086,9 +1193,12 @@ impl GameData {
     /// Asks for a cache directory and saves it. `None` when the dialog was
     /// cancelled.
     pub async fn pick_cache_directory() -> Result<Option<GameDataSnapshot>, String> {
-        let picked = pick_paths(OpenDialog::folders().title("Game Data Cache Directory").button_label("Select"))
-            .await
-            .map_err(|error| format!("could not show the directory dialog: {error}"))?;
+        let dialog = OpenDialog::folders()
+            .title(rust_i18n::t!("ui.game_data.cache_directory_title").into_owned())
+            .button_label(rust_i18n::t!("ui.game_data.select").into_owned());
+        let picked = pick_paths(dialog).await.map_err(|error| {
+            rust_i18n::t!("ui.game_data.dialog_failed", error = error.to_string()).into_owned()
+        })?;
         let Some(directory) = picked.and_then(|mut paths| paths.pop()) else { return Ok(None) };
 
         run_blocking(move || {
@@ -1177,9 +1287,12 @@ impl GameData {
     /// Asks for a replay directory and opens it. `false` when the dialog was
     /// cancelled.
     pub async fn pick_directory() -> Result<bool, String> {
-        let picked = pick_paths(OpenDialog::folders().title("Open Replay Directory").button_label("Open"))
-            .await
-            .map_err(|error| format!("could not show the directory dialog: {error}"))?;
+        let dialog = OpenDialog::folders()
+            .title(rust_i18n::t!("ui.game_data.open_directory_title").into_owned())
+            .button_label(rust_i18n::t!("ui.game_data.open").into_owned());
+        let picked = pick_paths(dialog).await.map_err(|error| {
+            rust_i18n::t!("ui.game_data.dialog_failed", error = error.to_string()).into_owned()
+        })?;
         let Some(directory) = picked.and_then(|mut paths| paths.pop()) else { return Ok(false) };
 
         run_blocking(move || open_registered_directory(directory, false).map(|()| true)).await
@@ -1196,7 +1309,7 @@ impl GameData {
     pub async fn pin_directory(path: String, pinned: bool) -> Result<(), String> {
         run_blocking(move || {
             if !update(|state| state.directories.set_pinned(Path::new(&path), pinned)) {
-                return Err(format!("{path} is not open"));
+                return Err(rust_i18n::t!("ui.game_data.directory_not_open", path = path.as_str()).into_owned());
             }
             save_pinned()
         })
@@ -1211,7 +1324,9 @@ impl GameData {
 
 fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), String> {
     if !root.is_dir() {
-        return Err(format!("{} is not a directory", root.display()));
+        return Err(
+            rust_i18n::t!("ui.game_data.not_a_directory", path = root.display().to_string()).into_owned(),
+        );
     }
     let root = update(|state| {
         let opened = state.directories.open(root, pinned);
@@ -1238,4 +1353,51 @@ fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), String> {
     run_cache_job(CacheJob::Downloading, move |client, base, _tip, report| async move {
         cache::download(&client, &base, &builds, report).await
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pass that indexed `fresh` beside an already indexed `old`.
+    fn pass(dir: &Path) -> (HashSet<String>, HashSet<String>, PathBuf) {
+        let old = dir.join("old.wowsreplay");
+        let fresh = dir.join("fresh.wowsreplay");
+        std::fs::write(&old, b"replay").expect("the file can be written");
+        std::fs::write(&fresh, b"replay").expect("the file can be written");
+        let before: HashSet<String> = [old.display().to_string()].into();
+        let after: HashSet<String> = [old.display().to_string(), fresh.display().to_string()].into();
+        (before, after, fresh)
+    }
+
+    fn sent(sharing: DataSharingMode, since: SystemTime) -> (Vec<PathBuf>, PathBuf, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let (before, after, fresh) = pass(dir.path());
+        let mut sent = Vec::new();
+        contribute_landed(newly_landed(&before, &after, since), sharing, |path| sent.push(path));
+        (sent, fresh, dir)
+    }
+
+    fn a_minute_ago() -> SystemTime {
+        SystemTime::now() - std::time::Duration::from_secs(60)
+    }
+
+    #[test]
+    fn a_newly_indexed_battle_is_contributed_while_sharing() {
+        for sharing in [DataSharingMode::BuildData, DataSharingMode::Replays] {
+            let (sent, fresh, _dir) = sent(sharing, a_minute_ago());
+            assert_eq!(sent, vec![fresh]);
+        }
+    }
+
+    #[test]
+    fn nothing_is_contributed_while_sharing_is_off() {
+        assert!(sent(DataSharingMode::Off, a_minute_ago()).0.is_empty());
+    }
+
+    #[test]
+    fn a_replay_written_before_the_session_is_not_contributed() {
+        let later = SystemTime::now() + std::time::Duration::from_secs(60);
+        assert!(sent(DataSharingMode::Replays, later).0.is_empty());
+    }
 }

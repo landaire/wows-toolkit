@@ -161,9 +161,9 @@ fn without_a_game_directory_the_sections_say_what_is_missing() {
 
     app.wait_for("text:Game data: no World of Warships directory").unwrap();
     app.press("Settings").unwrap();
-    app.wait_for("Game data cache").unwrap();
-    app.wait_for("Replay index").unwrap();
-    app.wait_for("Replay directories").unwrap();
+    app.wait_for("Game Data Cache").unwrap();
+    app.wait_for("Replay Index").unwrap();
+    app.wait_for("Replay Directories").unwrap();
     app.wait_for("Set the World of Warships directory to index its replays.").unwrap();
 }
 
@@ -205,18 +205,17 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
     let cache_dir = TestDirectory::new("cache");
 
     app.press("Settings").unwrap();
-    app.wait_for("Game data cache").unwrap();
-    app.press("label:Cache game data automatically").unwrap();
+    app.wait_for("Game Data Cache").unwrap();
+    app.press("label:Cache game data for old replay compatibility").unwrap();
     app.wait_until("the auto-dump flag is saved", Duration::from_secs(5), |_| {
         read_setting::<bool>(keys::AUTO_DUMP_GAME_DATA) == Some(true)
     })
     .unwrap();
 
     app.on_pick_paths(vec![cache_dir.0.clone()]).unwrap();
-    // The second: the first is the game directory's.
-    app.press("Browse... >> nth=1").unwrap();
-    wait_for_text(&mut app, &format!("Directory: {}", cache_dir.0.display()));
-    app.wait_for("text:0 B in 0 cached builds").unwrap();
+    app.press("text:Browse").unwrap();
+    wait_for_text(&mut app, &format!("Cache directory: {}", cache_dir.0.display()));
+    app.wait_for("text:Game data cache: 0 B across 0 version(s)").unwrap();
     assert_eq!(read_setting::<String>(keys::GAME_DATA_CACHE_DIR), Some(cache_dir.0.display().to_string()));
 
     save_setting(keys::AUTO_DUMP_GAME_DATA, &false);
@@ -229,10 +228,10 @@ fn an_install_without_builds_fails_the_load_and_indexes_nothing() {
     let install = install_without_builds("index");
     let mut app = app_with(Some(&install.0));
 
-    app.wait_for("text:/^Game data failed: no installed builds found under /").unwrap();
+    app.wait_for("text:/^Game data failed to load: no installed builds found under /").unwrap();
     app.press("Settings").unwrap();
     app.press("Build Index").unwrap();
-    app.wait_for_within("text:Indexed 0 replays, 1 could not be read.", Duration::from_secs(30)).unwrap();
+    app.wait_for_within("text:Indexed 0 replays, 1 could not be read", Duration::from_secs(30)).unwrap();
 }
 
 #[test]
@@ -243,14 +242,15 @@ fn a_replay_on_a_build_nothing_has_is_offered_for_download() {
     app.press("Settings").unwrap();
     app.press("Check Game Data for Replays").unwrap();
     app.wait_for("Download Game Data").unwrap();
-    app.wait_for("text:/1 replays/").unwrap();
+    app.wait_for("text:/needed by 1 replay\\(s\\)/").unwrap();
 
     app.press("Cancel").unwrap();
     app.wait_for_gone("Download Game Data", Duration::from_secs(5)).unwrap();
 
     // A build is put to the reader once a session; the plan the first check
     // asked for is waited out so the button takes the second press.
-    app.wait_for_gone("Asking the repository what it publishes...", Duration::from_secs(90)).unwrap();
+    app.wait_for_gone("Working out what needs fetching...", Duration::from_secs(90)).unwrap();
+    app.wait_for_gone("Asking what game data is published", Duration::from_secs(90)).unwrap();
     app.press("Check Game Data for Replays").unwrap();
     std::thread::sleep(Duration::from_millis(500));
     assert!(!app.shows("Download Game Data"));
