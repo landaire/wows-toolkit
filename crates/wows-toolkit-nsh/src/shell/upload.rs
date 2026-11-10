@@ -18,6 +18,7 @@ use nsh_core::prelude::background;
 use nsh_core::prelude::blocking;
 use nsh_core::prelude::module;
 use tokio::sync::Notify;
+use wows_toolkit_viewmodel::upload::contribute::ContributeError;
 use wows_toolkit_viewmodel::upload::contribute::Candidate;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
 use wows_toolkit_viewmodel::upload::contribute::Outcome;
@@ -25,7 +26,6 @@ use wows_toolkit_viewmodel::upload::shareable::Shareable;
 
 use crate::shell::error::SettingsError;
 use crate::shell::error::UploadError;
-use crate::shell::settings::parse_sharing;
 use crate::shell::update::USER_AGENT;
 
 /// Whether the sent-replay ledger decides what is skipped.
@@ -74,7 +74,7 @@ impl Contribution {
             Outcome::Skipped => (ContributionOutcome::Skipped, None),
             Outcome::AlreadySent => (ContributionOutcome::AlreadySent, None),
             Outcome::Waiting => (ContributionOutcome::Waiting, None),
-            Outcome::Failed(reason) => (ContributionOutcome::Failed, Some(reason)),
+            Outcome::Failed(reason) => (ContributionOutcome::Failed, Some(reason.to_string())),
         };
 
         Self { outcome, reason }
@@ -136,14 +136,15 @@ static CLAIMS: LazyLock<Claims> = LazyLock::new(Claims::new);
 pub async fn contribute(path: PathBuf, shareable: Shareable, ledger: LedgerUse) -> Result<Outcome, SettingsError> {
     let _claim = CLAIMS.claim(&path).await;
     let pool = crate::shell::settings::open().await?;
-    let settings = crate::shell::settings::load_from(&pool).await?;
-    let mode = parse_sharing(&settings.data_sharing)?;
+    let mode = crate::shell::settings::sharing_mode(&pool).await?;
+    let proxy_url = crate::shell::settings::manual_proxy(&pool).await?;
 
     let redirects = reqwest::redirect::Policy::none();
-    let client = match wows_toolkit_viewmodel::http::client(USER_AGENT, &settings.proxy_url, redirects) {
-        Ok(client) => client,
-        Err(err) => return Ok(Outcome::Failed(err.to_string())),
-    };
+    let client =
+        match wows_toolkit_viewmodel::http::client(USER_AGENT, proxy_url.as_deref(), redirects) {
+            Ok(client) => client,
+            Err(err) => return Ok(Outcome::Failed(ContributeError::Client(err))),
+        };
     let first_seen = wows_toolkit_viewmodel::upload::contribute::first_seen(&pool, &path).await;
     let candidate = Candidate { path, shareable, first_seen };
 
@@ -188,7 +189,8 @@ impl Uploads {
 
     /// Reads the replay at `path` and contributes it, as the setting asks.
     pub async fn contribute_replay(path: String, ledger: Ledger) -> Result<Contribution, UploadError> {
-        let outcome = background(contribute_path(PathBuf::from(path), ledger.usage())).await.map_err(UploadError::Task)??;
+        let outcome =
+            background(contribute_path(PathBuf::from(path), ledger.usage())).await.map_err(UploadError::Task)??;
 
         Ok(Contribution::from_outcome(outcome))
     }
@@ -246,7 +248,8 @@ mod tests {
             let claims = Claims::new();
             let _first = claims.claim(Path::new("/replays/a.wowsreplay")).await;
 
-            let other = tokio::time::timeout(Duration::from_millis(50), claims.claim(Path::new("/replays/b.wowsreplay"))).await;
+            let other =
+                tokio::time::timeout(Duration::from_millis(50), claims.claim(Path::new("/replays/b.wowsreplay"))).await;
             assert!(other.is_ok());
         });
     }

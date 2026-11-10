@@ -2,6 +2,7 @@
 //! index, the values a caret field offers, and the saved bar state.
 
 mod bar;
+mod error;
 mod palette;
 
 pub use bar::QueryBar;
@@ -19,10 +20,8 @@ use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
-use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
-use wows_toolkit_config::queries::SettingError;
 use wows_toolkit_viewmodel::listing_row;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
@@ -31,17 +30,16 @@ use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::search;
 use wows_toolkit_viewmodel::search_results;
 use wows_toolkit_viewmodel::search_results::RESULT_LIMIT;
-use wows_toolkit_viewmodel::search_results::ValueLookupError;
 use wows_toolkit_viewmodel::search_settings;
 use wows_toolkit_viewmodel::search_settings::COLUMN_WIDTHS_KEY;
 use wows_toolkit_viewmodel::search_settings::SEARCH_SETTINGS_KEY;
 use wows_toolkit_viewmodel::search_settings::SavedSearch;
-use wows_toolkit_viewmodel::search_settings::SavedSearchError;
 use wows_toolkit_viewmodel::search_settings::SearchField;
 use wows_toolkit_viewmodel::translate;
 
-use crate::runtime::RuntimeError;
+use crate::js_newtype::js_newtype;
 use bar::CompletionView;
+use error::SearchError;
 
 /// Serializes read-modify-writes of the saved row, so two fields saved at
 /// once do not drop each other.
@@ -73,6 +71,12 @@ pub struct SortState {
     pub direction: SortOrder,
 }
 
+/// A results column's width, in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColumnWidth(f64);
+
+js_newtype!(ColumnWidth, f64);
+
 /// A column the results table draws, in the order it draws them.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
@@ -82,7 +86,7 @@ pub struct ResultColumn {
     /// What a press on its header sorts by; Ship carries none, since the
     /// index has nothing to order it by.
     pub sort: Option<SortKey>,
-    pub default_width: f64,
+    pub default_width: ColumnWidth,
 }
 
 /// How a battle ended, which the outcome cell is tinted by.
@@ -188,33 +192,6 @@ pub struct SearchText {
     pub pill_delete: String,
 }
 
-/// Why a search or a saved-state read or write failed.
-#[derive(Debug, thiserror::Error)]
-pub enum SearchError {
-    #[error("{source}")]
-    Runtime { source: RuntimeError },
-    #[error("could not copy the replay to the clipboard: {source}")]
-    Clipboard { source: arboard::Error },
-    #[error("the {task} task did not complete: {source}")]
-    Task { task: &'static str, source: tokio::task::JoinError },
-    #[error("the replay index is not open: {source}")]
-    Open { source: sqlx::Error },
-    #[error("the query did not parse: {reason}")]
-    Parse { reason: String },
-    #[error("{source}")]
-    Search { source: IndexError },
-    #[error("{source}")]
-    Lookup { source: ValueLookupError },
-    #[error("Could not read Search settings: {source}")]
-    ReadSettings { source: SettingError },
-    #[error("{source}")]
-    Saved { source: SavedSearchError },
-    #[error("Search {field} could not be saved: {source}")]
-    WriteSettings { field: &'static str, source: sqlx::Error },
-    #[error("Search {field} could not be written: {source}")]
-    Encode { field: &'static str, source: serde_json::Error },
-}
-
 /// Searches the replay index and keeps the Search tab's saved state.
 #[module]
 pub struct ReplaySearch;
@@ -269,7 +246,7 @@ impl ReplaySearch {
                     key: "ship".to_owned(),
                     title: "Ship".to_owned(),
                     sort: None,
-                    default_width: 150.0,
+                    default_width: ColumnWidth(150.0),
                 });
             }
         }
@@ -290,73 +267,65 @@ impl ReplaySearch {
     }
 
     /// Searches the index for `query`, ordered by `sort`.
-    pub async fn search(query: String, sort: SortState) -> Result<SearchPage, String> {
+    pub async fn search(query: String, sort: SortState) -> Result<SearchPage, SearchError> {
         blocking(move || run_search(&query, sort_spec(sort)))
             .await
-            .map_err(|source| SearchError::Task { task: "search", source }.to_string())?
-            .map_err(|error| error.to_string())
+            .map_err(|source| SearchError::Task { task: "search", source })?
     }
 
     /// The values the caret field in `pending` takes, as completions of it.
-    pub async fn lookup_values(pending: String) -> Result<Vec<CompletionView>, String> {
+    pub async fn lookup_values(pending: String) -> Result<Vec<CompletionView>, SearchError> {
         blocking(move || look_up_values(&pending))
             .await
-            .map_err(|source| SearchError::Task { task: "value lookup", source }.to_string())?
-            .map_err(|error| error.to_string())
+            .map_err(|source| SearchError::Task { task: "value lookup", source })?
     }
 
     /// Reads the saved row.
-    pub async fn load_settings() -> Result<SavedSearchState, String> {
-        blocking(load_settings)
-            .await
-            .map_err(|source| SearchError::Task { task: "settings read", source }.to_string())?
-            .map_err(|error| error.to_string())
+    pub async fn load_settings() -> Result<SavedSearchState, SearchError> {
+        blocking(load_settings).await.map_err(|source| SearchError::Task { task: "settings read", source })?
     }
 
-    pub async fn save_query(query: String) -> Result<(), String> {
+    pub async fn save_query(query: String) -> Result<(), SearchError> {
         save_field(SearchField::Query, JsonValue::String(query)).await
     }
 
-    pub async fn save_history(history: Vec<String>) -> Result<(), String> {
+    pub async fn save_history(history: Vec<String>) -> Result<(), SearchError> {
         save_field(SearchField::History, serde_json::json!(history)).await
     }
 
-    pub async fn save_sort(sort: SortState) -> Result<(), String> {
+    pub async fn save_sort(sort: SortState) -> Result<(), SearchError> {
         save_field(SearchField::Sort, search_settings::sort_value(sort_spec(sort))).await
     }
 
-    pub async fn save_operator_preferences(preferences: JsonValue) -> Result<(), String> {
+    pub async fn save_operator_preferences(preferences: JsonValue) -> Result<(), SearchError> {
         save_field(SearchField::OperatorPreferences, preferences).await
     }
 
     /// The widths the reader dragged each column to, in [`Self::columns`]
     /// order; `null` for a column left at its default.
-    pub async fn load_column_widths() -> Result<Vec<Option<f64>>, String> {
+    pub async fn load_column_widths() -> Result<Vec<Option<ColumnWidth>>, SearchError> {
         blocking(load_column_widths)
             .await
-            .map_err(|source| SearchError::Task { task: "column width read", source }.to_string())?
-            .map_err(|error| error.to_string())
+            .map_err(|source| SearchError::Task { task: "column width read", source })?
     }
 
-    pub async fn save_column_widths(widths: Vec<Option<f64>>) -> Result<(), String> {
+    pub async fn save_column_widths(widths: Vec<Option<ColumnWidth>>) -> Result<(), SearchError> {
         blocking(move || save_column_widths(&widths))
             .await
-            .map_err(|source| SearchError::Task { task: "column width write", source }.to_string())?
-            .map_err(|error| error.to_string())
+            .map_err(|source| SearchError::Task { task: "column width write", source })?
     }
 
     /// Shows the replay selected in the file manager.
-    pub async fn reveal_replay(path: String) -> Result<(), String> {
-        reveal_path(PathBuf::from(path)).await
+    pub async fn reveal_replay(path: String) -> Result<(), SearchError> {
+        reveal_path(PathBuf::from(path)).await.map_err(|reason| SearchError::Reveal { reason })
     }
 
     /// Puts the replay at `path` on the clipboard as a file, so a file
     /// manager or chat client pastes the replay itself.
-    pub async fn copy_replay(path: String) -> Result<(), String> {
+    pub async fn copy_replay(path: String) -> Result<(), SearchError> {
         blocking(move || copy_replay_file(PathBuf::from(path)))
             .await
-            .map_err(|source| SearchError::Task { task: "replay copy", source }.to_string())?
-            .map_err(|error| error.to_string())
+            .map_err(|source| SearchError::Task { task: "replay copy", source })?
     }
 }
 
@@ -365,7 +334,7 @@ fn copy_replay_file(path: PathBuf) -> Result<(), SearchError> {
 }
 
 fn run_search(text: &str, sort: SortSpec) -> Result<SearchPage, SearchError> {
-    let expr = query_text::parse_query(text).map_err(|error| SearchError::Parse { reason: error.kind.to_string() })?;
+    let expr = query_text::parse_query(text).map_err(|error| SearchError::Parse { kind: error.kind })?;
     let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     let (mut hits, missing) = runtime.block_on(async {
@@ -405,7 +374,8 @@ fn run_search(text: &str, sort: SortSpec) -> Result<SearchPage, SearchError> {
 
 fn search_row(hit: &MatchHit) -> SearchRow {
     // The name stored at index time: a live name needs the match's own build
-    // loaded, which is the game data service's to provide.
+    // loaded, which is the game data service's to provide. A match with no
+    // stored name shows a dash.
     let ship = search::ship_display_name(hit, None).unwrap_or_else(|| "-".to_owned());
     let facts = listing_row::hover_facts_for_match(hit, ship.clone(), None)
         .into_iter()
@@ -482,14 +452,14 @@ fn load_settings() -> Result<SavedSearchState, SearchError> {
     })
 }
 
-async fn save_field(field: SearchField, value: JsonValue) -> Result<(), String> {
+async fn save_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> {
     blocking(move || write_field(field, value))
         .await
-        .map_err(|source| SearchError::Task { task: "settings write", source }.to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|source| SearchError::Task { task: "settings write", source })?
 }
 
 fn write_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> {
+    // The lock guards no data, so a poisoned one still serializes writes.
     let _guard = SETTINGS_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
@@ -505,7 +475,7 @@ fn write_field(field: SearchField, value: JsonValue) -> Result<(), SearchError> 
     })
 }
 
-fn load_column_widths() -> Result<Vec<Option<f64>>, SearchError> {
+fn load_column_widths() -> Result<Vec<Option<ColumnWidth>>, SearchError> {
     let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
     let stored = runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(|source| SearchError::Open { source })?;
@@ -515,11 +485,11 @@ fn load_column_widths() -> Result<Vec<Option<f64>>, SearchError> {
     })?;
 
     // Nothing saved is every column at its default.
-    Ok(stored.unwrap_or_default().into_iter().map(|width| width.map(f64::from)).collect())
+    Ok(stored.unwrap_or_default().into_iter().map(|width| width.map(|width| ColumnWidth(f64::from(width)))).collect())
 }
 
-fn save_column_widths(widths: &[Option<f64>]) -> Result<(), SearchError> {
-    let widths: Vec<Option<f32>> = widths.iter().map(|width| width.map(|width| width as f32)).collect();
+fn save_column_widths(widths: &[Option<ColumnWidth>]) -> Result<(), SearchError> {
+    let widths: Vec<Option<f32>> = widths.iter().map(|width| width.map(|width| width.0 as f32)).collect();
     let runtime = crate::runtime::shared().map_err(|source| SearchError::Runtime { source })?;
 
     runtime.block_on(async {
@@ -530,8 +500,8 @@ fn save_column_widths(widths: &[Option<f64>]) -> Result<(), SearchError> {
     })
 }
 
-fn default_width(column: SortColumn) -> f64 {
-    match column {
+fn default_width(column: SortColumn) -> ColumnWidth {
+    let width = match column {
         SortColumn::Date => 160.0,
         SortColumn::Map => 150.0,
         SortColumn::Mode => 130.0,
@@ -539,7 +509,9 @@ fn default_width(column: SortColumn) -> f64 {
         SortColumn::Damage => 100.0,
         SortColumn::Kills => 70.0,
         SortColumn::Pr => 80.0,
-    }
+    };
+
+    ColumnWidth(width)
 }
 
 fn sort_key(column: SortColumn) -> SortKey {

@@ -7,10 +7,14 @@ use na::Vector3;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::mat4_mul;
 use crate::viewport::picking;
+use crate::viewport::picking::PickTarget;
 use crate::viewport::picking::PickableMesh;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
+use crate::viewport::types::PixelSize;
+use crate::viewport::types::Ray;
+use crate::viewport::types::RgbaImage;
 use crate::viewport::types::Uniforms;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
@@ -105,17 +109,17 @@ const MSAA_SAMPLE_COUNT: u32 = 4;
 
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
-    /// Pipeline with depth writes enabled — used for opaque geometry (armor).
+    /// Pipeline with depth writes enabled, used for opaque geometry (armor).
     pipeline: wgpu::RenderPipeline,
-    /// Pipeline without depth writes — used for transparent hull geometry.
+    /// Pipeline without depth writes, used for transparent hull geometry.
     pipeline_no_depth_write: wgpu::RenderPipeline,
-    /// Pipeline that ignores depth — used for highlight overlays (always on top).
+    /// Pipeline that ignores depth, used for highlight overlays (always on top).
     pipeline_overlay: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     /// Shared sampler for all diffuse textures.
     default_sampler: wgpu::Sampler,
-    /// 1x1 white texture bind group — bound for non-textured meshes.
+    /// 1x1 white texture bind group, bound for non-textured meshes.
     fallback_texture_bind_group: wgpu::BindGroup,
 }
 
@@ -243,7 +247,7 @@ impl GpuPipeline {
             cache: None,
         });
 
-        // Pipeline for overlays — ignores depth so highlights are always visible.
+        // Pipeline for overlays: ignores depth so highlights are always visible.
         let pipeline_overlay = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("viewport_3d_pipeline_overlay"),
             layout: Some(&pipeline_layout),
@@ -326,10 +330,10 @@ impl GpuPipeline {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        rgba_data: &[u8],
-        width: u32,
-        height: u32,
+        image: &RgbaImage,
     ) -> wgpu::BindGroup {
+        let RgbaImage { width, height, pixels } = image;
+        let (width, height) = (*width, *height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_hull_texture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -348,7 +352,7 @@ impl GpuPipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba_data,
+            pixels,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
@@ -365,16 +369,16 @@ impl GpuPipeline {
     }
 }
 
-/// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
-/// - Layers <= LAYER_OPAQUE_MAX: depth-writing pipeline (opaque armor).
-/// - LAYER_HULL: no-depth-write pipeline with depth test (transparent hull, behind armor).
-/// - LAYER_OVERLAY: no depth test at all (highlight overlays, always visible on top).
-pub const LAYER_DEFAULT: i32 = 0;
-pub const LAYER_HULL: i32 = 1;
-pub const LAYER_OVERLAY: i32 = 2;
-
-/// Layers at or below this value write to the depth buffer (opaque pass).
-const LAYER_OPAQUE_MAX: i32 = 0;
+/// Which pass a mesh draws in. Earlier variants draw first (behind).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RenderLayer {
+    /// Depth-writing pipeline (opaque armor, opaque hull).
+    Opaque,
+    /// Depth test without depth write (transparent hull, behind armor).
+    Hull,
+    /// No depth test (highlight overlays, always on top).
+    Overlay,
+}
 
 /// Per-mesh GPU buffers.
 struct GpuMesh {
@@ -382,7 +386,7 @@ struct GpuMesh {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     visible: bool,
-    layer: i32,
+    layer: RenderLayer,
     /// Optional per-mesh texture bind group. When None, the fallback white texture is used.
     texture_bind_group: Option<wgpu::BindGroup>,
     /// If true, this mesh is in world space and should NOT be affected by model_roll.
@@ -442,7 +446,13 @@ impl Viewport3D {
     }
 
     /// Upload a mesh to the GPU. Returns a MeshId for later reference.
-    pub fn add_mesh(&mut self, device: &wgpu::Device, vertices: &[Vertex], indices: &[u32], layer: i32) -> MeshId {
+    pub fn add_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+        layer: RenderLayer,
+    ) -> MeshId {
         use wgpu::util::DeviceExt;
 
         let id = MeshId(self.next_mesh_id);
@@ -488,7 +498,7 @@ impl Viewport3D {
         device: &wgpu::Device,
         vertices: &[Vertex],
         indices: &[u32],
-        layer: i32,
+        layer: RenderLayer,
         texture_bind_group: wgpu::BindGroup,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
@@ -536,7 +546,7 @@ impl Viewport3D {
         device: &wgpu::Device,
         vertices: &[Vertex],
         indices: &[u32],
-        layer: i32,
+        layer: RenderLayer,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
 
@@ -579,7 +589,7 @@ impl Viewport3D {
         device: &wgpu::Device,
         vertices: &[Vertex],
         indices: &[u32],
-        layer: i32,
+        layer: RenderLayer,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
 
@@ -622,7 +632,7 @@ impl Viewport3D {
         device: &wgpu::Device,
         vertices: &[Vertex],
         indices: &[u32],
-        layer: i32,
+        layer: RenderLayer,
         texture_bind_group: wgpu::BindGroup,
     ) -> MeshId {
         use wgpu::util::DeviceExt;
@@ -688,12 +698,12 @@ impl Viewport3D {
                 index_buffer,
                 index_count: indices.len() as u32,
                 visible: true,
-                layer: LAYER_OVERLAY,
+                layer: RenderLayer::Overlay,
                 texture_bind_group: None,
             },
         );
 
-        // No pick_data entry — this mesh is invisible to picking
+        // No pick_data entry: this mesh is invisible to picking.
         self.needs_redraw = true;
         id
     }
@@ -763,8 +773,8 @@ impl Viewport3D {
     /// Build the three per-frame uniform sets from the current camera, model
     /// rotation, and lighting: `(model_lit, world, model_unlit)`. Consumed by the
     /// offscreen readback path (`render_offscreen_rgba`).
-    fn scene_uniforms(&self, size: (u32, u32)) -> (Uniforms, Uniforms, Uniforms) {
-        let aspect = size.0 as f32 / size.1 as f32;
+    fn scene_uniforms(&self, size: PixelSize) -> (Uniforms, Uniforms, Uniforms) {
+        let aspect = size.width as f32 / size.height as f32;
         let model_mat = {
             let has_roll = self.model_roll.abs() > 1e-6;
             let has_yaw = self.model_yaw.abs() > 1e-6;
@@ -873,24 +883,17 @@ impl Viewport3D {
             self.meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
         sorted.sort_by_key(|(_, m)| m.layer);
 
-        let mut current_layer_kind: i32 = -1; // force first set_pipeline
+        let mut current_layer: Option<RenderLayer> = None;
         let mut has_custom_texture = false; // track whether we need to rebind fallback
         let mut current_bind = BindKind::ModelUnlit;
         for (_id, mesh) in sorted {
-            let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
-                0 // opaque
-            } else if mesh.layer < LAYER_OVERLAY {
-                1 // transparent (hull)
-            } else {
-                2 // overlay (always on top)
-            };
-            if layer_kind != current_layer_kind {
-                match layer_kind {
-                    0 => pass.set_pipeline(&pipeline.pipeline),
-                    1 => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
-                    _ => pass.set_pipeline(&pipeline.pipeline_overlay),
+            if current_layer != Some(mesh.layer) {
+                match mesh.layer {
+                    RenderLayer::Opaque => pass.set_pipeline(&pipeline.pipeline),
+                    RenderLayer::Hull => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
+                    RenderLayer::Overlay => pass.set_pipeline(&pipeline.pipeline_overlay),
                 }
-                current_layer_kind = layer_kind;
+                current_layer = Some(mesh.layer);
             }
 
             // Pick the uniform bind group: world-space (always unlit), model-space lit
@@ -929,24 +932,24 @@ impl Viewport3D {
     }
 
     /// Render the current scene to an offscreen target and read the pixels back as
-    /// tightly-packed sRGB RGBA8 (`width * height * 4`). Runs entirely on the owned
-    /// wgpu device with no window surface, so it is usable headless. Returns
-    /// `(width, height, rgba)`.
+    /// tightly-packed sRGB RGBA8. Runs entirely on the owned wgpu device with no
+    /// window surface, so it is usable headless.
     pub fn render_offscreen_rgba(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipeline: &GpuPipeline,
-        size: (u32, u32),
-    ) -> Option<(u32, u32, Vec<u8>)> {
-        if size.0 == 0 || size.1 == 0 {
+        size: PixelSize,
+    ) -> Option<RgbaImage> {
+        if size.width == 0 || size.height == 0 {
             return None;
         }
+        let extent = wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 };
 
         // Transient render targets allocated per call (MSAA color + resolve + depth).
         let msaa_color = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_offscreen_msaa_color"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            size: extent,
             mip_level_count: 1,
             sample_count: MSAA_SAMPLE_COUNT,
             dimension: wgpu::TextureDimension::D2,
@@ -959,7 +962,7 @@ impl Viewport3D {
         // Resolve target is COPY_SRC (not TEXTURE_BINDING) since we read it back.
         let resolve_color = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_offscreen_color"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            size: extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -971,7 +974,7 @@ impl Viewport3D {
 
         let depth = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_offscreen_depth"),
-            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            size: extent,
             mip_level_count: 1,
             sample_count: MSAA_SAMPLE_COUNT,
             dimension: wgpu::TextureDimension::D2,
@@ -1016,10 +1019,10 @@ impl Viewport3D {
 
         // Copy the resolved color into a readback buffer. bytes_per_row must be a
         // multiple of 256, so pad each row and strip the padding after mapping.
-        let unpadded_bpr = size.0 * 4;
+        let unpadded_bpr = size.width * 4;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
         let padded_bpr = unpadded_bpr.div_ceil(align) * align;
-        let buffer_size = (padded_bpr * size.1) as u64;
+        let buffer_size = (padded_bpr * size.height) as u64;
         let readback = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport_3d_offscreen_readback"),
             size: buffer_size,
@@ -1039,10 +1042,10 @@ impl Viewport3D {
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bpr),
-                    rows_per_image: Some(size.1),
+                    rows_per_image: Some(size.height),
                 },
             },
-            wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            extent,
         );
 
         queue.submit(std::iter::once(encoder.finish()));
@@ -1055,8 +1058,8 @@ impl Viewport3D {
         let Ok(mapped) = slice.get_mapped_range() else {
             return None;
         };
-        let mut rgba = vec![0u8; (unpadded_bpr * size.1) as usize];
-        for row in 0..size.1 as usize {
+        let mut rgba = vec![0u8; (unpadded_bpr * size.height) as usize];
+        for row in 0..size.height as usize {
             let src = row * padded_bpr as usize;
             let dst = row * unpadded_bpr as usize;
             rgba[dst..dst + unpadded_bpr as usize].copy_from_slice(&mapped[src..src + unpadded_bpr as usize]);
@@ -1064,24 +1067,24 @@ impl Viewport3D {
         drop(mapped);
         readback.unmap();
 
-        Some((size.0, size.1, rgba))
+        Some(RgbaImage { width: size.width, height: size.height, pixels: rgba })
     }
 
     /// Transform a world-space ray into model space (inverse of model matrix).
     /// The model matrix is Ry(yaw) * Rz(-roll), so the inverse is Rz(+roll) * Ry(-yaw).
-    fn ray_to_model_space(&self, origin: Vec3, dir: Vec3) -> (Vec3, Vec3) {
+    fn ray_to_model_space(&self, ray: Ray) -> Ray {
         let has_roll = self.model_roll.abs() > 1e-6;
         let has_yaw = self.model_yaw.abs() > 1e-6;
         if !has_roll && !has_yaw {
-            return (origin, dir);
+            return ray;
         }
-        // Inverse: Rz(+roll) * Ry(-yaw) — composed as a single rotation.
+        // Inverse: Rz(+roll) * Ry(-yaw), composed as a single rotation.
         let inv_rot = {
             let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), self.model_roll);
             let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), -self.model_yaw);
             rz * ry
         };
-        (inv_rot * origin, inv_rot * dir)
+        Ray { origin: inv_rot * ray.origin, direction: inv_rot * ray.direction }
     }
 
     /// Transform a model-space position back to world space (apply model matrix).
@@ -1107,54 +1110,44 @@ impl Viewport3D {
     }
 
     /// Collect pickable mesh references with visibility info.
-    fn pick_mesh_refs(&self) -> Vec<(MeshId, &PickableMesh, bool)> {
+    fn pick_targets(&self) -> Vec<PickTarget<'_>> {
         self.pick_data
             .iter()
             .map(|(id, mesh)| {
                 let visible = self.meshes.get(id).is_some_and(|m| m.visible);
-                (*id, mesh, visible)
+                PickTarget { id: *id, mesh, visible }
             })
             .collect()
     }
 
     /// Perform CPU picking at a screen position within the given viewport rect.
     pub fn pick(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Option<HitResult> {
-        let (origin, dir) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)?;
-        let (origin, dir) = self.ray_to_model_space(origin, dir);
-        let mesh_refs = self.pick_mesh_refs();
-        let mut hit = picking::pick_all_ray(origin, dir, &mesh_refs).into_iter().next()?.0;
+        let ray = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)?;
+        let targets = self.pick_targets();
+        let mut hit = picking::pick_all_ray(self.ray_to_model_space(ray), &targets).into_iter().next()?.0;
         hit.world_position = self.pos_to_world_space(hit.world_position);
         Some(hit)
     }
 
-    /// Unproject a screen position to a world-space ray (origin, direction).
-    pub fn screen_to_ray(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Option<(Vec3, Vec3)> {
+    /// Unproject a screen position to a world-space ray.
+    pub fn screen_to_ray(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Option<Ray> {
         picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)
     }
 
     /// Perform CPU picking that returns ALL hits along the ray, sorted by distance.
     /// Each hit includes the triangle normal for impact angle calculations.
     pub fn pick_all(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Vec<(HitResult, Vec3)> {
-        let Some((origin, dir)) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera) else {
+        let Some(ray) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera) else {
             return Vec::new();
         };
-        let (origin, dir) = self.ray_to_model_space(origin, dir);
-        let mesh_refs = self.pick_mesh_refs();
-        picking::pick_all_ray(origin, dir, &mesh_refs)
-            .into_iter()
-            .map(|(mut hit, normal)| {
-                hit.world_position = self.pos_to_world_space(hit.world_position);
-                (hit, self.normal_to_world_space(normal))
-            })
-            .collect()
+        self.pick_all_ray(ray)
     }
 
     /// Pick ALL triangles hit by an arbitrary world-space ray, sorted by distance.
     /// Each hit includes the triangle normal for angle calculations.
-    pub fn pick_all_ray(&self, origin: Vec3, direction: Vec3) -> Vec<(HitResult, Vec3)> {
-        let (origin, dir) = self.ray_to_model_space(origin, direction);
-        let mesh_refs = self.pick_mesh_refs();
-        picking::pick_all_ray(origin, dir, &mesh_refs)
+    pub fn pick_all_ray(&self, ray: Ray) -> Vec<(HitResult, Vec3)> {
+        let targets = self.pick_targets();
+        picking::pick_all_ray(self.ray_to_model_space(ray), &targets)
             .into_iter()
             .map(|(mut hit, normal)| {
                 hit.world_position = self.pos_to_world_space(hit.world_position);
@@ -1165,9 +1158,9 @@ impl Viewport3D {
 
     /// Like `pick_all_ray`, but the ray is already in raw model/mesh space.
     /// Skips model rotation transforms on both input and output.
-    pub fn pick_all_ray_model_space(&self, origin: Vec3, direction: Vec3) -> Vec<(HitResult, Vec3)> {
-        let mesh_refs = self.pick_mesh_refs();
-        picking::pick_all_ray(origin, direction, &mesh_refs)
+    pub fn pick_all_ray_model_space(&self, ray: Ray) -> Vec<(HitResult, Vec3)> {
+        let targets = self.pick_targets();
+        picking::pick_all_ray(ray, &targets)
     }
 
     /// Top-right corner rect for the navigation gizmo within the viewport.

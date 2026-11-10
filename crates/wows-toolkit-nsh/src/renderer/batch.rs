@@ -14,6 +14,8 @@ use wows_toolkit_replay_data::playback;
 use wows_toolkit_replay_data::playback::BatchOutcome;
 use wows_toolkit_replay_data::playback::BatchStep;
 
+use crate::renderer::ids::Revision;
+
 /// Where a batch writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BatchTarget {
@@ -27,7 +29,7 @@ pub enum BatchTarget {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct BatchView {
     /// Changes whenever anything here does.
-    pub revision: u32,
+    pub revision: Revision,
     pub running: bool,
     /// What the line says: which replay of how many, or how it ended.
     pub text: Option<String>,
@@ -37,7 +39,7 @@ pub struct BatchView {
 
 #[derive(Clone, Debug, Default)]
 struct BatchState {
-    revision: u32,
+    revision: Revision,
     running: bool,
     text: Option<String>,
     failed: bool,
@@ -48,7 +50,7 @@ static BATCH: LazyLock<watch::Sender<BatchState>> = LazyLock::new(|| watch::chan
 fn publish(edit: impl FnOnce(&mut BatchState)) {
     BATCH.send_modify(|state| {
         edit(state);
-        state.revision = state.revision.wrapping_add(1);
+        state.revision = state.revision.next();
     });
 }
 
@@ -59,7 +61,7 @@ pub fn view() -> BatchView {
 }
 
 /// Resolves with the progress line once it differs from `after`.
-pub async fn next_change(after: u32) -> BatchView {
+pub async fn next_change(after: Revision) -> BatchView {
     let mut changes = BATCH.subscribe();
     // The sender lives for the process, so the wait only ends on a change.
     let _ = changes.wait_for(|state| state.revision != after).await;

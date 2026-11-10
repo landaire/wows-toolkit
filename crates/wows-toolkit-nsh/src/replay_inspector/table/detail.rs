@@ -55,6 +55,7 @@ use crate::replay_inspector::table::EngineMeasure;
 use crate::replay_inspector::table::Table;
 use crate::replay_inspector::table::glyphs::Glyph;
 use crate::replay_inspector::table::glyphs::glyph;
+use crate::replay_inspector::table::icons::IconImage;
 use crate::replay_inspector::table::icons::TableIcons;
 use crate::replay_inspector::table::parts::class;
 use crate::replay_inspector::table::parts::detail_text;
@@ -118,19 +119,15 @@ fn nda_gated_breakdown(rows: Option<&[BreakdownRow]>, row: &PlayerRow, debug: bo
 
 /// An icon fitted in a `size` square keeping its aspect, then its label, the
 /// tooltip over both. A missing icon leaves the label alone.
-fn icon_label_row(icon: Option<(SharedString, f32, f32)>, label: String, tooltip: &str, size: f32) -> AnyElement {
+fn icon_label_row(icon: Option<IconImage>, label: String, tooltip: &str, size: f32) -> AnyElement {
     let mut line = view().app_class(class("flex-row items-center w-full")).gap(px(ICON_LABEL_GAP));
-    if let Some((uri, width, height)) = icon {
-        let (width, height) = fit_dims(width, height, size);
-        line = line.child(image(uri).app_class(class("flex-none")).w(px(width)).h(px(height)));
+    if let Some(icon) = icon {
+        let fitted = fit_dims(icon.size, size);
+        line = line.child(image(icon.uri).app_class(class("flex-none")).w(px(fitted.width)).h(px(fitted.height)));
     }
     line = line.child(detail_text(label).app_class(class("flex-1 min-w-0 text-xs text-foreground")));
 
     if tooltip.is_empty() { line.into_element() } else { line.tooltip(tip(tooltip.to_owned())).into_element() }
-}
-
-fn keyed_icon(icons: &TableIcons, icon: &RowIcon) -> Option<(SharedString, f32, f32)> {
-    icons.icon(icon).map(|image| (image.uri, image.width, image.height))
 }
 
 /// Achievements, ribbons, damage events and the fire chance, each under
@@ -151,7 +148,7 @@ fn name_section(table: Table, row: &PlayerRow, debug: bool, icons: &TableIcons) 
     if !row.achievements.is_empty() {
         let mut content = vec![section_heading(t!("ui.replay.sections.achievements").into_owned())];
         for achievement in &row.achievements {
-            let icon = keyed_icon(icons, &RowIcon::achievement(&achievement.icon_key));
+            let icon = icons.icon(&RowIcon::achievement(&achievement.icon_key));
             content.push(icon_label_row(icon, achievement_label(achievement), &achievement.description, LARGE_ICON_SIZE));
         }
         section(&mut parts, content);
@@ -160,7 +157,7 @@ fn name_section(table: Table, row: &PlayerRow, debug: bool, icons: &TableIcons) 
     if !row.ribbons.is_empty() {
         let mut content = vec![section_heading(t!("ui.replay.sections.ribbons").into_owned())];
         for ribbon in sorted_ribbons(row) {
-            let icon = keyed_icon(icons, &RowIcon::ribbon(ribbon.is_subribbon, &ribbon.icon_key));
+            let icon = icons.icon(&RowIcon::ribbon(ribbon.is_subribbon, &ribbon.icon_key));
             content.push(icon_label_row(icon, ribbon_label(ribbon), &ribbon.description, ribbon_icon_box(ribbon)));
         }
         section(&mut parts, content);

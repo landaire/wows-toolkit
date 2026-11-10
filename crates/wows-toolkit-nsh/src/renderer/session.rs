@@ -17,16 +17,19 @@ use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_toolkit_replay_data::minimap;
 use wows_toolkit_replay_data::playback;
-use wt_collab_client::link::CollabLink;
-use wt_collab_client::types::Annotation;
 use wows_toolkit_viewmodel::tactics::board;
+use wowsunpack::data::Version;
+use wt_collab_client::ids::ReplayId;
+use wt_collab_client::link::CollabLink;
 
 use crate::frames;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
+use crate::renderer::error::ReplayLoadError;
+use crate::renderer::ids::Revision;
 use crate::renderer::raster;
-use crate::renderer::RendererError;
+use crate::renderer::viewer::PlacedShips;
 use crate::renderer::viewer::Viewer;
 
 /// How often a viewport in a running session redraws, which is what moves a
@@ -45,7 +48,7 @@ enum Message {
 pub struct Session {
     viewer: Mutex<Viewer>,
     surface: Arc<Surface>,
-    revision: watch::Sender<u32>,
+    revision: watch::Sender<Revision>,
     wake: mpsc::Sender<Message>,
     /// Set when the viewport closes, so a bake in flight stops walking a
     /// battle nobody is waiting for.
@@ -54,13 +57,22 @@ pub struct Session {
     defaults: SavedRenderOptions,
 }
 
+/// What the session is told when this playback opens.
+struct Announcement {
+    link: CollabLink,
+    replay_id: ReplayId,
+    replay_name: String,
+    space: String,
+    version: Version,
+}
+
 impl Session {
     /// Opens a viewport on `path` drawn on the surface `id`, and starts baking
     /// it and reading its events.
     pub fn open(id: &SurfaceId, path: PathBuf, alts: Vec<PathBuf>, defaults: SavedRenderOptions) -> Arc<Self> {
         let surface = frames::surface(id);
         let (wake, messages) = mpsc::channel();
-        let (revision, _) = watch::channel(0);
+        let (revision, _) = watch::channel(Revision::default());
         let links = crate::collab::subscribe();
         let collab = links.borrow().clone();
         let session = Arc::new(Self {
@@ -121,12 +133,12 @@ impl Session {
     }
 
     /// The revision the view last heard of, and a way to wait for the next.
-    pub fn subscribe(&self) -> watch::Receiver<u32> {
+    pub fn subscribe(&self) -> watch::Receiver<Revision> {
         self.revision.subscribe()
     }
 
     fn bump(&self) {
-        self.revision.send_modify(|revision| *revision = revision.wrapping_add(1));
+        self.revision.send_modify(|revision| *revision = revision.next());
     }
 
     /// Stops the producer and any bake; the session stops offering the
@@ -151,11 +163,11 @@ impl Session {
             let Some(game_data) = crate::game_data::cache() else {
                 // An unreadable file is the more useful thing to say, and
                 // needs no game data to find out.
-                let said = match wows_replays::ReplayFile::meta_from_file(&path) {
-                    Err(err) => minimap::PreviewError::UnreadableReplay(err).to_string(),
-                    Ok(_) => RendererError::NoGameData.to_string(),
+                let failure = match wows_replays::ReplayFile::meta_from_file(&path) {
+                    Err(err) => ReplayLoadError::Preview(minimap::PreviewError::UnreadableReplay(err)),
+                    Ok(_) => ReplayLoadError::NoGameData,
                 };
-                session.update(|viewer| viewer.bake_failed(said));
+                session.update(|viewer| viewer.bake_failed(failure));
                 return;
             };
             let baked = playback::bake(&path, &alts, &game_data, &session.cancel);
@@ -166,7 +178,7 @@ impl Session {
                 Ok((track, renderer)) => session.update(|viewer| viewer.baked(track, renderer, &session.defaults)),
                 Err(err) => {
                     log::warn!("renderer: {} did not bake: {err}", path.display());
-                    session.update(|viewer| viewer.bake_failed(err.to_string()));
+                    session.update(|viewer| viewer.bake_failed(ReplayLoadError::Preview(err)));
                 }
             }
         });
@@ -179,7 +191,7 @@ impl Session {
         let session = Arc::clone(self);
         std::thread::spawn(move || {
             let Some(game_data) = crate::game_data::cache() else {
-                log::warn!("renderer: the battle's events could not be read: {}", RendererError::NoGameData);
+                log::warn!("renderer: the battle's events could not be read: {}", ReplayLoadError::NoGameData);
                 session.update(Viewer::events_failed);
                 return;
             };
@@ -245,6 +257,7 @@ impl Session {
                     }
                 }
                 feed_armor(&mut viewer);
+                // A closed sender has nothing more to change to.
                 if links.has_changed().unwrap_or(false) {
                     let link = links.borrow_and_update().clone();
                     viewer.set_collab(link);
@@ -269,11 +282,11 @@ impl Session {
             (wanted, viewer.path().clone())
         };
         let built = match crate::game_data::cache() {
-            Some(game_data) => minimap::renderer_for_replay(&path, &game_data, wanted).map_err(|err| err.to_string()),
-            None => Err(RendererError::NoGameData.to_string()),
+            Some(game_data) => minimap::renderer_for_replay(&path, &game_data, wanted).map_err(ReplayLoadError::from),
+            None => Err(ReplayLoadError::NoGameData),
         };
         self.update(|viewer| match built {
-            Ok((renderer, origin)) => viewer.adopt_layout(wanted, renderer, origin),
+            Ok(built) => viewer.adopt_layout(wanted, built),
             Err(err) => {
                 // The layer stays off rather than drawing on a canvas with no
                 // room for it.
@@ -286,17 +299,23 @@ impl Session {
     /// Tells the session this playback is open, with the map art a peer
     /// without this build draws it on.
     fn announce(&self) {
-        let shared = {
+        let announcement = {
             let mut viewer = self.lock();
             if !viewer.wants_announcing() {
                 return;
             }
             viewer.announced();
             let Some(track) = viewer.track() else { return };
-            (viewer.collab().clone(), viewer.replay_id(), viewer.title().to_owned(), track.space.clone(), track.version)
+            Announcement {
+                link: viewer.collab().clone(),
+                replay_id: viewer.replay_id(),
+                replay_name: viewer.title().to_owned(),
+                space: track.space.clone(),
+                version: track.version,
+            }
         };
         std::thread::spawn(move || {
-            let (link, replay_id, replay_name, space, version) = shared;
+            let Announcement { link, replay_id, replay_name, space, version } = announcement;
             let art_png = crate::game_data::newest_loaded()
                 .and_then(|loaded| wows_minimap_renderer::assets::load_map_image(&space, loaded.vfs()))
                 .and_then(|art| {
@@ -321,8 +340,9 @@ impl Session {
             if !viewer.take_dirty() {
                 return;
             }
-            let placed = viewer.placed_ships().map(|(ships, space_size, version)| placed_ranges(&ships, space_size, version));
+            let placed = viewer.placed_ships().map(|placed| placed_ranges(&placed));
             viewer.broadcast_current();
+            // No placed ship asks for a range circle.
             viewer.draw_job(placed.unwrap_or_default())
         };
         let Some(job) = job else { return };
@@ -343,10 +363,10 @@ impl Session {
 
 /// The range circles every placed ship asks for, read out of the newest
 /// loaded build. Nothing is drawn before a build has loaded.
-fn placed_ranges(ships: &[Annotation], space_size: f32, version: wowsunpack::data::Version) -> Vec<DrawCommand> {
+fn placed_ranges(placed: &PlacedShips) -> Vec<DrawCommand> {
     let Some(loaded) = crate::game_data::newest_loaded() else { return Vec::new() };
 
-    board::ship_ranges(ships, loaded.provider(), Some(version), space_size)
+    board::ship_ranges(&placed.ships, loaded.provider(), Some(placed.version), placed.space_size)
 }
 
 /// Tells the armor viewer what the ship it follows had taken by where playback

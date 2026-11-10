@@ -6,25 +6,28 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use nsh_platform_linux as platform;
-use platform::gtk4 as gtk;
 use gtk::gio::prelude::ActionMapExt as _;
 use gtk::gio::prelude::ApplicationExt as _;
 use gtk::gio::prelude::ApplicationExtManual as _;
+use gtk::glib;
 use gtk::prelude::EventControllerExt as _;
 use gtk::prelude::GtkApplicationExt as _;
 use gtk::prelude::GtkWindowExt as _;
 use gtk::prelude::ObjectExt as _;
 use gtk::prelude::WidgetExt as _;
-use gtk::glib;
+use nsh_platform_linux as platform;
+use platform::gtk4 as gtk;
+
 use crate::shell::DEFAULT_ZOOM;
+use crate::shell::ZoomFactor;
 use crate::shell::window::MainWindowGeometry;
+use crate::shell::window::WindowSize;
 
 /// The host call the shell makes when the zoom setting changes.
 const ZOOM_CALL: &str = "shell.zoom";
 
 /// The size the window opens at when nothing is remembered, in points.
-const DEFAULT_SIZE: (i32, i32) = (1400, 1000);
+const DEFAULT_SIZE: WindowSize = WindowSize { width: 1400.0, height: 1000.0 };
 
 /// How long the window's size has to hold before it is written. GTK reports
 /// every step of a drag; the other front ends write geometry on a one second
@@ -62,15 +65,15 @@ fn open(app: &gtk::Application, bundle: platform::Bundle, options: platform::App
     let remembered = crate::shell::window::remembered();
     let size = remembered
         .and_then(|remembered| remembered.inner_size_points)
-        .map(|[width, height]| (width.round() as i32, height.round() as i32))
-        .filter(|(width, height)| *width > 0 && *height > 0)
+        .map(|[width, height]| WindowSize { width, height })
+        .filter(|size| size.width.round() >= 1.0 && size.height.round() >= 1.0)
         .unwrap_or(DEFAULT_SIZE);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title(&options.title)
-        .default_width(size.0)
-        .default_height(size.1)
+        .default_width(size.width.round() as i32)
+        .default_height(size.height.round() as i32)
         .build();
     if remembered.is_some_and(|remembered| remembered.maximized) {
         window.maximize();
@@ -103,18 +106,19 @@ fn open(app: &gtk::Application, bundle: platform::Bundle, options: platform::App
 
 /// The zoom factor the shared settings hold, or the default every front end
 /// uses when none was saved or the database cannot be read yet.
-fn saved_zoom() -> f32 {
+fn saved_zoom() -> ZoomFactor {
     wows_toolkit_config::load_startup_setting::<f32>(wows_toolkit_viewmodel::settings::keys::ZOOM_FACTOR)
         .ok()
         .flatten()
+        .map(ZoomFactor::new)
         .unwrap_or(DEFAULT_ZOOM)
 }
 
 /// The text scale a zoom factor draws at. The zoom factor is the one the other
 /// front ends store, whose default is 1.15; this view's sizes are designed at
 /// that default, so it is the 1.0 of this scale.
-fn font_scale(zoom: f32) -> f32 {
-    zoom / DEFAULT_ZOOM
+fn font_scale(zoom: ZoomFactor) -> f32 {
+    zoom.get() / DEFAULT_ZOOM.get()
 }
 
 fn handle_zoom(view: &platform::AppView) {
@@ -123,7 +127,7 @@ fn handle_zoom(view: &platform::AppView) {
             call.reject("shell.zoom takes { zoom: number }");
             return;
         };
-        let scale = font_scale(zoom as f32);
+        let scale = font_scale(ZoomFactor::new(zoom as f32));
         glib::MainContext::default().invoke(move || {
             VIEW.with_borrow(|view| {
                 if let Some(view) = view {
@@ -171,7 +175,7 @@ fn remember_geometry(window: &gtk::ApplicationWindow) {
 fn store(window: &gtk::ApplicationWindow) {
     let (width, height) = window.default_size();
     let geometry = MainWindowGeometry {
-        size: [width as f32, height as f32],
+        size: WindowSize { width: width as f32, height: height as f32 },
         maximized: window.is_maximized(),
         fullscreen: window.is_fullscreen(),
     };
@@ -233,6 +237,6 @@ mod tests {
     #[test]
     fn the_shared_default_zoom_draws_at_the_designed_size() {
         assert!((font_scale(DEFAULT_ZOOM) - 1.0).abs() < f32::EPSILON);
-        assert!(font_scale(2.0) > 1.0 && font_scale(0.5) < 1.0);
+        assert!(font_scale(ZoomFactor::new(2.0)) > 1.0 && font_scale(ZoomFactor::new(0.5)) < 1.0);
     }
 }

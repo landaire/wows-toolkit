@@ -7,10 +7,14 @@
 
 use std::sync::Arc;
 
+use crate::error::GpuInitError;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::RenderLayer;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::Bounds;
+use crate::viewport::types::PixelSize;
+use crate::viewport::types::RgbaImage;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::Vertex;
 
@@ -76,8 +80,9 @@ pub fn describe_adapters() -> String {
 
 impl GpuContext {
     /// Stand up the owned device. Blocks on adapter/device requests via pollster.
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> Result<Self, GpuInitError> {
         let instance = wgpu::Instance::default();
+        // No choice recorded means the command line asked for nothing.
         let choice = CHOICE.get().cloned().unwrap_or_default();
         let adapter = match pick_adapter(&instance, &choice) {
             Some(found) => found,
@@ -89,7 +94,7 @@ impl GpuContext {
                 compatible_surface: None,
                 apply_limit_buckets: false,
             }))
-            .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?,
+            .map_err(|source| GpuInitError::NoAdapter { source })?,
         };
 
         let (device, queue) =
@@ -97,7 +102,7 @@ impl GpuContext {
                 label: Some("armor_viewport_device"),
                 ..Default::default()
             }))
-            .map_err(|e| anyhow::anyhow!("failed to create wgpu device: {e}"))?;
+            .map_err(|source| GpuInitError::RequestDevice { source })?;
 
         // Said once, because this device is not the one the app draws through:
         // gpui picks its own and exposes no choice, so a viewport landing on a
@@ -172,13 +177,14 @@ pub fn unit_cube(color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
 pub fn render_test_cube_rgba(
     ctx: &GpuContext,
     pipeline: &GpuPipeline,
-    size: (u32, u32),
+    size: PixelSize,
     color: [f32; 4],
-) -> Option<(u32, u32, Vec<u8>)> {
+) -> Option<RgbaImage> {
     let mut viewport = Viewport3D::new();
     let (vertices, indices) = unit_cube(color);
-    viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
-    viewport.camera = ArcballCamera::from_bounds(Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
+    viewport.add_mesh(&ctx.device, &vertices, &indices, RenderLayer::Opaque);
+    viewport.camera =
+        ArcballCamera::from_bounds(Bounds { min: Vec3::new(-0.5, -0.5, -0.5), max: Vec3::new(0.5, 0.5, 0.5) });
     viewport.render_offscreen_rgba(&ctx.device, &ctx.queue, pipeline, size)
 }
 
@@ -203,12 +209,12 @@ mod tests {
             panic!("owned wgpu device creation failed - no adapter available");
         };
         let pipeline = ctx.pipeline();
-        let size = (256u32, 256u32);
+        let size = PixelSize { width: 256, height: 256 };
         let color = [0.0, 0.8, 0.0, 1.0]; // green cube
 
-        let (w, h, rgba) =
+        let RgbaImage { width: w, height: h, pixels: rgba } =
             render_test_cube_rgba(&ctx, &pipeline, size, color).expect("offscreen render produced no pixels");
-        assert_eq!((w, h), size);
+        assert_eq!(PixelSize { width: w, height: h }, size);
         assert_eq!(rgba.len(), (w * h * 4) as usize);
 
         let cx = w / 2;

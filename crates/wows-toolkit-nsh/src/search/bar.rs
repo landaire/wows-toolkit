@@ -5,6 +5,12 @@
 //! and GPUI bars; this is the state the TSX bar drives through them.
 
 use nsh_core::JsonValue;
+use nsh_core::element::JsHost;
+use nsh_core::element::JsIn;
+use nsh_core::element::JsOwned;
+use nsh_core::element::JsValue;
+use nsh_core::element::PropError;
+use nsh_core::element::TsTypes;
 use nsh_core::prelude::*;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
@@ -24,6 +30,46 @@ use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
 use wows_toolkit_viewmodel::search_settings::HISTORY_DEPTH;
+
+use super::error::OperatorPreferencesError;
+use crate::js_newtype::js_newtype;
+
+/// Where a drawn token sits in the query, as child indices from the root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenPath(NodePath);
+
+js_newtype!(TokenPath, NodePath);
+
+/// Which way a history walk steps. Crosses to JS as `1` for older and `-1`
+/// for newer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryStep {
+    Older,
+    Newer,
+}
+
+impl JsValue for HistoryStep {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "number".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        match value.as_number() {
+            Some(1.0) => Ok(Self::Older),
+            Some(-1.0) => Ok(Self::Newer),
+            _ => Err(value.expected("1 or -1")),
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let step = match self {
+            Self::Older => 1.0,
+            Self::Newer => -1.0,
+        };
+
+        Ok(JsOwned::new(host, host.new_number(step)))
+    }
+}
 
 /// What a drawn token of the bar is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -115,7 +161,7 @@ pub struct PillMenuView {
 #[non_exhaustive]
 pub struct BarToken {
     pub kind: BarTokenKind,
-    pub path: Vec<usize>,
+    pub path: TokenPath,
     /// A connector's word, a quantifier's prefix.
     pub text: String,
     pub segments: Vec<PillSegmentView>,
@@ -145,7 +191,7 @@ pub struct ValueLookup {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ValueEditView {
-    pub path: Vec<usize>,
+    pub path: TokenPath,
     pub literal: String,
 }
 
@@ -203,7 +249,7 @@ pub struct RunPlan {
 
 #[derive(Debug, Clone)]
 struct ValueEdit {
-    path: NodePath,
+    path: TokenPath,
     leaf: NodePath,
     seed: MatchExpr,
     tail: NodePath,
@@ -213,6 +259,7 @@ struct ValueEdit {
 
 #[derive(Debug, Clone)]
 struct HistoryWalk {
+    /// The recalled entry's position in `QueryBar::history`.
     at: usize,
     started_from: String,
 }
@@ -267,6 +314,7 @@ impl QueryBar {
 
     /// What the bar shows now.
     pub fn view(&self) -> QueryBarView {
+        // Nothing finished parses, so no tokens are drawn.
         let tokens = self.reading.as_ref().map(|expr| self.tokens(expr)).unwrap_or_default();
         let completions = pills::completions(&self.pending)
             .into_iter()
@@ -323,15 +371,14 @@ impl QueryBar {
 
     /// The operators each field was last given, as the settings row keeps
     /// them.
-    pub fn operator_preferences(&self) -> Result<JsonValue, String> {
-        serde_json::to_value(&self.operator_preferences)
-            .map_err(|error| format!("operator preferences could not be written: {error}"))
+    pub fn operator_preferences(&self) -> Result<JsonValue, OperatorPreferencesError> {
+        serde_json::to_value(&self.operator_preferences).map_err(|source| OperatorPreferencesError::Encode { source })
     }
 
     /// Takes saved operator preferences in place of what the bar holds.
-    pub fn set_operator_preferences(&mut self, saved: JsonValue) -> Result<(), String> {
-        self.operator_preferences = serde_json::from_value(saved)
-            .map_err(|error| format!("saved operator preferences are invalid: {error}"))?;
+    pub fn set_operator_preferences(&mut self, saved: JsonValue) -> Result<(), OperatorPreferencesError> {
+        self.operator_preferences =
+            serde_json::from_value(saved).map_err(|source| OperatorPreferencesError::Decode { source })?;
 
         Ok(())
     }
@@ -420,42 +467,50 @@ impl QueryBar {
         true
     }
 
-    /// Puts an older (`delta` 1) or newer (`delta` -1) query in the bar;
-    /// `true` when the bar changed and wants running. Walking past the
-    /// newest restores the text the walk started from.
-    pub fn walk_history(&mut self, delta: i32) -> bool {
+    /// Puts an older or newer query in the bar; `true` when the bar changed
+    /// and wants running. Walking past the newest restores the text the walk
+    /// started from.
+    pub fn walk_history(&mut self, step: HistoryStep) -> bool {
         if self.history.is_empty() {
             return false;
         }
-        let (at, started_from) = match self.history_walk.take() {
-            Some(walk) => (walk.at as i64 + i64::from(delta), walk.started_from),
-            None if delta > 0 => (0, self.full_query()),
+
+        let walk = self.history_walk.take();
+        // `None` is past the newest entry.
+        let at = match (&walk, step) {
+            (Some(walk), HistoryStep::Older) => Some(walk.at + 1),
+            (Some(walk), HistoryStep::Newer) => walk.at.checked_sub(1),
+            (None, HistoryStep::Older) => Some(0),
             // Down with no walk in progress is not a recall.
-            None => return false,
+            (None, HistoryStep::Newer) => return false,
         };
 
-        let text = if at < 0 {
-            started_from.clone()
-        } else {
-            let Some(entry) = self.history.get(at as usize) else {
+        let recalled = match at.map(|at| self.history.get(at).cloned()) {
+            Some(Some(entry)) => Some(entry),
+            Some(None) => {
                 // Past the oldest: stay where the walk already is.
-                let at = (at - i64::from(delta)) as usize;
-                self.history_walk = Some(HistoryWalk { at, started_from });
+                self.history_walk = walk;
                 return false;
-            };
-            entry.clone()
+            }
+            None => None,
+        };
+        let started_from = match walk {
+            Some(walk) => walk.started_from,
+            None => self.full_query(),
         };
 
-        self.committed = text;
+        self.committed = recalled.unwrap_or_else(|| started_from.clone());
         self.pending.clear();
         self.reading = query_text::parse_query(&self.committed).ok();
-        self.history_walk = usize::try_from(at).ok().map(|at| HistoryWalk { at, started_from });
+        self.history_walk = at.map(|at| HistoryWalk { at, started_from });
 
         true
     }
 
     /// Adds the pill at `path` to the selection, or takes it out again.
-    pub fn toggle_selected(&mut self, path: Vec<usize>) {
+    pub fn toggle_selected(&mut self, path: TokenPath) {
+        let path = path.0;
+
         // An arrow step afterwards carries on from the pill just pressed.
         if self.selection.contains(&path) {
             self.selection_anchor = None;
@@ -469,7 +524,7 @@ impl QueryBar {
 
     /// Applies a pill menu's `edit`, asked for from the pill at `path`;
     /// `true` when the query changed and wants running.
-    pub fn edit_pill(&mut self, path: Vec<usize>, edit: PillEdit) -> bool {
+    pub fn edit_pill(&mut self, path: TokenPath, edit: PillEdit) -> bool {
         let edit = match edit {
             PillEdit::GroupAll => StructuralEdit::Group { is_or: false },
             PillEdit::GroupAny => StructuralEdit::Group { is_or: true },
@@ -479,7 +534,7 @@ impl QueryBar {
             PillEdit::FlipConnector => StructuralEdit::FlipConnector,
         };
         let Some(reading) = self.reading.as_ref() else { return false };
-        let Some(edited) = pills::apply_structural_edit(reading, &path, edit, &self.selection) else {
+        let Some(edited) = pills::apply_structural_edit(reading, &path.0, edit, &self.selection) else {
             return false;
         };
 
@@ -505,6 +560,7 @@ impl QueryBar {
         };
 
         if extend {
+            // An anchorless extension starts from the pill it reaches.
             let anchor = self.selection_anchor.clone().unwrap_or_else(|| target.clone());
             self.selection.set_many(select::range(&paths, &anchor, &target));
             self.selection_anchor = Some(anchor);
@@ -570,9 +626,9 @@ impl QueryBar {
 
     /// Opens the value of the pill at `path` for retyping; `false` when the
     /// pill has no free value.
-    pub fn begin_value_edit(&mut self, path: Vec<usize>) -> bool {
+    pub fn begin_value_edit(&mut self, path: TokenPath) -> bool {
         let Some(expr) = self.reading.as_ref() else { return false };
-        let Some(term_path) = select::segment_path(expr, &path) else { return false };
+        let Some(term_path) = select::segment_path(expr, &path.0) else { return false };
         let Some((field, _, value)) = select::term_at(expr, &term_path) else { return false };
         let literal = query_text::print_value(value);
         let Some((leaf, seed, tail)) = select::leaf_seed(expr, &term_path) else { return false };
@@ -682,6 +738,7 @@ impl QueryBar {
                     TokenKind::QuantClose => (BarTokenKind::QuantClose, "]".to_owned(), Vec::new(), None),
                     TokenKind::Caret => (BarTokenKind::Caret, String::new(), Vec::new(), None),
                 };
+                let path = TokenPath(path);
                 let editing = self.value_edit.as_ref().is_some_and(|edit| edit.path == path);
 
                 BarToken { kind, path, text, segments, menu, editing }
@@ -746,7 +803,7 @@ mod tests {
         bar
     }
 
-    fn first_pill(bar: &QueryBar) -> Vec<usize> {
+    fn first_pill(bar: &QueryBar) -> TokenPath {
         bar.view()
             .tokens
             .into_iter()
@@ -805,13 +862,13 @@ mod tests {
         assert!(bar.remember_query());
         bar.set_query(String::new());
 
-        assert!(bar.walk_history(1));
+        assert!(bar.walk_history(HistoryStep::Older));
         assert_eq!(bar.full_query(), "survived:false");
-        assert!(bar.walk_history(1));
+        assert!(bar.walk_history(HistoryStep::Older));
         assert_eq!(bar.full_query(), "outcome:win");
-        assert!(!bar.walk_history(1), "past the oldest stays put");
-        assert!(bar.walk_history(-1));
-        assert!(bar.walk_history(-1));
+        assert!(!bar.walk_history(HistoryStep::Older), "past the oldest stays put");
+        assert!(bar.walk_history(HistoryStep::Newer));
+        assert!(bar.walk_history(HistoryStep::Newer));
         assert_eq!(bar.full_query(), "", "walking back out restores the text the walk started from");
     }
 

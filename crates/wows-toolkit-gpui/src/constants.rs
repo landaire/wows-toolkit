@@ -7,6 +7,7 @@ use gpui_kit::Task;
 use wows_toolkit_replay_data::constants::Cached;
 use wows_toolkit_replay_data::constants::Checked;
 use wows_toolkit_replay_data::constants::Fetched;
+use wows_toolkit_replay_data::error::ConstantsError;
 
 /// Asks whether the published mapping has moved since `known_commit`, and writes
 /// it for `build` when it has (see `wows_toolkit_replay_data::constants::check_latest`).
@@ -14,7 +15,7 @@ pub fn check_latest(build: u32, known_commit: Option<String>, cx: &App) -> Task<
     let runtime = crate::runtime::runtime(cx);
 
     cx.background_spawn(async move {
-        let Some(runtime) = runtime else { return Checked::Failed("no runtime to fetch on".to_owned()) };
+        let Some(runtime) = runtime else { return Checked::Failed(ConstantsError::NoRuntime) };
         runtime.block_on(wows_toolkit_replay_data::constants::check_latest(build, known_commit))
     })
 }

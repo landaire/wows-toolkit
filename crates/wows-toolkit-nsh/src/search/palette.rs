@@ -13,18 +13,15 @@ use wows_toolkit_viewmodel::palette::rank_ships;
 use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::translate;
 
-use crate::runtime::RuntimeError;
+use super::error::LayerError;
+use super::error::ReplayDialogError;
+use crate::js_newtype::js_newtype;
 
-/// Why an index-backed layer could not be read.
-#[derive(Debug, thiserror::Error)]
-enum LayerError {
-    #[error("{source}")]
-    Runtime { source: RuntimeError },
-    #[error("the replay index is not open: {source}")]
-    Open { source: sqlx::Error },
-    #[error("{source}")]
-    Rows { source: PaletteError },
-}
+/// A ship's GameParams index (`PJSB018`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShipParamIndex(String);
+
+js_newtype!(ShipParamIndex, String);
 
 /// One of the palette's second layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -93,7 +90,7 @@ pub struct PaletteRow {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ShipInput {
-    pub param_index: String,
+    pub param_index: ShipParamIndex,
     pub display_name: String,
     /// The tier as read (`X`).
     pub tier: String,
@@ -106,7 +103,7 @@ pub struct ShipInput {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ShipRowView {
-    pub param_index: String,
+    pub param_index: ShipParamIndex,
     pub display_name: String,
     pub label: String,
 }
@@ -177,16 +174,13 @@ impl Palette {
     }
 
     /// The rows an index-backed layer offers for `needle`.
-    pub async fn layer_rows(layer: PaletteLayer, needle: String) -> Result<Vec<PaletteRow>, String> {
-        blocking(move || read_layer(layer, &needle))
-            .await
-            .map_err(|error| format!("the palette layer task did not complete: {error}"))?
-            .map_err(|error| error.to_string())
+    pub async fn layer_rows(layer: PaletteLayer, needle: String) -> Result<Vec<PaletteRow>, LayerError> {
+        blocking(move || read_layer(layer, &needle)).await.map_err(|source| LayerError::Task { source })?
     }
 
     /// Shows the open dialog for one replay; its path, or `null` when
     /// cancelled.
-    pub async fn pick_replay() -> Result<Option<String>, String> {
+    pub async fn pick_replay() -> Result<Option<String>, ReplayDialogError> {
         let picked = pick_paths(
             OpenDialog::files()
                 .filter(FileFilter::new("World of Warships replay", ["wowsreplay"]))
@@ -194,7 +188,7 @@ impl Palette {
                 .button_label("Open"),
         )
         .await
-        .map_err(|error| format!("could not show the replay file dialog: {error}"))?;
+        .map_err(|reason| ReplayDialogError { reason })?;
 
         Ok(picked.and_then(|mut paths| paths.pop()).map(|path| path.to_string_lossy().into_owned()))
     }
@@ -211,7 +205,7 @@ impl ShipSearch {
     pub fn new(ships: Vec<ShipInput>) -> Self {
         let rows = ships
             .into_iter()
-            .map(|ship| ShipRow::new(ship.param_index, ship.display_name, &ship.tier, &ship.class, &ship.nation))
+            .map(|ship| ShipRow::new(ship.param_index.0, ship.display_name, &ship.tier, &ship.class, &ship.nation))
             .collect();
 
         Self { rows }
@@ -222,7 +216,7 @@ impl ShipSearch {
         rank_ships(&self.rows, &query)
             .into_iter()
             .map(|row| ShipRowView {
-                param_index: row.param_index.clone(),
+                param_index: ShipParamIndex(row.param_index.clone()),
                 display_name: row.display_name.clone(),
                 label: row.label.clone(),
             })
@@ -284,7 +278,7 @@ mod tests {
     #[test]
     fn the_ship_layer_ranks_the_catalogue() {
         let ship = |index: &str, name: &str| ShipInput {
-            param_index: index.to_owned(),
+            param_index: ShipParamIndex(index.to_owned()),
             display_name: name.to_owned(),
             tier: "X".to_owned(),
             class: "Battleship".to_owned(),
@@ -295,6 +289,6 @@ mod tests {
         assert_eq!(search.rank(String::new()).len(), 2);
         let found = search.rank("yama".to_owned());
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].param_index, "PJSB018");
+        assert_eq!(found[0].param_index, ShipParamIndex("PJSB018".to_owned()));
     }
 }

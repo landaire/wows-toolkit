@@ -49,6 +49,7 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 
+use crate::error::ReplayLoadError;
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
 
@@ -58,6 +59,29 @@ use crate::load::LoadedGameData;
 /// map therefore take turns, which is what they already did when each held
 /// its own copy.
 pub type SharedPreviewRenderer = Arc<Mutex<PreviewRenderer>>;
+
+/// Where the map's top-left corner sits on a renderer's canvas, in canvas
+/// pixels. The layout decides it: a side panel moves the map right, and the
+/// HUD strip moves it down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MapOrigin {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl MapOrigin {
+    fn of(renderer: &SharedPreviewRenderer) -> Self {
+        let (x, y) = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
+
+        Self { x: x as f32, y: y as f32 }
+    }
+}
+
+/// A replay's renderer for one layout, and where the map sits on its canvas.
+pub struct ReplayRenderer {
+    pub renderer: SharedPreviewRenderer,
+    pub map_origin: MapOrigin,
+}
 
 /// Which map's art a kept renderer carries.
 ///
@@ -180,7 +204,7 @@ fn load_build(
 ) -> Result<Arc<LoadedGameData>, PreviewError> {
     game_data
         .get_or_load_build_for(build.get(), Some(version))
-        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })
+        .map_err(|source| PreviewError::NoGameData { version: version.to_path(), source })
 }
 
 /// The renderer `path`'s battle is drawn through on `layout`'s canvas, and
@@ -193,15 +217,15 @@ pub fn renderer_for_replay(
     path: &Path,
     game_data: &GameDataCache,
     layout: SidePanelLayout,
-) -> Result<(SharedPreviewRenderer, (u32, u32)), PreviewError> {
+) -> Result<ReplayRenderer, PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
     let (version, build) = recorded_build(&replay)?;
     let loaded = load_build(game_data, build, &version)?;
 
     let renderer = renderer_for(Some(build), &replay.meta.mapName, loaded.vfs(), Some(&version), layout)?;
-    let origin = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
+    let map_origin = MapOrigin::of(&renderer);
 
-    Ok((renderer, origin))
+    Ok(ReplayRenderer { renderer, map_origin })
 }
 
 /// The canvas `options` need.
@@ -341,8 +365,8 @@ pub enum PreviewError {
     UnwalkableBattle(#[from] wows_battle_world::merged::MergeError),
     #[error("the replay reports an unreadable client version {raw:?}")]
     UnknownBuild { raw: String },
-    #[error("this replay's build {version} is not loaded: {reason}")]
-    NoGameData { version: String, reason: String },
+    #[error("this replay's build {version} is not loaded: {source}")]
+    NoGameData { version: String, source: ReplayLoadError },
     #[error("the build ships no map info for {map:?}")]
     NoMapInfo { map: String },
     #[error("the preview was superseded")]
@@ -481,7 +505,7 @@ pub struct BakedTrack {
     pub version: Version,
     /// Where the map's top-left corner sits in these frames. The layout
     /// decides it, and a side panel moves it.
-    pub map_origin: (u32, u32),
+    pub map_origin: MapOrigin,
 }
 
 /// What happened in a battle, and what each ship took.
@@ -574,7 +598,7 @@ pub fn bake_track(
     }
 
     let clocks = sink.kept_clocks().to_vec();
-    let map_origin = target.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
+    let map_origin = MapOrigin::of(&target);
 
     Ok(BakedTrack {
         frames: sink.finish(),

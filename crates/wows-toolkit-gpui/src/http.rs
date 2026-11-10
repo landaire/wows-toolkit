@@ -6,6 +6,7 @@ use wows_toolkit_viewmodel::http::HttpError;
 /// the same services and a log that cannot tell them apart is less useful.
 pub const USER_AGENT: &str = concat!("wows-toolkit-gpui/", env!("CARGO_PKG_VERSION"));
 
+/// `proxy_url` is the setting as stored, blank when unset.
 pub fn client(proxy_url: &str, redirects: reqwest::redirect::Policy) -> Result<reqwest::Client, HttpError> {
-    wows_toolkit_viewmodel::http::client(USER_AGENT, proxy_url, redirects)
+    wows_toolkit_viewmodel::http::client(USER_AGENT, wows_toolkit_viewmodel::http::manual_proxy(proxy_url), redirects)
 }

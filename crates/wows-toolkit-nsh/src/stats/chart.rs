@@ -19,10 +19,15 @@ use wows_toolkit_viewmodel::stats::plot::Plot;
 use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot_image;
+use wows_toolkit_viewmodel::stats::plot_image::PlotImage;
 
+use super::error::ChartImageError;
+use super::ids::MatchGroup;
+use super::ids::ParamIdText;
+use super::ids::ScopeName;
+use super::ids::ViewChartId;
 use super::snapshot::DivisionChoice;
 use super::snapshot::ModeOption;
-use crate::text::text_with;
 use crate::frames;
 use crate::frames::AlphaMode;
 use crate::frames::Frame;
@@ -30,6 +35,8 @@ use crate::frames::PixelSize;
 use crate::frames::PointerButton;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
+use crate::text::text_with;
 
 /// How much one wheel step zooms, as the GPUI chart zooms per scroll event.
 const WHEEL_ZOOM: f32 = 1.1;
@@ -100,7 +107,7 @@ pub struct StatOption {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ShipOption {
-    pub ship_id: String,
+    pub ship_id: ParamIdText,
     pub name: String,
     /// The name folded for search.
     pub search_key: String,
@@ -111,7 +118,7 @@ pub struct ShipOption {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ChartSnapshot {
-    pub id: u32,
+    pub id: ViewChartId,
     /// The frame surface the plot is drawn on.
     pub surface: String,
     pub title: String,
@@ -206,16 +213,16 @@ impl Chart {
 
     /// The chart drawn at the size it shows at, as a PNG `data:` URL.
     pub(crate) fn image(&self) -> Result<String, ChartImageError> {
-        let Some((size, scale)) = frames::surface(&self.surface).view_size() else {
+        let Some(ViewSize { size, scale }) = frames::surface(&self.surface).view_size() else {
             return Err(ChartImageError::NotShown);
         };
         let palette = *PALETTE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let snapshot = self.read(PlotSnapshot::of).ok_or(ChartImageError::Empty)?;
-        let (width, height, mut pixels) = snapshot
-            .render(palette.colors, plot_image::COPY_BACKGROUND, size.width, size.height, scale)
+        let PlotImage { width, height, mut rgba } = snapshot
+            .render(palette.colors, plot_image::COPY_BACKGROUND, size, scale.get())
             .ok_or(ChartImageError::Empty)?;
-        plot_image::unpremultiply(&mut pixels);
+        plot_image::unpremultiply(&mut rgba);
 
         let mut encoded = Vec::new();
         {
@@ -223,7 +230,7 @@ impl Chart {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().map_err(|source| ChartImageError::Encode { source })?;
-            writer.write_image_data(&pixels).map_err(|source| ChartImageError::Encode { source })?;
+            writer.write_image_data(&rgba).map_err(|source| ChartImageError::Encode { source })?;
         }
 
         Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(encoded)))
@@ -232,20 +239,10 @@ impl Chart {
 
 impl Drop for Chart {
     fn drop(&mut self) {
+        // The producer may already have stopped.
         let _ = self.messages.send(Message::Stop);
         frames::release(&self.surface);
     }
-}
-
-/// Why a chart could not be copied as an image.
-#[derive(Debug, thiserror::Error)]
-pub enum ChartImageError {
-    #[error("the chart is not shown, so it has no size to draw at")]
-    NotShown,
-    #[error("the chart has nothing to plot")]
-    Empty,
-    #[error("the chart image could not be encoded: {source}")]
-    Encode { source: png::EncodingError },
 }
 
 /// Replaces the colours every chart is drawn in and draws them again.
@@ -260,7 +257,7 @@ pub(crate) fn parse_color(css: &str) -> Option<PlotColor> {
 }
 
 /// The surface a chart of `scope` is drawn on.
-pub(crate) fn surface_id(scope: &str, id: ChartId) -> SurfaceId {
+pub(crate) fn surface_id(scope: &ScopeName, id: ChartId) -> SurfaceId {
     SurfaceId::new(format!("stats-{scope}-chart-{}", id.0))
 }
 
@@ -271,7 +268,7 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
     let filters = model.effective_filters();
 
     ChartSnapshot {
-        id: u32::try_from(model.id().0).expect("chart ids are checked to fit when a chart is restored"),
+        id: ViewChartId::from_chart(model.id()).expect("chart ids are checked to fit when a chart is restored"),
         surface: surface.to_owned(),
         title: model.tab_title(),
         value_label: model.value_label(),
@@ -292,13 +289,13 @@ fn snapshot(model: &ChartModel, surface: &str, view_moved: bool) -> ChartSnapsho
             .map(|mode| ModeOption {
                 label: match_group_display_name(&mode).to_owned(),
                 selected: filters.game_modes.contains(&mode),
-                id: mode,
+                id: MatchGroup::new(mode),
             })
             .collect(),
         ships: played
             .iter()
             .map(|(id, name)| ShipOption {
-                ship_id: id.raw().to_string(),
+                ship_id: ParamIdText::from_id(*id),
                 name: name.clone(),
                 search_key: wows_toolkit_viewmodel::search::normalize_ship_search(name),
                 selected: selected.contains(id),
@@ -344,7 +341,8 @@ impl PlotSnapshot {
         })
     }
 
-    fn render(&self, colors: Colors, background: PlotColor, width: u32, height: u32, scale: f32) -> Option<(u32, u32, Vec<u8>)> {
+    /// Premultiplied RGBA, `None` for a size no image can be made at.
+    fn render(&self, colors: Colors, background: PlotColor, size: PixelSize, scale: f32) -> Option<PlotImage> {
         let plot = Plot {
             series: &self.series,
             bars: &self.bars,
@@ -353,7 +351,7 @@ impl PlotSnapshot {
             show_values: self.show_values,
             view: self.view,
         };
-        plot_image::render(&plot, colors, background, width, height, scale)
+        plot_image::render(&plot, colors, background, size.width, size.height, scale)
     }
 }
 
@@ -405,7 +403,7 @@ impl Producer {
 
         match input {
             SurfaceInput::Resized { size, scale } => {
-                self.size = Some((size, scale));
+                self.size = Some((size, scale.get()));
                 true
             }
             SurfaceInput::PointerDown { at, button: PointerButton::Primary, clicks, .. } => {
@@ -432,6 +430,7 @@ impl Producer {
                 false
             }
             SurfaceInput::Wheel { at, dy, .. } => {
+                let dy = dy.get();
                 if dy == 0.0 || !self.pannable() {
                     return false;
                 }
@@ -440,6 +439,7 @@ impl Producer {
                 self.change_view(|view| view.zoom_about(factor, cursor))
             }
             SurfaceInput::Pinch { scale: gesture } => {
+                let gesture = gesture.get();
                 if !self.pannable() {
                     return false;
                 }
@@ -497,14 +497,13 @@ impl Producer {
         };
         // Rasterized after the model is let go, so a slow frame never holds
         // up the calls that change the chart.
-        let rendered =
-            snapshot.and_then(|snapshot| snapshot.render(palette.colors, palette.background, size.width, size.height, scale));
+        let rendered = snapshot.and_then(|snapshot| snapshot.render(palette.colors, palette.background, size, scale));
 
-        let Some((width, height, pixels)) = rendered else {
+        let Some(PlotImage { width, height, rgba }) = rendered else {
             self.surface.clear();
             return;
         };
-        match Frame::new(PixelSize { width, height }, AlphaMode::Premultiplied, pixels) {
+        match Frame::new(PixelSize { width, height }, AlphaMode::Premultiplied, rgba) {
             Ok(frame) => self.surface.present(frame),
             Err(error) => log::warn!("stats: a chart frame was refused: {error}"),
         }
@@ -565,7 +564,7 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
 
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: 2.0 });
+        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 640, height: 400 }, scale: frames::ScaleFactor::new(2.0) });
         let first = wait_for_frame(&surface, None);
         assert_eq!(first.size, PixelSize { width: 640, height: 400 });
         assert!(first.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != first.pixels[..3]), "the plot marks the frame");
@@ -597,10 +596,15 @@ mod tests {
         let id = SurfaceId::new("stats-test-chart-bars");
         let chart = Chart::start(model, id.clone());
         let surface = frames::surface(&id);
-        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 300, height: 200 }, scale: 1.0 });
+        surface.send_input(SurfaceInput::Resized { size: PixelSize { width: 300, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
         wait_for_frame(&surface, None);
 
-        surface.send_input(SurfaceInput::Wheel { at: Some(PixelPoint { x: 100.0, y: 100.0 }), dx: 0.0, dy: -1.0, modifiers: Modifiers::default() });
+        surface.send_input(SurfaceInput::Wheel {
+            at: Some(PixelPoint { x: 100.0, y: 100.0 }),
+            dx: frames::ScrollSteps::new(0.0),
+            dy: frames::ScrollSteps::new(-1.0),
+            modifiers: Modifiers::default(),
+        });
         chart.redraw();
         wait_for_frame(&surface, None);
 
@@ -615,7 +619,7 @@ mod tests {
         let chart = Chart::start(model, id.clone());
         assert!(matches!(chart.image(), Err(ChartImageError::NotShown)));
 
-        frames::surface(&id).send_input(SurfaceInput::Resized { size: PixelSize { width: 320, height: 200 }, scale: 1.0 });
+        frames::surface(&id).send_input(SurfaceInput::Resized { size: PixelSize { width: 320, height: 200 }, scale: frames::ScaleFactor::new(1.0) });
         let url = chart.image().expect("a shown chart copies");
 
         let encoded = url.strip_prefix("data:image/png;base64,").expect("a PNG data URL");

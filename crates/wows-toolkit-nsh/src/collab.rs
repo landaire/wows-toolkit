@@ -56,7 +56,9 @@ use wt_collab_client::controller::SessionController;
 use wt_collab_client::controller::SessionFailure;
 use wt_collab_client::controller::SessionNotice;
 use wt_collab_client::controller::StartError;
+use wt_collab_client::ids::UserId;
 use wt_collab_client::link::CollabLink;
+use wt_collab_client::link::WindowId;
 
 use crate::runtime;
 
@@ -87,12 +89,44 @@ pub fn revisions() -> tokio::sync::watch::Receiver<SessionRevision> {
     SERVICE.revisions.subscribe()
 }
 
+/// Where the session stands, as the popover shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum CollabPhase {
+    Idle,
+    /// Hosting or joining.
+    Starting,
+    Active,
+    Error,
+}
+
+/// How loudly a notice is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum CollabNoticeLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// Why a session request was refused.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum CollabError {
+    #[error(transparent)]
+    Runtime(#[from] runtime::RuntimeError),
+    #[error("{}", start_error_text(.0))]
+    Start(#[source] StartError),
+    #[error("not a session id: {raw:?}")]
+    InvalidId {
+        raw: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+}
+
 /// The session as the popover shows it.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct CollabState {
-    /// `idle`, `starting` (hosting or joining), `active` or `error`.
-    pub status: String,
+    pub status: CollabPhase,
     /// What went wrong, while `status` is `error`.
     pub error: Option<String>,
     /// Whether a session runs, hosted or joined.
@@ -150,8 +184,7 @@ pub struct SharedWindowEntry {
 #[non_exhaustive]
 pub struct CollabNotice {
     pub text: String,
-    /// `info`, `warning` or `error`.
-    pub level: String,
+    pub level: CollabNoticeLevel,
 }
 
 /// What a listener is told after each change.
@@ -211,12 +244,12 @@ impl Collab {
     }
 
     /// Starts hosting a session.
-    pub fn host() -> Result<(), String> {
+    pub fn host() -> Result<(), CollabError> {
         SERVICE.start(|controller, runtime, name| controller.host(runtime, toolkit_version(), name))
     }
 
     /// Joins the session `token` names.
-    pub fn join(token: String) -> Result<(), String> {
+    pub fn join(token: String) -> Result<(), CollabError> {
         SERVICE.start(|controller, runtime, name| controller.join(runtime, &token, toolkit_version(), name))
     }
 
@@ -252,18 +285,18 @@ impl Collab {
     }
 
     /// Raises a peer to co-host.
-    pub fn promote(user_id: String) -> Result<(), String> {
+    pub fn promote(user_id: String) -> Result<(), CollabError> {
         let user_id = parse_id(&user_id)?;
-        SERVICE.lock().controller.promote(user_id);
+        SERVICE.lock().controller.promote(UserId::new(user_id));
         SERVICE.changed();
 
         Ok(())
     }
 
     /// Asks every peer to open one of the session's windows.
-    pub fn open_for_everyone(replay_id: String) -> Result<(), String> {
+    pub fn open_for_everyone(replay_id: String) -> Result<(), CollabError> {
         let replay_id = parse_id(&replay_id)?;
-        link().open_for_everyone(replay_id);
+        link().open_for_everyone(WindowId::new(replay_id));
 
         Ok(())
     }
@@ -284,7 +317,7 @@ struct Held {
     token_revealed: bool,
     /// A start the background runtime could not take, which the controller
     /// never saw.
-    runtime_failure: Option<String>,
+    runtime_failure: Option<runtime::RuntimeError>,
     /// Whether the last published link was a running session's.
     published_active: bool,
 }
@@ -349,14 +382,13 @@ impl Service {
     fn start(
         &self,
         start: impl FnOnce(&mut SessionController, Arc<tokio::runtime::Runtime>, &str) -> Result<(), StartError>,
-    ) -> Result<(), String> {
+    ) -> Result<(), CollabError> {
         let runtime = match runtime::shared() {
             Ok(runtime) => runtime,
             Err(error) => {
-                let reason = error.to_string();
-                self.lock().runtime_failure = Some(reason.clone());
+                self.lock().runtime_failure = Some(error.clone());
                 self.changed();
-                return Err(reason);
+                return Err(error.into());
             }
         };
         let started = {
@@ -368,13 +400,7 @@ impl Service {
         self.publish_link();
         self.changed();
 
-        started.map_err(|error| match error {
-            StartError::NoDisplayName => t!("ui.collab.display_name_error").into_owned(),
-            StartError::InvalidToken { expected_prefix } => {
-                t!("ui.collab.invalid_token", error = expected_prefix).into_owned()
-            }
-            StartError::AlreadyRunning => error.to_string(),
-        })
+        started.map_err(CollabError::Start)
     }
 
     /// Takes what the session raised, says it to every listener, and reads
@@ -402,15 +428,15 @@ impl Held {
     fn state(&self) -> CollabState {
         let controller = &self.controller;
         let (status, error) = match controller.status() {
-            SessionStatus::Idle => ("idle", None),
-            SessionStatus::Starting | SessionStatus::Connecting => ("starting", None),
-            SessionStatus::Active => ("active", None),
-            SessionStatus::Error(reason) => ("error", Some(reason)),
+            SessionStatus::Idle => (CollabPhase::Idle, None),
+            SessionStatus::Starting | SessionStatus::Connecting => (CollabPhase::Starting, None),
+            SessionStatus::Active => (CollabPhase::Active, None),
+            SessionStatus::Error(reason) => (CollabPhase::Error, Some(reason)),
         };
         let token = controller.token();
-        let token_shown = token.as_ref().map(|token| {
-            if self.token_revealed { token.clone() } else { "*".repeat(token.chars().count().min(32)) }
-        });
+        let token_shown = token
+            .as_ref()
+            .map(|token| if self.token_revealed { token.clone() } else { "*".repeat(token.chars().count().min(32)) });
         let may_steer = controller.may_steer();
         let may_promote = controller.may_promote();
         let roster = controller.connected();
@@ -419,7 +445,7 @@ impl Held {
             if controller.is_hosting() { t!("ui.collab.session_active") } else { t!("ui.collab.connected_to_session") };
 
         CollabState {
-            status: status.to_owned(),
+            status,
             error,
             active: controller.is_active(),
             heading: heading.into_owned(),
@@ -433,7 +459,7 @@ impl Held {
             roster: roster
                 .into_iter()
                 .map(|peer| RosterEntry {
-                    user_id: peer.user_id.to_string(),
+                    user_id: peer.user_id.raw().to_string(),
                     role: match peer.role {
                         PeerRole::Host => Some(t!("ui.collab.role_host").into_owned()),
                         PeerRole::CoHost => Some(t!("ui.collab.role_cohost").into_owned()),
@@ -449,7 +475,7 @@ impl Held {
                 .shared_windows()
                 .into_iter()
                 .map(|window| SharedWindowEntry {
-                    replay_id: window.replay_id.to_string(),
+                    replay_id: window.replay_id.raw().to_string(),
                     replay_name: window.replay_name,
                     map: window.map,
                 })
@@ -457,8 +483,23 @@ impl Held {
             may_steer,
             annotations_locked: permissions.annotations_locked,
             settings_locked: permissions.settings_locked,
-            failure: self.runtime_failure.clone().or_else(|| controller.failure().map(failure_text)),
+            failure: self
+                .runtime_failure
+                .as_ref()
+                .map(ToString::to_string)
+                .or_else(|| controller.failure().map(failure_text)),
         }
+    }
+}
+
+/// What a refused start says, in the reader's language where the catalog has it.
+fn start_error_text(error: &StartError) -> String {
+    match error {
+        StartError::NoDisplayName => t!("ui.collab.display_name_error").into_owned(),
+        StartError::InvalidToken { expected_prefix } => {
+            t!("ui.collab.invalid_token", error = expected_prefix).into_owned()
+        }
+        StartError::AlreadyRunning => error.to_string(),
     }
 }
 
@@ -473,9 +514,9 @@ fn failure_text(failure: &SessionFailure) -> String {
 
 fn notice_of(notice: SessionNotice) -> CollabNotice {
     let level = match notice.severity() {
-        NoticeSeverity::Info => "info",
-        NoticeSeverity::Warning => "warning",
-        NoticeSeverity::Error => "error",
+        NoticeSeverity::Info => CollabNoticeLevel::Info,
+        NoticeSeverity::Warning => CollabNoticeLevel::Warning,
+        NoticeSeverity::Error => CollabNoticeLevel::Error,
     };
     let text = match notice {
         SessionNotice::HostingStarted => t!("ui.messages.session_started"),
@@ -490,11 +531,11 @@ fn notice_of(notice: SessionNotice) -> CollabNotice {
         SessionNotice::Rejected { reason } => t!("ui.messages.session_rejected", reason = reason),
     };
 
-    CollabNotice { text: text.into_owned(), level: level.to_owned() }
+    CollabNotice { text: text.into_owned(), level }
 }
 
-fn parse_id(raw: &str) -> Result<u64, String> {
-    raw.parse().map_err(|_| format!("not a session id: {raw:?}"))
+fn parse_id(raw: &str) -> Result<u64, CollabError> {
+    raw.parse().map_err(|source| CollabError::InvalidId { raw: raw.to_owned(), source })
 }
 
 /// What this build calls itself to its peers.
@@ -516,13 +557,13 @@ mod tests {
     fn notices_are_told_in_the_readers_words() {
         let notice = notice_of(SessionNotice::UserTimedOut { name: "Mira".into() });
 
-        assert_eq!(notice.level, "warning");
+        assert_eq!(notice.level, CollabNoticeLevel::Warning);
         assert!(notice.text.contains("Mira"), "{}", notice.text);
     }
 
     #[test]
     fn a_peer_id_round_trips_through_its_decimal_form() {
-        assert_eq!(parse_id(&u64::MAX.to_string()), Ok(u64::MAX));
+        assert_eq!(parse_id(&u64::MAX.to_string()).ok(), Some(u64::MAX));
         assert!(parse_id("seven").is_err());
     }
 
@@ -539,7 +580,7 @@ mod tests {
 
         let masked = held.state();
         assert_eq!(masked.token.as_deref(), Some("toolkit-abcdef"));
-        assert!(!masked.token_shown.as_deref().unwrap_or_default().contains("abcdef"));
+        assert!(masked.token_shown.is_some_and(|shown| !shown.contains("abcdef")));
 
         let revealed = Held { token_revealed: true, ..held };
         assert_eq!(revealed.state().token_shown.as_deref(), Some("toolkit-abcdef"));

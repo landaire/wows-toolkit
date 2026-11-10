@@ -46,9 +46,11 @@ pub struct CatalogView {
 }
 
 /// A search as the catalog's names are folded: accents removed, lowercased,
-/// trimmed. Empty means no search.
-pub(super) fn fold_query(query: &str) -> String {
-    unidecode::unidecode(query.trim()).to_lowercase()
+/// trimmed. `None` when nothing is searched for.
+pub(super) fn fold_query(query: &str) -> Option<String> {
+    let folded = unidecode::unidecode(query.trim()).to_lowercase();
+
+    (!folded.is_empty()).then_some(folded)
 }
 
 /// Whether `ship` is found by the folded `needle`.
@@ -67,7 +69,7 @@ pub(super) fn catalog_view(catalog: &ShipCatalog, query: &str) -> CatalogView {
             let ships: Vec<CatalogShip> = class
                 .ships
                 .iter()
-                .filter(|ship| needle.is_empty() || ship_matches(ship, &needle))
+                .filter(|ship| needle.as_deref().is_none_or(|needle| ship_matches(ship, needle)))
                 .map(ship_row)
                 .collect();
             if ships.is_empty() {
@@ -150,8 +152,8 @@ mod tests {
 
     #[test]
     fn a_query_is_folded_like_the_names() {
-        assert_eq!(fold_query("  Sm\u{e5}LAND "), "smaland");
-        assert_eq!(fold_query(""), "");
+        assert_eq!(fold_query("  Sm\u{e5}LAND ").as_deref(), Some("smaland"));
+        assert_eq!(fold_query(" "), None);
     }
 
     #[test]

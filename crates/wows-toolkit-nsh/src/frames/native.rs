@@ -14,13 +14,18 @@ use nsh_platform_linux::gtk4 as gtk;
 use serde_json::json;
 
 use super::AlphaMode;
+use super::FrameGeneration;
 use super::Modifiers;
+use super::PinchScale;
 use super::PixelPoint;
 use super::PixelSize;
 use super::PointerButton;
+use super::ScaleFactor;
+use super::ScrollSteps;
 use super::Surface;
 use super::SurfaceId;
 use super::SurfaceInput;
+use super::ViewSize;
 
 /// Name the TSX side passes to `nativeComponent`.
 pub const COMPONENT: &str = "wows.frame";
@@ -36,8 +41,8 @@ pub fn register(components: &Components) {
 #[derive(Default)]
 struct Binding {
     surface: Option<Arc<Surface>>,
-    shown_generation: Option<u64>,
-    reported: Option<(PixelSize, f32)>,
+    shown_generation: Option<FrameGeneration>,
+    reported: Option<ViewSize>,
 }
 
 type SharedBinding = Rc<RefCell<Binding>>;
@@ -103,9 +108,10 @@ impl FrameView {
                 width: (picture.width().max(0) as f32 * factor).round() as u32,
                 height: (picture.height().max(0) as f32 * factor).round() as u32,
             };
-            if binding.reported != Some((size, factor)) && !size.is_empty() {
-                binding.reported = Some((size, factor));
-                surface.send_input(SurfaceInput::Resized { size, scale: factor });
+            let view = ViewSize { size, scale: ScaleFactor::new(factor) };
+            if binding.reported != Some(view) && !size.is_empty() {
+                binding.reported = Some(view);
+                surface.send_input(SurfaceInput::Resized { size, scale: view.scale });
             }
 
             let generation = surface.generation();
@@ -197,8 +203,8 @@ impl FrameView {
                 &scroll_binding,
                 SurfaceInput::Wheel {
                     at: scroll_last.get(),
-                    dx: dx as f32,
-                    dy: dy as f32,
+                    dx: ScrollSteps::new(dx as f32),
+                    dy: ScrollSteps::new(dy as f32),
                     modifiers: modifiers(controller.current_event_state()),
                 },
             );
@@ -209,7 +215,7 @@ impl FrameView {
         let zoom = gtk::GestureZoom::new();
         let zoom_binding = Rc::clone(&binding);
         zoom.connect_scale_changed(move |_, scale| {
-            send(&zoom_binding, SurfaceInput::Pinch { scale: scale as f32 });
+            send(&zoom_binding, SurfaceInput::Pinch { scale: PinchScale::new(scale as f32) });
         });
         picture.add_controller(zoom);
 

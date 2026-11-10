@@ -52,6 +52,59 @@ pub struct PixelPoint {
     pub y: f32,
 }
 
+/// Device pixels per point.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ScaleFactor(f32);
+
+impl ScaleFactor {
+    pub fn new(factor: f32) -> Self {
+        Self(factor)
+    }
+
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// The size of a view and its scale factor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewSize {
+    pub size: PixelSize,
+    pub scale: ScaleFactor,
+}
+
+/// A wheel or touchpad scroll distance in scroll steps.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ScrollSteps(f32);
+
+impl ScrollSteps {
+    pub fn new(steps: f32) -> Self {
+        Self(steps)
+    }
+
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// A pinch gesture's scale relative to the gesture's start.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct PinchScale(f32);
+
+impl PinchScale {
+    pub fn new(scale: f32) -> Self {
+        Self(scale)
+    }
+
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// Counts the frames a surface has shown, so a view redraws only on change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameGeneration(u64);
+
 /// How the alpha channel of a frame's pixels is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlphaMode {
@@ -111,16 +164,16 @@ pub enum PointerButton {
 /// Input the component forwards to the surface's producer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceInput {
-    /// The view's size changed; `scale` is device pixels per point.
-    Resized { size: PixelSize, scale: f32 },
+    /// The view's size changed.
+    Resized { size: PixelSize, scale: ScaleFactor },
     PointerDown { at: PixelPoint, button: PointerButton, clicks: u32, modifiers: Modifiers },
     PointerUp { at: PixelPoint, button: PointerButton, modifiers: Modifiers },
     PointerMoved { at: PixelPoint, modifiers: Modifiers },
     PointerLeft,
-    /// Wheel or touchpad scroll, in scroll steps (positive `dy`: down).
-    Wheel { at: Option<PixelPoint>, dx: f32, dy: f32, modifiers: Modifiers },
-    /// Touchpad pinch; `scale` is relative to the gesture's start.
-    Pinch { scale: f32 },
+    /// Wheel or touchpad scroll (positive `dy`: down).
+    Wheel { at: Option<PixelPoint>, dx: ScrollSteps, dy: ScrollSteps, modifiers: Modifiers },
+    /// Touchpad pinch.
+    Pinch { scale: PinchScale },
     /// A key went down or up while the view had focus. `key` is the GDK key
     /// name (`"w"`, `"Left"`, `"space"`).
     Key { key: String, pressed: bool, modifiers: Modifiers },
@@ -132,7 +185,7 @@ pub struct Surface {
     id: SurfaceId,
     latest: Mutex<Option<Arc<Frame>>>,
     generation: AtomicU64,
-    view_size: Mutex<Option<(PixelSize, f32)>>,
+    view_size: Mutex<Option<ViewSize>>,
     input: mpsc::UnboundedSender<SurfaceInput>,
     receiver: Mutex<Option<mpsc::UnboundedReceiver<SurfaceInput>>>,
 }
@@ -172,7 +225,7 @@ impl Surface {
     }
 
     /// The size of the view last reported, if one is shown.
-    pub fn view_size(&self) -> Option<(PixelSize, f32)> {
+    pub fn view_size(&self) -> Option<ViewSize> {
         *self.view_size.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -180,14 +233,14 @@ impl Surface {
     /// native components do not exist.
     pub fn send_input(&self, input: SurfaceInput) {
         if let SurfaceInput::Resized { size, scale } = &input {
-            *self.view_size.lock().unwrap_or_else(|e| e.into_inner()) = Some((*size, *scale));
+            *self.view_size.lock().unwrap_or_else(|e| e.into_inner()) = Some(ViewSize { size: *size, scale: *scale });
         }
         // The producer may have stopped; input for it is then irrelevant.
         let _ = self.input.send(input);
     }
 
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation.load(Ordering::Acquire)
+    pub(crate) fn generation(&self) -> FrameGeneration {
+        FrameGeneration(self.generation.load(Ordering::Acquire))
     }
 
     /// The latest frame, for the view and for tests.
@@ -228,9 +281,10 @@ mod tests {
         let mut input = surface.take_input().expect("first reader gets the stream");
         assert!(surface.take_input().is_none());
         let size = PixelSize { width: 30, height: 20 };
-        surface.send_input(SurfaceInput::Resized { size, scale: 2.0 });
-        assert_eq!(surface.view_size(), Some((size, 2.0)));
-        assert_eq!(input.try_recv().ok(), Some(SurfaceInput::Resized { size, scale: 2.0 }));
+        let scale = ScaleFactor::new(2.0);
+        surface.send_input(SurfaceInput::Resized { size, scale });
+        assert_eq!(surface.view_size(), Some(ViewSize { size, scale }));
+        assert_eq!(input.try_recv().ok(), Some(SurfaceInput::Resized { size, scale }));
         release(&id);
         assert!(!Arc::ptr_eq(&surface, &super::surface(&id)));
         release(&id);

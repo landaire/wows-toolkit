@@ -26,12 +26,26 @@ use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
 use crate::shell::error::SettingsError;
 
+/// A UI zoom factor, as every front end stores it under `zoom_factor`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ZoomFactor(f32);
+
+impl ZoomFactor {
+    pub const fn new(factor: f32) -> Self {
+        Self(factor)
+    }
+
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
 /// Zoom factor applied when `zoom_factor` has never been saved, the egui
 /// app's documented default.
-pub const DEFAULT_ZOOM: f32 = 1.15;
+pub const DEFAULT_ZOOM: ZoomFactor = ZoomFactor(1.15);
 /// Bounds of the zoom slider, as the egui and GPUI settings tabs bound it.
-pub const MIN_ZOOM: f32 = 0.5;
-pub const MAX_ZOOM: f32 = 2.0;
+pub const MIN_ZOOM: ZoomFactor = ZoomFactor(0.5);
+pub const MAX_ZOOM: ZoomFactor = ZoomFactor(2.0);
 
 /// The replay columns and export the Settings tab edits.
 ///
@@ -173,27 +187,31 @@ impl SettingKey {
     }
 
     /// The rows `value` is written as, checked against the type the row holds.
-    fn encode(self, value: serde_json::Value) -> Result<Vec<(&'static str, String)>, SettingsError> {
+    fn encode(self, value: serde_json::Value) -> Result<Vec<EncodedRow>, SettingsError> {
         let row = self.row();
         let encoded = match self {
             Self::Zoom => {
                 let zoom: f32 = decode(row, "number", value)?;
-                if !(MIN_ZOOM..=MAX_ZOOM).contains(&zoom) {
-                    return Err(SettingsError::ZoomOutOfRange { value: f64::from(zoom), min: MIN_ZOOM, max: MAX_ZOOM });
+                if !(MIN_ZOOM.get()..=MAX_ZOOM.get()).contains(&zoom) {
+                    return Err(SettingsError::ZoomOutOfRange {
+                        value: f64::from(zoom),
+                        min: MIN_ZOOM.get(),
+                        max: MAX_ZOOM.get(),
+                    });
                 }
-                vec![(row, json(row, &zoom)?)]
+                vec![EncodedRow::new(row, json(row, &zoom)?)]
             }
             Self::Theme => {
                 let name: String = decode(row, "string", value)?;
                 let choice = parse_theme(&name)?;
-                vec![(row, json(row, &choice)?)]
+                vec![EncodedRow::new(row, json(row, &choice)?)]
             }
             Self::Locale => {
                 let code: String = decode(row, "string", value)?;
                 if !wt_translations::SUPPORTED_LANGUAGES.iter().any(|language| language.code == code) {
                     return Err(SettingsError::UnknownLanguage { value: code });
                 }
-                vec![(row, json(row, &code)?)]
+                vec![EncodedRow::new(row, json(row, &code)?)]
             }
             Self::DataSharing => {
                 let name: String = decode(row, "string", value)?;
@@ -201,7 +219,10 @@ impl SettingKey {
                 // The older bool beside the mode, which a build that knows only
                 // it still reads: writing the mode alone would have the load
                 // reconcile undo this choice.
-                vec![(row, json(row, &mode)?), (keys::SEND_REPLAY_DATA, json(row, &mode.shares_anything())?)]
+                vec![
+                    EncodedRow::new(row, json(row, &mode)?),
+                    EncodedRow::new(keys::SEND_REPLAY_DATA, json(row, &mode.shares_anything())?),
+                ]
             }
             Self::WowsDir
             | Self::ProxyUrl
@@ -210,7 +231,7 @@ impl SettingKey {
             | Self::CollabDisplayName
             | Self::TwitchChannel => {
                 let text: String = decode(row, "string", value)?;
-                vec![(row, json(row, &text.trim())?)]
+                vec![EncodedRow::new(row, json(row, &text.trim())?)]
             }
             Self::CheckForUpdates
             | Self::EnableLogging
@@ -224,13 +245,30 @@ impl SettingKey {
             | Self::LanguageSelectionShown
             | Self::SuppressGpuEncoderWarning => {
                 let flag: bool = decode(row, "boolean", value)?;
-                vec![(row, json(row, &flag)?)]
+                vec![EncodedRow::new(row, json(row, &flag)?)]
             }
         };
 
         Ok(encoded)
     }
 }
+
+/// One settings row as it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EncodedRow {
+    key: &'static str,
+    json: String,
+}
+
+impl EncodedRow {
+    fn new(key: &'static str, json: String) -> Self {
+        Self { key, json }
+    }
+}
+
+/// Which write of a row is the newest. Each write takes the next one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WriteGeneration(u64);
 
 /// The shared settings: read in one pass, written one key at a time.
 #[module]
@@ -321,32 +359,32 @@ static WRITE_ORDER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The newest generation of each row, so a write a newer one has overtaken is
 /// dropped rather than landing after it.
-static LATEST: Mutex<Option<HashMap<&'static str, u64>>> = Mutex::new(None);
+static LATEST: Mutex<Option<HashMap<&'static str, WriteGeneration>>> = Mutex::new(None);
 
-fn next_generation(row: &'static str) -> u64 {
+fn next_generation(row: &'static str) -> WriteGeneration {
     let mut latest = LATEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let generation = latest.get_or_insert_with(HashMap::new).entry(row).or_insert(0);
-    *generation += 1;
+    let generation = latest.get_or_insert_with(HashMap::new).entry(row).or_insert(WriteGeneration(0));
+    generation.0 += 1;
 
     *generation
 }
 
-fn is_latest(row: &'static str, generation: u64) -> bool {
+fn is_latest(row: &'static str, generation: WriteGeneration) -> bool {
     let latest = LATEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     latest.as_ref().and_then(|map| map.get(row)) == Some(&generation)
 }
 
-async fn write(rows: Vec<(&'static str, String)>) -> Result<(), SettingsError> {
-    let generations: Vec<u64> = rows.iter().map(|(row, _)| next_generation(row)).collect();
+async fn write(rows: Vec<EncodedRow>) -> Result<(), SettingsError> {
+    let generations: Vec<WriteGeneration> = rows.iter().map(|row| next_generation(row.key)).collect();
     let pool = open().await?;
     let _order = WRITE_ORDER.lock().await;
-    for ((row, encoded), generation) in rows.into_iter().zip(generations) {
-        if !is_latest(row, generation) {
+    for (row, generation) in rows.into_iter().zip(generations) {
+        if !is_latest(row.key, generation) {
             continue;
         }
-        wows_toolkit_config::queries::set_setting_raw(&pool, row, &encoded)
+        wows_toolkit_config::queries::set_setting_raw(&pool, row.key, &row.json)
             .await
-            .map_err(|source| SettingsError::Write { key: row, source })?;
+            .map_err(|source| SettingsError::Write { key: row.key, source })?;
     }
 
     Ok(())
@@ -356,19 +394,39 @@ pub(crate) async fn open() -> Result<SqlitePool, SettingsError> {
     wows_toolkit_config::open_db().await.map_err(SettingsError::Open)
 }
 
-pub(crate) async fn load_from(pool: &SqlitePool) -> Result<AppSettings, SettingsError> {
-    // Two rows, as the egui app keeps them: the mode, and the older bool that
-    // says only whether anything is shared. A disagreement means the bool is the
-    // newer word on it.
+/// The data-sharing mode. Two rows, as the egui app keeps them: the mode, and
+/// the older bool that says only whether anything is shared. A disagreement
+/// means the bool is the newer word on it.
+pub(crate) async fn sharing_mode(pool: &SqlitePool) -> Result<DataSharingMode, SettingsError> {
     let mode = read::<DataSharingMode>(pool, keys::DATA_SHARING_MODE).await?;
     let compatibility = read::<bool>(pool, keys::SEND_REPLAY_DATA).await?;
-    let data_sharing = match (mode, compatibility) {
+
+    Ok(match (mode, compatibility) {
         (Some(mode), Some(shared)) => mode.reconcile_with_compat_bool(shared),
         (Some(mode), None) => mode,
         (None, Some(shared)) => DataSharingMode::from_send_replay_data_bool(shared),
         // Never asked means nothing is shared.
         (None, None) => DataSharingMode::Off,
-    };
+    })
+}
+
+/// The manual proxy, `None` when none is set. A stored null and an absent
+/// row both mean none.
+pub(crate) async fn manual_proxy(pool: &SqlitePool) -> Result<Option<String>, SettingsError> {
+    let stored = read::<Option<String>>(pool, keys::PROXY_URL).await?.flatten();
+
+    Ok(stored.filter(|proxy| !proxy.is_empty()))
+}
+
+/// The Twitch channel to watch, `None` for the credential's own.
+pub(crate) async fn twitch_channel(pool: &SqlitePool) -> Result<Option<String>, SettingsError> {
+    let stored = read::<String>(pool, twitch_keys::MONITORED_CHANNEL).await?;
+
+    Ok(stored.filter(|channel| !channel.is_empty()))
+}
+
+pub(crate) async fn load_from(pool: &SqlitePool) -> Result<AppSettings, SettingsError> {
+    let data_sharing = sharing_mode(pool).await?;
     let replay = read_or_default::<ReplaySettings>(pool, keys::REPLAY_SETTINGS).await?;
     let armor_defaults = wows_toolkit_config::queries::get_armor_viewer_defaults(pool)
         .await
@@ -379,22 +437,22 @@ pub(crate) async fn load_from(pool: &SqlitePool) -> Result<AppSettings, Settings
             hull_opaque: row.hull_opaque,
         });
     // Stored as an `Option` by the other front ends: `null` is no credential.
-    let twitch_user = read::<Option<TwitchToken>>(pool, twitch_keys::TOKEN)
-        .await?
-        .flatten()
-        .map(|token| token.username().to_owned());
+    let twitch_user =
+        read::<Option<TwitchToken>>(pool, twitch_keys::TOKEN).await?.flatten().map(|token| token.username().to_owned());
+    // The view shows paths as text, where empty is none chosen.
     let current_replay_path = read::<std::path::PathBuf>(pool, keys::CURRENT_REPLAY_PATH)
         .await?
         .map(|path| path.display().to_string())
         .unwrap_or_default();
-    // A stored null and an absent row both mean no proxy and no language.
-    let proxy_url = read::<Option<String>>(pool, keys::PROXY_URL).await?.flatten().unwrap_or_default();
+    // The view edits the proxy as text, where empty is none.
+    let proxy_url = manual_proxy(pool).await?.unwrap_or_default();
+    // A stored null is no language chosen.
     let locale = read::<Option<String>>(pool, keys::LOCALE).await?.flatten();
     // Never chosen means following the desktop, the egui default.
     let theme = read::<ThemeChoice>(pool, keys::THEME).await?.unwrap_or_default();
 
     Ok(AppSettings {
-        zoom: f64::from(read::<f32>(pool, keys::ZOOM_FACTOR).await?.unwrap_or(DEFAULT_ZOOM)),
+        zoom: f64::from(read::<f32>(pool, keys::ZOOM_FACTOR).await?.map(ZoomFactor).unwrap_or(DEFAULT_ZOOM).get()),
         theme: theme_name(theme).to_owned(),
         wows_dir: read_or_default(pool, keys::WOWS_DIR).await?,
         locale,
@@ -489,14 +547,14 @@ pub(crate) fn theme_name(choice: ThemeChoice) -> &'static str {
     }
 }
 
-pub(crate) fn parse_sharing(name: &str) -> Result<DataSharingMode, SettingsError> {
+fn parse_sharing(name: &str) -> Result<DataSharingMode, SettingsError> {
     DataSharingMode::ALL
         .into_iter()
         .find(|mode| sharing_name(*mode) == name)
         .ok_or_else(|| SettingsError::UnknownSharingMode { value: name.to_owned() })
 }
 
-pub(crate) fn sharing_name(mode: DataSharingMode) -> &'static str {
+fn sharing_name(mode: DataSharingMode) -> &'static str {
     match mode {
         DataSharingMode::Off => "off",
         DataSharingMode::BuildData => "build_data",
@@ -535,7 +593,13 @@ mod tests {
     #[test]
     fn data_sharing_writes_the_compatibility_row_beside_the_mode() {
         let rows = SettingKey::DataSharing.encode(serde_json::json!("replays")).expect("a mode encodes");
-        assert_eq!(rows, vec![(keys::DATA_SHARING_MODE, "\"replays\"".to_owned()), (keys::SEND_REPLAY_DATA, "true".to_owned())]);
+        assert_eq!(
+            rows,
+            vec![
+                EncodedRow::new(keys::DATA_SHARING_MODE, "\"replays\"".to_owned()),
+                EncodedRow::new(keys::SEND_REPLAY_DATA, "true".to_owned()),
+            ]
+        );
     }
 
     #[test]
@@ -549,6 +613,6 @@ mod tests {
     #[test]
     fn text_settings_are_stored_trimmed() {
         let rows = SettingKey::WowsDir.encode(serde_json::json!("  /games/wows  ")).expect("a path encodes");
-        assert_eq!(rows, vec![(keys::WOWS_DIR, "\"/games/wows\"".to_owned())]);
+        assert_eq!(rows, vec![EncodedRow::new(keys::WOWS_DIR, "\"/games/wows\"".to_owned())]);
     }
 }

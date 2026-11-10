@@ -106,11 +106,12 @@ pub fn scan_arena(source: &LiveSource, provider: &GameMetadataProvider) -> Optio
 /// Asks the stats service about this match's roster.
 ///
 /// The caller holds the budget (see [`StatsBudget`]): this sends the request
-/// it was cleared for. `user_agent` names the front end asking.
+/// it was cleared for. `user_agent` names the front end asking; `proxy_url`
+/// is `None` for a direct connection.
 pub async fn fetch_stats(
     user_agent: &str,
     state: &ArenaState,
-    proxy_url: &str,
+    proxy_url: Option<&str>,
 ) -> Result<MatchStatsResponse, StatsError> {
     let request = build_request(state.arena_id, &state.players)?;
 

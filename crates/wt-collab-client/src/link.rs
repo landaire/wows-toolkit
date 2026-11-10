@@ -28,7 +28,7 @@ pub struct CollabLink {
     local_tx: Option<std::sync::mpsc::Sender<LocalEvent>>,
     /// Which tactics board this link speaks for. `None` is the replay context,
     /// which is the one window a session has without anyone opening one.
-    board: Option<u64>,
+    board: Option<BoardId>,
     /// What this end holds while there is no session to hold it.
     ///
     /// Drawing on a map is not a collab feature: a reader alone draws on their
@@ -99,7 +99,7 @@ impl CollabLink {
         Self {
             state: self.state.clone(),
             local_tx: self.local_tx.clone(),
-            board: Some(board_id.raw()),
+            board: Some(board_id),
             alone: Arc::new(Mutex::new(crate::AnnotationSyncState::default())),
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             // A board draws no battle, so it sends no frames.
@@ -120,7 +120,7 @@ impl CollabLink {
             // holds them the way the reader drew them.
             for one in held {
                 let event = crate::peer::LocalAnnotationEvent::Set {
-                    board_id: self.board,
+                    board_id: self.board_raw(),
                     id: one.id,
                     annotation: one.annotation,
                     owner: one.owner,
@@ -149,10 +149,21 @@ impl CollabLink {
         self.is_active().then(|| UserId::new(state.lock().my_user_id))
     }
 
+    /// The owner a shape drawn here is stored under. The wire's owner field has
+    /// no absent state, and the protocol reads 0 as no session user.
+    fn owner_raw(&self) -> u64 {
+        self.my_user_id().map(UserId::raw).unwrap_or_default()
+    }
+
+    /// The board as the session state and the wire key it.
+    fn board_raw(&self) -> Option<u64> {
+        self.board.map(BoardId::raw)
+    }
+
     /// The shapes this link speaks for, as the session holds them.
     fn sync_of<'a>(&self, held: &'a SessionState) -> Option<&'a crate::AnnotationSyncState> {
         match self.board {
-            Some(board_id) => held.tactics_boards.get(&board_id).map(|board| &board.annotation_sync),
+            Some(board_id) => held.tactics_boards.get(&board_id.raw()).map(|board| &board.annotation_sync),
             None => held.current_annotation_sync.as_ref(),
         }
     }
@@ -224,7 +235,7 @@ impl CollabLink {
 
     /// Puts `annotation` on the map for everyone in the session.
     pub fn add_annotation(&self, annotation: crate::types::Annotation) {
-        let owner = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let owner = self.owner_raw();
         let Some(tx) = &self.local_tx else {
             let id = self.next_alone_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut alone = self.alone.lock();
@@ -235,7 +246,7 @@ impl CollabLink {
         };
         let mut event = crate::peer::LocalAnnotationEvent::new_annotation(annotation, owner);
         if let crate::peer::LocalAnnotationEvent::Set { board_id, .. } = &mut event {
-            *board_id = self.board;
+            *board_id = self.board_raw();
         }
         self.apply_local_annotation(&event);
         let _ = tx.send(LocalEvent::Annotation(event));
@@ -244,16 +255,7 @@ impl CollabLink {
     /// Everything the session holds, with the ids and owners it keys them
     /// by. What a snapshot for undo is taken of.
     pub fn annotations_held(&self) -> Vec<crate::drawing::Held> {
-        let sync = self.held();
-        sync.annotations
-            .iter()
-            .enumerate()
-            .map(|(at, annotation)| crate::drawing::Held {
-                id: sync.ids.get(at).copied().unwrap_or_default(),
-                owner: sync.owners.get(at).copied().unwrap_or_default(),
-                annotation: annotation.clone(),
-            })
-            .collect()
+        held_of(&self.held())
     }
 
     /// Puts the session back the way `was` had it.
@@ -272,20 +274,13 @@ impl CollabLink {
             let mut state = state.lock();
             let changes = {
                 let sync = match self.board {
-                    Some(board_id) => state.tactics_boards.get_mut(&board_id).map(|board| &mut board.annotation_sync),
+                    Some(board_id) => {
+                        state.tactics_boards.get_mut(&board_id.raw()).map(|board| &mut board.annotation_sync)
+                    }
                     None => Some(state.current_annotation_sync.get_or_insert_with(Default::default)),
                 };
                 let Some(sync) = sync else { return };
-                let current = sync
-                    .annotations
-                    .iter()
-                    .enumerate()
-                    .map(|(at, annotation)| crate::drawing::Held {
-                        id: sync.ids.get(at).copied().unwrap_or_default(),
-                        owner: sync.owners.get(at).copied().unwrap_or_default(),
-                        annotation: annotation.clone(),
-                    })
-                    .collect::<Vec<_>>();
+                let current = held_of(sync);
                 let changes = crate::drawing::undo_plan(was, &current);
                 if !changes.is_empty() {
                     *sync = crate::AnnotationSyncState {
@@ -299,7 +294,7 @@ impl CollabLink {
             if !changes.is_empty() {
                 match self.board {
                     Some(board_id) => {
-                        if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                        if let Some(board) = state.tactics_boards.get_mut(&board_id.raw()) {
                             board.annotation_sync_version += 1;
                             state.tactics_boards_version += 1;
                         }
@@ -312,12 +307,12 @@ impl CollabLink {
         for change in changes {
             let event = match change {
                 Change::Set(held) => LocalAnnotationEvent::Set {
-                    board_id: self.board,
+                    board_id: self.board_raw(),
                     id: held.id,
                     annotation: held.annotation,
                     owner: held.owner,
                 },
-                Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: self.board, id },
+                Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: self.board_raw(), id },
             };
             let _ = tx.send(LocalEvent::Annotation(event));
         }
@@ -325,7 +320,7 @@ impl CollabLink {
 
     /// Replaces every annotation with the supplied set.
     pub fn replace_annotations(&self, annotations: Vec<crate::types::Annotation>) {
-        let owner = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let owner = self.owner_raw();
         let held = annotations
             .into_iter()
             .map(|annotation| crate::drawing::Held {
@@ -352,12 +347,14 @@ impl CollabLink {
             | LocalAnnotationEvent::Remove { board_id, .. }
             | LocalAnnotationEvent::Clear { board_id } => *board_id,
         };
-        if event_board != self.board {
+        if event_board != self.board_raw() {
             return;
         }
         let changed = {
             let sync = match self.board {
-                Some(board_id) => state.tactics_boards.get_mut(&board_id).map(|board| &mut board.annotation_sync),
+                Some(board_id) => {
+                    state.tactics_boards.get_mut(&board_id.raw()).map(|board| &mut board.annotation_sync)
+                }
                 None => Some(state.current_annotation_sync.get_or_insert_with(Default::default)),
             };
             let Some(sync) = sync else { return };
@@ -400,7 +397,7 @@ impl CollabLink {
         if changed {
             match self.board {
                 Some(board_id) => {
-                    if let Some(board) = state.tactics_boards.get_mut(&board_id) {
+                    if let Some(board) = state.tactics_boards.get_mut(&board_id.raw()) {
                         board.annotation_sync_version += 1;
                         state.tactics_boards_version += 1;
                     }
@@ -423,10 +420,13 @@ impl CollabLink {
             }
             return;
         };
-        let sync = self.held();
-        let Some(id) = sync.ids.get(index).copied() else { return };
-        let owner = sync.owners.get(index).copied().unwrap_or_default();
-        let event = crate::peer::LocalAnnotationEvent::Set { board_id: self.board, id, annotation, owner };
+        let Some(held) = held_of(&self.held()).into_iter().nth(index) else { return };
+        let event = crate::peer::LocalAnnotationEvent::Set {
+            board_id: self.board_raw(),
+            id: held.id,
+            annotation,
+            owner: held.owner,
+        };
         self.apply_local_annotation(&event);
         let _ = tx.send(LocalEvent::Annotation(event));
     }
@@ -447,7 +447,7 @@ impl CollabLink {
             return;
         };
         let Some(id) = self.held().ids.get(index).copied() else { return };
-        let event = crate::peer::LocalAnnotationEvent::Remove { board_id: self.board, id };
+        let event = crate::peer::LocalAnnotationEvent::Remove { board_id: self.board_raw(), id };
         self.apply_local_annotation(&event);
         let _ = tx.send(LocalEvent::Annotation(event));
     }
@@ -460,19 +460,21 @@ impl CollabLink {
     /// The session drops anything sent for a board it does not hold, so this has
     /// to reach the peer task before the board's zones and shapes do.
     pub fn announce_board(&self, map: BoardMap) {
-        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
-        let owner_user_id = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board_raw()) else { return };
+        let owner_user_id = self.owner_raw();
         let map_image_png = map.art_png.unwrap_or_default();
         let map_info = map.info;
+        // The wire states a map with no recorded layout as the id zero, which is
+        // the form the egui board sends and reads.
+        let map_id_raw = map.map_id.unwrap_or(0);
         if let Some(state) = &self.state {
             let mut state = state.lock();
-            let owner = if owner_user_id == 0 { state.my_user_id } else { owner_user_id };
             let board = state.tactics_boards.entry(board_id).or_default();
-            board.owner_user_id = owner;
+            board.owner_user_id = owner_user_id;
             board.tactics_map = crate::TacticsMapInfo {
                 map_name: map.space.clone(),
                 display_name: map.label.clone(),
-                map_id: map.map_id,
+                map_id: map_id_raw,
                 map_image_png: map_image_png.clone(),
                 map_info: map_info.clone(),
             };
@@ -483,7 +485,7 @@ impl CollabLink {
             owner_user_id,
             map_name: map.space,
             display_name: map.label,
-            map_id: map.map_id,
+            map_id: map_id_raw,
             map_image_png,
             map_info,
         });
@@ -492,13 +494,13 @@ impl CollabLink {
     /// Takes this board out of the session, so a peer stops being offered a board
     /// nobody is looking at.
     pub fn close_board(&self) {
-        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board_raw()) else { return };
         let _ = tx.send(LocalEvent::TacticsMapClosed { board_id });
     }
 
     /// Puts a capture point on this board for everyone in the session.
     pub fn set_cap(&self, cap: crate::protocol::WireCapPoint) {
-        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board_raw()) else { return };
         if let Some(state) = &self.state {
             // Board handoff can read this state before the worker drains the event.
             let mut state = state.lock();
@@ -517,7 +519,7 @@ impl CollabLink {
 
     /// Takes one off it.
     pub fn remove_cap(&self, id: CapPointId) {
-        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board_raw()) else { return };
         if let Some(state) = &self.state {
             let mut state = state.lock();
             if let Some(board) = state.tactics_boards.get_mut(&board_id) {
@@ -537,7 +539,7 @@ impl CollabLink {
 
     /// This board's capture points as the session holds them.
     pub fn board_caps(&self) -> Vec<crate::protocol::WireCapPoint> {
-        let (Some(state), Some(board_id)) = (&self.state, self.board) else { return Vec::new() };
+        let (Some(state), Some(board_id)) = (&self.state, self.board_raw()) else { return Vec::new() };
         let held = state.lock();
         held.tactics_boards.get(&board_id).map(|board| board.cap_point_sync.cap_points.clone()).unwrap_or_default()
     }
@@ -545,7 +547,7 @@ impl CollabLink {
     /// Which version of this board's capture points and shapes the session is
     /// on, so a board can tell that nothing has changed without comparing lists.
     pub fn board_versions(&self) -> Option<BoardVersions> {
-        let (state, board_id) = (self.state.as_ref()?, self.board?);
+        let (state, board_id) = (self.state.as_ref()?, self.board_raw()?);
         let held = state.lock();
         let board = held.tactics_boards.get(&board_id)?;
         Some(BoardVersions { caps: board.cap_point_sync_version, shapes: board.annotation_sync_version })
@@ -564,7 +566,8 @@ impl CollabLink {
                 map: BoardMap {
                     space: board.tactics_map.map_name.clone(),
                     label: board.tactics_map.display_name.clone(),
-                    map_id: board.tactics_map.map_id,
+                    // The wire's zero is a map with no recorded layout.
+                    map_id: (board.tactics_map.map_id > 0).then_some(board.tactics_map.map_id),
                     art_png: (!board.tactics_map.map_image_png.is_empty())
                         .then(|| board.tactics_map.map_image_png.clone()),
                     info: board.tactics_map.map_info.clone(),
@@ -632,16 +635,16 @@ impl CollabLink {
 
     /// The windows the host has asked every peer to open, taken as they are read:
     /// an ask that has been answered is not one to answer again.
-    pub fn take_forced_windows(&self) -> Vec<u64> {
+    pub fn take_forced_windows(&self) -> Vec<WindowId> {
         let Some(state) = &self.state else { return Vec::new() };
         let mut held = state.lock();
-        held.force_open_window_ids.drain().collect()
+        held.force_open_window_ids.drain().map(WindowId::new).collect()
     }
 
     /// Asks every peer to open one of the session's windows.
-    pub fn open_for_everyone(&self, window_id: u64) {
+    pub fn open_for_everyone(&self, window: WindowId) {
         let Some(commands) = &self.commands else { return };
-        let _ = commands.send(crate::SessionCommand::OpenWindowForEveryone { window_id });
+        let _ = commands.send(crate::SessionCommand::OpenWindowForEveryone { window_id: window.raw() });
     }
 
     /// Puts one frame of playback in front of the session.
@@ -717,7 +720,9 @@ pub struct BoardMap {
     pub space: String,
     /// What the map is called to a reader.
     pub label: String,
-    pub map_id: u32,
+    /// The id the cap layouts are keyed by. `None` for a map with no recorded
+    /// layout.
+    pub map_id: Option<u32>,
     /// The drawn map as a PNG, for a peer whose build ships none for this map.
     /// `None` where there was no art to send, which the wire states as an empty
     /// one.
@@ -732,6 +737,44 @@ pub struct SessionBoard {
     pub board_id: BoardId,
     pub owner_user_id: UserId,
     pub map: BoardMap,
+}
+
+/// A window the session can ask every peer to open: a replay or a tactics
+/// board, which the wire does not tell apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WindowId(u64);
+
+impl WindowId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<ReplayId> for WindowId {
+    fn from(replay_id: ReplayId) -> Self {
+        Self(replay_id.raw())
+    }
+}
+
+impl From<BoardId> for WindowId {
+    fn from(board_id: BoardId) -> Self {
+        Self(board_id.raw())
+    }
+}
+
+/// The shapes `sync` holds, each with the id and owner it is keyed by. The
+/// three lists are written together and so are always the same length.
+fn held_of(sync: &crate::AnnotationSyncState) -> Vec<crate::drawing::Held> {
+    sync.annotations
+        .iter()
+        .zip(&sync.ids)
+        .zip(&sync.owners)
+        .map(|((annotation, id), owner)| crate::drawing::Held { id: *id, owner: *owner, annotation: annotation.clone() })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1038,7 +1081,7 @@ mod board_tests {
         board.announce_board(super::BoardMap {
             space: "spaces/13_OC_new_dawn".into(),
             label: "New Dawn".into(),
-            map_id: 13,
+            map_id: Some(13),
             art_png: Some(vec![9]),
             info: None,
         });

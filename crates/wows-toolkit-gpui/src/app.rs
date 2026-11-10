@@ -1522,7 +1522,7 @@ impl App {
                 }
                 Checked::Failed(reason) => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
-                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(reason.clone()),
+                        wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(reason.to_string()),
                     );
                     // Said once, as the egui app says it once: the mappings that
                     // are cached still read, so this is a notice rather than a
@@ -1563,6 +1563,11 @@ impl App {
                     })
                 })
                 .await;
+            // Without the recorded layouts a board still draws, offering no modes.
+            let read = read.unwrap_or_else(|err| {
+                tracing::warn!("tactics: {err}");
+                wows_replay_insights::cap_layout::CapLayoutDb::default()
+            });
             let _ = this.update(cx, |this, cx| {
                 this.cap_layouts = read;
                 cx.notify();
@@ -1736,7 +1741,11 @@ impl App {
 
             let session = match crate::runtime::spawn(cx, {
                 let client = client.clone();
-                async move { wows_toolkit_viewmodel::twitch_chat::Session::open(&token, &channel, client).await }
+                // The settings store the credential's own channel as a blank name.
+                async move {
+                    let channel = (!channel.is_empty()).then_some(channel.as_str());
+                    wows_toolkit_viewmodel::twitch_chat::Session::open(&token, channel, client).await
+                }
             })
             .await
             {

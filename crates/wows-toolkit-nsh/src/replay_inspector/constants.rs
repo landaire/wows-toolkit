@@ -19,25 +19,38 @@ use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
 use wows_toolkit_viewmodel::settings::keys;
 
 use crate::game_data::GameDataState;
+use crate::js_newtype::js_newtype;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::settings;
+
+/// A game build number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BuildNumber(pub u32);
+
+js_newtype!(BuildNumber, u32);
+
+impl std::fmt::Display for BuildNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// A build a listing names, with the version its replays give, which is what
 /// resolves a mapping across servers when the build numbers differ.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ConstantsBuild {
-    pub build: u32,
+    pub build: BuildNumber,
     pub version: Option<String>,
 }
 
 /// Builds this session has had an answer about. A build whose fetch failed is
 /// left out, so a later listing asks again.
-static ASKED: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+static ASKED: Mutex<BTreeSet<BuildNumber>> = Mutex::new(BTreeSet::new());
 
 /// Builds a battle was read through an unfitting mapping for, each recovered
 /// once a session.
-static MISMATCHED: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+static MISMATCHED: Mutex<BTreeSet<BuildNumber>> = Mutex::new(BTreeSet::new());
 
 /// Whether the newest published mapping was asked about this session.
 static LATEST_CHECKED: AtomicBool = AtomicBool::new(false);
@@ -52,7 +65,7 @@ pub fn fetch_missing(builds: Vec<ConstantsBuild>) -> u32 {
 /// that does not fit it, and forgets the newest-mapping commit so the next
 /// check fetches that again too. `0` when this build was already recovered
 /// this session. Blocking.
-pub fn recover(build: u32, version: Option<String>) -> Result<u32, InspectorError> {
+pub fn recover(build: BuildNumber, version: Option<String>) -> Result<u32, InspectorError> {
     if !lock(&MISMATCHED).insert(build) {
         return Ok(0);
     }
@@ -98,6 +111,7 @@ pub fn check_latest() -> Result<bool, InspectorError> {
             Ok(false)
         }
         Checked::Failed(reason) => {
+            let reason = reason.to_string();
             wows_toolkit_viewmodel::bug_report::record_constants_fetch(ConstantsFetchStatus::Failed(reason.clone()));
             tracing::warn!(%reason, "constants: the published mappings could not be checked");
             Err(InspectorError::ConstantsCheck { reason })
@@ -106,9 +120,9 @@ pub fn check_latest() -> Result<bool, InspectorError> {
 }
 
 /// The build a mapping is imported for: the one loaded. Refused while none is.
-pub fn loaded_build() -> Result<u32, InspectorError> {
+pub fn loaded_build() -> Result<BuildNumber, InspectorError> {
     match crate::game_data::status() {
-        GameDataState::Ready(loaded) => Ok(loaded.build()),
+        GameDataState::Ready(loaded) => Ok(BuildNumber(loaded.build())),
         GameDataState::NotConfigured | GameDataState::Loading { .. } | GameDataState::Failed { .. } => {
             Err(InspectorError::NoBuildLoaded)
         }
@@ -116,18 +130,18 @@ pub fn loaded_build() -> Result<u32, InspectorError> {
 }
 
 /// Takes the `constants.json` at `from` as `build`'s mapping. Blocking.
-pub fn import(from: &Path, build: u32) -> Result<(), InspectorError> {
-    wows_toolkit_replay_data::constants::import(from, build)
-        .map_err(|reason| InspectorError::ConstantsImport { reason })
+pub fn import(from: &Path, build: BuildNumber) -> Result<(), InspectorError> {
+    wows_toolkit_replay_data::constants::import(from, build.0).map_err(|source| InspectorError::ConstantsImport { source })
 }
 
-fn fetch(builds: Vec<(u32, Option<String>)>, cached: Cached) -> u32 {
+fn fetch(builds: Vec<(BuildNumber, Option<String>)>, cached: Cached) -> u32 {
     let wanted: Vec<(u32, Option<String>)> = {
         let asked = lock(&ASKED);
         builds
             .into_iter()
             .filter(|(build, _)| !asked.contains(build))
-            .filter(|(build, _)| cached == Cached::Replace || !wows_toolkit_replay_data::constants::is_cached(*build))
+            .filter(|(build, _)| cached == Cached::Replace || !wows_toolkit_replay_data::constants::is_cached(build.0))
+            .map(|(build, version)| (build.0, version))
             .collect()
     };
     if wanted.is_empty() {
@@ -142,9 +156,9 @@ fn fetch(builds: Vec<(u32, Option<String>)>, cached: Cached) -> u32 {
                 wows_toolkit_viewmodel::bug_report::record_constants_fetch(ConstantsFetchStatus::Succeeded);
                 tracing::info!(build, actual, "constants: the result mapping was fetched");
                 written += 1;
-                answered.push(build);
+                answered.push(BuildNumber(build));
             }
-            Fetched::AlreadyOnDisk => answered.push(build),
+            Fetched::AlreadyOnDisk => answered.push(BuildNumber(build)),
             // Left unanswered: a repository that refused once is worth asking
             // again on a later listing.
             Fetched::Failed(reason) => {
@@ -184,6 +198,6 @@ fn runtime() -> Result<tokio::runtime::Runtime, InspectorError> {
         .map_err(|source| InspectorError::Runtime { source })
 }
 
-fn lock(set: &Mutex<BTreeSet<u32>>) -> std::sync::MutexGuard<'_, BTreeSet<u32>> {
+fn lock(set: &Mutex<BTreeSet<BuildNumber>>) -> std::sync::MutexGuard<'_, BTreeSet<BuildNumber>> {
     set.lock().unwrap_or_else(PoisonError::into_inner)
 }

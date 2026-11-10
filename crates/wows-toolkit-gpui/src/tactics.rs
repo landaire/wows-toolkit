@@ -710,9 +710,9 @@ impl TacticsBoard {
         let bounds = self.painted.get()?;
         let size = self.drawn.as_ref()?.size(0);
         Letterbox::fitting(
-            (bounds.origin.x.as_f32(), bounds.origin.y.as_f32()),
-            (bounds.size.width.as_f32(), bounds.size.height.as_f32()),
-            (size.width.0 as f32, size.height.0 as f32),
+            board::ElementPos { x: bounds.origin.x.as_f32(), y: bounds.origin.y.as_f32() },
+            board::Extent { width: bounds.size.width.as_f32(), height: bounds.size.height.as_f32() },
+            board::Extent { width: size.width.0 as f32, height: size.height.0 as f32 },
         )
     }
 
@@ -720,7 +720,9 @@ impl TacticsBoard {
     /// undone. What a zoom about the pointer needs, since it re-anchors on a
     /// drawn point rather than a map one.
     fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        self.letterbox()?.to_frame((position.x.as_f32(), position.y.as_f32()))
+        let at = self.letterbox()?.to_frame(board::ElementPos { x: position.x.as_f32(), y: position.y.as_f32() })?;
+
+        Some((at.x, at.y))
     }
 
     /// Where a map point lands in the element.
@@ -730,7 +732,8 @@ impl TacticsBoard {
     /// scrolled off the map, which has nowhere on screen to be.
     fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
         let bounds = self.painted.get()?;
-        let (x, y) = self.letterbox()?.to_element((self.view.x(at.0), self.view.y(at.1)))?;
+        let board::ElementPos { x, y } =
+            self.letterbox()?.to_element(board::FramePos { x: self.view.x(at.0), y: self.view.y(at.1) })?;
         let x = x - bounds.origin.x.as_f32();
         let y = y - bounds.origin.y.as_f32();
         Some((px(x), px(y)))
@@ -854,7 +857,9 @@ impl TacticsBoard {
     /// it; anywhere else inside moves it. The topmost one wins, which is the
     /// last drawn.
     fn cap_under(&self, position: Point<Pixels>) -> Option<(usize, CapDrag)> {
-        board::cap_under(&self.caps, self.world_point(position)?, &self.map_info()?)
+        let (x, z) = self.world_point(position)?;
+
+        board::cap_under(&self.caps, wowsunpack::game_types::WorldPos2D { x, z }, &self.map_info()?)
     }
 
     /// Whether a capture point is the reader's to move.
@@ -998,7 +1003,7 @@ impl TacticsBoard {
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
         self.collab = link.on_board(board.board_id);
         let map = MapChoice {
-            map_id: (board.map.map_id > 0).then_some(board.map.map_id),
+            map_id: board.map.map_id,
             space: board.map.space,
             label: board.map.label,
         };
@@ -1075,9 +1080,7 @@ impl TacticsBoard {
                 session.announce_board(wt_collab_client::link::BoardMap {
                     space: map.space,
                     label: map.label,
-                    // The wire states a map with no recorded layout as the id
-                    // zero, which is the form the egui board sends and reads.
-                    map_id: map.map_id.unwrap_or(0),
+                    map_id: map.map_id,
                     art_png,
                     info,
                 });
@@ -1420,7 +1423,7 @@ impl TacticsBoard {
         let Some(param) = loaded.provider().game_param_by_index(&ship.param_index) else { return };
 
         let friendly = self.placing.as_ref().map(|placed| placed.friendly).unwrap_or(true);
-        let placed = PlacedShip { param_id: param.id().raw(), name: ship.display_name.clone(), species, friendly };
+        let placed = PlacedShip { param_id: param.id(), name: ship.display_name.clone(), species, friendly };
         self.drawing.set_tool(placed.tool());
         self.placing = Some(placed);
         self.adding = false;
@@ -1453,7 +1456,7 @@ impl TacticsBoard {
             && let Some(placed) = self.placing.clone()
         {
             *config = Some(wt_collab_client::types::AnnotationShipConfig {
-                param_id: placed.param_id,
+                param_id: placed.param_id.raw(),
                 ship_name: placed.name,
                 range_filter: self.range_filter.clone(),
                 // Stock hull and no modifiers until the reader says otherwise,

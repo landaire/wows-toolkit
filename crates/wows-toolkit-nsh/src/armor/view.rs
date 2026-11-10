@@ -14,6 +14,7 @@ use wows_toolkit_armor::scene::ArmorScene;
 use wows_toolkit_armor::scene::CAST_RANGE_MAX;
 use wows_toolkit_armor::scene::CAST_RANGE_MIN;
 use wows_toolkit_armor::scene::CAST_RANGE_STEP;
+use wows_toolkit_armor::visibility::plate_explicitly_hidden;
 use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
 use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
 use wows_toolkit_viewmodel::armor::arc::StoppingPlate;
@@ -40,6 +41,8 @@ use super::state::GpuState;
 use super::state::Pane;
 use super::state::PaneId;
 use super::state::PaneLoad;
+use super::state::RevealRequest;
+use super::state::ShipGeneration;
 use super::state::State;
 use super::tree::HullGroupRow;
 use super::tree::TreeNames;
@@ -127,7 +130,7 @@ pub struct ShotLogLine {
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct PaneView {
-    pub id: u32,
+    pub id: PaneId,
     /// The frame surface to show it in.
     pub surface: String,
     /// One-based, as "Pane 2 of 3" reads.
@@ -140,7 +143,7 @@ pub struct PaneView {
     pub load_error: Option<String>,
     pub has_armor: bool,
     /// Bumped when the pane starts showing another ship.
-    pub ship_generation: u32,
+    pub ship_generation: ShipGeneration,
     pub export_confirm: bool,
     pub hidden_plates: u32,
     pub health: Option<f32>,
@@ -328,7 +331,7 @@ pub struct DisplayView {
 #[derive(Debug, Clone, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct ActiveView {
-    pub pane_id: u32,
+    pub pane_id: PaneId,
     pub has_armor: bool,
     pub ship: Option<String>,
     pub show_hidden: bool,
@@ -436,14 +439,14 @@ pub struct ArmorView {
     /// Why the device failed, worded.
     pub gpu_error: Option<String>,
     /// Bumped when a replay asks for the viewer to be shown.
-    pub reveal_request: u32,
+    pub reveal_request: RevealRequest,
     pub ship_loaded: bool,
     pub mirror_cameras: bool,
     pub sync_options: bool,
     pub stack_panes: bool,
     pub options_open: bool,
     pub pen_check_open: bool,
-    pub active_pane: u32,
+    pub active_pane: PaneId,
     pub panes: Vec<PaneView>,
     pub active: ActiveView,
     pub legend: LegendView,
@@ -481,7 +484,7 @@ pub struct HoverPlate {
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct HoverView {
-    pub pane_id: Option<u32>,
+    pub pane_id: Option<PaneId>,
     /// Logical pixels within the pane.
     pub x: f32,
     pub y: f32,
@@ -513,7 +516,7 @@ fn zone_label(zone: &str, metadata: Option<&GameMetadataProvider>) -> String {
 pub(super) fn hover_view(id: PaneId, scene: &ArmorScene, metadata: Option<&GameMetadataProvider>) -> HoverView {
     if let Some(ring) = scene.hovered_ring() {
         return HoverView {
-            pane_id: Some(id.raw()),
+            pane_id: Some(id),
             x: ring.cursor.x,
             y: ring.cursor.y,
             plate: None,
@@ -545,11 +548,11 @@ pub(super) fn hover_view(id: PaneId, scene: &ArmorScene, metadata: Option<&GameM
         color: hex_color(tooltip.color),
         zone_label: zone_label(&tooltip.zone, metadata),
         material_label: material_label(tooltip.material, metadata, species),
-        hidden: scene.plate_visibility().get(&hover.key).copied().unwrap_or(false),
+        hidden: plate_explicitly_hidden(scene.plate_visibility(), &hover.key),
         layers,
     };
 
-    HoverView { pane_id: Some(id.raw()), x: hover.cursor.x, y: hover.cursor.y, plate: Some(plate), ring: None }
+    HoverView { pane_id: Some(id), x: hover.cursor.x, y: hover.cursor.y, plate: Some(plate), ring: None }
 }
 
 /// The whole viewer as the interface reads it.
@@ -559,15 +562,15 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
         BundleState::NotConfigured => (Phase::NotConfigured, None),
         BundleState::NotStarted | BundleState::Loading => (Phase::Pending, None),
         BundleState::Ready(_) => (Phase::Ready, None),
-        BundleState::Failed(reason) => {
-            (Phase::Failed, Some(t!("ui.armor.catalog_failed", reason = reason.clone()).into_owned()))
+        BundleState::Failed(error) => {
+            (Phase::Failed, Some(t!("ui.armor.catalog_failed", reason = error.to_string()).into_owned()))
         }
     };
     let (gpu, gpu_error) = match &state.gpu {
         GpuState::Initializing => (GpuPhase::Initializing, None),
         GpuState::Ready(_) => (GpuPhase::Ready, None),
-        GpuState::Failed(reason) => {
-            (GpuPhase::Failed, Some(t!("ui.armor.init_failed", reason = reason.clone()).into_owned()))
+        GpuState::Failed(error) => {
+            (GpuPhase::Failed, Some(t!("ui.armor.init_failed", reason = error.to_string()).into_owned()))
         }
     };
 
@@ -585,7 +588,7 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
         plate,
         ships: state.pen.ship_rows(thickness),
         firing_ship: state.pen.firing_ship.clone(),
-        firing_shell: state.pen.firing_shell.map(|index| index as u32),
+        firing_shell: state.pen.firing_shell,
     };
 
     ArmorView {
@@ -600,7 +603,7 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
         stack_panes: state.stack_panes,
         options_open: state.options_open,
         pen_check_open: state.pen_open,
-        active_pane: state.active.raw(),
+        active_pane: state.active,
         panes: state
             .panes
             .iter()
@@ -611,8 +614,8 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
         legend: LegendView {
             visible: state.legend.visible,
             collapsed: state.legend.collapsed,
-            x: state.legend.x,
-            y: state.legend.y,
+            x: state.legend.position.x,
+            y: state.legend.position.y,
             entries: armor_color_legend().iter().map(legend_entry).collect(),
         },
         pen,
@@ -623,18 +626,20 @@ pub(super) fn armor_view(state: &State) -> ArmorView {
 
 fn pane_view(pane: &Pane, index: usize, active: bool) -> PaneView {
     let scene = &pane.scene;
-    let (loading, load_error) = match &pane.load {
-        PaneLoad::Idle => (None, None),
-        PaneLoad::Loading { display_name } => (Some(display_name.clone()), None),
-        PaneLoad::Failed { display_name, reason } => (
-            None,
-            Some(t!("ui.armor.ship_load_failed", ship = display_name.clone(), reason = reason.clone()).into_owned()),
+    let loading = match &pane.load {
+        PaneLoad::Loading { display_name } => Some(display_name.clone()),
+        PaneLoad::Idle | PaneLoad::Failed { .. } => None,
+    };
+    let load_error = match &pane.load {
+        PaneLoad::Failed { display_name, error } => Some(
+            t!("ui.armor.ship_load_failed", ship = display_name.clone(), reason = error.to_string()).into_owned(),
         ),
+        PaneLoad::Idle | PaneLoad::Loading { .. } => None,
     };
     let hits = scene.hits_drawn();
     let health = scene.hit_health();
     PaneView {
-        id: pane.id.raw(),
+        id: pane.id,
         surface: pane.id.surface().as_str().to_owned(),
         number: index as u32 + 1,
         active,
@@ -669,7 +674,7 @@ fn active_view(pane: &Pane, metadata: Option<&GameMetadataProvider>, legend_visi
     let names = TreeNames { metadata, species };
 
     ActiveView {
-        pane_id: pane.id.raw(),
+        pane_id: pane.id,
         has_armor: scene.has_armor(),
         ship: pane.source.as_ref().map(|source| source.display_name.clone()),
         show_hidden: scene.show_hidden_only(),
@@ -790,14 +795,14 @@ fn hull_view(scene: &ArmorScene) -> HullView {
     };
     let selection = scene.hull_selection();
     let upgrades = armor
-        .hull_upgrade_names
+        .hull_upgrades
         .iter()
         .enumerate()
-        .map(|(index, (key, label))| ChoiceView {
-            key: key.clone(),
-            label: label.clone(),
+        .map(|(index, upgrade)| ChoiceView {
+            key: upgrade.key.clone(),
+            label: upgrade.label.clone(),
             // No choice yet is the stock hull, listed first.
-            selected: selection.hull.as_ref().map_or(index == 0, |chosen| chosen == key),
+            selected: selection.hull.as_ref().map_or(index == 0, |chosen| *chosen == upgrade.key),
         })
         .collect();
     let modules = armor
@@ -934,6 +939,7 @@ pub(super) fn parse_hex(color: &str) -> Option<[f32; 3]> {
 }
 
 fn legend_entry(entry: &ArmorLegendEntry) -> LegendEntryView {
+    // The scale's last band has no upper bound; it is marked 999 mm.
     let label = if entry.max_mm >= 999.0 {
         format!("{}+ mm", entry.min_mm as u32)
     } else {

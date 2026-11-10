@@ -18,6 +18,7 @@ use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
 
 use super::Tab;
+use super::error::UnpackerError;
 use super::listing::BrowserSource;
 use super::ui::ButtonStyle;
 use super::ui::button;
@@ -46,9 +47,16 @@ pub struct SearchRun {
 
 impl SearchRun {
     /// Starts scanning `files` for `query`, narrowed by `path_filter`.
-    /// `None` when the query compiles neither as a regex nor as a literal.
-    pub fn start(source: BrowserSource, query: String, path_filter: String, files: Arc<FileList>) -> Option<Self> {
-        let pattern = compile_query(&query)?;
+    /// Fails when the query compiles neither as a regex nor as a literal.
+    pub fn start(
+        source: BrowserSource,
+        query: String,
+        path_filter: String,
+        files: Arc<FileList>,
+    ) -> Result<Self, UnpackerError> {
+        let Some(pattern) = compile_query(&query) else {
+            return Err(UnpackerError::SearchQuery { query });
+        };
 
         let run = Self {
             query: stored(query),
@@ -104,7 +112,7 @@ impl SearchRun {
             run.running.set(false);
         });
 
-        Some(run)
+        Ok(run)
     }
 
     pub fn stop(&self) {
@@ -172,6 +180,8 @@ pub fn search_view(run: SearchRun, tab: Tab) -> AnyElement {
 fn hit_row(run: SearchRun, tab: Tab, at: Position) -> AnyElement {
     let hit = computed(move || run.hits.with(|hits| hits.get(at.index()).cloned()));
     let path = move || hit.with_untracked(|hit| hit.as_ref().map(|hit| hit.vfs_path.clone()));
+    // A row past the end, while the list catches up with the closed panel
+    // dropping its hits, shows blank.
     let label = move || hit.with(|hit| hit.as_ref().map(|hit| hit.path.clone()).unwrap_or_default());
 
     let body = view()

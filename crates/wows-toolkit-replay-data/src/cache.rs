@@ -16,6 +16,8 @@ use wows_data_mgr::download_repo;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::dump::CacheStats;
 
+use crate::error::CacheError;
+
 /// What the cache section is doing, when it is doing something.
 ///
 /// One at a time: all of them reach the same repository and the same directory,
@@ -66,8 +68,13 @@ pub struct CacheState {
     pub tip: Option<String>,
     /// Bumped whenever the directory changes, so a measurement that started
     /// against the old one is discarded rather than shown against the new.
-    generation: u64,
+    generation: MeasureGeneration,
 }
+
+/// Which directory a measurement was taken against. Bumped whenever the
+/// directory changes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MeasureGeneration(u64);
 
 impl CacheState {
     /// Whether a job is under way, which is what refuses the controls.
@@ -83,7 +90,7 @@ impl CacheState {
     pub fn forget_stats(&mut self) {
         self.stats = None;
         self.measuring = false;
-        self.generation = self.generation.wrapping_add(1);
+        self.generation = MeasureGeneration(self.generation.0.wrapping_add(1));
     }
 
     /// Whether a measurement should be started now, and which directory it
@@ -92,7 +99,7 @@ impl CacheState {
     /// `None` when the answer is already in hand or a walk is already
     /// running. The section asks as it draws, so without that second
     /// condition every frame would start another walk of the same directory.
-    pub fn wants_measure(&mut self) -> Option<u64> {
+    pub fn wants_measure(&mut self) -> Option<MeasureGeneration> {
         if self.stats.is_some() || self.measuring {
             return None;
         }
@@ -101,7 +108,7 @@ impl CacheState {
     }
 
     /// Takes a finished measurement, unless the directory has moved on.
-    pub fn measured(&mut self, stats: CacheStats, generation: u64) {
+    pub fn measured(&mut self, stats: CacheStats, generation: MeasureGeneration) {
         if generation != self.generation {
             return;
         }
@@ -195,11 +202,11 @@ pub async fn check_for_updates(
     client: &reqwest::Client,
     base: &Path,
     known_tip: Option<&str>,
-) -> Result<CacheOutcome, String> {
+) -> Result<CacheOutcome, CacheError> {
     download_repo::check_for_updates(client, download_repo::DEFAULT_REPO_BASE_URL, base, known_tip)
         .await
         .map(|checked| CacheOutcome::Checked { tip: checked.tip, updates: checked.updates })
-        .map_err(|err| err.to_string())
+        .map_err(CacheError::Check)
 }
 
 /// Checks every cached object against the repository and its own hash.
@@ -207,7 +214,7 @@ pub async fn validate(
     client: &reqwest::Client,
     base: &Path,
     progress: impl Fn(Progress),
-) -> Result<CacheOutcome, String> {
+) -> Result<CacheOutcome, CacheError> {
     download_repo::validate_cache(client, download_repo::DEFAULT_REPO_BASE_URL, base, |done, total| {
         progress(Progress { done, total })
     })
@@ -219,7 +226,7 @@ pub async fn validate(
             .collect();
         CacheOutcome::Validated { tip: validated.tip, repair }
     })
-    .map_err(|err| err.to_string())
+    .map_err(CacheError::Validate)
 }
 
 /// Asks the repository what it has for each of `builds`, and what fetching them
@@ -232,12 +239,12 @@ pub async fn plan(
     client: &reqwest::Client,
     base: &Path,
     builds: &[(u32, Option<String>)],
-) -> Result<CacheOutcome, String> {
+) -> Result<CacheOutcome, CacheError> {
     let cas_root = wows_data_mgr::cas::cas_root(base);
     download_repo::plan_download(client, download_repo::DEFAULT_REPO_BASE_URL, &cas_root, builds)
         .await
         .map(|plan| CacheOutcome::Planned { plan })
-        .map_err(|err| err.to_string())
+        .map_err(CacheError::Plan)
 }
 
 /// Fetches the named builds, whether they are new, stale or damaged.
@@ -251,7 +258,7 @@ pub async fn download(
     base: &Path,
     builds: &[BuildUpdateStatus],
     progress: impl Fn(Progress),
-) -> Result<CacheOutcome, String> {
+) -> Result<CacheOutcome, CacheError> {
     let requests: Vec<(u32, Option<String>)> =
         builds.iter().map(|build| (build.build, Some(build.version.clone()))).collect();
     let results = download_repo::download_builds(

@@ -150,6 +150,7 @@ pub fn splash_half_extent(caliber: Millimeters) -> ModelUnit {
 /// The game names them `XX_SB_<part>_<index>`; the prefix says nothing to a
 /// reader and the part is an abbreviation.
 pub fn prettify_box_name(box_name: &str) -> String {
+    // A name without the prefix is read whole.
     let stripped = box_name.find("_SB_").map(|at| &box_name[at + 4..]).unwrap_or(box_name);
     let part: String =
         stripped.split('_').take_while(|piece| piece.chars().all(char::is_alphabetic)).collect::<Vec<_>>().join("_");
@@ -179,7 +180,7 @@ pub fn build_splash_box_groups(boxes: &[SplashBox]) -> Vec<(String, Vec<String>)
     for shape in boxes {
         let label = prettify_box_name(&shape.name);
         // The group is the part, without the index that distinguishes one
-        // turret from another.
+        // turret from another. `split` always yields at least one piece.
         let group = label.split(' ').next().unwrap_or(&label).to_string();
         match groups.iter_mut().find(|(name, _)| *name == group) {
             Some((_, members)) => members.push(shape.name.clone()),
@@ -230,6 +231,7 @@ pub fn compute_splash(
         }
 
         let zone = splash_data.box_to_zone.get(&shape.name);
+        // A box the splash file maps to no zone is named after itself.
         let zone_name = zone.cloned().unwrap_or_else(|| prettify_box_name(&shape.name));
         let location = hit_locations.and_then(|locations| zone.and_then(|zone| locations.get(zone)));
         hit_zones.push(SplashZoneHit {
@@ -292,11 +294,18 @@ pub struct SplashBoxLabel {
     pub name: String,
 }
 
+/// The outlines of a set of splash boxes, with somewhere to write each name.
+pub struct SplashBoxWireframes {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+    pub labels: Vec<SplashBoxLabel>,
+}
+
 /// The outlines of every named box, with somewhere to write each name.
 ///
 /// The label sits at the top face's middle, which is clear of the hull for
 /// every box that is not buried in it.
-pub fn build_splash_box_wireframes(boxes: &[&SplashBox]) -> (Vec<Vertex>, Vec<u32>, Vec<SplashBoxLabel>) {
+pub fn build_splash_box_wireframes(boxes: &[&SplashBox]) -> SplashBoxWireframes {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let mut labels = Vec::new();
@@ -310,7 +319,7 @@ pub fn build_splash_box_wireframes(boxes: &[&SplashBox]) -> (Vec<Vertex>, Vec<u3
             name: shape.name.clone(),
         });
     }
-    (vertices, indices, labels)
+    SplashBoxWireframes { vertices, indices, labels }
 }
 
 /// A box drawn as twelve thin quads, one per edge.
@@ -541,7 +550,7 @@ mod tests {
         let boxes = [splash_box("CM_SB_cit_1", [-2.0, -1.0, -3.0], [2.0, 4.0, 3.0])];
         let refs: Vec<&SplashBox> = boxes.iter().collect();
 
-        let (_, _, labels) = build_splash_box_wireframes(&refs);
+        let labels = build_splash_box_wireframes(&refs).labels;
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].position, [0.0, 4.0, 0.0]);
@@ -554,7 +563,7 @@ mod tests {
         let boxes = [splash_box("a", [0.0; 3], [1.0; 3]), splash_box("b", [2.0, 2.0, 2.0], [3.0, 3.0, 3.0])];
         let refs: Vec<&SplashBox> = boxes.iter().collect();
 
-        let (vertices, indices, _) = build_splash_box_wireframes(&refs);
+        let SplashBoxWireframes { vertices, indices, .. } = build_splash_box_wireframes(&refs);
 
         // The second box's indices are offset past the first box's vertices;
         // getting that wrong draws one box's edges onto the other.

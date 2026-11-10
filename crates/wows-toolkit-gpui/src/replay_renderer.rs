@@ -108,6 +108,7 @@ use wows_toolkit_replay_data::playback::SEEK_STEP;
 use wows_toolkit_replay_data::playback::SHIP_MATCHES;
 use wows_toolkit_replay_data::playback::SPECIES;
 use wows_toolkit_replay_data::playback::SPEEDS;
+use wows_toolkit_replay_data::playback::ShipSpecies;
 use wows_toolkit_replay_data::playback::TICK;
 use wows_toolkit_replay_data::playback::Track;
 use wows_toolkit_replay_data::playback::ZOOM_PER_PIXEL;
@@ -518,7 +519,7 @@ impl ReplayRendererPanel {
                 space_size: 1400.0,
                 version: wowsunpack::data::Version::base(99, 0, 0),
                 space: String::new(),
-                map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
+                map_origin: DEFAULT_MAP_ORIGIN,
             }),
             renderer: None,
             frame: None,
@@ -797,10 +798,10 @@ impl ReplayRendererPanel {
         }
         self.collab.broadcast_frame(wt_collab_client::peer::FrameBroadcast {
             replay_id: self.replay_id.raw(),
-            clock: track.seconds_at(self.at),
+            clock: track.clock_at(self.at).seconds(),
             frame_index: self.at as u32,
             total_frames: track.len() as u32,
-            game_duration: track.seconds_at(track.len().saturating_sub(1)),
+            game_duration: track.clock_at(track.len().saturating_sub(1)).seconds(),
             commands: commands.to_vec(),
         });
     }
@@ -960,7 +961,7 @@ impl ReplayRendererPanel {
             return None;
         }
         let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
-        Some((px(left.as_f32() + (drawn.0 + origin.0) * scale), px(top.as_f32() + (drawn.1 + origin.1) * scale)))
+        Some((px(left.as_f32() + (drawn.0 + origin.x) * scale), px(top.as_f32() + (drawn.1 + origin.y) * scale)))
     }
 
     /// Where the frame's HUD strip lands inside the viewport element.
@@ -992,8 +993,8 @@ impl ReplayRendererPanel {
         match reading {
             AdvantageReading::TeamEliminated => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
             AdvantageReading::Rows { rows, hp_incomplete } => {
-                for (label_key, contribution) in rows {
-                    lines.push(format!("{}  {}", t!(label_key), contribution));
+                for row in rows {
+                    lines.push(format!("{}  {}", t!(row.label_key), row.contribution));
                 }
                 if hp_incomplete {
                     lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
@@ -1055,7 +1056,7 @@ impl ReplayRendererPanel {
     /// The ship drawn nearest `at` in the frame on screen, if one is close
     /// enough to have been meant.
     fn ship_at(&self, at: (f32, f32)) -> Option<ShipMenu> {
-        let pick = self.track()?.ship_near(self.at, at)?;
+        let pick = self.track()?.ship_near(self.at, wows_minimap_renderer::MinimapPos { x: at.0, y: at.1 })?;
         // The caller puts the menu where the pointer was; a pick has no
         // position of its own.
         Some(ShipMenu { entity_id: pick.entity_id, player_name: pick.player_name, at: Point::default() })
@@ -1089,14 +1090,14 @@ impl ReplayRendererPanel {
         let Some(timeline) = self.shots.get(&entity_id).cloned() else { return };
 
         let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(timeline);
-        feed.advance_to(GameClock(self.clock_of(self.at)));
+        feed.advance_to(self.clock_of(self.at));
         let mut incoming = self.incoming_context(entity_id);
         // The log reads the whole battle, not the part played so far: scrubbing
         // back would otherwise take salvos out of a list nobody was scrubbing.
         incoming.taken = feed.whole_battle().to_vec();
         self.resolve_incoming_shells(&mut incoming);
         incoming.health = feed.health_strip();
-        incoming.at = Some(GameClock(self.clock_of(self.at)));
+        incoming.at = Some(self.clock_of(self.at));
         cx.emit(RendererEvent::ShowArmor {
             param_index,
             display_name,
@@ -1175,7 +1176,7 @@ impl ReplayRendererPanel {
     /// Only when the set of hits has changed: telling it again rebuilds the
     /// hull's meshes, which is far more than a frame of playback is worth.
     fn follow_armor(&mut self, cx: &mut Context<Self>) {
-        let clock = GameClock(self.clock_of(self.at));
+        let clock = self.clock_of(self.at);
         let Some((_, feed)) = self.armor_following.as_mut() else { return };
         let moved = feed.advance_to(clock);
         let changed = match moved {
@@ -1190,8 +1191,8 @@ impl ReplayRendererPanel {
     }
 
     /// The game clock frame `at` was drawn at.
-    fn clock_of(&self, at: usize) -> f32 {
-        self.track().map(|track| track.seconds_at(at)).unwrap_or_default()
+    fn clock_of(&self, at: usize) -> GameClock {
+        self.track().map(|track| track.clock_at(at)).unwrap_or_default()
     }
 
     /// Whether the menu's ship has anything an armor viewer could show.
@@ -1327,13 +1328,13 @@ impl ReplayRendererPanel {
     /// How far into the battle playback is, which is what an event's clock is
     /// measured against.
     fn elapsed_now(&self) -> Option<f32> {
-        self.track().map(|track| track.elapsed_at(self.at))
+        self.track().map(|track| track.elapsed_at(self.at).seconds())
     }
 
     /// Moves playback to `event` and says what it was.
     fn go_to_event(&mut self, at: f32, said: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(track) = self.track() else { return };
-        let frame = track.frame_at(at + track.battle_start.seconds());
+        let frame = track.frame_at(track.battle_start + at);
         self.go_to(frame, window, cx);
         crate::toast::info(said, window, cx);
     }
@@ -1341,7 +1342,7 @@ impl ReplayRendererPanel {
     /// Moves playback to `at` seconds into the battle.
     pub(crate) fn go_to_event_at(&mut self, at: f32, window: &mut Window, cx: &mut Context<Self>) {
         let Some(track) = self.track() else { return };
-        let frame = track.frame_at(at + track.battle_start.seconds());
+        let frame = track.frame_at(track.battle_start + at);
         self.go_to(frame, window, cx);
     }
 
@@ -1351,7 +1352,7 @@ impl ReplayRendererPanel {
     /// is what a salvo in the incoming-fire log is stamped with.
     pub(crate) fn go_to_clock(&mut self, clock: GameClock, window: &mut Window, cx: &mut Context<Self>) {
         let Some(track) = self.track() else { return };
-        let frame = track.frame_at(clock.seconds());
+        let frame = track.frame_at(clock);
         self.go_to(frame, window, cx);
     }
 
@@ -1497,11 +1498,11 @@ impl ReplayRendererPanel {
             return;
         };
         match wows_toolkit_replay_data::minimap::renderer_for_replay(&self.path, &game_data, wanted) {
-            Ok((renderer, origin)) => {
+            Ok(replay_renderer) => {
                 self.layout = wanted;
-                self.renderer = Some(renderer);
+                self.renderer = Some(replay_renderer.renderer);
                 if let State::Ready(track) = &mut self.state {
-                    track.map_origin = (origin.0 as f32, origin.1 as f32);
+                    track.map_origin = replay_renderer.map_origin;
                 }
                 // The frame on screen was drawn on the old canvas, so it is
                 // the wrong shape until the next one lands.
@@ -1555,7 +1556,7 @@ impl ReplayRendererPanel {
     /// Moves playback `delta` seconds of game time from where it is.
     fn seek_by(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
         let Some(track) = self.track() else { return };
-        let at = track.frame_at(track.seconds_at(self.at) + delta);
+        let at = track.frame_at(track.clock_at(self.at) + delta);
         self.go_to(at, window, cx);
     }
 
@@ -1990,7 +1991,7 @@ impl ReplayRendererPanel {
     fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let (x, y) = self.canvas_point(position)?;
         let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
-        let (x, y) = (x - origin.0, y - origin.1);
+        let (x, y) = (x - origin.x, y - origin.y);
         let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
         (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
     }
@@ -2533,13 +2534,13 @@ impl ReplayRendererPanel {
     /// not started.
     fn clock_label(&self) -> String {
         let Some(track) = self.track() else { return String::new() };
-        mmss(track.elapsed_at(self.at))
+        mmss(track.elapsed_at(self.at).seconds())
     }
 
     /// How long the battle runs for, as the clock would read at its end.
     fn length_label(&self) -> String {
         let Some(track) = self.track() else { return String::new() };
-        mmss(track.elapsed_at(track.len().saturating_sub(1)))
+        mmss(track.elapsed_at(track.len().saturating_sub(1)).seconds())
     }
 
     /// Where playback has reached and how much there is, which is what says
@@ -3261,7 +3262,7 @@ fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: boo
     let tint = if friendly { FRIENDLY_TINT } else { ENEMY_TINT };
     h_flex()
         .gap_1()
-        .children(SPECIES.iter().map(|(short, species)| {
+        .children(SPECIES.iter().map(|ShipSpecies { short, name: species }| {
             let owner = panel.clone();
             let species = (*species).to_string();
             let on = matches!(
@@ -4456,7 +4457,7 @@ mod tests {
                 // A point on the map, and the same point in window
                 // coordinates: the frame reserves a strip above the map.
                 let on_map = (200.0_f32, 300.0_f32);
-                let at = point(px(on_map.0), px(on_map.1 + super::DEFAULT_MAP_ORIGIN.1));
+                let at = point(px(on_map.0), px(on_map.1 + super::DEFAULT_MAP_ORIGIN.y));
                 let before = panel.view().to_map(on_map.0, on_map.1);
 
                 let event = ScrollEvent {
@@ -4926,7 +4927,7 @@ mod tests {
                 for zoom in [1.0_f32, 3.5] {
                     panel.set_view(super::MapViewport::new(zoom, (40.0, 90.0)), window, cx);
 
-                    let at = point(px(300.), px(200.0 + super::DEFAULT_MAP_ORIGIN.1));
+                    let at = point(px(300.), px(200.0 + super::DEFAULT_MAP_ORIGIN.y));
                     let on_map = panel.map_point(at).expect("the pointer is over the map");
                     let (left, top) = panel.element_point(on_map).expect("and the map point is on screen");
 

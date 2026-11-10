@@ -16,6 +16,7 @@ use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::theme::Semantic;
 use wows_toolkit_viewmodel::theme::semantic_for;
 
+use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::document::ReplayDocId;
 use crate::replay_inspector::document::ReplayDocument;
 
@@ -80,7 +81,7 @@ pub struct ChatLine {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ConstantsMismatchInfo {
-    pub build: u32,
+    pub build: BuildNumber,
     pub version: String,
 }
 
@@ -88,7 +89,7 @@ pub struct ConstantsMismatchInfo {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ReplaySummary {
-    pub document: u32,
+    pub document: ReplayDocId,
     pub path: String,
     pub file_name: String,
     /// `<self ship> - <map>`, or the map alone.
@@ -135,8 +136,9 @@ pub fn summarize(
     let damage = summary::team_damage(model);
 
     ReplaySummary {
-        document: id.to_js(),
+        document: id,
         path: document.path.display().to_string(),
+        // A document is read from a file, so its path always ends in a name.
         file_name: document.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
         title: summary::title(model),
         outcome,
@@ -211,14 +213,14 @@ mod tests {
         let mut document = sample_document(Path::new("/replays/sample.wowsreplay"), &[]);
         edit(&mut document);
 
-        summarize(ReplayDocId::from_js(7), &document, true, None)
+        summarize(ReplayDocId::new(7), &document, true, None)
     }
 
     #[test]
     fn the_header_names_the_ship_the_map_and_the_outcome() {
         let summary = summarize_sample(|document| document.model.battle_result = Some(BattleResult::Win(0)));
 
-        assert_eq!(summary.document, 7);
+        assert_eq!(summary.document, ReplayDocId::new(7));
         assert_eq!(summary.file_name, "sample.wowsreplay");
         assert_eq!(summary.title, "Shimakaze - Fault Line");
         assert_eq!(summary.outcome, Some(Outcome::Win));
@@ -313,7 +315,7 @@ mod tests {
         let summary = summarize_sample(|document| {
             document.alts = vec![PathBuf::from("/replays/other.wowsreplay")];
             document.constants_mismatch = Some(crate::replay_inspector::document::ConstantsMismatch {
-                build: 9_000_000,
+                build: BuildNumber(9_000_000),
                 version: "14.1.0".to_owned(),
             });
         });
@@ -321,7 +323,7 @@ mod tests {
         assert_eq!(summary.alts, ["/replays/other.wowsreplay"]);
         assert_eq!(
             summary.constants_mismatch,
-            Some(ConstantsMismatchInfo { build: 9_000_000, version: "14.1.0".to_owned() })
+            Some(ConstantsMismatchInfo { build: BuildNumber(9_000_000), version: "14.1.0".to_owned() })
         );
     }
 }

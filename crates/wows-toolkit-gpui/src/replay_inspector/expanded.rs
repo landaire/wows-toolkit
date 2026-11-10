@@ -49,6 +49,7 @@ use wows_toolkit_replay_data::row_detail::CONSUMABLE_NAME_WIDTH;
 use wows_toolkit_replay_data::row_detail::DamageDirection;
 use wows_toolkit_replay_data::row_detail::FIRE_CHANCE_SHIP_WIDTH;
 use wows_toolkit_replay_data::row_detail::ICON_LABEL_GAP;
+use wows_toolkit_replay_data::row_detail::IconSize;
 use wows_toolkit_replay_data::row_detail::LARGE_ICON_SIZE;
 use wows_toolkit_replay_data::row_detail::MODULE_ICON_SIZE;
 use wows_toolkit_replay_data::row_detail::SKILL_COST_WIDTH;
@@ -214,16 +215,16 @@ fn icon_or_text_cell(
         .into_any_element()
 }
 
-/// Fitted `(width, height)` to render `image` within a `max` by `max` box
+/// The size to render `image` at within a `max` by `max` box
 /// while preserving its native aspect ratio. Matches the egui app's ribbon
 /// rendering, which uses `Image::fit_to_exact_size((64, 64))` -- a scale that
 /// keeps aspect ratio -- so a wide, short ribbon icon renders short (its row
 /// only as tall as the fitted icon) rather than being forced into a `max` by
 /// `max` square and inflating the row height. Square icons (achievements) are
 /// unaffected: they fit as `max` by `max`.
-fn fit_within_box(image: &RenderImage, max: f32) -> (f32, f32) {
+fn fit_within_box(image: &RenderImage, max: f32) -> IconSize {
     let size = image.size(0);
-    fit_dims(size.width.0 as f32, size.height.0 as f32, max)
+    fit_dims(IconSize { width: size.width.0 as f32, height: size.height.0 as f32 }, max)
 }
 
 /// An `[icon | label]` row shared by achievements and ribbons: an icon when
@@ -253,8 +254,8 @@ fn icon_label_row(
     let tooltip: SharedString = tooltip_text.into();
     let mut row = h_flex().w_full().gap(px(ICON_LABEL_GAP)).items_center();
     if let Some(image) = icons.get_keyed(key) {
-        let (w, h) = fit_within_box(&image, size);
-        row = row.child(img(image).w(px(w)).h(px(h)).flex_none());
+        let fitted = fit_within_box(&image, size);
+        row = row.child(img(image).w(px(fitted.width)).h(px(fitted.height)).flex_none());
     }
     row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(detail_text(label)));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))

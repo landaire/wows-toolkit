@@ -38,6 +38,14 @@ pub const COPY_BACKGROUND: PlotColor = PlotColor::new(24.0 / 255.0, 24.0 / 255.0
 /// a glyph out of.
 type FaceBytes = Arc<(Vec<u8>, u32)>;
 
+/// A drawn plot: `width` by `height` device pixels of premultiplied RGBA rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlotImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 /// Draws a plot into an image.
 ///
 /// Coordinates handed to the canvas are logical pixels; `scale` maps them to
@@ -63,9 +71,11 @@ impl ImageCanvas {
     }
 
     /// The finished image as premultiplied RGBA rows.
-    pub fn into_premultiplied_rgba(self) -> (u32, u32, Vec<u8>) {
-        let (width, height) = (self.pixmap.width(), self.pixmap.height());
-        (width, height, self.pixmap.take())
+    pub fn into_premultiplied_rgba(self) -> PlotImage {
+        let width = self.pixmap.width();
+        let height = self.pixmap.height();
+
+        PlotImage { width, height, rgba: self.pixmap.take() }
     }
 
     /// Whether `bounds` survives the current clip.
@@ -205,7 +215,7 @@ pub fn render(
     width: u32,
     height: u32,
     scale: f32,
-) -> Option<(u32, u32, Vec<u8>)> {
+) -> Option<PlotImage> {
     let mut canvas = ImageCanvas::new(width, height, scale, background)?;
     let bounds = PlotRect::new(0.0, 0.0, width as f32 / scale, height as f32 / scale);
     draw(plot, bounds, colors, &mut canvas);
@@ -364,13 +374,13 @@ mod tests {
     fn a_plot_marks_the_image_it_is_drawn_into() {
         let series = series();
 
-        let (width, height, pixels) =
+        let image =
             render(&plot(&series), colors(), COPY_BACKGROUND, 400, 300, 1.0).expect("a pixmap of this size is made");
 
-        assert_eq!((width, height), (400, 300));
-        assert_eq!(pixels.len(), 400 * 300 * 4);
+        assert_eq!((image.width, image.height), (400, 300));
+        assert_eq!(image.rgba.len(), 400 * 300 * 4);
         let background = [24u8, 24, 27];
-        let drawn = pixels.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count();
+        let drawn = image.rgba.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count();
         assert!(drawn > 0, "the plot left nothing on the image");
     }
 
@@ -379,9 +389,10 @@ mod tests {
         let series = series();
         let background = [24u8, 24, 27];
         let marked = |scale: f32, size: u32| {
-            let (_, _, pixels) = render(&plot(&series), colors(), COPY_BACKGROUND, size, size * 3 / 4, scale)
+            let image = render(&plot(&series), colors(), COPY_BACKGROUND, size, size * 3 / 4, scale)
                 .expect("a pixmap of this size is made");
-            pixels.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count() as f64 / f64::from(size * size * 3 / 4)
+            image.rgba.as_chunks::<4>().0.iter().filter(|px| px[..3] != background).count() as f64
+                / f64::from(size * size * 3 / 4)
         };
 
         let single = marked(1.0, 400);

@@ -5,11 +5,18 @@ use wows_toolkit_config::WindowSettings;
 
 use crate::shell::error::WindowError;
 
-/// The main window's size in points, and whether it fills the screen.
+/// A window size in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowSize {
+    pub width: f32,
+    pub height: f32,
+}
+
+/// The main window's size, and whether it fills the screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MainWindowGeometry {
     /// The size it has when neither maximized nor full screen.
-    pub size: [f32; 2],
+    pub size: WindowSize,
     pub maximized: bool,
     pub fullscreen: bool,
 }
@@ -26,7 +33,7 @@ pub fn remembered() -> Option<WindowSettings> {
 /// the one another front end wrote is left for it.
 pub fn merged(previous: Option<WindowSettings>, geometry: MainWindowGeometry) -> WindowSettings {
     WindowSettings {
-        inner_size_points: Some(geometry.size),
+        inner_size_points: Some([geometry.size.width, geometry.size.height]),
         outer_position_pixels: previous.and_then(|previous| previous.outer_position_pixels),
         fullscreen: geometry.fullscreen,
         maximized: geometry.maximized,
@@ -37,8 +44,7 @@ pub fn merged(previous: Option<WindowSettings>, geometry: MainWindowGeometry) ->
 /// when the window has settled or is closing, where the write has to land
 /// before the process exits.
 pub fn store(geometry: MainWindowGeometry) -> Result<(), WindowError> {
-    let runtime =
-        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(WindowError::Runtime)?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(WindowError::Runtime)?;
 
     runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.map_err(WindowError::Open)?;
@@ -61,7 +67,11 @@ mod tests {
             fullscreen: false,
             maximized: false,
         };
-        let geometry = MainWindowGeometry { size: [1300.0, 900.0], maximized: true, fullscreen: false };
+        let geometry = MainWindowGeometry {
+            size: WindowSize { width: 1300.0, height: 900.0 },
+            maximized: true,
+            fullscreen: false,
+        };
 
         let stored = merged(Some(previous), geometry);
 

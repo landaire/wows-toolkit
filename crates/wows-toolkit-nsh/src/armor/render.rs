@@ -7,9 +7,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::frames::PixelSize;
 use crate::frames::Surface;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
 
 use super::frame;
 use super::input::InputMapper;
@@ -55,8 +55,8 @@ fn run(id: PaneId, surface: &Surface, signals: &mpsc::Receiver<Signal>) {
     const LONGEST_STEP: Duration = Duration::from_millis(100);
 
     let mut mapper = InputMapper::new();
-    let mut view: Option<(PixelSize, f32)> = None;
-    let mut rendered: Option<(PixelSize, f32)> = None;
+    let mut view: Option<ViewSize> = None;
+    let mut rendered: Option<ViewSize> = None;
     let mut last_tick: Option<Instant> = None;
 
     loop {
@@ -79,7 +79,7 @@ fn run(id: PaneId, surface: &Surface, signals: &mpsc::Receiver<Signal>) {
                 Signal::Stop => return,
                 Signal::Wake => {}
                 Signal::Input(event) => match mapper.map(event, now) {
-                    Some(SceneInput::Resize { size, scale }) => view = Some((size, scale)),
+                    Some(SceneInput::Resize { view: resized }) => view = Some(resized),
                     Some(input) => inputs.push(input),
                     None => {}
                 },
@@ -91,10 +91,9 @@ fn run(id: PaneId, surface: &Surface, signals: &mpsc::Receiver<Signal>) {
         let Some(driven) = state::drive(id, inputs, view, step, resized) else { return };
 
         last_tick = driven.wants_tick.then_some(now);
-        let Some(readback) = driven.readback else { continue };
+        let Some(render) = driven.render else { continue };
         rendered = view;
-        let scale = view.map(|(_, scale)| scale).unwrap_or(1.0);
-        match frame::compose(readback, driven.gizmo.as_ref(), scale) {
+        match frame::compose(render.readback, render.gizmo.as_ref(), render.scale) {
             Ok(frame) => surface.present(frame),
             Err(error) => tracing::warn!("armor viewer: pane {id} rendered an unusable frame: {error}"),
         }

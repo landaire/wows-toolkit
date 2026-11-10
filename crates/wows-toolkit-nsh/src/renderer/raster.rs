@@ -17,8 +17,11 @@ use crate::frames::AlphaMode;
 use crate::frames::Frame;
 use crate::frames::FrameError;
 use crate::frames::PixelSize;
+use crate::frames::ScaleFactor;
+use crate::renderer::geometry::CanvasSize;
+use crate::renderer::geometry::Fit;
+use crate::renderer::geometry::RotationHandle;
 use crate::renderer::viewer::DrawJob;
-use crate::renderer::viewer::Fit;
 use crate::renderer::viewer::PingMark;
 
 /// What the view is filled with beside a canvas that does not fill it.
@@ -31,7 +34,7 @@ const HANDLE_COLOR: [u8; 3] = [0xff, 0xff, 0x64];
 /// rest on in it.
 pub struct Drawn {
     pub frame: Frame,
-    pub canvas: (u32, u32),
+    pub canvas: CanvasSize,
     pub regions: Vec<DrawnRegion>,
 }
 
@@ -42,11 +45,11 @@ pub fn draw(job: &DrawJob) -> Result<Drawn, FrameError> {
         let mut renderer = job.renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         renderer.render_regions(job.view, &job.commands)
     };
-    let size = (canvas.width(), canvas.height());
+    let size = CanvasSize { width: canvas.width(), height: canvas.height() };
     let mut frame = fit(&canvas, job.viewport.size, MARGIN)?;
 
-    if let Some((handle, anchor)) = job.handle {
-        draw_handle(&mut frame, handle, anchor, job.viewport.scale);
+    if let Some(handle) = job.handle {
+        draw_handle(&mut frame, handle, job.viewport.scale);
     }
     for ping in &job.pings {
         draw_ping(&mut frame, ping, job.viewport.scale);
@@ -67,7 +70,8 @@ pub fn fit(image: &RgbImage, size: PixelSize, margin: [u8; 3]) -> Result<Pixmap,
     };
     canvas.fill(Color::from_rgba8(margin[0], margin[1], margin[2], 0xff));
 
-    if let (Some(fit), Some(layer)) = (Fit::of((image.width(), image.height()), size), layer(image)) {
+    let image_size = CanvasSize { width: image.width(), height: image.height() };
+    if let (Some(fit), Some(layer)) = (Fit::of(image_size, size), layer(image)) {
         canvas.draw_pixmap(
             0,
             0,
@@ -98,33 +102,33 @@ fn layer(image: &RgbImage) -> Option<Pixmap> {
 
 /// The handle a picked shape is turned by, and the stem back to the shape so
 /// it reads as belonging to it.
-fn draw_handle(canvas: &mut Pixmap, handle: (f32, f32), anchor: (f32, f32), scale: f32) {
+fn draw_handle(canvas: &mut Pixmap, handle: RotationHandle, scale: ScaleFactor) {
     let mut paint = Paint::default();
     paint.set_color_rgba8(HANDLE_COLOR[0], HANDLE_COLOR[1], HANDLE_COLOR[2], 0xff);
     paint.anti_alias = true;
 
     let mut stem = PathBuilder::new();
-    stem.move_to(handle.0, handle.1);
-    stem.line_to(anchor.0, anchor.1);
+    stem.move_to(handle.handle.x, handle.handle.y);
+    stem.line_to(handle.anchor.x, handle.anchor.y);
     if let Some(stem) = stem.finish() {
-        let stroke = Stroke { width: scale.max(1.0), ..Stroke::default() };
+        let stroke = Stroke { width: scale.get().max(1.0), ..Stroke::default() };
         canvas.stroke_path(&stem, &paint, &stroke, Transform::identity(), None);
     }
 
-    let radius = wows_toolkit_replay_data::playback::HANDLE_RADIUS * scale;
-    if let Some(dot) = PathBuilder::from_circle(handle.0, handle.1, radius) {
+    let radius = wows_toolkit_replay_data::playback::HANDLE_RADIUS * scale.get();
+    if let Some(dot) = PathBuilder::from_circle(handle.handle.x, handle.handle.y, radius) {
         canvas.fill_path(&dot, &paint, FillRule::Winding, Transform::identity(), None);
     }
 }
 
 /// A ping's ring, grown and faded by its age.
-fn draw_ping(canvas: &mut Pixmap, ping: &PingMark, scale: f32) {
-    let Some(ring) = PathBuilder::from_circle(ping.at.0, ping.at.1, ping.radius.max(1.0)) else { return };
+fn draw_ping(canvas: &mut Pixmap, ping: &PingMark, scale: ScaleFactor) {
+    let Some(ring) = PathBuilder::from_circle(ping.at.x, ping.at.y, ping.radius.max(1.0)) else { return };
     let mut paint = Paint::default();
     let alpha = (ping.alpha.clamp(0.0, 1.0) * 255.0) as u8;
     paint.set_color_rgba8(ping.color[0], ping.color[1], ping.color[2], alpha);
     paint.anti_alias = true;
-    let stroke = Stroke { width: 2.0 * scale, ..Stroke::default() };
+    let stroke = Stroke { width: 2.0 * scale.get(), ..Stroke::default() };
     canvas.stroke_path(&ring, &paint, &stroke, Transform::identity(), None);
 }
 

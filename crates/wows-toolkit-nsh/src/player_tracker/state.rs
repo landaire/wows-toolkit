@@ -39,6 +39,26 @@ use super::view::TrackerControls;
 use super::view::TrackerLabels;
 use super::view::ViewModeOption;
 
+/// Counts index reads, so a slower earlier one cannot land over a later.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IndexGeneration(u64);
+
+impl IndexGeneration {
+    pub fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+/// Counts edits of the tracked rows made here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrackedRevision(u64);
+
+impl TrackedRevision {
+    pub fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 /// Where one of the tables is in reading the index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadState {
@@ -67,10 +87,10 @@ pub struct Tracker {
     /// Why the last note did not save, or why the notes could not be read.
     pub note_error: Option<String>,
     /// Bumped per index read so a slower earlier one cannot land over a later.
-    pub generation: u64,
+    pub generation: IndexGeneration,
     /// Bumped whenever `tracked` is edited here, so a read of the stored rows
     /// taken before the edit does not put the old rows back.
-    pub tracked_revision: u64,
+    pub tracked_revision: TrackedRevision,
 }
 
 impl Default for Tracker {
@@ -91,8 +111,8 @@ impl Tracker {
             index: LoadState::Idle,
             clans: LoadState::Idle,
             note_error: None,
-            generation: 0,
-            tracked_revision: 0,
+            generation: IndexGeneration::default(),
+            tracked_revision: TrackedRevision::default(),
         }
     }
 
@@ -194,7 +214,7 @@ impl Tracker {
                 let account = row.facet.account_id;
                 let tracked = self.tracked.get(&account);
                 PlayerRowView {
-                    account_id: account.0.to_string(),
+                    account_id: account.into(),
                     name: row.facet.latest_name,
                     clan: row.facet.clan,
                     total_encounters: count_text(row.total_encounters),
@@ -202,6 +222,7 @@ impl Tracker {
                     severity: encounter_severity(row.encounters_in_range).into(),
                     last_seen: history::last_seen_text(row.last_seen, now),
                     last_seen_exact: history::last_seen_timestamp_text(row.last_seen),
+                    // An untracked player has no note; the editor shows it empty.
                     note: tracked.map(|player| player.notes.clone()).unwrap_or_default(),
                     detail: tracked.map(|player| self.player_detail(player)),
                 }
@@ -266,7 +287,7 @@ impl Tracker {
                         .members
                         .iter()
                         .map(|(account, matches)| ClanMemberView {
-                            account_id: account.0.to_string(),
+                            account_id: (*account).into(),
                             // A member the tracker recorded under no name is
                             // still worth a row: the account id is what the
                             // search needs.
@@ -312,6 +333,8 @@ impl Tracker {
         // The name the index knows, so a note written here is legible in the
         // egui tab's own list, which keys its rows on the stored name.
         let facet = self.players.iter().find(|facet| facet.account_id == account);
+        // The stored rows hold an unknown name or clan as empty, as the other
+        // front ends write them.
         let entry = self.tracked.entry(account).or_insert_with(|| TrackedPlayer {
             db_id: account,
             last_name: facet.map(|facet| facet.latest_name.clone()).unwrap_or_default(),
@@ -323,7 +346,7 @@ impl Tracker {
         }
         entry.notes = note;
         let written = entry.clone();
-        self.tracked_revision = self.tracked_revision.wrapping_add(1);
+        self.tracked_revision = self.tracked_revision.next();
 
         Some(written)
     }
@@ -331,12 +354,12 @@ impl Tracker {
     /// Forgets every tracked player.
     pub fn clear_tracked(&mut self) {
         self.tracked.clear();
-        self.tracked_revision = self.tracked_revision.wrapping_add(1);
+        self.tracked_revision = self.tracked_revision.next();
     }
 
     /// Installs the stored rows a read taken at `read_at` returned, unless
     /// the rows were edited here since. Returns whether they were installed.
-    pub fn install_tracked(&mut self, read_at: u64, tracked: HashMap<AccountId, TrackedPlayer>) -> bool {
+    pub fn install_tracked(&mut self, read_at: TrackedRevision, tracked: HashMap<AccountId, TrackedPlayer>) -> bool {
         if self.tracked_revision != read_at {
             return false;
         }

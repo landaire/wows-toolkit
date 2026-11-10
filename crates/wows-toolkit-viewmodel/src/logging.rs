@@ -14,6 +14,8 @@ use std::path::PathBuf;
 /// Where the rotated log files live: beside the executable, as the egui app
 /// writes them, so one Copy Latest Log finds either app's.
 pub fn log_dir() -> PathBuf {
+    // Without an executable path, the working directory, as the egui app falls
+    // back to.
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))

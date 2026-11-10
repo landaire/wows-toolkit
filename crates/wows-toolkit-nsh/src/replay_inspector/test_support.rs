@@ -38,10 +38,7 @@ pub fn read_replays_as_sample() {
 
 fn sample_source(path: &Path, alts: &[PathBuf]) -> Result<ReplayDocument, InspectorError> {
     if path.extension().is_none_or(|extension| extension != "wowsreplay") {
-        return Err(InspectorError::Load(wows_toolkit_replay_data::error::ReplayLoadError::Parse(format!(
-            "{} is not a replay",
-            path.display()
-        ))));
+        return Err(InspectorError::Load(wows_toolkit_replay_data::test_support::not_a_replay_error(path)));
     }
 
     Ok(sample_document(path, alts))

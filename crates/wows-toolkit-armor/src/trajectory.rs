@@ -129,6 +129,7 @@ pub fn build_hits(
     triangle_info: &[(MeshId, Vec<ArmorTriangleTooltip>)],
     shell_dir: &Vec3,
 ) -> Vec<TrajectoryHit> {
+    // Only read while mapping `ray_hits`, which is then non-empty.
     let first_distance = ray_hits.first().map(|(hit, _)| hit.distance).unwrap_or(0.0);
     ray_hits
         .iter()

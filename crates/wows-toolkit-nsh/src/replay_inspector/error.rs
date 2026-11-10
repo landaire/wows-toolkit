@@ -65,8 +65,11 @@ pub enum InspectorError {
     },
     #[error("{}", rust_i18n::t!("ui.replay.constants_no_build"))]
     NoBuildLoaded,
-    #[error("{}", rust_i18n::t!("ui.replay.constants_import_failed", reason = reason))]
-    ConstantsImport { reason: String },
+    #[error("{}", rust_i18n::t!("ui.replay.constants_import_failed", reason = source.to_string()))]
+    ConstantsImport {
+        #[source]
+        source: wows_toolkit_replay_data::error::ConstantsError,
+    },
     #[error("{}", rust_i18n::t!("ui.replay.constants_check_failed", reason = reason))]
     ConstantsCheck { reason: String },
     #[error(transparent)]
@@ -85,4 +88,9 @@ pub enum InspectorError {
     },
     #[error("World of Warships directory is not set")]
     WowsDirMissing,
+    #[error("{source}")]
+    Launch {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }

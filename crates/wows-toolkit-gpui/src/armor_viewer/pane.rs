@@ -67,7 +67,7 @@ use wows_toolkit_replay_data::load::LoadedGameData;
 use gpui_kit::component::WindowExt as _;
 
 use super::assets::ArmorAssetsBundle;
-use wows_toolkit_armor::assets::ArmorAssetsError;
+use wows_toolkit_armor::error::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
 use wows_replays::types::EntityId;
@@ -89,7 +89,7 @@ use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
-use wows_toolkit_armor::load_ship::ShipLoadError;
+use wows_toolkit_armor::error::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
 use super::sidebar::CollapseSidebar;

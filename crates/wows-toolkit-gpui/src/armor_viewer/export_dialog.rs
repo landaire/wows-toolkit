@@ -18,6 +18,7 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use wows_toolkit_armor::load_ship::HullUpgrade;
 use wows_toolkit_viewmodel::armor::export::ExportDefaults;
 use wows_toolkit_viewmodel::armor::export::ExportDraft;
 use wows_toolkit_viewmodel::armor::export::TextureResolution;
@@ -84,9 +85,9 @@ pub(crate) struct Changed;
 pub(crate) struct ExportDialogState {
     param_index: String,
     display_name: String,
-    /// `(raw upgrade key, label)`, in the hull vocabulary the pane's own picker
-    /// uses, so one ship is described the same way in both places.
-    hull_upgrades: Vec<(String, String)>,
+    /// In the hull vocabulary the pane's own picker uses, so one ship is
+    /// described the same way in both places.
+    hull_upgrades: Vec<HullUpgrade>,
     meta: MetaState,
     size: SizeState,
     /// The camo ladders being read, so the same set is not asked for twice while
@@ -384,12 +385,12 @@ fn read_ship_meta(
 /// An empty list genuinely means the ship offers no hull choice, which older
 /// game versions do; a ship that could not be resolved at all is reported by the
 /// read itself rather than here.
-fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index: &str) -> Vec<(String, String)> {
+fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index: &str) -> Vec<HullUpgrade> {
     use wowsunpack::game_params::types::GameParamProvider;
 
     let Some(param) = assets.metadata().game_param_by_index(param_index) else { return Vec::new() };
     let Some(vehicle) = param.vehicle() else { return Vec::new() };
-    wows_toolkit_armor::load_ship::build_hull_upgrade_names(vehicle)
+    wows_toolkit_armor::load_ship::build_hull_upgrades(vehicle)
 }
 
 /// Fills `dialog` with the export choices, reading them off `state`.
@@ -455,7 +456,8 @@ pub(crate) fn render(state: &Entity<ExportDialogState>, dialog: Dialog, _window:
         }))
         .when(!hulls.is_empty(), |this| {
             this.child(row(t!("ui.armor.export.hull").into_owned(), {
-                h_flex().flex_wrap().gap_1().children(hulls.into_iter().enumerate().map(|(ix, (key, label))| {
+                h_flex().flex_wrap().gap_1().children(hulls.into_iter().enumerate().map(|(ix, upgrade)| {
+                    let HullUpgrade { key, label } = upgrade;
                     let state = state.clone();
                     let chosen = hull_chosen(&key, ix);
                     crate::ui::selectable(

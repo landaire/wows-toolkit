@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use thiserror::Error;
+use wt_collab_protocol::ids::ReplayId;
+use wt_collab_protocol::ids::UserId;
 
 use crate::PeerRole;
 use crate::Permissions;
@@ -94,7 +96,7 @@ pub enum NoticeSeverity {
 /// One battle the session is on.
 #[derive(Clone, Debug)]
 pub struct SharedWindow {
-    pub replay_id: u64,
+    pub replay_id: ReplayId,
     pub replay_name: String,
     /// The map it is played on, translated where the host said so.
     pub map: String,
@@ -108,7 +110,7 @@ pub struct SharedWindow {
 /// One participant, as the roster shows them.
 #[derive(Clone, Debug)]
 pub struct ConnectedPeer {
-    pub user_id: u64,
+    pub user_id: UserId,
     pub name: String,
     pub role: PeerRole,
     /// Whether this is the reader, which the roster marks.
@@ -202,7 +204,7 @@ impl SessionController {
             .open_replays
             .iter()
             .map(|replay| SharedWindow {
-                replay_id: replay.replay_id,
+                replay_id: ReplayId::new(replay.replay_id),
                 replay_name: replay.replay_name.clone(),
                 map_name: replay.map_name.clone(),
                 art_png: (!replay.map_image_png.is_empty()).then(|| replay.map_image_png.clone()),
@@ -222,7 +224,12 @@ impl SessionController {
         let me = held.my_user_id;
         held.connected_users
             .iter()
-            .map(|user| ConnectedPeer { user_id: user.id, name: user.name.clone(), role: user.role, is_me: user.id == me })
+            .map(|user| ConnectedPeer {
+                user_id: UserId::new(user.id),
+                name: user.name.clone(),
+                role: user.role,
+                is_me: user.id == me,
+            })
             .collect()
     }
 
@@ -366,8 +373,8 @@ impl SessionController {
     }
 
     /// Raises a peer to co-host.
-    pub fn promote(&self, user_id: u64) {
-        self.command(SessionCommand::PromoteToCoHost { user_id });
+    pub fn promote(&self, user_id: UserId) {
+        self.command(SessionCommand::PromoteToCoHost { user_id: user_id.raw() });
     }
 
     fn command(&self, command: SessionCommand) {

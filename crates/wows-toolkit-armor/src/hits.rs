@@ -10,6 +10,7 @@ use nalgebra::Vector3;
 use wows_replay_insights::hull_impact;
 use wows_replay_insights::timeline::PreExtractedHit;
 
+use crate::viewport::types::Bounds;
 use crate::viewport::types::Vertex;
 
 type Vec3 = Vector3<f32>;
@@ -43,11 +44,11 @@ const CENTER_ARM_FRACTION: f32 = 0.05;
 pub fn build_markers(
     hits: &[PreExtractedHit],
     model_center: Vec3,
-    bounds: Option<(Vec3, Vec3)>,
+    bounds: Option<Bounds>,
     opacity: f32,
 ) -> (Vec<Vertex>, Vec<u32>) {
     let center = [model_center.x, model_center.y, model_center.z];
-    let bounds = bounds.map(|(low, high)| ([low.x, low.y, low.z], [high.x, high.y, high.z]));
+    let bounds = bounds.map(|Bounds { min, max }| ([min.x, min.y, min.z], [max.x, max.y, max.z]));
 
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -63,9 +64,8 @@ pub fn build_markers(
 /// Where the game measures a ship from, which is not where the hull's middle
 /// looks to be: the egui viewer draws the same three axes for the same reason
 /// (`armor_viewer/ui/tab.rs`'s `show_ship_center`).
-pub fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
-    let (min, max) = bounds;
-    let extent = max - min;
+pub fn build_center_marker(bounds: Bounds) -> (Vec<Vertex>, Vec<u32>) {
+    let extent = bounds.max - bounds.min;
     let arm = (extent.x.max(extent.y).max(extent.z) * CENTER_ARM_FRACTION).max(CENTER_ARM_FLOOR);
     let mut vertices = Vec::new();
     let mut indices = Vec::new();

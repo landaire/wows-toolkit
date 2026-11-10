@@ -19,7 +19,7 @@ use crate::upload::raw_replay_snapshot_state;
 use crate::upload::shareable::Shareable;
 
 /// What one replay's contribution came to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Outcome {
     /// Sent, and recorded in the ledger so it is not sent again.
     Sent,
@@ -31,7 +31,26 @@ pub enum Outcome {
     /// The next read of this replay decides again.
     Waiting,
     /// The service could not be reached. Not recorded, so it is tried again.
-    Failed(String),
+    Failed(ContributeError),
+}
+
+/// Why a contribution did not complete.
+#[derive(Debug, thiserror::Error)]
+pub enum ContributeError {
+    #[error("no runtime to send on")]
+    NoRuntime,
+    #[error(transparent)]
+    Client(#[from] crate::http::HttpError),
+    #[error("the sent-replay ledger could not be read: {0}")]
+    LedgerRead(#[source] sqlx::Error),
+    #[error(transparent)]
+    ReadReplay(std::io::Error),
+    #[error(transparent)]
+    Post(reqwest::Error),
+    /// Sent but not recorded: the next read sends it again and the service
+    /// sees it twice.
+    #[error("sent, but the ledger was not written: {0}")]
+    LedgerWrite(#[source] sqlx::Error),
 }
 
 /// Whether the sent-replay ledger decides what is skipped.
@@ -79,6 +98,8 @@ pub async fn first_seen(pool: &SqlitePool, path: &Path) -> jiff::Timestamp {
 pub async fn already_contributed(pool: &SqlitePool, path: &Path) -> bool {
     let recorded = path.to_string_lossy();
 
+    // A ledger that cannot be read here costs only the read: `send` consults it
+    // again and reports the failure there.
     wows_toolkit_config::queries::sent_replay_exists(pool, &recorded).await.unwrap_or(false)
 }
 
@@ -103,7 +124,7 @@ pub async fn send(
             Ok(false) => {}
             // A ledger that cannot be read is not a reason to send again: a second
             // copy of a replay is worse for the service than a missing one.
-            Err(err) => return Outcome::Failed(format!("the sent-replay ledger could not be read: {err}")),
+            Err(err) => return Outcome::Failed(ContributeError::LedgerRead(err)),
         }
     }
 
@@ -127,7 +148,7 @@ pub async fn send(
             }
             for payload in &shareable.builds {
                 if let Err(err) = client.post(SHIP_BUILDS_URL).json(payload).send().await {
-                    return Outcome::Failed(err.to_string());
+                    return Outcome::Failed(ContributeError::Post(err));
                 }
             }
             record(pool, &recorded).await
@@ -135,7 +156,7 @@ pub async fn send(
         ReplayUploadAction::RawReplay => {
             let bytes = match tokio::fs::read(&path).await {
                 Ok(bytes) => bytes,
-                Err(err) => return Outcome::Failed(err.to_string()),
+                Err(err) => return Outcome::Failed(ContributeError::ReadReplay(err)),
             };
             let sent = client
                 .post(RAW_REPLAYS_URL)
@@ -145,7 +166,7 @@ pub async fn send(
                 .await;
             match sent {
                 Ok(_) => record(pool, &recorded).await,
-                Err(err) => Outcome::Failed(err.to_string()),
+                Err(err) => Outcome::Failed(ContributeError::Post(err)),
             }
         }
     }
@@ -155,8 +176,6 @@ pub async fn send(
 async fn record(pool: &SqlitePool, path: &str) -> Outcome {
     match wows_toolkit_config::queries::insert_sent_replay(pool, path).await {
         Ok(()) => Outcome::Sent,
-        // Sent but not recorded: say so, because the next read will send it
-        // again and the service will see it twice.
-        Err(err) => Outcome::Failed(format!("sent, but the ledger was not written: {err}")),
+        Err(err) => Outcome::Failed(ContributeError::LedgerWrite(err)),
     }
 }

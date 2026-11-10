@@ -17,7 +17,10 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(locale: &str) -> Self {
+    /// Text in `locale`; with none chosen, in the catalog's base language.
+    pub fn new(locale: Option<&str>) -> Self {
+        let locale = locale.unwrap_or(FALLBACK_LOCALE);
+
         Self { backend: Rc::new(TranslationsBackend::load()), locale: Rc::from(locale) }
     }
 
@@ -48,7 +51,7 @@ mod tests {
 
     #[test]
     fn placeholders_are_filled_and_unknown_locales_fall_back_to_english() {
-        let text = Text::new("xx");
+        let text = Text::new(Some("xx"));
 
         assert_eq!(text.get("ui.unpacker.packages"), "Packages");
         assert_eq!(text.with("ui.unpacker.item_count", &[("count", &3)]), "3 items");

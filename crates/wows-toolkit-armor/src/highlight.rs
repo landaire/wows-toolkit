@@ -15,6 +15,7 @@ use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
+use crate::visibility::PartKey;
 use crate::visibility::VisibilityFilter;
 
 /// `armor_viewer::constants::TRAJECTORY_NORMAL_OFFSET`: offsets the hover
@@ -91,19 +92,18 @@ pub fn upload_zone_highlight(
     })
 }
 
-/// Uploads a highlight overlay for every visible armor triangle matching
-/// `(zone, material)`. Ports `armor_viewer::ui::tab::upload_part_highlight` verbatim.
+/// Uploads a highlight overlay for every visible armor triangle of `part`.
+/// Ports `armor_viewer::ui::tab::upload_part_highlight` verbatim.
 pub fn upload_part_highlight(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     armor: &LoadedShipArmor,
-    zone: &str,
-    material: &str,
+    part: &PartKey,
     visibility: VisibilityFilter,
     show_zero_mm: bool,
 ) -> MeshId {
     upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
-        info.zone == zone && info.material.name() == material
+        info.zone == part.zone && info.material.name() == part.part
     })
 }
 

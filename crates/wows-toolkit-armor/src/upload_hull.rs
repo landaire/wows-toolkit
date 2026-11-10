@@ -26,8 +26,7 @@ use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
 
 use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_HULL;
+use crate::viewport::renderer::RenderLayer;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
@@ -58,6 +57,7 @@ const LUMA_SAMPLE_STRIDE: usize = 37;
 /// path, for matching a hull mesh's texture against `active_camo_textures`'s
 /// keys. Ports `armor_viewer::common::mfm_stem` verbatim.
 pub fn mfm_stem(mfm_path: &str) -> &str {
+    // `rsplit` always yields at least one piece.
     let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
     base.strip_suffix(".mfm").unwrap_or(base)
 }
@@ -91,8 +91,8 @@ pub fn tex_brightness(rgba: &[u8]) -> f32 {
 /// mesh (`hull_mesh_ids`, drained and replaced in place) and re-adds only the
 /// ones `hull_visibility` marks visible (absent/false = hidden, matching the
 /// egui app's own default). `hull_opaque` selects the alpha/layer: opaque
-/// hulls draw depth-written on [`LAYER_DEFAULT`] like armor plates,
-/// translucent ones draw on [`LAYER_HULL`] (no depth write, behind armor).
+/// hulls draw depth-written on [`RenderLayer::Opaque`] like armor plates,
+/// translucent ones draw on [`RenderLayer::Hull`] (no depth write, behind armor).
 /// `active_camo_textures`/`active_camo_uvs` are `ViewportView`'s decoded
 /// active-camo state (see the module doc); pass empty maps for base albedo
 /// only.
@@ -122,9 +122,10 @@ pub fn upload_hull_meshes(
     }
 
     let hull_alpha: f32 = if hull_opaque { 1.0 } else { 0.7 };
-    let hull_layer = if hull_opaque { LAYER_DEFAULT } else { LAYER_HULL };
+    let hull_layer = if hull_opaque { RenderLayer::Opaque } else { RenderLayer::Hull };
 
     for mesh in &armor.hull_meshes {
+        // Absent means hidden.
         let visible = hull_visibility.get(&mesh.name).copied().unwrap_or(false);
         if !visible {
             continue;
@@ -142,6 +143,7 @@ pub fn upload_hull_meshes(
         let camo_uv = stem.filter(|s| active_camo_textures.contains_key(*s)).and_then(|s| active_camo_uvs.get(s));
         let has_texture = texture_data.is_some() && has_uvs;
 
+        // An untextured mesh is drawn from vertex colors; the value is unused.
         let brightness = texture_data.map(|texture| tex_brightness(&texture.pixels)).unwrap_or(FALLBACK_TEX_BRIGHTNESS);
         let fallback_color: [f32; 4] =
             [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
@@ -182,8 +184,7 @@ pub fn upload_hull_meshes(
             continue;
         }
         let mid = if let Some(texture) = texture_data.filter(|_| has_uvs) {
-            let tex_bind_group =
-                pipeline.create_texture_bind_group(device, queue, &texture.pixels, texture.width, texture.height);
+            let tex_bind_group = pipeline.create_texture_bind_group(device, queue, texture);
             viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bind_group)
         } else {
             viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)

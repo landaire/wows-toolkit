@@ -4,6 +4,7 @@
 mod board;
 mod error;
 mod game;
+mod ids;
 mod producer;
 mod raster;
 #[cfg(test)]
@@ -26,6 +27,9 @@ use crate::frames::SurfaceId;
 use crate::tactics::board::Board;
 use crate::tactics::error::TacticsError;
 use crate::tactics::game::BoardGame;
+use crate::tactics::ids::InkIndex;
+use crate::tactics::ids::ShipMatchIndex;
+use crate::tactics::ids::ViewRevision;
 use crate::tactics::producer::Shared;
 use crate::tactics::view::RangeName;
 use crate::tactics::view::TacticsView;
@@ -34,6 +38,7 @@ use crate::tactics::view::ToolName;
 /// The surface the board is drawn on, which `ui/tactics.tsx` names.
 pub const SURFACE: &str = "tactics-board";
 
+// Empty until the first open hands it a build and its layouts.
 static SHARED: LazyLock<Arc<Shared>> =
     LazyLock::new(|| Shared::start(&SurfaceId::new(SURFACE), Board::new(None, CapLayoutDb::default(), None)));
 
@@ -76,31 +81,31 @@ fn stop_following_session() {
 /// before it replaces the board, and one the board closed under, or a later
 /// open overtook, must not bring the board back or follow the session.
 struct OpenGate {
-    generation: Mutex<u64>,
+    current: Mutex<OpenTicket>,
 }
 
 impl OpenGate {
     const fn new() -> Self {
-        Self { generation: Mutex::new(0) }
+        Self { current: Mutex::new(OpenTicket(0)) }
     }
 
-    fn lock(&self) -> MutexGuard<'_, u64> {
-        self.generation.lock().unwrap_or_else(PoisonError::into_inner)
+    fn lock(&self) -> MutexGuard<'_, OpenTicket> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Starts an open, overtaking any still under way.
     fn begin(&self) -> OpenTicket {
-        let mut generation = self.lock();
-        *generation += 1;
+        let mut current = self.lock();
+        *current = current.next();
 
-        OpenTicket(*generation)
+        *current
     }
 
     /// Runs `apply` when `ticket` is still the current open, holding the gate
     /// so no close comes between the check and the change. Whether it ran.
     fn finish(&self, ticket: OpenTicket, apply: impl FnOnce()) -> bool {
-        let generation = self.lock();
-        if *generation != ticket.0 {
+        let current = self.lock();
+        if *current != ticket {
             return false;
         }
         apply();
@@ -110,8 +115,8 @@ impl OpenGate {
 
     /// Abandons any open under way and runs `apply` under the gate.
     fn close(&self, apply: impl FnOnce()) {
-        let mut generation = self.lock();
-        *generation += 1;
+        let mut current = self.lock();
+        *current = current.next();
         apply();
     }
 }
@@ -119,6 +124,12 @@ impl OpenGate {
 /// One started open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OpenTicket(u64);
+
+impl OpenTicket {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
 
 static OPENS: OpenGate = OpenGate::new();
 
@@ -143,18 +154,18 @@ pub struct Tactics;
 impl Tactics {
     /// Opens a fresh board on the installed build, with the capture layouts
     /// recorded so far. Loads the build the first time.
-    pub async fn open() -> Result<TacticsView, String> {
+    pub async fn open() -> Result<TacticsView, TacticsError> {
         let ticket = OPENS.begin();
-        let layouts = blocking(load_layouts).await.map_err(|error| format!("tactics layout task failed: {error}"))?;
+        let layouts = blocking(load_layouts).await.map_err(|source| TacticsError::LayoutTask { source })?;
         let loaded = blocking(crate::game_data::wait_current_build)
             .await
-            .map_err(|error| format!("tactics game data task failed: {error}"))?;
+            .map_err(|source| TacticsError::GameDataTask { source })?;
         // Without a game directory the board opens anyway and says what it
         // needs; any other failure to load is the reader's to see.
         let game: Option<Arc<dyn BoardGame>> = match loaded {
             Ok(loaded) => Some(loaded),
             Err(crate::game_data::GameDataError::NotConfigured) => None,
-            Err(error) => return Err(error.to_string()),
+            Err(error) => return Err(TacticsError::GameData(error)),
         };
         let replays_dir = crate::game_data::replays_dir();
         // An open the board closed under, or a later open overtook, leaves
@@ -162,10 +173,10 @@ impl Tactics {
         OPENS.finish(ticket, || {
             shared().update(|board| {
                 board.close();
-                let viewport = board.viewport();
+                let view_size = board.view_size();
                 *board = Board::new(game, layouts, replays_dir);
-                if let Some(viewport) = viewport {
-                    board.resize(viewport);
+                if let Some(view_size) = view_size {
+                    board.resize(view_size);
                 }
             });
             follow_session();
@@ -191,7 +202,7 @@ impl Tactics {
     }
 
     /// Resolves with what the board shows once it differs from `after`.
-    pub async fn next_change(after: u32) -> TacticsView {
+    pub async fn next_change(after: ViewRevision) -> TacticsView {
         let mut revisions = shared().subscribe();
         // The sender lives for the process, so the wait only ends on a change.
         let _ = revisions.wait_for(|revision| *revision != after).await;
@@ -224,8 +235,8 @@ impl Tactics {
     }
 
     /// Draws in ink `index` of the offered inks from here on.
-    pub fn set_ink(index: u32) -> Result<TacticsView, TacticsError> {
-        let (ink, _) = INKS.get(index as usize).ok_or(TacticsError::UnknownInk { index })?;
+    pub fn set_ink(index: InkIndex) -> Result<TacticsView, TacticsError> {
+        let (ink, _) = INKS.get(index.position()).ok_or(TacticsError::UnknownInk { index })?;
         Ok(change(|board| board.set_ink(*ink)))
     }
 
@@ -310,7 +321,7 @@ impl Tactics {
     }
 
     /// Takes up ship match `index`, so the next map click places it.
-    pub fn pick_ship(index: u32) -> Result<TacticsView, TacticsError> {
+    pub fn pick_ship(index: ShipMatchIndex) -> Result<TacticsView, TacticsError> {
         shared().update(|board| board.pick_ship(index))?;
         Ok(current())
     }
@@ -354,13 +365,17 @@ impl Tactics {
     /// puts the tool down and picks out the capture point there.
     pub fn context_menu(x: f64, y: f64) -> TacticsView {
         change(|board| {
-            let scale = board.viewport().map_or(1.0, |viewport| viewport.scale);
+            // Without a view nothing lies under the pointer, so any scale
+            // serves.
+            let scale = board.view_size().map_or(1.0, |view_size| view_size.scale.get());
             board.context_menu(PixelPoint { x: x as f32 * scale, y: y as f32 * scale });
         })
     }
 }
 
-/// The capture layouts recorded in the settings database.
+/// The capture layouts recorded in the settings database. The board works
+/// without them, so a failure to read them is logged and the board opens with
+/// none recorded.
 fn load_layouts() -> CapLayoutDb {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
@@ -370,8 +385,15 @@ fn load_layouts() -> CapLayoutDb {
         }
     };
     runtime.block_on(async {
-        match wows_toolkit_config::open_db().await {
-            Ok(pool) => wows_toolkit_viewmodel::tactics::layout_store::load_from_db(&pool).await,
+        let pool = match wows_toolkit_config::open_db().await {
+            Ok(pool) => pool,
+            Err(err) => {
+                log::warn!("tactics: the capture layouts could not be read: {err}");
+                return CapLayoutDb::default();
+            }
+        };
+        match wows_toolkit_viewmodel::tactics::layout_store::load_from_db(&pool).await {
+            Ok(layouts) => layouts,
             Err(err) => {
                 log::warn!("tactics: the capture layouts could not be read: {err}");
                 CapLayoutDb::default()

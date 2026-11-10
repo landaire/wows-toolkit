@@ -47,7 +47,7 @@ use wows_toolkit_viewmodel::ship_catalog::ShipCatalog;
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.
 pub(crate) const CLASS_ICON_TINT: u32 = 0xffffff;
 
-use wows_toolkit_armor::assets::ArmorAssetsError;
+use wows_toolkit_armor::error::ArmorAssetsError;
 
 /// One loaded build's Armor Viewer data: the shared ship-export assets, the
 /// pre-built ship catalog for the sidebar/tree, and the nation-flag/class-icon

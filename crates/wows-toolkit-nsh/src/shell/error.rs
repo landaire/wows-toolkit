@@ -80,6 +80,8 @@ pub enum ShellError {
         #[source]
         source: std::io::Error,
     },
+    #[error("the file manager did not open {path}: xdg-open exited with {status}")]
+    OpenerFailed { path: PathBuf, status: std::process::ExitStatus },
     #[error("no log file was found beside the executable")]
     NoLogFile,
     #[error("{path} could not be read")]
@@ -129,6 +131,26 @@ pub enum UploadError {
     },
     #[error("the contribution task did not complete")]
     Task(#[source] tokio::task::JoinError),
+}
+
+/// `error` and each error under it on one line, joined by `: `, for a message
+/// shown in a single line of the interface. A cause that repeats the text
+/// above it, as a transparent wrapper's does, is shown once.
+pub fn sentence(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut previous = text.clone();
+    let mut cause = error.source();
+    while let Some(next) = cause {
+        let line = next.to_string();
+        if line != previous {
+            text.push_str(": ");
+            text.push_str(&line);
+        }
+        previous = line;
+        cause = next.source();
+    }
+
+    text
 }
 
 /// `error` and each error under it, one per line.

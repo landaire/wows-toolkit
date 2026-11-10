@@ -19,12 +19,14 @@ use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
 use wows_replay_insights::cap_layout::CapPointLayout;
 use wows_replays::game_constants::GameConstants;
+use wows_replays::types::GameParamId;
 use wows_replays::types::TeamId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::WorldPos;
+use wowsunpack::game_types::WorldPos2D;
 use wowsunpack::vfs::VfsPath;
 use wt_collab_protocol::drawing::Held;
 use wt_collab_protocol::drawing::Tool;
@@ -476,14 +478,13 @@ pub enum CapDrag {
     Resize,
 }
 
-/// Which capture point a press at world `(x, z)` lands on, and what it would do
-/// to it.
+/// Which capture point a press at `world` lands on, and what it would do to it.
 ///
 /// A press within a few pixels of a zone's drawn edge, inside or out, widens
 /// it; anywhere else inside moves it. The topmost one wins, which is the last
 /// drawn.
-pub fn cap_under(caps: &[BoardCapPoint], world: (f32, f32), map: &MapInfo) -> Option<(usize, CapDrag)> {
-    let (x, z) = world;
+pub fn cap_under(caps: &[BoardCapPoint], world: WorldPos2D, map: &MapInfo) -> Option<(usize, CapDrag)> {
+    let WorldPos2D { x, z } = world;
     // The band is a screen tolerance, so it is measured where the reader is
     // aiming: converted from pixels into the world at this map's scale.
     let band = band_in_world(map);
@@ -502,6 +503,27 @@ pub fn cap_under(caps: &[BoardCapPoint], world: (f32, f32), map: &MapInfo) -> Op
     })
 }
 
+/// A position in the element a frame is drawn into, in its own pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementPos {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// A position in a drawn frame, in the frame's own pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FramePos {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// A width and a height in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extent {
+    pub width: f32,
+    pub height: f32,
+}
+
 /// Where a drawn frame landed in the element that shows it, and how much it was
 /// scaled to fit.
 ///
@@ -515,22 +537,22 @@ pub struct Letterbox {
     pub top: f32,
     pub scale: f32,
     /// The frame's own size, which is what a point is held inside.
-    pub frame: (f32, f32),
+    pub frame: Extent,
 }
 
 impl Letterbox {
     /// The frame `frame` fitted into an element at `origin` of `size`. `None`
     /// for a frame or an element with no extent, which nothing can be placed
     /// against.
-    pub fn fitting(origin: (f32, f32), size: (f32, f32), frame: (f32, f32)) -> Option<Self> {
-        if frame.0 <= 0.0 || frame.1 <= 0.0 || size.0 <= 0.0 || size.1 <= 0.0 {
+    pub fn fitting(origin: ElementPos, size: Extent, frame: Extent) -> Option<Self> {
+        if frame.width <= 0.0 || frame.height <= 0.0 || size.width <= 0.0 || size.height <= 0.0 {
             return None;
         }
-        let scale = (size.0 / frame.0).min(size.1 / frame.1);
+        let scale = (size.width / frame.width).min(size.height / frame.height);
 
         Some(Self {
-            left: origin.0 + (size.0 - frame.0 * scale) / 2.0,
-            top: origin.1 + (size.1 - frame.1 * scale) / 2.0,
+            left: origin.x + (size.width - frame.width * scale) / 2.0,
+            top: origin.y + (size.height - frame.height * scale) / 2.0,
             scale,
             frame,
         })
@@ -538,16 +560,22 @@ impl Letterbox {
 
     /// An element position as a point in the frame. `None` for one in the
     /// margin beside a frame that does not fill its element.
-    pub fn to_frame(self, at: (f32, f32)) -> Option<(f32, f32)> {
-        let (x, y) = ((at.0 - self.left) / self.scale, (at.1 - self.top) / self.scale);
-        (x >= 0.0 && x < self.frame.0 && y >= 0.0 && y < self.frame.1).then_some((x, y))
+    pub fn to_frame(self, at: ElementPos) -> Option<FramePos> {
+        let x = (at.x - self.left) / self.scale;
+        let y = (at.y - self.top) / self.scale;
+
+        self.holds(x, y).then_some(FramePos { x, y })
     }
 
     /// A point in the frame as an element position. `None` for one the frame
     /// does not show, which has nowhere on screen to be.
-    pub fn to_element(self, at: (f32, f32)) -> Option<(f32, f32)> {
-        (at.0 >= 0.0 && at.0 < self.frame.0 && at.1 >= 0.0 && at.1 < self.frame.1)
-            .then_some((self.left + at.0 * self.scale, self.top + at.1 * self.scale))
+    pub fn to_element(self, at: FramePos) -> Option<ElementPos> {
+        self.holds(at.x, at.y)
+            .then_some(ElementPos { x: self.left + at.x * self.scale, y: self.top + at.y * self.scale })
+    }
+
+    fn holds(self, x: f32, y: f32) -> bool {
+        x >= 0.0 && x < self.frame.width && y >= 0.0 && y < self.frame.height
     }
 }
 
@@ -643,7 +671,7 @@ pub struct BoardState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedShip {
     /// The param the ranges are read from.
-    pub param_id: u64,
+    pub param_id: GameParamId,
     pub name: String,
     pub species: Species,
     /// Whether it is on the reader's side, which is what colours the marker.
@@ -856,11 +884,12 @@ mod tests {
         let band = band_in_world(&map);
         let caps = [cap(0, 0.0, 0.0, 100.0)];
 
-        assert_eq!(cap_under(&caps, (0.0, 0.0), &map), Some((0, CapDrag::Move)));
-        assert_eq!(cap_under(&caps, (50.0, 0.0), &map), Some((0, CapDrag::Move)));
-        assert_eq!(cap_under(&caps, (100.0 - band / 2.0, 0.0), &map), Some((0, CapDrag::Resize)));
-        assert_eq!(cap_under(&caps, (100.0 + band / 2.0, 0.0), &map), Some((0, CapDrag::Resize)));
-        assert_eq!(cap_under(&caps, (100.0 + band * 2.0, 0.0), &map), None);
+        let at = |x: f32| WorldPos2D { x, z: 0.0 };
+        assert_eq!(cap_under(&caps, at(0.0), &map), Some((0, CapDrag::Move)));
+        assert_eq!(cap_under(&caps, at(50.0), &map), Some((0, CapDrag::Move)));
+        assert_eq!(cap_under(&caps, at(100.0 - band / 2.0), &map), Some((0, CapDrag::Resize)));
+        assert_eq!(cap_under(&caps, at(100.0 + band / 2.0), &map), Some((0, CapDrag::Resize)));
+        assert_eq!(cap_under(&caps, at(100.0 + band * 2.0), &map), None);
     }
 
     /// A frozen cap is picked but never dragged.
@@ -869,7 +898,7 @@ mod tests {
         let map = map(1200);
         let caps = [BoardCapPoint { frozen: true, ..cap(0, 0.0, 0.0, 100.0) }];
 
-        assert_eq!(cap_under(&caps, (99.0, 0.0), &map), Some((0, CapDrag::None)));
+        assert_eq!(cap_under(&caps, WorldPos2D { x: 99.0, z: 0.0 }, &map), Some((0, CapDrag::None)));
     }
 
     /// A cap circle is talked about in kilometres, and the model holds it in
@@ -934,7 +963,8 @@ mod tests {
         assert!((pos.x - middle).abs() < 0.01 && (pos.y - middle).abs() < 0.01);
 
         let pressed = map.minimap_to_world_f32(pos.x, pos.y, MINIMAP_SIZE);
-        assert_eq!(cap_under(std::slice::from_ref(&zone), (pressed.x, pressed.z), &map).map(|hit| hit.0), Some(0));
+        let pressed = WorldPos2D { x: pressed.x, z: pressed.z };
+        assert_eq!(cap_under(std::slice::from_ref(&zone), pressed, &map).map(|hit| hit.0), Some(0));
     }
 
     /// The resize tolerance is a screen distance, so it is the same handful of
@@ -968,17 +998,22 @@ mod tests {
     /// stretched, and the two directions are each other's inverse.
     #[test]
     fn a_frame_is_centred_and_round_trips() {
-        let fit = Letterbox::fitting((10.0, 20.0), (400.0, 200.0), (100.0, 100.0)).expect("a frame with extent");
+        let extent = |width, height| Extent { width, height };
+        let fit = Letterbox::fitting(ElementPos { x: 10.0, y: 20.0 }, extent(400.0, 200.0), extent(100.0, 100.0))
+            .expect("a frame with extent");
         assert_eq!((fit.scale, fit.top, fit.left), (2.0, 20.0, 110.0));
 
-        for at in [(0.0, 0.0), (50.0, 50.0), (99.0, 1.0)] {
+        for (x, y) in [(0.0, 0.0), (50.0, 50.0), (99.0, 1.0)] {
+            let at = FramePos { x, y };
             let on_screen = fit.to_element(at).expect("a point the frame shows");
             let back = fit.to_frame(on_screen).expect("over the map");
-            assert!((back.0 - at.0).abs() < 1e-3 && (back.1 - at.1).abs() < 1e-3, "{at:?} -> {back:?}");
+            assert!((back.x - at.x).abs() < 1e-3 && (back.y - at.y).abs() < 1e-3, "{at:?} -> {back:?}");
         }
-        assert!(fit.to_frame((20.0, 100.0)).is_none(), "in the left margin");
-        assert!(fit.to_element((100.0, 50.0)).is_none(), "past the far edge");
-        assert!(Letterbox::fitting((0.0, 0.0), (400.0, 200.0), (0.0, 100.0)).is_none());
+        assert!(fit.to_frame(ElementPos { x: 20.0, y: 100.0 }).is_none(), "in the left margin");
+        assert!(fit.to_element(FramePos { x: 100.0, y: 50.0 }).is_none(), "past the far edge");
+        assert!(
+            Letterbox::fitting(ElementPos { x: 0.0, y: 0.0 }, extent(400.0, 200.0), extent(0.0, 100.0)).is_none()
+        );
     }
 
     /// The walk finds replays in nested directories in name order and skips

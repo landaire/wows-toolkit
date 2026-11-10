@@ -18,6 +18,8 @@ use wows_toolkit_viewmodel::unpacker::listing::filter_files;
 use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
 use wowsunpack::vfs::VfsPath;
 
+use super::error::UnpackerError;
+
 /// What the label of the tree's root reads: the extracted tree starts at
 /// `res`, as the egui and GPUI listings label it.
 pub const ROOT_LABEL: &str = "res";
@@ -141,7 +143,7 @@ pub enum PaneState {
     /// No game data yet. Not an error: the WoWs directory may be unset.
     Empty,
     Loading,
-    Failed(String),
+    Failed(Shared<UnpackerError>),
     Ready(Shared<Walked>),
 }
 
@@ -265,8 +267,14 @@ pub fn ancestors(dir: &str) -> Vec<String> {
 /// Whether the file viewer has anything to show for this name: the
 /// extensions the egui and GPUI listings offer "View Contents" for.
 pub fn is_viewable(label: &str) -> bool {
-    let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-    matches!(extension.as_str(), "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg")
+    extension(label).is_some_and(|extension| {
+        matches!(extension.as_str(), "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg")
+    })
+}
+
+/// The lowercase extension of a file name or path, absent when it has none.
+pub fn extension(name: &str) -> Option<String> {
+    name.rsplit_once('.').map(|(_, extension)| extension.to_ascii_lowercase())
 }
 
 /// The glyph of a listing row, from the four kinds the egui listing tells
@@ -286,7 +294,9 @@ impl Glyph {
             return Self::Folder;
         }
 
-        let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+        let Some(extension) = extension(label) else {
+            return Self::File;
+        };
         match extension.as_str() {
             "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => Self::Image,
             "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => Self::Text,
@@ -357,7 +367,8 @@ mod tests {
     #[test]
     fn a_pane_without_a_vfs_lists_nothing() {
         assert!(Rows::build(&PaneState::Loading, "/", "").is_empty());
-        assert!(Rows::build(&PaneState::Failed("x".into()), "/", "abc").is_empty());
+        let failed = PaneState::Failed(Shared::new(UnpackerError::SearchQuery { query: "x".to_owned() }));
+        assert!(Rows::build(&failed, "/", "abc").is_empty());
     }
 
     #[test]

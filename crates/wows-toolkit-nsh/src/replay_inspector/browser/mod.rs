@@ -46,6 +46,7 @@ use wows_toolkit_viewmodel::theme::DARK_SEMANTIC;
 use wows_toolkit_viewmodel::theme::LIGHT_SEMANTIC;
 
 use crate::game_data::GameDataState;
+use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::settings;
 
@@ -55,6 +56,7 @@ use self::listing::Listing;
 use self::listing::Naming;
 use self::listing::Node;
 use self::listing::Pressed;
+use self::listing::ShownIndex;
 use self::listing::ShownRow;
 use self::listing::Step;
 use self::listing::Upserted;
@@ -126,9 +128,9 @@ pub struct ReplayHover {
 }
 
 /// A build the listing holds.
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct ListedBuildEntry {
-    pub build: u32,
+    pub build: BuildNumber,
     /// The `major.minor.patch` its replays name.
     pub version: Option<SharedString>,
     pub replays: u32,
@@ -212,8 +214,25 @@ enum Body {
 struct GameView {
     current: Option<Arc<LoadedGameData>>,
     has_cache: bool,
-    /// While the installed build loads: the version it names, if any.
-    loading: Option<Option<String>>,
+    loading: Option<LoadingBuild>,
+}
+
+/// The installed build while it loads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoadingBuild {
+    /// The version it names, when it names one.
+    version: Option<String>,
+}
+
+/// Counts the scans, so an earlier scan (and its watch) cannot write over a
+/// later one's listing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ScanGeneration(u64);
+
+impl ScanGeneration {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
 }
 
 impl GameView {
@@ -247,9 +266,7 @@ struct Browser {
 
     /// The install, for "Open in Game", whatever directory is listed.
     wows_dir: Stored<Option<PathBuf>>,
-    /// Bumped per scan, so an earlier scan (and its watch) cannot write over
-    /// a later one's listing.
-    generation: Stored<u64>,
+    generation: Stored<ScanGeneration>,
     /// Held because dropping it stops the watch.
     watcher: Stored<Option<RecommendedWatcher>>,
     hovered: Stored<Option<PathBuf>>,
@@ -278,7 +295,7 @@ pub fn ReplayBrowser(props: ReplayBrowserProps, cx: Scope<ReplayBrowserEvent>) -
         install_listing: signal(true),
         game: signal_with(GameView::default(), SignalEquals::Never),
         wows_dir: stored(None),
-        generation: stored(0),
+        generation: stored(ScanGeneration::default()),
         watcher: stored(None),
         hovered: stored(None),
         focused: signal(false),
@@ -315,7 +332,7 @@ impl Browser {
         self.emit(ReplayBrowserEvent::Notice(text.into(), level));
     }
 
-    fn is_stale(self, generation: u64) -> bool {
+    fn is_stale(self, generation: ScanGeneration) -> bool {
         self.generation.get() != generation
     }
 
@@ -323,7 +340,7 @@ impl Browser {
     /// directory without one, then watches it.
     fn scan(self, directory: Option<PathBuf>) {
         let generation = self.generation.with(|generation| {
-            *generation = generation.wrapping_add(1);
+            *generation = generation.next();
             *generation
         });
         // The directory the watch was on is no longer the one to watch.
@@ -382,7 +399,7 @@ impl Browser {
         self.status.set(Status::Failed(Rc::new(err)));
     }
 
-    fn watch(self, dir: &Path, generation: u64) {
+    fn watch(self, dir: &Path, generation: ScanGeneration) {
         let (watcher, mut changes) = match watch::watch(dir) {
             Ok(watching) => watching,
             Err(failure) => {
@@ -465,8 +482,9 @@ impl Browser {
                             readable: cache
                                 .as_ref()
                                 .is_some_and(|cache| cache.can_read_build(listed.build, listed.version.as_deref())),
-                            build: listed.build,
+                            build: BuildNumber(listed.build),
                             version: listed.version.map(SharedString::from),
+                            // Saturates: no directory holds four billion replays.
                             replays: u32::try_from(listed.replays).unwrap_or(u32::MAX),
                         })
                         .collect::<Vec<_>>()
@@ -496,7 +514,9 @@ impl Browser {
 
                 let next = match status {
                     GameDataState::Ready(loaded) => GameView { current: Some(loaded), has_cache, loading: None },
-                    GameDataState::Loading { version } => GameView { current: None, has_cache, loading: Some(version) },
+                    GameDataState::Loading { version } => {
+                        GameView { current: None, has_cache, loading: Some(LoadingBuild { version }) }
+                    }
                     GameDataState::NotConfigured | GameDataState::Failed { .. } => {
                         GameView { current: None, has_cache, loading: None }
                     }
@@ -549,7 +569,8 @@ impl Browser {
                 self.listing.update(|listing| moved = listing.step(step));
                 if let Some(at) = moved {
                     self.list.scroll_to_index(
-                        u32::try_from(at).unwrap_or(u32::MAX),
+                        // Saturates: the list cannot hold more rows than a u32 counts.
+                        u32::try_from(at.0).unwrap_or(u32::MAX),
                         Percentage(0.5),
                         Points(0.0),
                         false,
@@ -564,7 +585,7 @@ impl Browser {
         }
     }
 
-    fn press(self, at: usize, press: &PressEvent) {
+    fn press(self, at: ShownIndex, press: &PressEvent) {
         self.keys.focus();
         self.engaged.set(true);
 
@@ -592,7 +613,7 @@ impl Browser {
 
     /// The pointer came over the shown row `at`: a replay's preview follows
     /// it, once per replay.
-    fn hover(self, at: usize, mouse: &MouseEvent) {
+    fn hover(self, at: ShownIndex, mouse: &MouseEvent) {
         let Some(Node::Leaf(leaf)) = self.listing.with_untracked(|listing| listing.shown_row(at)).map(|row| row.node)
         else {
             return;
@@ -653,14 +674,15 @@ impl Browser {
                     }
                 }
 
-                let recorded = blocking(move || actions::record_session_stats(&paths, replace)).await;
-                let failure = match recorded {
-                    Ok(Ok(())) => return,
-                    Ok(Err(err)) => err.to_string(),
-                    Err(source) => InspectorError::Task { source }.to_string(),
+                let recorded = blocking(move || actions::record_session_stats(&paths, replace))
+                    .await
+                    .map_err(|source| InspectorError::Task { source })
+                    .flatten();
+                let Err(failure) = recorded else {
+                    return;
                 };
                 tracing::warn!("replay listing: {failure}");
-                self.notice(failure, NoticeLevel::Failed);
+                self.notice(failure.to_string(), NoticeLevel::Failed);
             })
         });
     }
@@ -695,16 +717,16 @@ impl Browser {
 
                 let launched = blocking(move || {
                     wows_toolkit_launcher::open_replay_in_game(&wows_dir, replay, |_command| {})
-                        .map_err(|err| format!("{err}"))
+                        .map_err(|source| InspectorError::Launch { source: Box::new(source) })
                 })
-                .await;
-                let failure = match launched {
-                    Ok(Ok(())) => return,
-                    Ok(Err(failure)) => failure,
-                    Err(source) => InspectorError::Task { source }.to_string(),
+                .await
+                .map_err(|source| InspectorError::Task { source })
+                .flatten();
+                let Err(failure) = launched else {
+                    return;
                 };
                 tracing::warn!("replay listing: the game could not be launched: {failure}");
-                self.notice(failure, NoticeLevel::Failed);
+                self.notice(failure.to_string(), NoticeLevel::Failed);
             })
         });
     }
@@ -803,7 +825,7 @@ fn body(browser: Browser) -> AnyElement {
         // A list built before the game data loads is a list of raw ids; a
         // chosen directory lists at once.
         Status::Loaded => match browser.game.with(|game| game.loading.clone()) {
-            Some(version) if browser.install_listing.get() => Body::Note(match version {
+            Some(LoadingBuild { version }) if browser.install_listing.get() => Body::Note(match version {
                 Some(version) => t!("ui.replay.loading_game_data_version", version = version).into_owned(),
                 None => t!("ui.replay.loading_game_data").into_owned(),
             }),
@@ -874,12 +896,14 @@ fn tree(browser: Browser) -> AnyElement {
 }
 
 fn row(browser: Browser, at: Position) -> AnyElement {
-    let shown = computed(move || browser.listing.with(|listing| listing.shown_row(at.index())));
+    let at = ShownIndex(at.index());
+    let shown = computed(move || browser.listing.with(|listing| listing.shown_row(at)));
 
     let content = view()
         .accessible(true)
         .role(AccessibilityRole::TreeItem)
         .focusable(false)
+        // A row past the end, briefly drawn while the list shrinks, has no label.
         .label(move || shown.with(|row| row.as_ref().map(row_label).unwrap_or_default()))
         .accessibility_state(move || {
             shown.with(|row| AccessibilityState {
@@ -890,8 +914,8 @@ fn row(browser: Browser, at: Position) -> AnyElement {
         })
         .accessibility_level(move || shown.with(|row| row.as_ref().map_or(0, |row| row.depth + 1)))
         .app_class(move || shown.with(|row| class(row_class(row.as_ref()))))
-        .on_press(move |press: &PressEvent| browser.press(at.index(), press))
-        .on_mouse_enter(move |mouse: &MouseEvent| browser.hover(at.index(), mouse))
+        .on_press(move |press: &PressEvent| browser.press(at, press))
+        .on_mouse_enter(move |mouse: &MouseEvent| browser.hover(at, mouse))
         .child(dynamic(move || match shown.get() {
             Some(row) => row_content(&row),
             None => Vec::new(),

@@ -20,6 +20,8 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wowsunpack::vfs::VfsPath;
 
 use crate::game_data::GameDataError;
+use crate::js_newtype::js_newtype;
+use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::error::InspectorError;
 
 /// Identifies one open replay for as long as it is open. A re-read replay
@@ -27,14 +29,12 @@ use crate::replay_inspector::error::InspectorError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ReplayDocId(u32);
 
-impl ReplayDocId {
-    /// The id as the TSX passes it around.
-    pub fn from_js(raw: u32) -> Self {
-        Self(raw)
-    }
+js_newtype!(ReplayDocId, u32);
 
-    pub fn to_js(self) -> u32 {
-        self.0
+#[cfg(test)]
+impl ReplayDocId {
+    pub(crate) fn new(raw: u32) -> Self {
+        Self(raw)
     }
 }
 
@@ -47,7 +47,7 @@ impl std::fmt::Display for ReplayDocId {
 /// The build a replay's results were read with a mapping that does not fit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstantsMismatch {
-    pub build: u32,
+    pub build: BuildNumber,
     pub version: String,
 }
 
@@ -104,7 +104,7 @@ impl ReplayDocument {
         }
         let constants_mismatch = match (indexable.constants_fit, indexable.version_build) {
             (ConstantsFit::Mismatched, Some(build)) => {
-                Some(ConstantsMismatch { build, version: model.context.version.clone() })
+                Some(ConstantsMismatch { build: BuildNumber(build), version: model.context.version.clone() })
             }
             _ => None,
         };

@@ -12,6 +12,7 @@ use gpui_kit::AppContext as _;
 use gpui_kit::Task;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::upload::contribute::Candidate;
+use wows_toolkit_viewmodel::upload::contribute::ContributeError;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
 use wows_toolkit_viewmodel::upload::contribute::Outcome;
 
@@ -50,10 +51,10 @@ pub fn contribute(
 ) -> Task<Outcome> {
     let runtime = crate::runtime::runtime(cx);
     cx.background_spawn(async move {
-        let Some(runtime) = runtime else { return Outcome::Failed("no runtime to send on".to_owned()) };
+        let Some(runtime) = runtime else { return Outcome::Failed(ContributeError::NoRuntime) };
         let client = match crate::http::client(&proxy, reqwest::redirect::Policy::none()) {
             Ok(client) => client,
-            Err(err) => return Outcome::Failed(err.to_string()),
+            Err(err) => return Outcome::Failed(ContributeError::Client(err)),
         };
         runtime.block_on(async move {
             wows_toolkit_viewmodel::upload::contribute::send(candidate, mode, ledger, &pool, &client).await

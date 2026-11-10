@@ -40,10 +40,12 @@ impl SessionData {
             }
         };
 
-        let personal_rating =
-            wows_toolkit_replay_data::personal_rating::load_refreshed(crate::http::USER_AGENT, proxy_url)
-                .await
-                .map(Arc::new);
+        let personal_rating = wows_toolkit_replay_data::personal_rating::load_refreshed(
+            crate::http::USER_AGENT,
+            wows_toolkit_viewmodel::http::manual_proxy(proxy_url),
+        )
+        .await
+        .map(Arc::new);
 
         Self { games, filters: load_filters(pool).await, personal_rating }
     }

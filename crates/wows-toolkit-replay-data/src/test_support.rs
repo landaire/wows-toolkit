@@ -1,9 +1,10 @@
 //! Shared test-only fixtures for `model`, `columns`, and `sort`. Every
 //! `PlayerRow`/`NormalizedPlayer`/`NormalizedBattleReport` here is fabricated
-//! by hand (no parsed replay), matching the brief's "fabricated PlayerRow"
-//! testing strategy.
+//! by hand (no parsed replay).
 
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use wows_replay_insights::battle_report::MatchMetadata;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
@@ -18,7 +19,16 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
+use crate::error::ReplayLoadError;
 use crate::model::PlayerRow;
+
+/// The load error a file that is not a replay fails with.
+pub fn not_a_replay_error(path: &Path) -> ReplayLoadError {
+    let report = rootcause::report!(wows_replays::ParseError::InvalidPacketData)
+        .attach(format!("{} is not a replay", path.display()));
+
+    ReplayLoadError::Parse(Arc::new(report))
+}
 
 /// An effective-fire-chance result with enough behind it to state a rate: 3
 /// fires out of 40 eligible hits, against 4.2 expected.
@@ -64,8 +74,7 @@ pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
         is_test_ship: false,
         manual_stat_hide_toggle: false,
         display_name: format!("Player{db_id}"),
-        clan_tag: None,
-        clan_color_rgb: 0,
+        clan: None,
         division_label: None,
         is_self_division_mate: false,
         ship_name: "Test Ship".to_string(),
@@ -175,8 +184,8 @@ pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> 
 
 /// A fabricated two-player `NormalizedBattleReport`: a self player with
 /// server results (nonzero damage, an interaction breakdown) and an enemy
-/// player with none, matching the brief's request for a fixture that shows
-/// "a breakdown Option populated only when server results exist".
+/// player with none, so a breakdown is populated only when server results
+/// exist.
 pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
     use std::collections::BTreeMap;
 

@@ -205,7 +205,7 @@ impl CollabState {
     }
 
     /// Raises a peer to co-host.
-    pub fn promote(&self, user_id: u64) {
+    pub fn promote(&self, user_id: wt_collab_client::ids::UserId) {
         self.controller.promote(user_id);
     }
 

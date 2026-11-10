@@ -10,9 +10,7 @@ use nsh_base::menu_item;
 use nsh_core::prelude::*;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
-use wows_toolkit_replay_data::cells::CaptainPointsTier;
 use wows_toolkit_replay_data::cells::CellValue;
-use wows_toolkit_replay_data::cells::ColorRole;
 use wows_toolkit_replay_data::cells::cell_value;
 use wows_toolkit_replay_data::cells::name_color_kind;
 use wows_toolkit_replay_data::cells::player_color_kind;
@@ -243,11 +241,9 @@ impl RowLayout<'_> {
         if let Some(division) = row.division_label.as_ref() {
             cell = cell.child(text(division.clone()).app_class(class("flex-none text-sm text-foreground")));
         }
-        if let Some(clan) = row.clan_tag.as_ref() {
+        if let Some(clan) = row.clan.as_ref() {
             cell = cell.child(
-                text(clan.clone())
-                    .app_class(class("flex-none text-sm"))
-                    .text_color(colors::fixed(row.clan_color_rgb)),
+                text(clan.tag.clone()).app_class(class("flex-none text-sm")).text_color(colors::fixed(clan.color_rgb)),
             );
         }
         cell = cell.child(
@@ -336,7 +332,10 @@ impl RowLayout<'_> {
             return self.plain_cell(ReplayColumn::Skills, cell);
         }
 
-        let color = colors::role(cell.color.unwrap_or(ColorRole::CaptainPoints(CaptainPointsTier::Good)));
+        let Some(role) = cell.color else {
+            return self.plain_cell(ReplayColumn::Skills, cell);
+        };
+        let color = colors::role(role);
         let mut marks = Vec::new();
         if row.has_dazzle {
             marks.push(Glyph::StarFill);
@@ -426,11 +425,7 @@ struct MenuHeading {
 impl MenuData {
     fn from_row(row: &PlayerRow, icons: &TableIcons, debug: bool) -> Self {
         let heading = MenuHeading {
-            clan: row
-                .clan_tag
-                .clone()
-                .filter(|clan| !clan.is_empty())
-                .map(|clan| (clan, colors::fixed(row.clan_color_rgb))),
+            clan: row.clan.as_ref().map(|clan| (clan.tag.clone(), colors::fixed(clan.color_rgb))),
             name: row.display_name.clone(),
             name_color: colors::player(name_color_kind(row)),
             class_icon: icons.ship_class(row.ship_class).map(|uri| (uri, colors::player(player_color_kind(row)))),

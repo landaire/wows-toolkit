@@ -11,6 +11,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use nsh_core::prelude::*;
 use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::row_detail::IconSize;
 use wows_toolkit_replay_data::row_icons::RowIcon;
 use wows_toolkit_replay_data::row_icons::row_icons;
 use wows_toolkit_replay_data::row_icons::ship_class_svg;
@@ -22,8 +23,7 @@ use wowsunpack::vfs::VfsPath;
 #[derive(Debug, Clone, PartialEq)]
 pub struct IconImage {
     pub uri: SharedString,
-    pub width: f32,
-    pub height: f32,
+    pub size: IconSize,
 }
 
 /// What the background read found.
@@ -86,11 +86,11 @@ fn read(classes: &[Species], wanted: &[RowIcon], vfs: &VfsPath) -> LoadedIcons {
             continue;
         };
         // Bytes that are not a PNG would not draw either.
-        let Some((width, height)) = png_size(&bytes) else {
+        let Some(size) = png_size(&bytes) else {
             tracing::debug!(icon = icon.cache_key(), "player table icon is not a readable PNG");
             continue;
         };
-        loaded.keyed.insert(icon.clone(), IconImage { uri: data_uri("image/png", &bytes), width, height });
+        loaded.keyed.insert(icon.clone(), IconImage { uri: data_uri("image/png", &bytes), size });
     }
 
     loaded
@@ -101,11 +101,11 @@ fn data_uri(mime: &str, bytes: &[u8]) -> SharedString {
 }
 
 /// A PNG's size from its header.
-fn png_size(bytes: &[u8]) -> Option<(f32, f32)> {
+fn png_size(bytes: &[u8]) -> Option<IconSize> {
     let reader = png::Decoder::new(Cursor::new(bytes)).read_info().ok()?;
     let info = reader.info();
 
-    Some((info.width as f32, info.height as f32))
+    Some(IconSize { width: info.width as f32, height: info.height as f32 })
 }
 
 #[cfg(test)]
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn a_png_reads_its_size_and_anything_else_reads_none() {
-        assert_eq!(png_size(&png_bytes(220, 60)), Some((220.0, 60.0)));
+        assert_eq!(png_size(&png_bytes(220, 60)), Some(IconSize { width: 220.0, height: 60.0 }));
         assert_eq!(png_size(b"not an image"), None);
     }
 

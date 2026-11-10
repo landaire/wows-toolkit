@@ -58,11 +58,14 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
+use crate::js_newtype::js_newtype;
+use crate::replay_inspector::constants::BuildNumber;
 use crate::text::text;
 use crate::text::text_with;
 
 use super::database;
 use super::state::Tracker;
+use super::view::AccountIdText;
 use super::view::BandedText;
 use super::view::LiveView;
 use super::view::RatingBand;
@@ -77,6 +80,31 @@ use super::view::TeamView;
 /// The chat poll writes them every two minutes, so reading faster than that
 /// only repeats the same rows.
 const CHAT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Counts changes to what the Current Match section shows; the view polls it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LiveRevision(u32);
+
+js_newtype!(LiveRevision, u32);
+
+impl LiveRevision {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+/// Counts watches of the replays directory, so a thread whose directory was
+/// replaced stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WatchGeneration(u64);
+
+impl WatchGeneration {
+    const FIRST: Self = Self(1);
+
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
 
 /// Why the roster's ships or figures are missing.
 #[derive(Debug, thiserror::Error)]
@@ -110,7 +138,7 @@ enum StatsState {
 
 /// A battle's stats lookup, held until the Current Match section is shown.
 struct HeldLookup {
-    generation: u64,
+    generation: WatchGeneration,
     started_at: Timestamp,
     state: ArenaState,
 }
@@ -125,7 +153,7 @@ struct Lookups {
 
 /// The game data a battle's roster resolves against.
 struct BuildShips {
-    build: u32,
+    build: BuildNumber,
     provider: Arc<GameMetadataProvider>,
 }
 
@@ -153,20 +181,20 @@ pub struct LiveState {
     stats: StatsState,
     lookups: Lookups,
 
-    revision: u32,
-    /// Bumped per watch, so a thread whose directory was replaced stops.
-    watch: u64,
+    revision: LiveRevision,
+    /// The watch running, `None` before the first.
+    watch: Option<WatchGeneration>,
 }
 
 impl LiveState {
     /// Whether `generation`'s battle starting at `started_at` is still the
     /// one shown, so work that outlived its battle does not land on the next.
-    fn is_current(&self, generation: u64, started_at: Timestamp) -> bool {
-        self.watch == generation && started_at_of(self) == Some(started_at)
+    fn is_current(&self, generation: WatchGeneration, started_at: Timestamp) -> bool {
+        self.watch == Some(generation) && started_at_of(self) == Some(started_at)
     }
 
     fn bump(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = self.revision.next();
     }
 }
 
@@ -179,7 +207,7 @@ fn live() -> MutexGuard<'static, LiveState> {
 }
 
 /// Bumped whenever what [`view`] returns has changed.
-pub fn revision() -> u32 {
+pub fn revision() -> LiveRevision {
     live().revision
 }
 
@@ -190,14 +218,15 @@ pub fn watch(wows_dir: Option<&Path>) {
 
     let generation = {
         let mut state = live();
-        if state.replay_dir == replay_dir && (replay_dir.is_none() || state.watch != 0) {
+        if state.replay_dir == replay_dir && (replay_dir.is_none() || state.watch.is_some()) {
             return;
         }
-        let watch = state.watch.wrapping_add(1);
-        let revision = state.revision.wrapping_add(1);
+        let watch = state.watch.map_or(WatchGeneration::FIRST, WatchGeneration::next);
+        let revision = state.revision.next();
         let mut lookups = std::mem::take(&mut state.lookups);
         lookups.gate.clear();
-        *state = LiveState { replay_dir: replay_dir.clone(), lookups, watch, revision, ..LiveState::default() };
+        *state =
+            LiveState { replay_dir: replay_dir.clone(), lookups, watch: Some(watch), revision, ..LiveState::default() };
         watch
     };
 
@@ -228,27 +257,46 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 /// The chat read for the battle in progress, while its window is open.
 struct ChatPoll {
     started_at: Timestamp,
-    start: i64,
-    end: i64,
+    start: Timestamp,
+    end: Timestamp,
     next: Instant,
 }
 
-fn run_watch(generation: u64, replay_dir: &Path) {
+impl ChatPoll {
+    /// The poll for a battle that started at `started_at`, due now. A window
+    /// edge past the range a timestamp can hold is held at that range's end.
+    fn new(started_at: Timestamp) -> Self {
+        // Whole seconds, as the observations are stored.
+        let offset = |minutes: f64| {
+            let second = started_at.as_second().saturating_add((minutes * 60.0) as i64);
+            let second = second.clamp(Timestamp::MIN.as_second(), Timestamp::MAX.as_second());
+            Timestamp::from_second(second).expect("the second is clamped to the representable range")
+        };
+
+        Self {
+            started_at,
+            start: offset(twitch::WINDOW_BEFORE_MINUTES),
+            end: offset(twitch::WINDOW_AFTER_MINUTES),
+            next: Instant::now(),
+        }
+    }
+}
+
+/// A battle the watch has just adopted, as its lookups need it.
+struct AdoptedBattle {
+    started_at: Timestamp,
+    names: Vec<String>,
+    build: Option<BuildNumber>,
+}
+
+fn run_watch(generation: WatchGeneration, replay_dir: &Path) {
     let source = LiveSource::in_dir(replay_dir);
     let mut watcher = LiveWatcher::new();
     let mut chat: Option<ChatPoll> = None;
 
-    while live().watch == generation {
+    while live().watch == Some(generation) {
         if let Some(found) = watcher.tick(&source) {
-            chat = found.as_ref().map(|found| {
-                let started = found.started_at.as_second();
-                ChatPoll {
-                    started_at: found.started_at,
-                    start: started + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64,
-                    end: started + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64,
-                    next: Instant::now(),
-                }
-            });
+            chat = found.as_ref().map(|found| ChatPoll::new(found.started_at));
             adopt(generation, replay_dir, found);
         }
 
@@ -258,7 +306,7 @@ fn run_watch(generation: u64, replay_dir: &Path) {
             read_chat(generation, poll);
             poll.next = Instant::now() + CHAT_POLL_INTERVAL;
             // Past the window there is nothing further to find.
-            if Timestamp::now().as_second() > poll.end {
+            if Timestamp::now().as_second() > poll.end.as_second() {
                 chat = None;
             }
         }
@@ -269,10 +317,10 @@ fn run_watch(generation: u64, replay_dir: &Path) {
 
 /// Takes what a poll found, asks the index which of its players were met
 /// before, and starts resolving the battle against its build.
-fn adopt(generation: u64, replay_dir: &Path, found: Option<LiveMatch>) {
+fn adopt(generation: WatchGeneration, replay_dir: &Path, found: Option<LiveMatch>) {
     let battle = {
         let mut state = live();
-        if state.watch != generation {
+        if state.watch != Some(generation) {
             return;
         }
         state.checked = true;
@@ -283,18 +331,19 @@ fn adopt(generation: u64, replay_dir: &Path, found: Option<LiveMatch>) {
         state.identities = None;
         state.stats = StatsState::Idle;
         state.lookups.gate.clear();
-        let build = found.as_ref().and_then(|found| found.build);
+        let build = found.as_ref().and_then(|found| found.build).map(BuildNumber);
         // The same build keeps resolving the ships while it is asked for
         // again, rather than flashing the roster back to unresolved.
         if state.ships.as_ref().map(|ships| ships.build) != build {
             state.ships = None;
             state.class_icons.clear();
         }
-        let battle = found.as_ref().map(|found| {
-            let names: Vec<String> = found.players.iter().map(|player| player.name.clone()).collect();
-            (found.started_at, names, found.build)
+        let battle = found.as_ref().map(|found| AdoptedBattle {
+            started_at: found.started_at,
+            names: found.players.iter().map(|player| player.name.clone()).collect(),
+            build,
         });
-        if matches!(battle, Some((_, _, Some(_)))) {
+        if build.is_some() {
             state.stats = StatsState::Scanning;
         }
         state.live_match = found;
@@ -302,7 +351,7 @@ fn adopt(generation: u64, replay_dir: &Path, found: Option<LiveMatch>) {
         battle
     };
 
-    let Some((started_at, names, build)) = battle else { return };
+    let Some(AdoptedBattle { started_at, names, build }) = battle else { return };
     if let Some(build) = build {
         let replay_dir = replay_dir.to_owned();
         spawn("player-tracker-battle", move || resolve_battle(generation, started_at, build, &replay_dir));
@@ -317,7 +366,7 @@ fn adopt(generation: u64, replay_dir: &Path, found: Option<LiveMatch>) {
             }
         }
         // The roster still lists everyone; only the met counts stay empty.
-        Err(err) => log::warn!("player tracker: the met-before lookup failed: {}", err.report()),
+        Err(err) => log::warn!("player tracker: the met-before lookup failed: {}", err.chain()),
     }
 }
 
@@ -326,7 +375,7 @@ fn adopt(generation: u64, replay_dir: &Path, found: Option<LiveMatch>) {
 ///
 /// The stream arrives in flushes, so the scan retries on a timer until the
 /// packet naming the roster lands or the budget runs out.
-fn resolve_battle(generation: u64, started_at: Timestamp, build: u32, replay_dir: &Path) {
+fn resolve_battle(generation: WatchGeneration, started_at: Timestamp, build: BuildNumber, replay_dir: &Path) {
     let metadata = match load_build(crate::game_data::cache(), build) {
         Ok(metadata) => metadata,
         // The roster still lists names and relations; the ship columns and
@@ -399,10 +448,10 @@ fn resolve_battle(generation: u64, started_at: Timestamp, build: u32, replay_dir
 
 /// `build`'s game data from the cache bound to the WoWs directory, which
 /// keeps a build once it has loaded.
-fn load_build(cache: Option<GameDataCache>, build: u32) -> Result<Arc<LoadedGameData>, LiveDataError> {
+fn load_build(cache: Option<GameDataCache>, build: BuildNumber) -> Result<Arc<LoadedGameData>, LiveDataError> {
     let cache = cache.ok_or(LiveDataError::NotConfigured)?;
 
-    cache.get_or_load_build(build).map_err(LiveDataError::Build)
+    cache.get_or_load_build(build.0).map_err(LiveDataError::Build)
 }
 
 /// Each class of `ships` with its icon in `metadata`'s build, as an SVG
@@ -472,7 +521,7 @@ fn fetch(lookup: HeldLookup) {
     let proxy_url = crate::game_data::proxy_url();
     let fetched = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime
-            .block_on(live_match::fetch_stats(crate::game_data::USER_AGENT, &lookup.state, &proxy_url))
+            .block_on(live_match::fetch_stats(crate::game_data::USER_AGENT, &lookup.state, proxy_url.as_deref()))
             .map_err(LiveDataError::Stats),
         Err(err) => Err(LiveDataError::Runtime(err)),
     };
@@ -502,8 +551,9 @@ fn index_by_account(players: Vec<PlayerStatsOut>) -> HashMap<AccountId, PlayerSt
     players.into_iter().map(|player| (player.account_id, player)).collect()
 }
 
-fn read_chat(generation: u64, poll: &ChatPoll) {
-    let (start, end) = (poll.start, poll.end);
+fn read_chat(generation: WatchGeneration, poll: &ChatPoll) {
+    let start = poll.start;
+    let end = poll.end;
     match database::run(async move |pool| database::chat_observations(pool, start, end).await) {
         Ok(observations) => {
             let mut state = live();
@@ -513,7 +563,7 @@ fn read_chat(generation: u64, poll: &ChatPoll) {
             }
         }
         // The roster still lists everyone; only the chips are missing.
-        Err(err) => log::warn!("player tracker: the chat lookup failed: {}", err.report()),
+        Err(err) => log::warn!("player tracker: the chat lookup failed: {}", err.chain()),
     }
 }
 
@@ -566,6 +616,7 @@ fn state_view(state: &LiveState, tracker: &Tracker, now: Timestamp) -> LiveView 
     };
 
     let Some(live) = state.live_match.as_ref() else {
+        // No row reads `started_at` from an empty roster.
         let context = RosterContext { state, tracker, stats, modes: &modes, started_at: now, now };
         return LiveView {
             status,
@@ -605,6 +656,7 @@ fn state_view(state: &LiveState, tracker: &Tracker, now: Timestamp) -> LiveView 
 /// lead with, and its rows. A team nobody has figures for shows no average
 /// rather than a zero.
 fn team_view(title_key: &str, rows: &[LiveRosterRow], context: &RosterContext) -> TeamView {
+    // `visible_stat_modes` names at least one scope; the fallback is unused.
     let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
     let average_win_rate = context.stats.and_then(|stats| team_average_win_rate(rows, stats, lead)).map(|rate| {
         BandedText {
@@ -633,6 +685,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
     // How many battles this player has been met in, counted the way the
     // tables beside it count.
     let tracked = row.tracked.and_then(|account| context.tracker.tracked.get(&account));
+    // A player never recorded was met in no battle.
     let met = tracked.map_or(0, |tracked| tracked.visible_arena_ids(show_division_mates).count());
     let met_hover = match tracked {
         Some(tracked) if met > 0 => {
@@ -657,6 +710,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
     // which is a different absence from a player the service had no data for.
     let player = row.account_id.and_then(|id| context.stats?.get(&id));
     let pending = context.stats.is_none();
+    // Without an answer row the cells show dashes or wait, not a mark.
     let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
     let hover_both_scopes = win_rate_hover(player, None);
     let scopes = context
@@ -664,6 +718,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
         .iter()
         .map(|mode| scope_cells(row_stats(player, *mode), status, pending, *mode, hover_both_scopes.clone()))
         .collect();
+    // `visible_stat_modes` names at least one scope; the fallback is unused.
     let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
 
     let links = row.account_id.zip(row.region);
@@ -677,6 +732,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
         tint: row.tint.into(),
         class_icon: class_icon.map(|icon| icon.to_string()),
         class_name: class_icon.and(row.species_text.clone()),
+        // A ship the build has not resolved reads as a dash.
         ship: row.ship_name.clone().unwrap_or_else(|| "-".to_string()),
         band: row_stats(player, lead).band.map(band),
         scopes,
@@ -688,7 +744,7 @@ fn roster_row(row: &LiveRosterRow, context: &RosterContext) -> RosterRowView {
         twitch_hover,
         wows_numbers_url: links.map(|(account, region)| wows_numbers_player_url(region, account, &row.name)),
         shipbuilds_url: links.map(|(account, region)| shipbuilds_player_url(region, account, &row.name)),
-        account_id: links.map(|(account, _)| account.0.to_string()),
+        account_id: links.map(|(account, _)| AccountIdText::from(account)),
     }
 }
 
@@ -806,7 +862,7 @@ mod tests {
             checked: true,
             live_match: Some(battle(started_at)),
             stats: StatsState::Failed(LiveDataError::NotConfigured),
-            watch: 1,
+            watch: Some(WatchGeneration(1)),
             ..LiveState::default()
         }
     }
@@ -814,7 +870,7 @@ mod tests {
     /// A build that resolved, with no ships of its own to name.
     fn resolved() -> Option<BuildShips> {
         let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider");
-        Some(BuildShips { build: 1, provider: Arc::new(provider) })
+        Some(BuildShips { build: BuildNumber(1), provider: Arc::new(provider) })
     }
 
     fn figures(account: i64, status: PlayerStatsStatus) -> PlayerStatsOut {
@@ -847,7 +903,7 @@ mod tests {
     }
 
     fn lookup(started_at: Timestamp, arena: i64) -> HeldLookup {
-        HeldLookup { generation: 1, started_at, state: ArenaState { arena_id: ArenaId::from(arena), players: Vec::new() } }
+        HeldLookup { generation: WatchGeneration(1), started_at, state: ArenaState { arena_id: ArenaId::from(arena), players: Vec::new() } }
     }
 
     #[test]
@@ -902,10 +958,10 @@ mod tests {
             std::env::temp_dir().join(format!("wows-toolkit-nsh-tracker-storage-{}", std::process::id())),
         );
 
-        let missing = load_build(None, 12_668_706).err().expect("no cache, no build");
+        let missing = load_build(None, BuildNumber(12_668_706)).err().expect("no cache, no build");
         assert!(matches!(missing, LiveDataError::NotConfigured));
 
-        let err = load_build(Some(GameDataCache::new(dir.path().to_owned())), 12_668_706).err().expect("no install");
+        let err = load_build(Some(GameDataCache::new(dir.path().to_owned())), BuildNumber(12_668_706)).err().expect("no install");
         assert!(matches!(err, LiveDataError::Build(_)));
         assert!(err.to_string().starts_with("this battle's game data did not load: "), "got {err}");
     }
@@ -1004,7 +1060,7 @@ mod tests {
         assert_eq!(ship.win_rate, "48.0%");
         assert_eq!(ship.personal_rating, "-", "the service gave no ship rating");
         assert!(me.band.is_some(), "the row is tinted by its lead scope");
-        assert!(me.account_id.as_deref() == Some("1") && me.wows_numbers_url.is_some());
+        assert!(me.account_id == Some(AccountIdText::from(AccountId(1))) && me.wows_numbers_url.is_some());
 
         let friend = view.friendly.rows.iter().find(|row| row.name == "Friendly42").expect("the ally is listed");
         assert_eq!(friend.scopes[0].win_rate, "-", "a player the scan never named has no figures");

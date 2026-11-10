@@ -12,14 +12,14 @@ static RUNTIME: LazyLock<Result<Arc<tokio::runtime::Runtime>, RuntimeError>> = L
         .enable_all()
         .build()
         .map(Arc::new)
-        .map_err(|error| RuntimeError { reason: error.to_string() })
+        .map_err(|io| RuntimeError { io: Arc::new(io) })
 });
 
-/// Why the runtime could not start.
+/// Why the runtime could not start. Every caller is handed the same failure.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("could not start the background runtime: {reason}")]
+#[error("could not start the background runtime: {io}")]
 pub struct RuntimeError {
-    reason: String,
+    io: Arc<std::io::Error>,
 }
 
 /// The app's runtime, started on first use.
