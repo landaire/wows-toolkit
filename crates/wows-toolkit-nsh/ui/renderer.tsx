@@ -554,7 +554,7 @@ function ShipMenu(props: { port: Viewport; menu: ShipMenuView; area: Size }) {
     >
       <Surface style={{ padding: 8, gap: 4, backgroundColor: colors.popover }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, fontWeight: "700", color: colors.popoverForeground }}>{player()}</Text>
+          <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12, fontWeight: "700", color: colors.popoverForeground }}>{player()}</Text>
           <ToolButton icon="x" accessibilityLabel={t("ui.renderer.context.close")} onPress={() => run(() => ReplayRenderer.closeShipMenu(id()))}/>
         </View>
         <Toggle label={labels.showTrail} checked={props.menu.trail} onChange={(on) => run(() => ReplayRenderer.setTrail(id(), player(), on))}/>

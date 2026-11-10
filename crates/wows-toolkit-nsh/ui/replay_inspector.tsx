@@ -817,7 +817,7 @@ function ListingHeader() {
   return (
     <View style={{ minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
       <IconButton label={t("ui.replay.collapse_listing")} icon="panel-left-close" onPress={() => setListingCollapsed(true)}/>
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{t("ui.replay.listing_caption")}</Text>
+      <Text style={{ flex: 1, numberOfLines: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{t("ui.replay.listing_caption")}</Text>
       <ListingOptions/>
       <OpenMenu/>
     </View>
@@ -855,12 +855,12 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
       style={{ maxWidth: 300, flexDirection: "row", alignItems: "center", gap: 6 }}
     >
       <If when={loaded()?.nationFlag}>
-        {(flag) => <Image source={flag()} style={{ width: 23, height: 16 }}/>}
+        {(flag) => <Image src={flag()} style={{ width: 23, height: 16 }}/>}
       </If>
       <If when={loaded()?.classIcon}>
-        {(icon) => <Image source={icon()} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>}
+        {(icon) => <Image src={icon()} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>}
       </If>
-      <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12.5 }}>{title()}</Text>
+      <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12.5 }}>{title()}</Text>
       <View
         role="button"
         accessibilityLabel={`Close ${title()}`}
@@ -1333,7 +1333,7 @@ function WorkspaceToolbar(props: { ws: Workspace; view: ReplayInspectorProps }) 
           {(path) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View accessibilityLabel={path()} tooltip={<Hint text={path()}/>} style={{ maxWidth: 280 }}>
-                <Text numberOfLines={1} style={{ fontSize: 12, color: colors.mutedForeground }}>{path()}</Text>
+                <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.mutedForeground }}>{path()}</Text>
               </View>
               <View tooltip={<Hint text={t("ui.replay.check_game_data_tooltip")}/>}>
                 <Button label={t("ui.replay.check_game_data")} variant="ghost" onPress={() => void checkGameData()}/>

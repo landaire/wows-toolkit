@@ -396,7 +396,7 @@ function DirectoryHeader(props: { view: DirectoryView }) {
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
       <View style={{ minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12.5, color: colors.foreground }}>{status().root}</Text>
+        <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12.5, color: colors.foreground }}>{status().root}</Text>
         <Rule/>
         <If when={status().status}>
           <Text accessibilityLiveRegion="polite" style={{ fontSize: 12, color: colors.mutedForeground }}>{status().status}</Text>
@@ -867,7 +867,7 @@ function OverviewPanel(props: { model: StatsModel }) {
                         style={{ width: 84, alignItems: "center", paddingVertical: 4 }}
                       >
                         <If when={achievement().icon}>
-                          <Image source={{ uri: achievement().icon! }} accessibilityLabel={achievement().name} style={{ width: 48, height: 48 }}/>
+                          <Image src={achievement().icon!} accessibilityLabel={achievement().name} style={{ width: 48, height: 48 }}/>
                         </If>
                         <If when={!achievement().icon}>
                           <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }}>
@@ -986,13 +986,13 @@ function ShipsPanel(props: { model: StatsModel }) {
                         <Icon name={open() ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
                       </View>
                       <If when={section().nationFlag}>
-                        <Image source={{ uri: section().nationFlag! }} style={{ width: 23, height: 16 }}/>
+                        <Image src={section().nationFlag!} style={{ width: 23, height: 16 }}/>
                       </If>
                       <If when={section().classIcon}>
-                        <Image source={{ uri: section().classIcon! }} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
+                        <Image src={section().classIcon!} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
                       </If>
                       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                        <Text numberOfLines={1} style={{ fontSize: 13, color: colors.foreground }}>{section().name}</Text>
+                        <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.foreground }}>{section().name}</Text>
                         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
                           <Text style={{ fontSize: 11.5, color: semantic.win }}>{section().wins}</Text>
                           <Text style={{ fontSize: 11.5, color: semantic.loss }}>{section().losses}</Text>
@@ -1059,7 +1059,7 @@ function ShipsPanel(props: { model: StatsModel }) {
                         <Each of={section().rows}>
                           {(row, index) => (
                             <View role="row" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: index() % 2 === 1 ? colors.muted : "transparent" }}>
-                              <Text role="rowheader" style={{ width: 140, fontSize: 12.5, color: colors.foreground }}>{row().label}</Text>
+                              <Text role="cell" style={{ width: 140, fontSize: 12.5, color: colors.foreground }}>{row().label}</Text>
                               <Each of={row().cells}>
                                 {(cell) => (
                                   <View role="cell" style={{ width: 110, flexDirection: "row" }}>

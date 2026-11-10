@@ -196,7 +196,7 @@ function SharedWindow(props: {
 }) {
   return (
     <View accessibilityLabel={props.window.replayName} style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 12, color: colors.popoverForeground }}>{props.window.replayName}</Text>
+      <Text style={{ flex: 1, numberOfLines: 1, fontSize: 12, color: colors.popoverForeground }}>{props.window.replayName}</Text>
       <Dim text={props.window.map}/>
       <If when={props.onWatch}>
         {(watch) => <Button label={t("ui.collab.open")} onPress={() => watch()(props.window)}/>}

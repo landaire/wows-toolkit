@@ -503,13 +503,13 @@ function PlayerRow(props: { row: () => PlayerRowView; index: () => number; track
       <View role="row" accessibilityLabel={row().name} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
         <View style={{ width: PLAYER_WIDTHS.name, flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Chip icon={open() ? "chevron-down" : "chevron-right"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().name}`} onPress={() => togglePlayer(row().accountId)}/>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: colors.foreground }}>{row().name}</Text>
+          <Text style={{ flex: 1, numberOfLines: 1, fontSize: 13, color: colors.foreground }}>{row().name}</Text>
         </View>
-        <Text numberOfLines={1} style={{ width: PLAYER_WIDTHS.clan, fontSize: 13, color: colors.mutedForeground }}>{row().clan}</Text>
+        <Text style={{ width: PLAYER_WIDTHS.clan, numberOfLines: 1, fontSize: 13, color: colors.mutedForeground }}>{row().clan}</Text>
         <Text style={{ width: PLAYER_WIDTHS.totalEncounters, fontSize: 13, color: tone() ?? colors.foreground }}>{row().totalEncounters}</Text>
         <Text style={{ width: PLAYER_WIDTHS.encounters, fontSize: 13, color: tone() ?? colors.foreground }}>{row().encountersInRange}</Text>
         <View style={{ width: PLAYER_WIDTHS.lastEncountered }} tooltip={row().lastSeenExact ? <Hint text={row().lastSeenExact}/> : undefined}>
-          <Text numberOfLines={1} style={{ fontSize: 13, color: colors.mutedForeground }}>{row().lastSeen}</Text>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.mutedForeground }}>{row().lastSeen}</Text>
         </View>
         <Chip
           label={text().findMatches}
@@ -524,7 +524,7 @@ function PlayerRow(props: { row: () => PlayerRowView; index: () => number; track
           tooltip={<Hint text={row().note || text().notesHint}/>}
           style={{ flex: 1, minWidth: 120, height: 22, paddingHorizontal: 5, borderRadius: 4, justifyContent: "center" }}
         >
-          <Text numberOfLines={1} style={{ fontSize: 12, color: row().note ? colors.foreground : colors.mutedForeground }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: row().note ? colors.foreground : colors.mutedForeground }}>
             {row().note || text().notesHint}
           </Text>
         </View>
@@ -577,7 +577,7 @@ function ClanRow(props: { row: () => ClanRowView; index: () => number; tracker: 
       <View role="row" accessibilityLabel={row().clan} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 }}>
         <View style={{ width: CLAN_WIDTHS.clan, flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Chip icon={open() ? "chevron-down" : "chevron-right"} accessibilityLabel={`${open() ? "Collapse" : "Expand"} ${row().clan}`} onPress={() => toggleClan(row().clan)}/>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: tone() ?? colors.foreground }}>{row().clan}</Text>
+          <Text style={{ flex: 1, numberOfLines: 1, fontSize: 13, color: tone() ?? colors.foreground }}>{row().clan}</Text>
         </View>
         <Text style={{ width: CLAN_WIDTHS.members, fontSize: 13, color: colors.foreground }}>{row().members}</Text>
         <Text style={{ width: CLAN_WIDTHS.encounters, fontSize: 13, color: colors.foreground }}>{row().matches}</Text>
@@ -586,7 +586,7 @@ function ClanRow(props: { row: () => ClanRowView; index: () => number; tracker: 
           <Text style={{ fontSize: 13, color: colors.foreground }}>{row().sightings}</Text>
         </View>
         <View style={{ width: CLAN_WIDTHS.lastEncountered }} tooltip={<Hint text={row().lastSeenExact}/>}>
-          <Text numberOfLines={1} style={{ fontSize: 13, color: colors.mutedForeground }}>{row().lastSeen}</Text>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.mutedForeground }}>{row().lastSeen}</Text>
         </View>
         <Chip
           label={text().findMatches}
@@ -823,8 +823,8 @@ function TeamColumn(props: { team: TeamView; view: LiveView; tracker: PlayerTrac
               </If>
             </View>
             <TwitchChip row={row()} tracker={props.tracker}/>
-            <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: tintColor(row().tint) }}>{row().name}</Text>
-            <Text numberOfLines={1} style={{ width: 130, fontSize: 11.5, color: colors.mutedForeground }}>{row().ship}</Text>
+            <Text style={{ flex: 1, numberOfLines: 1, fontSize: 13, color: tintColor(row().tint) }}>{row().name}</Text>
+            <Text style={{ width: 130, numberOfLines: 1, fontSize: 11.5, color: colors.mutedForeground }}>{row().ship}</Text>
             <Each of={row().scopes}>
               {(cells) => <ScopeCells cells={cells()}/>}
             </Each>

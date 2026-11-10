@@ -103,7 +103,7 @@ function ShipTree() {
                 >
                   <Chevron open={isOpen(nationKey())}/>
                   <If when={nation().flag}>
-                    <Image source={{ uri: nation().flag! }} style={{ width: 23, height: 16 }}/>
+                    <Image src={nation().flag!} style={{ width: 23, height: 16 }}/>
                   </If>
                   <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{nation().label}</Text>
                 </View>
@@ -124,7 +124,7 @@ function ShipTree() {
                             >
                               <Chevron open={isOpen(classKey())}/>
                               <If when={group().icon}>
-                                <Image source={{ uri: group().icon! }} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
+                                <Image src={group().icon!} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>
                               </If>
                               <Text style={{ fontSize: 12.5, color: colors.foreground }}>{group().label}</Text>
                             </View>

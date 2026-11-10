@@ -295,7 +295,7 @@ function RunningDownload(props: { row: DownloadRow }) {
         <Button label={t("ui.launcher.pause")} variant="ghost" onPress={() => adopt(session.pause(props.row.key))}/>
         <Button label={t("ui.launcher.cancel")} variant="ghost" onPress={() => adopt(session.cancel(props.row.key))}/>
       </View>
-      <Text numberOfLines={1} style={{ fontSize: 12.5, color: colors.cardForeground }}>{props.row.status.text}</Text>
+      <Text style={{ numberOfLines: 1, fontSize: 12.5, color: colors.cardForeground }}>{props.row.status.text}</Text>
     </View>
   );
 }

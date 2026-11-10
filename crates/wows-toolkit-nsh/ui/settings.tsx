@@ -39,7 +39,7 @@ function Section(props: { title: string; description: string; children: JSX.Elem
   return (
     <View style={{ gap: 8 }}>
       <View style={{ gap: 2 }}>
-        <Text role="heading" style={{ fontSize: 14, fontWeight: "700", color: colors.foreground }}>{props.title}</Text>
+        <Text role="header" style={{ fontSize: 14, fontWeight: "700", color: colors.foreground }}>{props.title}</Text>
         <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{props.description}</Text>
       </View>
       <View style={{ padding: 12, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 6, backgroundColor: colors.surface }}>
