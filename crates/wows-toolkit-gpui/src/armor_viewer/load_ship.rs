@@ -787,7 +787,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -847,7 +847,7 @@ mod tests {
         );
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -907,7 +907,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()

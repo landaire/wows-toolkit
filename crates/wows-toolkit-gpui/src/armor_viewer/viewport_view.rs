@@ -3694,7 +3694,7 @@ impl Render for ViewportView {
             // A zone and a plate are named the way the game names them, as the
             // egui tooltip does.
             let zone_label = match self.reload_bundle() {
-                Some(bundle) => super::catalog::translate_name(bundle.assets.metadata(), &hover.tooltip.zone),
+                Some(bundle) => wows_toolkit_viewmodel::ship_catalog::translate_name(bundle.assets.metadata(), &hover.tooltip.zone),
                 None => hover.tooltip.zone.clone(),
             };
             let material_label = self.material_label(hover.tooltip.material);

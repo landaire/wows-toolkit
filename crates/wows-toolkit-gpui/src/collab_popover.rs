@@ -23,7 +23,7 @@ use wt_collab_client::Permissions;
 use wt_collab_client::SessionStatus;
 
 use crate::collab::CollabState;
-use crate::collab::SharedWindow as CollabSharedWindow;
+use wt_collab_client::controller::SharedWindow as CollabSharedWindow;
 
 /// How wide the popover sits, matching the egui one's own minimum.
 const WIDTH: Pixels = px(300.);
@@ -113,7 +113,7 @@ fn render_body<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> An
 /// What is offered with no session running: a name, then host or join.
 fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> AnyElement {
     let named = !view.collab().display_name.trim().is_empty();
-    let failure = view.collab().failure.clone();
+    let failure = view.collab().failure();
 
     v_flex()
         .gap_2()

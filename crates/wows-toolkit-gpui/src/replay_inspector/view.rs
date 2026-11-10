@@ -227,7 +227,7 @@ pub struct ReplaySettingsChanged(pub ReplaySettings);
 
 /// The session started or stopped, for whoever owns a window this view does
 /// not: the tactics board is the app's, and it draws in the session too.
-pub struct SessionShared(pub crate::collab::CollabLink);
+pub struct SessionShared(pub wt_collab_client::link::CollabLink);
 
 /// The collab popover's Tactics Board button. The board is the app's window, so
 /// the ask goes up rather than opening anything here.
@@ -1517,7 +1517,7 @@ impl ReplayInspectorView {
     }
 
     /// Whether a session is running, for a window this view does not own.
-    pub fn session_link(&self) -> crate::collab::CollabLink {
+    pub fn session_link(&self) -> wt_collab_client::link::CollabLink {
         self.collab.link()
     }
 
@@ -1529,7 +1529,7 @@ impl ReplayInspectorView {
     /// into two panels.
     pub fn watch_shared_window(
         &mut self,
-        shared: crate::collab::SharedWindow,
+        shared: wt_collab_client::controller::SharedWindow,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2156,7 +2156,7 @@ impl crate::collab_popover::SessionHost for ReplayInspectorView {
 
     fn watch_shared_window(
         &mut self,
-        shared: crate::collab::SharedWindow,
+        shared: wt_collab_client::controller::SharedWindow,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

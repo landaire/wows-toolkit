@@ -147,7 +147,7 @@ pub struct BoardCapPoint {
     /// What a session calls this zone. Its place in the list is not that: a
     /// peer's list is its own, and a zone moved by one has to be the same zone
     /// on every board.
-    pub id: crate::collab::CapPointId,
+    pub id: wt_collab_client::ids::CapPointId,
     /// Its place in the alphabet: A, B, C.
     pub index: usize,
     /// Where it sits, in the world's own coordinates.
@@ -175,7 +175,7 @@ impl BoardCapPoint {
             // absence rather than a team.
             team: (point.team_id >= 0).then(|| wows_replays::types::TeamId::new(point.team_id)),
             frozen: true,
-            id: crate::collab::CapPointId::fresh(),
+            id: wt_collab_client::ids::CapPointId::fresh(),
         }
     }
 
@@ -187,7 +187,7 @@ impl BoardCapPoint {
             radius: saved.radius,
             team: (saved.team_id >= 0).then(|| wows_replays::types::TeamId::new(saved.team_id)),
             frozen: saved.frozen,
-            id: crate::collab::CapPointId::fresh(),
+            id: wt_collab_client::ids::CapPointId::fresh(),
         }
     }
 
@@ -222,7 +222,7 @@ impl BoardCapPoint {
     /// The same, read back.
     fn from_wire(wire: &wt_collab_client::protocol::WireCapPoint) -> Self {
         Self {
-            id: crate::collab::CapPointId::new(wire.id),
+            id: wt_collab_client::ids::CapPointId::new(wire.id),
             index: wire.index as usize,
             world_x: wire.world_x,
             world_z: wire.world_z,
@@ -670,10 +670,10 @@ pub struct TacticsBoard {
     drawing: wt_collab_client::drawing::Drawing,
     /// This board's end of a collab session, which also holds what has been
     /// drawn on it when there is no session to hold it.
-    collab: crate::collab::CollabLink,
+    collab: wt_collab_client::link::CollabLink,
     /// What this board is called in a session. A board is one window of several
     /// a session can be on, and every message about it carries this.
-    board_id: crate::collab::BoardId,
+    board_id: wt_collab_client::ids::BoardId,
     /// The art a peer sent for this board, for a map this build has none of.
     /// `None` for a board drawn from art this build ships.
     peer_art: Option<Arc<image::RgbImage>>,
@@ -683,7 +683,7 @@ pub struct TacticsBoard {
     peer_map_info: Option<wows_minimap_renderer::MapInfo>,
     /// Who opened the board in the session. `None` for one nobody has shared,
     /// which is every board outside a session.
-    owner: Option<crate::collab::UserId>,
+    owner: Option<wt_collab_client::ids::UserId>,
     /// Which version of the session's capture points and shapes this board has
     /// taken, so a change made by a peer is noticed without comparing lists
     /// every tick.
@@ -699,7 +699,7 @@ pub struct TacticsBoard {
     /// Anything sent for a board the session does not hold is dropped by the
     /// peer task, so the board draws on its own end until the announcement has
     /// gone over and only then starts speaking to the session.
-    joining: Option<crate::collab::CollabLink>,
+    joining: Option<wt_collab_client::link::CollabLink>,
     /// Kept alive while a session is running, to notice what peers change.
     _collab_tick: Option<Task<()>>,
     /// The window this board is drawn in, remembered so the menu can bring it
@@ -729,7 +729,7 @@ pub struct TacticsBoard {
     /// What is typed into the ship search, and what it matched. Placing a ship
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
-    matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
+    matched_ships: Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)>,
     map_select: Entity<SelectState<SearchableVec<MapItem>>>,
     _map_select_subscription: Subscription,
     map_picker_sync_needed: bool,
@@ -740,7 +740,7 @@ pub struct TacticsBoard {
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
     /// Every ship the build knows, built the first time one is looked up.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_catalog: Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>>,
     /// Which circles a placed ship shows. Every ship already on the board is
     /// given the same set, so two ships are compared on the same terms.
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
@@ -866,8 +866,8 @@ impl TacticsBoard {
             dragging: None,
             adding: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
-            collab: crate::collab::CollabLink::default(),
-            board_id: crate::collab::BoardId::fresh(),
+            collab: wt_collab_client::link::CollabLink::default(),
+            board_id: wt_collab_client::ids::BoardId::fresh(),
             peer_art: None,
             peer_map_info: None,
             owner: None,
@@ -1474,7 +1474,7 @@ impl TacticsBoard {
     /// What was drawn stays on the board either way: a session starting under an
     /// open board hears about it, and one ending leaves it where the reader can
     /// still see it.
-    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: wt_collab_client::link::CollabLink, cx: &mut Context<Self>) {
         self.announced = false;
         self.adopted_caps = None;
         self.adopted_shapes = None;
@@ -1483,7 +1483,7 @@ impl TacticsBoard {
             // end, where the reader can still see it.
             let carried = self.collab.annotations_held();
             self.joining = None;
-            self.collab = crate::collab::CollabLink::default().on_board(self.board_id);
+            self.collab = wt_collab_client::link::CollabLink::default().on_board(self.board_id);
             self.collab.adopt(carried);
             self.follow_collab(cx);
             self.redraw(cx);
@@ -1501,7 +1501,7 @@ impl TacticsBoard {
     ///
     /// The art comes with it: the peer who opened the board may be on a build
     /// this one does not have, and a board nobody can draw is not shared.
-    pub fn adopt_session_board(&mut self, board: crate::collab::SessionBoard, cx: &mut Context<Self>) {
+    pub fn adopt_session_board(&mut self, board: wt_collab_client::link::SessionBoard, cx: &mut Context<Self>) {
         self.board_id = board.board_id;
         self.owner = Some(board.owner_user_id);
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
@@ -1576,7 +1576,7 @@ impl TacticsBoard {
                 // Both absent where no build is open, which is a board a peer
                 // can still draw from the map name if it has that build.
                 let (art_png, info) = art.unwrap_or((None, None));
-                session.announce_board(crate::collab::BoardMap {
+                session.announce_board(wt_collab_client::link::BoardMap {
                     space: map.space,
                     label: map.label,
                     // The wire states a map with no recorded layout as the id
@@ -1714,7 +1714,7 @@ impl TacticsBoard {
     /// points by id, and re-sending an unchanged one would have every peer
     /// redraw its board for nothing.
     fn set_caps(&mut self, caps: Vec<BoardCapPoint>) {
-        let was: Vec<crate::collab::CapPointId> = self.caps.iter().map(|cap| cap.id).collect();
+        let was: Vec<wt_collab_client::ids::CapPointId> = self.caps.iter().map(|cap| cap.id).collect();
         for gone in was.iter().filter(|id| !caps.iter().any(|cap| cap.id == **id)) {
             self.collab.remove_cap(*gone);
         }
@@ -1770,7 +1770,7 @@ impl TacticsBoard {
         // hand its letter to the next one placed.
         let index = self.caps.iter().map(|cap| cap.index + 1).max().unwrap_or(0);
         self.caps.push(BoardCapPoint {
-            id: crate::collab::CapPointId::fresh(),
+            id: wt_collab_client::ids::CapPointId::fresh(),
             index,
             world_x: world.0,
             world_z: world.1,
@@ -1892,12 +1892,12 @@ impl TacticsBoard {
     }
 
     /// Every ship the build knows, built the first time one is looked up.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+    fn ships(&mut self) -> Option<std::rc::Rc<wows_toolkit_viewmodel::ship_catalog::ShipCatalog>> {
         if let Some(catalog) = &self.ship_catalog {
             return Some(std::rc::Rc::clone(catalog));
         }
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        let catalog = std::rc::Rc::new(wows_toolkit_viewmodel::ship_catalog::ShipCatalog::build(loaded.provider()));
         self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
         Some(catalog)
     }
@@ -1908,7 +1908,7 @@ impl TacticsBoard {
     fn matching_ships(
         &mut self,
         typed: &str,
-    ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
+    ) -> Vec<(wowsunpack::game_params::types::Species, wows_toolkit_viewmodel::ship_catalog::ShipEntry)> {
         let query = unidecode::unidecode(typed.trim()).to_lowercase();
         if query.is_empty() {
             return Vec::new();
@@ -1934,7 +1934,7 @@ impl TacticsBoard {
     fn pick_ship(
         &mut self,
         species: wowsunpack::game_params::types::Species,
-        ship: &crate::armor_viewer::catalog::ShipEntry,
+        ship: &wows_toolkit_viewmodel::ship_catalog::ShipEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3214,7 +3214,7 @@ impl TacticsBoard {
                                 Button::new(("tactics-ship-match", index))
                                     .label(format!(
                                         "{} {}",
-                                        crate::armor_viewer::catalog::tier_roman(ship.tier),
+                                        wows_toolkit_viewmodel::ship_catalog::tier_roman(ship.tier),
                                         ship.display_name
                                     ))
                                     .compact()
@@ -3672,7 +3672,7 @@ mod tests {
 
     fn cap(index: usize, x: f32, z: f32, radius: f32) -> BoardCapPoint {
         BoardCapPoint {
-            id: crate::collab::CapPointId::new(index as u64 + 1),
+            id: wt_collab_client::ids::CapPointId::new(index as u64 + 1),
             index,
             world_x: x,
             world_z: z,
@@ -3790,7 +3790,7 @@ mod coordinate_tests {
         let map = map(1200);
         let centre = map.minimap_to_world_f32(MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE);
         let cap = BoardCapPoint {
-            id: crate::collab::CapPointId::new(1),
+            id: wt_collab_client::ids::CapPointId::new(1),
             index: 0,
             world_x: centre.x,
             world_z: centre.z,

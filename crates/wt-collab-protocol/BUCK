@@ -14,6 +14,7 @@ workspace_library(
         "//third-party/rust:egui",
         "//third-party/rust:flate2",
         "//third-party/rust:iroh",
+        "//third-party/rust:rand",
         "//third-party/rust:rkyv",
         "//third-party/rust:web-time",
     ],
@@ -21,9 +22,6 @@ workspace_library(
 
 workspace_test(
     name = "wt_collab_protocol_test",
-    test_deps = [
-        "//third-party/rust:rand",
-    ],
     crate = "wt_collab_protocol",
     crate_root = "src/lib.rs",
     package = "wt-collab-protocol",
@@ -37,6 +35,7 @@ workspace_test(
         "//third-party/rust:egui",
         "//third-party/rust:flate2",
         "//third-party/rust:iroh",
+        "//third-party/rust:rand",
         "//third-party/rust:rkyv",
         "//third-party/rust:web-time",
     ],
